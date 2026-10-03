@@ -11,7 +11,6 @@ pub(crate) struct ReviewTarget {
     pub session: Option<String>,
     pub label: String,
 }
-
 impl ReviewTarget {
     pub fn matches(&self, presence: &AgentPresence) -> bool {
         self.name == presence.name
@@ -19,77 +18,29 @@ impl ReviewTarget {
             && self.session == presence.session_id
     }
 }
-
 pub(super) struct Targets {
-    pub row: gtk::Box,
-    chooser: gtk::DropDown,
-    labels: gtk::StringList,
-    refresh: gtk::Button,
-    pub focus: gtk::Button,
-    items: RefCell<Vec<ReviewTarget>>,
+    pub menu: gtk::MenuButton,
+    list: gtk::Box,
     bridge: RefCell<Option<Bridge>>,
+    items: RefCell<Option<Vec<ReviewTarget>>>,
 }
-
 impl Targets {
     pub fn new() -> Self {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let labels = gtk::StringList::new(&["No live agents — Copy review is available"]);
-        let chooser = gtk::DropDown::new(Some(labels.clone()), None::<gtk::Expression>);
-        chooser.set_hexpand(true);
-        chooser.update_property(&[gtk::accessible::Property::Label("Review recipient")]);
-        let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, object| {
-            let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-            item.set_child(Some(
-                &gtk::Label::builder()
-                    .xalign(0.0)
-                    .ellipsize(pango::EllipsizeMode::End)
-                    .max_width_chars(40)
-                    .build(),
-            ));
-        });
-        factory.connect_bind(|_, object| {
-            let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-            let value = item
-                .item()
-                .and_downcast::<gtk::StringObject>()
-                .unwrap()
-                .string();
-            let label = item.child().and_downcast::<gtk::Label>().unwrap();
-            label.set_text(&value);
-            label.set_tooltip_text(Some(&value));
-        });
-        chooser.set_factory(Some(&factory));
-        let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
-        refresh.set_tooltip_text(Some("Refresh live agents"));
-        let focus = gtk::Button::with_label("Copy & focus agent");
-        focus.set_sensitive(false);
-        focus.set_tooltip_text(Some("Validate and copy the review, then focus the selected agent. Paste and submit when ready; existing input is preserved."));
-        row.append(&chooser);
-        row.append(&refresh);
+        let menu = gtk::MenuButton::builder().label("Send · 0").build();
+        menu.add_css_class("suggested-action");
+        menu.set_tooltip_text(Some("Send feedback"));
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        margins(&list, 8);
+        let popover = gtk::Popover::new();
+        popover.set_child(Some(&list));
+        menu.set_popover(Some(&popover));
         Self {
-            row,
-            chooser,
-            labels,
-            refresh,
-            focus,
-            items: RefCell::new(Vec::new()),
+            menu,
+            list,
             bridge: RefCell::new(None),
+            items: RefCell::new(None),
         }
     }
-
-    pub fn selected(&self) -> Option<ReviewTarget> {
-        self.items
-            .borrow()
-            .get(self.chooser.selected().checked_sub(1)? as usize)
-            .cloned()
-    }
-
-    pub fn set_enabled(&self, enabled: bool) {
-        self.focus
-            .set_sensitive(enabled && self.selected().is_some() && self.bridge.borrow().is_some());
-    }
-
     pub fn send(&self, command: GtkCommand) -> bool {
         self.bridge
             .borrow()
@@ -97,139 +48,131 @@ impl Targets {
             .is_some_and(|b| b.tx.try_send(command).is_ok())
     }
 }
-
 impl ReviewWindow {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn smoke_activate_target(&self, surface: SurfaceId) {
+        let index = self
+            .targets
+            .items
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .position(|target| target.surface == surface)
+            .unwrap();
+        self.targets.menu.popup();
+        self.targets
+            .list
+            .observe_children()
+            .item(index as u32 + 1)
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap()
+            .emit_clicked();
+        assert!(!self.targets.menu.popover().unwrap().is_visible());
+    }
+
     pub fn connect_targets(self: &Rc<Self>, bridge: Bridge) {
         *self.targets.bridge.borrow_mut() = Some(bridge);
         let weak = Rc::downgrade(self);
-        self.targets.refresh.connect_clicked(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.targets.send(GtkCommand::RefreshReviewTargets);
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.targets.chooser.connect_selected_notify(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.update_delivery_controls();
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.targets.focus.connect_clicked(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.deliver_to_agent();
-            }
-        });
+        self.targets
+            .menu
+            .popover()
+            .unwrap()
+            .connect_closed(move |_| {
+                if let Some(this) = weak.upgrade() {
+                    this.targets.send(GtkCommand::RefreshReviewTargets);
+                }
+            });
+        self.set_targets(Vec::new());
     }
-
-    pub fn set_targets(&self, targets: Vec<ReviewTarget>) {
-        if *self.targets.items.borrow() == targets {
+    pub fn set_targets(self: &Rc<Self>, targets: Vec<ReviewTarget>) {
+        // Replacing a live row destroys its focus/pressed state. Keep this
+        // menu stable until it closes; delivery revalidates the chosen agent.
+        if self.targets.menu.popover().unwrap().is_visible() {
             return;
         }
-        let previous = self.targets.selected();
-        let selected = previous
-            .and_then(|p| {
-                targets.iter().position(|t| {
-                    t.surface == p.surface
-                        && t.name == p.name
-                        && t.pid == p.pid
-                        && t.session == p.session
-                })
-            })
-            .map_or(0, |i| i as u32 + 1);
-        let mut labels = vec![if targets.is_empty() {
-            "No live agents — Copy review is available"
-        } else {
-            "Select a live agent"
-        }];
-        labels.extend(targets.iter().map(|t| t.label.as_str()));
-        self.targets
-            .labels
-            .splice(0, self.targets.labels.n_items(), &labels);
-        *self.targets.items.borrow_mut() = targets;
-        self.targets.chooser.set_selected(selected);
-        self.update_delivery_controls();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use flowmux_core::{AgentActivity, AgentStatus};
-    #[test]
-    fn target_identity_is_provider_and_activity_independent() {
-        for name in [
-            "claude",
-            "codex",
-            "gemini",
-            "cline",
-            "opencode",
-            "agy",
-            "custom-agent",
-        ] {
-            let mut presence = AgentPresence::new(name, AgentActivity::Idle, Some(42));
-            presence.session_id = Some("session-a".into());
-            let target = ReviewTarget {
-                surface: SurfaceId::new(),
-                name: name.into(),
-                pid: Some(42),
-                session: Some("session-a".into()),
-                label: name.into(),
-            };
-            for status in [
-                AgentStatus::Unknown,
-                AgentStatus::Idle,
-                AgentStatus::Working,
-                AgentStatus::Blocked,
-                AgentStatus::Done,
-            ] {
-                presence.status = status;
-                assert!(target.matches(&presence));
-            }
-            presence.pid = Some(43);
-            assert!(!target.matches(&presence));
-            presence.pid = Some(42);
-            presence.session_id = Some("session-b".into());
-            assert!(!target.matches(&presence));
-            presence.session_id = Some("session-a".into());
-            presence.name = "replaced".into();
-            assert!(!target.matches(&presence));
+        if self.targets.items.borrow().as_ref() == Some(&targets) {
+            return;
         }
+        *self.targets.items.borrow_mut() = Some(targets.clone());
+        while let Some(child) = self.targets.list.first_child() {
+            self.targets.list.remove(&child);
+        }
+        let label = gtk::Label::new(Some(if targets.is_empty() {
+            "No agent in this workspace"
+        } else {
+            "Send to agent"
+        }));
+        label.add_css_class("caption");
+        self.targets.list.append(&label);
+        for target in targets {
+            let button = gtk::Button::new();
+            button.set_child(Some(
+                &gtk::Label::builder()
+                    .label(&target.label)
+                    .xalign(0.0)
+                    .max_width_chars(32)
+                    .ellipsize(pango::EllipsizeMode::End)
+                    .build(),
+            ));
+            button.set_tooltip_text(Some(&target.label));
+            let weak = Rc::downgrade(self);
+            button.connect_clicked(move |_| {
+                if let Some(this) = weak.upgrade() {
+                    this.send_review(Some(target.clone()));
+                }
+            });
+            self.targets.list.append(&button);
+        }
+        let copy = gtk::Button::with_label("Copy feedback");
+        let weak = Rc::downgrade(self);
+        copy.connect_clicked(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.send_review(None);
+            }
+        });
+        self.targets.list.append(&copy);
     }
 }
 
 #[cfg(test)]
 pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
-    let (bridge, receiver) = Bridge::new();
-    review.connect_targets(bridge);
-    assert!(!review.targets.focus.is_sensitive());
+    let initial = review.targets.items.borrow().clone().unwrap_or_default();
     let target = ReviewTarget {
         surface: SurfaceId::new(),
-        name: "custom-agent".into(),
+        name: "fixture".into(),
         pid: None,
-        session: None,
-        label: "custom-agent · fixture / terminal · blocked".into(),
+        session: Some("popup-test".into()),
+        label: "fixture · Working (1s)".into(),
     };
     review.set_targets(vec![target.clone()]);
-    review.targets.chooser.set_selected(1);
-    assert!(review.targets.focus.is_sensitive());
-    review.targets.focus.emit_clicked();
-    let command = glib::future_with_timeout(std::time::Duration::from_secs(20), receiver.recv())
-        .await
+    review.targets.menu.popup();
+    glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    let button = review
+        .targets
+        .list
+        .first_child()
         .unwrap()
+        .next_sibling()
         .unwrap();
-    match command {
-        GtkCommand::FocusReviewTarget {
-            target: received,
-            prompt,
-            ..
-        } => {
-            assert_eq!(received, target);
-            assert!(prompt.contains("Code review feedback"));
-            assert!(prompt.contains("preserve conflict draft"));
-        }
-        other => panic!("unexpected handoff command: {other:?}"),
-    }
-    review.set_targets(Vec::new());
-    assert!(!review.targets.focus.is_sensitive());
-    println!("DIFF_REVIEW_HANDOFF_BUTTON_OK");
+    assert!(button.grab_focus());
+    assert_eq!(button.root().unwrap().focus().as_ref(), Some(&button));
+    let mut updated = target;
+    updated.label = "fixture · Working (2s)".into();
+    review.set_targets(vec![updated.clone()]);
+    assert!(
+        button.parent().is_some(),
+        "live target refresh detached the focused Send button"
+    );
+    assert_eq!(
+        button.root().unwrap().focus().as_ref(),
+        Some(&button),
+        "live target refresh stole Send focus"
+    );
+    review.targets.menu.popdown();
+    review.set_targets(vec![updated.clone()]);
+    assert_eq!(review.targets.items.borrow().as_ref(), Some(&vec![updated]));
+    review.set_targets(initial);
+    println!("DIFF_REVIEW_SEND_REFRESH_FOCUS_OK");
 }

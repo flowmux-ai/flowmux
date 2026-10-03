@@ -277,7 +277,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleFileBrowser, &["<Ctrl><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Ctrl><Alt>u"]),
     (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
-    (ActionId::OpenDiffReview, &["<Ctrl><Alt>d"]),
+    (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Ctrl><Alt>g"]),
 ];
 
@@ -322,7 +322,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleFileBrowser, &["<Meta><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Meta><Alt>u"]),
     (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
-    (ActionId::OpenDiffReview, &["<Ctrl><Alt>d"]),
+    (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Meta><Alt>g"]),
 ];
 

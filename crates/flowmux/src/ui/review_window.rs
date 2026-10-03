@@ -8,16 +8,18 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-const PAGE_LINES: usize = 500;
 mod comments;
 mod targets;
 pub(crate) use targets::ReviewTarget;
 
 pub(crate) struct ReviewWindow {
-    pub window: adw::Window,
+    pub root_widget: gtk::Box,
+    parent: adw::ApplicationWindow,
+    host: RefCell<gtk::Stack>,
+    return_to: RefCell<Option<gtk::Widget>>,
     pub root: PathBuf,
-    scope: gtk::DropDown,
-    base: gtk::Entry,
+    pub workspace: Cell<Option<flowmux_core::WorkspaceId>>,
+    pub pane: flowmux_core::PaneId,
     refresh: gtk::Button,
     search: gtk::SearchEntry,
     files: gtk::StringList,
@@ -25,52 +27,55 @@ pub(crate) struct ReviewWindow {
     visible_files: RefCell<Vec<usize>>,
     pub status: gtk::Label,
     heading: gtk::Label,
+    comparison: gtk::Label,
     diff: gtk::TextView,
-    previous: gtk::Button,
-    next: gtk::Button,
-    page_label: gtk::Label,
-    page: Cell<usize>,
+    display_lines: RefCell<Vec<Option<usize>>>,
+    inline_widgets: RefCell<Vec<gtk::Widget>>,
+    pending_note: RefCell<Option<review::notes::Note>>,
+    selected_path: RefCell<Option<PathBuf>>,
     snapshot: RefCell<Option<Snapshot>>,
     patch: RefCell<Option<Patch>>,
     generation: Cell<u64>,
     patch_generation: Cell<u64>,
+    scroll_generation: Cell<u64>,
     comments: comments::Comments,
     targets: targets::Targets,
 }
 
 impl ReviewWindow {
-    pub fn new(parent: &adw::ApplicationWindow, root: PathBuf) -> Rc<Self> {
-        let window = adw::Window::builder()
-            .title("Diff review")
-            .transient_for(parent)
-            .destroy_with_parent(true)
-            .hide_on_close(true)
-            .default_width(1040)
-            .default_height(720)
-            .build();
-        window.set_widget_name("flowmux-diff-review");
+    pub fn new(
+        parent: &adw::ApplicationWindow,
+        host: &gtk::Stack,
+        pane: flowmux_core::PaneId,
+        root: PathBuf,
+    ) -> Rc<Self> {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Diff review", &review::display_path(&root));
-        header.set_title_widget(Some(&title));
-        content.append(&header);
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        margins(&controls, 10);
-        let scope =
-            gtk::DropDown::from_strings(&["All changes", "Unstaged", "Staged", "Branch changes"]);
-        scope.set_tooltip_text(Some("All changes compares tracked files with HEAD and includes untracked files. Branch changes compares commits from the merge base."));
-        scope.update_property(&[gtk::accessible::Property::Label("Diff scope")]);
-        let base = gtk::Entry::builder()
-            .placeholder_text("Base branch or commit")
+        content.set_widget_name("flowmux-diff-review");
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        margins(&header, 8);
+        let back = gtk::Button::from_icon_name("go-previous-symbolic");
+        back.set_tooltip_text(Some("Back to terminal"));
+        header.append(&back);
+        let title = gtk::Label::builder()
+            .label("Diff")
+            .xalign(0.0)
             .hexpand(true)
-            .visible(false)
+            .ellipsize(pango::EllipsizeMode::End)
             .build();
-        base.update_property(&[gtk::accessible::Property::Label("Base branch or commit")]);
-        let refresh = gtk::Button::with_label("Refresh");
-        controls.append(&scope);
-        controls.append(&base);
-        controls.append(&refresh);
-        content.append(&controls);
+        title.add_css_class("title-3");
+        header.append(&title);
+        content.append(&header);
+        let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
+        refresh.set_tooltip_text(Some("Refresh changes"));
+        header.append(&refresh);
+        let comparison = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(pango::EllipsizeMode::Middle)
+            .build();
+        comparison.add_css_class("caption");
+        comparison.set_widget_name("flowmux-review-comparison");
+        margins(&comparison, 8);
+        content.append(&comparison);
 
         let left = gtk::Box::new(gtk::Orientation::Vertical, 6);
         margins(&left, 8);
@@ -110,7 +115,7 @@ impl ReviewWindow {
             &gtk::ScrolledWindow::builder()
                 .child(&list)
                 .vexpand(true)
-                .min_content_width(180)
+                .min_content_width(120)
                 .build(),
         );
 
@@ -122,7 +127,16 @@ impl ReviewWindow {
             .build();
         margins(&heading, 8);
         heading.add_css_class("heading");
-        right.append(&heading);
+        let file_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        heading.set_hexpand(true);
+        file_header.append(&heading);
+        let comment = gtk::Button::with_label("+ Comment");
+        comment.set_tooltip_text(Some("Comment on selected lines (C)"));
+        let whole_file = gtk::Button::with_label("File comment");
+        whole_file.set_tooltip_text(Some("Comment on whole file"));
+        file_header.append(&comment);
+        file_header.append(&whole_file);
+        right.append(&file_header);
         let diff = gtk::TextView::builder()
             .editable(false)
             .cursor_visible(true)
@@ -134,6 +148,13 @@ impl ReviewWindow {
             .bottom_margin(8)
             .build();
         diff.set_widget_name("flowmux-review-diff");
+        let code_style = gtk::CssProvider::new();
+        code_style.load_from_string(
+            "textview, textview text { font-family: monospace; font-size: 13px; }",
+        );
+        #[allow(deprecated)]
+        diff.style_context()
+            .add_provider(&code_style, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
         diff.update_property(&[gtk::accessible::Property::Label(
             "Diff with old and new line numbers",
         )]);
@@ -144,37 +165,24 @@ impl ReviewWindow {
                 .vexpand(true)
                 .build(),
         );
-        let paging = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        margins(&paging, 8);
-        let previous = gtk::Button::with_label("Previous page");
-        let next = gtk::Button::with_label("Next page");
-        let page_label = gtk::Label::builder().hexpand(true).build();
-        paging.append(&previous);
-        paging.append(&page_label);
-        paging.append(&next);
-        right.append(&paging);
         let comments = comments::Comments::new();
         let targets = targets::Targets::new();
-        comments.attach_targets(&targets);
-        let review_split = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .start_child(&right)
-            .end_child(&comments.panel)
-            .resize_start_child(true)
-            .resize_end_child(false)
-            .shrink_start_child(true)
-            .shrink_end_child(true)
-            .position(340)
-            .build();
+        header.append(&comments.menu);
+        header.append(&targets.menu);
+        for menu in [&comments.menu, &targets.menu] {
+            // Keep the arrow anchored to the button; align the popup body
+            // to its right edge without inventing a shifted pointing target.
+            menu.popover().unwrap().set_halign(gtk::Align::End);
+        }
         let split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
             .start_child(&left)
-            .end_child(&review_split)
+            .end_child(&right)
             .resize_start_child(false)
             .resize_end_child(true)
             .shrink_start_child(true)
             .shrink_end_child(true)
-            .position(240)
+            .position(160)
             .vexpand(true)
             .build();
         content.append(&split);
@@ -185,12 +193,15 @@ impl ReviewWindow {
             .build();
         margins(&status, 10);
         content.append(&status);
-        window.set_content(Some(&content));
+        host.add_child(&content);
         let this = Rc::new(Self {
-            window,
+            root_widget: content,
+            parent: parent.clone(),
+            host: RefCell::new(host.clone()),
+            return_to: RefCell::new(None),
             root,
-            scope,
-            base,
+            workspace: Cell::new(None),
+            pane,
             refresh,
             search,
             files,
@@ -198,33 +209,22 @@ impl ReviewWindow {
             visible_files: RefCell::new(Vec::new()),
             status,
             heading,
+            comparison,
             diff,
-            previous,
-            next,
-            page_label,
-            page: Cell::new(0),
+            display_lines: RefCell::new(Vec::new()),
+            inline_widgets: RefCell::new(Vec::new()),
+            pending_note: RefCell::new(None),
+            selected_path: RefCell::new(None),
             snapshot: RefCell::new(None),
             patch: RefCell::new(None),
             generation: Cell::new(0),
             patch_generation: Cell::new(0),
+            scroll_generation: Cell::new(0),
             comments,
             targets,
         });
         let weak = Rc::downgrade(&this);
         this.refresh.connect_clicked(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.reload();
-            }
-        });
-        let weak = Rc::downgrade(&this);
-        this.scope.connect_selected_notify(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.base.set_visible(this.scope.selected() == 3);
-                this.reload();
-            }
-        });
-        let weak = Rc::downgrade(&this);
-        this.base.connect_activate(move |_| {
             if let Some(this) = weak.upgrade() {
                 this.reload();
             }
@@ -241,31 +241,94 @@ impl ReviewWindow {
                 this.load_selected();
             }
         });
-        for (button, forward) in [(&this.previous, false), (&this.next, true)] {
+        let weak = Rc::downgrade(&this);
+        back.connect_clicked(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.hide();
+            }
+        });
+        for (button, whole) in [(&comment, false), (&whole_file, true)] {
             let weak = Rc::downgrade(&this);
             button.connect_clicked(move |_| {
                 if let Some(this) = weak.upgrade() {
-                    this.page.set(if forward {
-                        this.page.get() + 1
-                    } else {
-                        this.page.get().saturating_sub(1)
-                    });
-                    this.show_page();
+                    this.begin_comment(whole);
                 }
             });
         }
+        let click = gtk::GestureClick::new();
+        let weak = Rc::downgrade(&this);
+        click.connect_released(move |_, _, x, y| {
+            if x > 35.0 {
+                return;
+            }
+            if let Some(this) = weak.upgrade() {
+                if this.diff.pick(x, y, gtk::PickFlags::DEFAULT).as_ref()
+                    != Some(this.diff.upcast_ref())
+                {
+                    return;
+                }
+                let (x, y) = this.diff.window_to_buffer_coords(
+                    gtk::TextWindowType::Widget,
+                    x as i32,
+                    y as i32,
+                );
+                if let Some(iter) = this.diff.iter_at_location(x, y) {
+                    this.diff.buffer().place_cursor(&iter);
+                    this.begin_comment(false);
+                }
+            }
+        });
+        this.diff.add_controller(click);
+        let keys = gtk::EventControllerKey::new();
+        let weak = Rc::downgrade(&this);
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let Some(this) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if !this.diff.has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            if modifiers.is_empty() && key == gtk::gdk::Key::c {
+                this.begin_comment(false);
+                return glib::Propagation::Stop;
+            }
+            if modifiers.is_empty() && matches!(key, gtk::gdk::Key::n | gtk::gdk::Key::p) {
+                this.next_hunk(key == gtk::gdk::Key::n);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        this.diff.add_controller(keys);
+        let weak = Rc::downgrade(&this);
+        if let Some(adjustment) = this.diff.hadjustment() {
+            adjustment.connect_page_size_notify(move |adjustment| {
+                let Some(this) = weak.upgrade() else {
+                    return;
+                };
+                let width = (adjustment.page_size() as i32 - 48).max(240);
+                for widget in this.inline_widgets.borrow().iter() {
+                    if widget.width_request() != width {
+                        widget.set_size_request(width, -1);
+                    }
+                }
+            });
+        }
+        let keys = gtk::EventControllerKey::new();
+        let weak = Rc::downgrade(&this);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            let Some(this) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if key == gtk::gdk::Key::Escape {
+                this.cancel_or_close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        this.root_widget.add_controller(keys);
         this.connect_comments();
         this.reload();
         this
-    }
-
-    fn scope(&self) -> Scope {
-        match self.scope.selected() {
-            1 => Scope::Unstaged,
-            2 => Scope::Staged,
-            3 => Scope::Branch(self.base.text().into()),
-            _ => Scope::WorkingTree,
-        }
     }
 
     fn reload(self: &Rc<Self>) {
@@ -280,7 +343,7 @@ impl ReviewWindow {
         self.status.set_text("Loading changes…");
         self.refresh.set_sensitive(false);
         let root = self.root.clone();
-        let scope = self.scope();
+        let scope = Scope::WorkingTree;
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || review::load(&root, scope)).await;
@@ -293,14 +356,16 @@ impl ReviewWindow {
             this.refresh.set_sensitive(true);
             match result {
                 Ok(Ok(snapshot)) => {
+                    this.comparison
+                        .set_text(&review::display_path(&snapshot.root));
+                    this.comparison.set_tooltip_text(Some(
+                        "Current checkout changes since HEAD, including staged edits and new files",
+                    ));
                     this.init_comments(snapshot.root.clone());
                     this.status.set_text(&if snapshot.files.is_empty() {
-                        "No changes in this scope.".into()
+                        "No uncommitted changes.".into()
                     } else {
-                        format!(
-                            "{} changed files · Read-only comparison",
-                            snapshot.files.len()
-                        )
+                        format!("{} changed files", snapshot.files.len())
                     });
                     *this.snapshot.borrow_mut() = Some(snapshot);
                     this.filter_files();
@@ -312,6 +377,9 @@ impl ReviewWindow {
     }
 
     fn filter_files(self: &Rc<Self>) {
+        // Replacing the list emits selection changes. Only load the final
+        // selection, otherwise an intermediate empty list consumes pending notes.
+        let notifications = self.selection.freeze_notify();
         let query = self.search.text().to_lowercase();
         let (indices, labels): (Vec<_>, Vec<_>) = self
             .snapshot
@@ -329,8 +397,27 @@ impl ReviewWindow {
             self.files.n_items(),
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
         );
-        if !labels.is_empty() {
-            self.selection.set_selected(0);
+        let wanted = self
+            .pending_note
+            .borrow()
+            .as_ref()
+            .map(|n| n.path())
+            .or_else(|| self.selected_path.borrow().clone());
+        let index = wanted.as_ref().and_then(|path| {
+            let snapshot = self.snapshot.borrow();
+            let snapshot = snapshot.as_ref()?;
+            self.visible_files
+                .borrow()
+                .iter()
+                .position(|&i| &snapshot.files[i].path == path)
+        });
+        if self.pending_note.borrow().is_some() && index.is_none() {
+            drop(notifications);
+            if self.pending_note.borrow().is_some() {
+                self.load_selected();
+            }
+        } else if !labels.is_empty() {
+            self.selection.set_selected(index.unwrap_or(0) as u32);
         }
     }
 
@@ -338,15 +425,28 @@ impl ReviewWindow {
         let generation = self.patch_generation.get().wrapping_add(1);
         self.patch_generation.set(generation);
         self.patch.borrow_mut().take();
-        self.page.set(0);
         self.show_page();
+        if self.snapshot.borrow().is_none() {
+            return;
+        }
         let Some(index) = self
             .visible_files
             .borrow()
             .get(self.selection.selected() as usize)
             .copied()
         else {
-            self.heading.set_text("Select a changed file");
+            let pending = self.pending_note.borrow().clone();
+            if let Some(note) = pending {
+                self.heading
+                    .set_text(&format!("{} · no longer in this comparison", note.label()));
+                *self.selected_path.borrow_mut() = Some(note.path());
+                *self.patch.borrow_mut() = Some(review::parse_patch(""));
+                self.show_page();
+                self.pending_note.borrow_mut().take();
+                self.focus_pending_comment(&note);
+            } else {
+                self.heading.set_text("Select a changed file");
+            }
             return;
         };
         let Some(snapshot) = self.snapshot.borrow().clone() else {
@@ -355,6 +455,7 @@ impl ReviewWindow {
         let Some(file) = snapshot.files.get(index).cloned() else {
             return;
         };
+        *self.selected_path.borrow_mut() = Some(file.path.clone());
         self.heading.set_text(&file.label());
         self.heading.set_tooltip_text(Some(&file.label()));
         self.diff.buffer().set_text("Loading diff…");
@@ -371,6 +472,9 @@ impl ReviewWindow {
                 Ok(Ok(patch)) => {
                     *this.patch.borrow_mut() = Some(patch);
                     this.show_page();
+                    if let Some(note) = this.pending_note.borrow_mut().take() {
+                        this.focus_pending_comment(&note);
+                    }
                 }
                 Ok(Err(error)) => this.diff.buffer().set_text(&error),
                 Err(_) => this
@@ -381,47 +485,217 @@ impl ReviewWindow {
         });
     }
 
-    #[allow(deprecated)] // Named theme colors are available on our GTK 4.12 floor.
-    fn show_page(&self) {
+    #[cfg(test)]
+    pub(crate) async fn smoke_wait_for_files(&self, expected: &[&str]) {
+        glib::future_with_timeout(std::time::Duration::from_secs(20), async {
+            while self.patch.borrow().is_none()
+                || !self.comments.ready.get()
+                || self.comments.busy.get()
+            {
+                glib::timeout_future(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let snapshot = self.snapshot.borrow();
+        let snapshot = snapshot.as_ref().unwrap();
+        assert_eq!(snapshot.scope, Scope::WorkingTree);
+        assert_eq!(
+            snapshot.files.iter().map(|f| f.label()).collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    pub fn focus(&self) {
+        if gtk::prelude::GtkWindowExt::focus(&self.parent)
+            .is_some_and(|focus| focus.is_ancestor(&self.root_widget))
+        {
+            return;
+        }
+        if self.comments.composer.is_mapped() {
+            self.comments
+                .composer
+                .child_focus(gtk::DirectionType::TabForward);
+        } else {
+            self.diff.grab_focus();
+        }
+    }
+
+    pub fn attach(&self, host: &gtk::Stack) {
+        if *self.host.borrow() != *host {
+            self.host.borrow().remove(&self.root_widget);
+            host.add_child(&self.root_widget);
+            *self.host.borrow_mut() = host.clone();
+            self.return_to.borrow_mut().take();
+        }
+    }
+
+    pub fn detach(&self) {
+        self.hide();
+        self.host.borrow().remove(&self.root_widget);
+    }
+
+    pub fn present(self: &Rc<Self>) {
+        let host = self.host.borrow();
+        if host.visible_child().as_ref() != Some(self.root_widget.upcast_ref()) {
+            *self.return_to.borrow_mut() = host.visible_child();
+            if self.snapshot.borrow().is_some() && !self.has_unsaved_review() {
+                self.reload();
+            }
+        }
+        host.set_visible_child(&self.root_widget);
+        self.parent.present();
+        self.focus();
+    }
+
+    pub fn hide(&self) {
+        self.comments.menu.popdown();
+        self.targets.menu.popdown();
+        let host = self.host.borrow();
+        if host.visible_child().as_ref() == Some(self.root_widget.upcast_ref()) {
+            if let Some(previous) = self
+                .return_to
+                .borrow()
+                .as_ref()
+                .filter(|p| p.parent().as_ref() == Some(host.upcast_ref()))
+            {
+                host.set_visible_child(previous);
+                previous.child_focus(gtk::DirectionType::TabForward);
+            }
+        }
+    }
+
+    fn next_hunk(self: &Rc<Self>, forward: bool) {
+        let buffer = self.diff.buffer();
+        let current = buffer.iter_at_offset(buffer.cursor_position()).line() as usize;
         let patch = self.patch.borrow();
-        let count = patch.as_ref().map_or(0, |p| p.lines.len());
-        let pages = count.div_ceil(PAGE_LINES).max(1);
-        let page = self.page.get().min(pages - 1);
-        self.page.set(page);
-        self.previous.set_sensitive(page > 0);
-        self.next.set_sensitive(page + 1 < pages);
-        self.page_label.set_text(&format!(
-            "Page {} / {} · {} diff lines",
-            page + 1,
-            pages,
-            count
-        ));
-        let text = patch
-            .as_ref()
-            .map(|patch| {
-                patch
-                    .lines
-                    .iter()
-                    .skip(page * PAGE_LINES)
-                    .take(PAGE_LINES)
-                    .map(|line| {
-                        format!(
-                            "{:>6} {:>6}  {}\n",
-                            line.old.map(|n| n.to_string()).unwrap_or_default(),
-                            line.new.map(|n| n.to_string()).unwrap_or_default(),
-                            line.text
-                        )
-                    })
-                    .collect::<String>()
+        let Some(patch) = patch.as_ref() else {
+            return;
+        };
+        let rows: Vec<_> = self
+            .display_lines
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, raw)| {
+                raw.filter(|&r| patch.lines[r].text.starts_with("@@"))
+                    .map(|_| i)
             })
+            .collect();
+        let next = if forward {
+            rows.iter().copied().find(|&i| i > current)
+        } else {
+            rows.iter().copied().rev().find(|&i| i < current)
+        };
+        if let Some(iter) = next.and_then(|i| buffer.iter_at_line(i as i32)) {
+            buffer.place_cursor(&iter);
+            self.scroll_to_cursor(true, 0.2);
+        }
+    }
+
+    fn scroll_to_cursor(self: &Rc<Self>, align: bool, yalign: f64) {
+        let generation = self.scroll_generation.get().wrapping_add(1);
+        self.scroll_generation.set(generation);
+        let weak = Rc::downgrade(self);
+        let allocated = Cell::new(false);
+        self.diff.add_tick_callback(move |diff, _| {
+            let Some(this) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if this.scroll_generation.get() != generation {
+                return glib::ControlFlow::Break;
+            }
+            // Tick runs before layout. Allow one frame to allocate the newly
+            // attached cards, then let TextView validate and scroll its mark.
+            if !allocated.replace(true) {
+                return glib::ControlFlow::Continue;
+            }
+            let buffer = diff.buffer();
+            let iter = buffer.iter_at_mark(&buffer.get_insert());
+            if let Some(card) = iter
+                .child_anchor()
+                .and_then(|anchor| anchor.widgets().into_iter().next())
+            {
+                if let (Some(bounds), Some(adjustment)) =
+                    (card.compute_bounds(diff), diff.vadjustment())
+                {
+                    let margin = 12.0;
+                    let top = bounds.y() as f64;
+                    let bottom = top + bounds.height() as f64;
+                    let height = diff.height() as f64;
+                    let offset = if top < margin || bounds.height() as f64 > height - margin * 2.0 {
+                        top - margin
+                    } else if bottom > height - margin {
+                        bottom - height + margin
+                    } else {
+                        0.0
+                    };
+                    let previous = adjustment.value();
+                    adjustment.set_value(previous + offset);
+                    if (adjustment.value() - previous).abs() > 0.5 {
+                        // Scrolling validates more of a long TextView, which
+                        // can change the heights above this card next frame.
+                        return glib::ControlFlow::Continue;
+                    }
+                }
+            } else {
+                diff.scroll_to_mark(&buffer.get_insert(), 0.05, align, 0.0, yalign);
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    #[allow(deprecated)]
+    fn show_page(self: &Rc<Self>) {
+        self.scroll_generation
+            .set(self.scroll_generation.get().wrapping_add(1));
+        let restore_focus = gtk::prelude::GtkWindowExt::focus(&self.parent)
+            .filter(|focus| focus.is_ancestor(&self.comments.composer));
+        let cursor = self
+            .diff
+            .buffer()
+            .iter_at_offset(self.diff.buffer().cursor_position())
+            .line() as usize;
+        let previous_line = self
+            .display_lines
+            .borrow()
+            .iter()
+            .take(cursor + 1)
+            .rev()
+            .find_map(|line| *line)
+            .unwrap_or(0);
+        for widget in self.inline_widgets.borrow_mut().drain(..) {
+            if widget.parent().as_ref() == Some(self.diff.upcast_ref()) {
+                self.diff.remove(&widget);
+            }
+        }
+        let patch = self.patch.borrow().clone();
+        let buffer = self.diff.buffer();
+        buffer.set_text("");
+        let Some(patch) = patch else {
+            self.display_lines.borrow_mut().clear();
+            return;
+        };
+        let path = self.selected_path.borrow().clone();
+        let mut cards = path
+            .as_deref()
+            .map(|path| self.note_cards(&patch, path))
             .unwrap_or_default();
-        self.diff.buffer().set_text(&text);
+        cards.sort_by_key(|(position, _, _)| *position);
+        let mut cards = cards.into_iter().peekable();
+        let mut map = Vec::new();
+        let wanted_note = self
+            .pending_note
+            .borrow()
+            .as_ref()
+            .map(|note| note.id.clone());
+        let mut comment_row = None;
         for (name, color) in [
             ("addition", "success_color"),
             ("deletion", "error_color"),
             ("hunk", "accent_color"),
         ] {
-            let table = self.diff.buffer().tag_table();
+            let table = buffer.tag_table();
             let tag = table.lookup(name).unwrap_or_else(|| {
                 let tag = gtk::TextTag::builder().name(name).build();
                 table.add(&tag);
@@ -429,165 +703,135 @@ impl ReviewWindow {
             });
             tag.set_foreground_rgba(self.diff.style_context().lookup_color(color).as_ref());
         }
-        if let Some(patch) = patch.as_ref() {
-            for (i, line) in patch
-                .lines
-                .iter()
-                .skip(page * PAGE_LINES)
-                .take(PAGE_LINES)
-                .enumerate()
+        for raw in 0..=patch.lines.len() {
+            while cards
+                .peek()
+                .is_some_and(|(position, _, _)| *position <= raw)
             {
-                let tag = if line.new.is_some() && line.old.is_none() {
-                    "addition"
-                } else if line.old.is_some() && line.new.is_none() {
-                    "deletion"
-                } else if line.text.starts_with("@@") {
-                    "hunk"
-                } else {
-                    continue;
-                };
-                if let Some(start) = self.diff.buffer().iter_at_line(i as i32) {
-                    let mut end = start;
-                    end.forward_to_line_end();
-                    self.diff.buffer().apply_tag_by_name(tag, &start, &end);
+                let (_, id, widget) = cards.next().unwrap();
+                if wanted_note.as_ref().map_or(
+                    widget == self.comments.composer.clone().upcast::<gtk::Widget>(),
+                    |wanted| *wanted == id,
+                ) {
+                    comment_row = Some(map.len());
                 }
+                let mut end = buffer.end_iter();
+                let anchor = buffer.create_child_anchor(&mut end);
+                widget.set_size_request((self.diff.width() - 48).max(240), -1);
+                self.diff.add_child_at_anchor(&widget, &anchor);
+                buffer.insert(&mut buffer.end_iter(), "\n");
+                map.push(None);
+                self.inline_widgets.borrow_mut().push(widget);
             }
+            let Some(line) = patch.lines.get(raw) else {
+                break;
+            };
+            if line.old.is_none()
+                && line.new.is_none()
+                && ["diff --git ", "index ", "--- ", "+++ "]
+                    .iter()
+                    .any(|prefix| line.text.starts_with(prefix))
+            {
+                continue;
+            }
+            let code = line.old.is_some() || line.new.is_some();
+            let text = format!(
+                "{} {:>5} {:>5}  {}\n",
+                if code { "+" } else { " " },
+                line.old.map(|n| n.to_string()).unwrap_or_default(),
+                line.new.map(|n| n.to_string()).unwrap_or_default(),
+                line.text
+            );
+            let tag = if line.new.is_some() && line.old.is_none() {
+                Some("addition")
+            } else if line.old.is_some() && line.new.is_none() {
+                Some("deletion")
+            } else if line.text.starts_with("@@") {
+                Some("hunk")
+            } else {
+                None
+            };
+            if let Some(tag) = tag {
+                buffer.insert(&mut buffer.end_iter(), &text[..2]);
+                buffer.insert_with_tags_by_name(&mut buffer.end_iter(), &text[2..], &[tag]);
+            } else {
+                buffer.insert(&mut buffer.end_iter(), &text);
+            }
+            map.push(Some(raw));
         }
-        let start = self.diff.buffer().start_iter();
-        self.diff.buffer().place_cursor(&start);
-        self.diff
-            .scroll_to_iter(&mut self.diff.buffer().start_iter(), 0.0, false, 0.0, 0.0);
+        let row = comment_row.unwrap_or_else(|| {
+            map.iter()
+                .position(|raw| raw.is_some_and(|r| r >= previous_line))
+                .unwrap_or(0)
+        });
+        *self.display_lines.borrow_mut() = map;
+        if let Some(iter) = buffer.iter_at_line(row as i32) {
+            buffer.place_cursor(&iter);
+            // Child anchors contribute their allocated card heights. Defer
+            // scrolling until TextView has validated those line heights.
+            self.scroll_to_cursor(false, 0.0);
+        }
+        if let Some(focus) = restore_focus.filter(|focus| focus.is_mapped()) {
+            focus.grab_focus();
+        }
     }
 }
 
 #[cfg(test)]
 pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
-    use std::process::Command;
-    async fn wait(mut condition: impl FnMut() -> bool) {
-        glib::future_with_timeout(std::time::Duration::from_secs(20), async {
-            while !condition() {
-                glib::timeout_future(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("review UI timed out");
-    }
-    let directory = tempfile::tempdir().unwrap();
-    assert!(Command::new("git")
+    let test_window = adw::ApplicationWindow::builder()
+        .transient_for(parent)
+        .default_width(1100)
+        .default_height(760)
+        .build();
+    let parent = &test_window;
+    let dir = tempfile::tempdir().unwrap();
+    std::process::Command::new("git")
         .args(["init", "-b", "main"])
-        .current_dir(directory.path())
+        .current_dir(dir.path())
         .output()
-        .unwrap()
-        .status
-        .success());
-    for i in 0..600 {
-        std::fs::write(
-            directory.path().join(format!("file-{i:04}.rs")),
-            "fn small() {}\n",
-        )
         .unwrap();
-    }
     std::fs::write(
-        directory.path().join("large.rs"),
+        dir.path().join("large.rs"),
         (0..20_000)
             .map(|i| format!("line {i} 내용\n"))
             .collect::<String>(),
     )
     .unwrap();
-    let review = ReviewWindow::new(parent, directory.path().into());
-    println!("REVIEW_SMOKE_PRESENT");
-    review.window.present();
-    wait(|| review.patch.borrow().is_some() && review.window.is_mapped()).await;
-    assert_eq!(review.files.n_items(), 601);
-    assert!(!review.next.is_sensitive());
-    review.search.set_text("large");
-    wait(|| {
-        review
-            .patch
-            .borrow()
-            .as_ref()
-            .is_some_and(|p| p.lines.len() > 20_000)
-    })
-    .await;
-    assert_eq!(review.files.n_items(), 1);
-    assert!(review.next.is_sensitive());
-    review.next.emit_clicked();
-    assert_eq!(review.page.get(), 1);
-    assert!(review
-        .diff
-        .buffer()
-        .text(
-            &review.diff.buffer().start_iter(),
-            &review.diff.buffer().end_iter(),
-            false
-        )
-        .contains("line 500"));
-    for _ in 0..50 {
-        if review.next.is_sensitive() {
-            review.next.emit_clicked();
+    let host = gtk::Stack::new();
+    let terminal = gtk::Label::new(Some("Terminal remains mounted"));
+    host.add_child(&terminal);
+    parent.set_content(Some(&host));
+    let review = ReviewWindow::new(
+        parent,
+        &host,
+        flowmux_core::PaneId::new(),
+        dir.path().into(),
+    );
+    review.present();
+    glib::future_with_timeout(std::time::Duration::from_secs(20), async {
+        while review.patch.borrow().is_none() {
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
         }
-    }
-    assert!(review
-        .diff
-        .buffer()
-        .text(
-            &review.diff.buffer().start_iter(),
-            &review.diff.buffer().end_iter(),
-            false
-        )
-        .contains("line 19999"));
+    })
+    .await
+    .unwrap();
+    let buffer = review.diff.buffer();
+    let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+    assert!(text.contains("line 0 ") && text.contains("line 19999 "));
+    assert!(!text.contains("diff --git") && !text.contains("index 0000"));
+    assert!(review.root_widget.is_mapped());
     comments::smoke(&review).await;
-    review.window.set_default_size(720, 500);
-    println!("REVIEW_SMOKE_RESIZE");
-    glib::timeout_future(std::time::Duration::from_millis(100)).await;
-    assert!(review.diff.width() > 200);
-    if let Some(directory) = std::env::var_os("FLOWMUX_REVIEW_SNAPSHOT_DIR") {
-        std::fs::create_dir_all(&directory).unwrap();
-        let snapshot = gtk::Snapshot::new();
-        gtk::WidgetPaintable::new(Some(&review.window)).snapshot(
-            &snapshot,
-            review.window.width() as f64,
-            review.window.height() as f64,
-        );
-        let node = snapshot.to_node().unwrap();
-        review
-            .window
-            .native()
-            .unwrap()
-            .renderer()
-            .unwrap()
-            .render_texture(&node, None)
-            .save_to_png(PathBuf::from(directory).join("diff-review.png"))
-            .unwrap();
-    }
-    // Fast scope/filter changes must not render an older in-flight patch.
-    review.scope.set_selected(2);
-    println!("REVIEW_SMOKE_SCOPES");
-    review.scope.set_selected(0);
-    review.scope.set_selected(2);
-    wait(|| review.refresh.is_sensitive()).await;
-    assert_eq!(review.files.n_items(), 0);
-    assert!(review.status.text().contains("No changes"));
-    review.scope.set_selected(3);
-    review.base.set_text("missing-base");
-    review.refresh.emit_clicked();
-    wait(|| review.refresh.is_sensitive()).await;
-    assert!(review.status.text().contains("Git:"));
-    review.scope.set_selected(0);
-    wait(|| review.patch.borrow().is_some()).await;
-    review.window.close();
-    println!("REVIEW_SMOKE_CLOSED");
-    assert!(!review.window.is_visible());
-    // Native macOS unmaps asynchronously; a second user action arrives on a
-    // later event-loop turn, not inside the close signal's call stack.
-    glib::timeout_future(std::time::Duration::from_millis(50)).await;
-    review.window.present();
-    println!("REVIEW_SMOKE_REOPENED");
-    assert!(review.window.is_visible());
-    wait(|| review.window.is_mapped()).await;
-    glib::timeout_future(std::time::Duration::from_millis(50)).await;
-    review.window.destroy();
-    println!("DIFF_REVIEW_NATIVE_SMOKE_OK");
+    review.hide();
+    assert_eq!(host.visible_child(), Some(terminal.upcast()));
+    review.present();
+    assert_eq!(
+        host.visible_child(),
+        Some(review.root_widget.clone().upcast())
+    );
+    host.remove(&review.root_widget);
+    test_window.destroy();
+    println!("DIFF_REVIEW_CONTINUOUS_EMBEDDED_OK");
 }
 
 #[cfg(all(test, not(target_os = "macos")))]

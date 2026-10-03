@@ -88,6 +88,12 @@ impl PaneCallbackRouter {
                     dispatch_with_ack(&bridge, move |ack| GtkCommand::CloseFocused { pane, ack });
                 }))
             },
+            on_open_diff_review: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane| {
+                    dispatch_detached(&bridge, GtkCommand::OpenDiffReview { pane: Some(pane) });
+                }))
+            },
             on_toggle_pane_zoom: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane| {
@@ -514,6 +520,31 @@ mod tests {
         assert_eq!(pane, focused_pane);
         assert_eq!(direction, flowmux_core::SplitDirection::Vertical);
         let _ = ack.send(Ok(PaneId::new()));
+    }
+
+    #[cfg_attr(target_os = "macos", test)]
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    fn diff_menu_targets_its_own_pane_even_when_another_is_focused() {
+        let (bridge, command_rx) = Bridge::new();
+        let menu_pane = PaneId::new();
+        let callbacks = PaneCallbackRouter::new(
+            Rc::new(Cell::new(Some(PaneId::new()))),
+            bridge,
+            Rc::new(RefCell::new(flowmux_config::options::Options::default())),
+            Rc::new(RefCell::new(PaneRegistry::default())),
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        )
+        .into_callbacks();
+        (callbacks.on_open_diff_review.borrow_mut())(menu_pane);
+        let context = glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+        assert!(
+            matches!(command_rx.try_recv(), Ok(GtkCommand::OpenDiffReview { pane: Some(pane) }) if pane == menu_pane)
+        );
     }
 
     #[test]

@@ -303,10 +303,12 @@ pub enum GtkCommand {
         pane: Option<PaneId>,
     },
     SessionPanel(crate::ui::session_panel::SessionPanelAction),
-    OpenDiffReview,
+    OpenDiffReview {
+        pane: Option<PaneId>,
+    },
     RefreshReviewTargets,
     FocusReviewTarget {
-        root: PathBuf,
+        pane: PaneId,
         target: crate::ui::review_window::ReviewTarget,
         prompt: String,
     },

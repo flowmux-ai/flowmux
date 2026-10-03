@@ -116,6 +116,10 @@ fill="#14b014" stroke="none">
 
 const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
     SymbolicIcon {
+        name: "flowmux-diff-symbolic",
+        path: "M2 1h12v14H2zm1.5 1.5v11h9v-11zM5 5h6v1.5H5zm2.25 3h1.5v1.5H11V11H8.75v1.5h-1.5V11H5V9.5h2.25z",
+    },
+    SymbolicIcon {
         name: "applications-utilities-symbolic",
         path: "M10.8 1.5a3.4 3.4 0 0 0-3.2 4.6L2.4 11.3a1.8 1.8 0 0 0 2.5 2.5l5.2-5.2a3.4 3.4 0 0 0 4.4-4.3l-2.3 2.3-1.8-1.8 2.3-2.3a3.4 3.4 0 0 0-1.9-1z",
     },

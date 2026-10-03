@@ -105,7 +105,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
-            | GtkCommand::OpenDiffReview
+            | GtkCommand::OpenDiffReview { .. }
             | GtkCommand::FocusReviewTarget { .. }
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
@@ -588,7 +588,7 @@ pub struct WindowController {
     worktrees: WorktreePanelState,
     sessions: sessions::SessionPanelState,
     reviews:
-        Rc<RefCell<std::collections::HashMap<PathBuf, Rc<crate::ui::review_window::ReviewWindow>>>>,
+        Rc<RefCell<std::collections::HashMap<PaneId, Rc<crate::ui::review_window::ReviewWindow>>>>,
     file_browser: FileBrowserState,
     agent_bar: AgentBarState,
     pane_zoom: PaneZoomState,
@@ -2117,6 +2117,25 @@ impl WindowController {
     }
 
     async fn confirm_dirty_surfaces(&self, surfaces: &[SurfaceId]) -> bool {
+        let pending = self.reviews.borrow().iter().find_map(|(pane, review)| {
+            let registry = self.pane_registry.borrow();
+            (review.has_unsaved_review()
+                && registry.surface_tabs.get(pane).is_some_and(|tabs| {
+                    !tabs.is_empty() && tabs.iter().all(|(surface, _)| surfaces.contains(surface))
+                }))
+            .then(|| review.clone())
+        });
+        if let Some(review) = pending {
+            if let Some(workspace) = review.workspace.get() {
+                self.activate_workspace(workspace).await;
+            }
+            if let Some(host) = self.pane_registry.borrow().stack_for_pane(review.pane) {
+                review.attach(&host);
+            }
+            review.present();
+            review.delivery_message("Save or cancel your comment before closing this pane.");
+            return false;
+        }
         confirm_dirty_editor_close(&self.window, self.editors_for_surfaces(surfaces)).await
     }
 
@@ -2153,8 +2172,14 @@ impl WindowController {
             .find(|r| r.has_unsaved_review())
             .cloned();
         if let Some(review) = pending_review {
+            if let Some(workspace) = review.workspace.get() {
+                self.activate_workspace(workspace).await;
+            }
+            if let Some(host) = self.pane_registry.borrow().stack_for_pane(review.pane) {
+                review.attach(&host);
+            }
             review.status.set_text("Save or clear your review draft before closing FlowMux. If a save is running, wait for it to finish.");
-            review.window.present();
+            review.present();
             self.window_close.prompting.set(false);
             return;
         }
@@ -2430,6 +2455,11 @@ impl WindowController {
     /// exist. These maps outlive individual workspace widgets, so relying on
     /// GTK teardown alone would retain file-tree paths and stale MRU ids.
     fn forget_closed_pane_ui_state(&self, panes: &[PaneId]) {
+        for pane in panes {
+            if let Some(review) = self.reviews.borrow_mut().remove(pane) {
+                review.detach();
+            }
+        }
         if panes.is_empty() {
             return;
         }
@@ -2621,7 +2651,16 @@ impl WindowController {
             let _ = bridge.tx.send(GtkCommand::PaneFocused { pane }).await;
             let _ = bridge.tx.send(GtkCommand::RefreshWindowTitle).await;
         });
-        grab_registered_pane_focus(registry, pane);
+        if let Some(review) = self
+            .reviews
+            .borrow()
+            .get(&pane)
+            .filter(|r| r.root_widget.is_mapped())
+        {
+            review.focus();
+        } else {
+            grab_registered_pane_focus(registry, pane);
+        }
     }
 
     async fn resize_pane_ratio(&self, pane: PaneId, ratio: f32) -> Result<(), String> {
@@ -2794,13 +2833,13 @@ impl WindowController {
                 self.dispatch_pane_command(command).await;
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
-            GtkCommand::OpenDiffReview => self.open_diff_review().await,
+            GtkCommand::OpenDiffReview { pane } => self.open_diff_review(pane).await,
             GtkCommand::RefreshReviewTargets => self.refresh_review_targets().await,
             GtkCommand::FocusReviewTarget {
-                root,
+                pane,
                 target,
                 prompt,
-            } => self.focus_review_target(root, target, prompt).await,
+            } => self.focus_review_target(pane, target, prompt).await,
             command @ (GtkCommand::CloseWindow
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette

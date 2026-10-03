@@ -1,135 +1,110 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Diff review
+# Review changes
 
-Click **Diff** in the side-panel footer or press **Ctrl+Alt+D**. The shortcut can
-be changed in Options. A separate native review window leaves the terminal,
-its running process, and its input untouched. macOS and Linux share the same
-GTK implementation; no agent skill, account, or extra configuration is required.
+Open the pane's top-right **… → View Diff** menu, click the sidebar's Diff icon
+right of AI usage, or press **Ctrl+Alt+E**
+for the focused pane. The review stays inside that pane, including split layouts.
+Other panes remain visible and usable. The back arrow or **Escape** returns to
+that pane's previous tab without stopping its process.
 
-The window uses the focused local tab's directory. SSH checkouts are not read
-through the local filesystem. Switch to a local checkout to review it.
+## Read the current checkout
 
-## Compare changes
+The review uses the selected pane's current local Git checkout (or its active
+editor's project path). Its path is shown above the files. It compares the
+working tree with **HEAD**, including staged edits, unstaged edits, and new
+untracked files in one list. Already committed changes are excluded. There are
+no branch inputs or scope dropdowns. A file with both staged and unstaged edits
+appears once with its net change.
 
-- **All changes** compares tracked files against HEAD and includes untracked,
-  non-ignored files. It also works before the first commit.
-- **Unstaged** compares the working tree with the index and includes untracked files.
-- **Staged** compares the index with HEAD.
-- **Branch changes** compares the merge base of the entered branch/commit with
-  HEAD. Uncommitted changes are excluded. Press Enter or Refresh after editing
-  the base. Both commit endpoints are pinned until the next refresh.
+Use **Refresh** after changing files or Git state. Reopening also refreshes the
+comparison. Changing the pane's directory and reopening selects that checkout;
+an unfinished comment is preserved until saved or cancelled. Reviews in separate
+panes keep their own navigation, even when they point at the same repository.
 
-Filter the file list, then select a file. Old and new line numbers are displayed
-next to the unified diff. Only the selected file is loaded; long patches have
-500-line pages. The virtual file list handles large sets without creating a
-widget for every file. Binary, rename-only, mode, and symlink changes retain
-Git's explanatory text. Untracked symlinks are described without following them.
+Select or filter a file. Diffs scroll continuously without manual pages.
+Transport headers and full object hashes are hidden; old/new line numbers,
+changed lines, and Git descriptions for binary, rename, mode, and symlink
+changes remain visible. With the diff focused, **n / p** moves between hunks.
 
-Git operations run outside the GUI thread with a 30-second timeout. A single
-Git result has an 8 MiB limit, reported explicitly rather than silently cut off.
-Non-UTF-8 patch content reports an error. Paths remain byte-preserving for Git
-operations, while control characters in display labels are escaped.
+## Comment where you read
 
-## Regression checks
+Click **+** beside a code line, select a range and click **+ Comment**, or press
+**c** in the diff. The comment editor opens directly below the selected code.
+Use **File comment** for feedback on the entire file. **Ctrl/Cmd+Enter** saves;
+**Cancel** or **Escape** cancels from anywhere in the composer. An open menu
+closes first on **Escape** or an outside click. Saved comments stay inline with Edit and Delete actions. Delete removes the saved comment immediately.
+The **Comments** menu jumps to a comment's file and location, including feedback
+on files no longer present in the comparison.
+Below **Reload saved comments**, **Remove all comments** deletes the saved
+comments for this checkout and closes its current composer after a successful save.
 
-`cargo test -p flowmux-vcs -p flowmux-config --locked` covers Git scopes,
-unborn/empty/non-repositories, renames, deletions, binary files, literal pathspec
-characters, Unicode, symlinks, ignored files, pinned branch comparisons, line
-numbers, 600 files, 20,000-line patches, and explicit oversized-file handling.
-Linux also exercises filenames that are not valid UTF-8 (macOS filesystems may
-reject those filenames).
+Comments are saved locally in `reviews.sqlite3`. They do not modify repository
+files or Git's index. Open Diff panes and windows using the same checkout and
+local storage automatically pick up saved changes within about half a second.
+Updates wait while a Comments or Send menu is open to preserve its focused rows.
+Unfinished text stays local. If another pane changes the same comment being
+edited, the local text is preserved and saving is blocked until that edit is
+cancelled; copy any text you want to keep first. Concurrent saves also use
+revision checks; **Reload saved comments** recovers a storage revision conflict.
+Closing
+FlowMux with an unfinished comment brings it forward for saving or cancellation.
+A forced process termination can lose unfinished text.
 
-Linux native GUI checks:
+## Send feedback
+
+Open **Send** and select an agent in the same workspace. FlowMux checks
+comments against the current code, verifies the live session, and sends the
+batch as a bracketed paste followed by Enter. An agent must be idle or done and
+show an empty recognized prompt (`›`, `❯`, or `>`), or Codex's known empty-input placeholder with the cursor at its start. Existing input, working
+agents, approval waits, exited sessions, and unrecognized prompts are left
+untouched. Feedback remains saved so it can be retried. **Copy feedback** is
+available in the same menu for other programs or prompt styles.
+
+Comments follow unchanged selected code when other lines shift. Nearby context
+helps disambiguate repeated code. If a selected passage changes or its location
+is ambiguous, the review opens that comment for inspection; delete it or use
+**Reattach** (attach to selected lines). Whole-file text comments stay attached across
+edits. Missing files and changed binary content still need inspection.
+
+## Limits and verification
+
+Only local checkouts are supported. Git reads run outside the GUI thread with
+a 30-second command timeout and an explicit 8 MiB output limit. Non-UTF-8 patch
+content reports an error. Git paths retain their original bytes; control
+characters are escaped for display. Untracked symlinks are never followed.
+
+Model and persistence checks:
+
+```sh
+cargo test -p flowmux-vcs -p flowmux-state --locked
+```
+
+Linux native GUI checks (GTK on X11):
 
 ```sh
 GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals \
   xvfb-run -a dbus-run-session -- \
-  cargo test -p flowmux --bin flowmux ui::review_window --locked -- --nocapture
+  cargo test -p flowmux --bin flowmux ui::review_window --locked -- --test-threads=1
+GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals \
+  xvfb-run -a dbus-run-session -- \
+  cargo test -p flowmux --bin flowmux ui::window::review --locked -- --test-threads=1
 ```
 
-macOS native GUI checks run on the AppKit main thread:
+macOS native GUI checks:
 
 ```sh
-FLOWMUX_BUNDLED_CLI_PATH="$PWD/target/debug/flowmuxctl" \
-  cargo test -p flowmux --test macos_native --features native-smoke --locked
+./scripts/test-diff-review-macos.sh
 ```
 
-The shared GUI scenario verifies small/large diffs, a 601-file list, filtering,
-first/last page access, narrow-window layout, fast scope changes while reads
-are pending, bad base errors, and close/reopen. Set
-`FLOWMUX_REVIEW_SNAPSHOT_DIR` to retain a rendered PNG. These tests run alongside
-existing macOS terminal/browser/editor/theme regression scenarios.
+The native scenarios check continuous 20,000-line rendering, pane-local navigation and checkout selection,
+menu dismissal and comment cancellation, stacked comment edit geometry,
+unchanged Edit versus unsaved text, menu-to-PTY delivery between two Codex targets,
+inline Unicode comments, persistence, relocation after insertion, missing-file
+feedback, existing terminal input protection, session identity checks, and an
+actual child PTY's receipt of the multiline bracketed paste and submit key.
+They do not assert that every third-party agent recognizes every prompt style.
+Installed-app keyboard/mouse verification uses a separate app bundle and state
+directory, preserving the user's running FlowMux sessions.
 
-## Review comments
-
-Select one or more diff lines and write a comment in **Write**, or leave the
-selection empty to comment on the whole file. The anchor is captured when you
-start writing, so switching files while composing does not move the comment.
-**Save comment** persists it locally in `reviews.sqlite3` in FlowMux's state
-directory. Review data never changes files or the Git index. **Comments** lets
-you edit, resolve, reopen, or reload saved comments. Resolved comments are kept
-and excluded from delivery. A concurrent edit in another window reports a
-conflict instead of overwriting it; reload preserves the text you are composing.
-
-**Deliver → Validate & preview** prepares one review containing all open
-comments, file paths, old/new line ranges, and quoted diff context. **Copy review**
-checks the current diff again before copying. A full diff fingerprint marks
-changed/deleted anchors as STALE. Refresh the diff, edit a stale comment and
-choose **Use current diff selection** to attach it explicitly, or resolve it.
-Unrelated changes in the same file also require this check. Reviews containing
-stale comments cannot be copied as current feedback.
-
-Hiding the review window keeps the draft. Closing FlowMux with an unsaved review
-focuses that draft so it can be saved or explicitly cleared first. Saved comments
-survive restarts; unfinished text does not survive a forced process termination.
-
-The shared native scenario additionally covers line selection on page 41,
-Unicode and long multiline comments, 300 saved comments, edit/resolve/reopen,
-clipboard readback, persistence reload, cross-window conflicts, stale anchors,
-and preservation of unfinished text when the window is hidden.
-
-## Deliver to a running agent
-
-The **Deliver** tab lists this window's live agent sessions from FlowMux's existing runtime
-model, including the workspace, tab, and current status. Select the recipient,
-then use **Copy & focus agent**. FlowMux validates the review, rechecks the
-recipient's process/session identity, copies the complete review, and focuses
-that terminal. Paste and submit when ready. The handoff preserves existing
-input and works while an agent is idle, working, finished, or asking for approval.
-An ended/replaced session cannot receive a handoff intended for its predecessor.
-
-This uses the same path for Claude, Codex, Gemini, Cline, OpenCode, AGY, and
-custom agent names. It requires no provider SDK, skill, hook-specific prompt,
-or saved recipient configuration. Detection still depends on FlowMux's existing
-agent runtime; **Copy review** is available even when a program is not detected.
-Agent selection is explicit and can include another local workspace. Verify the
-workspace/tab label before handing off. Remote checkout reading and automatic
-prompt submission are outside this feature.
-
-The preview displays at most 40,000 characters with a visible notice; copying
-includes the complete review. An unfinished composer must be saved or cleared
-before delivery.
-
-## Acceptance matrix
-
-| Scenario | Automated check |
-| --- | --- |
-| Empty/unborn repo, all four scopes, pinned branch endpoints | `flowmux-vcs` review integration tests |
-| Add/delete/rename/binary/symlink, literal and non-UTF-8 paths | `flowmux-vcs` review integration tests |
-| 601 files, 20,000-line diff, first/last pages, filters, rapid scope changes | Shared native GTK smoke |
-| Empty/short/Unicode/multiline/long comments and 300 comments | Model tests and shared native GTK smoke |
-| 50 files with mixed-length reviews and staged/unstaged anchors | `reviews_across_many_files_and_scopes_validate_independently` |
-| Edit, resolve/reopen, explicit re-anchor, save/reload, concurrent save conflict | Shared native GTK smoke and state tests |
-| External changes/deletions, stale copy rejection, binary content change | Model tests and shared native GTK smoke |
-| Preview/copy complete text, large-preview bound, provider handoff button | Shared native GTK smoke |
-| Seven provider names × five states, stale session, exited process, terminal draft preservation | `review_handoff_preserves_agent_input_and_checks_session` and macOS native harness |
-| Hidden-window draft retention, app-close guard, narrow window | Shared native GTK smoke and handoff smoke |
-| Installed app: shortcut, typing, multiline save, clipboard, resize, close/reopen | `scripts/test-diff-review-gui.py --gui ... --cli ...` (Linux; Xvfb, Xlib, Pillow, xdotool, xclip) |
-| Actual macOS text insertion callback and installed GUI input | macOS native harness plus isolated installed-app keyboard/paste verification |
-
-Provider-state tests use fixture lifecycle records and real terminal widgets;
-they verify FlowMux's common handoff, not third-party model responses. The feature
-does not submit prompts. Native tests exercise GTK on macOS and Linux X11; an
-independent Wayland desktop and other CPU architectures are not covered by the
-local verification environment.
+Detailed event coverage and outstanding verification limits: [event audit](diff-review-event-audit.md).

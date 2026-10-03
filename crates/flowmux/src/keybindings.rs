@@ -333,7 +333,10 @@ pub fn install_actions(
         .activate(move |_, _, _| {
             let bridge = review_bridge.clone();
             glib::MainContext::default().spawn_local(async move {
-                let _ = bridge.tx.send(GtkCommand::OpenDiffReview).await;
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::OpenDiffReview { pane: None })
+                    .await;
             });
         })
         .build();

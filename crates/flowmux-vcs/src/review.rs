@@ -17,6 +17,9 @@ pub mod notes;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
+    /// Net change from the branch base to the working tree, including new files.
+    /// An empty reference selects the repository's default branch, or HEAD.
+    AllChanges(String),
     WorkingTree,
     Unstaged,
     Staged,
@@ -140,7 +143,7 @@ fn git(root: &Path, args: &[OsString], allow_difference: bool) -> Result<Vec<u8>
         return Err("This diff exceeds the 8 MiB display limit. Review a smaller change with Git or your editor.".into());
     }
     let status = status?;
-    if !status.success() && !(allow_difference && status.code() == Some(1)) {
+    if !(status.success() || allow_difference && status.code() == Some(1)) {
         return Err(format!("Git: {}", String::from_utf8_lossy(&error).trim()));
     }
     Ok(output)
@@ -169,19 +172,29 @@ pub fn repository_root(start: &Path) -> Result<PathBuf, String> {
 
 pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
     let root = repository_root(start)?;
-    let base = match &scope {
-        Scope::Unstaged => None,
-        Scope::WorkingTree | Scope::Staged => Some(match revision(&root, "HEAD^{commit}") {
-            Ok(oid) => oid,
-            Err(_) => String::from_utf8_lossy(&git(
+    let scope = match scope {
+        Scope::AllChanges(reference) if reference.trim().is_empty() => {
+            Scope::AllChanges(default_base(&root))
+        }
+        scope => scope,
+    };
+    let head_or_empty = || -> Result<String, String> {
+        match revision(&root, "HEAD^{commit}") {
+            Ok(oid) => Ok(oid),
+            Err(_) => Ok(String::from_utf8_lossy(&git(
                 &root,
                 &args(&["hash-object", "-t", "tree", "--stdin"]),
                 false,
             )?)
             .trim()
-            .into(),
-        }),
-        Scope::Branch(reference) => {
+            .into()),
+        }
+    };
+    let base = match &scope {
+        Scope::Unstaged => None,
+        Scope::WorkingTree | Scope::Staged => Some(head_or_empty()?),
+        Scope::AllChanges(reference) if reference == "HEAD" => Some(head_or_empty()?),
+        Scope::Branch(reference) | Scope::AllChanges(reference) => {
             if reference.trim().is_empty() {
                 return Err("Enter a base branch or commit.".into());
             }
@@ -208,7 +221,10 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
     let mut command = snapshot.diff_args();
     command.extend(args(&["--name-status", "-z", "--"]));
     snapshot.files = parse_files(&git(&snapshot.root, &command, false)?)?;
-    if matches!(snapshot.scope, Scope::WorkingTree | Scope::Unstaged) {
+    if matches!(
+        snapshot.scope,
+        Scope::AllChanges(_) | Scope::WorkingTree | Scope::Unstaged
+    ) {
         let untracked = git(
             &snapshot.root,
             &args(&["ls-files", "--others", "--exclude-standard", "-z"]),
@@ -228,6 +244,28 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
     }
     snapshot.files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(snapshot)
+}
+
+fn default_base(root: &Path) -> String {
+    if let Ok(bytes) = git(
+        root,
+        &args(&["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
+        false,
+    ) {
+        let reference = String::from_utf8_lossy(&bytes).trim().to_string();
+        if revision(root, &format!("{reference}^{{commit}}")).is_ok() {
+            return reference
+                .strip_prefix("refs/remotes/")
+                .unwrap_or(&reference)
+                .to_string();
+        }
+    }
+    for reference in ["main", "master"] {
+        if revision(root, &format!("refs/heads/{reference}^{{commit}}")).is_ok() {
+            return reference.into();
+        }
+    }
+    "HEAD".into()
 }
 
 impl Snapshot {

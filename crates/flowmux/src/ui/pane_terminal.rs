@@ -52,6 +52,8 @@ pub struct PaneCallbacks {
         Rc<RefCell<dyn FnMut(PaneId, flowmux_editor::EditorFocusDirection)>>,
     /// Terminal-body right-click menu 'Close Pane'.
     pub on_close_pane: Rc<RefCell<dyn FnMut(PaneId)>>,
+    /// Open the current checkout diff inside this pane.
+    pub on_open_diff_review: Rc<RefCell<dyn FnMut(PaneId)>>,
     /// Pane-header maximize/restore button.
     pub on_toggle_pane_zoom: Rc<RefCell<dyn FnMut(PaneId)>>,
     /// Right-click menu 'Split Right'.
@@ -164,6 +166,7 @@ impl PaneCallbacks {
             on_focus: Rc::new(RefCell::new(|_| {})),
             on_editor_focus_direction: Rc::new(RefCell::new(|_, _| {})),
             on_close_pane: Rc::new(RefCell::new(|_| {})),
+            on_open_diff_review: Rc::new(RefCell::new(|_| {})),
             on_toggle_pane_zoom: Rc::new(RefCell::new(|_| {})),
             on_split_right: Rc::new(RefCell::new(|_| {})),
             on_split_down: Rc::new(RefCell::new(|_| {})),

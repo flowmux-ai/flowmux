@@ -130,6 +130,116 @@ fn scopes_rename_delete_binary_and_literal_paths() {
 }
 
 #[test]
+fn all_changes_includes_committed_dirty_and_new_files_without_duplicates() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("shared"), "base\n").unwrap();
+    commit(root);
+    git(root, &["checkout", "-b", "feature"]);
+    std::fs::write(root.join("shared"), "committed\n").unwrap();
+    std::fs::write(root.join("committed-only"), "committed\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("shared"), "working\n").unwrap();
+    std::fs::write(root.join("new"), "new\n").unwrap();
+    let snapshot = load(root, Scope::AllChanges(String::new())).unwrap();
+    assert_eq!(snapshot.scope, Scope::AllChanges("main".into()));
+    assert_eq!(snapshot.files.len(), 3);
+    let file = snapshot
+        .files
+        .iter()
+        .find(|f| f.label() == "shared")
+        .unwrap();
+    let patch = snapshot.patch(file).unwrap();
+    assert!(patch.text.contains("-base") && patch.text.contains("+working"));
+    assert!(!patch.text.contains("+committed"));
+    assert!(snapshot
+        .files
+        .iter()
+        .any(|f| f.label() == "new" && f.untracked));
+}
+
+#[test]
+fn all_changes_before_first_commit_and_without_default_branch() {
+    let dir = repo();
+    std::fs::write(dir.path().join("new"), "new\n").unwrap();
+    let snapshot = load(dir.path(), Scope::AllChanges(String::new())).unwrap();
+    assert_eq!(snapshot.scope, Scope::AllChanges("HEAD".into()));
+    assert_eq!(snapshot.files.len(), 1);
+    commit(dir.path());
+    git(dir.path(), &["branch", "-m", "custom"]);
+    std::fs::write(dir.path().join("new"), "dirty\n").unwrap();
+    assert_eq!(
+        load(dir.path(), Scope::AllChanges(String::new()))
+            .unwrap()
+            .files
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn comment_follows_code_when_unrelated_lines_change() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    std::fs::write(dir.path().join("a"), "alpha\ntarget\nomega\n").unwrap();
+    let snapshot = load(dir.path(), Scope::AllChanges(String::new())).unwrap();
+    let file = &snapshot.files[0];
+    let patch = snapshot.patch(file).unwrap();
+    let row = patch
+        .lines
+        .iter()
+        .position(|l| l.text == "+target")
+        .unwrap();
+    let note = Note::new(
+        "note".into(),
+        &snapshot,
+        file,
+        &patch,
+        Some(row..row + 1),
+        "Keep this readable",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("a"),
+        "inserted\nalpha\ntarget\nchanged elsewhere\n",
+    )
+    .unwrap();
+    let (updated, stale) = notes::refresh(dir.path(), &[note]).unwrap();
+    assert!(stale.is_empty());
+    assert_eq!(updated[0].location, "new lines 3–3");
+    assert!(notes::prompt(dir.path(), &updated)
+        .unwrap()
+        .contains("new lines 3–3"));
+    std::fs::write(
+        dir.path().join("a"),
+        "inserted\nalpha\nreplaced target\nchanged elsewhere\n",
+    )
+    .unwrap();
+    assert_eq!(notes::validate(dir.path(), &updated).unwrap(), ["note"]);
+}
+
+#[test]
+fn repeated_comment_context_is_not_guessed() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    std::fs::write(dir.path().join("a"), "same\n").unwrap();
+    let snapshot = load(dir.path(), Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let row = patch.lines.iter().position(|l| l.text == "+same").unwrap();
+    let note = Note::new(
+        "ambiguous".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        Some(row..row + 1),
+        "Which one?",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("a"), "same\nsame\n").unwrap();
+    assert_eq!(notes::validate(dir.path(), &[note]).unwrap(), ["ambiguous"]);
+}
+
+#[test]
 fn branch_comparison_is_pinned_and_does_not_include_dirty_changes() {
     let dir = repo();
     let root = dir.path();
@@ -367,7 +477,8 @@ fn reviews_across_many_files_and_scopes_validate_independently() {
     );
     assert!(notes::validate(dir.path(), &notes).unwrap().is_empty());
     std::fs::write(dir.path().join("file-00.txt"), "changed externally\n").unwrap();
-    assert_eq!(notes::validate(dir.path(), &notes).unwrap(), ["unstaged"]);
+    // Whole-file feedback remains attached when only the file contents change.
+    assert!(notes::validate(dir.path(), &notes).unwrap().is_empty());
     let current = load(dir.path(), Scope::Unstaged).unwrap();
     let file = &current.files[0];
     notes[50] = Note::new(
@@ -383,4 +494,35 @@ fn reviews_across_many_files_and_scopes_validate_independently() {
     assert!(notes::prompt(dir.path(), &notes)
         .unwrap()
         .contains("51. file-00.txt"));
+}
+
+#[test]
+fn current_checkout_combines_git_states_and_refreshes_after_commit() {
+    let dir = repo();
+    let root = dir.path();
+    for name in ["staged.txt", "unstaged.txt", "both.txt"] {
+        std::fs::write(root.join(name), "original\n").unwrap();
+    }
+    commit(root);
+    git(root, &["switch", "-c", "feature"]);
+    std::fs::write(root.join("already-committed.txt"), "committed\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("staged.txt"), "staged only\n").unwrap();
+    std::fs::write(root.join("both.txt"), "intermediate\n").unwrap();
+    git(root, &["add", "staged.txt", "both.txt"]);
+    std::fs::write(root.join("both.txt"), "final contents\n").unwrap();
+    std::fs::write(root.join("unstaged.txt"), "unstaged only\n").unwrap();
+    std::fs::write(root.join("new.txt"), "new file\n").unwrap();
+    let current = load(root, Scope::WorkingTree).unwrap();
+    assert_eq!(
+        current.files.iter().map(|f| f.label()).collect::<Vec<_>>(),
+        ["both.txt", "new.txt", "staged.txt", "unstaged.txt"]
+    );
+    let patch = current.patch(&current.files[0]).unwrap();
+    assert!(patch.text.contains("-original") && patch.text.contains("+final contents"));
+    assert!(!patch.text.contains("intermediate"));
+    let unstaged = load(root, Scope::Unstaged).unwrap();
+    assert!(!unstaged.files.iter().any(|f| f.label() == "staged.txt"));
+    commit(root);
+    assert!(load(root, Scope::WorkingTree).unwrap().files.is_empty());
 }

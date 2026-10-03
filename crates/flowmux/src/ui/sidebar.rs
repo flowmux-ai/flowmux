@@ -355,9 +355,33 @@ impl Sidebar {
         });
         footer.append(&options_btn);
 
-        let footer_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        footer_spacer.set_hexpand(true);
-        footer.append(&footer_spacer);
+        let footer_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        footer_actions.set_halign(gtk::Align::End);
+        footer_actions.set_widget_name("flowmux-footer-actions");
+        let footer_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .child(&footer_actions)
+            .build();
+        footer_scroll.set_widget_name("flowmux-footer-actions-scroll");
+        // Resize from the right edge; manual scrolling only changes the value,
+        // so it remains available until the content or viewport size changes.
+        footer_scroll.hadjustment().connect_changed(|adjustment| {
+            let adjustment = adjustment.clone();
+            gtk::glib::idle_add_local_once(move || {
+                adjustment.set_value((adjustment.upper() - adjustment.page_size()).max(0.0));
+            });
+        });
+        let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        let adjustment = footer_scroll.hadjustment();
+        wheel.connect_scroll(move |_, dx, dy| {
+            let delta = if dx.abs() > dy.abs() { dx } else { dy };
+            adjustment.set_value(adjustment.value() + delta * 32.0);
+            gtk::glib::Propagation::Stop
+        });
+        footer_scroll.add_controller(wheel);
+        footer.append(&footer_scroll);
 
         let agent_bar_button = gtk::ToggleButton::new();
         agent_bar_button.set_icon_name("view-list-symbolic");
@@ -368,7 +392,7 @@ impl Sidebar {
         agent_bar_button.set_focus_on_click(false);
         agent_bar_button.set_active(agent_bar_mode);
         agent_bar_button.set_widget_name("flowmux-agent-bar-button");
-        footer.append(&agent_bar_button);
+        footer_actions.append(&agent_bar_button);
 
         let usage = UsagePopover::new(tokio_handle.clone());
         let usage_bridge = bridge.clone();
@@ -380,8 +404,18 @@ impl Sidebar {
         usage
             .button()
             .set_tooltip_text(Some("AI usage (Ctrl+Alt+U)"));
-        footer.append(usage.button());
+        footer_actions.append(usage.button());
         let usage_button = usage.button().clone();
+
+        let diff_btn = gtk::Button::from_icon_name("flowmux-diff-symbolic");
+        diff_btn.add_css_class("flat");
+        diff_btn.add_css_class("flowmux-sidebar-options");
+        diff_btn.set_tooltip_text(Some("View Diff (Ctrl+Alt+E)"));
+        diff_btn.update_property(&[gtk::accessible::Property::Label("View Diff")]);
+        diff_btn.set_focus_on_click(false);
+        diff_btn.set_widget_name("flowmux-diff-button");
+        diff_btn.set_action_name(Some("win.open-diff-review"));
+        footer_actions.append(&diff_btn);
 
         let workspace_overview_btn = gtk::Button::from_icon_name("view-grid-symbolic");
         workspace_overview_btn.add_css_class("flat");
@@ -398,7 +432,7 @@ impl Sidebar {
                 let _ = bridge.tx.send(GtkCommand::ToggleWorkspaceOverview).await;
             });
         });
-        footer.append(&workspace_overview_btn);
+        footer_actions.append(&workspace_overview_btn);
 
         let worktree_btn = gtk::Button::from_icon_name("vcs-branch-symbolic");
         worktree_btn.add_css_class("flat");
@@ -417,7 +451,7 @@ impl Sidebar {
                     .await;
             });
         });
-        footer.append(&worktree_btn);
+        footer_actions.append(&worktree_btn);
 
         // File browser toggle, immediately right of the worktree button. Sends
         // `None` so the window dispatcher targets the focused pane (the footer
@@ -439,7 +473,7 @@ impl Sidebar {
                     .await;
             });
         });
-        footer.append(&file_browser_btn);
+        footer_actions.append(&file_browser_btn);
 
         let search_btn = gtk::Button::from_icon_name("system-search-symbolic");
         search_btn.add_css_class("flat");
@@ -449,7 +483,7 @@ impl Sidebar {
         search_btn.set_focus_on_click(false);
         search_btn.set_widget_name("flowmux-terminal-output-search-button");
         search_btn.set_action_name(Some("win.search-all-terminals"));
-        footer.append(&search_btn);
+        footer_actions.append(&search_btn);
 
         let session_btn = gtk::Button::from_icon_name("document-open-recent-symbolic");
         session_btn.add_css_class("flat");
@@ -459,16 +493,7 @@ impl Sidebar {
         session_btn.set_focus_on_click(false);
         session_btn.set_widget_name("flowmux-session-button");
         session_btn.set_action_name(Some("win.toggle-session-panel"));
-        footer.append(&session_btn);
-
-        let review_btn = gtk::Button::with_label("Diff");
-        review_btn.add_css_class("flat");
-        review_btn.set_tooltip_text(Some("Diff review (Ctrl+Alt+D)"));
-        review_btn.update_property(&[gtk::accessible::Property::Label("Diff review")]);
-        review_btn.set_focus_on_click(false);
-        review_btn.set_widget_name("flowmux-review-button");
-        review_btn.set_action_name(Some("win.open-diff-review"));
-        footer.append(&review_btn);
+        footer_actions.append(&session_btn);
 
         // Self-update banner. Hidden until the background release check
         // finds a newer tag; the banner owns its own check/install wiring.
@@ -3414,9 +3439,9 @@ mod tests {
             None,
             false,
         );
-        let footer = sidebar
-            .root
-            .last_child()
+        let footer = descendant_widgets(&sidebar.root)
+            .into_iter()
+            .find(|widget| widget.widget_name() == "flowmux-footer-actions")
             .unwrap()
             .downcast::<gtk::Box>()
             .unwrap();
@@ -3448,7 +3473,12 @@ mod tests {
             .iter()
             .position(|name| name == "flowmux-workspace-overview-button")
             .expect("workspace overview button must exist");
-        assert_eq!(usage + 1, overview);
+        let diff = names
+            .iter()
+            .position(|name| name == "flowmux-diff-button")
+            .unwrap();
+        assert_eq!(usage + 1, diff);
+        assert_eq!(diff + 1, overview);
         let overview_button =
             std::iter::successors(footer.first_child(), |widget| widget.next_sibling())
                 .find(|widget| widget.widget_name() == "flowmux-workspace-overview-button")

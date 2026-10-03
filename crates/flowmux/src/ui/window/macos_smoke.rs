@@ -87,8 +87,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
     if std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some() {
+        check_sidebar_footer(&controller).await;
         crate::ui::review_window::smoke(&controller.window).await;
         super::review::handoff_smoke(&controller).await;
+        super::review::pane_scope_smoke(&controller).await;
         controller.window.destroy();
         return;
     }
@@ -494,6 +496,72 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .iter()
         .any(|window| window.instance_id == owner.instance_id));
     println!("MACOS_NATIVE_SAVE_RETRY_OK");
+}
+
+async fn check_sidebar_footer(controller: &WindowController) {
+    let footer = controller.sidebar.root.last_child().unwrap();
+    let scroll = footer
+        .last_child()
+        .unwrap()
+        .downcast::<gtk::ScrolledWindow>()
+        .unwrap();
+    let actions = scroll.child().unwrap().first_child().unwrap();
+    let buttons: Vec<_> =
+        std::iter::successors(actions.first_child(), |w| w.next_sibling()).collect();
+    let usage = buttons
+        .iter()
+        .position(|w| w.widget_name() == "flowmux-usage-button")
+        .unwrap();
+    let diff = buttons[usage + 1]
+        .clone()
+        .downcast::<gtk::Button>()
+        .unwrap();
+    assert_eq!(diff.widget_name(), "flowmux-diff-button");
+    assert_eq!(diff.action_name().as_deref(), Some("win.open-diff-review"));
+    let app = controller
+        .window
+        .application()
+        .unwrap()
+        .downcast::<adw::Application>()
+        .unwrap();
+    crate::keybindings::install_accels(&app, &flowmux_config::options::Options::default());
+    assert_eq!(
+        app.accels_for_action("win.open-diff-review"),
+        ["<Control><Alt>e"]
+    );
+    let previous = controller.sidebar_split.position();
+    let adjustment = scroll.hadjustment();
+    controller.sidebar_split.set_position(210);
+    wait_until("footer overflows at right edge", || {
+        adjustment.upper() > adjustment.page_size()
+            && (adjustment.value() - (adjustment.upper() - adjustment.page_size())).abs() < 1.0
+    })
+    .await;
+    // Adjustment values can update before GTK allocates the scrolled children.
+    wait_until(
+        "footer clips left icons and keeps the last icon visible",
+        || {
+            let first = buttons[0].compute_bounds(&scroll).unwrap();
+            let last = buttons.last().unwrap().compute_bounds(&scroll).unwrap();
+            first.x() < 0.0
+                && last.x() >= 0.0
+                && last.x() + last.width() <= scroll.width() as f32 + 1.0
+        },
+    )
+    .await;
+    adjustment.set_value(0.0);
+    glib::timeout_future(Duration::from_millis(100)).await;
+    assert_eq!(adjustment.value(), 0.0, "manual scroll must not snap back");
+    controller.sidebar_split.set_position(600);
+    wait_until("footer expands", || scroll.width() > 500).await;
+    controller.sidebar_split.set_position(210);
+    wait_until("footer resize restores right edge", || {
+        scroll.width() < 300
+            && (adjustment.value() - (adjustment.upper() - adjustment.page_size())).abs() < 1.0
+    })
+    .await;
+    controller.sidebar_split.set_position(previous);
+    println!("DIFF_REVIEW_SIDEBAR_FOOTER_OK");
 }
 
 async fn check_theme_focus(controller: &WindowController) {

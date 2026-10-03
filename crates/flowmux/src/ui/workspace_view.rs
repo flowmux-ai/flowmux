@@ -801,6 +801,10 @@ impl PaneRegistry {
         true
     }
 
+    pub fn stack_for_pane(&self, pane: PaneId) -> Option<gtk::Stack> {
+        self.surface_stacks.get(&pane).cloned()
+    }
+
     /// Whether `pane` is currently rendered (its surface stack exists).
     pub fn has_pane(&self, pane: PaneId) -> bool {
         self.surface_stacks.contains_key(&pane)
@@ -3582,6 +3586,25 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
     items.set_margin_top(4);
     items.set_margin_bottom(4);
 
+    let review = gtk::Button::with_label("View Diff");
+    review.add_css_class("flat");
+    review.set_halign(gtk::Align::Fill);
+    review.set_sensitive(!(callbacks.is_ssh_pane)(pane_id));
+    if let Some(label) = review.child().and_downcast::<gtk::Label>() {
+        label.set_xalign(0.0);
+    }
+    {
+        let popover = popover.downgrade();
+        let callback = callbacks.on_open_diff_review.clone();
+        review.connect_clicked(move |_| {
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+            (callback.borrow_mut())(pane_id);
+        });
+    }
+    items.append(&review);
+
     let close = gtk::Button::with_label("Close Pane");
     close.add_css_class("flat");
     close.set_halign(gtk::Align::Fill);
@@ -3600,6 +3623,12 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
         });
     }
     items.append(&close);
+    let anchor = button.downgrade();
+    popover.connect_show(move |popover| {
+        if let Some(button) = anchor.upgrade() {
+            crate::ui::popover_pos::anchor_at_click(popover, &button, 0.0, button.height() as f64);
+        }
+    });
     popover.set_child(Some(&items));
     button.set_popover(Some(&popover));
     button
@@ -3686,13 +3715,19 @@ mod pane_menu_tests {
     }
 
     #[gtk::test]
-    fn pane_menu_close_item_dispatches_the_owning_pane() {
+    fn pane_menu_actions_dispatch_the_owning_pane() {
         let pane = PaneId::new();
         let closed = Rc::new(RefCell::new(Vec::new()));
         let mut callbacks = PaneCallbacks::noop_for_test();
         callbacks.on_close_pane = {
             let closed = closed.clone();
             Rc::new(RefCell::new(move |pane| closed.borrow_mut().push(pane)))
+        };
+
+        let reviewed = Rc::new(RefCell::new(Vec::new()));
+        callbacks.on_open_diff_review = {
+            let reviewed = reviewed.clone();
+            Rc::new(RefCell::new(move |pane| reviewed.borrow_mut().push(pane)))
         };
 
         let menu = pane_menu_button(pane, &callbacks);
@@ -3707,10 +3742,15 @@ mod pane_menu_tests {
             .child()
             .and_downcast::<gtk::Box>()
             .expect("pane menu popover owns an item list");
+        let review = items.first_child().and_downcast::<gtk::Button>().unwrap();
+        assert_eq!(review.label().as_deref(), Some("View Diff"));
+        review.emit_clicked();
+        assert_eq!(&*reviewed.borrow(), &[pane]);
+
         let close = items
-            .first_child()
+            .last_child()
             .and_downcast::<gtk::Button>()
-            .expect("pane menu starts with the close action");
+            .expect("pane menu ends with the close action");
         assert_eq!(close.label().as_deref(), Some("Close Pane"));
 
         close.emit_clicked();

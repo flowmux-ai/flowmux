@@ -51,7 +51,7 @@ impl WindowController {
             .reviews
             .borrow()
             .values()
-            .any(|r| r.window.is_visible())
+            .any(|r| r.root_widget.is_mapped())
         {
             self.refresh_review_targets().await;
         }

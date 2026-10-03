@@ -26,7 +26,12 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | toggle-worktree-panel / toggle-file-browser | Ctrl+Alt+W / Ctrl+Alt+F | Cmd+Alt+W / Cmd+Alt+F |
 | toggle-usage-popover | Ctrl+Alt+U | Cmd+Alt+U |
 | toggle-session-panel | Ctrl+Alt+J | Ctrl+Alt+J |
+| open-diff-review | Ctrl+Alt+E | Ctrl+Alt+E |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
+
+The sidebar footer also opens Diff from the icon immediately right of AI usage.
+Its right-hand icon group scrolls horizontally (including with the mouse wheel).
+Resizing keeps the right edge visible and clips icons from the left; Options stays fixed.
 
 Shift+Enter in a terminal commits pending IME composition before sending
 the agent newline sequence (Escape followed by carriage return). This is
