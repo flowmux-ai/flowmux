@@ -88,6 +88,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
 
     if std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some() {
         crate::ui::review_window::smoke(&controller.window).await;
+        super::review::handoff_smoke(&controller).await;
         controller.window.destroy();
         return;
     }
@@ -95,6 +96,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     check_theme_focus(&controller).await;
     check_theme_sources(&controller).await;
     crate::ui::review_window::smoke(&controller.window).await;
+    super::review::handoff_smoke(&controller).await;
 
     println!("MACOS_NATIVE_BROWSER_START");
     // A loopback fixture avoids file URL access differences between macOS versions.

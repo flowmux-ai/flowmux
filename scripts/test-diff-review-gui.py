@@ -8,6 +8,7 @@ dbus-daemon, python3-xlib and Pillow. Only fixture-owned processes are stopped.
 import argparse
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -63,6 +64,22 @@ def shot(name):
     Image.frombytes("RGB", (g.width, g.height), raw.data, "raw", "BGRX").save(h.root / name)
 
 
+def click(window, x, y):
+    g = window.get_geometry()
+    xtest.fake_input(d, X.MotionNotify, x=g.x + x, y=g.y + y)
+    xtest.fake_input(d, X.ButtonPress, 1)
+    xtest.fake_input(d, X.ButtonRelease, 1)
+    d.sync()
+
+
+def saved_comments():
+    path = h.root / "state/flowmux/reviews.sqlite3"
+    if not path.exists():
+        return []
+    with sqlite3.connect(path) as db:
+        return [note for (data,) in db.execute("SELECT data FROM review_drafts") for note in json.loads(data)]
+
+
 try:
     h.start_display()
     proc, sock = h.window("diff-review")
@@ -80,6 +97,26 @@ try:
     shot("review-small.png")
     assert "UNSUBMITTED_DRAFT" in h.screen(sock, pane)
     assert proc.poll() is None
+    review.set_input_focus(X.RevertToParent, X.CurrentTime)
+    click(review, 450, 550)
+    comment = "Installed review comment\nSecond line preserved"
+    for index, line in enumerate(comment.splitlines()):
+        if index:
+            key("Return")
+        subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "2", line], env=h.env, check=True)
+    click(review, 325, 651)
+    notes = m.wait_for(lambda: saved_comments(), "comment persisted from installed GUI")
+    assert notes[0]["text"] == comment, notes
+    click(review, 460, 465)
+    time.sleep(0.2)
+    # The bottom action row stays at the same height across notebook pages.
+    click(review, 475, 628)
+    def copied_review():
+        result = subprocess.run(["xclip", "-selection", "clipboard", "-o"], env=h.env, capture_output=True, text=True, timeout=3)
+        return result.stdout if comment in result.stdout else None
+    m.wait_for(copied_review, "complete review copied from installed GUI")
+    assert "UNSUBMITTED_DRAFT" in h.screen(sock, pane)
+    shot("review-delivery.png")
     review.configure(width=740, height=560)
     review.set_input_focus(X.RevertToParent, X.CurrentTime)
     d.sync()
@@ -94,7 +131,8 @@ try:
     key("d", ("Control_L", "Alt_L"))
     m.wait_for(lambda: named_window("Diff review"), "review reopens")
     assert "UNSUBMITTED_DRAFT" in h.screen(sock, pane)
-    h.pass_check("installed GUI opens, resizes and reopens review without altering terminal draft")
+    assert saved_comments()[0]["text"] == comment
+    h.pass_check("installed GUI saves multiline comments, copies the complete review, resizes and reopens without altering terminal draft")
     h.close_window(proc)
     print("DIFF_REVIEW_INSTALLED_GUI_OK", flush=True)
 finally:

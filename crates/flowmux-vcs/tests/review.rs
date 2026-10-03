@@ -309,3 +309,78 @@ fn comments_anchor_ranges_unicode_long_text_and_stale_files() {
     std::fs::remove_file(dir.path().join("review.rs")).unwrap();
     assert_eq!(notes::validate(dir.path(), &many).unwrap().len(), 300);
 }
+
+#[test]
+fn reviews_across_many_files_and_scopes_validate_independently() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    for i in 0..50 {
+        std::fs::write(
+            dir.path().join(format!("file-{i:02}.txt")),
+            format!("original {i}\n"),
+        )
+        .unwrap();
+    }
+    commit(dir.path());
+    for i in 0..50 {
+        std::fs::write(
+            dir.path().join(format!("file-{i:02}.txt")),
+            format!("staged {i}\n"),
+        )
+        .unwrap();
+    }
+    git(dir.path(), &["add", "."]);
+    std::fs::write(dir.path().join("file-00.txt"), "unstaged\n").unwrap();
+    let staged = load(dir.path(), Scope::Staged).unwrap();
+    let mut notes: Vec<_> = staged
+        .files
+        .iter()
+        .enumerate()
+        .map(|(i, file)| {
+            Note::new(
+                format!("staged-{i}"),
+                &staged,
+                file,
+                &staged.patch(file).unwrap(),
+                None,
+                &if i % 2 == 0 {
+                    "short".into()
+                } else {
+                    "다중 파일 리뷰\n".repeat(500)
+                },
+            )
+            .unwrap()
+        })
+        .collect();
+    let unstaged = load(dir.path(), Scope::Unstaged).unwrap();
+    let file = &unstaged.files[0];
+    notes.push(
+        Note::new(
+            "unstaged".into(),
+            &unstaged,
+            file,
+            &unstaged.patch(file).unwrap(),
+            None,
+            "different scope",
+        )
+        .unwrap(),
+    );
+    assert!(notes::validate(dir.path(), &notes).unwrap().is_empty());
+    std::fs::write(dir.path().join("file-00.txt"), "changed externally\n").unwrap();
+    assert_eq!(notes::validate(dir.path(), &notes).unwrap(), ["unstaged"]);
+    let current = load(dir.path(), Scope::Unstaged).unwrap();
+    let file = &current.files[0];
+    notes[50] = Note::new(
+        "unstaged".into(),
+        &current,
+        file,
+        &current.patch(file).unwrap(),
+        None,
+        "reattached review",
+    )
+    .unwrap();
+    assert!(notes::validate(dir.path(), &notes).unwrap().is_empty());
+    assert!(notes::prompt(dir.path(), &notes)
+        .unwrap()
+        .contains("51. file-00.txt"));
+}

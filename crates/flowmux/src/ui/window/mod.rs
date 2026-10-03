@@ -106,6 +106,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
             | GtkCommand::OpenDiffReview
+            | GtkCommand::FocusReviewTarget { .. }
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
@@ -2794,6 +2795,12 @@ impl WindowController {
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
             GtkCommand::OpenDiffReview => self.open_diff_review().await,
+            GtkCommand::RefreshReviewTargets => self.refresh_review_targets().await,
+            GtkCommand::FocusReviewTarget {
+                root,
+                target,
+                prompt,
+            } => self.focus_review_target(root, target, prompt).await,
             command @ (GtkCommand::CloseWindow
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette

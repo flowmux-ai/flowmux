@@ -304,6 +304,12 @@ pub enum GtkCommand {
     },
     SessionPanel(crate::ui::session_panel::SessionPanelAction),
     OpenDiffReview,
+    RefreshReviewTargets,
+    FocusReviewTarget {
+        root: PathBuf,
+        target: crate::ui::review_window::ReviewTarget,
+        prompt: String,
+    },
     /// Toggle the right-side Git worktree panel for the focused pane.
     ToggleWorktreePanel {
         pane: Option<PaneId>,

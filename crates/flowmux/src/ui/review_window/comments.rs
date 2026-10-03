@@ -6,6 +6,7 @@ use flowmux_vcs::review::notes::{self, Note};
 pub(super) struct Comments {
     pub panel: gtk::Notebook,
     writer: gtk::TextView,
+    hint: gtk::Label,
     add: gtk::Button,
     cancel: gtk::Button,
     reanchor: gtk::CheckButton,
@@ -18,6 +19,8 @@ pub(super) struct Comments {
     prepare: gtk::Button,
     copy: gtk::Button,
     message: gtk::Label,
+    export: gtk::Box,
+    actions: gtk::Box,
     draft: RefCell<Draft>,
     root: RefCell<Option<PathBuf>>,
     editing: RefCell<Option<String>>,
@@ -143,6 +146,7 @@ impl Comments {
         Self {
             panel,
             writer,
+            hint,
             add,
             cancel,
             reanchor,
@@ -155,6 +159,8 @@ impl Comments {
             prepare,
             copy,
             message,
+            export,
+            actions: buttons,
             draft: RefCell::new(Draft::default()),
             root: RefCell::new(None),
             editing: RefCell::new(None),
@@ -180,9 +186,33 @@ impl Comments {
         self.cancel.set_sensitive(!self.busy.get());
         self.writer.set_editable(!self.busy.get());
     }
+
+    pub(super) fn attach_targets(&self, targets: &targets::Targets) {
+        self.export.prepend(&targets.row);
+        self.actions.append(&targets.focus);
+    }
 }
 
 impl ReviewWindow {
+    #[cfg(test)]
+    pub(crate) fn smoke_set_draft(&self, value: &str) {
+        self.comments.writer.buffer().set_text(value);
+    }
+    pub(super) fn update_delivery_controls(&self) {
+        self.comments.controls();
+        self.targets
+            .set_enabled(self.comments.ready.get() && !self.comments.busy.get());
+    }
+
+    pub fn delivery_message(&self, message: &str) {
+        self.comments.message.set_text(message);
+    }
+
+    pub(super) fn deliver_to_agent(self: &Rc<Self>) {
+        if let Some(target) = self.targets.selected() {
+            self.validate_review(true, Some(target));
+        }
+    }
     pub fn has_unsaved_review(&self) -> bool {
         self.comments.busy.get() || !text(&self.comments.writer).is_empty()
     }
@@ -204,7 +234,7 @@ impl ReviewWindow {
             }
             match this.current_note(uuid::Uuid::new_v4().to_string(), &value) {
                 Ok(note) => {
-                    this.status.set_text(&format!(
+                    this.comments.hint.set_text(&format!(
                         "Comment on {} · {}",
                         note.label(),
                         note.location
@@ -253,7 +283,7 @@ impl ReviewWindow {
         if self.comments.busy.replace(true) {
             return;
         }
-        self.comments.controls();
+        self.update_delivery_controls();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result =
@@ -278,7 +308,7 @@ impl ReviewWindow {
                         .set_text("Cannot load review comments. Use Reload saved to retry.");
                 }
             }
-            this.comments.controls();
+            this.update_delivery_controls();
         });
     }
 
@@ -326,6 +356,7 @@ impl ReviewWindow {
     }
 
     fn clear_comment(&self) {
+        self.comments.hint.set_text("Select diff lines to comment on them, or leave the selection empty for the whole file.");
         self.comments.writer.buffer().set_text("");
         self.comments.editing.borrow_mut().take();
         self.comments.anchor.borrow_mut().take();
@@ -345,6 +376,9 @@ impl ReviewWindow {
             self.status.set_text("Select a saved comment first.");
             return;
         };
+        self.comments
+            .hint
+            .set_text(&format!("Editing {} · {}", note.label(), note.location));
         *self.comments.editing.borrow_mut() = Some(note.id);
         self.comments.writer.buffer().set_text(&note.text);
         self.comments.reanchor.set_visible(true);
@@ -452,7 +486,7 @@ impl ReviewWindow {
         if self.comments.busy.replace(true) {
             return;
         }
-        self.comments.controls();
+        self.update_delivery_controls();
         self.status.set_text("Saving review…");
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
@@ -477,18 +511,28 @@ impl ReviewWindow {
                     .status
                     .set_text("Cannot save comments. Your draft is still here; try again."),
             }
-            this.comments.controls();
+            this.update_delivery_controls();
         });
     }
 
     fn prepare_review(self: &Rc<Self>, copy: bool) {
+        self.validate_review(copy, None);
+    }
+
+    fn validate_review(self: &Rc<Self>, copy: bool, target: Option<ReviewTarget>) {
+        if !text(&self.comments.writer).is_empty() {
+            self.comments
+                .message
+                .set_text("Save or clear the current draft before delivering the review.");
+            return;
+        }
         let Some(root) = self.comments.root.borrow().clone() else {
             return;
         };
         if self.comments.busy.replace(true) {
             return;
         }
-        self.comments.controls();
+        self.update_delivery_controls();
         self.comments
             .message
             .set_text("Checking comments against the current diff…");
@@ -507,9 +551,19 @@ impl ReviewWindow {
                     *this.comments.stale.borrow_mut() = stale.clone();
                     this.render_comments();
                     if stale.is_empty() {
-                        this.comments.preview.buffer().set_text(&prompt);
-                        if copy { this.window.clipboard().set_text(&prompt); }
-                        this.comments.message.set_text(if copy { "Review copied. Paste it into your agent when ready." } else { "All open comments match the current diff." });
+                        let preview = match prompt.char_indices().nth(40_000) {
+                            Some((end, _)) => format!("{}\n\n[Preview shows the first 40,000 characters. Copy includes all comments.]", &prompt[..end]),
+                            None => prompt.clone(),
+                        };
+                        this.comments.preview.buffer().set_text(&preview);
+                        if let Some(target) = target {
+                            if !this.targets.send(crate::bridge::GtkCommand::FocusReviewTarget { root: this.root.clone(), target, prompt }) {
+                                this.comments.message.set_text("The agent connection is unavailable. Copy review is still available.");
+                            }
+                        } else {
+                            if copy { this.window.clipboard().set_text(&prompt); }
+                            this.comments.message.set_text(if copy { "Review copied. Paste it into your agent when ready." } else { "All open comments match the current diff." });
+                        }
                     } else {
                         this.comments.message.set_text(&format!("{} stale comments. Refresh the diff, edit each STALE comment and select Use current diff selection, or resolve it.", stale.len()));
                     }
@@ -517,7 +571,7 @@ impl ReviewWindow {
                 Ok(Err(error)) => { this.comments.preview.buffer().set_text(""); this.comments.message.set_text(&error); }
                 Err(_) => this.comments.message.set_text("Cannot validate review. Try again."),
             }
-            this.comments.controls();
+            this.update_delivery_controls();
         });
     }
 }
@@ -544,6 +598,8 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     c.writer
         .buffer()
         .set_text("마지막 페이지 두 줄을 검토해주세요.");
+    // Changing the visible selection while composing cannot move its anchor.
+    buffer.place_cursor(&buffer.start_iter());
     c.add.emit_clicked();
     ready(review).await;
     assert_eq!(c.draft.borrow().notes.len(), 1);
@@ -620,6 +676,13 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     ready(review).await;
     assert!(!c.draft.borrow().notes[0].resolved);
     std::fs::write(path, original).unwrap();
+    c.selection.set_selected(0);
+    c.edit.emit_clicked();
+    c.reanchor.set_active(true);
+    c.add.emit_clicked();
+    ready(review).await;
+    assert_eq!(c.draft.borrow().notes[0].location, "Whole file");
+    targets::smoke(review).await;
     c.writer
         .buffer()
         .set_text("unsaved survives hiding the review window");

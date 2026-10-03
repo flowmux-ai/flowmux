@@ -10,6 +10,8 @@ use std::rc::Rc;
 
 const PAGE_LINES: usize = 500;
 mod comments;
+mod targets;
+pub(crate) use targets::ReviewTarget;
 
 pub(crate) struct ReviewWindow {
     pub window: adw::Window,
@@ -33,6 +35,7 @@ pub(crate) struct ReviewWindow {
     generation: Cell<u64>,
     patch_generation: Cell<u64>,
     comments: comments::Comments,
+    targets: targets::Targets,
 }
 
 impl ReviewWindow {
@@ -151,6 +154,8 @@ impl ReviewWindow {
         paging.append(&next);
         right.append(&paging);
         let comments = comments::Comments::new();
+        let targets = targets::Targets::new();
+        comments.attach_targets(&targets);
         let review_split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Vertical)
             .start_child(&right)
@@ -203,6 +208,7 @@ impl ReviewWindow {
             generation: Cell::new(0),
             patch_generation: Cell::new(0),
             comments,
+            targets,
         });
         let weak = Rc::downgrade(&this);
         this.refresh.connect_clicked(move |_| {
