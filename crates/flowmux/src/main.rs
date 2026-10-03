@@ -84,7 +84,7 @@ fn main() -> anyhow::Result<()> {
 
     #[cfg(target_os = "linux")]
     install_gtk_wayland_surface_workaround();
-    install_memory_efficient_renderer();
+    install_platform_renderer();
 
     let previous_crash = match flowmux_config::diagnostics::take_unreported_crash() {
         Ok(path) => path,
@@ -452,16 +452,18 @@ fn needs_x11_workaround(
     matches!(gtk_version, (4, 12.., _)) && !backend_overridden && wayland_available && x11_available
 }
 
-/// macOS keeps several full-window GPU surfaces alive while a terminal repaints.
+/// Cairo's partial redraws on macOS can briefly lose unchanged terminal text
+/// while an agent TUI repaints. Default to GL, preserving an explicit renderer
+/// override (including Cairo for low memory).
 #[cfg(target_os = "macos")]
-fn install_memory_efficient_renderer() {
+fn install_platform_renderer() {
     if std::env::var_os("GSK_RENDERER").is_none() {
-        std::env::set_var("GSK_RENDERER", "cairo");
+        std::env::set_var("GSK_RENDERER", "gl");
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn install_memory_efficient_renderer() {}
+fn install_platform_renderer() {}
 
 fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active
