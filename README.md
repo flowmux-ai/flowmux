@@ -71,6 +71,14 @@ Claude and Codex usage, which also stays in the bar below the terminal.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
+### Code Review
+
+Review staged, unstaged, and new files in your terminal pane. Add comments
+to code or whole files, then send the feedback with code context to a running
+agent. Toggle Code Review with **Ctrl+Alt+E**.
+
+<img src="resources/screenshot/flowmux-code-review.gif" alt="Code Review: comment on changes and send feedback to an agent" width="100%" />
+
 ### Search terminal output
 
 Search all terminal tabs with **Ctrl+Alt+Shift+F**.
