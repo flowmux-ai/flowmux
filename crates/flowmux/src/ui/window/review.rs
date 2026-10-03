@@ -7,8 +7,19 @@ impl WindowController {
         let Some(pane) = pane.or(self.focused_pane.get()) else {
             return;
         };
+        let Some(host) = self.pane_registry.borrow().stack_for_pane(pane) else {
+            return;
+        };
+        let previous = self.reviews.borrow().get(&pane).cloned();
+        if let Some(review) = &previous {
+            if host.visible_child().as_ref() == Some(review.root_widget.upcast_ref()) {
+                self.focused_pane.set(Some(pane));
+                review.hide();
+                return;
+            }
+        }
         if self.pane_registry.borrow().is_ssh_pane(pane) {
-            self.clipboard_toast.show_with_message("Diff review requires a local checkout. Open the remote checkout locally to review it.");
+            self.clipboard_toast.show_with_message("Code Review requires a local checkout. Open the remote checkout locally to review it.");
             return;
         }
         let Some(root) = self.file_browser_root_for_pane(pane).await else {
@@ -29,10 +40,6 @@ impl WindowController {
                     return;
                 }
             };
-        let Some(host) = self.pane_registry.borrow().stack_for_pane(pane) else {
-            return;
-        };
-        let previous = self.reviews.borrow().get(&pane).cloned();
         if let Some(previous) = &previous {
             if previous.root != root {
                 if previous.has_unsaved_review() {
@@ -678,8 +685,50 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
         Some(right_review.root_widget.upcast_ref())
     );
     assert!(!Rc::ptr_eq(&left_review, &right_review));
-    right_review.hide();
+    let right_pid = controller
+        .pane_registry
+        .borrow()
+        .active_terminal(right)
+        .unwrap()
+        .pid
+        .get();
+    right_review.smoke_set_draft("Keep this comment while toggling Code Review");
+    controller.focused_pane.set(Some(right));
+    controller.open_diff_review(None).await;
+    assert_eq!(
+        right_stack.visible_child(),
+        right_terminal,
+        "repeated action must return to the previous tab"
+    );
+    assert!(right_review.has_unsaved_review());
+    assert_eq!(
+        left_stack.visible_child().as_ref(),
+        Some(left_review.root_widget.upcast_ref())
+    );
+    controller.open_diff_review(None).await;
+    assert_eq!(
+        right_stack.visible_child().as_ref(),
+        Some(right_review.root_widget.upcast_ref())
+    );
+    assert!(right_review.has_unsaved_review());
+    assert!(Rc::ptr_eq(
+        &controller.reviews.borrow()[&right],
+        &right_review
+    ));
+    assert_eq!(
+        controller
+            .pane_registry
+            .borrow()
+            .active_terminal(right)
+            .unwrap()
+            .pid
+            .get(),
+        right_pid
+    );
+    right_review.smoke_set_draft("");
+    controller.open_diff_review(Some(right)).await;
     assert_eq!(right_stack.visible_child(), right_terminal);
+    println!("CODE_REVIEW_TOGGLE_PRESERVES_DRAFT_AND_TERMINAL_OK");
     assert_eq!(
         left_stack.visible_child().as_ref(),
         Some(left_review.root_widget.upcast_ref())
@@ -700,6 +749,7 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
     ));
     assert!(right_review.status.text().contains("Save or cancel"));
     right_review.smoke_set_draft("");
+    right_review.hide();
     controller.open_diff_review(Some(right)).await;
     let rebound = controller.reviews.borrow()[&right].clone();
     assert_eq!(rebound.root, left_review.root);

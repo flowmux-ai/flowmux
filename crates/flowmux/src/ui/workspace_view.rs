@@ -3586,7 +3586,7 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
     items.set_margin_top(4);
     items.set_margin_bottom(4);
 
-    let review = gtk::Button::with_label("View Diff");
+    let review = gtk::Button::with_label("Code Review");
     review.add_css_class("flat");
     review.set_halign(gtk::Align::Fill);
     review.set_sensitive(!(callbacks.is_ssh_pane)(pane_id));
@@ -3743,7 +3743,7 @@ mod pane_menu_tests {
             .and_downcast::<gtk::Box>()
             .expect("pane menu popover owns an item list");
         let review = items.first_child().and_downcast::<gtk::Button>().unwrap();
-        assert_eq!(review.label().as_deref(), Some("View Diff"));
+        assert_eq!(review.label().as_deref(), Some("Code Review"));
         review.emit_clicked();
         assert_eq!(&*reviewed.borrow(), &[pane]);
 

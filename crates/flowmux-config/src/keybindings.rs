@@ -169,7 +169,7 @@ impl ActionId {
             Self::ToggleFileBrowser => "Toggle file browser",
             Self::ToggleUsagePopover => "Toggle AI usage",
             Self::ToggleSessionPanel => "Toggle agent sessions",
-            Self::OpenDiffReview => "Open diff review",
+            Self::OpenDiffReview => "Toggle Code Review",
             Self::OpenTig => "Open tig",
         }
     }

@@ -54,10 +54,10 @@ impl ReviewWindow {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         margins(&header, 8);
         let back = gtk::Button::from_icon_name("go-previous-symbolic");
-        back.set_tooltip_text(Some("Back to terminal"));
+        back.set_tooltip_text(Some("Back to previous tab"));
         header.append(&back);
         let title = gtk::Label::builder()
-            .label("Diff")
+            .label("Code Review")
             .xalign(0.0)
             .hexpand(true)
             .ellipsize(pango::EllipsizeMode::End)

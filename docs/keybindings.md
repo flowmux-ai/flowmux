@@ -29,7 +29,9 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | open-diff-review | Ctrl+Alt+E | Ctrl+Alt+E |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
 
-The sidebar footer also opens Diff from the icon immediately right of AI usage.
+The sidebar footer toggles **Code Review** from the icon immediately right of AI usage.
+**Ctrl+Alt+E** and the pane's **Code Review** menu item also toggle between the
+review and the previous tab, preserving unfinished comments.
 Its right-hand icon group scrolls horizontally (including with the mouse wheel).
 Resizing keeps the right edge visible and clips icons from the left; Options stays fixed.
 

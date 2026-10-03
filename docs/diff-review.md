@@ -1,12 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Review changes
+# Code Review
 
-Open the pane's top-right **… → View Diff** menu, click the sidebar's Diff icon
+Open the pane's top-right **… → Code Review** menu, click the sidebar's Code Review icon
 right of AI usage, or press **Ctrl+Alt+E**
 for the focused pane. The review stays inside that pane, including split layouts.
-Other panes remain visible and usable. The back arrow or **Escape** returns to
-that pane's previous tab without stopping its process.
+Other panes remain visible and usable. Use the same icon, menu item, or shortcut
+again to return to that pane's previous tab. The back arrow or **Escape** also
+returns without stopping its process. Toggling preserves unfinished comments.
 
 ## Read the current checkout
 
@@ -40,7 +41,7 @@ Below **Reload saved comments**, **Remove all comments** deletes the saved
 comments for this checkout and closes its current composer after a successful save.
 
 Comments are saved locally in `reviews.sqlite3`. They do not modify repository
-files or Git's index. Open Diff panes and windows using the same checkout and
+files or Git's index. Open Code Review panes and windows using the same checkout and
 local storage automatically pick up saved changes within about half a second.
 Updates wait while a Comments or Send menu is open to preserve its focused rows.
 Unfinished text stays local. If another pane changes the same comment being

@@ -410,8 +410,8 @@ impl Sidebar {
         let diff_btn = gtk::Button::from_icon_name("flowmux-diff-symbolic");
         diff_btn.add_css_class("flat");
         diff_btn.add_css_class("flowmux-sidebar-options");
-        diff_btn.set_tooltip_text(Some("View Diff (Ctrl+Alt+E)"));
-        diff_btn.update_property(&[gtk::accessible::Property::Label("View Diff")]);
+        diff_btn.set_tooltip_text(Some("Toggle Code Review (Ctrl+Alt+E)"));
+        diff_btn.update_property(&[gtk::accessible::Property::Label("Code Review")]);
         diff_btn.set_focus_on_click(false);
         diff_btn.set_widget_name("flowmux-diff-button");
         diff_btn.set_action_name(Some("win.open-diff-review"));
