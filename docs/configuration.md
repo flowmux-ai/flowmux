@@ -72,7 +72,11 @@ the file. `theme_overrides` apply on top.
 
 flowmux does not automatically read `~/.config/ghostty/config`. Import a
 compatible file with `flowmux theme import PATH`, then use **Reload config**
-in the command palette. A `theme = ...` line does not load another theme
+in the command palette. In **Options > Theme**, select **User theme file**
+to use imported colors, or **Default** to use the built-in colors. A missing
+user file uses the built-in defaults and is labeled in the list. Selecting a
+preset does not remove the file; select **User theme file** to return to it.
+A `theme = ...` line does not load another theme
 file; choose a built-in preset through Options instead. Other unsupported
 keys are parsed but do not affect the UI.
 

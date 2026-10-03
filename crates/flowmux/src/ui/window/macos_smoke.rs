@@ -86,6 +86,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
     check_theme_focus(&controller).await;
+    check_theme_sources(&controller).await;
 
     println!("MACOS_NATIVE_BROWSER_START");
     // A loopback fixture avoids file URL access differences between macOS versions.
@@ -530,4 +531,89 @@ async fn check_theme_focus(controller: &WindowController) {
     controller.apply_runtime_theme(&Options::default());
     window.close();
     println!("MACOS_NATIVE_THEME_FOCUS_OK");
+}
+
+fn theme_widget<T: IsA<gtk::Widget> + glib::object::IsClass>(root: &gtk::Widget, name: &str) -> T {
+    fn find(root: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
+        if root.widget_name() == name {
+            return Some(root.clone());
+        }
+        let mut child = root.first_child();
+        while let Some(widget) = child {
+            if let Some(found) = find(&widget, name) {
+                return Some(found);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+    find(root, name)
+        .expect("theme widget exists")
+        .downcast::<T>()
+        .ok()
+        .expect("theme widget type")
+}
+
+async fn check_theme_sources(controller: &WindowController) {
+    use crate::ui::theme_tab::{self, ThemeSelection};
+    use flowmux_config::options::Options;
+    let path = flowmux_config::theme::user_theme_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "background = #102030\nforeground = #e0e0e0\n").unwrap();
+    let state = Rc::new(RefCell::new(ThemeSelection::default()));
+    let changed = Rc::new(Cell::new(0));
+    let apply = {
+        let state = state.clone();
+        let changed = changed.clone();
+        let controller = controller.clone();
+        Rc::new(move || {
+            let selection = state.borrow();
+            let opts = Options {
+                theme: selection.theme.clone(),
+                theme_overrides: selection.overrides.clone(),
+                ..Options::default()
+            };
+            flowmux_config::options::save(&opts).unwrap();
+            controller.apply_runtime_theme(&opts);
+            changed.set(changed.get() + 1);
+        })
+    };
+    let tab = theme_tab::build(state.clone(), apply);
+    let window = gtk::Window::builder()
+        .title("Theme source verification")
+        .default_width(660)
+        .default_height(720)
+        .child(&tab)
+        .build();
+    window.present();
+    wait_until("theme source window mapped", || window.is_mapped()).await;
+    let list: gtk::ListBox = theme_widget(&tab, "flowmux-theme-list");
+    assert_eq!(list.selected_row().unwrap().index(), 0);
+    assert_eq!(changed.get(), 0);
+    for (row, source, bg) in [
+        (3, Some("dracula"), "#282a36"),
+        (1, Some("default"), "#282c34"),
+        (0, None, "#102030"),
+    ] {
+        list.select_row(list.row_at_index(row).as_ref());
+        glib::timeout_future(Duration::from_millis(80)).await;
+        assert_eq!(state.borrow().theme.as_deref(), source);
+        assert_eq!(flowmux_config::options::load().theme.as_deref(), source);
+        assert_eq!(
+            controller.current_theme().bg,
+            gtk::gdk::RGBA::parse(bg).unwrap()
+        );
+    }
+    assert_eq!(changed.get(), 3);
+    let reopened = theme_tab::build(
+        state.clone(),
+        Rc::new(|| panic!("initial selection must not save")),
+    );
+    let reopened_list: gtk::ListBox = theme_widget(&reopened, "flowmux-theme-list");
+    assert_eq!(reopened_list.selected_row().unwrap().index(), 0);
+    window.close();
+    std::fs::remove_file(path).unwrap();
+    flowmux_config::options::save(&Options::default()).unwrap();
+    controller.apply_runtime_theme(&Options::default());
+    println!("MACOS_NATIVE_THEME_SOURCES_OK");
 }

@@ -277,7 +277,7 @@ pub(crate) fn run_theme_op(op: &ThemeOp) -> anyhow::Result<()> {
             let dest = flowmux_config::theme::import_from(src)
                 .with_context(|| format!("importing {}", src.display()))?;
             println!("imported  {} → {}", src.display(), dest.display());
-            println!("relaunch flowmux to apply.");
+            println!("Select User theme file in Options > Theme, then use Reload config to apply.");
             Ok(())
         }
     }

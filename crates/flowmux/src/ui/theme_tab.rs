@@ -17,8 +17,8 @@ use std::rc::Rc;
 /// Theme selection shared with the options dialog.
 #[derive(Clone, Default)]
 pub struct ThemeSelection {
-    /// Preset id, or `None` when the user has not picked one (legacy
-    /// theme-file / built-in default behavior).
+    /// Preset id, or `None` to follow the user's theme file (with built-in
+    /// fallback colors when the file is absent).
     pub theme: Option<String>,
     pub overrides: ThemeOverrides,
 }
@@ -142,16 +142,30 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
     body.set_margin_end(20);
 
     let list = gtk::ListBox::new();
+    list.set_widget_name("flowmux-theme-list");
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.add_css_class("boxed-list");
-    for preset in PRESETS {
-        let cfg = flowmux_config::presets::config(preset.id).unwrap_or_default();
+    let file_cfg = flowmux_config::theme::load();
+    let file_label = if file_cfg.is_some() {
+        "User theme file"
+    } else {
+        "User theme file (not found; using defaults)"
+    };
+    let choices = std::iter::once((file_label, file_cfg.unwrap_or_default())).chain(
+        PRESETS.iter().map(|preset| {
+            (
+                preset.name,
+                flowmux_config::presets::config(preset.id).unwrap_or_default(),
+            )
+        }),
+    );
+    for (name, cfg) in choices {
         let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         row_box.set_margin_top(8);
         row_box.set_margin_bottom(8);
         row_box.set_margin_start(10);
         row_box.set_margin_end(10);
-        let name = gtk::Label::new(Some(preset.name));
+        let name = gtk::Label::new(Some(name));
         name.set_xalign(0.0);
         name.set_hexpand(true);
         row_box.append(&name);
@@ -205,14 +219,19 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
     };
     seed_buttons();
 
-    // Initial selection: the saved preset row, or the Default row when no
-    // preset was ever picked (index 0). Guarded so it does not count as a
-    // user action — `state.theme` stays `None` until the user clicks.
+    // The first row follows the user file; Default is a distinct preset.
+    // Seed before connecting signals so opening Options never changes the source.
     let initial_index = state
         .borrow()
         .theme
         .as_deref()
-        .and_then(|id| PRESETS.iter().position(|preset| preset.id == id))
+        .map(|id| {
+            PRESETS
+                .iter()
+                .position(|preset| preset.id == id)
+                .unwrap_or(0)
+                + 1
+        })
         .unwrap_or(0);
     syncing.set(true);
     list.select_row(list.row_at_index(initial_index as i32).as_ref());
@@ -230,10 +249,17 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
             let Some(row) = row else {
                 return;
             };
-            let Some(preset) = PRESETS.get(row.index().max(0) as usize) else {
-                return;
+            let theme = if row.index() == 0 {
+                None
+            } else {
+                PRESETS
+                    .get((row.index() - 1) as usize)
+                    .map(|preset| preset.id.to_string())
             };
-            state.borrow_mut().theme = Some(preset.id.to_string());
+            if state.borrow().theme == theme {
+                return;
+            }
+            state.borrow_mut().theme = theme;
             seed_buttons();
             on_change();
         });
