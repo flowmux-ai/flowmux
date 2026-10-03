@@ -59,6 +59,29 @@ impl DraftStore {
             None => Ok(Draft::default()),
         }
     }
+    /// Refresh anchors and remove obsolete comments only after a successful
+    /// Git read. Revision checking prevents overwriting another window's edits.
+    pub fn refresh(&self, root: &Path, draft: &Draft) -> Result<Draft, String> {
+        let mut current = draft.clone();
+        for note in &mut current.notes {
+            note.scope = flowmux_vcs::review::Scope::WorkingTree;
+            note.resolved = false;
+        }
+        let (notes, stale) = flowmux_vcs::review::notes::refresh(root, &current.notes)?;
+        current.notes = notes;
+        current.notes.retain(|note| !stale.contains(&note.id));
+        if current != *draft {
+            self.save(root, &current)
+        } else {
+            if self.load(root)?.revision != draft.revision {
+                return Err(
+                    "This review changed in another window. Reload saved comments before editing."
+                        .into(),
+                );
+            }
+            Ok(current)
+        }
+    }
     /// Optimistic revision checking preserves reviews edited in another window.
     pub fn save(&self, root: &Path, draft: &Draft) -> Result<Draft, String> {
         let mut connection = self.connection()?;
@@ -91,6 +114,84 @@ impl DraftStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refresh_removes_obsolete_notes_but_preserves_moved_code_and_failed_reads() {
+        use flowmux_vcs::review::{self, Scope};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&root)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let store = DraftStore::new(dir.path().join("reviews.sqlite3"));
+        for (file, value) in [
+            ("changed", "old code\n"),
+            ("removed", "gone\n"),
+            ("moved", "keep code\n"),
+        ] {
+            std::fs::write(root.join(file), value).unwrap();
+        }
+        let snapshot = review::load(&root, Scope::WorkingTree).unwrap();
+        let mut draft = Draft::default();
+        for file in &snapshot.files {
+            let patch = snapshot.patch(file).unwrap();
+            let row = patch
+                .lines
+                .iter()
+                .position(|line| line.new == Some(1))
+                .unwrap();
+            draft.notes.push(
+                Note::new(
+                    file.label(),
+                    &snapshot,
+                    file,
+                    &patch,
+                    Some(row..row + 1),
+                    "Keep this feedback",
+                )
+                .unwrap(),
+            );
+        }
+        let saved = store.save(&root, &draft).unwrap();
+        std::fs::write(root.join("changed"), "different code\n").unwrap();
+        std::fs::remove_file(root.join("removed")).unwrap();
+        std::fs::write(root.join("moved"), "inserted\nkeep code\n").unwrap();
+        let current = store.refresh(&root, &saved).unwrap();
+        assert_eq!(current.notes.len(), 1);
+        assert_eq!(current.notes[0].id, "moved");
+        assert_eq!(current.notes[0].location, "new lines 2–2");
+        assert_eq!(store.load(&root).unwrap(), current);
+        assert_eq!(
+            store.refresh(&root, &current).unwrap(),
+            current,
+            "unchanged refresh must not write"
+        );
+        assert!(
+            store.refresh(&root, &saved).is_err(),
+            "stale revision must not overwrite saved cleanup"
+        );
+        let newer = store.save(&root, &current).unwrap();
+        assert!(
+            store.refresh(&root, &current).is_err(),
+            "unchanged anchors must still check the saved revision"
+        );
+        let current = newer;
+        std::fs::rename(root.join(".git"), root.join("git-unavailable")).unwrap();
+        assert!(store.refresh(&root, &current).is_err());
+        assert_eq!(
+            store.load(&root).unwrap(),
+            current,
+            "failed Git read must not delete notes"
+        );
+        std::fs::rename(root.join("git-unavailable"), root.join(".git")).unwrap();
+        std::fs::remove_file(root.join("moved")).unwrap();
+        assert!(store.refresh(&root, &current).unwrap().notes.is_empty());
+        assert!(store.load(&root).unwrap().notes.is_empty());
+    }
     #[test]
     fn review_drafts_roundtrip_conflict_and_corruption() {
         let dir = tempfile::tempdir().unwrap();

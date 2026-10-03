@@ -499,19 +499,6 @@ finally:
         })
         .await
         .unwrap();
-        for (surface, session) in [
-            (surface, "source-codex"),
-            (destination_surface, "destination-codex"),
-        ] {
-            let mut agent =
-                AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
-            agent.status = AgentStatus::Idle;
-            agent.session_id = Some(session.into());
-            controller
-                .store
-                .set_agent_activity(surface, Some(agent))
-                .await;
-        }
         let target_review = ReviewWindow::new(
             &controller.window,
             &destination_stack,
@@ -532,6 +519,21 @@ finally:
         review
             .smoke_prepare_unchanged_edit("Send unchanged Edit to the chosen Codex pane")
             .await;
+        // Publish fixture identities after Git/storage awaits so background
+        // polling cannot age them out while the views are being prepared.
+        for (surface, session) in [
+            (surface, "source-codex"),
+            (destination_surface, "destination-codex"),
+        ] {
+            let mut agent =
+                AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
+            agent.status = AgentStatus::Idle;
+            agent.session_id = Some(session.into());
+            controller
+                .store
+                .set_agent_activity(surface, Some(agent))
+                .await;
+        }
         controller.refresh_review_targets().await;
         let source_before = terminal.screen_text().unwrap();
         review.smoke_activate_target(destination_surface);

@@ -35,8 +35,14 @@ Click **+** beside a code line, select a range and click **+ Comment**, or press
 Use **File comment** for feedback on the entire file. **Ctrl/Cmd+Enter** saves;
 **Cancel** or **Escape** cancels from anywhere in the composer. An open menu
 closes first on **Escape** or an outside click. Saved comments stay inline with Edit and Delete actions. Delete removes the saved comment immediately.
-The **Comments** menu jumps to a comment's file and location, including feedback
-on files no longer present in the comparison.
+The **Comments** menu jumps to a comment's file and location.
+Opening or refreshing Code Review, reloading saved comments, and preparing
+feedback automatically remove saved comments whose file or selected code is no
+longer in the current diff. Comments whose code merely moved follow its new
+location. Whole-file comments remain while that file still has a valid diff.
+Git read failures and concurrent saves do not authorize deleting comments.
+Unfinished local text is preserved; if its saved comment was removed, cancel
+the edit before starting a new comment.
 Below **Reload saved comments**, **Remove all comments** deletes the saved
 comments for this checkout and closes its current composer after a successful save.
 
@@ -63,10 +69,10 @@ untouched. Feedback remains saved so it can be retried. **Copy feedback** is
 available in the same menu for other programs or prompt styles.
 
 Comments follow unchanged selected code when other lines shift. Nearby context
-helps disambiguate repeated code. If a selected passage changes or its location
-is ambiguous, the review opens that comment for inspection; delete it or use
-**Reattach** (attach to selected lines). Whole-file text comments stay attached across
-edits. Missing files and changed binary content still need inspection.
+helps disambiguate repeated code. Saved comments with changed or ambiguous
+selections, missing files, or changed binary content are removed during validation.
+Whole-file text comments stay attached across edits. If no valid comments remain,
+the list is cleared and no feedback is copied or sent.
 
 ## Limits and verification
 

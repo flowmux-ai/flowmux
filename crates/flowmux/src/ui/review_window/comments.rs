@@ -232,8 +232,8 @@ impl ReviewWindow {
     }
 
     pub(super) fn init_comments(self: &Rc<Self>, _root: PathBuf) {
+        self.load_comments();
         if !self.comments.initialized.replace(true) {
-            self.load_comments();
             let weak = Rc::downgrade(self);
             glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
                 let Some(this) = weak.upgrade() else {
@@ -324,8 +324,11 @@ impl ReviewWindow {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
-            let result =
-                gtk::gio::spawn_blocking(move || DraftStore::default_store()?.load(&root)).await;
+            let result = gtk::gio::spawn_blocking(move || {
+                let store = DraftStore::default_store()?;
+                store.refresh(&root, &store.load(&root)?)
+            })
+            .await;
             let Some(this) = weak.upgrade() else {
                 return;
             };
@@ -803,32 +806,55 @@ impl ReviewWindow {
         self.update_delivery_controls();
         self.targets.menu.popdown();
         let root = self.root.clone();
-        let mut draft = self.comments.draft.borrow().clone();
+        let draft = self.comments.draft.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || {
-                let (notes, stale) = notes::refresh(&root, &draft.notes)?;
-                draft.notes = notes;
-                let draft = DraftStore::default_store()?.save(&root, &draft)?;
-                let prompt = notes::prompt(&root, &draft.notes)?;
-                Ok::<_, String>((draft, stale, prompt))
-            }).await;
-            let Some(this) = weak.upgrade() else { return; };
+                let draft = DraftStore::default_store()?.refresh(&root, &draft)?;
+                let prompt = if draft.notes.is_empty() {
+                    None
+                } else {
+                    Some(notes::prompt(&root, &draft.notes)?)
+                };
+                Ok::<_, String>((draft, prompt))
+            })
+            .await;
+            let Some(this) = weak.upgrade() else {
+                return;
+            };
             this.comments.busy.set(false);
             match result {
-                Ok(Ok((draft, stale, prompt))) => {
+                Ok(Ok((draft, prompt))) => {
                     *this.comments.draft.borrow_mut() = draft;
-                    *this.comments.stale.borrow_mut() = stale.clone(); this.render_comments();
-                    if let Some(id) = stale.first() {
-                        let note = this.comments.draft.borrow().notes.iter().find(|n| &n.id == id).cloned();
-                        if let Some(note) = note { this.jump_to_note(&note); }
-                        this.status.set_text(&format!("{} comments need review because their code changed. Delete them or attach to selected lines.", stale.len()));
-                    } else if let Some(target) = target {
-                        if !this.targets.send(crate::bridge::GtkCommand::FocusReviewTarget { pane: this.pane, target, prompt }) { this.status.set_text("Agent connection unavailable. Try again or copy feedback."); }
-                    } else { this.parent.clipboard().set_text(&prompt); this.status.set_text("Feedback copied"); }
+                    this.comments.stale.borrow_mut().clear();
+                    this.render_comments();
+                    if let Some(prompt) = prompt {
+                        if let Some(target) = target {
+                            if !this
+                                .targets
+                                .send(crate::bridge::GtkCommand::FocusReviewTarget {
+                                    pane: this.pane,
+                                    target,
+                                    prompt,
+                                })
+                            {
+                                this.status.set_text(
+                                    "Agent connection unavailable. Try again or copy feedback.",
+                                );
+                            }
+                        } else {
+                            this.parent.clipboard().set_text(&prompt);
+                            this.status.set_text("Feedback copied");
+                        }
+                    } else {
+                        this.status
+                            .set_text("Obsolete comments removed. No feedback to send.");
+                    }
                 }
                 Ok(Err(error)) => this.status.set_text(&error),
-                Err(_) => this.status.set_text("Could not prepare feedback. Try again."),
+                Err(_) => this
+                    .status
+                    .set_text("Could not prepare feedback. Try again."),
             }
             this.update_delivery_controls();
         });
@@ -1079,20 +1105,21 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     review.load_comments();
     ready(review).await;
     println!("DIFF_REVIEW_LEGACY_COUNT_AND_FEEDBACK_OK");
-    // A removed file can still be opened from Comments and deleted.
+    // Refresh removes obsolete saved comments, including their inline cards.
     std::fs::remove_file(&file).unwrap();
     review.jump_to_note(&moved);
     glib::future_with_timeout(std::time::Duration::from_secs(20), async {
-        while !review.refresh.is_sensitive() {
+        while !review.refresh.is_sensitive() || review.comments.busy.get() {
             glib::timeout_future(std::time::Duration::from_millis(10)).await;
         }
     })
     .await
     .unwrap();
     assert!(review.heading.text().contains("no longer"));
-    assert_eq!(review.inline_widgets.borrow().len(), 1);
+    assert!(review.inline_widgets.borrow().is_empty());
+    assert!(review.comments.draft.borrow().notes.is_empty());
     println!("DIFF_REVIEW_INLINE_COMMENTS_RELOCATION_PERSISTENCE_OK");
-    event_smoke(review).await;
+    event_smoke(review, &moved).await;
     sync_smoke(&review.parent).await;
 }
 
@@ -1217,6 +1244,62 @@ async fn sync_smoke(parent: &adw::ApplicationWindow) {
     assert_eq!(right.comments.menu.label().as_deref(), Some("Comments · 0"));
     assert_eq!(right.targets.menu.label().as_deref(), Some("Send · 0"));
     assert!(other.comments.draft.borrow().notes.is_empty());
+    // Pruning from another view preserves an in-progress edit, but cannot
+    // silently resurrect the obsolete saved comment.
+    left.begin_comment(true);
+    left.comments
+        .writer
+        .buffer()
+        .set_text("obsolete saved comment");
+    left.save_comment();
+    wait_for(|| !left.comments.busy.get() && right.comments.draft.borrow().notes.len() == 1).await;
+    edit_first(right);
+    right
+        .comments
+        .writer
+        .buffer()
+        .set_text("keep my unsaved edit");
+    std::fs::remove_file(dirs[0].path().join("sync.txt")).unwrap();
+    left.reload();
+    wait_for(|| {
+        left.comments.draft.borrow().notes.is_empty() && right.comments.edit_conflict.get()
+    })
+    .await;
+    assert_eq!(text(&right.comments.writer), "keep my unsaved edit");
+    right.save_comment();
+    assert!(!right.comments.busy.get());
+    assert!(DraftStore::default_store()
+        .unwrap()
+        .load(&left.root)
+        .unwrap()
+        .notes
+        .is_empty());
+    right.cancel_comment();
+
+    // If every comment expires immediately before Send, clear the saved list
+    // and do not copy or dispatch an empty feedback batch.
+    std::fs::write(dirs[0].path().join("sync.txt"), "fresh code\n").unwrap();
+    left.reload();
+    wait_for(|| !left.comments.busy.get() && left.patch.borrow().is_some()).await;
+    left.begin_comment(true);
+    left.comments
+        .writer
+        .buffer()
+        .set_text("expires before send");
+    left.save_comment();
+    wait_for(|| !left.comments.busy.get()).await;
+    let clipboard = left.parent.clipboard().read_text_future().await.unwrap();
+    std::fs::remove_file(dirs[0].path().join("sync.txt")).unwrap();
+    left.send_review(None);
+    wait_for(|| !left.comments.busy.get()).await;
+    assert!(left.comments.draft.borrow().notes.is_empty());
+    assert!(!left.targets.menu.is_sensitive());
+    assert!(left.status.text().contains("No feedback to send"));
+    assert_eq!(
+        left.parent.clipboard().read_text_future().await.unwrap(),
+        clipboard
+    );
+    println!("CODE_REVIEW_AUTO_PRUNE_PRESERVES_DRAFTS_OK");
     for window in windows {
         window.destroy();
     }
@@ -1224,7 +1307,7 @@ async fn sync_smoke(parent: &adw::ApplicationWindow) {
 }
 
 #[cfg(test)]
-async fn event_smoke(review: &Rc<ReviewWindow>) {
+async fn event_smoke(review: &Rc<ReviewWindow>, missing: &Note) {
     async fn settled(review: &ReviewWindow) {
         glib::future_with_timeout(std::time::Duration::from_secs(20), async {
             while !review.refresh.is_sensitive()
@@ -1403,9 +1486,9 @@ async fn event_smoke(review: &Rc<ReviewWindow>) {
     assert_eq!(text(&review.comments.writer), "keep this draft");
     assert_eq!(
         review.comments.menu.label().as_deref(),
-        Some("Comments · 1")
+        Some("Comments · 0")
     );
-    assert_eq!(review.targets.menu.label().as_deref(), Some("Send · 1"));
+    assert_eq!(review.targets.menu.label().as_deref(), Some("Send · 0"));
     review.load_comments();
     settled(review).await;
     assert!(!review
@@ -1426,11 +1509,10 @@ async fn event_smoke(review: &Rc<ReviewWindow>) {
         review.selected_path.borrow().as_deref(),
         Some(std::path::Path::new("alpha.txt"))
     );
-    let missing = review.comments.draft.borrow().notes[0].clone();
-    review.jump_to_note(&missing);
+    review.jump_to_note(missing);
     settled(review).await;
     assert!(review.heading.text().contains("no longer"));
-    assert_eq!(review.inline_widgets.borrow().len(), 1);
+    assert!(review.inline_widgets.borrow().is_empty());
     // Initial storage failure must still expose a working retry action.
     let database = flowmux_config::paths::state_dir()
         .unwrap()
