@@ -2061,6 +2061,16 @@ impl WindowController {
             registry.clear_workspace(ws.id);
         }
         let new_widget = self.build_workspace_widget(ws);
+        for review in self
+            .reviews
+            .borrow()
+            .values()
+            .filter(|r| r.workspace.get() == Some(ws.id))
+        {
+            if let Some(host) = self.pane_registry.borrow().stack_for_pane(review.pane) {
+                review.attach(&host);
+            }
+        }
         self.discard_unused_ssh_channels(ws.id);
         self.pane_registry
             .borrow_mut()

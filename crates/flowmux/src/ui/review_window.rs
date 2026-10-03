@@ -523,10 +523,16 @@ impl ReviewWindow {
 
     pub fn attach(&self, host: &gtk::Stack) {
         if *self.host.borrow() != *host {
+            let visible =
+                self.host.borrow().visible_child().as_ref() == Some(self.root_widget.upcast_ref());
             self.host.borrow().remove(&self.root_widget);
+            let previous = host.visible_child();
             host.add_child(&self.root_widget);
             *self.host.borrow_mut() = host.clone();
-            self.return_to.borrow_mut().take();
+            *self.return_to.borrow_mut() = previous;
+            if visible {
+                host.set_visible_child(&self.root_widget);
+            }
         }
     }
 

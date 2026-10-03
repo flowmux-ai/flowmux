@@ -242,9 +242,9 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         .unwrap()
         .clone();
     glib::future_with_timeout(Duration::from_secs(15), async {
-        while !terminal
+        while terminal
             .screen_text()
-            .is_some_and(|text| !text.trim().is_empty())
+            .is_none_or(|text| text.trim().is_empty())
         {
             glib::timeout_future(Duration::from_millis(20)).await;
         }
@@ -545,7 +545,7 @@ finally:
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("review handoff timed out: {error:?}; receipt={}, focused={:?}, expected={destination:?}, source_mapped={}, target_mapped={}, status={}", receipt.exists(), controller.focused_pane.get(), review.root_widget.is_mapped(), target_review.root_widget.is_mapped(), review.status.text()));
         let received = std::fs::read(&receipt).unwrap();
         assert!(received.starts_with(b"\x1b[200~Code review feedback"));
         assert!(received.ends_with(b"\x1b[201~\r"));
@@ -587,9 +587,9 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
         path: &std::path::Path,
     ) {
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !terminal
+            while terminal
                 .screen_text()
-                .is_some_and(|text| !text.trim().is_empty())
+                .is_none_or(|text| text.trim().is_empty())
             {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
@@ -772,6 +772,21 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
     assert!(!controller.reviews.borrow().contains_key(&right));
     assert!(rebound.root_widget.parent().is_none());
     assert!(controller.reviews.borrow().contains_key(&left));
+    left_review.smoke_set_draft("Keep this review visible across layout reconstruction");
+    controller.rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+    let left_stack = controller
+        .pane_registry
+        .borrow()
+        .stack_for_pane(left)
+        .unwrap();
+    assert_eq!(
+        left_stack.visible_child().as_ref(),
+        Some(left_review.root_widget.upcast_ref()),
+        "layout reconstruction must reattach the visible review"
+    );
+    assert!(left_review.has_unsaved_review());
+    left_review.smoke_set_draft("");
+    println!("CODE_REVIEW_LAYOUT_REATTACH_OK");
     controller
         .reviews
         .borrow_mut()
