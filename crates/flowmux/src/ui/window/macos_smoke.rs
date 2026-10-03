@@ -557,6 +557,7 @@ fn theme_widget<T: IsA<gtk::Widget> + glib::object::IsClass>(root: &gtk::Widget,
 async fn check_theme_sources(controller: &WindowController) {
     use crate::ui::theme_tab::{self, ThemeSelection};
     use flowmux_config::options::Options;
+    use vte::prelude::*;
     let path = flowmux_config::theme::user_theme_path().unwrap();
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "background = #102030\nforeground = #e0e0e0\n").unwrap();
@@ -579,15 +580,23 @@ async fn check_theme_sources(controller: &WindowController) {
         })
     };
     let tab = theme_tab::build(state.clone(), apply);
-    let window = gtk::Window::builder()
+    let window = adw::Window::builder()
         .title("Theme source verification")
         .default_width(660)
         .default_height(720)
-        .child(&tab)
+        .content(&tab)
         .build();
     window.present();
     wait_until("theme source window mapped", || window.is_mapped()).await;
     let list: gtk::ListBox = theme_widget(&tab, "flowmux-theme-list");
+    let preview: vte::Terminal = theme_widget(&tab, "flowmux-theme-preview");
+    assert!(preview.pty().is_none(), "preview must never spawn a shell");
+    wait_until("preview sample rendered", || {
+        preview
+            .text_format(vte::Format::Text)
+            .is_some_and(|text| text.contains("Selected text") && text.contains("fn main()"))
+    })
+    .await;
     assert_eq!(list.selected_row().unwrap().index(), 0);
     assert_eq!(changed.get(), 0);
     for (row, source, bg) in [
@@ -602,6 +611,10 @@ async fn check_theme_sources(controller: &WindowController) {
         assert_eq!(
             controller.current_theme().bg,
             gtk::gdk::RGBA::parse(bg).unwrap()
+        );
+        assert_eq!(
+            preview.color_background_for_draw(),
+            controller.current_theme().bg
         );
     }
     assert_eq!(changed.get(), 3);
@@ -650,10 +663,52 @@ async fn check_theme_sources(controller: &WindowController) {
         controller.current_theme().fg,
         gtk::gdk::RGBA::parse("#24292f").unwrap()
     );
+    glib::timeout_future(Duration::from_millis(400)).await;
+    assert_eq!(preview.color_background_for_draw(), gtk::gdk::RGBA::WHITE);
+    let styled_preview = preview.text_format(vte::Format::Html).unwrap();
+    assert!(styled_preview.contains("<font color=\"#116329\">PASS</font>"));
+    assert!(styled_preview.contains("<font color=\"#CF222E\">error:</font>"));
+    assert!(styled_preview.contains("background-color:#ADD6FF"));
+    save_theme_snapshot(window.upcast_ref(), "light");
+    list.select_row(list.row_at_index(3).as_ref());
+    glib::timeout_future(Duration::from_millis(400)).await;
+    assert_eq!(
+        preview.color_background_for_draw(),
+        controller.current_theme().bg
+    );
+    save_theme_snapshot(window.upcast_ref(), "dark");
+    assert!(preview
+        .text_format(vte::Format::Text)
+        .unwrap()
+        .contains("error: example diagnostic"));
+    println!("MACOS_NATIVE_THEME_PREVIEW_OK");
     println!("MACOS_NATIVE_THEME_OVERRIDES_OK");
     window.close();
     std::fs::remove_file(path).unwrap();
     flowmux_config::options::save(&Options::default()).unwrap();
     controller.apply_runtime_theme(&Options::default());
     println!("MACOS_NATIVE_THEME_SOURCES_OK");
+}
+
+fn save_theme_snapshot(widget: &gtk::Widget, name: &str) {
+    let Some(directory) = std::env::var_os("FLOWMUX_THEME_SNAPSHOT_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let snapshot = gtk::Snapshot::new();
+    gtk::WidgetPaintable::new(Some(widget)).snapshot(
+        &snapshot,
+        widget.width() as f64,
+        widget.height() as f64,
+    );
+    let node = snapshot.to_node().expect("mapped theme tab renders");
+    widget
+        .native()
+        .unwrap()
+        .renderer()
+        .unwrap()
+        .render_texture(&node, None)
+        .save_to_png(directory.join(format!("theme-{name}.png")))
+        .unwrap();
 }

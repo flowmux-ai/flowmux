@@ -1564,7 +1564,8 @@ impl WindowController {
         }
         drop(registry);
 
-        self.css_provider.load_from_string(&resolved.css_for_options(opts));
+        self.css_provider
+            .load_from_string(&resolved.css_for_options(opts));
     }
 
     pub fn new(

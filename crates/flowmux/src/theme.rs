@@ -89,7 +89,7 @@ impl ResolvedTheme {
         theme
     }
 
-    fn from_ghostty(cfg: &flowmux_config::ghostty::GhosttyConfig) -> Self {
+    pub(crate) fn from_ghostty(cfg: &flowmux_config::ghostty::GhosttyConfig) -> Self {
         // Missing or invalid resolved colors use flowmux's defaults;
         // the cursor falls back to the resolved foreground.
         let bg = cfg
@@ -326,6 +326,9 @@ impl ResolvedTheme {
 .flowmux-pane .flowmux-terminal {{
     padding: 7px;
     border-radius: 0;
+}}
+.flowmux-theme-preview {{
+    padding: 8px 10px;
 }}
 .flowmux-terminal-search-entry {{
     /* Keep the search field readable over terminal output while retaining a

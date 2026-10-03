@@ -79,6 +79,9 @@ preset does not remove the file; select **User theme file** to return to it.
 Custom colors remain in effect when switching sources. The Theme tab shows
 how many are active; each **Reset** button restores that field's inherited
 color, while **Reset custom colors** restores all five fields.
+The live preview shows terminal output, an error, selection and cursor colors,
+and a short code sample using the effective colors, including overrides. It
+does not execute commands. Each source is labeled **Light** or **Dark**.
 A `theme = ...` line does not load another theme
 file; choose a built-in preset through Options instead. Other unsupported
 keys are parsed but do not affect the UI.

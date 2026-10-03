@@ -13,6 +13,7 @@ use flowmux_config::presets::PRESETS;
 use gtk::gdk;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use vte::prelude::*;
 
 /// Theme selection shared with the options dialog.
 #[derive(Clone, Default)]
@@ -130,6 +131,40 @@ fn swatch_colors(cfg: &GhosttyConfig) -> Vec<String> {
     colors
 }
 
+fn update_preview(preview: &vte::Terminal, cfg: &GhosttyConfig) {
+    let theme = crate::theme::ResolvedTheme::from_ghostty(cfg);
+    preview.set_colors(
+        Some(&theme.fg),
+        Some(&theme.bg),
+        &theme.palette.iter().collect::<Vec<_>>(),
+    );
+    let mut font = theme.font.clone();
+    font.set_size(11 * gtk::pango::SCALE);
+    preview.set_font(Some(&font));
+    // The preview has no PTY and never executes commands. Use the real ANSI
+    // renderer, including explicit selection colors, for representative output.
+    let rgb = |color: gdk::RGBA| {
+        format!(
+            "{};{};{}",
+            (color.red() * 255.0).round() as u8,
+            (color.green() * 255.0).round() as u8,
+            (color.blue() * 255.0).round() as u8
+        )
+    };
+    let selection_bg = theme.selection_bg.unwrap_or(theme.fg);
+    let selection_fg = theme
+        .selection_fg
+        .unwrap_or(if theme.selection_bg.is_some() {
+            theme.fg
+        } else {
+            theme.bg
+        });
+    preview.feed(format!(
+        "\x1b[0m\x1b[2J\x1b[H\x1b[?25l$ cargo test\r\n\x1b[32mPASS\x1b[0m  12 tests passed\r\n\x1b[31merror:\x1b[0m example diagnostic\r\n\x1b[48;2;{}m\x1b[38;2;{}m Selected text \x1b[0m  Cursor \x1b[48;2;{}m \x1b[0m\r\nfn main() {{ println!(\"Hello\"); }}",
+        rgb(selection_bg), rgb(selection_fg), rgb(theme.cursor),
+    ).as_bytes());
+}
+
 pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk::Widget {
     // Suppresses change handlers while widgets are being seeded
     // programmatically (initial selection, reseeding after a preset click).
@@ -140,6 +175,23 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
     body.set_margin_bottom(16);
     body.set_margin_start(20);
     body.set_margin_end(20);
+
+    let preview_heading = gtk::Label::new(Some("Preview"));
+    preview_heading.set_xalign(0.0);
+    preview_heading.add_css_class("heading");
+    body.append(&preview_heading);
+    let preview = vte::Terminal::new();
+    preview.set_widget_name("flowmux-theme-preview");
+    preview.add_css_class("flowmux-theme-preview");
+    preview.set_input_enabled(false);
+    preview.set_focusable(false);
+    preview.set_scrollback_lines(0);
+    preview.set_size(44, 6);
+    preview.set_height_request(120);
+    preview.set_vexpand(false);
+    let preview_frame = gtk::Frame::new(None);
+    preview_frame.set_child(Some(&preview));
+    body.append(&preview_frame);
 
     let list = gtk::ListBox::new();
     list.set_widget_name("flowmux-theme-list");
@@ -169,6 +221,16 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
         name.set_xalign(0.0);
         name.set_hexpand(true);
         row_box.append(&name);
+        let tone = gtk::Label::new(Some(
+            if crate::theme::ResolvedTheme::from_ghostty(&cfg).is_dark() {
+                "Dark"
+            } else {
+                "Light"
+            },
+        ));
+        tone.add_css_class("dim-label");
+        tone.set_margin_end(8);
+        row_box.append(&tone);
         for color in swatch_colors(&cfg) {
             row_box.append(&swatch(&color));
         }
@@ -233,6 +295,7 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
             let selection = state.borrow();
             let mut cfg = base_config(selection.theme.as_deref());
             cfg.merge(selection.overrides.to_ghostty());
+            update_preview(&preview, &cfg);
             syncing.set(true);
             let mut custom_count = 0;
             for (field, button, reset) in buttons.iter() {
