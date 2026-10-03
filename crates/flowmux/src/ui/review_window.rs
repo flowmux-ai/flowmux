@@ -611,9 +611,11 @@ impl ReviewWindow {
             if this.scroll_generation.get() != generation {
                 return glib::ControlFlow::Break;
             }
-            // Tick runs before layout. Allow one frame to allocate the newly
-            // attached cards, then let TextView validate and scroll its mark.
+            // Tick runs before layout. Ask TextView to validate the target line
+            // before measuring its newly attached card on a later frame.
             if !allocated.replace(true) {
+                let buffer = diff.buffer();
+                diff.scroll_to_mark(&buffer.get_insert(), 0.05, align, 0.0, yalign);
                 return glib::ControlFlow::Continue;
             }
             let buffer = diff.buffer();
@@ -622,6 +624,9 @@ impl ReviewWindow {
                 .child_anchor()
                 .and_then(|anchor| anchor.widgets().into_iter().next())
             {
+                if !card.is_mapped() || card.width() <= 0 || card.height() <= 0 {
+                    return glib::ControlFlow::Continue;
+                }
                 if let (Some(bounds), Some(adjustment)) =
                     (card.compute_bounds(diff), diff.vadjustment())
                 {

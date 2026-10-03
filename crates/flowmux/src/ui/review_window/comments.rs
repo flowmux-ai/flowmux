@@ -1069,7 +1069,14 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
             }
         })
         .await
-        .expect("composer must become fully visible after card layout and scrolling");
+        .unwrap_or_else(|error| {
+            panic!(
+                "composer must become fully visible after card layout and scrolling: {error:?}; card={:?}, viewport={}, adjustment={:?}",
+                review.comments.composer.compute_bounds(&review.diff),
+                review.diff.height(),
+                review.diff.vadjustment().map(|a| (a.value(), a.upper(), a.page_size())),
+            )
+        });
         review.send_review(None);
         ready(review).await;
         assert_eq!(review.status.text(), "Feedback copied");
