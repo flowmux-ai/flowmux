@@ -70,7 +70,15 @@ pub fn install_insert_text_accumulation() {
 
 /// Text already staged on the view's `GdkSurface` for this key event, if any.
 unsafe fn pending_insert_text(view: &AnyObject) -> Option<String> {
-    let surface: *mut c_void = msg_send![view, gdkSurface];
+    // GTK encodes this return type as its private GdkMacosSurface struct.
+    // Calling msg_send! with void* trips objc2's debug signature check even
+    // though both have the same pointer ABI. Read through the method IMP,
+    // without declaring or depending on GTK's private struct layout.
+    let selector = sel!(gdkSurface);
+    let method = view.class().instance_method(selector)?;
+    let get_surface: unsafe extern "C-unwind" fn(&AnyObject, Sel) -> *mut c_void =
+        std::mem::transmute(method.implementation());
+    let surface = get_surface(view, selector);
     if surface.is_null() {
         return None;
     }
@@ -81,6 +89,25 @@ unsafe fn pending_insert_text(view: &AnyObject) -> Option<String> {
     }
     let text = CStr::from_ptr(raw).to_str().ok()?;
     (!text.is_empty()).then(|| text.to_owned())
+}
+
+#[cfg(test)]
+pub fn check_native_surface_access(window: &adw::ApplicationWindow) {
+    use gtk::{glib::translate::ToGlibPtr, prelude::*};
+    unsafe extern "C" {
+        fn gdk_macos_surface_get_native_window(
+            surface: *mut gtk::gdk::ffi::GdkSurface,
+        ) -> *mut c_void;
+    }
+    let surface = window.surface().expect("mapped native window");
+    unsafe {
+        let native = gdk_macos_surface_get_native_window(surface.to_glib_none().0);
+        let view = (&*(native as *mut objc2_app_kit::NSWindow))
+            .contentView()
+            .unwrap();
+        // This is the same selector invoked on every native text insertion.
+        assert!(pending_insert_text(&view).is_none());
+    }
 }
 
 /// `aString` is documented as either `NSString` or `NSAttributedString`.
