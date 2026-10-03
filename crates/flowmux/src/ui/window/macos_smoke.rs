@@ -87,6 +87,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
 
     check_theme_focus(&controller).await;
     check_theme_sources(&controller).await;
+    crate::ui::review_window::smoke(&controller.window).await;
 
     println!("MACOS_NATIVE_BROWSER_START");
     // A loopback fixture avoids file URL access differences between macOS versions.

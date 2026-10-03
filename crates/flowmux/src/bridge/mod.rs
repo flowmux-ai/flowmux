@@ -303,6 +303,7 @@ pub enum GtkCommand {
         pane: Option<PaneId>,
     },
     SessionPanel(crate::ui::session_panel::SessionPanelAction),
+    OpenDiffReview,
     /// Toggle the right-side Git worktree panel for the focused pane.
     ToggleWorktreePanel {
         pane: Option<PaneId>,

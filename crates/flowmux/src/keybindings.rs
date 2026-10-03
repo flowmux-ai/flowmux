@@ -328,6 +328,15 @@ pub fn install_actions(
     );
     let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
     let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
+    let review_bridge = bridge.clone();
+    let open_diff_review = gtk::gio::ActionEntry::builder("open-diff-review")
+        .activate(move |_, _, _| {
+            let bridge = review_bridge.clone();
+            glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::OpenDiffReview).await;
+            });
+        })
+        .build();
     let new_surface = make_pane_action(
         "new-surface",
         focused.clone(),
@@ -502,6 +511,7 @@ pub fn install_actions(
         toggle_pane_zoom,
         toggle_workspace_overview,
         toggle_session_panel,
+        open_diff_review,
         next_workspace,
         prev_workspace,
         w1,

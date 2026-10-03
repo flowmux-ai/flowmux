@@ -105,6 +105,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
+            | GtkCommand::OpenDiffReview
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
@@ -585,6 +586,8 @@ pub struct WindowController {
     sidebar_split: gtk::Paned,
     worktrees: WorktreePanelState,
     sessions: sessions::SessionPanelState,
+    reviews:
+        Rc<RefCell<std::collections::HashMap<PathBuf, Rc<crate::ui::review_window::ReviewWindow>>>>,
     file_browser: FileBrowserState,
     agent_bar: AgentBarState,
     pane_zoom: PaneZoomState,
@@ -1229,6 +1232,7 @@ mod notification_coordinator;
 mod pane_callbacks;
 mod pane_commands;
 mod polling;
+mod review;
 mod sessions;
 pub(crate) mod ssh;
 mod surface_ops;
@@ -1884,6 +1888,7 @@ impl WindowController {
             ),
             sidebar_split: split,
             sessions: sessions::SessionPanelState::new(session_panel),
+            reviews: Rc::new(RefCell::new(std::collections::HashMap::new())),
             worktrees: WorktreePanelState {
                 source_pane: worktree_source_pane,
                 source_directory: worktree_source_directory,
@@ -2776,6 +2781,7 @@ impl WindowController {
                 self.dispatch_pane_command(command).await;
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
+            GtkCommand::OpenDiffReview => self.open_diff_review().await,
             command @ (GtkCommand::CloseWindow
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette

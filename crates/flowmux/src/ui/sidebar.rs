@@ -461,6 +461,15 @@ impl Sidebar {
         session_btn.set_action_name(Some("win.toggle-session-panel"));
         footer.append(&session_btn);
 
+        let review_btn = gtk::Button::with_label("Diff");
+        review_btn.add_css_class("flat");
+        review_btn.set_tooltip_text(Some("Diff review (Ctrl+Alt+D)"));
+        review_btn.update_property(&[gtk::accessible::Property::Label("Diff review")]);
+        review_btn.set_focus_on_click(false);
+        review_btn.set_widget_name("flowmux-review-button");
+        review_btn.set_action_name(Some("win.open-diff-review"));
+        footer.append(&review_btn);
+
         // Self-update banner. Hidden until the background release check
         // finds a newer tag; the banner owns its own check/install wiring.
         let update_banner = UpdateBanner::new(tokio_handle);
