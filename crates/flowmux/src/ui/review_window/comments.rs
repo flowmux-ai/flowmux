@@ -669,7 +669,8 @@ impl ReviewWindow {
                     }
                 }
             }
-            let uncertain = self.comments.stale.borrow().contains(&note.id)
+            let uncertain = note.needs_reattach
+                || self.comments.stale.borrow().contains(&note.id)
                 || (!note.excerpt.is_empty() && range.is_none());
             let position = range.as_ref().map_or(0, |r| r.end);
             let card = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -812,9 +813,9 @@ impl ReviewWindow {
             let result = gtk::gio::spawn_blocking(move || {
                 let draft = DraftStore::default_store()?.refresh(&root, &draft)?;
                 let prompt = if draft.notes.is_empty() {
-                    None
+                    Ok(None)
                 } else {
-                    Some(notes::prompt(&root, &draft.notes)?)
+                    notes::prompt(&root, &draft.notes).map(Some)
                 };
                 Ok::<_, String>((draft, prompt))
             })
@@ -828,14 +829,14 @@ impl ReviewWindow {
                     *this.comments.draft.borrow_mut() = draft;
                     this.comments.stale.borrow_mut().clear();
                     this.render_comments();
-                    if let Some(prompt) = prompt {
+                    if let Ok(Some(prompt)) = &prompt {
                         if let Some(target) = target {
                             if !this
                                 .targets
                                 .send(crate::bridge::GtkCommand::FocusReviewTarget {
                                     pane: this.pane,
                                     target,
-                                    prompt,
+                                    prompt: prompt.clone(),
                                 })
                             {
                                 this.status.set_text(
@@ -843,9 +844,11 @@ impl ReviewWindow {
                                 );
                             }
                         } else {
-                            this.parent.clipboard().set_text(&prompt);
+                            this.parent.clipboard().set_text(prompt);
                             this.status.set_text("Feedback copied");
                         }
+                    } else if let Err(error) = prompt {
+                        this.status.set_text(&error);
                     } else {
                         this.status
                             .set_text("Obsolete comments removed. No feedback to send.");
@@ -944,7 +947,9 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     // Code above the comment shifts; feedback must follow rather than block.
     let file = review.root.join("large.rs");
     let contents = std::fs::read_to_string(&file).unwrap();
-    std::fs::write(&file, format!("inserted\n{contents}")).unwrap();
+    let last = contents.lines().last().unwrap();
+    let shifted = contents.strip_suffix(&format!("{last}\n")).unwrap();
+    std::fs::write(&file, format!("inserted\n{shifted}    {last}\n")).unwrap();
     review.send_review(None);
     ready(review).await;
     let clipboard = review
@@ -955,6 +960,12 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
         .unwrap()
         .unwrap();
     assert!(clipboard.contains("new lines 20001–20001"));
+    assert!(clipboard.contains(&format!("+    {last}")));
+    assert_eq!(
+        review.comments.draft.borrow().notes[0].new_lines,
+        Some((20001, 20001))
+    );
+    println!("CODE_REVIEW_CODE_ANCHOR_RELOCATION_OK");
     assert!(!clipboard.contains("SHA-256"));
     // Refresh and navigation take the reader to the comment's code.
     let moved = review.comments.draft.borrow().notes[0].clone();

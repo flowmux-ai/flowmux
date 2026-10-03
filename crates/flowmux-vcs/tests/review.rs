@@ -308,6 +308,118 @@ fn comment_follows_code_when_unrelated_lines_change() {
 }
 
 #[test]
+fn comment_tracks_indentation_and_partial_context_changes() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(
+        root.join("a"),
+        "first()\n    run()\nend_first()\nsecond()\n    run()\nend_second()\n",
+    )
+    .unwrap();
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let row = patch
+        .lines
+        .iter()
+        .position(|l| l.text == "+    run()")
+        .unwrap();
+    let note = Note::new(
+        "move".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        Some(row..row + 1),
+        "Check first call",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("a"),
+        "inserted()\nfirst()\n        run()\nnew_end()\nsecond()\n    run()\nend_second()\n",
+    )
+    .unwrap();
+    let (updated, stale) = notes::refresh(root, &[note]).unwrap();
+    assert!(stale.is_empty());
+    assert_eq!(updated[0].location, "new lines 3–3");
+    assert_eq!(updated[0].excerpt, "+        run()\n");
+}
+
+#[test]
+fn comment_tracks_context_becoming_added_code_without_following_deleted_copy() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("a"), "first\ntarget\nlast\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("a"), "changed\ntarget\nlast\n").unwrap();
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let row = patch
+        .lines
+        .iter()
+        .position(|l| l.text == " target")
+        .unwrap();
+    let note = Note::new(
+        "move".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        Some(row..row + 1),
+        "Check target",
+    )
+    .unwrap();
+    std::fs::write(root.join("a"), "changed\nlast\ninserted\ntarget\n").unwrap();
+    let (updated, stale) = notes::refresh(root, &[note]).unwrap();
+    assert!(stale.is_empty());
+    assert_eq!(updated[0].location, "new lines 4–4");
+    std::fs::write(root.join("a"), "changed\nlast\ninserted\n").unwrap();
+    assert_eq!(notes::validate(root, &updated).unwrap(), ["move"]);
+}
+
+#[test]
+fn multi_hunk_comment_ignores_changed_hunk_headers() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    let original: String = (1..=30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("a"), &original).unwrap();
+    commit(root);
+    let changed = original
+        .replace("line 3\n", "first change\n")
+        .replace("line 27\n", "second change\n");
+    std::fs::write(root.join("a"), &changed).unwrap();
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let start = patch
+        .lines
+        .iter()
+        .position(|l| l.text == "+first change")
+        .unwrap();
+    let end = patch
+        .lines
+        .iter()
+        .position(|l| l.text == "+second change")
+        .unwrap()
+        + 1;
+    let note = Note::new(
+        "range".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        Some(start..end),
+        "Review both changes",
+    )
+    .unwrap();
+    assert!(note.excerpt.contains("@@"));
+    std::fs::write(root.join("a"), format!("inserted\n{changed}")).unwrap();
+    let (updated, stale) = notes::refresh(root, &[note]).unwrap();
+    assert!(stale.is_empty());
+    assert_eq!(updated[0].new_lines, Some((4, 28)));
+    assert_eq!(updated[0].old_lines, Some((4, 27)));
+    assert!(updated[0].excerpt.contains("+second change"));
+}
+
+#[test]
 fn repeated_comment_context_is_not_guessed() {
     use flowmux_vcs::review::notes::{self, Note};
     let dir = repo();
@@ -325,7 +437,24 @@ fn repeated_comment_context_is_not_guessed() {
     )
     .unwrap();
     std::fs::write(dir.path().join("a"), "same\nsame\n").unwrap();
-    assert_eq!(notes::validate(dir.path(), &[note]).unwrap(), ["ambiguous"]);
+    assert_eq!(
+        notes::validate(dir.path(), std::slice::from_ref(&note)).unwrap(),
+        ["ambiguous"]
+    );
+    let (updated, obsolete) = notes::refresh(dir.path(), &[note]).unwrap();
+    assert!(
+        obsolete.is_empty(),
+        "ambiguous feedback must not be deleted"
+    );
+    assert!(updated[0].needs_reattach);
+    assert!(notes::prompt(dir.path(), &updated)
+        .unwrap_err()
+        .contains("Reattach"));
+    std::fs::write(dir.path().join("a"), "inserted\nsame\n").unwrap();
+    let (recovered, obsolete) = notes::refresh(dir.path(), &updated).unwrap();
+    assert!(obsolete.is_empty());
+    assert!(!recovered[0].needs_reattach);
+    assert_eq!(recovered[0].new_lines, Some((2, 2)));
 }
 
 #[test]

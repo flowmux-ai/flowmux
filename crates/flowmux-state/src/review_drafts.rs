@@ -156,14 +156,26 @@ mod tests {
                 .unwrap(),
             );
         }
+        // Older saved comments lack structured bounds and the reattach flag.
+        let mut legacy = serde_json::to_value(&draft.notes).unwrap();
+        for note in legacy.as_array_mut().unwrap() {
+            let note = note.as_object_mut().unwrap();
+            note.remove("old_lines");
+            note.remove("new_lines");
+            note.remove("needs_reattach");
+        }
+        draft.notes = serde_json::from_value(legacy).unwrap();
+        assert!(draft.notes.iter().all(|n| n.new_lines.is_none()));
         let saved = store.save(&root, &draft).unwrap();
         std::fs::write(root.join("changed"), "different code\n").unwrap();
         std::fs::remove_file(root.join("removed")).unwrap();
-        std::fs::write(root.join("moved"), "inserted\nkeep code\n").unwrap();
+        std::fs::write(root.join("moved"), "inserted\n    keep code\n").unwrap();
         let current = store.refresh(&root, &saved).unwrap();
         assert_eq!(current.notes.len(), 1);
         assert_eq!(current.notes[0].id, "moved");
         assert_eq!(current.notes[0].location, "new lines 2–2");
+        assert_eq!(current.notes[0].new_lines, Some((2, 2)));
+        assert_eq!(current.notes[0].excerpt, "+    keep code\n");
         assert_eq!(store.load(&root).unwrap(), current);
         assert_eq!(
             store.refresh(&root, &current).unwrap(),
@@ -179,7 +191,18 @@ mod tests {
             store.refresh(&root, &current).is_err(),
             "unchanged anchors must still check the saved revision"
         );
-        let current = newer;
+        std::fs::write(
+            root.join("moved"),
+            "inserted\n    keep code\ninserted\n    keep code\n",
+        )
+        .unwrap();
+        let ambiguous = store.refresh(&root, &newer).unwrap();
+        assert_eq!(ambiguous.notes.len(), 1);
+        assert!(ambiguous.notes[0].needs_reattach);
+        assert_eq!(store.load(&root).unwrap(), ambiguous);
+        std::fs::write(root.join("moved"), "inserted\n    keep code\n").unwrap();
+        let current = store.refresh(&root, &ambiguous).unwrap();
+        assert!(!current.notes[0].needs_reattach);
         std::fs::rename(root.join(".git"), root.join("git-unavailable")).unwrap();
         assert!(store.refresh(&root, &current).is_err());
         assert_eq!(

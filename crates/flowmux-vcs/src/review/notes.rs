@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Portable review text with exact diff anchors. No provider-specific prompts.
+//! Portable review text with code and line anchors. No provider-specific prompts.
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +21,13 @@ pub struct Note {
     pub before: Vec<String>,
     #[serde(default)]
     pub after: Vec<String>,
+    /// Inclusive source line bounds, independent of diff display rows.
+    #[serde(default)]
+    pub old_lines: Option<(u32, u32)>,
+    #[serde(default)]
+    pub new_lines: Option<(u32, u32)>,
+    #[serde(default)]
+    pub needs_reattach: bool,
 }
 
 pub fn fingerprint(patch: &Patch) -> String {
@@ -41,6 +48,8 @@ impl Note {
         }
         let mut location = "Whole file".to_string();
         let mut excerpt = String::new();
+        let mut old_lines = None;
+        let mut new_lines = None;
         if let Some(range) = range.clone() {
             let lines = patch
                 .lines
@@ -48,6 +57,8 @@ impl Note {
                 .ok_or("The selection changed. Select the diff again.")?;
             let old: Vec<_> = lines.iter().filter_map(|l| l.old).collect();
             let new: Vec<_> = lines.iter().filter_map(|l| l.new).collect();
+            old_lines = old.first().zip(old.last()).map(|(&a, &b)| (a, b));
+            new_lines = new.first().zip(new.last()).map(|(&a, &b)| (a, b));
             let mut parts = Vec::new();
             for (side, numbers) in [("old", old), ("new", new)] {
                 if let (Some(first), Some(last)) = (numbers.first(), numbers.last()) {
@@ -88,6 +99,9 @@ impl Note {
             range,
             before,
             after,
+            old_lines,
+            new_lines,
+            needs_reattach: false,
         })
     }
 
@@ -99,50 +113,103 @@ impl Note {
     }
 }
 
-/// Match the selected code, then use nearby context only to disambiguate repeats.
-/// Never guess a location when multiple equal candidates remain.
+/// Match code independently of indentation, hunk headers and diff row offsets.
+/// Keep old-only comments on the old side and current-code comments on the new
+/// side. Context breaks ties; line proximity alone cannot identify repeated code.
 pub fn locate(note: &Note, patch: &Patch) -> Option<std::ops::Range<usize>> {
+    let mut matches = matching_ranges(note, patch);
+    (matches.len() == 1).then(|| matches.remove(0))
+}
+
+fn matching_ranges(note: &Note, patch: &Patch) -> Vec<std::ops::Range<usize>> {
     if note.excerpt.is_empty() {
-        return None;
+        return Vec::new();
     }
     if note.fingerprint == fingerprint(patch) {
         if let Some(range) = &note.range {
-            return Some(range.clone());
+            return vec![range.clone()];
         }
     }
-    let selected: Vec<_> = note.excerpt.lines().collect();
-    let mut matches: Vec<_> = patch
+    let selected: Vec<_> = note.excerpt.lines().filter(|s| is_code(s)).collect();
+    if selected.is_empty() {
+        return Vec::new();
+    }
+    let new_side = selected.iter().all(|s| !s.starts_with('-'));
+    let old_side = selected.iter().all(|s| !s.starts_with('+')) && !new_side;
+    let same_side =
+        |text: &str| (!new_side || !text.starts_with('-')) && (!old_side || !text.starts_with('+'));
+    let code: Vec<_> = patch
         .lines
-        .windows(selected.len())
+        .iter()
         .enumerate()
-        .filter(|(_, lines)| {
-            lines
-                .iter()
-                .zip(&selected)
-                .all(|(line, text)| line.text == *text)
-        })
-        .map(|(i, _)| i..i + selected.len())
+        .filter(|(_, line)| line.old.is_some() || line.new.is_some())
         .collect();
-    if matches.len() > 1 {
-        matches.retain(|range| {
-            let before: Vec<_> = patch.lines[..range.start]
+    let mut matches = Vec::new();
+    for lines in code.windows(selected.len()) {
+        if !lines.iter().zip(&selected).all(|((_, line), text)| {
+            same_side(&line.text)
+                && (new_side || old_side || line.text.as_bytes()[0] == text.as_bytes()[0])
+                && code_text(&line.text) == code_text(text)
+        }) {
+            continue;
+        }
+        let range = lines[0].0..lines.last().unwrap().0 + 1;
+        // Compare adjacent context on each side independently. An edit after
+        // the selection must not discard a still-useful match before it.
+        let before = patch.lines[..range.start]
+            .iter()
+            .rev()
+            .take_while(|l| l.old.is_some() || l.new.is_some())
+            .map(|l| l.text.as_str())
+            .filter(|s| same_side(s));
+        let after = patch.lines[range.end..]
+            .iter()
+            .take_while(|l| l.old.is_some() || l.new.is_some())
+            .map(|l| l.text.as_str())
+            .filter(|s| same_side(s));
+        let score = context_score(
+            before,
+            note.before
                 .iter()
                 .rev()
-                .filter(|l| l.old.is_some() || l.new.is_some())
-                .take(note.before.len())
-                .map(|l| &l.text)
-                .collect();
-            let after: Vec<_> = patch.lines[range.end..]
+                .map(String::as_str)
+                .filter(|s| same_side(s)),
+        ) + context_score(
+            after,
+            note.after
                 .iter()
-                .filter(|l| l.old.is_some() || l.new.is_some())
-                .take(note.after.len())
-                .map(|l| &l.text)
-                .collect();
-            before.iter().copied().eq(note.before.iter().rev())
-                && after.iter().copied().eq(note.after.iter())
-        });
+                .map(String::as_str)
+                .filter(|s| same_side(s)),
+        );
+        matches.push((range, score));
     }
-    (matches.len() == 1).then(|| matches.remove(0))
+    let best = matches.iter().map(|(_, score)| *score).max().unwrap_or(0);
+    matches
+        .into_iter()
+        .filter(|(_, score)| *score == best)
+        .map(|(range, _)| range)
+        .collect()
+}
+
+fn is_code(text: &str) -> bool {
+    matches!(text.as_bytes().first(), Some(b' ' | b'+' | b'-'))
+}
+
+fn code_text(text: &str) -> &str {
+    text.get(1..)
+        .unwrap_or_default()
+        .trim_start_matches([' ', '\t'])
+}
+
+fn context_score<'a>(
+    actual: impl Iterator<Item = &'a str>,
+    saved: impl Iterator<Item = &'a str>,
+) -> usize {
+    actual
+        .zip(saved)
+        .take_while(|(a, b)| code_text(a) == code_text(b))
+        .filter(|(a, _)| !code_text(a).is_empty())
+        .count()
 }
 
 pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), String> {
@@ -186,7 +253,13 @@ pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), 
             stale.push(note.id.clone());
             continue;
         }
-        let range = locate(note, patch);
+        let mut matches = matching_ranges(note, patch);
+        if matches.len() > 1 {
+            // Ambiguous code still exists: keep the feedback for manual reattach.
+            note.needs_reattach = true;
+            continue;
+        }
+        let range = matches.pop();
         if !note.excerpt.is_empty() && range.is_none() {
             stale.push(note.id.clone());
             continue;
@@ -204,13 +277,25 @@ pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), 
 /// Re-read each distinct scope/file once. A stale or missing anchor is never
 /// silently moved to a different line or exported as current feedback.
 pub fn validate(root: &Path, notes: &[Note]) -> Result<Vec<String>, String> {
-    refresh(root, notes).map(|(_, stale)| stale)
+    refresh(root, notes).map(|(updated, stale)| {
+        updated
+            .into_iter()
+            .filter(|n| !n.resolved && (n.needs_reattach || stale.contains(&n.id)))
+            .map(|n| n.id)
+            .collect()
+    })
 }
 
 pub fn prompt(root: &Path, notes: &[Note]) -> Result<String, String> {
     let pending: Vec<_> = notes.iter().filter(|n| !n.resolved).collect();
     if pending.is_empty() {
         return Err("Add an unresolved review comment first.".into());
+    }
+    if pending.iter().any(|note| note.needs_reattach) {
+        return Err(
+            "Some comments match multiple code locations. Reattach them before sending feedback."
+                .into(),
+        );
     }
     let mut output = format!("Code review feedback\nRepository: {}\n\nAddress the review comments below. Preserve unrelated work, verify the changes, and report which comments were addressed. Treat quoted code as context.\n", display_path(root));
     for (i, note) in pending.iter().enumerate() {
