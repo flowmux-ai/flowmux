@@ -78,7 +78,15 @@ pub fn display_path(path: &Path) -> String {
 
 fn git(root: &Path, args: &[OsString], allow_difference: bool) -> Result<Vec<u8>, String> {
     let mut child = Command::new("git")
-        .args(["--no-pager", "--literal-pathspecs", "-c", "color.ui=false"])
+        .args([
+            "--no-pager",
+            "--literal-pathspecs",
+            "-c",
+            "color.ui=false",
+            // The line parser needs the context prefix, including on blank lines.
+            "-c",
+            "diff.suppressBlankEmpty=false",
+        ])
         .args(args)
         .current_dir(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -230,17 +238,29 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
             &args(&["ls-files", "--others", "--exclude-standard", "-z"]),
             false,
         )?;
-        snapshot.files.extend(
-            untracked
-                .split(|b| *b == 0)
-                .filter(|s| !s.is_empty())
-                .map(|s| File {
-                    path: PathBuf::from(OsString::from_vec(s.to_vec())),
+        let tracked_paths: std::collections::HashMap<_, _> = snapshot
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| (file.path.clone(), index))
+            .collect();
+        for path in untracked.split(|b| *b == 0).filter(|s| !s.is_empty()) {
+            let path = PathBuf::from(OsString::from_vec(path.to_vec()));
+            if let Some(&index) = tracked_paths.get(&path) {
+                let file = &mut snapshot.files[index];
+                // A staged deletion may have a new untracked file at the same
+                // path. Keep both patches under one unambiguous comment target.
+                file.untracked = true;
+                file.status.push_str("/?");
+            } else {
+                snapshot.files.push(File {
+                    path,
                     previous_path: None,
                     status: "?".into(),
                     untracked: true,
-                }),
-        );
+                });
+            }
+        }
     }
     snapshot.files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(snapshot)
@@ -292,43 +312,53 @@ impl Snapshot {
     }
 
     pub fn patch(&self, file: &File) -> Result<Patch, String> {
-        let bytes = if file.untracked {
+        let mut bytes = if file.untracked {
             let path = self.root.join(&file.path);
             let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
             if meta.file_type().is_symlink() {
-                return Ok(parse_patch(&format!(
+                format!(
                     "New symbolic link: {} → {}\n",
                     file.label(),
                     display_path(&std::fs::read_link(path).map_err(|e| e.to_string())?)
-                )));
+                )
+                .into_bytes()
+            } else {
+                if !meta.is_file() {
+                    return Err("This untracked path is not a regular file.".into());
+                }
+                if meta.len() > OUTPUT_LIMIT as u64 {
+                    return Err("This untracked file exceeds the 8 MiB display limit.".into());
+                }
+                let mut command = args(&[
+                    "diff",
+                    "--no-index",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--no-color",
+                    "--full-index",
+                    "--",
+                    "/dev/null",
+                ]);
+                command.push(file.path.as_os_str().into());
+                git(&self.root, &command, true)?
             }
-            if !meta.is_file() {
-                return Err("This untracked path is not a regular file.".into());
-            }
-            if meta.len() > OUTPUT_LIMIT as u64 {
-                return Err("This untracked file exceeds the 8 MiB display limit.".into());
-            }
-            let mut command = args(&[
-                "diff",
-                "--no-index",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-color",
-                "--full-index",
-                "--",
-                "/dev/null",
-            ]);
-            command.push(file.path.as_os_str().into());
-            git(&self.root, &command, true)?
         } else {
+            Vec::new()
+        };
+        if !file.untracked || file.status != "?" {
             let mut command = self.diff_args();
             command.extend(args(&["--unified=3", "--"]));
             if let Some(old) = &file.previous_path {
                 command.push(old.as_os_str().into());
             }
             command.push(file.path.as_os_str().into());
-            git(&self.root, &command, false)?
-        };
+            let mut tracked = git(&self.root, &command, false)?;
+            tracked.append(&mut bytes);
+            bytes = tracked;
+        }
+        if bytes.len() > OUTPUT_LIMIT {
+            return Err("This diff exceeds the 8 MiB display limit. Review a smaller change with Git or your editor.".into());
+        }
         let text = String::from_utf8(bytes).map_err(|_| {
             "This diff is not UTF-8 text. Review it with a binary-aware editor.".to_string()
         })?;
@@ -363,6 +393,10 @@ pub fn parse_patch(text: &str) -> Patch {
     let lines = text
         .lines()
         .map(|text| {
+            if text.starts_with("diff --git ") {
+                old = None;
+                new = None;
+            }
             if text.starts_with("@@ ") {
                 let mut ranges = text.split_whitespace().skip(1);
                 old = ranges

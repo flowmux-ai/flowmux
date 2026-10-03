@@ -65,6 +65,95 @@ fn empty_unborn_and_non_repository() {
 }
 
 #[test]
+fn configured_blank_context_keeps_comment_line_numbers() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("lines.txt"), "old\n\nend\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("lines.txt"), "new\n\nend\n").unwrap();
+    git(root, &["config", "diff.suppressBlankEmpty", "true"]);
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let row = patch
+        .lines
+        .iter()
+        .position(|line| line.text == " end")
+        .unwrap();
+    assert_eq!(
+        (patch.lines[row].old, patch.lines[row].new),
+        (Some(3), Some(3))
+    );
+    let note = flowmux_vcs::review::notes::Note::new(
+        "blank-context".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        Some(row..row + 1),
+        "Check the last line",
+    )
+    .unwrap();
+    assert_eq!(note.location, "old lines 3–3, new lines 3–3");
+}
+
+#[test]
+fn staged_deletion_and_recreated_file_share_one_review_entry() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("recreated.txt"), "old\n").unwrap();
+    commit(root);
+    git(root, &["rm", "recreated.txt"]);
+    std::fs::write(root.join("recreated.txt"), "new\n").unwrap();
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    assert_eq!(
+        snapshot.files.len(),
+        1,
+        "one path must have one selectable entry"
+    );
+    let file = &snapshot.files[0];
+    let patch = snapshot.patch(file).unwrap();
+    assert!(patch.text.contains("-old") && patch.text.contains("+new"));
+    assert!(patch
+        .lines
+        .iter()
+        .filter(|line| line.text.starts_with("--- ") || line.text.starts_with("+++ "))
+        .all(|line| line.old.is_none() && line.new.is_none()));
+    for (id, content, location) in [
+        ("removed", "-old", "old lines 1–1"),
+        ("added", "+new", "new lines 1–1"),
+    ] {
+        let row = patch
+            .lines
+            .iter()
+            .position(|line| line.text == content)
+            .unwrap();
+        let note = Note::new(
+            id.into(),
+            &snapshot,
+            file,
+            &patch,
+            Some(row..row + 1),
+            "Review this change",
+        )
+        .unwrap();
+        assert_eq!(note.location, location);
+        assert!(notes::validate(root, &[note]).unwrap().is_empty());
+    }
+    let staged = load(root, Scope::Staged).unwrap();
+    assert!(!staged
+        .patch(&staged.files[0])
+        .unwrap()
+        .text
+        .contains("+new"));
+    let unstaged = load(root, Scope::Unstaged).unwrap();
+    assert!(!unstaged
+        .patch(&unstaged.files[0])
+        .unwrap()
+        .text
+        .contains("-old"));
+}
+
+#[test]
 fn scopes_rename_delete_binary_and_literal_paths() {
     let dir = repo();
     let root = dir.path();
@@ -387,7 +476,7 @@ fn comments_anchor_ranges_unicode_long_text_and_stale_files() {
     assert!(notes::validate(dir.path(), &many).unwrap().is_empty());
     let prompt = notes::prompt(dir.path(), &many).unwrap();
     assert!(prompt.contains("300. review.rs"));
-    assert!(prompt.contains("짧은 리뷰") == false);
+    assert!(!prompt.contains("짧은 리뷰"));
     assert!(prompt.contains("> -before\n> +after"));
     let binary = snapshot
         .files
