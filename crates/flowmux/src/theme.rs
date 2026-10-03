@@ -215,6 +215,29 @@ impl ResolvedTheme {
         relative_luminance(&self.bg) < 0.5
     }
 
+    pub(crate) fn focus_style<'a>(
+        &self,
+        options: &'a flowmux_config::options::Options,
+    ) -> (&'a str, f32) {
+        if options.automatic_focus_border() {
+            if self.is_dark() {
+                (flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT, 0.3)
+            } else {
+                ("#175cd3", 1.0)
+            }
+        } else {
+            (
+                options.focus_border_color_or_default(),
+                options.focus_border_alpha(),
+            )
+        }
+    }
+
+    pub(crate) fn css_for_options(&self, options: &flowmux_config::options::Options) -> String {
+        let (color, alpha) = self.focus_style(options);
+        self.css(color, alpha, options.zoom_percent)
+    }
+
     pub(crate) fn editor_appearance(
         &self,
         options: &flowmux_config::options::Options,
@@ -859,6 +882,39 @@ fn shift_lightness(c: &gdk::RGBA, delta: f32) -> gdk::RGBA {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_focus_is_visible_on_light_presets_and_preserves_custom_settings() {
+        use flowmux_config::options::Options;
+        for id in [
+            "github-light",
+            "catppuccin-latte",
+            "solarized-light",
+            "one-dark",
+        ] {
+            let mut opts = Options {
+                theme: Some(id.into()),
+                ..Options::default()
+            };
+            let theme = ResolvedTheme::resolve_with_file(&opts, None);
+            assert_eq!(
+                theme.focus_style(&opts),
+                if theme.is_dark() {
+                    ("#fff4b3", 0.3)
+                } else {
+                    ("#175cd3", 1.0)
+                }
+            );
+            opts = opts
+                .with_focus_border_color("#123456")
+                .with_focus_border_opacity(42);
+            assert_eq!(theme.focus_style(&opts), ("#123456", 0.42));
+            opts = opts
+                .with_focus_border_color("#fff4b3")
+                .with_focus_border_opacity(30);
+            assert_eq!(theme.focus_style(&opts), ("#fff4b3", 0.3));
+        }
+    }
 
     /// Helper that yields a deterministic CSS string. We intentionally
     /// construct the theme through `from_ghostty` with an empty config

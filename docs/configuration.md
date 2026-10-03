@@ -9,7 +9,7 @@ the built-in defaults.
 ## options.json
 
 `zoom_percent`, `default_browser_engine`, `focus_border_color`,
-`focus_border_opacity`, `persist_browser_session`, `auto_resume_agent_sessions`,
+`focus_border_opacity`, `focus_border_auto`, `persist_browser_session`, `auto_resume_agent_sessions`,
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
 `terminal_minimap_enabled`, `terminal_minimap_width`, `terminal_minimap_opacity`,
 `system_notifications_enabled`, `agent_bar_mode`, `agent_sort_mode`,
@@ -17,6 +17,11 @@ the built-in defaults.
 `cursor_blink_interval_ms`, `font_family`, `font_size`,
 `editor_minimap_enabled`, `agent_notification_target`, `theme`, `theme_overrides`,
 and `keybindings`.
+`focus_border_auto` follows theme brightness: light themes use an opaque blue
+focus indicator; dark themes use the default pale yellow at 30% opacity.
+Turn off **Automatic focus colors** to use the saved color and opacity.
+Older settings without this field enable automatic colors only when both
+focus settings match the old defaults; custom settings remain manual.
 `default_shell` selects the command for new tabs; a per-tab IPC `shell` takes
 precedence, then `$SHELL` is used. Invalid commands fall back safely.
 `agent_bar_mode` switches Agent Activity from the resizable lower side-panel

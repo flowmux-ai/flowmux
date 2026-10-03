@@ -124,6 +124,10 @@ pub struct Options {
     /// empty values fall back to [`FOCUS_BORDER_COLOR_DEFAULT`].
     #[serde(default = "default_focus_color")]
     pub focus_border_color: String,
+    /// Follow theme brightness. None migrates legacy default colors/opacity
+    /// automatically, while preserving legacy custom focus settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_border_auto: Option<bool>,
     /// Focus border opacity (%: `0..=100`). 100 is opaque, 0 is transparent.
     /// Selected by the options dialog slider; out-of-range values are clamped
     /// by [`Options::clamp_focus_border_opacity`].
@@ -289,6 +293,7 @@ impl Default for Options {
             zoom_percent: ZOOM_DEFAULT,
             default_browser_engine: BrowserEngine::default(),
             focus_border_color: default_focus_color(),
+            focus_border_auto: None,
             focus_border_opacity: default_focus_border_opacity(),
             persist_browser_session: default_persist_browser_session(),
             auto_resume_agent_sessions: default_auto_resume_agent_sessions(),
@@ -386,6 +391,7 @@ impl Options {
     /// Set a new focus border color. Invalid values, including empty strings,
     /// missing `#`, or non-hex content, fall back to the default color.
     pub fn with_focus_border_color(mut self, color: impl Into<String>) -> Self {
+        self.focus_border_auto = Some(false);
         let color = color.into();
         self.focus_border_color = if is_valid_hex_color(&color) {
             color
@@ -414,8 +420,16 @@ impl Options {
         Self::clamp_focus_border_opacity(self.focus_border_opacity) as f32 / 100.0
     }
 
+    pub fn automatic_focus_border(&self) -> bool {
+        self.focus_border_auto.unwrap_or_else(|| {
+            self.focus_border_color_or_default() == FOCUS_BORDER_COLOR_DEFAULT
+                && self.focus_border_opacity == FOCUS_BORDER_OPACITY_DEFAULT
+        })
+    }
+
     /// Builder-style setter, clamped immediately.
     pub fn with_focus_border_opacity(mut self, p: u8) -> Self {
+        self.focus_border_auto = Some(false);
         self.focus_border_opacity = Self::clamp_focus_border_opacity(p);
         self
     }
@@ -793,6 +807,25 @@ mod tests {
     #[test]
     fn default_focus_border_color_is_pale_yellow() {
         assert_eq!(Options::default().focus_border_color, "#fff4b3");
+    }
+
+    #[test]
+    fn automatic_focus_migrates_only_legacy_defaults() {
+        let mut options: Options = serde_json::from_str("{}").unwrap();
+        assert!(options.automatic_focus_border());
+        options.focus_border_color = "#123456".into();
+        assert!(!options.automatic_focus_border());
+        options.focus_border_color = FOCUS_BORDER_COLOR_DEFAULT.into();
+        options.focus_border_opacity = 70;
+        assert!(!options.automatic_focus_border());
+        options.focus_border_auto = Some(true);
+        assert!(options.automatic_focus_border());
+        let saved = serde_json::to_string(&options).unwrap();
+        let loaded: Options = serde_json::from_str(&saved).unwrap();
+        assert!(loaded.automatic_focus_border());
+        assert!(!Options::default()
+            .with_focus_border_color(FOCUS_BORDER_COLOR_DEFAULT)
+            .automatic_focus_border());
     }
 
     #[test]

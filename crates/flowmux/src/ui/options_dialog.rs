@@ -107,6 +107,9 @@ fn build_dialog(
     let zoom_picker = ZoomPicker::new(current.zoom_percent, font_widgets.size_spin.value());
     let focus_color_btn = build_focus_color_button(current.focus_border_color_or_default());
     let opacity_widgets = build_focus_opacity_row(current.focus_border_opacity);
+    let focus_auto = build_toggle_switch(current.automatic_focus_border());
+    focus_color_btn.set_sensitive(!focus_auto.is_active());
+    opacity_widgets.row.set_sensitive(!focus_auto.is_active());
     let persist_check = build_persist_check(current.persist_browser_session);
     let auto_resume_check = build_persist_check(current.auto_resume_agent_sessions);
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
@@ -134,6 +137,7 @@ fn build_dialog(
     general.append(&row("Terminal font", &font_widgets.family_drop));
     general.append(&row("Font size (pt)", &font_widgets.size_spin));
     general.append(&row("Browser web view", &gtk::Label::new(Some("WebKit"))));
+    general.append(&row("Automatic focus colors", &focus_auto));
     general.append(&row("Focus border color", &focus_color_btn));
     general.append(&row("Focus border opacity (%)", &opacity_widgets.row));
     general.append(&row("Keep browser session data", &persist_check));
@@ -178,6 +182,7 @@ fn build_dialog(
         let zoom_picker = zoom_picker.clone();
         // Preserve legacy profile storage when unrelated options change.
         let browser_engine = current.default_browser_engine.clone();
+        let focus_auto = focus_auto.clone();
         let focus_color_btn = focus_color_btn.clone();
         let opacity_spin = opacity_widgets.spin.clone();
         let persist_check = persist_check.clone();
@@ -215,6 +220,7 @@ fn build_dialog(
                 &zoom_picker,
                 &browser_engine,
                 &focus_color_btn,
+                &focus_auto,
                 &opacity_spin,
                 &persist_check,
                 &auto_resume_check,
@@ -284,6 +290,16 @@ fn build_dialog(
     {
         let apply_current = apply_current.clone();
         focus_color_btn.connect_rgba_notify(move |_| apply_current());
+    }
+    {
+        let apply_current = apply_current.clone();
+        let color = focus_color_btn.clone();
+        let opacity = opacity_widgets.row.clone();
+        focus_auto.connect_active_notify(move |toggle| {
+            color.set_sensitive(!toggle.is_active());
+            opacity.set_sensitive(!toggle.is_active());
+            apply_current();
+        });
     }
     connect_value_changed(&opacity_widgets.spin, apply_current.clone());
     connect_toggled(&persist_check, apply_current.clone());
@@ -954,6 +970,7 @@ fn collect_options(
     zoom_picker: &ZoomPicker,
     browser_engine: &BrowserEngine,
     focus_color: &gtk::ColorDialogButton,
+    focus_auto: &gtk::Switch,
     opacity_spin: &gtk::SpinButton,
     persist_check: &gtk::CheckButton,
     auto_resume_check: &gtk::CheckButton,
@@ -1000,6 +1017,7 @@ fn collect_options(
         zoom_percent: zoom,
         default_browser_engine: browser_engine.clone(),
         focus_border_color: color_hex,
+        focus_border_auto: Some(focus_auto.is_active()),
         focus_border_opacity: opacity,
         persist_browser_session: persist_check.is_active(),
         auto_resume_agent_sessions: auto_resume_check.is_active(),
@@ -1657,6 +1675,7 @@ mod tests {
             &zoom,
             &engine,
             &focus_color,
+            &build_toggle_switch(false),
             &opacity.spin,
             &persist_off,
             &auto_resume_off,
@@ -1726,6 +1745,7 @@ mod tests {
             &zoom,
             &engine,
             &focus_color,
+            &build_toggle_switch(false),
             &opacity.spin,
             &persist_on,
             &auto_resume_on,

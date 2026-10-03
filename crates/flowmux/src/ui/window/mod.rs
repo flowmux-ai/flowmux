@@ -1564,11 +1564,7 @@ impl WindowController {
         }
         drop(registry);
 
-        self.css_provider.load_from_string(&resolved.css(
-            opts.focus_border_color_or_default(),
-            opts.focus_border_alpha(),
-            opts.zoom_percent,
-        ));
+        self.css_provider.load_from_string(&resolved.css_for_options(opts));
     }
 
     pub fn new(

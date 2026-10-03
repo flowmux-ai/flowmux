@@ -345,11 +345,7 @@ fn main() -> anyhow::Result<()> {
         // before app.run() panics with "GTK has not been initialized".
         keybindings::install_accels(app, &initial_options);
         let provider = gtk::CssProvider::new();
-        provider.load_from_string(&theme.css(
-            initial_options.focus_border_color_or_default(),
-            initial_options.focus_border_alpha(),
-            initial_options.zoom_percent,
-        ));
+        provider.load_from_string(&theme.css_for_options(&initial_options));
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(
                 &display,

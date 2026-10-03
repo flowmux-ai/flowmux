@@ -85,6 +85,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    check_theme_focus(&controller).await;
+
     println!("MACOS_NATIVE_BROWSER_START");
     // A loopback fixture avoids file URL access differences between macOS versions.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -481,4 +483,51 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .iter()
         .any(|window| window.instance_id == owner.instance_id));
     println!("MACOS_NATIVE_SAVE_RETRY_OK");
+}
+
+async fn check_theme_focus(controller: &WindowController) {
+    use flowmux_config::options::Options;
+    let display = gtk::gdk::Display::default().unwrap();
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &controller.css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    let badge = gtk::Label::new(Some("Focused pane"));
+    badge.add_css_class("flowmux-pane-zoom-badge");
+    let window = gtk::Window::builder()
+        .title("Theme focus verification")
+        .default_width(360)
+        .default_height(100)
+        .child(&badge)
+        .build();
+    window.present();
+    wait_until("theme focus window mapped", || window.is_mapped()).await;
+    for (id, color) in [
+        ("github-light", "#175cd3"),
+        ("catppuccin-latte", "#175cd3"),
+        ("solarized-light", "#175cd3"),
+        ("one-dark", "#fff4b3"),
+    ] {
+        let opts = Options {
+            theme: Some(id.into()),
+            ..Options::default()
+        };
+        controller.apply_runtime_theme(&opts);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(badge.color(), gtk::gdk::RGBA::parse(color).unwrap());
+        assert_eq!(controller.current_theme().is_dark(), id == "one-dark");
+    }
+    let custom = Options {
+        theme: Some("github-light".into()),
+        ..Options::default()
+    }
+    .with_focus_border_color("#123456")
+    .with_focus_border_opacity(42);
+    controller.apply_runtime_theme(&custom);
+    glib::timeout_future(Duration::from_millis(100)).await;
+    assert_eq!(badge.color(), gtk::gdk::RGBA::parse("#123456").unwrap());
+    controller.apply_runtime_theme(&Options::default());
+    window.close();
+    println!("MACOS_NATIVE_THEME_FOCUS_OK");
 }
