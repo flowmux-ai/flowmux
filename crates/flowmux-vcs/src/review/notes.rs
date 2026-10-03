@@ -142,7 +142,7 @@ fn matching_ranges(note: &Note, patch: &Patch) -> Vec<std::ops::Range<usize>> {
         .lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| line.old.is_some() || line.new.is_some())
+        .filter(|(_, line)| (line.old.is_some() || line.new.is_some()) && same_side(&line.text))
         .collect();
     let mut matches = Vec::new();
     for lines in code.windows(selected.len()) {
@@ -212,9 +212,38 @@ fn context_score<'a>(
         .count()
 }
 
+/// Partial/missing diff ranges are not proof that the reviewed code disappeared.
+/// Preserve feedback if any selected code remains on the appropriate side.
+fn anchor_code_survives(note: &Note, patch: &Patch) -> bool {
+    let selected: Vec<_> = note.excerpt.lines().filter(|s| is_code(s)).collect();
+    let new_side = selected.iter().all(|s| !s.starts_with('-'));
+    let old_side = selected.iter().all(|s| !s.starts_with('+')) && !new_side;
+    let key = |text: &str| {
+        if new_side || old_side {
+            0
+        } else {
+            text.as_bytes()[0]
+        }
+    };
+    let available: std::collections::HashSet<_> = patch
+        .lines
+        .iter()
+        .filter(|line| {
+            (line.old.is_some() || line.new.is_some())
+                && (!new_side || !line.text.starts_with('-'))
+                && (!old_side || !line.text.starts_with('+'))
+        })
+        .map(|line| (key(&line.text), code_text(&line.text)))
+        .collect();
+    selected
+        .iter()
+        .any(|text| available.contains(&(key(text), code_text(text))))
+}
+
 pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), String> {
     let mut snapshots: Vec<Snapshot> = Vec::new();
     let mut patches: Vec<(Scope, Vec<u8>, Option<Patch>)> = Vec::new();
+    let mut full_patches: Vec<(Scope, Vec<u8>, Patch)> = Vec::new();
     let mut updated = notes.to_vec();
     let mut stale = Vec::new();
     for note in updated.iter_mut().filter(|n| !n.resolved) {
@@ -253,6 +282,11 @@ pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), 
             stale.push(note.id.clone());
             continue;
         }
+        let file = snapshot
+            .files
+            .iter()
+            .find(|f| f.path == note.path())
+            .unwrap();
         let mut matches = matching_ranges(note, patch);
         if matches.len() > 1 {
             // Ambiguous code still exists: keep the feedback for manual reattach.
@@ -261,14 +295,34 @@ pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), 
         }
         let range = matches.pop();
         if !note.excerpt.is_empty() && range.is_none() {
-            stale.push(note.id.clone());
+            let mut survives = anchor_code_survives(note, patch);
+            if !survives && !file.untracked {
+                // A normal diff omits unchanged lines. Check complete context
+                // before deleting, still using the bounded, read-only Git path.
+                if !full_patches
+                    .iter()
+                    .any(|(scope, path, _)| *scope == note.scope && *path == note.path)
+                {
+                    full_patches.push((
+                        note.scope.clone(),
+                        note.path.clone(),
+                        snapshot.patch_with_context(file, i32::MAX as u32)?,
+                    ));
+                }
+                let full = &full_patches
+                    .iter()
+                    .find(|(scope, path, _)| *scope == note.scope && *path == note.path)
+                    .unwrap()
+                    .2;
+                survives = anchor_code_survives(note, full);
+            }
+            if survives {
+                note.needs_reattach = true;
+            } else {
+                stale.push(note.id.clone());
+            }
             continue;
         }
-        let file = snapshot
-            .files
-            .iter()
-            .find(|f| f.path == note.path())
-            .unwrap();
         *note = Note::new(note.id.clone(), snapshot, file, patch, range, &note.text)?;
     }
     Ok((updated, stale))
@@ -293,7 +347,7 @@ pub fn prompt(root: &Path, notes: &[Note]) -> Result<String, String> {
     }
     if pending.iter().any(|note| note.needs_reattach) {
         return Err(
-            "Some comments match multiple code locations. Reattach them before sending feedback."
+            "Some comments could not be located uniquely. Reattach them before sending feedback."
                 .into(),
         );
     }

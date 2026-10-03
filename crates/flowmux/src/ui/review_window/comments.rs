@@ -3,6 +3,9 @@ use super::*;
 use flowmux_state::review_drafts::{Draft, DraftStore};
 use flowmux_vcs::review::notes::{self, Note};
 
+#[cfg(test)]
+mod scenarios;
+
 pub(super) struct Comments {
     pub composer: gtk::Box,
     writer: gtk::TextView,
@@ -664,6 +667,9 @@ impl ReviewWindow {
                             &note.text,
                         ) {
                             updated.resolved = note.resolved;
+                            // A displayed patch can predate Send's validation.
+                            // Rendering it must not clear a persisted conflict.
+                            updated.needs_reattach = note.needs_reattach;
                             note = updated;
                         }
                     }
@@ -1132,6 +1138,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     println!("DIFF_REVIEW_INLINE_COMMENTS_RELOCATION_PERSISTENCE_OK");
     event_smoke(review, &moved).await;
     sync_smoke(&review.parent).await;
+    scenarios::run(&review.parent).await;
 }
 
 #[cfg(test)]

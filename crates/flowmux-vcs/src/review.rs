@@ -312,6 +312,10 @@ impl Snapshot {
     }
 
     pub fn patch(&self, file: &File) -> Result<Patch, String> {
+        self.patch_with_context(file, 3)
+    }
+
+    fn patch_with_context(&self, file: &File, context: u32) -> Result<Patch, String> {
         let mut bytes = if file.untracked {
             let path = self.root.join(&file.path);
             let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -347,7 +351,7 @@ impl Snapshot {
         };
         if !file.untracked || file.status != "?" {
             let mut command = self.diff_args();
-            command.extend(args(&["--unified=3", "--"]));
+            command.extend(args(&[&format!("--unified={context}"), "--"]));
             if let Some(old) = &file.previous_path {
                 command.push(old.as_os_str().into());
             }
