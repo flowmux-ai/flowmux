@@ -27,9 +27,11 @@ pub(crate) fn run() {
         .build();
     app.register(None::<&gtk::gio::Cancellable>).unwrap();
     glib::MainContext::default().block_on(async {
-        glib::future_with_timeout(Duration::from_secs(120), check(&app, isolated.path()))
+        // Theme and Code Review scenarios now run before the browser/editor/IPC checks.
+        // Allow time for the whole suite; individual UI waits remain bounded at 30s.
+        glib::future_with_timeout(Duration::from_secs(300), check(&app, isolated.path()))
             .await
-            .expect("native smoke exceeded 120 seconds");
+            .expect("native smoke exceeded 300 seconds");
     });
     println!("MACOS_NATIVE_SMOKE_OK");
 }

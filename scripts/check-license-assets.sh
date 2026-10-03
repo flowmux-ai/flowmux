@@ -27,9 +27,14 @@ do
 done
 
 for theme in crates/flowmux-config/themes/*.theme; do
+    case "$theme" in
+        crates/flowmux-config/themes/flowmux-contrast-dark.theme|crates/flowmux-config/themes/flowmux-contrast-light.theme)
+            license="GPL-3.0-or-later" ;;
+        *) license="MIT" ;;
+    esac
     IFS= read -r header < "$theme"
-    if [ "$header" != "# SPDX-License-Identifier: MIT" ]; then
-        echo "missing MIT SPDX header: $theme" >&2
+    if [ "$header" != "# SPDX-License-Identifier: $license" ]; then
+        echo "missing $license SPDX header: $theme" >&2
         exit 1
     fi
 done
