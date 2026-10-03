@@ -184,36 +184,80 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
     overrides_heading.set_margin_top(8);
     body.append(&overrides_heading);
 
-    let override_buttons: Rc<Vec<(Field, gtk::ColorDialogButton)>> = Rc::new(
+    let override_status = gtk::Label::new(None);
+    override_status.set_widget_name("flowmux-theme-override-status");
+    override_status.set_xalign(0.0);
+    override_status.set_wrap(true);
+    override_status.add_css_class("dim-label");
+    body.append(&override_status);
+
+    let override_buttons: Rc<Vec<(Field, gtk::ColorDialogButton, gtk::Button)>> = Rc::new(
         FIELDS
             .iter()
-            .map(|(field, label)| {
+            .enumerate()
+            .map(|(index, (field, label))| {
                 let color_dialog = gtk::ColorDialog::new();
                 color_dialog.set_with_alpha(false);
                 let button = gtk::ColorDialogButton::new(Some(color_dialog));
-                body.append(&crate::ui::options_dialog::row(label, &button));
-                (*field, button)
+                button.set_widget_name(&format!("flowmux-theme-color-{index}"));
+                let reset = gtk::Button::with_label("Reset");
+                reset.set_widget_name(&format!("flowmux-theme-reset-{index}"));
+                reset.set_tooltip_text(Some(&format!(
+                    "Use theme color for {}",
+                    label.to_lowercase()
+                )));
+                let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                controls.append(&button);
+                controls.append(&reset);
+                body.append(&crate::ui::options_dialog::row(label, &controls));
+                (*field, button, reset)
             })
             .collect(),
     );
 
     let reset_btn = gtk::Button::with_label("Reset custom colors");
+    reset_btn.set_widget_name("flowmux-theme-reset-all");
     reset_btn.set_halign(gtk::Align::Start);
     body.append(&reset_btn);
 
     let seed_buttons = {
         let state = state.clone();
-        let buttons = override_buttons.clone();
+        // Callbacks own this closure, so it must not keep their buttons alive.
+        let buttons: Vec<_> = override_buttons
+            .iter()
+            .map(|(field, button, reset)| (*field, button.downgrade(), reset.downgrade()))
+            .collect();
         let syncing = syncing.clone();
+        let reset_btn = reset_btn.downgrade();
         Rc::new(move || {
             let selection = state.borrow();
-            let cfg = base_config(selection.theme.as_deref());
+            let mut cfg = base_config(selection.theme.as_deref());
+            cfg.merge(selection.overrides.to_ghostty());
             syncing.set(true);
-            for (field, button) in buttons.iter() {
-                let color = override_value(&selection.overrides, *field)
-                    .unwrap_or_else(|| base_color(&cfg, *field));
+            let mut custom_count = 0;
+            for (field, button, reset) in buttons.iter() {
+                let Some((button, reset)) = button.upgrade().zip(reset.upgrade()) else {
+                    continue;
+                };
+                let custom = override_value(&selection.overrides, *field).is_some();
+                custom_count += usize::from(custom);
+                reset.set_sensitive(custom);
+                button.set_tooltip_text(Some(if custom {
+                    "Custom color"
+                } else {
+                    "Inherited from theme"
+                }));
+                let color = base_color(&cfg, *field);
                 button.set_rgba(&parse_rgba(&color));
             }
+            if let Some(reset_btn) = reset_btn.upgrade() {
+                reset_btn.set_sensitive(custom_count > 0);
+            }
+            override_status.set_text(&if custom_count == 0 {
+                "Using theme colors".into()
+            } else {
+                format!("Custom colors active: {custom_count}. Kept when switching themes.")
+            });
             syncing.set(false);
         })
     };
@@ -265,11 +309,22 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
         });
     }
 
-    for (field, button) in override_buttons.iter() {
+    for (field, button, reset) in override_buttons.iter() {
         let field = *field;
+        {
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let seed_buttons = seed_buttons.clone();
+            reset.connect_clicked(move |_| {
+                *override_slot(&mut state.borrow_mut().overrides, field) = None;
+                seed_buttons();
+                on_change();
+            });
+        }
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
+        let seed_buttons = seed_buttons.clone();
         button.connect_rgba_notify(move |button| {
             if syncing.get() {
                 return;
@@ -282,6 +337,7 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
                 (rgba.blue().clamp(0.0, 1.0) * 255.0).round() as u8,
             );
             *override_slot(&mut state.borrow_mut().overrides, field) = Some(hex);
+            seed_buttons();
             on_change();
         });
     }

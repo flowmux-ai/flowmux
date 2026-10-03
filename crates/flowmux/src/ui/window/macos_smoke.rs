@@ -611,6 +611,46 @@ async fn check_theme_sources(controller: &WindowController) {
     );
     let reopened_list: gtk::ListBox = theme_widget(&reopened, "flowmux-theme-list");
     assert_eq!(reopened_list.selected_row().unwrap().index(), 0);
+    let background: gtk::ColorDialogButton = theme_widget(&tab, "flowmux-theme-color-0");
+    let foreground: gtk::ColorDialogButton = theme_widget(&tab, "flowmux-theme-color-1");
+    let cursor: gtk::ColorDialogButton = theme_widget(&tab, "flowmux-theme-color-2");
+    let reset_background: gtk::Button = theme_widget(&tab, "flowmux-theme-reset-0");
+    let reset_foreground: gtk::Button = theme_widget(&tab, "flowmux-theme-reset-1");
+    let reset_all: gtk::Button = theme_widget(&tab, "flowmux-theme-reset-all");
+    let status: gtk::Label = theme_widget(&tab, "flowmux-theme-override-status");
+    assert_eq!(status.text(), "Using theme colors");
+    assert!(!reset_all.is_sensitive());
+    background.set_rgba(&gtk::gdk::RGBA::parse("#112233").unwrap());
+    foreground.set_rgba(&gtk::gdk::RGBA::parse("#eeeeee").unwrap());
+    assert_eq!(
+        cursor.rgba(),
+        foreground.rgba(),
+        "inherited cursor follows text override"
+    );
+    assert!(reset_background.is_sensitive() && reset_foreground.is_sensitive());
+    assert!(status.text().contains("active: 2"));
+    list.select_row(list.row_at_index(10).as_ref()); // GitHub Light
+    assert_eq!(controller.current_theme().bg, background.rgba());
+    assert!(status.text().contains("active: 2"));
+    let before_reset = changed.get();
+    reset_background.emit_clicked();
+    assert_eq!(changed.get(), before_reset + 1, "reset saves once");
+    assert_eq!(controller.current_theme().bg, gtk::gdk::RGBA::WHITE);
+    assert_eq!(controller.current_theme().fg, foreground.rgba());
+    assert!(state.borrow().overrides.background.is_none());
+    assert!(state.borrow().overrides.foreground.is_some());
+    assert!(!reset_background.is_sensitive() && reset_foreground.is_sensitive());
+    assert!(status.text().contains("active: 1"));
+    reset_all.emit_clicked();
+    assert!(state.borrow().overrides.is_empty());
+    assert!(flowmux_config::options::load().theme_overrides.is_empty());
+    assert!(!reset_all.is_sensitive());
+    assert_eq!(status.text(), "Using theme colors");
+    assert_eq!(
+        controller.current_theme().fg,
+        gtk::gdk::RGBA::parse("#24292f").unwrap()
+    );
+    println!("MACOS_NATIVE_THEME_OVERRIDES_OK");
     window.close();
     std::fs::remove_file(path).unwrap();
     flowmux_config::options::save(&Options::default()).unwrap();
