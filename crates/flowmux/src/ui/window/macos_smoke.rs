@@ -85,6 +85,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some() {
+        crate::ui::review_window::smoke(&controller.window).await;
+        controller.window.destroy();
+        return;
+    }
+
     check_theme_focus(&controller).await;
     check_theme_sources(&controller).await;
     crate::ui::review_window::smoke(&controller.window).await;

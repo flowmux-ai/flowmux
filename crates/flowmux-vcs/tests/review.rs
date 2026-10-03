@@ -226,3 +226,86 @@ fn many_files_large_patch_and_oversize_are_explicit() {
         .unwrap_err()
         .contains("limit"));
 }
+
+#[test]
+fn comments_anchor_ranges_unicode_long_text_and_stale_files() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    std::fs::write(dir.path().join("review.rs"), "before\ncontext\n").unwrap();
+    std::fs::write(dir.path().join("binary"), [0, 1, 2]).unwrap();
+    commit(dir.path());
+    std::fs::write(dir.path().join("review.rs"), "after\ncontext\n").unwrap();
+    std::fs::write(dir.path().join("binary"), [0, 1, 3]).unwrap();
+    let snapshot = load(dir.path(), Scope::WorkingTree).unwrap();
+    let file = snapshot
+        .files
+        .iter()
+        .find(|f| f.path == Path::new("review.rs"))
+        .unwrap();
+    let patch = snapshot.patch(file).unwrap();
+    assert!(Note::new("empty".into(), &snapshot, file, &patch, None, " \n").is_err());
+    assert!(Note::new(
+        "header".into(),
+        &snapshot,
+        file,
+        &patch,
+        Some(0..1),
+        "comment"
+    )
+    .is_err());
+    let first = patch
+        .lines
+        .iter()
+        .position(|l| l.text == "-before")
+        .unwrap();
+    let note = Note::new(
+        "range".into(),
+        &snapshot,
+        file,
+        &patch,
+        Some(first..first + 2),
+        "짧은 리뷰\nSecond line",
+    )
+    .unwrap();
+    assert_eq!(note.location, "old lines 1–1, new lines 1–1");
+    assert_eq!(note.excerpt, "-before\n+after\n");
+    let mut many = vec![note.clone(); 300];
+    for (i, n) in many.iter_mut().enumerate() {
+        n.id = i.to_string();
+        n.text = "긴 리뷰 🧪\n".repeat(300);
+    }
+    assert!(notes::validate(dir.path(), &many).unwrap().is_empty());
+    let prompt = notes::prompt(dir.path(), &many).unwrap();
+    assert!(prompt.contains("300. review.rs"));
+    assert!(prompt.contains("짧은 리뷰") == false);
+    assert!(prompt.contains("> -before\n> +after"));
+    let binary = snapshot
+        .files
+        .iter()
+        .find(|f| f.path == Path::new("binary"))
+        .unwrap();
+    let binary_note = Note::new(
+        "binary".into(),
+        &snapshot,
+        binary,
+        &snapshot.patch(binary).unwrap(),
+        None,
+        "binary review",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("binary"), [0, 1, 4]).unwrap();
+    assert_eq!(
+        notes::validate(dir.path(), &[binary_note]).unwrap(),
+        vec!["binary"]
+    );
+    std::fs::write(dir.path().join("review.rs"), "changed again\ncontext\n").unwrap();
+    assert_eq!(notes::validate(dir.path(), &many).unwrap().len(), 300);
+    let mut resolved = note;
+    resolved.resolved = true;
+    assert!(notes::validate(dir.path(), &[resolved.clone()])
+        .unwrap()
+        .is_empty());
+    assert!(notes::prompt(dir.path(), &[resolved]).is_err());
+    std::fs::remove_file(dir.path().join("review.rs")).unwrap();
+    assert_eq!(notes::validate(dir.path(), &many).unwrap().len(), 300);
+}

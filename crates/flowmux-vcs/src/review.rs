@@ -13,8 +13,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
+pub mod notes;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
     WorkingTree,
     Unstaged,
@@ -158,11 +159,16 @@ fn revision(root: &Path, name: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).trim().into())
 }
 
-pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
+pub fn repository_root(start: &Path) -> Result<PathBuf, String> {
     let bytes = git(start, &args(&["rev-parse", "--show-toplevel"]), false)?;
     let root = PathBuf::from(OsString::from_vec(
         bytes.strip_suffix(b"\n").unwrap_or(&bytes).to_vec(),
     ));
+    Ok(std::fs::canonicalize(&root).unwrap_or(root))
+}
+
+pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
+    let root = repository_root(start)?;
     let base = match &scope {
         Scope::Unstaged => None,
         Scope::WorkingTree | Scope::Staged => Some(match revision(&root, "HEAD^{commit}") {
@@ -231,6 +237,7 @@ impl Snapshot {
             "--no-ext-diff",
             "--no-textconv",
             "--no-color",
+            "--full-index",
             "--find-renames",
             "--submodule=short",
         ]);
@@ -269,6 +276,7 @@ impl Snapshot {
                 "--no-ext-diff",
                 "--no-textconv",
                 "--no-color",
+                "--full-index",
                 "--",
                 "/dev/null",
             ]);

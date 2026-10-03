@@ -60,3 +60,31 @@ first/last page access, narrow-window layout, fast scope changes while reads
 are pending, bad base errors, and close/reopen. Set
 `FLOWMUX_REVIEW_SNAPSHOT_DIR` to retain a rendered PNG. These tests run alongside
 existing macOS terminal/browser/editor/theme regression scenarios.
+
+## Review comments
+
+Select one or more diff lines and write a comment in **Write**, or leave the
+selection empty to comment on the whole file. The anchor is captured when you
+start writing, so switching files while composing does not move the comment.
+**Save comment** persists it locally in `reviews.sqlite3` in FlowMux's state
+directory. Review data never changes files or the Git index. **Comments** lets
+you edit, resolve, reopen, or reload saved comments. Resolved comments are kept
+and excluded from delivery. A concurrent edit in another window reports a
+conflict instead of overwriting it; reload preserves the text you are composing.
+
+**Deliver → Validate & preview** prepares one review containing all open
+comments, file paths, old/new line ranges, and quoted diff context. **Copy review**
+checks the current diff again before copying. A full diff fingerprint marks
+changed/deleted anchors as STALE. Refresh the diff, edit a stale comment and
+choose **Use current diff selection** to attach it explicitly, or resolve it.
+Unrelated changes in the same file also require this check. Reviews containing
+stale comments cannot be copied as current feedback.
+
+Hiding the review window keeps the draft. Closing FlowMux with an unsaved review
+focuses that draft so it can be saved or explicitly cleared first. Saved comments
+survive restarts; unfinished text does not survive a forced process termination.
+
+The shared native scenario additionally covers line selection on page 41,
+Unicode and long multiline comments, 300 saved comments, edit/resolve/reopen,
+clipboard readback, persistence reload, cross-window conflicts, stale anchors,
+and preservation of unfinished text when the window is hidden.

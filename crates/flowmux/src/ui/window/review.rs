@@ -13,7 +13,21 @@ impl WindowController {
         let Some(root) = self.file_browser_root_for_pane(pane).await else {
             return;
         };
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root =
+            match gtk::gio::spawn_blocking(move || flowmux_vcs::review::repository_root(&root))
+                .await
+            {
+                Ok(Ok(root)) => root,
+                Ok(Err(error)) => {
+                    self.clipboard_toast.show_with_message(&error);
+                    return;
+                }
+                Err(_) => {
+                    self.clipboard_toast
+                        .show_with_message("Cannot locate the Git checkout.");
+                    return;
+                }
+            };
         let review = self
             .reviews
             .borrow_mut()

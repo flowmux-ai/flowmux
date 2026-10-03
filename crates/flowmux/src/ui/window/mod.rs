@@ -2145,6 +2145,18 @@ impl WindowController {
     }
 
     async fn close_window(&self) {
+        let pending_review = self
+            .reviews
+            .borrow()
+            .values()
+            .find(|r| r.has_unsaved_review())
+            .cloned();
+        if let Some(review) = pending_review {
+            review.status.set_text("Save or clear your review draft before closing FlowMux. If a save is running, wait for it to finish.");
+            review.window.present();
+            self.window_close.prompting.set(false);
+            return;
+        }
         let editors = self
             .pane_registry
             .borrow()

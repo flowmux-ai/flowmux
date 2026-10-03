@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 const PAGE_LINES: usize = 500;
+mod comments;
 
 pub(crate) struct ReviewWindow {
     pub window: adw::Window,
@@ -31,6 +32,7 @@ pub(crate) struct ReviewWindow {
     patch: RefCell<Option<Patch>>,
     generation: Cell<u64>,
     patch_generation: Cell<u64>,
+    comments: comments::Comments,
 }
 
 impl ReviewWindow {
@@ -148,10 +150,21 @@ impl ReviewWindow {
         paging.append(&page_label);
         paging.append(&next);
         right.append(&paging);
+        let comments = comments::Comments::new();
+        let review_split = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .start_child(&right)
+            .end_child(&comments.panel)
+            .resize_start_child(true)
+            .resize_end_child(false)
+            .shrink_start_child(true)
+            .shrink_end_child(true)
+            .position(340)
+            .build();
         let split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
             .start_child(&left)
-            .end_child(&right)
+            .end_child(&review_split)
             .resize_start_child(false)
             .resize_end_child(true)
             .shrink_start_child(true)
@@ -189,6 +202,7 @@ impl ReviewWindow {
             patch: RefCell::new(None),
             generation: Cell::new(0),
             patch_generation: Cell::new(0),
+            comments,
         });
         let weak = Rc::downgrade(&this);
         this.refresh.connect_clicked(move |_| {
@@ -234,6 +248,7 @@ impl ReviewWindow {
                 }
             });
         }
+        this.connect_comments();
         this.reload();
         this
     }
@@ -272,6 +287,7 @@ impl ReviewWindow {
             this.refresh.set_sensitive(true);
             match result {
                 Ok(Ok(snapshot)) => {
+                    this.init_comments(snapshot.root.clone());
                     this.status.set_text(&if snapshot.files.is_empty() {
                         "No changes in this scope.".into()
                     } else {
@@ -473,6 +489,7 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
     )
     .unwrap();
     let review = ReviewWindow::new(parent, directory.path().into());
+    println!("REVIEW_SMOKE_PRESENT");
     review.window.present();
     wait(|| review.patch.borrow().is_some() && review.window.is_mapped()).await;
     assert_eq!(review.files.n_items(), 601);
@@ -513,7 +530,9 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
             false
         )
         .contains("line 19999"));
+    comments::smoke(&review).await;
     review.window.set_default_size(720, 500);
+    println!("REVIEW_SMOKE_RESIZE");
     glib::timeout_future(std::time::Duration::from_millis(100)).await;
     assert!(review.diff.width() > 200);
     if let Some(directory) = std::env::var_os("FLOWMUX_REVIEW_SNAPSHOT_DIR") {
@@ -537,6 +556,7 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
     }
     // Fast scope/filter changes must not render an older in-flight patch.
     review.scope.set_selected(2);
+    println!("REVIEW_SMOKE_SCOPES");
     review.scope.set_selected(0);
     review.scope.set_selected(2);
     wait(|| review.refresh.is_sensitive()).await;
@@ -550,9 +570,16 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
     review.scope.set_selected(0);
     wait(|| review.patch.borrow().is_some()).await;
     review.window.close();
+    println!("REVIEW_SMOKE_CLOSED");
     assert!(!review.window.is_visible());
+    // Native macOS unmaps asynchronously; a second user action arrives on a
+    // later event-loop turn, not inside the close signal's call stack.
+    glib::timeout_future(std::time::Duration::from_millis(50)).await;
     review.window.present();
+    println!("REVIEW_SMOKE_REOPENED");
     assert!(review.window.is_visible());
+    wait(|| review.window.is_mapped()).await;
+    glib::timeout_future(std::time::Duration::from_millis(50)).await;
     review.window.destroy();
     println!("DIFF_REVIEW_NATIVE_SMOKE_OK");
 }
