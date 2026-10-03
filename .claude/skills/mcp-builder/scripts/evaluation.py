@@ -1,6 +1,7 @@
 """MCP Server Evaluation Harness
 
 This script evaluates MCP servers by running test questions against them using Claude.
+FlowMux modifications: handle complete tool-call batches and serialize MCP content.
 """
 
 import argparse
@@ -107,32 +108,34 @@ async def agent_loop(
     tool_metrics = {}
 
     while response.stop_reason == "tool_use":
-        tool_use = next(block for block in response.content if block.type == "tool_use")
-        tool_name = tool_use.name
-        tool_input = tool_use.input
+        results = []
+        for tool_use in (block for block in response.content if block.type == "tool_use"):
+            tool_name = tool_use.name
+            tool_start_ts = time.time()
+            failed = False
+            try:
+                tool_result = await connection.call_tool(tool_name, tool_use.input)
+                tool_response = json.dumps(
+                    tool_result, default=lambda block: block.model_dump(mode="json")
+                ) if isinstance(tool_result, (dict, list)) else str(tool_result)
+            except Exception as e:
+                failed = True
+                tool_response = f"Error executing tool {tool_name}: {str(e)}\n"
+                tool_response += traceback.format_exc()
+            tool_duration = time.time() - tool_start_ts
 
-        tool_start_ts = time.time()
-        try:
-            tool_result = await connection.call_tool(tool_name, tool_input)
-            tool_response = json.dumps(tool_result) if isinstance(tool_result, (dict, list)) else str(tool_result)
-        except Exception as e:
-            tool_response = f"Error executing tool {tool_name}: {str(e)}\n"
-            tool_response += traceback.format_exc()
-        tool_duration = time.time() - tool_start_ts
-
-        if tool_name not in tool_metrics:
-            tool_metrics[tool_name] = {"count": 0, "durations": []}
-        tool_metrics[tool_name]["count"] += 1
-        tool_metrics[tool_name]["durations"].append(tool_duration)
-
-        messages.append({
-            "role": "user",
-            "content": [{
+            if tool_name not in tool_metrics:
+                tool_metrics[tool_name] = {"count": 0, "durations": []}
+            tool_metrics[tool_name]["count"] += 1
+            tool_metrics[tool_name]["durations"].append(tool_duration)
+            results.append({
                 "type": "tool_result",
                 "tool_use_id": tool_use.id,
                 "content": tool_response,
-            }]
-        })
+                "is_error": failed,
+            })
+
+        messages.append({"role": "user", "content": results})
 
         response = await asyncio.to_thread(
             client.messages.create,
