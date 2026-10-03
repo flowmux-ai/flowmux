@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Catppuccin Latte — Copyright (c) 2021 Catppuccin.
 # Source: https://github.com/catppuccin/catppuccin
+# FlowMux adaptation: improve text, selection, or cursor contrast; ANSI palette retained.
 background = #eff1f5
 foreground = #4c4f69
-cursor-color = #dc8a78
+cursor-color = #8839ef
 selection-background = #acb0be
-selection-foreground = #4c4f69
+selection-foreground = #3c3f55
 palette = 0=#5c5f77
 palette = 1=#d20f39
 palette = 2=#40a02b

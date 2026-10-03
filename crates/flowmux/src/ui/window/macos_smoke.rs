@@ -683,6 +683,53 @@ async fn check_theme_sources(controller: &WindowController) {
         .contains("error: example diagnostic"));
     println!("MACOS_NATIVE_THEME_PREVIEW_OK");
     println!("MACOS_NATIVE_THEME_OVERRIDES_OK");
+    for (index, preset) in flowmux_config::presets::PRESETS.iter().enumerate() {
+        list.select_row(list.row_at_index(index as i32 + 1).as_ref());
+        glib::timeout_future(Duration::from_millis(120)).await;
+        let resolved = controller.current_theme();
+        assert_eq!(
+            flowmux_config::options::load().theme.as_deref(),
+            Some(preset.id)
+        );
+        assert_eq!(preview.color_background_for_draw(), resolved.bg);
+        let text = preview.text_format(vte::Format::Text).unwrap();
+        assert!(
+            text.contains("00 Aa") && text.contains("15 Aa"),
+            "{}: clipped ANSI preview",
+            preset.id
+        );
+        let html = preview.text_format(vte::Format::Html).unwrap();
+        for color in &resolved.palette {
+            if *color != resolved.fg {
+                let hex = format!(
+                    "#{:02X}{:02X}{:02X}",
+                    (color.red() * 255.0).round() as u8,
+                    (color.green() * 255.0).round() as u8,
+                    (color.blue() * 255.0).round() as u8
+                );
+                assert!(
+                    html.contains(&hex),
+                    "{}: ANSI color {hex} missing",
+                    preset.id
+                );
+            }
+        }
+        if matches!(
+            preset.id,
+            "github-dark"
+                | "gruvbox-light"
+                | "flowmux-contrast-dark"
+                | "flowmux-contrast-light"
+                | "catppuccin-latte"
+                | "solarized-dark"
+                | "solarized-light"
+        ) {
+            glib::timeout_future(Duration::from_millis(300)).await;
+            save_theme_snapshot(window.upcast_ref(), preset.id);
+            save_theme_snapshot(preview.upcast_ref(), &format!("{}-palette", preset.id));
+        }
+        println!("MACOS_NATIVE_PALETTE_OK {}", preset.id);
+    }
     window.close();
     std::fs::remove_file(path).unwrap();
     flowmux_config::options::save(&Options::default()).unwrap();

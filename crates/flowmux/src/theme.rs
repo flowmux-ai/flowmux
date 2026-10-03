@@ -886,6 +886,106 @@ fn shift_lightness(c: &gdk::RGBA, delta: f32) -> gdk::RGBA {
 mod tests {
     use super::*;
 
+    // Linearize sRGB for contrast measurement; the UI's dark/light heuristic
+    // above intentionally measures brightness rather than a contrast ratio.
+    fn contrast_luminance(color: &gdk::RGBA) -> f64 {
+        let linear = |value: f32| {
+            let value = value as f64;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.red())
+            + 0.7152 * linear(color.green())
+            + 0.0722 * linear(color.blue())
+    }
+
+    fn contrast_ratio(a: &gdk::RGBA, b: &gdk::RGBA) -> f64 {
+        let a = contrast_luminance(a);
+        let b = contrast_luminance(b);
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn preset_contrast_audit() {
+        println!("| Theme | Text | Selection text | Selection vs canvas | Cursor | ANSI below 4.5 | Repeated normal/bright accents |");
+        println!("| --- | ---: | ---: | ---: | ---: | --- | --- |");
+        for preset in flowmux_config::presets::PRESETS {
+            let theme =
+                ResolvedTheme::from_ghostty(&flowmux_config::presets::config(preset.id).unwrap());
+            let selection_bg = theme.selection_bg.unwrap_or(theme.fg);
+            let selection_fg = theme
+                .selection_fg
+                .unwrap_or(if theme.selection_bg.is_some() {
+                    theme.fg
+                } else {
+                    theme.bg
+                });
+            let text = contrast_ratio(&theme.fg, &theme.bg);
+            let selection = contrast_ratio(&selection_fg, &selection_bg);
+            let selection_edge = contrast_ratio(&selection_bg, &theme.bg);
+            let cursor = contrast_ratio(&theme.cursor, &theme.bg);
+            let low: Vec<_> = theme
+                .palette
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    let ratio = contrast_ratio(c, &theme.bg);
+                    (ratio < 4.5).then(|| format!("{i} ({ratio:.2})"))
+                })
+                .collect();
+            let repeats: Vec<_> = (1..=6)
+                .filter(|&i| theme.palette[i] == theme.palette[i + 8])
+                .map(|i| format!("{i}/{}", i + 8))
+                .collect();
+            println!(
+                "| {} | {text:.2} | {selection:.2} | {selection_edge:.2} | {cursor:.2} | {} | {} |",
+                preset.name,
+                low.join(", "),
+                repeats.join(", ")
+            );
+            assert!(text >= 4.5, "{}: default text contrast {text}", preset.id);
+            assert!(
+                selection >= 4.5,
+                "{}: selected text contrast {selection}",
+                preset.id
+            );
+            assert!(
+                selection_edge >= 1.25,
+                "{}: selection blends into canvas",
+                preset.id
+            );
+            assert!(cursor >= 3.0, "{}: cursor contrast {cursor}", preset.id);
+            if matches!(preset.id, "github-dark" | "gruvbox-light") {
+                for i in (1..=6).chain(9..=14) {
+                    assert!(
+                        contrast_ratio(&theme.palette[i], &theme.bg) >= 4.5,
+                        "{}: unreadable ANSI accent {i}",
+                        preset.id
+                    );
+                }
+            }
+            if preset.id.starts_with("flowmux-contrast-") {
+                assert!(text >= 7.0, "{}: high contrast text", preset.id);
+                assert!(low.is_empty(), "{}: weak ANSI colors {low:?}", preset.id);
+                for i in 0..8 {
+                    assert!(
+                        contrast_luminance(&theme.palette[i + 8])
+                            > contrast_luminance(&theme.palette[i]),
+                        "{}: bright slot {} must be lighter",
+                        preset.id,
+                        i + 8
+                    );
+                }
+                let unique: std::collections::HashSet<_> =
+                    theme.palette.iter().map(rgba_hex).collect();
+                assert_eq!(unique.len(), 16, "{}: duplicate ANSI colors", preset.id);
+            }
+        }
+    }
+
     #[test]
     fn automatic_focus_is_visible_on_light_presets_and_preserves_custom_settings() {
         use flowmux_config::options::Options;

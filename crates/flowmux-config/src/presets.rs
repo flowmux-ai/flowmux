@@ -73,6 +73,26 @@ pub const PRESETS: &[ThemePreset] = &[
         name: "Catppuccin Latte",
         source: include_str!("../themes/catppuccin-latte.theme"),
     },
+    ThemePreset {
+        id: "github-dark",
+        name: "GitHub Dark",
+        source: include_str!("../themes/github-dark.theme"),
+    },
+    ThemePreset {
+        id: "gruvbox-light",
+        name: "Gruvbox Light",
+        source: include_str!("../themes/gruvbox-light.theme"),
+    },
+    ThemePreset {
+        id: "flowmux-contrast-dark",
+        name: "FlowMux Contrast Dark",
+        source: include_str!("../themes/flowmux-contrast-dark.theme"),
+    },
+    ThemePreset {
+        id: "flowmux-contrast-light",
+        name: "FlowMux Contrast Light",
+        source: include_str!("../themes/flowmux-contrast-light.theme"),
+    },
 ];
 
 pub fn find(id: &str) -> Option<&'static ThemePreset> {

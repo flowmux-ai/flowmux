@@ -159,10 +159,17 @@ fn update_preview(preview: &vte::Terminal, cfg: &GhosttyConfig) {
         } else {
             theme.bg
         });
-    preview.feed(format!(
+    let mut sample = format!(
         "\x1b[0m\x1b[2J\x1b[H\x1b[?25l$ cargo test\r\n\x1b[32mPASS\x1b[0m  12 tests passed\r\n\x1b[31merror:\x1b[0m example diagnostic\r\n\x1b[48;2;{}m\x1b[38;2;{}m Selected text \x1b[0m  Cursor \x1b[48;2;{}m \x1b[0m\r\nfn main() {{ println!(\"Hello\"); }}",
         rgb(selection_bg), rgb(selection_fg), rgb(theme.cursor),
-    ).as_bytes());
+    );
+    for (label, start) in [("Normal", 0), ("Bright", 8)] {
+        sample.push_str(&format!("\r\n{label}: "));
+        for index in start..start + 8 {
+            sample.push_str(&format!("\x1b[38;5;{index}m{index:02} Aa \x1b[0m"));
+        }
+    }
+    preview.feed(sample.as_bytes());
 }
 
 pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk::Widget {
@@ -186,8 +193,8 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
     preview.set_input_enabled(false);
     preview.set_focusable(false);
     preview.set_scrollback_lines(0);
-    preview.set_size(44, 6);
-    preview.set_height_request(120);
+    preview.set_size(56, 8);
+    preview.set_height_request(160);
     preview.set_vexpand(false);
     let preview_frame = gtk::Frame::new(None);
     preview_frame.set_child(Some(&preview));

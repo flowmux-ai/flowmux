@@ -27,9 +27,11 @@ The following color data is distributed under the MIT License:
   Source: <https://github.com/catppuccin/catppuccin>
 - Dracula: Copyright (c) 2023 Dracula Theme.
   Source: <https://github.com/dracula/dracula-theme>
-- GitHub Light: Copyright (c) 2020 Primer.
+- GitHub Light and Dark: Copyright (c) 2020 Primer.
   Source: <https://github.com/primer/github-vscode-theme>
-- Gruvbox Dark: Pavel Pertsev (morhetz).
+- GitHub Dark ANSI palette (Primer Primitives 7.10.0): Copyright (c) 2018 GitHub Inc.
+  Source: <https://github.com/primer/primitives>
+- Gruvbox Dark and Light: Pavel Pertsev (morhetz).
   Source: <https://github.com/morhetz/gruvbox>
 - Nord: Copyright (c) 2016-present Sven Greb.
   Source: <https://github.com/nordtheme/nord>
