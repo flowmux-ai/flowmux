@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 mod comments;
+mod history;
 mod targets;
 pub(crate) use targets::ReviewTarget;
 
@@ -21,6 +22,7 @@ pub(crate) struct ReviewWindow {
     pub workspace: Cell<Option<flowmux_core::WorkspaceId>>,
     pub pane: flowmux_core::PaneId,
     refresh: gtk::Button,
+    history: history::History,
     search: gtk::SearchEntry,
     files: gtk::StringList,
     selection: gtk::SingleSelection,
@@ -65,6 +67,8 @@ impl ReviewWindow {
         title.add_css_class("title-3");
         header.append(&title);
         content.append(&header);
+        let history = history::History::new();
+        header.append(&history.menu);
         let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh.set_tooltip_text(Some("Refresh changes"));
         header.append(&refresh);
@@ -203,6 +207,7 @@ impl ReviewWindow {
             workspace: Cell::new(None),
             pane,
             refresh,
+            history,
             search,
             files,
             selection,
@@ -327,6 +332,7 @@ impl ReviewWindow {
         });
         this.root_widget.add_controller(keys);
         this.connect_comments();
+        this.connect_history();
         this.reload();
         this
     }
@@ -337,13 +343,14 @@ impl ReviewWindow {
         self.patch_generation
             .set(self.patch_generation.get().wrapping_add(1));
         self.snapshot.borrow_mut().take();
+        self.update_delivery_controls();
         self.patch.borrow_mut().take();
         self.files.splice(0, self.files.n_items(), &[]);
         self.diff.buffer().set_text("");
         self.status.set_text("Loading changes…");
         self.refresh.set_sensitive(false);
         let root = self.root.clone();
-        let scope = Scope::WorkingTree;
+        let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || review::load(&root, scope)).await;
@@ -358,16 +365,18 @@ impl ReviewWindow {
                 Ok(Ok(snapshot)) => {
                     this.comparison
                         .set_text(&review::display_path(&snapshot.root));
-                    this.comparison.set_tooltip_text(Some(
-                        "Current checkout changes since HEAD, including staged edits and new files",
-                    ));
-                    this.init_comments(snapshot.root.clone());
+                    this.comparison.set_tooltip_text(Some(match snapshot.scope {
+                        Scope::Commit(_) => "Selected commit compared with its first parent (empty tree for a root commit)",
+                        _ => "Current checkout changes since HEAD, including staged edits and new files",
+                    }));
+                    let empty = matches!(snapshot.scope, Scope::Commit(_));
                     this.status.set_text(&if snapshot.files.is_empty() {
-                        "No uncommitted changes.".into()
+                        if empty { "No changes in this commit." } else { "No uncommitted changes." }.into()
                     } else {
                         format!("{} changed files", snapshot.files.len())
                     });
                     *this.snapshot.borrow_mut() = Some(snapshot);
+                    this.init_comments(this.root.clone());
                     this.filter_files();
                 }
                 Ok(Err(error)) => this.status.set_text(&error),
@@ -843,6 +852,7 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
     assert!(!text.contains("diff --git") && !text.contains("index 0000"));
     assert!(review.root_widget.is_mapped());
     comments::smoke(&review).await;
+    history::smoke(parent).await;
     review.hide();
     assert_eq!(host.visible_child(), Some(terminal.upcast()));
     review.present();

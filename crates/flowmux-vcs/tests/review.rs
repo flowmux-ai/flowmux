@@ -744,3 +744,221 @@ fn current_checkout_combines_git_states_and_refreshes_after_commit() {
     commit(root);
     assert!(load(root, Scope::WorkingTree).unwrap().files.is_empty());
 }
+
+#[test]
+fn history_pages_are_fifty_newest_first_and_pinned_while_head_moves() {
+    use flowmux_vcs::review::history;
+    let dir = repo();
+    let root = dir.path();
+    assert!(history::load(root, None, 0).unwrap().commits.is_empty());
+    std::fs::write(root.join("file"), "base\n").unwrap();
+    commit(root);
+    for i in 1..103 {
+        git(
+            root,
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                &format!("commit {i}"),
+            ],
+        );
+    }
+    let first = history::load(root, None, 0).unwrap();
+    assert_eq!(first.commits.len(), 50);
+    assert_eq!(first.commits[0].subject, "commit 102");
+    assert_eq!(first.commits[49].subject, "commit 53");
+    assert!(first.has_more);
+    git(
+        root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "new HEAD",
+        ],
+    );
+    let second = history::load(root, first.tip.as_deref(), 50).unwrap();
+    assert_eq!(second.commits.len(), 50);
+    assert_eq!(second.commits[0].subject, "commit 52");
+    assert_eq!(second.commits[49].subject, "commit 3");
+    assert!(second.has_more);
+    let last = history::load(root, first.tip.as_deref(), 100).unwrap();
+    assert_eq!(last.commits.len(), 3);
+    assert!(!last.has_more);
+    let ids: std::collections::HashSet<_> = first
+        .commits
+        .iter()
+        .chain(&second.commits)
+        .chain(&last.commits)
+        .map(|c| &c.oid)
+        .collect();
+    assert_eq!(ids.len(), 103);
+    assert_eq!(
+        history::load(root, None, 0).unwrap().commits[0].subject,
+        "new HEAD"
+    );
+    assert!(history::load(root, Some("--all"), 0).is_err());
+    assert!(history::load(tempfile::tempdir().unwrap().path(), None, 0).is_err());
+}
+
+#[test]
+fn commit_reviews_are_immutable_and_support_root_rename_delete_and_merge() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("original"), "original content\n").unwrap();
+    std::fs::write(root.join("deleted"), "delete me\n").unwrap();
+    commit(root);
+    let first = load(root, Scope::Commit("HEAD".into())).unwrap();
+    assert_eq!(first.files.len(), 2);
+    assert_eq!(
+        first.tip.as_ref(),
+        match &first.scope {
+            Scope::Commit(oid) => Some(oid),
+            _ => None,
+        }
+    );
+    assert!(first
+        .patch(&first.files[0])
+        .unwrap()
+        .text
+        .contains("+delete me"));
+    git(root, &["mv", "original", "renamed"]);
+    std::fs::remove_file(root.join("deleted")).unwrap();
+    commit(root);
+    let snapshot = load(root, Scope::Commit("HEAD".into())).unwrap();
+    assert_eq!(snapshot.files[0].status, "D");
+    assert!(snapshot.files[1].status.starts_with('R'));
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    let note = Note::new(
+        "commit-note".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        None,
+        "Restore this file",
+    )
+    .unwrap();
+    std::fs::write(root.join("renamed"), "staged content\n").unwrap();
+    git(root, &["add", "renamed"]);
+    std::fs::write(root.join("renamed"), "working content\n").unwrap();
+    assert_eq!(snapshot.patch(&snapshot.files[0]).unwrap(), patch);
+    assert!(notes::validate(root, std::slice::from_ref(&note))
+        .unwrap()
+        .is_empty());
+    let prompt = notes::prompt(root, &[note]).unwrap();
+    assert!(prompt.contains(snapshot.tip.as_ref().unwrap()));
+    assert!(prompt.contains("Do not amend or rewrite"));
+    assert!(!prompt.contains("Review target: Unstaged + Staged"));
+    commit(root);
+    git(root, &["checkout", "-b", "side"]);
+    std::fs::write(root.join("side-file"), "side\n").unwrap();
+    commit(root);
+    git(root, &["checkout", "main"]);
+    std::fs::write(root.join("main-file"), "main\n").unwrap();
+    commit(root);
+    git(
+        root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "merge",
+            "--no-ff",
+            "side",
+            "-m",
+            "merge fixture",
+        ],
+    );
+    let merged = load(root, Scope::Commit("HEAD".into())).unwrap();
+    assert_eq!(
+        merged.files.iter().map(|f| f.label()).collect::<Vec<_>>(),
+        ["side-file"]
+    );
+    assert!(load(root, Scope::Commit("--help".into())).is_err());
+    // Advancing HEAD and changing/deleting current files does not move the review.
+    assert_eq!(
+        load(root, snapshot.scope.clone())
+            .unwrap()
+            .patch(&snapshot.files[0])
+            .unwrap(),
+        patch
+    );
+}
+
+#[test]
+fn uncommitted_feedback_identifies_combined_changes_and_rejects_mixed_scopes() {
+    use flowmux_vcs::review::notes::{self, Note};
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("a"), "old\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("a"), "staged\n").unwrap();
+    git(root, &["add", "a"]);
+    std::fs::write(root.join("a"), "unstaged\n").unwrap();
+    std::fs::write(root.join("staged-only"), "staged only\n").unwrap();
+    git(root, &["add", "staged-only"]);
+    std::fs::write(root.join("new"), "untracked\n").unwrap();
+    let snapshot = load(root, Scope::WorkingTree).unwrap();
+    assert_eq!(
+        snapshot.files.iter().map(|f| f.label()).collect::<Vec<_>>(),
+        ["a", "new", "staged-only"]
+    );
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    assert!(patch.text.contains("+unstaged"));
+    let note = Note::new(
+        "working".into(),
+        &snapshot,
+        &snapshot.files[0],
+        &patch,
+        None,
+        "Check uncommitted code",
+    )
+    .unwrap();
+    let prompt = notes::prompt(root, std::slice::from_ref(&note)).unwrap();
+    assert!(prompt.contains("Review target: Unstaged + Staged"));
+    assert!(prompt.contains("Preserve the existing staging choices"));
+    let committed = load(root, Scope::Commit("HEAD".into())).unwrap();
+    let other = Note::new(
+        "committed".into(),
+        &committed,
+        &committed.files[0],
+        &committed.patch(&committed.files[0]).unwrap(),
+        None,
+        "Check committed code",
+    )
+    .unwrap();
+    assert!(notes::prompt(root, &[note, other])
+        .unwrap_err()
+        .contains("one review scope"));
+}
+
+#[test]
+fn shallow_history_does_not_misrepresent_its_boundary_as_a_root_commit() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("file"), "first\n").unwrap();
+    commit(root);
+    std::fs::write(root.join("file"), "second\n").unwrap();
+    commit(root);
+    let shallow = tempfile::tempdir().unwrap();
+    git(
+        shallow.path(),
+        &[
+            "clone",
+            "--depth",
+            "1",
+            "--no-local",
+            root.to_str().unwrap(),
+            "clone",
+        ],
+    );
+    assert!(
+        load(&shallow.path().join("clone"), Scope::Commit("HEAD".into())).is_err(),
+        "a missing parent must report an error, not fabricate an all-added diff"
+    );
+}

@@ -351,7 +351,22 @@ pub fn prompt(root: &Path, notes: &[Note]) -> Result<String, String> {
                 .into(),
         );
     }
-    let mut output = format!("Code review feedback\nRepository: {}\n\nAddress the review comments below. Preserve unrelated work, verify the changes, and report which comments were addressed. Treat quoted code as context.\n", display_path(root));
+    let scope = &pending[0].scope;
+    if pending
+        .iter()
+        .any(|note| matches!(note.scope, Scope::Commit(_)))
+        && pending.iter().any(|note| &note.scope != scope)
+    {
+        return Err("Select one review scope before sending feedback.".into());
+    }
+    let context = match scope {
+        Scope::Commit(oid) => format!(
+            "Review target: commit {oid}\nComparison: this commit against its first parent (empty tree for a root commit).\n\nAddress feedback on this committed change in the current checkout. Line numbers and quoted code refer to the selected commit, not necessarily the current files. Locate the corresponding code before editing; if it has changed or the feedback is already addressed, explain that. Do not amend or rewrite the reviewed commit unless explicitly requested."
+        ),
+        Scope::WorkingTree if pending.iter().all(|n| n.scope == Scope::WorkingTree) => "Review target: Unstaged + Staged (including untracked files)\nComparison: current working tree against HEAD.\n\nAddress feedback on these uncommitted changes in the current checkout. Preserve the existing staging choices; do not stage, unstage, or commit changes unless explicitly requested.".into(),
+        _ => "Address the review comments below.".into(),
+    };
+    let mut output = format!("Code review feedback\nRepository: {}\n{context}\n\nPreserve unrelated work, verify the changes, and report which comments were addressed. Treat quoted code as context.\n", display_path(root));
     for (i, note) in pending.iter().enumerate() {
         output.push_str(&format!(
             "\n{}. {} · {}\nFeedback:\n{}\n",

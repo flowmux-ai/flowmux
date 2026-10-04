@@ -132,6 +132,39 @@ impl Comments {
 }
 
 impl ReviewWindow {
+    #[cfg(test)]
+    pub(super) async fn smoke_save_file_comment(self: &Rc<Self>, value: &str) {
+        self.smoke_wait_for_comments().await;
+        self.begin_comment(true);
+        self.smoke_set_draft(value);
+        self.comments.save.emit_clicked();
+        self.smoke_wait_for_comments().await;
+        assert_eq!(self.status.text(), "Comment saved");
+    }
+
+    #[cfg(test)]
+    pub(super) async fn smoke_wait_for_comments(&self) {
+        glib::future_with_timeout(std::time::Duration::from_secs(20), async {
+            while self.comments.busy.get() || !self.comments.ready.get() {
+                glib::timeout_future(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(test)]
+    pub(super) fn smoke_remove_scope_comments(&self) {
+        self.comments.menu.popup();
+        self.comments
+            .navigation
+            .last_child()
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap()
+            .emit_clicked();
+    }
+
     #[cfg(all(test, target_os = "macos"))]
     pub(crate) async fn smoke_prepare_unchanged_edit(self: &Rc<Self>, value: &str) {
         self.begin_comment(true);
@@ -185,13 +218,14 @@ impl ReviewWindow {
         self.comments.writer.set_editable(!self.comments.busy.get());
         self.targets.menu.set_sensitive(
             enabled
+                && self.snapshot.borrow().is_some()
                 && self
                     .comments
                     .draft
                     .borrow()
                     .notes
                     .iter()
-                    .any(|n| !n.resolved),
+                    .any(|n| !n.resolved && n.scope == *self.history.scope.borrow()),
         );
     }
 
@@ -287,7 +321,9 @@ impl ReviewWindow {
 
     fn apply_loaded_comments(self: &Rc<Self>, mut draft: Draft) {
         for note in &mut draft.notes {
-            note.scope = Scope::WorkingTree;
+            if !matches!(note.scope, Scope::Commit(_)) {
+                note.scope = Scope::WorkingTree;
+            }
             // Resolve was replaced by Delete, including for legacy comments.
             note.resolved = false;
         }
@@ -325,11 +361,12 @@ impl ReviewWindow {
         }
         self.update_delivery_controls();
         let root = self.root.clone();
+        let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || {
                 let store = DraftStore::default_store()?;
-                store.refresh(&root, &store.load(&root)?)
+                store.refresh_scope(&root, &store.load(&root)?, &scope)
             })
             .await;
             let Some(this) = weak.upgrade() else {
@@ -424,7 +461,7 @@ impl ReviewWindow {
         self.status.set_text("Comment cancelled");
     }
 
-    fn focus_comment(self: &Rc<Self>) {
+    pub(super) fn focus_comment(self: &Rc<Self>) {
         let note = self.comments.anchor.borrow().clone();
         if let Some(note) = note {
             if self.comments.writer.is_mapped() {
@@ -464,7 +501,7 @@ impl ReviewWindow {
     }
 
     pub(super) fn cancel_or_close(self: &Rc<Self>) {
-        for menu in [&self.comments.menu, &self.targets.menu] {
+        for menu in [&self.comments.menu, &self.targets.menu, &self.history.menu] {
             if menu.popover().is_some_and(|p| p.is_visible()) {
                 menu.popdown();
                 self.diff.grab_focus();
@@ -478,7 +515,7 @@ impl ReviewWindow {
         }
     }
 
-    fn clear_comment(&self) {
+    pub(super) fn clear_comment(&self) {
         self.comments.writer.buffer().set_text("");
         self.comments.anchor.borrow_mut().take();
         self.comments.editing.set(false);
@@ -553,11 +590,19 @@ impl ReviewWindow {
         });
     }
 
-    fn render_comments(self: &Rc<Self>) {
+    pub(super) fn render_comments(self: &Rc<Self>) {
         while let Some(child) = self.comments.navigation.first_child() {
             self.comments.navigation.remove(&child);
         }
-        let notes = self.comments.draft.borrow().notes.clone();
+        let notes: Vec<_> = self
+            .comments
+            .draft
+            .borrow()
+            .notes
+            .iter()
+            .filter(|n| n.scope == *self.history.scope.borrow())
+            .cloned()
+            .collect();
         let count = notes.len();
         self.comments.menu.set_label(&format!("Comments · {count}"));
         self.targets.menu.set_label(&format!("Send · {count}"));
@@ -607,7 +652,9 @@ impl ReviewWindow {
                     return;
                 }
                 let mut draft = this.comments.draft.borrow().clone();
-                draft.notes.clear();
+                draft
+                    .notes
+                    .retain(|n| n.scope != *this.history.scope.borrow());
                 this.persist_comments(draft, true, "All comments removed");
             }
         });
@@ -634,7 +681,7 @@ impl ReviewWindow {
             .borrow()
             .notes
             .iter()
-            .filter(|n| n.path() == path)
+            .filter(|n| n.path() == path && n.scope == *self.history.scope.borrow())
             .cloned()
             .collect();
         for mut note in notes {
@@ -769,13 +816,9 @@ impl ReviewWindow {
             card.append(&actions);
             cards.push((position, note.id, card.upcast()));
         }
-        if let Some(note) = self
-            .comments
-            .anchor
-            .borrow()
-            .as_ref()
-            .filter(|n| n.path() == path && !composer_added)
-        {
+        if let Some(note) = self.comments.anchor.borrow().as_ref().filter(|n| {
+            n.path() == path && n.scope == *self.history.scope.borrow() && !composer_added
+        }) {
             let position = notes::locate(note, patch).map_or(0, |r| r.end);
             cards.push((
                 position,
@@ -814,14 +857,21 @@ impl ReviewWindow {
         self.targets.menu.popdown();
         let root = self.root.clone();
         let draft = self.comments.draft.borrow().clone();
+        let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || {
-                let draft = DraftStore::default_store()?.refresh(&root, &draft)?;
-                let prompt = if draft.notes.is_empty() {
+                let draft = DraftStore::default_store()?.refresh_scope(&root, &draft, &scope)?;
+                let selected: Vec<_> = draft
+                    .notes
+                    .iter()
+                    .filter(|n| n.scope == scope)
+                    .cloned()
+                    .collect();
+                let prompt = if selected.is_empty() {
                     Ok(None)
                 } else {
-                    notes::prompt(&root, &draft.notes).map(Some)
+                    notes::prompt(&root, &selected).map(Some)
                 };
                 Ok::<_, String>((draft, prompt))
             })

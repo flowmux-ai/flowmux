@@ -9,14 +9,29 @@ Other panes remain visible and usable. Use the same icon, menu item, or shortcut
 again to return to that pane's previous tab. The back arrow or **Escape** also
 returns without stopping its process. Toggling preserves unfinished comments.
 
-## Read the current checkout
+## Choose changes to review
 
 The review uses the selected pane's current local Git checkout (or its active
 editor's project path). Its path is shown above the files. It compares the
 working tree with **HEAD**, including staged edits, unstaged edits, and new
-untracked files in one list. Already committed changes are excluded. There are
-no branch inputs or scope dropdowns. A file with both staged and unstaged edits
-appears once with its net change.
+untracked files in one list. The default **Unstaged + Staged** selection shows
+this combined comparison. A file with both staged and unstaged edits appears
+once with its net change.
+
+Use the dropdown beside **Code Review** to select a commit from the current
+branch's history. The newest 50 commits load first; scrolling to the bottom
+loads 50 more at a time. Each row shows a short commit ID and subject. Opening
+the menu again refreshes the history; additional pages remain pinned to the
+same HEAD while the menu is open, even if another agent creates a commit.
+
+Selecting a commit shows only that commit's changed files and diffs against
+its first parent. A root commit is compared with an empty tree. Merge commits
+use their first parent. Reviewing history does not switch branches or change
+the checkout. In a shallow clone, a missing parent reports an error and asks
+you to fetch the missing history. Save or cancel unfinished comments before
+changing the selection.
+Each commit and the uncommitted comparison keep separate comments, counts,
+and Send batches. Refreshing or toggling Code Review keeps the selected commit fixed.
 
 Use **Refresh** after changing files or Git state. Reopening also refreshes the
 comparison. Changing the pane's directory and reopening selects that checkout;
@@ -44,7 +59,7 @@ Git read failures and concurrent saves do not authorize deleting comments.
 Unfinished local text is preserved; if its saved comment was removed, cancel
 the edit before starting a new comment.
 Below **Reload saved comments**, **Remove all comments** deletes the saved
-comments for this checkout and closes its current composer after a successful save.
+comments for the selected comparison and closes its current composer after a successful save.
 
 Comments are saved locally in `reviews.sqlite3`. They do not modify repository
 files or Git's index. Open Code Review panes and windows using the same checkout and
@@ -61,16 +76,25 @@ A forced process termination can lose unfinished text.
 ## Send feedback
 
 Open **Send** and select an agent in the same workspace. FlowMux checks
-comments against the current code, verifies the live session, and sends the
+comments against the selected comparison's code, verifies the live session, and sends the
 batch as a bracketed paste followed by Enter. An agent must be idle or done and
 show an empty recognized prompt (`›`, `❯`, or `>`), or Codex's known empty-input placeholder with the cursor at its start. Existing input, working
 agents, approval waits, exited sessions, and unrecognized prompts are left
 untouched. Feedback remains saved so it can be retried. **Copy feedback** is
 available in the same menu for other programs or prompt styles.
 
-Comments follow unchanged selected code when other lines shift. Nearby context
+Uncommitted feedback identifies **Unstaged + Staged**, compares against HEAD,
+and asks the agent to preserve existing staging choices. Commit feedback
+includes the full commit ID, explains that line numbers refer to historical
+code, and asks the agent to locate the corresponding current code before
+making corrections without rewriting the reviewed commit. Only comments from
+the selected comparison are sent or copied. Historical comments remain tied
+to their commit when the working tree changes or HEAD advances.
+
+Uncommitted comments follow unchanged selected code when other lines shift. Nearby context
 helps disambiguate repeated code. Saved comments with changed or ambiguous
-selections, missing files, or changed binary content are removed during validation.
+selections that still exist are preserved for reattachment. Missing files,
+removed selected code, or changed binary content are removed during validation.
 Whole-file text comments stay attached across edits. If no valid comments remain,
 the list is cleared and no feedback is copied or sent.
 
@@ -104,7 +128,11 @@ macOS native GUI checks:
 ./scripts/test-diff-review-macos.sh
 ```
 
-The native scenarios check continuous 20,000-line rendering, pane-local navigation and checkout selection,
+The native scenarios check 50/100/103-commit dropdown scrolling, commit and
+uncommitted comment isolation, scope-specific feedback, historical review reopening,
+and protection of unfinished comments when switching scopes. The macOS handoff
+scenario verifies both message templates at the receiving child PTY.
+They also check continuous 20,000-line rendering, pane-local navigation and checkout selection,
 menu dismissal and comment cancellation, stacked comment edit geometry,
 unchanged Edit versus unsaved text, menu-to-PTY delivery between two Codex targets,
 inline Unicode comments, persistence, relocation after insertion, missing-file

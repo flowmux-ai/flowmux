@@ -13,6 +13,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
+pub mod history;
 pub mod notes;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -24,6 +25,8 @@ pub enum Scope {
     Unstaged,
     Staged,
     Branch(String),
+    /// One immutable commit, compared with its first parent (or the empty tree).
+    Commit(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +173,16 @@ fn revision(root: &Path, name: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).trim().into())
 }
 
+fn empty_tree(root: &Path) -> Result<String, String> {
+    Ok(String::from_utf8_lossy(&git(
+        root,
+        &args(&["hash-object", "-t", "tree", "--stdin"]),
+        false,
+    )?)
+    .trim()
+    .into())
+}
+
 pub fn repository_root(start: &Path) -> Result<PathBuf, String> {
     let bytes = git(start, &args(&["rev-parse", "--show-toplevel"]), false)?;
     let root = PathBuf::from(OsString::from_vec(
@@ -184,22 +197,34 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
         Scope::AllChanges(reference) if reference.trim().is_empty() => {
             Scope::AllChanges(default_base(&root))
         }
+        Scope::Commit(reference) => {
+            Scope::Commit(revision(&root, &format!("{reference}^{{commit}}"))?)
+        }
         scope => scope,
     };
     let head_or_empty = || -> Result<String, String> {
         match revision(&root, "HEAD^{commit}") {
             Ok(oid) => Ok(oid),
-            Err(_) => Ok(String::from_utf8_lossy(&git(
-                &root,
-                &args(&["hash-object", "-t", "tree", "--stdin"]),
-                false,
-            )?)
-            .trim()
-            .into()),
+            Err(_) => empty_tree(&root),
         }
     };
     let base = match &scope {
         Scope::Unstaged => None,
+        Scope::Commit(oid) => {
+            // Traversal commands hide parents at shallow boundaries. Read the
+            // object header so missing history cannot look like a root commit.
+            let object = git(&root, &args(&["cat-file", "-p", oid]), false)?;
+            let object = String::from_utf8_lossy(&object);
+            let parent = object
+                .lines()
+                .take_while(|line| !line.is_empty())
+                .find_map(|line| line.strip_prefix("parent "));
+            Some(match parent {
+                Some(parent) => revision(&root, &format!("{parent}^{{commit}}"))
+                    .map_err(|_| "The parent commit is unavailable. Fetch the missing history before reviewing this commit.".to_string())?,
+                None => empty_tree(&root)?,
+            })
+        }
         Scope::WorkingTree | Scope::Staged => Some(head_or_empty()?),
         Scope::AllChanges(reference) if reference == "HEAD" => Some(head_or_empty()?),
         Scope::Branch(reference) | Scope::AllChanges(reference) => {
@@ -214,10 +239,10 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
             )
         }
     };
-    let tip = if matches!(scope, Scope::Branch(_)) {
-        Some(revision(&root, "HEAD^{commit}")?)
-    } else {
-        None
+    let tip = match &scope {
+        Scope::Commit(oid) => Some(oid.clone()),
+        Scope::Branch(_) => Some(revision(&root, "HEAD^{commit}")?),
+        _ => None,
     };
     let mut snapshot = Snapshot {
         root,

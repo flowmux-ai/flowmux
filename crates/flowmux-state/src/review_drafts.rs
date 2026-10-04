@@ -62,13 +62,35 @@ impl DraftStore {
     /// Refresh anchors and remove obsolete comments only after a successful
     /// Git read. Revision checking prevents overwriting another window's edits.
     pub fn refresh(&self, root: &Path, draft: &Draft) -> Result<Draft, String> {
+        self.refresh_scope(root, draft, &flowmux_vcs::review::Scope::WorkingTree)
+    }
+
+    /// Validate only the selected review; other commits keep their own anchors.
+    pub fn refresh_scope(
+        &self,
+        root: &Path,
+        draft: &Draft,
+        scope: &flowmux_vcs::review::Scope,
+    ) -> Result<Draft, String> {
         let mut current = draft.clone();
         for note in &mut current.notes {
-            note.scope = flowmux_vcs::review::Scope::WorkingTree;
+            if !matches!(note.scope, flowmux_vcs::review::Scope::Commit(_)) {
+                note.scope = flowmux_vcs::review::Scope::WorkingTree;
+            }
             note.resolved = false;
         }
-        let (notes, stale) = flowmux_vcs::review::notes::refresh(root, &current.notes)?;
-        current.notes = notes;
+        let selected: Vec<_> = current
+            .notes
+            .iter()
+            .filter(|n| &n.scope == scope)
+            .cloned()
+            .collect();
+        let (notes, stale) = flowmux_vcs::review::notes::refresh(root, &selected)?;
+        for note in &mut current.notes {
+            if let Some(updated) = notes.iter().find(|updated| updated.id == note.id) {
+                *note = updated.clone();
+            }
+        }
         current.notes.retain(|note| !stale.contains(&note.id));
         if current != *draft {
             self.save(root, &current)

@@ -290,3 +290,69 @@ fn committed_clean_or_deleted_files_still_remove_obsolete_feedback() {
         assert!(s.reopen().notes.is_empty());
     }
 }
+
+#[test]
+fn commit_and_working_reviews_keep_separate_anchors_across_reopen_and_cleanup() {
+    let scenario = Scenario::new(Some("original\n"), "committed change\n");
+    scenario.commit();
+    let committed = review::load(&scenario.root, Scope::Commit("HEAD".into())).unwrap();
+    let patch = committed.patch(&committed.files[0]).unwrap();
+    let row = patch
+        .lines
+        .iter()
+        .position(|line| line.text == "+committed change")
+        .unwrap();
+    let commit_note = Note::new(
+        "historical".into(),
+        &committed,
+        &committed.files[0],
+        &patch,
+        Some(row..row + 1),
+        "Review historical code",
+    )
+    .unwrap();
+    scenario.write("uncommitted change\n");
+    let mut draft = scenario.save("+uncommitted change", "+uncommitted change");
+    draft.notes.push(commit_note.clone());
+    let draft = scenario.store().save(&scenario.root, &draft).unwrap();
+    scenario.write("completely different\n");
+    let refreshed = scenario
+        .store()
+        .refresh_scope(&scenario.root, &draft, &committed.scope)
+        .unwrap();
+    assert_eq!(
+        refreshed, draft,
+        "commit refresh must not clean up another scope's comments"
+    );
+    let current = scenario
+        .store()
+        .refresh(&scenario.root, &refreshed)
+        .unwrap();
+    assert_eq!(
+        current.notes.as_slice(),
+        std::slice::from_ref(&commit_note),
+        "working cleanup must preserve the historical comment"
+    );
+    scenario.git(&["rm", "-f", "sample.txt"]);
+    scenario.commit();
+    let reopened = scenario.store().load(&scenario.root).unwrap();
+    assert_eq!(
+        reopened.notes.as_slice(),
+        std::slice::from_ref(&commit_note)
+    );
+    assert_eq!(
+        scenario
+            .store()
+            .refresh_scope(&scenario.root, &reopened, &committed.scope)
+            .unwrap()
+            .notes,
+        [commit_note]
+    );
+    assert!(
+        scenario
+            .store()
+            .refresh_scope(&scenario.root, &draft, &committed.scope)
+            .is_err(),
+        "scope refresh still rejects a concurrent stale revision"
+    );
+}

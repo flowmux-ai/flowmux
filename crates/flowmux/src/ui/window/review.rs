@@ -563,6 +563,7 @@ finally:
         assert!(received.ends_with(b"\x1b[201~\r"));
         assert!(String::from_utf8_lossy(&received)
             .contains("Send unchanged Edit to the chosen Codex pane"));
+        assert!(String::from_utf8_lossy(&received).contains("Review target: Unstaged + Staged"));
         assert!(!review.root_widget.is_mapped());
         assert!(!target_review.root_widget.is_mapped());
         assert_eq!(terminal.screen_text().unwrap(), source_before);
@@ -586,6 +587,85 @@ finally:
         .await
         .expect("focus must reach the terminal while the outgoing review is still mapped");
         println!("DIFF_REVIEW_TRANSITION_TERMINAL_FOCUS_OK");
+        // The same real Send -> bridge -> PTY path carries a historical review
+        // with its immutable commit ID and the committed-change template.
+        for args in [
+            vec!["add", "review.txt"],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "test: create committed review fixture",
+            ],
+        ] {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_AUTHOR_NAME", "JunsuChoi")
+                .env("GIT_AUTHOR_EMAIL", "jsuya.choi@samsung.com")
+                .env("GIT_COMMITTER_NAME", "JunsuChoi")
+                .env("GIT_COMMITTER_EMAIL", "jsuya.choi@samsung.com")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        review.present();
+        let oid = review.smoke_select_latest_commit().await;
+        review
+            .smoke_prepare_unchanged_edit("Send this historical commit review")
+            .await;
+        std::fs::remove_file(&receipt).unwrap();
+        destination_terminal
+            .write_input(format!("python3 '{}'\r", receiver.display()).as_bytes())
+            .unwrap();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            loop {
+                let (column, row) = destination_terminal.widget.cursor_position();
+                let (line, _) = destination_terminal.widget.text_range_format(
+                    vte::Format::Text,
+                    row,
+                    0,
+                    row + 1,
+                    0,
+                );
+                if empty_agent_prompt("codex", line.as_deref().unwrap_or_default(), column) {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut agent = AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
+        agent.status = AgentStatus::Idle;
+        agent.session_id = Some("destination-commit-codex".into());
+        controller
+            .store
+            .set_agent_activity(destination_surface, Some(agent))
+            .await;
+        controller.refresh_review_targets().await;
+        review.smoke_activate_target(destination_surface);
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !receipt.exists() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let received = std::fs::read_to_string(&receipt).unwrap();
+        assert!(
+            received.starts_with("\x1b[200~Code review feedback")
+                && received.ends_with("\x1b[201~\r")
+        );
+        assert!(received.contains(&format!("Review target: commit {oid}")));
+        assert!(received.contains("Send this historical commit review"));
+        assert!(!received.contains("Send unchanged Edit to the chosen Codex pane"));
+        println!("DIFF_REVIEW_COMMIT_TEMPLATE_PTY_HANDOFF_OK");
         controller
             .store
             .set_agent_activity(destination_surface, None)
