@@ -30,6 +30,8 @@ pub(crate) struct ReviewWindow {
     pub status: gtk::Label,
     heading: gtk::Label,
     comparison: gtk::Label,
+    commit_message: gtk::Label,
+    commit_details: gtk::ScrolledWindow,
     diff: gtk::TextView,
     display_lines: RefCell<Vec<Option<usize>>>,
     inline_widgets: RefCell<Vec<gtk::Widget>>,
@@ -80,6 +82,23 @@ impl ReviewWindow {
         comparison.set_widget_name("flowmux-review-comparison");
         margins(&comparison, 8);
         content.append(&comparison);
+
+        let commit_message = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(pango::WrapMode::WordChar)
+            .selectable(true)
+            .build();
+        commit_message.set_widget_name("flowmux-review-commit-message");
+        margins(&commit_message, 8);
+        let commit_details = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(120)
+            .child(&commit_message)
+            .visible(false)
+            .build();
+        content.append(&commit_details);
 
         let left = gtk::Box::new(gtk::Orientation::Vertical, 6);
         margins(&left, 8);
@@ -215,6 +234,8 @@ impl ReviewWindow {
             status,
             heading,
             comparison,
+            commit_message,
+            commit_details,
             diff,
             display_lines: RefCell::new(Vec::new()),
             inline_widgets: RefCell::new(Vec::new()),
@@ -343,6 +364,8 @@ impl ReviewWindow {
         self.patch_generation
             .set(self.patch_generation.get().wrapping_add(1));
         self.snapshot.borrow_mut().take();
+        self.commit_details.set_visible(false);
+        self.commit_message.set_text("");
         self.update_delivery_controls();
         self.patch.borrow_mut().take();
         self.files.splice(0, self.files.n_items(), &[]);
@@ -363,6 +386,10 @@ impl ReviewWindow {
             this.refresh.set_sensitive(true);
             match result {
                 Ok(Ok(snapshot)) => {
+                    if let Some(message) = &snapshot.commit_message {
+                        this.commit_message.set_text(message);
+                        this.commit_details.set_visible(true);
+                    }
                     this.comparison
                         .set_text(&review::display_path(&snapshot.root));
                     this.comparison.set_tooltip_text(Some(match snapshot.scope {

@@ -316,7 +316,7 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
                 "commit.gpgsign=false",
                 "commit",
                 "-m",
-                &format!("Review commit {i}"),
+                &format!("Review commit {i}\n\n설명 {i} with <literal> & text"),
             ]);
         }
         std::fs::write(dir.path().join("staged.txt"), "staged only\n").unwrap();
@@ -346,6 +346,7 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
     review
         .smoke_wait_for_files(&["committed.txt", "new.txt", "staged.txt"])
         .await;
+    assert!(!review.commit_details.is_visible());
     review.smoke_save_file_comment("Working review only").await;
     review.history.menu.popup();
     wait_for(|| !review.history.loading.get() && review.history.commits.borrow().len() == 50).await;
@@ -382,6 +383,11 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
     })
     .await;
     review.smoke_wait_for_comments().await;
+    assert!(review.commit_details.is_visible());
+    assert_eq!(
+        review.commit_message.text(),
+        "Review commit 102\n\n설명 102 with <literal> & text"
+    );
     assert_eq!(review.files.n_items(), 1);
     assert!(review
         .patch
@@ -423,6 +429,10 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
         .text
         .contains("+revision 0"));
     assert_eq!(review.targets.menu.label().as_deref(), Some("Send · 0"));
+    assert_eq!(
+        review.commit_message.text(),
+        "Review commit 0\n\n설명 0 with <literal> & text"
+    );
     review.begin_comment(true);
     review.smoke_set_draft("unsaved historical feedback");
     review.select_review_scope(None);
@@ -439,6 +449,8 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
     review
         .smoke_wait_for_files(&["committed.txt", "new.txt", "staged.txt"])
         .await;
+    assert!(!review.commit_details.is_visible());
+    assert!(review.commit_message.text().is_empty());
     assert_eq!(review.targets.menu.label().as_deref(), Some("Send · 1"));
     review.send_review(None);
     review.smoke_wait_for_comments().await;

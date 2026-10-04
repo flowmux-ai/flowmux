@@ -962,3 +962,23 @@ fn shallow_history_does_not_misrepresent_its_boundary_as_a_root_commit() {
         "a missing parent must report an error, not fabricate an all-added diff"
     );
 }
+
+#[test]
+fn commit_snapshot_keeps_full_message_and_working_tree_has_none() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::write(root.join("file"), "content\n").unwrap();
+    git(root, &["add", "."]);
+    let message =
+        "feat: 커밋 메시지\n\nFirst paragraph with <literal> & text.\n\nSecond paragraph.";
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
+    let snapshot = load(root, Scope::Commit("HEAD".into())).unwrap();
+    assert_eq!(snapshot.commit_message.as_deref(), Some(message));
+    assert!(load(root, Scope::WorkingTree)
+        .unwrap()
+        .commit_message
+        .is_none());
+}

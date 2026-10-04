@@ -50,6 +50,7 @@ pub struct Snapshot {
     /// Resolved OID, so a moving branch cannot silently change the comparison.
     pub base: Option<String>,
     pub tip: Option<String>,
+    pub commit_message: Option<String>,
     pub files: Vec<File>,
 }
 
@@ -208,6 +209,7 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
             Err(_) => empty_tree(&root),
         }
     };
+    let mut commit_message = None;
     let base = match &scope {
         Scope::Unstaged => None,
         Scope::Commit(oid) => {
@@ -215,6 +217,9 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
             // object header so missing history cannot look like a root commit.
             let object = git(&root, &args(&["cat-file", "-p", oid]), false)?;
             let object = String::from_utf8_lossy(&object);
+            commit_message = object
+                .split_once("\n\n")
+                .map(|(_, message)| message.trim_end().to_string());
             let parent = object
                 .lines()
                 .take_while(|line| !line.is_empty())
@@ -249,6 +254,7 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
         scope,
         base,
         tip,
+        commit_message,
         files: Vec::new(),
     };
     let mut command = snapshot.diff_args();
