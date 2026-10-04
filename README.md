@@ -81,7 +81,11 @@ agent. Toggle Code Review with **Ctrl+Alt+E**.
 
 ### Search terminal output
 
-Search all terminal tabs with **Ctrl+Alt+Shift+F**.
+Search output across workspaces and terminal tabs with **Ctrl+Alt+Shift+F**.
+Each result shows its workspace and tab. Click a result or use the arrow keys
+and Enter to jump to the matching line, even in a hidden tab.
+
+<img src="resources/screenshot/flowmux-search-terminals.gif" alt="Search terminal output across workspaces and jump to matching lines" width="100%" />
 
 ### Themes and keybindings
 
