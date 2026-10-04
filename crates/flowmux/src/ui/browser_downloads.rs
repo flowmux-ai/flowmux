@@ -251,7 +251,7 @@ impl DownloadManager {
         root.append(&scroll);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&root));
-        button.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&button, &popover);
 
         let inner = Rc::new(DownloadManagerInner {
             button,

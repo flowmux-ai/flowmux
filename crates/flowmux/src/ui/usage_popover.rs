@@ -30,8 +30,9 @@ impl UsagePopover {
 
         let popover = gtk::Popover::new();
         popover.set_size_request(360, -1);
-        button.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&button, &popover);
         popover.set_position(gtk::PositionType::Top);
+        popover.set_halign(gtk::Align::Start);
 
         let state = Rc::new(RefCell::new(UsagePanelState::default()));
         let bar = Rc::new(super::usage_bar::UsageBar::new());

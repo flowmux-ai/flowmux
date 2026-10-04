@@ -1908,7 +1908,8 @@ fn attach_tab_context_menu(
             .filter(|(_, id, _)| Some(*id) != current_ws)
             .collect();
 
-        let move_btn = gtk::Button::new();
+        let move_btn = gtk::MenuButton::new();
+        move_btn.set_direction(gtk::ArrowType::Right);
         move_btn.add_css_class("flat");
         let move_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let move_label = gtk::Label::new(Some("Move"));
@@ -1927,7 +1928,7 @@ fn attach_tab_context_menu(
             let submenu = gtk::Popover::new();
             submenu.set_has_arrow(false);
             submenu.set_position(gtk::PositionType::Right);
-            submenu.set_parent(&move_btn);
+            crate::ui::popover_pos::set_menu_popover(&move_btn, &submenu);
             let sub_v = gtk::Box::new(gtk::Orientation::Vertical, 0);
             sub_v.set_margin_top(4);
             sub_v.set_margin_bottom(4);
@@ -1954,18 +1955,6 @@ fn attach_tab_context_menu(
             submenu.connect_closed(|sub| {
                 if let Some(parent) = sub.parent() {
                     parent.grab_focus();
-                }
-            });
-            let sub_for_close = submenu.downgrade();
-            popover.connect_closed(move |_| {
-                if let Some(sub) = sub_for_close.upgrade() {
-                    crate::ui::popover_pos::unparent_after_close(&sub);
-                }
-            });
-            let sub_for_btn = submenu.downgrade();
-            move_btn.connect_clicked(move |_| {
-                if let Some(submenu) = sub_for_btn.upgrade() {
-                    submenu.popup();
                 }
             });
         }
@@ -2119,16 +2108,25 @@ mod tab_dnd_tests {
             .child()
             .unwrap()
             .last_child()
-            .and_downcast::<gtk::Button>()
+            .and_downcast::<gtk::MenuButton>()
             .unwrap();
-        let submenu = move_button
-            .last_child()
-            .and_downcast::<gtk::Popover>()
-            .unwrap();
+        let submenu = move_button.popover().unwrap();
+        assert_eq!(submenu.position(), gtk::PositionType::Right);
         let weak_submenu = submenu.downgrade();
         gtk::glib::timeout_future(Duration::from_millis(100)).await;
-        move_button.emit_clicked();
+        let toggle = move_button
+            .first_child()
+            .and_downcast::<gtk::ToggleButton>()
+            .unwrap();
+        toggle.emit_clicked();
         gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(submenu.is_mapped());
+        toggle.emit_clicked();
+        assert!(!move_button.is_active());
+        toggle.emit_clicked();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(submenu.is_mapped());
+        drop(toggle);
         let destination_button = submenu
             .child()
             .unwrap()
@@ -3630,7 +3628,7 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
         }
     });
     popover.set_child(Some(&items));
-    button.set_popover(Some(&popover));
+    crate::ui::popover_pos::set_menu_popover(&button, &popover);
     button
 }
 

@@ -33,7 +33,7 @@ impl Targets {
         margins(&list, 8);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&list));
-        menu.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&menu, &popover);
         Self {
             menu,
             list,

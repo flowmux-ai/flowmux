@@ -27,7 +27,7 @@ impl BookmarkMenu {
         list.set_size_request(320, -1);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&list));
-        button.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&button, &popover);
 
         let repository = BookmarkRepository::for_profile(profile).ok();
         request_reload(repository, &list, &popover, current, open);

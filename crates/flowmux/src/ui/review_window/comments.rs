@@ -109,7 +109,7 @@ impl Comments {
                 .propagate_natural_height(true)
                 .build(),
         ));
-        menu.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&menu, &popover);
         Self {
             composer,
             writer,

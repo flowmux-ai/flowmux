@@ -88,8 +88,28 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
-    if std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some() {
+    let review_only = std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some();
+    if review_only {
         check_sidebar_footer(&controller).await;
+    }
+    crate::ui::popover_pos::menu_toggle_smoke().await;
+    for _ in 0..2 {
+        controller.dispatch(GtkCommand::ShowOptionsDialog).await;
+        let options = gtk::Window::list_toplevels()
+            .into_iter()
+            .filter_map(|w| w.downcast::<gtk::Window>().ok())
+            .filter(|w| {
+                w.widget_name() == "flowmux-options-dialog"
+                    && w.transient_for().as_ref() == Some(controller.window.upcast_ref())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(options.len(), 1);
+        controller.dispatch(GtkCommand::ShowOptionsDialog).await;
+        assert!(!options[0].is_visible());
+    }
+    println!("OPTIONS_BUTTON_TOGGLE_OK");
+
+    if review_only {
         crate::ui::review_window::smoke(&controller.window).await;
         super::review::handoff_smoke(&controller).await;
         super::review::pane_scope_smoke(&controller).await;

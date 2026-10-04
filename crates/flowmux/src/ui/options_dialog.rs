@@ -95,6 +95,7 @@ fn build_dialog(
         .default_height(720)
         .title("Options")
         .build();
+    dialog.set_widget_name("flowmux-options-dialog");
 
     let header = adw::HeaderBar::new();
     header.set_show_start_title_buttons(false);

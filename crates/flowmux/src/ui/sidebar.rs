@@ -284,7 +284,7 @@ impl Sidebar {
         bell_button.set_tooltip_text(Some("Notifications"));
         let bell_popover = gtk::Popover::new();
         bell_popover.set_size_request(320, -1);
-        bell_button.set_popover(Some(&bell_popover));
+        crate::ui::popover_pos::set_menu_popover(&bell_button, &bell_popover);
 
         let store_for_show = notifications.clone();
         let bridge_for_rows = bridge.clone();

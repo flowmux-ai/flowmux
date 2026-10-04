@@ -8,6 +8,17 @@ impl WindowController {
         match cmd {
             GtkCommand::CloseWindow => self.close_window().await,
             GtkCommand::ShowOptionsDialog => {
+                if let Some(dialog) = gtk::Window::list_toplevels()
+                    .into_iter()
+                    .filter_map(|widget| widget.downcast::<gtk::Window>().ok())
+                    .find(|window| {
+                        window.widget_name() == "flowmux-options-dialog"
+                            && window.transient_for().as_ref() == Some(self.window.upcast_ref())
+                    })
+                {
+                    dialog.close();
+                    return;
+                }
                 let current = self.options.borrow().clone();
                 let options_cell = self.options.clone();
                 let window = self.window.clone();

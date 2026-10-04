@@ -41,7 +41,7 @@ impl History {
         content.append(&status);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&content));
-        menu.set_popover(Some(&popover));
+        crate::ui::popover_pos::set_menu_popover(&menu, &popover);
         Self {
             menu,
             scope: RefCell::new(Scope::WorkingTree),
