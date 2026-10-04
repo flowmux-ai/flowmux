@@ -519,6 +519,16 @@ finally:
         review
             .smoke_prepare_unchanged_edit("Send unchanged Edit to the chosen Codex pane")
             .await;
+        // Keep outgoing reviews mapped during the handoff so focus routing
+        // must follow the selected stack page, not the transition's widgets.
+        for pane in [pane, destination] {
+            controller
+                .pane_registry
+                .borrow()
+                .stack_for_pane(pane)
+                .unwrap()
+                .set_transition_duration(1000);
+        }
         // Publish fixture identities after Git/storage awaits so background
         // polling cannot age them out while the views are being prepared.
         for (surface, session) in [
@@ -556,6 +566,26 @@ finally:
         assert!(!review.root_widget.is_mapped());
         assert!(!target_review.root_widget.is_mapped());
         assert_eq!(terminal.screen_text().unwrap(), source_before);
+        target_review.present();
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while destination_stack.is_transition_running() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        target_review.hide();
+        controller.focus_pane(destination);
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while !gtk::prelude::GtkWindowExt::focus(&controller.window).is_some_and(|focus| {
+                focus == destination_terminal.widget.clone().upcast::<gtk::Widget>()
+            }) {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("focus must reach the terminal while the outgoing review is still mapped");
+        println!("DIFF_REVIEW_TRANSITION_TERMINAL_FOCUS_OK");
         controller
             .store
             .set_agent_activity(destination_surface, None)

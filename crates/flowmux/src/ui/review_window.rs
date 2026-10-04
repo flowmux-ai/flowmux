@@ -506,6 +506,10 @@ impl ReviewWindow {
         );
     }
 
+    pub fn is_presented(&self) -> bool {
+        self.host.borrow().visible_child().as_ref() == Some(self.root_widget.upcast_ref())
+    }
+
     pub fn focus(&self) {
         if gtk::prelude::GtkWindowExt::focus(&self.parent)
             .is_some_and(|focus| focus.is_ancestor(&self.root_widget))
@@ -627,11 +631,17 @@ impl ReviewWindow {
                 if !card.is_mapped() || card.width() <= 0 || card.height() <= 0 {
                     return glib::ControlFlow::Continue;
                 }
-                if let (Some(bounds), Some(adjustment)) =
-                    (card.compute_bounds(diff), diff.vadjustment())
-                {
+                if let Some(adjustment) = diff.vadjustment() {
+                    // TextView parks offscreen children at (-width, -height).
+                    // Their widget bounds are not the anchor's buffer position.
+                    let bounds = diff.iter_location(&iter);
+                    let (_, y) = diff.buffer_to_window_coords(
+                        gtk::TextWindowType::Widget,
+                        bounds.x(),
+                        bounds.y(),
+                    );
                     let margin = 12.0;
-                    let top = bounds.y() as f64;
+                    let top = y as f64;
                     let bottom = top + bounds.height() as f64;
                     let height = diff.height() as f64;
                     let offset = if top < margin || bounds.height() as f64 > height - margin * 2.0 {

@@ -2665,7 +2665,9 @@ impl WindowController {
             .reviews
             .borrow()
             .get(&pane)
-            .filter(|r| r.root_widget.is_mapped())
+            // GtkStack keeps the outgoing page mapped during a transition.
+            // Focusing that page can steal focus back from the terminal.
+            .filter(|r| r.root_widget.is_mapped() && r.is_presented())
         {
             review.focus();
         } else {
