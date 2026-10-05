@@ -41,7 +41,8 @@ cargo fmt --all -- --check
 if [[ $mode == linux ]]; then
     cargo llvm-cov --version
     rustup component add llvm-tools-preview
-    export GDK_BACKEND=x11 GTK_A11Y=test
+    export GDK_BACKEND=x11 GTK_A11Y=test LANG=C.UTF-8 LC_ALL=C.UTF-8
+    locale
     # Keep a fixed virtual desktop. AppArmor is provisioned by the host/CI;
     # this runner does not disable the WebKit sandbox or change host policy.
     result=0

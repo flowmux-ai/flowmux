@@ -31,6 +31,12 @@ still hundreds of thousands of pixels below the viewport. Both the first and
 last stacked comment must become fully visible with the fix. This runs in the
 Linux coverage test and the macOS main-thread native smoke.
 
+Meta-review also reproduced a near-full-height composer ending below the viewport:
+the default 5% scroll margin left a 583px card at y=38 in a 607px viewport. Such
+cards now center without that margin; cards taller than the viewport align at
+their top. The geometry test requires the requested height to be allocated and
+position/range to stabilize, so a briefly visible animation frame cannot pass.
+
 PTY receipts are published atomically and waits require the full paste/submit
 terminator. File existence alone is not a receipt-completion signal.
 
@@ -43,7 +49,8 @@ records toolchain/native-library versions and the complete output. It does not
 restart the installed app or disable WebKit sandboxing.
 
 `rust-toolchain.toml` pins Rust; the Test workflow reads that file through rustup.
-Ubuntu is pinned to 24.04, and the native runner remains macOS 15. Updating the
+Ubuntu is pinned to 24.04 with an explicit C.UTF-8 test locale, and the native
+runner remains macOS 15. Updating the
 compiler/OS is an explicit change to validate on both platforms. Homebrew/apt
 package updates and hosted-runner hardware can still vary; logs record relevant
 versions rather than pretending these environments are bit-for-bit identical.
@@ -84,6 +91,7 @@ child GUI log before its temporary directory is removed. This was verified with
 a denied nested sandbox (failure included the bubblewrap/dbus-proxy cause), then
 with namespace/mount support enabled (both sandbox-on and opt-out tests passed).
 Local Docker validation needs an init/reaper (`docker run --init`), nested
-namespace support, and unmasked `/proc` mounts; the
+namespace support, unmasked `/proc` mounts, and a Bash login shell for the
+SSH fixture account (its input test exercises readline); the
 hosted Ubuntu job uses the packaged AppArmor profile directly. Do not disable or
 skip the sandbox assertion to make a restricted container pass.
