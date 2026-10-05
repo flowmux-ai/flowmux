@@ -2743,6 +2743,9 @@ impl WindowController {
     }
 
     pub async fn dispatch(&self, cmd: GtkCommand) {
+        if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
+            eprintln!("GTK_DIAG dispatch {cmd:?} {:?}", std::time::Instant::now());
+        }
         if self.workspace_overview.is_active() && command_dismisses_workspace_overview(&cmd) {
             self.dismiss_workspace_overview_immediately();
         }

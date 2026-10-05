@@ -33,6 +33,11 @@ pub(crate) fn run() {
         }
     }
     std::env::set_var("SHELL", "/bin/sh");
+    let _log = flowmux_config::diagnostics::init_logging(
+        "native-smoke.log",
+        "warn,flowmux_agent=debug,flowmux_ipc=debug",
+    )
+    .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _entered = runtime.enter();
     adw::init().expect("native macOS display must be available");

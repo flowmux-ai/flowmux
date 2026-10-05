@@ -62,7 +62,13 @@ async fn materialize_workspace(
         .send(GtkCommand::WorkspaceCreated { id, ack })
         .await
         .map_err(|_| "bridge closed".to_string())?;
-    reply.await.map_err(|_| "bridge closed".to_string())?
+    eprintln!("IPC_DIAG workspace queued {:?}", std::time::Instant::now());
+    let result = reply.await.map_err(|_| "bridge closed".to_string())?;
+    eprintln!(
+        "IPC_DIAG workspace acknowledged {:?}",
+        std::time::Instant::now()
+    );
+    result
 }
 
 /// Success means the model and GTK tree have both applied the split.
@@ -310,7 +316,15 @@ impl GuiHandler {
         match req {
             Request::WorkspaceCreate { .. } => {
                 // Create the model, then require the GUI to materialize it.
+                eprintln!(
+                    "IPC_DIAG workspace model begin {:?}",
+                    std::time::Instant::now()
+                );
                 let resp = self.inner.handle(req.clone()).await;
+                eprintln!(
+                    "IPC_DIAG workspace model complete {:?}",
+                    std::time::Instant::now()
+                );
                 let id = match &resp {
                     Response::WorkspaceCreated { id } => *id,
                     _ => return resp,

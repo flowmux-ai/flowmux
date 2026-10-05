@@ -7,13 +7,22 @@ impl WindowController {
     pub(super) async fn dispatch_workspace_command(&self, cmd: GtkCommand) {
         match cmd {
             GtkCommand::WorkspaceCreated { id, ack } => {
+                eprintln!(
+                    "IPC_DIAG GTK workspace begin {:?}",
+                    std::time::Instant::now()
+                );
                 // Pull the authoritative workspace (with the store's
                 // pane ids) instead of fabricating new ones — otherwise
                 // `focused_pane` gets a UUID that doesn't exist in the
                 // store and split / close shortcuts no-op.
                 let result = match self.store.get_workspace(id).await {
                     Some(ws) => {
+                        eprintln!("IPC_DIAG GTK render begin {:?}", std::time::Instant::now());
                         self.render_workspace(&ws);
+                        eprintln!(
+                            "IPC_DIAG GTK render complete {:?}",
+                            std::time::Instant::now()
+                        );
                         Ok(())
                     }
                     None => Err("Workspace no longer exists".into()),

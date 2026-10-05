@@ -15,6 +15,7 @@ import shlex
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -57,7 +58,16 @@ int main(int argc, char **argv) {
             stream.settimeout(10)
             stream.connect(args.socket)
             stream.sendall((json.dumps(dict(id=1, kind="request", verb=verb, **fields)) + "\n").encode())
-            response = json.loads(stream.makefile().readline())
+            try:
+                response = json.loads(stream.makefile().readline())
+            except TimeoutError:
+                print(f"IPC_DIAG timeout: {verb}", file=sys.stderr, flush=True)
+                if sys.platform == "darwin":
+                    sample = root / "timeout-sample.txt"
+                    subprocess.run(["/usr/bin/sample", str(os.getppid()), "1", "-file", str(sample)], timeout=15)
+                    if sample.exists():
+                        print(sample.read_text(), file=sys.stderr, flush=True)
+                raise
         assert "error" not in response, response
         return response
 
