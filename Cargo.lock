@@ -918,6 +918,7 @@ dependencies = [
  "block2",
  "chrono",
  "flowmux-browser",
+ "flowmux-cli",
  "flowmux-config",
  "flowmux-cookies",
  "flowmux-core",

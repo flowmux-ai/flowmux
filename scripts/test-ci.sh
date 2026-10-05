@@ -65,3 +65,8 @@ export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/native-smoke.log"
 grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
+
+# Install skills through the mapped Options UI using a private agent home.
+FLOWMUX_SKILLS_SMOKE_ONLY=1 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/skills-smoke.log"
+grep -q '^MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK$' "$report_dir/skills-smoke.log"

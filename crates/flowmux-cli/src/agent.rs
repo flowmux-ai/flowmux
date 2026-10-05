@@ -283,7 +283,7 @@ pub fn resolved_codex_home() -> Option<PathBuf> {
     std::env::var_os("CODEX_HOME").map(PathBuf::from)
 }
 
-pub(crate) fn antigravity_is_installed(home: &Path) -> bool {
+pub fn antigravity_is_installed(home: &Path) -> bool {
     home.join(".gemini/antigravity-cli").is_dir() || home.join(".local/bin/agy").is_file()
 }
 

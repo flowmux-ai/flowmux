@@ -198,6 +198,10 @@ only when the user requests a team; listing agents does not require launching an
 
 ## Settings and integrations
 
+For users, open **Options → Skills** and click **Install** next to the agent they
+use. The same tab offers **Update** (with backup) and **Refresh status**. Each
+agent is managed separately. The equivalent CLI commands are below.
+
 ```bash
 "$FLOWMUX_CLI" theme path
 "$FLOWMUX_CLI" theme import /path/to/example.theme

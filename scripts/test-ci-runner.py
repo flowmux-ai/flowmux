@@ -18,12 +18,16 @@ with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps({'name': name, 'args': args,
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
         'tmp': os.environ.get('TMPDIR'),
-        'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR')}) + '\n')
+        'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
+        'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY')}) + '\n')
 if name == 'uname': print(os.environ.get('TEST_OS', 'Linux'))
 if name == 'xvfb-run': sys.exit(int(os.environ.get('TEST_EXIT', '0')))
 if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
     sys.exit(23)
 if name == 'cargo' and 'macos_native' in args:
+    if os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'):
+        print('MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK')
+        sys.exit(int(os.environ.get('SKILLS_TEST_EXIT', '0')))
     print('MACOS_NATIVE_SMOKE_OK')
     sys.exit(int(os.environ.get('TEST_EXIT', '0')))
 '''
@@ -61,6 +65,17 @@ class RunnerTests(unittest.TestCase):
         result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin', TEST_EXIT='19')
         self.assertEqual(result.returncode, 19, result.stdout + result.stderr)
         self.assertEqual(sum('macos_native' in c['args'] for c in calls), 1)
+
+    def test_macos_skill_gate_runs_and_propagates_failure(self):
+        for exit_code in (0, 21):
+            with self.subTest(exit_code=exit_code):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                                                SKILLS_TEST_EXIT=str(exit_code))
+                self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
+                native = [c for c in calls if 'macos_native' in c['args']]
+                self.assertEqual(len(native), 2)
+                self.assertIsNone(native[0]['skills'])
+                self.assertEqual(native[1]['skills'], '1')
 
     def test_coverage_environment_failure_cannot_run_uninstrumented_tests(self):
         result, calls = self.run_script('test-coverage.sh')

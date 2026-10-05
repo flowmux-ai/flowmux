@@ -335,6 +335,7 @@ fn build_dialog(
     // keyboard glyph in `input-keyboard-symbolic` matches the system
     // Settings → Keyboard panel and reads as "shortcuts" at a glance.
     let stack = adw::ViewStack::new();
+    stack.set_widget_name("flowmux-options-stack");
     stack.add_titled_with_icon(
         &general_scroll,
         Some("general"),
@@ -359,6 +360,12 @@ fn build_dialog(
         "Update",
         "software-update-available-symbolic",
     );
+    stack.add_titled_with_icon(
+        &crate::ui::skills_tab::build(),
+        Some("skills"),
+        "Skills",
+        "system-run-symbolic",
+    );
     stack.set_vexpand(true);
     let switcher = adw::ViewSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -377,6 +384,12 @@ fn build_dialog(
     // also blow away every shortcut the user customised.
     let reset_btn = gtk::Button::with_label("Reset to defaults");
     reset_btn.add_css_class("destructive-action");
+    reset_btn.set_widget_name("flowmux-options-reset");
+    // Reset changes general preferences, not installed skills.
+    let reset_for_page = reset_btn.clone();
+    stack.connect_visible_child_name_notify(move |stack| {
+        reset_for_page.set_visible(stack.visible_child_name().as_deref() != Some("skills"));
+    });
     let about_btn = gtk::Button::with_label("About");
     let footer_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     footer_spacer.set_hexpand(true);

@@ -19,7 +19,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-mod agent;
+use flowmux_cli::agent;
 mod cmd_hooks;
 mod cmd_ops;
 mod desktop_install;

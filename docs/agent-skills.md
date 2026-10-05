@@ -24,7 +24,21 @@ The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
 After changing the source, rebuild the CLI before updating installed copies.
 
-## Product installation
+## Install from Settings
+
+Open **Options → Skills** and click **Install** beside the agent you use
+(Codex, Claude Code, OpenCode, Antigravity, or Cline). Each row shows whether the
+FlowMux user guide is missing, installed, or different from the bundled version.
+Click **Update** to replace a different version while keeping a backup; the row
+shows the backup location. **Refresh status** checks changes made outside FlowMux.
+Hover over an agent row to inspect its destination path.
+
+Installation is per agent and affects only the FlowMux user skill. It does not
+install the agent itself, change its hooks/settings, or restart running sessions.
+Check the agent's skill list or open a new session to load the updated guide.
+User-managed symlinks and filesystem errors are explained in the affected row.
+
+## CLI installation
 
 `flowmux agent install` installs for all five targets when `--agent` is omitted,
 even if those agents have not been installed. Prefer an explicit target when

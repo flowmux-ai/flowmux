@@ -17,6 +17,18 @@ pub(crate) fn run() {
         std::fs::create_dir_all(&path).unwrap();
         std::env::set_var(key, path);
     }
+    // Skill installation must never touch the developer's actual agent folders.
+    if std::env::var_os("FLOWMUX_SKILLS_SMOKE_ONLY").is_some() {
+        for (key, directory) in [
+            ("HOME", "home"),
+            ("CLAUDE_CONFIG_DIR", "home/.claude"),
+            ("CODEX_HOME", "home/.codex"),
+        ] {
+            let path = isolated.path().join(directory);
+            std::fs::create_dir_all(&path).unwrap();
+            std::env::set_var(key, path);
+        }
+    }
     std::env::set_var("SHELL", "/bin/sh");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _entered = runtime.enter();
@@ -87,6 +99,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_SKILLS_SMOKE_ONLY").is_some() {
+        check_skills(&controller).await;
+        controller.window.destroy();
+        return;
+    }
 
     let review_only = std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some();
     if review_only {
@@ -858,4 +876,143 @@ fn save_theme_snapshot(widget: &gtk::Widget, name: &str) {
         .render_texture(&node, None)
         .save_to_png(directory.join(format!("theme-{name}.png")))
         .unwrap();
+}
+
+async fn check_skills(controller: &WindowController) {
+    use flowmux_cli::agent::{self, SkillOverrides, Target};
+    controller.dispatch(GtkCommand::ShowOptionsDialog).await;
+    let dialog = gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Window>().ok())
+        .find(|w| w.widget_name() == "flowmux-options-dialog" && w.is_visible())
+        .unwrap();
+    let stack: adw::ViewStack = theme_widget(dialog.upcast_ref(), "flowmux-options-stack");
+    stack.set_visible_child_name("skills");
+    let reset: gtk::Button = theme_widget(dialog.upcast_ref(), "flowmux-options-reset");
+    assert!(
+        !reset.is_visible(),
+        "general reset must not look like skill removal"
+    );
+    let refresh: gtk::Button = theme_widget(dialog.upcast_ref(), "flowmux-skills-refresh");
+    let home = agent::resolved_home().unwrap();
+    let overrides = SkillOverrides::from_env();
+    let mut paths = Vec::new();
+    for &target in Target::ALL {
+        let button: gtk::Button = theme_widget(
+            dialog.upcast_ref(),
+            &format!("flowmux-skill-install-{}", target.slug()),
+        );
+        wait_until("skill install button ready", || {
+            button.label().as_deref() == Some("Install") && button.is_mapped()
+        })
+        .await;
+        let path = overrides.path(target, &home, None);
+        assert!(
+            !path.exists(),
+            "fresh skill check must not install anything"
+        );
+        button.emit_clicked();
+        button.emit_clicked(); // in-flight guard also protects programmatic repeat activation
+        wait_until("skill installed", || {
+            button.label().as_deref() == Some("Installed")
+        })
+        .await;
+        assert!(!button.is_sensitive());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), Target::payload());
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        paths.push((target, path, button));
+    }
+    glib::timeout_future(Duration::from_millis(100)).await;
+    save_theme_snapshot(dialog.upcast_ref(), "skills-installed");
+    // An external edit is exposed as Update; replacement keeps exactly one backup.
+    let (_, path, button) = &paths[2];
+    std::fs::write(path, "custom skill notes").unwrap();
+    refresh.emit_clicked();
+    wait_until("skill update offered", || {
+        button.label().as_deref() == Some("Update")
+    })
+    .await;
+    button.emit_clicked();
+    button.emit_clicked();
+    wait_until("skill updated", || {
+        button.label().as_deref() == Some("Installed")
+    })
+    .await;
+    let backups = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("SKILL.md.flowmux-backup-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&backups[0]).unwrap(),
+        "custom skill notes"
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), Target::payload());
+
+    // Protect user-managed links and show the reason in the row.
+    let (_, linked, linked_button) = &paths[0];
+    std::fs::remove_file(linked).unwrap();
+    let source = home.join("custom-skill.md");
+    std::fs::write(&source, "user-managed").unwrap();
+    std::os::unix::fs::symlink(&source, linked).unwrap();
+    refresh.emit_clicked();
+    wait_until("linked skill refused", || {
+        linked_button.label().as_deref() == Some("Unavailable")
+    })
+    .await;
+    let linked_row: adw::ActionRow = theme_widget(dialog.upcast_ref(), "flowmux-skill-claude-code");
+    assert!(linked_row.subtitle().unwrap().contains("symlink"));
+    assert!(!linked_button.is_sensitive());
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "user-managed");
+
+    // A new file appearing after the status check needs a separate Update click.
+    let (_, raced, raced_button) = &paths[1];
+    std::fs::remove_file(raced).unwrap();
+    refresh.emit_clicked();
+    wait_until("missing skill rechecked", || {
+        raced_button.label().as_deref() == Some("Install")
+    })
+    .await;
+    std::fs::write(raced, "created after check").unwrap();
+    raced_button.emit_clicked();
+    wait_until("stale install refused", || {
+        raced_button.label().as_deref() == Some("Update")
+    })
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(raced).unwrap(),
+        "created after check"
+    );
+    let raced_row: adw::ActionRow = theme_widget(dialog.upcast_ref(), "flowmux-skill-opencode");
+    assert!(raced_row
+        .subtitle()
+        .unwrap()
+        .starts_with("Installation failed:"));
+
+    glib::timeout_future(Duration::from_millis(100)).await;
+    save_theme_snapshot(dialog.upcast_ref(), "skills");
+    dialog.close();
+    controller.dispatch(GtkCommand::ShowOptionsDialog).await;
+    let reopened = gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Window>().ok())
+        .find(|w| w.widget_name() == "flowmux-options-dialog" && w.is_visible())
+        .unwrap();
+    let installed: gtk::Button = theme_widget(reopened.upcast_ref(), "flowmux-skill-install-codex");
+    wait_until("reopened skill status", || {
+        installed.label().as_deref() == Some("Installed")
+    })
+    .await;
+    assert!(!installed.is_sensitive());
+    reopened.close();
+    println!("MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK");
 }
