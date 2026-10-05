@@ -58,6 +58,11 @@ if [[ $mode == linux ]]; then
     exit "$result"
 fi
 
+# Hosted macOS VMs compile OpenGL shaders on the GTK thread for seconds.
+# Keep local and CI functional checks independent of inherited GPU settings.
+export GSK_RENDERER=cairo
+printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
+
 cargo build --workspace --locked
 git rev-parse HEAD
 python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CARGO_TARGET_DIR/debug/flowmuxctl"

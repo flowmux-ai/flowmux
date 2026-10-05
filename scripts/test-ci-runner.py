@@ -22,7 +22,8 @@ with open(os.environ['CALLS'], 'a') as log:
         'tmp': os.environ.get('TMPDIR'),
         'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
         'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
-        'agents': os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY')}) + '\n')
+        'agents': os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY'),
+        'renderer': os.environ.get('GSK_RENDERER')}) + '\n')
 if name == 'uname': print(os.environ.get('TEST_OS', 'Linux'))
 if name == 'xvfb-run': sys.exit(int(os.environ.get('TEST_EXIT', '0')))
 if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
@@ -84,6 +85,16 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(len(native), 3 if exit_code == 0 else 2)
                 self.assertIsNone(native[0]['skills'])
                 self.assertEqual(native[1]['skills'], '1')
+
+    def test_macos_gate_uses_cairo_despite_inherited_renderer(self):
+        for renderer in ('', 'gl'):
+            with self.subTest(renderer=renderer):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                                                GSK_RENDERER=renderer)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                native = [c for c in calls if 'macos_native' in c['args']]
+                self.assertEqual(len(native), 3)
+                self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
 
     def test_macos_agent_gates_run_and_propagate_failure(self):
         for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):

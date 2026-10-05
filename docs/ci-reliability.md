@@ -60,6 +60,14 @@ regression clears the terminal after exit and checks acknowledgement again;
 the previous screen-based wait fails this case. Paste bytes, destination,
 session, review scope, and the 10-second exit deadline remain checked.
 
+The remaining macOS timeout was traced in run `37313952560`: workspace model
+creation took less than a millisecond, but its GTK command waited 12.56 seconds.
+A process sample captured all 679 main-thread samples in GSK rendering, mostly
+Apple's software OpenGL shader compiler (`GLRendererFloat`). The macOS gate now
+uses Cairo for native UI/IPC tests and logs the renderer, overriding inherited
+GPU settings. Direct native harness runs still allow GL checks. The application
+renderer, RPC deadlines, native UI assertions, and coverage floors are unchanged.
+
 ## One execution path
 
 `.github/workflows/test.yml` invokes `scripts/test-ci.sh linux|macos`, exactly as
