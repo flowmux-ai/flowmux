@@ -6,6 +6,7 @@ from pathlib import Path
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 
 
@@ -37,6 +38,14 @@ def main():
         if os.fork():
             os._exit(0)
         os.setsid()
+
+        def parent_gone():
+            # Watch the existing pipe during Cargo too, not just after it exits.
+            os.read(release_read, 1)
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+
+        parent_watch = threading.Thread(target=parent_gone, daemon=True)
+        parent_watch.start()
         os.write(write_fd, f"{os.getpid()}\n".encode())
         result = 1
         try:
@@ -56,9 +65,7 @@ def main():
             os.close(write_fd)
             # Keep the group leader alive until the parent cleans the group:
             # macOS killpg returns EPERM for a group containing only a zombie.
-            # If the parent disappears, pipe EOF makes us clean our own group.
-            os.read(release_read, 1)
-            os.killpg(os.getpgrp(), signal.SIGKILL)
+            parent_watch.join()
             os._exit(result)
     os.close(write_fd)
     os.close(release_read)

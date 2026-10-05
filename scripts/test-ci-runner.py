@@ -127,7 +127,7 @@ if os.environ['WORKER_CASE'] in ('success', 'failure'):
 time.sleep(60)
 """
         for mode, expected in [('empty', 0), ('success', 0), ('failure', 27), ('timeout', 1),
-                               ('terminate', 143), ('interrupt', 130)]:
+                               ('terminate', 143), ('interrupt', 130), ('kill', -9)]:
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 cargo = root / 'cargo'
@@ -148,8 +148,10 @@ time.sleep(60)
                             time.sleep(.02)
                         child, group = json.loads(info.read_text())
                         self.assertNotEqual(group, os.getpgrp())
-                        if mode in ('terminate', 'interrupt'):
-                            process.send_signal(signal.SIGTERM if mode == 'terminate' else signal.SIGINT)
+                        termination = {'terminate': signal.SIGTERM, 'interrupt': signal.SIGINT,
+                                       'kill': signal.SIGKILL}.get(mode)
+                        if termination is not None:
+                            process.send_signal(termination)
                         self.assertEqual(process.wait(timeout=10), expected,
                                          (root / 'output').read_text())
                         deadline = time.monotonic() + 2
