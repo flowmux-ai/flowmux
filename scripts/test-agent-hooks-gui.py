@@ -268,15 +268,34 @@ int main(int argc, char **argv) {
                         custom_status="Ready", activity="idle")
                     response = rpc("agent_surface_resolve", agent="codex", session_id="fixture-codex")
                     assert response["agent_surface_ambiguous"]["exact_session"] is True, response
+                    rpc("agent_lifecycle_update", pane=other_pane, surface=other_surface,
+                        agent="codex", session_id="fixture-codex", seq=time.time_ns(),
+                        lifecycle=dict(event="turn_started", turn_id="resume-focused",
+                                       status_text="Starting turn"))
                     before = [observed(), observed(other_surface)]
+                    assert all(a["status"] == "working" for a in before), before
                     subprocess.run(["/bin/sh", "-c", '"$@"; result=$?; exit $result', "--managed-daemon",
                                     args.cli, "--socket", args.socket, "hooks", "codex", "stop"],
                                    input=json.dumps(dict(session_id="fixture-codex", cwd=str(root),
-                                                         turn_id="ambiguous-stop")),
+                                                         turn_id="resume-focused")),
                                    text=True, env=hook_env, capture_output=True, check=True, timeout=10)
+                    # A misrouted valid Stop settles only after the grace timer.
+                    time.sleep(.5)
                     after = [observed(), observed(other_surface)]
                     assert after == before, (before, after)
-                    print("PASS: ambiguous session hook leaves target unchanged", flush=True)
+                    # Positive control: remove the duplicate binding, then the
+                    # same Stop must complete its unique target, not its sibling.
+                    other_session_id = "fixture-restored-codex"
+                    rpc("agent_activity_update", pane=other_pane, surface=other_surface,
+                        agent="codex", pid=other_pid, source="flowmux:hook",
+                        session_id=other_session_id, seq=time.time_ns(),
+                        custom_status="Ready", activity="idle")
+                    rpc("agent_lifecycle_update", pane=other_pane, surface=other_surface,
+                        agent="codex", session_id=other_session_id, seq=time.time_ns(),
+                        lifecycle=dict(event="turn_started", turn_id="other-restored",
+                                       status_text="Starting turn"))
+                    hook("stop", "idle", turn_id="resume-focused")
+                    print("PASS: ambiguous Stop rejected; identical unique Stop completes", flush=True)
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
                 # Only the executable started in this test's new terminal.
