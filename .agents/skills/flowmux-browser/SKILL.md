@@ -4,7 +4,7 @@ name: flowmux-browser
 description: Operate FlowMux workspaces, terminal panes, in-app browser, SSH connections and notifications through its CLI. Use for FlowMux feature guidance or automation inside a FlowMux pane or with an explicitly supplied socket and pane.
 ---
 
-# FlowMux user guide
+# FlowMux CLI
 
 Use the category matching the user's task. This skill describes product usage;
 it does not install development tools or prescribe a software development process.
@@ -199,8 +199,9 @@ only when the user requests a team; listing agents does not require launching an
 ## Settings and integrations
 
 For users, open **Options → Skills** and click **Install** next to the agent they
-use. The same tab offers **Update** (with backup) and **Refresh status**. Each
-agent is managed separately. The equivalent CLI commands are below.
+use. The same tab offers **Update**, **Remove**, and **Refresh status**. Updates
+and removal back up modified skill content and preserve agent hooks/settings.
+Each agent is managed separately. The equivalent CLI commands are below.
 
 ```bash
 "$FLOWMUX_CLI" theme path

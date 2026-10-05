@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# FlowMux user skill: features and installation
+# FlowMux CLI skill: features and installation
 
 FlowMux ships **one product skill, `flowmux-browser`**. Its source is
 [`.agents/skills/flowmux-browser/SKILL.md`](../.agents/skills/flowmux-browser/SKILL.md).
-This is a user guide for operating FlowMux, organized by task:
+The **FlowMux CLI** skill is a user guide for operating FlowMux, organized by task:
 
 | Category | Covered features |
 |---|---|
@@ -28,12 +28,18 @@ After changing the source, rebuild the CLI before updating installed copies.
 
 Open **Options → Skills** and click **Install** beside the agent you use
 (Codex, Claude Code, OpenCode, Antigravity, or Cline). Each row shows whether the
-FlowMux user guide is missing, installed, or different from the bundled version.
+FlowMux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
 shows the backup location. **Refresh status** checks changes made outside FlowMux.
 Hover over an agent row to inspect its destination path.
 
-Installation is per agent and affects only the FlowMux user skill. It does not
+Click **Remove** beside an installed skill to delete that agent's FlowMux skill.
+Modified content is backed up before deletion, and the row shows its backup path.
+Other agents' copies, supporting files, hooks, wrappers and settings are preserved.
+A file symlink is unlinked without deleting its target; linked skill directories
+must be managed manually. After removal the row offers **Install** again.
+
+Installation is per agent and affects only the FlowMux CLI skill. It does not
 install the agent itself, change its hooks/settings, or restart running sessions.
 Check the agent's skill list or open a new session to load the updated guide.
 User-managed symlinks and filesystem errors are explained in the affected row.

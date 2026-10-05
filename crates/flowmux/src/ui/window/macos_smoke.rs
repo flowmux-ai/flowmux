@@ -906,6 +906,11 @@ async fn check_skills(controller: &WindowController) {
             button.label().as_deref() == Some("Install") && button.is_mapped()
         })
         .await;
+        let remove: gtk::Button = theme_widget(
+            dialog.upcast_ref(),
+            &format!("flowmux-skill-remove-{}", target.slug()),
+        );
+        assert!(!remove.is_sensitive(), "missing skills cannot be removed");
         let path = overrides.path(target, &home, None);
         assert!(
             !path.exists(),
@@ -918,6 +923,7 @@ async fn check_skills(controller: &WindowController) {
         })
         .await;
         assert!(!button.is_sensitive());
+        assert!(remove.is_sensitive());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), Target::payload());
         assert_eq!(
             std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
@@ -998,8 +1004,88 @@ async fn check_skills(controller: &WindowController) {
         .unwrap()
         .starts_with("Installation failed:"));
 
+    // A stale Remove button must surface filesystem errors without deleting data.
+    let (_, cline_path, _) = &paths[4];
+    let cline_remove: gtk::Button = theme_widget(dialog.upcast_ref(), "flowmux-skill-remove-cline");
+    wait_until("remove ready after refresh", || cline_remove.is_sensitive()).await;
+    std::fs::remove_file(cline_path).unwrap();
+    std::fs::create_dir(cline_path).unwrap();
+    cline_remove.emit_clicked();
+    let cline_row: adw::ActionRow = theme_widget(dialog.upcast_ref(), "flowmux-skill-cline");
+    wait_until("removal failure shown", || {
+        cline_row
+            .subtitle()
+            .is_some_and(|s| s.starts_with("Removal failed:"))
+    })
+    .await;
+    assert!(cline_path.is_dir());
+    assert!(!cline_remove.is_sensitive());
+    std::fs::remove_dir(cline_path).unwrap();
+    std::fs::write(cline_path, Target::payload()).unwrap();
+    refresh.emit_clicked();
+
+    // Removal is scoped to the selected skill, preserves custom bytes and
+    // supporting files, and never removes agent settings or wrapper scripts.
+    let settings = home.join(".claude/settings.json");
+    std::fs::write(&settings, "{\"hooks\":{}}").unwrap();
+    let wrapper = home.join("agent-wrapper");
+    std::fs::write(&wrapper, "keep wrapper").unwrap();
+    let resource = path.parent().unwrap().join("notes.txt");
+    std::fs::write(&resource, "keep supporting file").unwrap();
+    for (index, (target, removed_path, install)) in paths.iter().enumerate() {
+        let remove: gtk::Button = theme_widget(
+            dialog.upcast_ref(),
+            &format!("flowmux-skill-remove-{}", target.slug()),
+        );
+        wait_until("remove button ready", || {
+            remove.is_sensitive() && remove.is_mapped()
+        })
+        .await;
+        remove.emit_clicked();
+        remove.emit_clicked();
+        install.emit_clicked(); // in-flight removal also blocks a competing install
+        wait_until("skill removed", || {
+            install.label().as_deref() == Some("Install") && install.is_sensitive()
+        })
+        .await;
+        assert!(!remove.is_sensitive());
+        assert!(!removed_path.exists());
+        assert!(removed_path.symlink_metadata().is_err());
+        for (_, untouched, _) in &paths[index + 1..] {
+            assert!(untouched.exists(), "removal must be agent-scoped");
+        }
+    }
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "user-managed");
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        "{\"hooks\":{}}"
+    );
+    assert_eq!(std::fs::read_to_string(&wrapper).unwrap(), "keep wrapper");
+    assert_eq!(
+        std::fs::read_to_string(&resource).unwrap(),
+        "keep supporting file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&backups[0]).unwrap(),
+        "custom skill notes"
+    );
+    let removed_backups = std::fs::read_dir(raced.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(removed_backups.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&removed_backups[0]).unwrap(),
+        "created after check"
+    );
+    let removed_row: adw::ActionRow = theme_widget(dialog.upcast_ref(), "flowmux-skill-opencode");
+    assert!(removed_row
+        .subtitle()
+        .unwrap()
+        .starts_with("Removed · Modified content saved to"));
+
     glib::timeout_future(Duration::from_millis(100)).await;
-    save_theme_snapshot(dialog.upcast_ref(), "skills");
+    save_theme_snapshot(dialog.upcast_ref(), "skills-removed");
     dialog.close();
     controller.dispatch(GtkCommand::ShowOptionsDialog).await;
     let reopened = gtk::Window::list_toplevels()
@@ -1008,11 +1094,21 @@ async fn check_skills(controller: &WindowController) {
         .find(|w| w.widget_name() == "flowmux-options-dialog" && w.is_visible())
         .unwrap();
     let installed: gtk::Button = theme_widget(reopened.upcast_ref(), "flowmux-skill-install-codex");
-    wait_until("reopened skill status", || {
+    let reopened_stack: adw::ViewStack =
+        theme_widget(reopened.upcast_ref(), "flowmux-options-stack");
+    reopened_stack.set_visible_child_name("skills");
+    wait_until("reopened removed skill status", || {
+        installed.label().as_deref() == Some("Install") && installed.is_mapped()
+    })
+    .await;
+    installed.emit_clicked();
+    wait_until("removed skill reinstalled", || {
         installed.label().as_deref() == Some("Installed")
     })
     .await;
+    assert_eq!(std::fs::read_to_string(path).unwrap(), Target::payload());
     assert!(!installed.is_sensitive());
+    println!("MACOS_NATIVE_SKILLS_REMOVE_REINSTALL_OK");
     reopened.close();
     println!("MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK");
 }
