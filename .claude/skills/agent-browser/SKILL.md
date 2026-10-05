@@ -1,11 +1,16 @@
 ---
 name: agent-browser
-description: Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.
+license: Complete terms in LICENSE.txt
+description: Use agent-browser for explicitly requested Chrome/CDP or Electron automation, or a verified CDP-only requirement such as network mocking. Inside FlowMux, use flowmux-browser for ordinary page reading and interaction, following AGENTS.md.
 allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
 hidden: true
 ---
 
 # agent-browser
+
+Repository adaptation: follow `AGENTS.md` before this upstream guide. Only
+install or launch this external browser when the task requires it. Its
+availability does not authorize messaging, publishing, or other external actions.
 
 Fast browser automation CLI for AI agents. Chrome/Chromium via CDP with accessibility-tree snapshots and compact `@eN` element refs.
 

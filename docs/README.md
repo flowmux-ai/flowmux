@@ -8,6 +8,7 @@
 - [SSH workspaces](ssh-workspaces.md)
 - [Agent session history](agent-sessions.md)
 - [Agent CLI and browser automation](../AGENTS.md)
+- [Agent skill installation and management](agent-skills.md)
 - [Development guide](../CLAUDE.md)
 - [Memory sanitizer checks](sanitizers.md)
 - [Contributing](../.github/CONTRIBUTING.md)

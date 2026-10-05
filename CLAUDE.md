@@ -2,8 +2,8 @@
 
 # Developing flowmux
 
-Rust workspace, edition 2021, declared MSRV 1.93. The toolchain follows the
-`stable` channel. See [setup](docs/setup.md) for native dependencies and
+Rust workspace, edition 2021, declared MSRV 1.93. Use the exact toolchain in
+`rust-toolchain.toml`. See [setup](docs/setup.md) for native dependencies and
 [contributing](.github/CONTRIBUTING.md) for license checks.
 
 ## Build and verify
@@ -17,17 +17,20 @@ cargo run -p flowmux                 # debug GUI
 cargo build --release --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked
+bash scripts/test-ci.sh linux       # on Linux: shared CI gate, coverage + GUI
+bash scripts/test-ci.sh macos       # on macOS: shared CI gate, native main-thread GUI
 ```
 
-`GDK_BACKEND=x11` keeps GTK on Xvfb even in a Wayland session;
-`GTK_A11Y=test` enables the accessibility assertions without a desktop service.
-`G_DEBUG=fatal-criticals` turns invalid GTK calls into test failures.
+The shared gates isolate runtime state and retain failure logs. macOS GTK
+tests requiring AppKit must use the native main-thread harness; a generic
+`cargo test --workspace` is not a substitute. See [CI reliability](docs/ci-reliability.md).
 
 The binaries are `flowmux` (GUI and CLI delegation), `flowmuxctl` (IPC client),
 `flowmux-md-viewer` (Markdown reader), and `flowmux-daemon` (headless handler).
 The GUI embeds its IPC server; normal desktop use needs no separate daemon.
 Runtime/UI fixes require the live verification described in [AGENTS.md](AGENTS.md).
+Preserve active user sessions; reproduce in an isolated instance with separate
+state and a short runtime path under `/tmp`.
 
 The committed Monaco bundle supports Rust builds without Node.js. Frontend
 changes use `scripts/build-editor-assets.sh`; commit the rebuilt assets with
@@ -82,6 +85,12 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
 
 ## Agent integration invariants
 
+- Read [AGENTS.md](AGENTS.md) for the pane/browser command contract, including
+  the preference for the in-app browser. Repository skills supplement these
+  rules; an external browser skill does not override them.
+- See [skill management](docs/agent-skills.md) before changing skill installation
+  or updating vendored development skills. Product payloads and development-only
+  skills have different distribution paths.
 - New pane commands accept explicit IDs and use pane context where supported.
   Distinguish a pane's UUID from its individual tab surface UUID.
 - Snapshot references belong to the latest snapshot of one browser surface.

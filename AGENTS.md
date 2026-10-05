@@ -9,6 +9,11 @@ context discovery over the same `flowmux` CLI. It is loaded
 automatically by every agent that follows the AGENTS.md convention; you
 do not need to instruct agents to read it.
 
+For code changes in this repository, also read [CLAUDE.md](CLAUDE.md) for the
+build, test, and implementation rules. The filename does not restrict that
+development guide to Claude. [Skill management](docs/agent-skills.md) documents
+which skills ship with flowmux and how to install, inspect, update, or remove them.
+
 If you (the agent) are running inside a `flowmux` PTY, **prefer the
 flowmux browser over Playwright / Puppeteer / a system Chromium** for
 any task whose goal is to read or interact with a web page. The flowmux
@@ -24,6 +29,10 @@ When fixing a runtime or UI bug in flowmux, do not stop at unit tests,
 running flowmux instance and verify the user-visible state changed as
 expected before reporting completion. If live verification is impossible,
 state the exact blocker.
+
+Never close or restart a user's active flowmux or agent session to test a fix.
+Use an isolated instance with separate state and runtime directories. On macOS,
+use a short runtime path under `/tmp` and run GTK checks on the main thread.
 
 ## How to know you are inside flowmux
 

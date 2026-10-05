@@ -127,8 +127,11 @@ flowmux fix      # install / refresh what doctor flagged
 
 Both accept `--json`. `fix` is idempotent: hook entries without a flowmux
 marker are preserved, and flowmux-managed SKILL copies are re-synced to the
-version embedded in the binary. Restart running agent sessions afterwards so
-they reload hook configuration.
+version embedded in the binary after backing up differing content. Symlinked
+skills remain user-managed. See [skill management](agent-skills.md) for target
+paths, skill-only installation/removal, backups, and agent activation controls.
+Reload hook configuration at a convenient session boundary; do not interrupt
+active agent sessions just to apply an update.
 
 Codex asks you to approve changed user hooks in `/hooks`; flowmux does not
 bypass that. Codex configurations with `allow_managed_hooks_only = true`
