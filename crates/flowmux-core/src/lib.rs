@@ -3051,8 +3051,13 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
     // Codex goal mode puts completion in the model/cwd row below the
     // composer, including after a recap. Prose above the composer is not
     // activity evidence. Live progress and native waits still take priority.
-    let goal_elapsed = (prompt == 1 && lines[prompt].starts_with('›'))
-        .then(|| lines[0].rsplit_once("  Goal achieved ("))
+    let goal_elapsed = lines[prompt]
+        .starts_with('›')
+        .then(|| {
+            lines[..prompt]
+                .iter()
+                .find_map(|line| line.rsplit_once("  Goal achieved ("))
+        })
         .flatten()
         .filter(|(prefix, _)| prefix.contains(" · "))
         .and_then(|(_, elapsed)| elapsed.strip_suffix(')'));

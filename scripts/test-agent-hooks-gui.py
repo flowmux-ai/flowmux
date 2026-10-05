@@ -30,13 +30,23 @@ def main():
     # A real executable basename is needed for process identity on both OSes.
     source = root / "agent.c"
     source.write_text("""#include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
     if (argc != 2) return 1;
     FILE *f = fopen(argv[1], "w");
     if (!f) return 2;
     fprintf(f, "%d", getpid()); fclose(f);
-    for (;;) pause();
+    char line[64];
+    while (fgets(line, sizeof(line), stdin)) {
+        if (!strncmp(line, "screen-working", 14))
+            printf("\\033[2J\\033[H• Working (1s • esc to interrupt)\\n› Ask Codex to do anything\\n");
+        if (!strncmp(line, "screen-completed", 16))
+            printf("\\033[2J\\033[HWorked for 1m 58s • 6:09 PM\\n› Ask Codex to do anything\\n"
+                   "GPT-6-Astra high fast · ~/work    Goal achieved (11m)\\n"
+                   "← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view\\n");
+        fflush(stdout);
+    }
 }
 """)
 
@@ -191,6 +201,21 @@ int main(int argc, char **argv) {
                     hook("turn-start", "running", turn_id="root-5")
                     hook("stop", "running", turn_id="root-4")
                     hook("stop", "idle", turn_id="root-5")
+                    rpc("workspace_focus", workspace=workspace)
+                    hook("turn-start", "running", turn_id="footer")
+                    # The completed goal row is followed by hints in the live
+                    # Codex TUI. Recover even when no Stop hook arrives.
+                    rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                    deadline = time.monotonic() + 5
+                    while observed()["status"] not in ("idle", "done"):
+                        assert time.monotonic() < deadline, observed()
+                        time.sleep(.05)
+                    assert observed()["custom_status"] == "Completed", observed()
+                    hook("turn-start", "running", turn_id="after-footer")
+                    rpc("pane_send_keys", pane=pane, keys="screen-working\r")
+                    time.sleep(.5)
+                    assert observed()["status"] == "working", observed()
+                    print("PASS: completed goal footer and next working turn", flush=True)
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
                 # Only the executable started in this test's new terminal.

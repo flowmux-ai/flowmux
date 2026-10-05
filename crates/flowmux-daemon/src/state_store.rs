@@ -5662,6 +5662,7 @@ mod tests {
     #[tokio::test]
     async fn completed_codex_screen_recovers_without_observing_a_spinner() {
         for screen in [
+            "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view",
             "• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work",
             "─ Conversation recap ─\n전체 사용량 0일 때 숨김 처리 여부는 확인이 필요합니다.\n› Ask Codex to do anything\ngpt-6-astra high fast · ~/work    Goal achieved (16m)",
         ] {

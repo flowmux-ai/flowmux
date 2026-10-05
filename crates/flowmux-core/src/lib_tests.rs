@@ -3231,6 +3231,14 @@ fn completion_footer_requires_the_matching_live_composer() {
             Some("codex"),
         ),
         ("›\ngpt-6-astra · ~/work    Goal achieved (1h 02m)", Some("codex")),
+        (
+            "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view",
+            Some("codex"),
+        ),
+        (
+            "› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\nctrl+c copy · enter copy & follow · esc clear",
+            Some("codex"),
+        ),
         ("Goal achieved (16m)\n›", None),
         ("─ Conversation recap ─\n확인이 필요합니다.\n›", None),
         ("›\nGoal achieved (16m)", None),
