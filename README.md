@@ -142,7 +142,7 @@ support, hook configuration, and logs.
 - [Documentation index](docs/README.md) · [Release history](https://github.com/flowmux-ai/flowmux/releases)
 - [Keyboard shortcuts](docs/keybindings.md) · [Configuration](docs/configuration.md)
 - [Agent CLI and browser automation](AGENTS.md) · [SSH workspaces](docs/ssh-workspaces.md)
-- [Agent skill installation and management](docs/agent-skills.md)
+- [FlowMux user skill: features and installation](docs/agent-skills.md)
 - [Contributing](.github/CONTRIBUTING.md)
 
 ## License

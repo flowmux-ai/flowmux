@@ -86,17 +86,15 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
 ## Agent integration invariants
 
 - Read [AGENTS.md](AGENTS.md) for the pane/browser command contract, including
-  the preference for the in-app browser. Repository skills supplement these
-  rules; an external browser skill does not override them.
-- See [skill management](docs/agent-skills.md) before changing skill installation
-  or updating vendored development skills. Product payloads and development-only
-  skills have different distribution paths.
+  the preference for the in-app browser.
+- The [FlowMux user skill](docs/agent-skills.md) covers product CLI and GUI
+  workflows. Keep it user-facing; do not bundle development skills.
 - New pane commands accept explicit IDs and use pane context where supported.
   Distinguish a pane's UUID from its individual tab surface UUID.
 - Snapshot references belong to the latest snapshot of one browser surface.
   The snapshot must not add tracking attributes to the DOM. Reused token
   names can point to different elements after a new snapshot.
-- Hooks and browser skill text are embedded in the CLI. Keep `doctor`/`fix`
+- Hooks and user skill text are embedded in the CLI. Keep `doctor`/`fix`
   drift detection consistent with changes to installed payloads.
 - Native lifecycle hooks are activity evidence; process inspection establishes
   identity/liveness; terminal text is fallback evidence. A title or screen

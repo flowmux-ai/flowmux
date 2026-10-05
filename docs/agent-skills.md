@@ -1,9 +1,25 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Agent skills: installation and maintenance
+# FlowMux user skill: features and installation
 
 FlowMux ships **one product skill, `flowmux-browser`**. Its source is
 [`.agents/skills/flowmux-browser/SKILL.md`](../.agents/skills/flowmux-browser/SKILL.md).
+This is a user guide for operating FlowMux, organized by task:
+
+| Category | Covered features |
+|---|---|
+| Context | Connection checks, window/socket selection, pane and tab IDs |
+| Workspaces and terminals | Workspace selection, splits, tabs, terminal input/output |
+| Browser | Open, snapshot, interact, wait, inspect and screenshot |
+| SSH | Connect, inspect status, reconnect, forward ports and preview |
+| Agents and notifications | Live agent list, session names and completion notifications |
+| Settings and integrations | Themes, skill installation, diagnostics and removal |
+| GUI features | Code Review comments, terminal search, Files, editor and AI Usage |
+
+The skill's existing `flowmux-browser` identifier and install directory are kept
+for compatibility. Its title and description cover the full user guide. FlowMux
+does not bundle development, design, skill-discovery or MCP-builder skills.
+
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
 After changing the source, rebuild the CLI before updating installed copies.
@@ -96,106 +112,6 @@ For persistent activation controls, use the agent's own settings:
 FlowMux's `doctor` deliberately does not change these settings or claim a
 file check proves that a skill is enabled.
 
-## Repository-only development skills
-
-The following tracked files help contributors. They are **not embedded in the
-application or copied by `flowmux agent install` / `fix`**.
-
-| Skill | Source | Intended use in this repository |
-|---|---|---|
-| `agent-browser` | [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) | Explicit Chrome/CDP or Electron work; ordinary FlowMux page tasks use the in-app browser |
-| `design-taste-frontend` | [Leonxlnx/taste-skill](https://github.com/Leonxlnx/taste-skill) | Marketing/landing-page design; not a replacement for GTK UI conventions |
-| `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | Discover optional tooling when needed; no automatic bulk installation |
-| `mcp-builder` | [anthropics/skills](https://github.com/anthropics/skills) | Explicit MCP-server development; its evaluation script can contact APIs and run tools |
-
-Their source files are in `.claude/skills/`. Other agents may read compatible
-paths; do not describe them as universally installed for all five targets.
-Each directory retains its upstream `LICENSE.txt`. Local changes currently
-include narrowing `agent-browser` routing to respect `AGENTS.md` and fixing
-MCP evaluation result handling. The MCP Python requirements are separate from
-FlowMux's Rust build; do not install or execute them merely to run the app.
-
-`skills-lock.json` records upstream sources and hashes for this development
-collection. It is tracked provenance, not FlowMux's installer database, a
-runtime dependency, or a verifier of locally patched skill bytes. Review a
-skill update's actual diff, references, license and local adaptations before
-committing. An upstream update can replace local fixes. Run the existing
-MCP offline tests after changing its evaluator:
-
-```sh
-python3 -m unittest discover -s .claude/skills/mcp-builder/scripts -p 'test_*.py'
-```
-
-`AGENTS.md` is the agent-facing runtime/CLI contract. `CLAUDE.md` is the shared
-development guide and links back to it. Neither should be installed into a
-user's other repositories by the product installer.
-
-## Additional skills worth considering
-
-Prioritize focused FlowMux workflows over installing another general catalog:
-
-1. **Isolated native UI validation** (repository skill): launching a separate
-   instance with private state, short macOS socket paths, the main-thread GTK
-   harness, and proof from mapped widgets. Existing entry points are in
-   `scripts/test-ci.sh` and `docs/ci-reliability.md`.
-2. **CI failure investigation** (repository skill): compare the failing commit
-   and logs, reproduce through the shared OS gate, then verify the patch on
-   the same commit. This could package the current CI reliability procedure.
-3. **Workspace/terminal control** (optional future product skill): pane/surface
-   IDs, `tree`, `read-screen`, and scoped terminal operations already documented
-   in `AGENTS.md`. Keep browser triggers separate; prove command examples and
-   session-preservation rules before adding another embedded payload.
-
-These are proposals, not new installed skills. Native agent activation and
-explicit user task scope still govern their use.
-
-## Regression verification
-
-`crates/flowmux-cli/tests/agent_skills.rs` invokes the built CLI in private home,
-config, data, cache and runtime directories. It covers all five default
-install targets, repeated install, drift/refusal/forced update, retained backups,
-selective removal, wrapper preservation/removal, reinstall, JSON output,
-custom config roots, Flatpak path resolution, and Codex duplicate preservation.
-Unit tests additionally cover linked directories and dangling links.
-
-```sh
-cargo test -p flowmux-cli --bin flowmuxctl --test agent_skills --locked
-cargo test -p flowmux-config --locked paths::tests
-```
-
-These tests prove CLI filesystem behavior without contacting an AI service or
-restarting user sessions. Flatpak path tests simulate environment routing;
-they do not replace sandbox-package or each agent's native discovery tests.
-
-### Audit evidence (2026-10-05)
-
-Five added regression scenarios failed before the installer changes: lost update
-backups, lost modified files on uninstall, overwritten symlink targets, writes
-through linked skill directories, and dangling links misreported as missing.
-They pass after the changes. Review also retained already-current symlinks as
-healthy, verified atomic replacement preserves file mode and hardlink siblings,
-and checked all four upstream paths recorded in `skills-lock.json` still exist.
-
-The focused suite passes 353 tests (252 CLI unit, 7 CLI lifecycle/config
-scenarios, 94 config unit). Strict Clippy for these two crates/all targets,
-formatting, local documentation links, asset license checks and the existing
-MCP offline evaluator test pass.
-
-The wider default-member run reports 1,070 passed, 5 failed and 8 ignored on this
-Mac. Each failure also reproduces in an untouched `6051b406` checkout:
-
-- `pty_tee_restores_shared_stdout_flags`
-- `pty_tee_preserves_input_queued_before_startup`
-- `pty_tee_delivers_final_output_in_order_after_outer_eof`
-- `pty_tee_outer_eof_kills_signal_ignoring_inner_group` (reproduced separately)
-- `ssh::tests::remote_bootstrap_preserves_literal_arguments_and_rejects_missing_cwd`
-
-These failures are not fixed by this skill-management patch. Two rustdoc
-crate-resolution errors appeared while the baseline comparison reused the
-build cache; the separate current-tree `cargo test --locked --doc` run verifies
-that part again. A subsequent stale-path result after that shared-cache
-comparison prompted a fresh, independent target-directory build: all 353
-focused tests pass there too. Use distinct target directories for baseline
-comparisons. The affected local CLI/config build artifacts were also cleaned
-and rebuilt. This audit does not claim a green full macOS default suite,
-Linux execution, or native discovery by every external agent.
+`AGENTS.md` describes this repository's runtime/CLI contract; `CLAUDE.md`
+contains contributor instructions. Neither is copied into users' other projects
+by the skill installer.

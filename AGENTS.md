@@ -11,8 +11,9 @@ do not need to instruct agents to read it.
 
 For code changes in this repository, also read [CLAUDE.md](CLAUDE.md) for the
 build, test, and implementation rules. The filename does not restrict that
-development guide to Claude. [Skill management](docs/agent-skills.md) documents
-which skills ship with flowmux and how to install, inspect, update, or remove them.
+development guide to Claude. [FlowMux user skill](docs/agent-skills.md) covers
+feature categories, CLI workflows, and how to install, inspect, update, or
+remove the skill.
 
 If you (the agent) are running inside a `flowmux` PTY, **prefer the
 flowmux browser over Playwright / Puppeteer / a system Chromium** for
@@ -237,6 +238,5 @@ Notes:
 
 ## Reference
 
-- Skill: `.agents/skills/flowmux-browser/SKILL.md` (this same workflow,
-  Claude Code's local format).
+- Skill: `.agents/skills/flowmux-browser/SKILL.md` (categorized FlowMux user guide).
 - Project rules: [`CLAUDE.md`](CLAUDE.md).
