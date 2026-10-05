@@ -28,6 +28,7 @@ def main():
     print(f"HOOK ARTIFACTS: {root}", flush=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("FLOWMUX_")}
     # A real executable basename is needed for process identity on both OSes.
+    frames = json.loads((Path(__file__).parent / "fixtures/agent-status/codex-goal.json").read_text())
     source = root / "agent.c"
     source.write_text("""#include <stdio.h>
 #include <string.h>
@@ -39,16 +40,17 @@ int main(int argc, char **argv) {
     fprintf(f, "%d", getpid()); fclose(f);
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
-        if (!strncmp(line, "screen-working", 14))
-            printf("\\033[2J\\033[H• Working (1s • esc to interrupt)\\n› Ask Codex to do anything\\n");
-        if (!strncmp(line, "screen-completed", 16))
-            printf("\\033[2J\\033[HWorked for 1m 58s • 6:09 PM\\n› Ask Codex to do anything\\n"
-                   "GPT-6-Astra high fast · ~/work    Goal achieved (11m)\\n"
-                   "← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view\\n");
+        if (!strncmp(line, "screen-working", 14)) {
+            printf("\\033[2J\\033[H"); fputs(WORKING_FRAME, stdout);
+        }
+        if (!strncmp(line, "screen-completed", 16)) {
+            printf("\\033[2J\\033[H"); fputs(COMPLETED_FRAME, stdout);
+        }
         fflush(stdout);
     }
 }
-""")
+""".replace("WORKING_FRAME", json.dumps(frames["working"], ensure_ascii=False))
+       .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False)))
 
     def rpc(verb, **fields):
         with socket.socket(socket.AF_UNIX) as stream:
@@ -85,9 +87,9 @@ int main(int argc, char **argv) {
             other_status = "idle"
             other_session_id = None
 
-            def observed():
+            def observed(target=surface):
                 return next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
-                            for p in w["panes"] for t in p["tabs"] if t["id"] == surface).get("agent")
+                            for p in w["panes"] for t in p["tabs"] if t["id"] == target).get("agent")
 
             deadline = time.monotonic() + 10
             while not observed():
@@ -124,9 +126,7 @@ int main(int argc, char **argv) {
                 expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
                 assert value["status"] in expected, value
                 if other_surface:
-                    other = next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
-                                 for p in w["panes"] for t in p["tabs"]
-                                 if t["id"] == other_surface).get("agent")
+                    other = observed(other_surface)
                     assert other and other["status"] == other_status, other
                     assert other.get("session_id") == other_session_id, other
                 evidence.write(json.dumps(dict(agent=name, event=event, payload=payload, observed=value)) + "\n")
@@ -188,6 +188,9 @@ int main(int argc, char **argv) {
                     child = dict(agent_id="child", turn_id="child-1")
                     hook("subagent-start", "running", **child)
                     hook("stop", "running", turn_id="root-1")
+                    rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                    time.sleep(.5)
+                    assert observed()["status"] == "working", observed()
                     hook("subagent-stop", "idle", **child)
                     hook("turn-start", "running", turn_id="root-2")
                     # A reused child reports a prompt without SubagentStart.
@@ -249,6 +252,31 @@ int main(int argc, char **argv) {
                             assert observed()["status"] == "working", observed()
                             assert rpc("workspace_current")["workspace_current"]["id"] == focused
                             print(f"PASS: {visibility} {completion} completion and next turn", flush=True)
+                        hook("notification", "needs_input", turn_id=f"after-{turn}", tool_name="Bash")
+                        rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                        time.sleep(.5)
+                        assert observed()["status"] == "blocked", observed()
+                        hook("running", "needs_input", turn_id=f"after-{turn}", tool_name="Bash")
+                        hook("turn-start", "running", turn_id=f"resume-{visibility}")
+                        print(f"PASS: {visibility} completion cannot clear permission wait", flush=True)
+
+                    # Corrupt/stale bindings must not let a shared-daemon hook
+                    # choose one of two exact matches by window or pane order.
+                    rpc("agent_activity_update", pane=other_pane, surface=other_surface,
+                        agent="codex", pid=other_pid, source="flowmux:hook",
+                        session_id="fixture-codex", seq=time.time_ns(),
+                        custom_status="Ready", activity="idle")
+                    response = rpc("agent_surface_resolve", agent="codex", session_id="fixture-codex")
+                    assert response["agent_surface_ambiguous"]["exact_session"] is True, response
+                    before = [observed(), observed(other_surface)]
+                    subprocess.run(["/bin/sh", "-c", '"$@"; result=$?; exit $result', "--managed-daemon",
+                                    args.cli, "--socket", args.socket, "hooks", "codex", "stop"],
+                                   input=json.dumps(dict(session_id="fixture-codex", cwd=str(root),
+                                                         turn_id="ambiguous-stop")),
+                                   text=True, env=hook_env, capture_output=True, check=True, timeout=10)
+                    after = [observed(), observed(other_surface)]
+                    assert after == before, (before, after)
+                    print("PASS: ambiguous session hook leaves target unchanged", flush=True)
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
                 # Only the executable started in this test's new terminal.

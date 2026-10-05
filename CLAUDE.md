@@ -116,6 +116,11 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
   can block Stop. The observed ledger is not a complete process inventory;
   retain process/screen fallbacks.
 
+The [agent status verification contract](docs/agent-status-verification.md) maps
+these rules to regression cases and diagnostic evidence. Keep a failing case's
+workspace visibility and event ordering intact; check both early completion and
+stuck working before committing lifecycle changes.
+
 ## Conventions
 
 Use **side panel**, **workspace**, **pane**, **tab**, **browser tab**, and

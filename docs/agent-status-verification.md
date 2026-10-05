@@ -51,3 +51,49 @@ unit/native failures to prove that later gates cannot mask them.
 The macOS gate records the Git revision, CLI checksum, unit results and native
 hook marker in `target/ci/macos/`. A configured Linux gate is not evidence that it
 ran on a macOS workstation; report unavailable platform execution separately.
+
+## Transition contract and regression cases
+
+`StateStore` owns session/turn/wait/child correlation. Core applies the existing
+presence merge; the GUI supplies parsed terminal observations and visibility.
+Do not copy lifecycle guards into CLI parsers or add a second state machine.
+
+| Rule | Executable regression |
+| --- | --- |
+| Process evidence establishes identity/liveness, not whether a turn is working. A stale process scan cannot replace newer hook identity. | `stale_process_snapshot_cannot_displace_a_new_native_session` |
+| Route to the unique strongest session binding before applying activity. Multiple equally strong candidates do not authorize choosing the first. | `codex_session_tab_rejects_duplicate_title_candidates`, `codex_routing_rejects_ties_and_prefers_unique_exact_session`, GUI ambiguous-session replay |
+| Stop completes a response turn; SessionEnd tears down its session. Surviving background jobs/cron do not by themselves keep a Claude response working. | `claude_lifecycle_tracks_stop_interrupt_restart_and_session_end`, GUI Claude Stop replay |
+| Tool wait delivery is idempotent by invocation ID. A resolved ID stays resolved until a boundary. Session/permission waits remain separate. | `correlated_wait_delivery_is_idempotent_and_resolution_is_final`, `claude_batch_completion_clears_only_the_permission_wait` |
+| Parent Stop must respect observed active children. Old child events must not settle a reused child's newer turn. | `codex_parent_stop_waits_for_matching_active_subagent`, `older_cross_turn_codex_child_events_cannot_replace_the_current_turn`, GUI child replay |
+| Older terminal events and grace timers cannot cross newer turn activity. A new root turn invalidates a pending old Stop. | `terminal_boundaries_cannot_overwrite_newer_same_turn_activity`, `older_codex_grace_timer_cannot_consume_a_newer_pending_stop`, `codex_new_root_turn_invalidates_pending_parent_stop` |
+| Screen completion is fallback evidence; it cannot clear correlated waits/children or complete a new turn with its unchanged old footer. | `completion_screen_preserves_correlated_waits_and_children`, GUI permission/footer replay |
+| A settled native turn cannot be reopened by a stale spinner. New native work still accepts live screen progress. | `stale_codex_spinner_after_grace_settlement_stays_idle`, GUI native completion/next-turn replay |
+| Parsed output must refresh hidden terminals too. Raw PTY notification is not proof that VTE already parsed the final bytes. | `hidden_terminal_output_refreshes_after_vte_parses`, GUI hidden footer replay |
+| A local process lookup missing a remote agent is not proof of exit. Restored terminal text alone is not proof of life. | `reconcile_process_agents_keeps_screen_presence_for_out_of_tree_agent`, `process_poll_rejects_replayed_agent_screen_after_restart` |
+| Late SessionEnd/dead-PID observations cannot clear a replacement session/process. | `session_end_only_removes_the_current_agent_session`, `dead_pid_clear_cannot_remove_a_replacement_process` |
+
+Idle is the runtime completed-turn activity. Done is its unseen-completion UI
+projection, not a separate process lifecycle. No new status enum is needed.
+
+The router keeps the established order: unique reported session, then matching
+thread title (prefer an unclaimed tab), then the only eligible unnamed tab in
+the directory. The window returns `AgentSurfaceAmbiguous` for ties. The CLI
+checks all responding windows: a unique exact match beats heuristic ambiguity;
+duplicate exact bindings or unresolved heuristic ties reject the hook without
+mutating either target. Older servers that answer only the probe ping are still
+skipped. A sole unnamed candidate remains a heuristic, not proof of ownership;
+this change removes arbitrary tie-breaking, not that existing fallback limit.
+
+`scripts/fixtures/agent-status/codex-goal.json` records the minimal reported
+footer shape, origin/date/platform and whether the provider version is known.
+It is a synthetic redacted sample, not a full transcript. Preserve the footer,
+composer and hints together when adding a format regression. Do not substitute
+a focus change for reproducing a hidden-workspace failure.
+
+For the next incident, retain the failing event/screen sequence and connect it
+to one contract row and the earlier relevant commits. Fix the responsible layer,
+then verify both the symptom and its opposite error (early idle versus stuck
+working). Commit only after the matching unit and isolated GUI checks pass;
+repeat the affected checks after that commit before proceeding to another stage.
+Report build, test, commit, installation and running-version verification
+separately. A configured but unexecuted platform gate is not a pass.

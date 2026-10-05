@@ -5276,6 +5276,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_session_tab_rejects_duplicate_title_candidates() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let names = HashMap::from([("session".to_string(), "Same task".to_string())]);
+        let mut targets = Vec::new();
+        for _ in 0..2 {
+            let ws = store.create_workspace(None, "/tmp/same-root".into()).await;
+            let ws = store.get_workspace(ws).await.unwrap();
+            let pane = first_pane(&ws);
+            let surface = first_pane_active_surface(&ws);
+            targets.push((pane, surface));
+            store
+                .reconcile_process_agents(&[(surface, Some("codex"))])
+                .await;
+            store
+                .update_surface_auto_title(pane, surface, "Same task | project".into())
+                .await;
+        }
+        assert_eq!(
+            store
+                .codex_session_tab(
+                    "session",
+                    Some((&names, std::path::Path::new("/tmp/same-root")))
+                )
+                .await,
+            Err(false)
+        );
+        // Equal unnamed candidates are just as ambiguous.
+        for (pane, surface) in &targets {
+            store
+                .update_surface_auto_title(*pane, *surface, "codex".into())
+                .await;
+        }
+        let lookup = || {
+            store.codex_session_tab(
+                "session",
+                Some((&names, std::path::Path::new("/tmp/same-root"))),
+            )
+        };
+        assert_eq!(lookup().await, Err(false));
+        for (index, (_, surface)) in targets.iter().enumerate() {
+            let mut report = AgentStatusReport::from_activity(
+                "codex",
+                Some(flowmux_core::AgentActivity::Running),
+                None,
+            );
+            report.source = Some("flowmux:hook".into());
+            report.session_id = Some("session".into());
+            report.seq = Some(1);
+            store.report_agent_status(*surface, report).await;
+            if index == 0 {
+                assert_eq!(
+                    lookup().await,
+                    Ok(Some((targets[0].0, targets[0].1, Some("session".into()))))
+                );
+            } else {
+                assert_eq!(lookup().await, Err(true));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn codex_session_tab_uses_reported_session_then_title_and_directory() {
         use std::path::Path;
         let store = StateStore::new_lazy(State::default());
@@ -5294,26 +5355,26 @@ mod tests {
             |session, names, cwd| store.codex_session_tab(session, Some((names, Path::new(cwd))));
 
         // A tab without a Codex process is never a match.
-        assert_eq!(find("s1", &unnamed, "/tmp/demo").await, None);
+        assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), None);
         store
             .reconcile_process_agents(&[(surface, Some("codex"))])
             .await;
         let tab = Some((pane, surface, None));
-        assert_eq!(store.codex_session_tab("s1", None).await, None);
+        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), None);
 
         // The only Codex tab in the directory that names no thread yet.
-        assert_eq!(find("s1", &unnamed, "/tmp/demo").await, tab);
-        assert_eq!(find("s1", &named, "/tmp/demo").await, tab);
-        assert_eq!(find("s1", &unnamed, "/elsewhere").await, None);
+        assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), tab);
+        assert_eq!(find("s1", &named, "/tmp/demo").await.unwrap(), tab);
+        assert_eq!(find("s1", &unnamed, "/elsewhere").await.unwrap(), None);
 
         // Once the title names a thread, only that thread's session matches.
         store
             .update_surface_auto_title(pane, surface, "⠋ Fix bug | demo".into())
             .await;
-        assert_eq!(find("s1", &named, "/tmp/demo").await, tab);
-        assert_eq!(find("s1", &named, "/elsewhere").await, None);
-        assert_eq!(find("s2", &named, "/tmp/demo").await, None);
-        assert_eq!(find("s3", &named, "/tmp/demo").await, None);
+        assert_eq!(find("s1", &named, "/tmp/demo").await.unwrap(), tab);
+        assert_eq!(find("s1", &named, "/elsewhere").await.unwrap(), None);
+        assert_eq!(find("s2", &named, "/tmp/demo").await.unwrap(), None);
+        assert_eq!(find("s3", &named, "/tmp/demo").await.unwrap(), None);
 
         // A tab that reported the session matches whatever its title says.
         let report = AgentStatusReport {
@@ -5331,15 +5392,15 @@ mod tests {
         };
         store.report_agent_status(surface, report).await;
         let reported = Some((pane, surface, Some("s1".into())));
-        assert_eq!(store.codex_session_tab("s1", None).await, reported);
-        assert_eq!(store.codex_session_tab("s2", None).await, None);
+        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), reported);
+        assert_eq!(store.codex_session_tab("s2", None).await.unwrap(), None);
 
         // Its title names the other thread now: that session takes the tab over.
         store
             .update_surface_auto_title(pane, surface, "Other | demo".into())
             .await;
-        assert_eq!(find("s2", &named, "/tmp/demo").await, reported);
-        assert_eq!(find("s3", &named, "/tmp/demo").await, None);
+        assert_eq!(find("s2", &named, "/tmp/demo").await.unwrap(), reported);
+        assert_eq!(find("s3", &named, "/tmp/demo").await.unwrap(), None);
 
         // A tab whose title names no thread keeps the session it reported
         // until that session has a name; after that the title should show it,
@@ -5366,10 +5427,10 @@ mod tests {
             messaging_socket: None,
         };
         store.report_agent_status(other, report).await;
-        assert_eq!(find("z", &named, "/tmp/other").await, None);
+        assert_eq!(find("z", &named, "/tmp/other").await.unwrap(), None);
         let named = HashMap::from([("y1".to_string(), "Done".to_string())]);
         let taken = Some((first_pane(&other_ws), other, Some("y1".into())));
-        assert_eq!(find("z", &named, "/tmp/other").await, taken);
+        assert_eq!(find("z", &named, "/tmp/other").await.unwrap(), taken);
     }
 
     #[tokio::test]

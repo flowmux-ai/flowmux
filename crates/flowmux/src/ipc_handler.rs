@@ -786,10 +786,10 @@ impl GuiHandler {
                 cwd,
             } => {
                 let store = self.inner.store();
-                let mut tab = None;
+                let mut tab = Ok(None);
                 if agent.eq_ignore_ascii_case("codex") {
                     tab = store.codex_session_tab(&session_id, None).await;
-                    if tab.is_none() {
+                    if matches!(tab, Ok(None)) {
                         let id = session_id.clone();
                         // Hooks name their directory; the legacy notify
                         // payload does not, but its session file does.
@@ -807,12 +807,13 @@ impl GuiHandler {
                     }
                 }
                 match tab {
-                    Some((pane, surface, session_id)) => Response::AgentSurface {
+                    Ok(Some((pane, surface, session_id))) => Response::AgentSurface {
                         pane,
                         surface,
                         session_id,
                     },
-                    None => Response::Error(RpcError::NotFound(format!(
+                    Err(exact_session) => Response::AgentSurfaceAmbiguous { exact_session },
+                    Ok(None) => Response::Error(RpcError::NotFound(format!(
                         "no tab runs {agent} session {session_id}"
                     ))),
                 }

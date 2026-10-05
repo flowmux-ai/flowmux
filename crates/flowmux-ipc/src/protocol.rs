@@ -649,7 +649,7 @@ pub enum Request {
     /// Find the tab running session `session_id` of `agent`, which was
     /// started in `cwd`. Codex's shared app-server daemon runs hooks outside
     /// the pane, so they know their session but not their tab. Replies
-    /// `AgentSurface`, or `NotFound`.
+    /// `AgentSurface`, `AgentSurfaceAmbiguous`, or `NotFound`.
     AgentSurfaceResolve {
         agent: String,
         session_id: String,
@@ -863,6 +863,12 @@ pub enum Response {
         surface: SurfaceId,
         #[serde(default)]
         session_id: Option<String>,
+    },
+    /// `AgentSurfaceResolve` found multiple equally strong candidates. Exact
+    /// session ambiguity also invalidates an exact match in another window;
+    /// heuristic ambiguity may still be superseded by a unique exact binding.
+    AgentSurfaceAmbiguous {
+        exact_session: bool,
     },
     /// Reply to `Request::Notify`. Carries the `org.gtk.Notifications`
     /// id the daemon assigned, so the GUI can later issue

@@ -456,13 +456,15 @@ impl StateStore {
     /// tabs opened in `cwd`: one whose title names the session's thread,
     /// preferring a tab no session has claimed, else the only tab whose title
     /// names no thread yet. `names` maps Codex sessions to thread names.
+    /// Ambiguity returns `Err(true)` for duplicate reported session bindings,
+    /// or `Err(false)` for tied heuristic candidates. Never pick by visit order.
     // ponytail: a Codex session started in `cwd` outside flowmux also lands
     // on that only unnamed tab until the tab's own thread has a name.
     pub async fn codex_session_tab(
         &self,
         session_id: &str,
         thread: Option<(&HashMap<String, String>, &Path)>,
-    ) -> Option<(PaneId, SurfaceId, Option<String>)> {
+    ) -> Result<Option<(PaneId, SurfaceId, Option<String>)>, bool> {
         fn for_each_tab(pane: &Pane, f: &mut impl FnMut(PaneId, &PaneSurface)) {
             match pane {
                 Pane::Leaf {
@@ -478,8 +480,8 @@ impl StateStore {
         }
         type Tab = (PaneId, SurfaceId, Option<String>);
         let state = self.inner.lock().await;
-        let mut reported = None;
-        let mut titled: Option<Tab> = None;
+        let mut reported = Vec::new();
+        let mut titled: Vec<Tab> = Vec::new();
         let mut unnamed: Vec<Tab> = Vec::new();
         let mut visit = |pane: PaneId, tab: &PaneSurface| {
             let Some(agent) = tab.agent.as_ref().filter(|agent| agent.name == "codex") else {
@@ -487,7 +489,7 @@ impl StateStore {
             };
             let found = (pane, tab.id, agent.session_id.clone());
             if agent.session_id.as_deref() == Some(session_id) {
-                reported.get_or_insert(found);
+                reported.push(found);
                 return;
             }
             let (
@@ -508,9 +510,7 @@ impl StateStore {
                 .then(|| flowmux_state::session_history::codex_title_thread(&tab.title));
             match shown {
                 Some(Some(shown)) if names.get(session_id).is_some_and(|name| name == shown) => {
-                    if titled.as_ref().is_none_or(|tab| tab.2.is_some()) || claimed.is_none() {
-                        titled = Some(found);
-                    }
+                    titled.push(found);
                 }
                 Some(Some(_)) => {}
                 // A title without a thread still fits the session the tab
@@ -531,8 +531,21 @@ impl StateStore {
                 for_each_tab(&root.root_pane, &mut visit);
             }
         }
-        let only_unnamed = (unnamed.len() == 1).then(|| unnamed.remove(0));
-        reported.or(titled).or(only_unnamed)
+        let unique = |mut tabs: Vec<Tab>, exact_session| match tabs.len() {
+            0 => Ok(None),
+            1 => Ok(tabs.pop()),
+            _ => Err(exact_session),
+        };
+        if !reported.is_empty() {
+            return unique(reported, true);
+        }
+        if !titled.is_empty() {
+            if titled.iter().any(|tab| tab.2.is_none()) {
+                titled.retain(|tab| tab.2.is_none());
+            }
+            return unique(titled, false);
+        }
+        unique(unnamed, false)
     }
 
     pub(super) async fn forget_cleared_agent_surfaces(&self, surfaces: &[SurfaceId]) {

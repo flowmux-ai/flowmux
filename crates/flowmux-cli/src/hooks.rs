@@ -564,8 +564,7 @@ pub fn started_by_codex_app_server() -> bool {
 /// started in `cwd`. The flag says the tab still holds another session. A
 /// window whose tab already reported the session beats one that matched a tab
 /// by title or directory.
-// ponytail: among windows that only matched by title or directory the first
-// wins; same-named threads from one directory cannot be told apart.
+// Equal-strength matches remain unresolved rather than modifying another tab.
 pub async fn resolve_codex_tab(
     session_id: &str,
     cwd: Option<&str>,
@@ -577,7 +576,18 @@ pub async fn resolve_codex_tab(
     sockets.extend(scan_pid_sockets().unwrap_or_default());
     sockets.sort();
     sockets.dedup();
-    let mut found = None;
+    resolve_codex_tab_at(sockets, session_id, cwd).await
+}
+
+async fn resolve_codex_tab_at(
+    sockets: Vec<PathBuf>,
+    session_id: &str,
+    cwd: Option<&str>,
+) -> Option<(Client, PaneId, SurfaceId, bool)> {
+    let mut exact = Vec::new();
+    let mut heuristic = Vec::new();
+    let mut ambiguous_exact = false;
+    let mut ambiguous_heuristic = false;
     for socket in sockets {
         let request = Request::AgentSurfaceResolve {
             agent: "codex".into(),
@@ -585,23 +595,40 @@ pub async fn resolve_codex_tab(
             cwd: cwd.map(PathBuf::from),
         };
         let reply = tokio::time::timeout(HOOK_NOTIFY_TIMEOUT, ask_window(&socket, request)).await;
-        let Ok(Some(Response::AgentSurface {
-            pane,
-            surface,
-            session_id: current,
-        })) = reply
-        else {
-            continue;
-        };
-        tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
-            exact_session = current.as_deref() == Some(session_id), "Codex route candidate");
-        if current.as_deref() == Some(session_id) {
-            found = Some((socket, pane, surface, false));
-            break;
+        match reply {
+            Ok(Some(Response::AgentSurface {
+                pane,
+                surface,
+                session_id: current,
+            })) => {
+                let exact_session = current.as_deref() == Some(session_id);
+                tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
+                    exact_session, "Codex route candidate");
+                let candidate = (socket, pane, surface, current.is_some() && !exact_session);
+                if exact_session {
+                    exact.push(candidate);
+                } else {
+                    heuristic.push(candidate);
+                }
+            }
+            Ok(Some(Response::AgentSurfaceAmbiguous { exact_session })) => {
+                if exact_session {
+                    ambiguous_exact = true;
+                } else {
+                    ambiguous_heuristic = true;
+                }
+            }
+            _ => {}
         }
-        found.get_or_insert((socket, pane, surface, current.is_some()));
     }
-    let (socket, pane, surface, other_session) = found?;
+    if ambiguous_exact
+        || exact.len() > 1
+        || (exact.is_empty() && (ambiguous_heuristic || heuristic.len() > 1))
+    {
+        tracing::debug!(target: "flowmux_agent", reason = "ambiguous_route", "Codex route rejected");
+        return None;
+    }
+    let (socket, pane, surface, other_session) = exact.pop().or_else(|| heuristic.pop())?;
     tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
         other_session, "Codex route selected");
     let client = try_connect(&socket, HOOK_CONNECT_TIMEOUT).await?;
@@ -664,6 +691,88 @@ fn pid_sockets_in(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn codex_routing_rejects_ties_and_prefers_unique_exact_session() {
+        use flowmux_ipc::protocol::{Envelope, Payload};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        // h: heuristic, e: exact, a: ambiguous heuristics, d: duplicate exact
+        // bindings, o: older server that only responds to the probe ping.
+        for (kinds, expected) in [
+            ("h", Some(0)),
+            ("hh", None),
+            ("he", Some(1)),
+            ("eh", Some(0)),
+            ("ee", None),
+            ("ah", None),
+            ("ae", Some(1)),
+            ("ea", Some(0)),
+            ("de", None),
+            ("ed", None),
+            ("oe", Some(1)),
+        ] {
+            let root = tempfile::Builder::new()
+                .prefix("fm-route-")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let mut sockets = Vec::new();
+            let mut surfaces = Vec::new();
+            let mut servers = Vec::new();
+            for (index, kind) in kinds.chars().enumerate() {
+                let socket = root.path().join(format!("{index}.sock"));
+                let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+                sockets.push(socket);
+                let pane = PaneId::new();
+                let surface = SurfaceId::new();
+                surfaces.push(surface);
+                let response = match kind {
+                    'a' | 'd' => Response::AgentSurfaceAmbiguous {
+                        exact_session: kind == 'd',
+                    },
+                    'o' => Response::Pong,
+                    _ => Response::AgentSurface {
+                        pane,
+                        surface,
+                        session_id: (kind == 'e').then(|| "session".into()),
+                    },
+                };
+                servers.push(tokio::spawn(async move {
+                    loop {
+                        let (stream, _) = listener.accept().await.unwrap();
+                        let mut stream = tokio::io::BufReader::new(stream);
+                        let mut line = String::new();
+                        if stream.read_line(&mut line).await.unwrap() == 0 {
+                            continue;
+                        }
+                        let request: Envelope = serde_json::from_str(&line).unwrap();
+                        assert!(matches!(
+                            request.payload,
+                            Payload::Request(Request::AgentSurfaceResolve { .. })
+                        ));
+                        let reply = Envelope {
+                            id: if kind == 'o' { 2 } else { 1 },
+                            payload: Payload::Response(response.clone()),
+                        };
+                        let encoded = serde_json::to_string(&reply).unwrap() + "\n";
+                        stream
+                            .get_mut()
+                            .write_all(encoded.as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                }));
+            }
+            let chosen = resolve_codex_tab_at(sockets, "session", Some("/same")).await;
+            assert_eq!(
+                chosen.map(|(_, _, surface, _)| surface),
+                expected.map(|i| surfaces[i]),
+                "{kinds}"
+            );
+            for server in servers {
+                server.abort();
+            }
+        }
+    }
 
     #[test]
     #[cfg(unix)]
