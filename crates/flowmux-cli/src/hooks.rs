@@ -574,16 +574,22 @@ pub async fn resolve_codex_tab(
     let name = probe.file_name()?.to_string_lossy().into_owned();
     let mut sockets = pid_sockets_in(probe.parent()?, name.strip_suffix("0.sock")?);
     sockets.extend(scan_pid_sockets().unwrap_or_default());
-    sockets.sort();
-    sockets.dedup();
     resolve_codex_tab_at(sockets, session_id, cwd).await
 }
 
 async fn resolve_codex_tab_at(
-    sockets: Vec<PathBuf>,
+    mut sockets: Vec<PathBuf>,
     session_id: &str,
     cwd: Option<&str>,
 ) -> Option<(Client, PaneId, SurfaceId, bool)> {
+    // Count endpoints, not aliases (including symlinked runtime directories).
+    for socket in &mut sockets {
+        if let Ok(endpoint) = socket.canonicalize() {
+            *socket = endpoint;
+        }
+    }
+    sockets.sort();
+    sockets.dedup();
     let mut exact = Vec::new();
     let mut heuristic = Vec::new();
     let mut ambiguous_exact = false;
@@ -710,6 +716,10 @@ mod tests {
             ("de", None),
             ("ed", None),
             ("oe", Some(1)),
+            ("e+", Some(0)),
+            ("h+", Some(0)),
+            ("e+e", None),
+            ("h+h", None),
         ] {
             let root = tempfile::Builder::new()
                 .prefix("fm-route-")
@@ -720,6 +730,12 @@ mod tests {
             let mut servers = Vec::new();
             for (index, kind) in kinds.chars().enumerate() {
                 let socket = root.path().join(format!("{index}.sock"));
+                // '+' exposes the first endpoint through a second pathname.
+                if kind == '+' {
+                    std::os::unix::fs::symlink(&sockets[0], &socket).unwrap();
+                    sockets.push(socket);
+                    continue;
+                }
                 let listener = tokio::net::UnixListener::bind(&socket).unwrap();
                 sockets.push(socket);
                 let pane = PaneId::new();

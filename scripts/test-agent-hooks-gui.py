@@ -199,7 +199,14 @@ int main(int argc, char **argv) {
                     hook("stop", "running", turn_id="root-2")
                     hook("subagent-stop", "idle", agent_id="child", turn_id="child-2")
                     hook("turn-start", "running", turn_id="root-3")
-                    hook("stop", "idle", turn_id="root-3")
+                    # A second pathname to this window is not another candidate.
+                    alias = Path(args.socket).with_name("flowmux-99999999.sock")
+                    alias.symlink_to(Path(args.socket).name)
+                    try:
+                        hook("stop", "idle", turn_id="root-3")
+                    finally:
+                        alias.unlink()
+                    print("PASS: socket alias does not suppress completion", flush=True)
                     hook("running", "running", turn_id="root-3")
                     hook("stop", "idle", turn_id="root-3", stop_hook_active=True)
                     hook("turn-start", "running", turn_id="root-4")
