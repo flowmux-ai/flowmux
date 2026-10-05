@@ -1080,6 +1080,30 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     }
     // Editing a stacked comment must keep its slot and reveal the whole composer.
     for index in [0, 4] {
+        // Reproduce incremental layout exposing a target before its scroll
+        // range has caught up. An unchanged adjustment is not proof that the
+        // composer is onscreen, even after the first allocation frame.
+        let adjustment = review.diff.vadjustment().unwrap();
+        let pending_upper = Rc::new(std::cell::Cell::new(adjustment.upper()));
+        let upper = pending_upper.clone();
+        let range_pending = adjustment.connect_upper_notify(move |adjustment| {
+            if adjustment.upper() > adjustment.page_size() {
+                upper.set(adjustment.upper());
+                adjustment.set_upper(adjustment.page_size());
+            }
+        });
+        let range_pending = std::cell::RefCell::new(Some(range_pending));
+        let frames = std::cell::Cell::new(0);
+        review.diff.add_tick_callback(move |_, _| {
+            frames.set(frames.get() + 1);
+            if frames.get() == 3 {
+                adjustment.disconnect(range_pending.borrow_mut().take().unwrap());
+                adjustment.set_upper(pending_upper.get());
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
         let card = review.inline_widgets.borrow()[index].clone();
         card.last_child()
             .unwrap()

@@ -643,7 +643,7 @@ impl ReviewWindow {
         let generation = self.scroll_generation.get().wrapping_add(1);
         self.scroll_generation.set(generation);
         let weak = Rc::downgrade(self);
-        let allocated = Cell::new(false);
+        let requested = Cell::new(false);
         self.diff.add_tick_callback(move |diff, _| {
             let Some(this) = weak.upgrade() else {
                 return glib::ControlFlow::Break;
@@ -651,54 +651,42 @@ impl ReviewWindow {
             if this.scroll_generation.get() != generation {
                 return glib::ControlFlow::Break;
             }
-            // Tick runs before layout. Ask TextView to validate the target line
-            // before measuring its newly attached card on a later frame.
-            if !allocated.replace(true) {
-                let buffer = diff.buffer();
-                diff.scroll_to_mark(&buffer.get_insert(), 0.05, align, 0.0, yalign);
-                return glib::ControlFlow::Continue;
-            }
             let buffer = diff.buffer();
-            let iter = buffer.iter_at_mark(&buffer.get_insert());
-            if let Some(card) = iter
+            let mark = buffer.get_insert();
+            let iter = buffer.iter_at_mark(&mark);
+            let card = iter
                 .child_anchor()
-                .and_then(|anchor| anchor.widgets().into_iter().next())
-            {
-                if !card.is_mapped() || card.width() <= 0 || card.height() <= 0 {
-                    return glib::ControlFlow::Continue;
-                }
-                if let Some(adjustment) = diff.vadjustment() {
-                    // TextView parks offscreen children at (-width, -height).
-                    // Their widget bounds are not the anchor's buffer position.
-                    let bounds = diff.iter_location(&iter);
-                    let (_, y) = diff.buffer_to_window_coords(
-                        gtk::TextWindowType::Widget,
-                        bounds.x(),
-                        bounds.y(),
-                    );
-                    let margin = 12.0;
-                    let top = y as f64;
-                    let bottom = top + bounds.height() as f64;
-                    let height = diff.height() as f64;
-                    let offset = if top < margin || bounds.height() as f64 > height - margin * 2.0 {
-                        top - margin
-                    } else if bottom > height - margin {
-                        bottom - height + margin
-                    } else {
-                        0.0
-                    };
-                    let previous = adjustment.value();
-                    adjustment.set_value(previous + offset);
-                    if (adjustment.value() - previous).abs() > 0.5 {
-                        // Scrolling validates more of a long TextView, which
-                        // can change the heights above this card next frame.
-                        return glib::ControlFlow::Continue;
+                .and_then(|anchor| anchor.widgets().into_iter().next());
+            let Some(card) = card else {
+                diff.scroll_to_mark(&mark, 0.05, align, 0.0, yalign);
+                return glib::ControlFlow::Break;
+            };
+            // TextView validates long buffers incrementally. A clamped or
+            // unchanged adjustment does not mean the target has been reached.
+            // Measure the allocated child on a later frame, and let GTK own
+            // validation/animation instead of overwriting its adjustment.
+            let oversized = card.height() > diff.height();
+            if requested.replace(true) && card.is_mapped() && card.height() > 0 {
+                if let Some(bounds) = card.compute_bounds(diff) {
+                    let visible = bounds.y() >= 0.0
+                        && if oversized {
+                            bounds.y() <= (card.margin_top() + diff.top_margin()) as f32
+                        } else {
+                            bounds.y() + bounds.height() <= diff.height() as f32
+                        };
+                    if visible {
+                        return glib::ControlFlow::Break;
                     }
                 }
-            } else {
-                diff.scroll_to_mark(&buffer.get_insert(), 0.05, align, 0.0, yalign);
             }
-            glib::ControlFlow::Break
+            diff.scroll_to_mark(
+                &mark,
+                if oversized { 0.0 } else { 0.05 },
+                align || oversized,
+                0.0,
+                if oversized { 0.0 } else { yalign },
+            );
+            glib::ControlFlow::Continue
         });
     }
 
