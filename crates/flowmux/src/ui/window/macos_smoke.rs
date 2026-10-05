@@ -880,6 +880,11 @@ fn save_theme_snapshot(widget: &gtk::Widget, name: &str) {
 
 async fn check_skills(controller: &WindowController) {
     use flowmux_cli::agent::{self, SkillOverrides, Target};
+    let legacy = agent::resolved_codex_home()
+        .unwrap()
+        .join("skills/flowmux-browser/SKILL.md");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "unmanaged copy").unwrap();
     controller.dispatch(GtkCommand::ShowOptionsDialog).await;
     let dialog = gtk::Window::list_toplevels()
         .into_iter()
@@ -894,6 +899,28 @@ async fn check_skills(controller: &WindowController) {
         "general reset must not look like skill removal"
     );
     let refresh: gtk::Button = theme_widget(dialog.upcast_ref(), "flowmux-skills-refresh");
+    let preview: gtk::Expander = theme_widget(dialog.upcast_ref(), "flowmux-skill-preview");
+    let manual: gtk::TextView = theme_widget(&preview.child().unwrap(), "flowmux-skill-contents");
+    assert!(!manual.is_editable());
+    assert_eq!(
+        manual
+            .buffer()
+            .text(
+                &manual.buffer().start_iter(),
+                &manual.buffer().end_iter(),
+                false
+            )
+            .as_str(),
+        Target::payload()
+    );
+    for _ in 0..2 {
+        preview.emit_by_name::<()>("activate", &[]);
+        wait_until("skill preview shown", || manual.is_mapped()).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        save_theme_snapshot(dialog.upcast_ref(), "skills-preview");
+        preview.emit_by_name::<()>("activate", &[]);
+        wait_until("skill preview collapsed", || !manual.is_mapped()).await;
+    }
     let home = agent::resolved_home().unwrap();
     let overrides = SkillOverrides::from_env();
     let mut paths = Vec::new();
@@ -933,6 +960,35 @@ async fn check_skills(controller: &WindowController) {
     }
     glib::timeout_future(Duration::from_millis(100)).await;
     save_theme_snapshot(dialog.upcast_ref(), "skills-installed");
+    let codex_row: adw::ActionRow = theme_widget(dialog.upcast_ref(), "flowmux-skill-codex");
+    assert!(codex_row
+        .subtitle()
+        .unwrap()
+        .contains("Another copy remains"));
+    // Matching linked directories are healthy but intentionally not removable.
+    let (_, linked_dir_path, _) = &paths[3];
+    let directory_source = home.join("managed-dotfiles");
+    std::fs::rename(linked_dir_path.parent().unwrap(), &directory_source).unwrap();
+    std::os::unix::fs::symlink(&directory_source, linked_dir_path.parent().unwrap()).unwrap();
+    refresh.emit_clicked();
+    let linked_dir_row: adw::ActionRow =
+        theme_widget(dialog.upcast_ref(), "flowmux-skill-antigravity");
+    let linked_dir_remove: gtk::Button =
+        theme_widget(dialog.upcast_ref(), "flowmux-skill-remove-antigravity");
+    wait_until("linked directory explanation", || {
+        linked_dir_row
+            .subtitle()
+            .is_some_and(|s| s.contains("Managed through a linked folder"))
+    })
+    .await;
+    assert!(!linked_dir_remove.is_sensitive());
+    assert_eq!(
+        std::fs::read_to_string(directory_source.join("SKILL.md")).unwrap(),
+        Target::payload()
+    );
+    std::fs::remove_file(linked_dir_path.parent().unwrap()).unwrap();
+    std::fs::rename(&directory_source, linked_dir_path.parent().unwrap()).unwrap();
+
     // An external edit is exposed as Update; replacement keeps exactly one backup.
     let (_, path, button) = &paths[2];
     std::fs::write(path, "custom skill notes").unwrap();
@@ -1056,6 +1112,12 @@ async fn check_skills(controller: &WindowController) {
         }
     }
     assert_eq!(std::fs::read_to_string(&source).unwrap(), "user-managed");
+    assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "unmanaged copy");
+    assert!(codex_row
+        .subtitle()
+        .unwrap()
+        .contains("Another copy remains"));
+    assert!(codex_row.subtitle().unwrap().contains("after removal here"));
     assert_eq!(
         std::fs::read_to_string(&settings).unwrap(),
         "{\"hooks\":{}}"

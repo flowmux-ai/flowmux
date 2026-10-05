@@ -201,7 +201,11 @@ only when the user requests a team; listing agents does not require launching an
 For users, open **Options → Skills** and click **Install** next to the agent they
 use. The same tab offers **Update**, **Remove**, and **Refresh status**. Updates
 and removal back up modified skill content and preserve agent hooks/settings.
-Each agent is managed separately. The equivalent CLI commands are below.
+**View skill contents** previews the bundled instructions. Agent skill lists use
+its existing `flowmux-browser` identifier. A separate Codex copy shown in the row
+can remain discoverable after removing this managed copy; do not delete user-owned
+copies automatically. Each agent is managed separately. The equivalent CLI
+commands are below.
 
 ```bash
 "$FLOWMUX_CLI" theme path

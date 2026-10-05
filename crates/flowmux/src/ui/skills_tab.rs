@@ -54,12 +54,30 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     });
     content.append(&refresh);
     let note = gtk::Label::new(Some(
-        "After installation, check your agent's skill list or start a new session. Existing sessions are not restarted. Only the FlowMux CLI skill is managed here; agent hooks and settings are unchanged.",
+        "In your agent's skill list, look for flowmux-browser (the existing installation identifier). Start a new session if needed. Existing sessions are not restarted. Only the FlowMux CLI skill is managed here; agent hooks and settings are unchanged.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
     note.add_css_class("dim-label");
     content.append(&note);
+
+    let manual = gtk::TextView::builder()
+        .editable(false)
+        .cursor_visible(false)
+        .monospace(true)
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .build();
+    manual.set_widget_name("flowmux-skill-contents");
+    manual.buffer().set_text(Target::payload());
+    let manual_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .min_content_height(260)
+        .child(&manual)
+        .build();
+    let preview = gtk::Expander::new(Some("View skill contents"));
+    preview.set_widget_name("flowmux-skill-preview");
+    preview.set_child(Some(&manual_scroll));
+    content.append(&preview);
 
     gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -73,6 +91,7 @@ struct SkillRow {
     button: gtk::Button,
     remove: gtk::Button,
     path: PathBuf,
+    target: Target,
     busy: Cell<bool>,
     update: Cell<bool>,
 }
@@ -116,6 +135,7 @@ impl SkillRow {
             button,
             remove,
             path,
+            target,
             busy: Cell::new(false),
             update: Cell::new(false),
         });
@@ -149,6 +169,7 @@ impl SkillRow {
         }
         let row = self.clone();
         let path = self.path.clone();
+        let target = self.target;
         // A file created/changed after a Missing check must not be overwritten
         // by an Install click. Only an explicit Update permits replacement.
         let force = self.update.get();
@@ -178,21 +199,36 @@ impl SkillRow {
                 .map_err(|error| format!("{error:#}"));
                 // A file symlink can be unlinked without touching its target;
                 // linked directories and non-file entries remain user-managed.
+                let linked_directory = path.parent().is_some_and(|parent| parent.is_symlink());
+                let duplicates = if target == Target::Codex {
+                    agent::resolved_home()
+                        .map(|home| {
+                            agent::codex_unmanaged_skill_paths(
+                                &home,
+                                agent::resolved_codex_home().as_deref(),
+                            )
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 let removable = path
                     .symlink_metadata()
                     .is_ok_and(|meta| meta.is_file() || meta.file_type().is_symlink())
-                    && !path.parent().is_some_and(|parent| parent.is_symlink());
+                    && !linked_directory;
                 (
                     agent::doctor_one(&path, Target::payload()),
                     outcome,
                     removable,
+                    linked_directory,
+                    duplicates,
                 )
             })
             .await;
             row.busy.set(false);
             row.remove.set_label("Remove");
             match result {
-                Ok((status, outcome, removable)) => {
+                Ok((status, outcome, removable, linked_directory, duplicates)) => {
                     row.show_status(&status);
                     row.remove.set_sensitive(removable);
                     match outcome {
@@ -207,6 +243,19 @@ impl SkillRow {
                         }
                         _ => {}
                     }
+                    let mut details = row.widget.subtitle().unwrap_or_default().to_string();
+                    if linked_directory {
+                        details.push_str(
+                            "\nManaged through a linked folder; change or remove it at its source.",
+                        );
+                    }
+                    for duplicate in duplicates {
+                        details.push_str(&format!(
+                            "\nAnother copy remains at {}. It may still appear in your agent after removal here.",
+                            duplicate.display()
+                        ));
+                    }
+                    row.widget.set_subtitle(&details);
                 }
                 Err(_) => {
                     row.widget

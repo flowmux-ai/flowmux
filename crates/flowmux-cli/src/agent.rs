@@ -7,7 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Repository skill embedded at compile time; rebuilding includes updated text.
@@ -165,13 +165,35 @@ impl DoctorStatus {
     }
 }
 
+/// Open without waiting for FIFO writers, then inspect the opened object before
+/// reading. Symlinks to regular files remain readable for drift checks.
+fn read_skill(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "skill must be a regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// Idempotent install. Writes `payload` to `path` (creating parent
 /// dirs). If `path` already exists with the same content, this is a
 /// no-op. If it exists with different content, `force = true`
 /// archives the old file then atomically replaces it; `force = false` returns
 /// an error. User-managed symlinks are never followed for writes.
 pub fn install_one(path: &Path, payload: &str, force: bool) -> Result<InstallOutcome> {
-    let existing = match fs::read(path) {
+    let existing = match read_skill(path) {
         Ok(existing) => Some(existing),
         Err(error) if error.kind() == ErrorKind::NotFound => None,
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
@@ -256,7 +278,7 @@ pub enum InstallOutcome {
 
 /// Compare embedded payload against on-disk file.
 pub fn doctor_one(path: &Path, payload: &str) -> DoctorStatus {
-    let content = fs::read(path);
+    let content = read_skill(path);
     if content
         .as_deref()
         .is_ok_and(|bytes| bytes == payload.as_bytes())
@@ -359,7 +381,7 @@ pub fn uninstall_one(path: &Path) -> Result<UninstallOutcome> {
         // Unlink just this entry, including a dangling link; never its target.
         None
     } else {
-        let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let bytes = read_skill(path).with_context(|| format!("reading {}", path.display()))?;
         if bytes == SKILL_BODY.as_bytes() {
             None
         } else {
@@ -788,5 +810,58 @@ mod tests {
             fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o640
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod special_file_tests {
+    use super::*;
+    use std::os::unix::fs::FileTypeExt;
+
+    #[test]
+    fn fifo_is_rejected_without_waiting_or_modifying_it() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("SKILL.md");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let checked = path.clone();
+        std::thread::spawn(move || {
+            let status = doctor_one(&checked, SKILL_BODY);
+            let install = install_one(&checked, SKILL_BODY, true).is_err();
+            let uninstall = uninstall_one(&checked).is_err();
+            tx.send((status, install, uninstall)).unwrap();
+        });
+        let (status, install, uninstall) = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("special skill files must not block any operation");
+        assert!(
+            matches!(status, DoctorStatus::Error(ref message) if message.contains("regular file"))
+        );
+        assert!(install && uninstall);
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_fifo());
+        assert_eq!(fs::read_dir(home.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn link_to_special_file_is_not_read_and_uninstall_only_unlinks() {
+        let home = tempfile::tempdir().unwrap();
+        let source = home.path().join("source");
+        let link = home.path().join("SKILL.md");
+        nix::unistd::mkfifo(&source, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        std::os::unix::fs::symlink(&source, &link).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let status = doctor_one(&link, SKILL_BODY);
+            let install = install_one(&link, SKILL_BODY, true).is_err();
+            let uninstall = uninstall_one(&link).unwrap();
+            tx.send((status, install, uninstall)).unwrap();
+        });
+        let (status, install, uninstall) = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("linked special files must not block skill operations");
+        assert!(matches!(status, DoctorStatus::Error(_)));
+        assert!(install);
+        assert_eq!(uninstall, UninstallOutcome::Removed);
+        assert!(fs::symlink_metadata(&source).unwrap().file_type().is_fifo());
     }
 }

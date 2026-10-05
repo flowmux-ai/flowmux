@@ -31,18 +31,23 @@ Open **Options → Skills** and click **Install** beside the agent you use
 FlowMux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
 shows the backup location. **Refresh status** checks changes made outside FlowMux.
-Hover over an agent row to inspect its destination path.
+Hover over an agent row to inspect its destination path. Expand **View skill
+contents** to inspect the exact bundled instructions without installing them.
+The display name is **FlowMux CLI**; agents discover it under the existing
+`flowmux-browser` identifier. A known extra Codex copy is shown in the row and
+remains visible there after removal of the managed copy.
 
 Click **Remove** beside an installed skill to delete that agent's FlowMux skill.
 Modified content is backed up before deletion, and the row shows its backup path.
 Other agents' copies, supporting files, hooks, wrappers and settings are preserved.
 A file symlink is unlinked without deleting its target; linked skill directories
-must be managed manually. After removal the row offers **Install** again.
+must be managed manually and are labeled in the row. After removal the row offers **Install** again.
 
 Installation is per agent and affects only the FlowMux CLI skill. It does not
 install the agent itself, change its hooks/settings, or restart running sessions.
 Check the agent's skill list or open a new session to load the updated guide.
 User-managed symlinks and filesystem errors are explained in the affected row.
+Special files such as named pipes are rejected without waiting or modifying them.
 
 ## CLI installation
 
