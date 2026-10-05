@@ -4,9 +4,11 @@
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,6 +96,82 @@ class RunnerTests(unittest.TestCase):
                 self.assertIsNone(units[0]['socket'])
                 hooks = [c for c in calls if c['agents'] == '1']
                 self.assertEqual(len(hooks), 0 if variable == 'AGENT_UNIT_EXIT' else 1)
+
+    @unittest.skipUnless(sys.platform == "darwin", "agent unit worker is used by the macOS gate")
+    def test_agent_unit_worker_cleans_up_descendants(self):
+        # Exercise the real fork/timeout/signal paths, not the gate's exit-code stub.
+        driver = """
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("runner", sys.argv[1])
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+real_run = runner.subprocess.run
+def short_run(*args, **kwargs):
+    kwargs['timeout'] = .5 if sys.argv[2] == 'timeout' else 10
+    return real_run(*args, **kwargs)
+runner.subprocess.run = short_run
+raise SystemExit(runner.main())
+"""
+        job = """
+import json, os, pathlib, subprocess, sys, time
+if os.environ['WORKER_CASE'] == 'empty':
+    pathlib.Path(os.environ['CHILD_INFO']).write_text(json.dumps([os.getpid(), os.getpgrp()]))
+    sys.exit(0)
+child = subprocess.Popen([sys.executable, '-c',
+    'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+pathlib.Path(os.environ['CHILD_INFO']).write_text(json.dumps([child.pid, os.getpgrp()]))
+if os.environ['WORKER_CASE'] in ('success', 'failure'):
+    sys.exit(0 if os.environ['WORKER_CASE'] == 'success' else 27)
+time.sleep(60)
+"""
+        for mode, expected in [('empty', 0), ('success', 0), ('failure', 27), ('timeout', 1),
+                               ('terminate', 143), ('interrupt', 130)]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                cargo = root / 'cargo'
+                cargo.write_text(f'#!{sys.executable}\n' + job)
+                cargo.chmod(0o755)
+                info = root / 'child.json'
+                env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
+                           CHILD_INFO=str(info), WORKER_CASE=mode)
+                with (root / 'output').open('w') as output:
+                    process = subprocess.Popen([sys.executable, '-c', driver,
+                        str(ROOT / 'scripts/test-agent-unit.py'), mode],
+                        env=env, stdout=output, stderr=subprocess.STDOUT)
+                    try:
+                        deadline = time.monotonic() + 10
+                        while not info.exists() or not info.read_text():
+                            self.assertIsNone(process.poll(), (root / 'output').read_text())
+                            self.assertLess(time.monotonic(), deadline)
+                            time.sleep(.02)
+                        child, group = json.loads(info.read_text())
+                        self.assertNotEqual(group, os.getpgrp())
+                        if mode in ('terminate', 'interrupt'):
+                            process.send_signal(signal.SIGTERM if mode == 'terminate' else signal.SIGINT)
+                        self.assertEqual(process.wait(timeout=10), expected,
+                                         (root / 'output').read_text())
+                        deadline = time.monotonic() + 2
+                        while True:
+                            try:
+                                os.kill(child, 0)
+                            except ProcessLookupError:
+                                break
+                            self.assertLess(time.monotonic(), deadline, 'test descendant survived')
+                            time.sleep(.02)
+                    finally:
+                        # Clean only this fixture's detached group, including on red tests.
+                        if info.exists() and info.read_text():
+                            _, group = json.loads(info.read_text())
+                            if group != os.getpgrp():
+                                try:
+                                    os.killpg(group, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait(timeout=10)
 
     def test_coverage_environment_failure_cannot_run_uninstrumented_tests(self):
         result, calls = self.run_script('test-coverage.sh')

@@ -29,9 +29,11 @@ def main():
     # setsid alone leaves the Codex app-server among the ancestors. A short
     # intermediate process lets only our test worker be reparented to init.
     read_fd, write_fd = os.pipe()
+    release_read, release_write = os.pipe()
     intermediate = os.fork()
     if intermediate == 0:
         os.close(read_fd)
+        os.close(release_write)
         if os.fork():
             os._exit(0)
         os.setsid()
@@ -47,25 +49,42 @@ def main():
         except Exception as error:
             print(f"agent unit runner failed: {error}", flush=True)
         finally:
-            os.write(write_fd, f"{result}\n".encode())
+            try:
+                os.write(write_fd, f"{result}\n".encode())
+            except BrokenPipeError:
+                pass
             os.close(write_fd)
+            # Keep the group leader alive until the parent cleans the group:
+            # macOS killpg returns EPERM for a group containing only a zombie.
+            # If the parent disappears, pipe EOF makes us clean our own group.
+            os.read(release_read, 1)
+            os.killpg(os.getpgrp(), signal.SIGKILL)
             os._exit(result)
     os.close(write_fd)
+    os.close(release_read)
     os.waitpid(intermediate, 0)
     with os.fdopen(read_fd) as result_stream:
         worker = int(result_stream.readline())
-        finished = False
+        def interrupted(signum, _frame):
+            raise SystemExit(128 + signum)
+
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
+            for sig in previous:
+                signal.signal(sig, interrupted)
             status = result_stream.readline()
-            finished = bool(status)
             return int(status) if status else 1
         finally:
-            # Interrupt only our still-running private test process group.
-            if not finished:
-                try:
-                    os.killpg(worker, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+            # A result only proves Cargo exited, not its descendants. The worker
+            # owns a private group; also remove children that ignore SIGTERM.
+            try:
+                os.killpg(worker, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            finally:
+                os.close(release_write)
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
