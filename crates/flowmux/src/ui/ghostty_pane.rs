@@ -671,17 +671,15 @@ impl GhosttyPane {
             let refresh = callbacks.on_terminal_contents_changed.clone();
             let throttle_for_content = refresh_throttle.clone();
             let refresh_for_content = refresh.clone();
-            term.connect_contents_changed(move |term| {
+            term.connect_contents_changed(move |_| {
                 dirty.set(true);
-                // pty-tee reports output for hidden tabs. Scanning here as
-                // well would extract and classify the same VTE grid twice.
-                if term.is_mapped() {
-                    schedule_agent_content_refresh(
-                        throttle_for_content.clone(),
-                        refresh_for_content.clone(),
-                        surface,
-                    );
-                }
+                // PTY output notification can arrive before VTE parses it.
+                // Hidden tabs also need this trailing, parsed-grid refresh.
+                schedule_agent_content_refresh(
+                    throttle_for_content.clone(),
+                    refresh_for_content.clone(),
+                    surface,
+                );
             });
             term.connect_map(move |_| {
                 schedule_agent_content_refresh(refresh_throttle.clone(), refresh.clone(), surface);
@@ -3957,7 +3955,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn hidden_terminal_output_skips_duplicate_vte_agent_refresh() {
+    async fn hidden_terminal_output_refreshes_after_vte_parses() {
         let calls = Rc::new(Cell::new(0));
         let mut callbacks = PaneCallbacks::noop_for_test();
         callbacks.on_terminal_contents_changed = {
@@ -3979,7 +3977,12 @@ mod tests {
         pane.widget.feed(b"codex working\n");
         gtk::glib::timeout_future(std::time::Duration::from_millis(150)).await;
 
-        assert_eq!(calls.get(), 0, "pty-tee owns hidden terminal refreshes");
+        assert_eq!(
+            calls.get(),
+            1,
+            "hidden parsed output must refresh Agent state"
+        );
+        calls.set(0);
         let window = gtk::Window::new();
         window.set_child(Some(&pane.container));
         window.present();

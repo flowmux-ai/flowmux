@@ -82,6 +82,8 @@ int main(int argc, char **argv) {
                             FLOWMUX_RUNTIME_DIR=str(Path(args.socket).parent))
             other_pid = None
             other_surface = None
+            other_status = "idle"
+            other_session_id = None
 
             def observed():
                 return next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
@@ -125,7 +127,8 @@ int main(int argc, char **argv) {
                     other = next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
                                  for p in w["panes"] for t in p["tabs"]
                                  if t["id"] == other_surface).get("agent")
-                    assert other and other["status"] == "idle" and not other.get("session_id"), other
+                    assert other and other["status"] == other_status, other
+                    assert other.get("session_id") == other_session_id, other
                 evidence.write(json.dumps(dict(agent=name, event=event, payload=payload, observed=value)) + "\n")
 
             try:
@@ -201,21 +204,51 @@ int main(int argc, char **argv) {
                     hook("turn-start", "running", turn_id="root-5")
                     hook("stop", "running", turn_id="root-4")
                     hook("stop", "idle", turn_id="root-5")
-                    rpc("workspace_focus", workspace=workspace)
-                    hook("turn-start", "running", turn_id="footer")
-                    # The completed goal row is followed by hints in the live
-                    # Codex TUI. Recover even when no Stop hook arrives.
-                    rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
-                    deadline = time.monotonic() + 5
-                    while observed()["status"] not in ("idle", "done"):
-                        assert time.monotonic() < deadline, observed()
-                        time.sleep(.05)
-                    assert observed()["custom_status"] == "Completed", observed()
-                    hook("turn-start", "running", turn_id="after-footer")
-                    rpc("pane_send_keys", pane=pane, keys="screen-working\r")
-                    time.sleep(.5)
-                    assert observed()["status"] == "working", observed()
-                    print("PASS: completed goal footer and next working turn", flush=True)
+                    # Keep the sibling genuinely working while the target
+                    # completes. Misrouting must not settle either session.
+                    subprocess.run([args.cli, "--socket", args.socket, "hooks", "codex", "turn-start"],
+                                   input=json.dumps(dict(session_id="fixture-other-codex",
+                                                         cwd=str(other_root), turn_id="other-live")),
+                                   text=True, env=hook_env, capture_output=True, check=True, timeout=10)
+                    other_status = "working"
+                    other_session_id = "fixture-other-codex"
+                    for visibility in ("hidden", "focused"):
+                        focused = other_ws["id"] if visibility == "hidden" else workspace
+                        rpc("workspace_focus", workspace=focused)
+                        for completion in ("footer", "native"):
+                            turn = f"{visibility}-{completion}"
+                            hook("turn-start", "running", turn_id=turn)
+                            # An unchanged old footer must not settle a new turn.
+                            time.sleep(.3)
+                            assert observed()["status"] == "working", observed()
+                            rpc("pane_send_keys", pane=pane, keys="screen-working\r")
+                            deadline = time.monotonic() + 5
+                            while "Working (1s" not in (observed().get("custom_status") or ""):
+                                assert time.monotonic() < deadline, observed()
+                                time.sleep(.05)
+                            if completion == "native":
+                                hook("stop", "idle", turn_id=turn)
+                                # A late spinner repaint must not reopen a
+                                # natively settled turn, visible or hidden.
+                                rpc("pane_send_keys", pane=pane, keys="screen-working\r")
+                                time.sleep(.5)
+                            else:
+                                # Recover the final parsed grid without Stop
+                                # or any focus change/additional output.
+                                rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                            deadline = time.monotonic() + 5
+                            while observed()["status"] not in ("idle", "done"):
+                                assert time.monotonic() < deadline, (
+                                    observed(), rpc("pane_read_screen", pane=pane))
+                                time.sleep(.05)
+                            if completion == "footer":
+                                assert observed()["custom_status"] == "Completed", observed()
+                            hook("turn-start", "running", turn_id=f"after-{turn}")
+                            rpc("pane_send_keys", pane=pane, keys="screen-working\r")
+                            time.sleep(.3)
+                            assert observed()["status"] == "working", observed()
+                            assert rpc("workspace_current")["workspace_current"]["id"] == focused
+                            print(f"PASS: {visibility} {completion} completion and next turn", flush=True)
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
                 # Only the executable started in this test's new terminal.
