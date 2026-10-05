@@ -20,6 +20,60 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use tokio::sync::Mutex;
 
+// Diagnostic IDs are opaque correlation tokens, never payload, prompt or title text.
+fn trace_key(value: Option<&str>) -> Option<u64> {
+    value.map(|value| {
+        let mut hash = DefaultHasher::new();
+        value.hash(&mut hash);
+        hash.finish()
+    })
+}
+
+fn lifecycle_trace_event(event: &AgentLifecycleEvent) -> (&'static str, Option<u64>) {
+    use AgentLifecycleEvent::*;
+    let (kind, key) = match event {
+        TurnStarted { turn_id, .. } => ("turn_started", turn_id.as_deref()),
+        ProgressObserved { .. } => ("progress", None),
+        CodexRootProgressObserved { turn_id, .. } => ("root_progress", Some(turn_id.as_str())),
+        PermissionWaitStarted { scope, .. } => ("permission_wait", scope.as_deref()),
+        SessionWaitStarted { scope, .. } => ("session_wait", scope.as_deref()),
+        SessionWaitResolved { scope, .. } => ("session_wait_resolved", scope.as_deref()),
+        ToolBatchFinished { .. } => ("tool_batch_finished", None),
+        WaitStarted { item_id, .. } => ("tool_wait", Some(item_id.as_str())),
+        WaitResolved { item_id } => ("tool_resolved", Some(item_id.as_str())),
+        TurnStopped { .. } => ("turn_stopped", None),
+        CodexSubagentStarted { turn_id, .. } => ("child_started", Some(turn_id.as_str())),
+        CodexChildProgressObserved { turn_id, .. } => ("child_progress", Some(turn_id.as_str())),
+        CodexSubagentStopped { turn_id, .. } => ("child_stopped", Some(turn_id.as_str())),
+        CodexTurnStopped { turn_id, .. } => ("codex_stopped", Some(turn_id.as_str())),
+        CodexTurnInterrupted { turn_id, .. } => ("codex_interrupted", Some(turn_id.as_str())),
+    };
+    (kind, trace_key(key))
+}
+
+fn trace_agent_before(current: Option<&LocatedAgentPresence>) {
+    if let Some(current) = current {
+        let presence = &current.presence;
+        let owner = match presence.source.as_deref() {
+            Some("flowmux:hook") => "hook",
+            Some("flowmux:screen") => "screen",
+            Some(flowmux_core::AGENT_SOURCE_PROC) => "process",
+            _ => "other",
+        };
+        let provider = match presence.name.as_str() {
+            "claude" => "claude",
+            "codex" => "codex",
+            "gemini" => "gemini",
+            "opencode" => "opencode",
+            _ => "other",
+        };
+        tracing::debug!(target: "flowmux_agent", workspace = %current.workspace,
+            pane = %current.pane, previous = ?presence.status, identity_source = owner,
+            session_key = ?trace_key(presence.session_id.as_deref()),
+            provider, "agent before");
+    }
+}
+
 #[derive(Default)]
 pub(super) struct AgentRuntime {
     pub(super) cleared_agent_surfaces: Mutex<HashSet<SurfaceId>>,
@@ -807,6 +861,11 @@ impl StateStore {
     /// tool's permission wait or settling a Codex parent turn while an observed
     /// subagent is still active.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "flowmux_agent", level = "debug", skip_all,
+        fields(instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
+            os = std::env::consts::OS, surface = %surface_id, evidence = "hook",
+            session_key = ?trace_key(Some(session_id)), event = ?lifecycle_trace_event(&lifecycle_event),
+            provider_key = ?trace_key(Some(agent)), seq = ?seq, surface_visible = surface_visible))]
     pub async fn report_agent_lifecycle_with_visibility(
         &self,
         surface_id: SurfaceId,
@@ -819,6 +878,7 @@ impl StateStore {
     ) -> AgentLifecycleResult {
         use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
         if !self.is_local_agent_surface(surface_id).await {
+            tracing::debug!(target: "flowmux_agent", reason = "unsupported_surface", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
 
@@ -826,6 +886,7 @@ impl StateStore {
         let mut runtime = self.agents.lifecycle.lock().await;
         let wait_key = (surface_id, agent.clone(), session_id.to_string());
         let current = self.located_agent_presence(surface_id).await;
+        trace_agent_before(current.as_ref());
         // SessionEnd/dead-PID teardown leaves a bounded tombstone. A native
         // SessionStart normally establishes the next epoch. The one exception
         // is a live outer agent returning after a nested agent owned the pane:
@@ -843,6 +904,7 @@ impl StateStore {
                 })
                 && seq.is_some_and(|incoming| ended.seq.is_none_or(|floor| incoming > floor));
             if !can_reactivate {
+                tracing::debug!(target: "flowmux_agent", reason = "ended_session", changed = false, "agent decision");
                 return AgentLifecycleResult::default();
             }
             runtime.ended.remove(&wait_key);
@@ -856,6 +918,7 @@ impl StateStore {
                 .zip(pid)
                 .is_some_and(|(owner, incoming)| owner != incoming)
         {
+            tracing::debug!(target: "flowmux_agent", reason = "owner_pid_mismatch", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         if current.as_ref().is_some_and(|located| {
@@ -876,6 +939,7 @@ impl StateStore {
                 });
             authoritative_other_agent || other_session || live_other_pid
         }) {
+            tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         let terminal_boundary = matches!(
@@ -894,6 +958,7 @@ impl StateStore {
             (Some(_), None) => true,
             _ => false,
         } {
+            tracing::debug!(target: "flowmux_agent", reason = "stale_sequence", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         let runtime_before = current
@@ -927,6 +992,7 @@ impl StateStore {
         let turn_boundary_seq = seq;
         let mut settle_codex_after_grace = None;
         let mut completion_message = None;
+        let mut no_transition_reason = "ledger_only";
         let decision = match lifecycle_event {
             AgentLifecycleEvent::TurnStarted {
                 turn_id,
@@ -1196,6 +1262,7 @@ impl StateStore {
                             .is_none_or(|current| incoming > *current)
                 });
                 if !newer {
+                    tracing::debug!(target: "flowmux_agent", reason = "stale_child_sequence", changed = false, "agent decision");
                     return AgentLifecycleResult::default();
                 }
                 if let Some(seq) = seq {
@@ -1236,6 +1303,7 @@ impl StateStore {
                                 .is_none_or(|current| incoming > *current)
                     });
                     if !newer {
+                        tracing::debug!(target: "flowmux_agent", reason = "stale_child_sequence", changed = false, "agent decision");
                         return AgentLifecycleResult::default();
                     }
                     if let Some(seq) = seq {
@@ -1247,6 +1315,7 @@ impl StateStore {
                         .get(&agent_id)
                         .is_some_and(|active_turn| active_turn == &turn_id);
                     if !matches_current_turn {
+                        tracing::debug!(target: "flowmux_agent", reason = "child_turn_mismatch", changed = false, "agent decision");
                         return AgentLifecycleResult::default();
                     }
                     ledger.active_children.remove(&agent_id);
@@ -1322,6 +1391,7 @@ impl StateStore {
                     )
                 };
                 if superseded || (already_settled && !stop_hook_active) {
+                    no_transition_reason = "stale_or_settled_turn";
                     None
                 } else {
                     clear_permission_scope_if_newer(
@@ -1388,6 +1458,7 @@ impl StateStore {
                     )
                 };
                 if superseded || already_settled {
+                    no_transition_reason = "stale_or_settled_turn";
                     None
                 } else {
                     clear_permission_scope_if_newer(
@@ -1455,6 +1526,13 @@ impl StateStore {
         }
 
         let Some((activity, message, custom_status)) = decision else {
+            let reason = if lifecycle_has_waits(&runtime, &wait_key) {
+                "pending_waits"
+            } else {
+                no_transition_reason
+            };
+            tracing::debug!(target: "flowmux_agent", reason, changed = false,
+                deferred = settle_codex_after_grace.is_some(), "agent decision");
             return AgentLifecycleResult {
                 settle_codex_after_grace,
                 ..AgentLifecycleResult::default()
@@ -1502,6 +1580,10 @@ impl StateStore {
         }
     }
 
+    #[tracing::instrument(target = "flowmux_agent", level = "debug", skip_all,
+        fields(instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
+            os = std::env::consts::OS, surface = %surface_id, evidence = "status_report",
+            session_key = ?trace_key(report.session_id.as_deref()), seq = report.seq, surface_visible = surface_visible))]
     pub async fn report_agent_status_with_visibility(
         &self,
         surface_id: SurfaceId,
@@ -1509,6 +1591,7 @@ impl StateStore {
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         if !self.is_local_agent_surface(surface_id).await {
+            tracing::debug!(target: "flowmux_agent", reason = "unsupported_surface", changed = false, "agent decision");
             return None;
         }
         // Only a native SessionStart carries both Ready and a session id.
@@ -1544,6 +1627,7 @@ impl StateStore {
                 (Some(_), None) => true,
                 _ => false,
             } {
+                tracing::debug!(target: "flowmux_agent", reason = "stale_session_start", changed = false, "agent decision");
                 return None;
             }
             let displaced = current.as_ref().and_then(|located| {
@@ -1605,6 +1689,7 @@ impl StateStore {
             let mut lifecycle = self.agents.lifecycle.lock().await;
             let key = (surface_id, agent.clone(), session_id.clone());
             if lifecycle.ended.contains_key(&key) {
+                tracing::debug!(target: "flowmux_agent", reason = "ended_session", changed = false, "agent decision");
                 return None;
             }
             if agent == "codex"
@@ -1615,6 +1700,7 @@ impl StateStore {
                     .zip(report.pid)
                     .is_some_and(|(owner, incoming)| owner != incoming)
             {
+                tracing::debug!(target: "flowmux_agent", reason = "owner_pid_mismatch", changed = false, "agent decision");
                 return None;
             }
             let current = self.located_agent_presence(surface_id).await;
@@ -1639,6 +1725,7 @@ impl StateStore {
                         });
                 authoritative_other_agent || other_session || live_other_pid
             }) {
+                tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
                 return None;
             }
             let boundary = lifecycle.boundary_seq.get(&key).copied();
@@ -1647,6 +1734,7 @@ impl StateStore {
                 (Some(_), None) => true,
                 _ => false,
             } {
+                tracing::debug!(target: "flowmux_agent", reason = "stale_sequence", changed = false, "agent decision");
                 return None;
             }
             let terminal_idle = report.effective_status() == Some(AgentStatus::Idle);
@@ -1692,6 +1780,10 @@ impl StateStore {
     /// spawned before its SubagentStart hook is dispatched, so the Stop hook
     /// can otherwise observe an empty child set and publish a false completion.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "flowmux_agent", level = "debug", skip_all,
+        fields(instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
+            os = std::env::consts::OS, surface = %surface_id, evidence = "hook_grace",
+            session_key = ?trace_key(Some(session_id)), turn_key = ?trace_key(Some(turn_id)), seq = ?seq))]
     pub async fn settle_codex_turn_after_grace(
         &self,
         surface_id: SurfaceId,
@@ -1706,6 +1798,7 @@ impl StateStore {
         let mut runtime = self.agents.lifecycle.lock().await;
         let wait_key = (surface_id, "codex".to_string(), session_id.to_string());
         if runtime.ended.contains_key(&wait_key) {
+            tracing::debug!(target: "flowmux_agent", reason = "ended_session", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         let current = self.located_agent_presence(surface_id).await;
@@ -1718,6 +1811,7 @@ impl StateStore {
                     .zip(pid)
                     .is_none_or(|(current, incoming)| current == incoming)
         }) {
+            tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         let before = LifecycleCheckpoint::capture(&runtime, &wait_key);
@@ -1726,6 +1820,7 @@ impl StateStore {
                 .codex_turns
                 .get_mut(&(surface_id, session_id.to_string()))
             else {
+                tracing::debug!(target: "flowmux_agent", reason = "no_turn_ledger", changed = false, "agent decision");
                 return AgentLifecycleResult::default();
             };
             if ledger
@@ -1738,6 +1833,7 @@ impl StateStore {
                     .as_ref()
                     .is_none_or(|pending| pending.turn_id != turn_id || pending.seq != seq)
             {
+                tracing::debug!(target: "flowmux_agent", reason = "superseded_or_active_children", changed = false, "agent decision");
                 return AgentLifecycleResult::default();
             }
             let pending = ledger.pending_parent_stop.take().unwrap();
@@ -1774,6 +1870,7 @@ impl StateStore {
             .map(|(workspace, _)| workspace);
         if workspace.is_none() {
             before.restore(&mut runtime);
+            tracing::debug!(target: "flowmux_agent", reason = "report_rejected", changed = false, "agent decision");
             return AgentLifecycleResult::default();
         }
         self.allow_agent_screen_restore(surface_id).await;
@@ -1805,14 +1902,19 @@ impl StateStore {
             let mut found = false;
             let mut changed = false;
             for surface in ws.surfaces.iter_mut() {
-                if let Some(existing) = surface.root_pane.agent_presence_for_surface(surface_id) {
-                    preserve_live_agent_pid(&mut report, &existing);
+                let previous = surface.root_pane.agent_presence_for_surface(surface_id);
+                if let Some(existing) = &previous {
+                    preserve_live_agent_pid(&mut report, existing);
                 }
                 if let Some(applied) = surface.root_pane.report_surface_agent(
                     surface_id,
                     report.clone(),
                     surface_visible,
                 ) {
+                    tracing::debug!(target: "flowmux_agent", surface = %surface_id,
+                        workspace = %ws.id, previous = ?previous.as_ref().map(|p| p.status),
+                        next = ?surface.root_pane.agent_presence_for_surface(surface_id).map(|p| p.status),
+                        changed = applied, reason = "report_result", "agent decision");
                     found = true;
                     changed = applied;
                     break;
@@ -1919,6 +2021,9 @@ impl StateStore {
                             != Some(observed_presence)
                     });
                 if changed_during_scan {
+                    tracing::debug!(target: "flowmux_agent", surface = %surface_id,
+                        evidence = "process", reason = "changed_during_scan", changed = false,
+                        "agent decision");
                     continue;
                 }
                 if let Some(screen_fallback) = screen_fallback {
@@ -1951,6 +2056,12 @@ impl StateStore {
                     }
                     if let Some((result, previous, name)) = applied {
                         if result {
+                            tracing::debug!(target: "flowmux_agent", surface = %surface_id,
+                                workspace = %ws.id, evidence = "process",
+                                previous = ?previous.as_ref().map(|p| p.status),
+                                next = ?ws.surfaces.iter().find_map(|s| s.root_pane.agent_presence_for_surface(*surface_id)).map(|p| p.status),
+                                candidate_present = name.is_some(), changed = true,
+                                reason = "process_reconciled", "agent decision");
                             changed.push((ws.id, ws.agent_status_rollup()));
                             if name.is_some() {
                                 created_surfaces.push(*surface_id);
@@ -2026,6 +2137,9 @@ impl StateStore {
         .await
     }
 
+    #[tracing::instrument(target = "flowmux_agent", level = "debug", skip_all,
+        fields(instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
+            os = std::env::consts::OS, surface = %surface_id, evidence = "screen", surface_visible = surface_visible))]
     pub async fn report_agent_screen_signals_with_visibility(
         &self,
         surface_id: SurfaceId,
@@ -2036,13 +2150,18 @@ impl StateStore {
         // Screen evidence is already scoped to a tab and carries no local PID.
         // SSH remains excluded from process scans and native hook reports.
         let lifecycle = self.agents.lifecycle.lock().await;
+        if tracing::enabled!(target: "flowmux_agent", tracing::Level::DEBUG) {
+            trace_agent_before(self.located_agent_presence(surface_id).await.as_ref());
+        }
         if !self.is_local_agent_surface(surface_id).await && !self.is_ssh_surface(surface_id).await
         {
+            tracing::debug!(target: "flowmux_agent", reason = "unsupported_surface", changed = false, "agent decision");
             return None;
         }
         if lifecycle.screen_absent.contains(&surface_id)
             && self.located_agent_presence(surface_id).await.is_none()
         {
+            tracing::debug!(target: "flowmux_agent", reason = "process_absent", changed = false, "agent decision");
             return None;
         }
         let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
@@ -2099,6 +2218,7 @@ impl StateStore {
                     .await
                     .insert(surface_id);
             }
+            tracing::debug!(target: "flowmux_agent", reason = "no_screen_signal", "agent decision");
             drop(lifecycle);
             return self
                 .clear_screen_agent_signal(surface_id, surface_visible)
@@ -2121,6 +2241,7 @@ impl StateStore {
         {
             // A new hook turn must not be completed by its unchanged old footer.
             // Ordinary late tool hooks still allow the live footer to recover.
+            tracing::debug!(target: "flowmux_agent", reason = "unchanged_completion_new_turn", changed = false, "agent decision");
             return None;
         }
         if status == AgentStatus::Idle
@@ -2128,6 +2249,7 @@ impl StateStore {
                 *surface == surface_id && !ledger.active_children.is_empty()
             })
         {
+            tracing::debug!(target: "flowmux_agent", reason = "active_children", changed = false, "agent decision");
             return None;
         }
         if status != AgentStatus::Blocked
@@ -2144,6 +2266,7 @@ impl StateStore {
         {
             // Hook waits are authoritative. A spinner or stale completion line
             // must not visually clear a real permission/input prompt.
+            tracing::debug!(target: "flowmux_agent", reason = "pending_waits", changed = false, "agent decision");
             return None;
         }
         if self
@@ -2177,6 +2300,7 @@ impl StateStore {
                     .lock()
                     .await
                     .insert(surface_id, Some(fingerprint));
+                tracing::debug!(target: "flowmux_agent", reason = "session_teardown", changed = false, "agent decision");
                 return None;
             }
             self.allow_agent_screen_restore(surface_id).await;
@@ -2211,6 +2335,7 @@ impl StateStore {
             // the Stop hook returns, so a screen Working here is stale and
             // must not reopen the turn: a bare prompt cannot clear hook
             // Working, so nothing would ever settle it again.
+            tracing::debug!(target: "flowmux_agent", reason = "settled_turn_spinner", changed = false, "agent decision");
             return None;
         }
         let mut outcome = None;
@@ -2218,6 +2343,9 @@ impl StateStore {
             let mut found = false;
             let mut changed = false;
             for surface in ws.surfaces.iter_mut() {
+                let previous = tracing::enabled!(target: "flowmux_agent", tracing::Level::DEBUG)
+                    .then(|| surface.root_pane.agent_presence_for_surface(surface_id))
+                    .flatten();
                 if let Some(applied) = surface.root_pane.report_surface_agent_signal(
                     surface_id,
                     status,
@@ -2226,6 +2354,10 @@ impl StateStore {
                     status_text,
                     surface_visible,
                 ) {
+                    tracing::debug!(target: "flowmux_agent", workspace = %ws.id,
+                        previous = ?previous.as_ref().map(|p| p.status), detected = ?status,
+                        next = ?surface.root_pane.agent_presence_for_surface(surface_id).map(|p| p.status),
+                        changed = applied, reason = "screen_result", "agent decision");
                     found = true;
                     changed = applied;
                     break;
@@ -2503,6 +2635,93 @@ fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPrese
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decision_trace_records_rejections_and_transitions_without_payload_text() {
+        // Other parallel tests hit the same tracing callsites without a
+        // subscriber. Capture in a child so global interest stays deterministic.
+        const CHILD: &str = "FLOWMUX_TRACE_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            assert!(std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "state_store::agent_runtime::tests::decision_trace_records_rejections_and_transitions_without_payload_text", "--nocapture"])
+                .env(CHILD, "1").status().unwrap().success());
+            return;
+        }
+        #[derive(Clone)]
+        struct Writer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Writer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let output = Writer(Default::default());
+        let writer = output.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter("flowmux_agent=debug")
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+        let ws = store.get_workspace(workspace).await.unwrap();
+        let pane = &ws.surfaces[0].root_pane;
+        let surface = pane
+            .active_surface_id(pane.first_leaf_id().unwrap())
+            .unwrap();
+        for (seq, event) in [
+            (
+                10,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("private-turn".into()),
+                    status_text: "private-status".into(),
+                },
+            ),
+            (
+                9,
+                AgentLifecycleEvent::TurnStopped {
+                    message: Some("private-message".into()),
+                    status_text: "private-status".into(),
+                },
+            ),
+            (
+                11,
+                AgentLifecycleEvent::TurnStopped {
+                    message: Some("private-message".into()),
+                    status_text: "private-status".into(),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(seq),
+                    "private-session",
+                    event,
+                    false,
+                )
+                .await;
+        }
+        let log = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("stale_sequence"), "{log}");
+        assert!(log.contains("seq=Some(10)"), "{log}");
+        assert!(log.contains("surface_visible=false"), "{log}");
+        assert!(log.contains("next=Some(Working)"), "{log}");
+        assert!(log.contains("next=Some(Idle)"), "{log}");
+        assert!(log.contains("identity_source=\"hook\""), "{log}");
+        assert!(log.contains(&surface.to_string()), "{log}");
+        assert!(
+            !log.contains("private-"),
+            "diagnostics leaked payload: {log}"
+        );
+    }
 
     #[test]
     fn lifecycle_checkpoint_restores_one_session_without_rewinding_others() {

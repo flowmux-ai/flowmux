@@ -593,6 +593,8 @@ pub async fn resolve_codex_tab(
         else {
             continue;
         };
+        tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
+            exact_session = current.as_deref() == Some(session_id), "Codex route candidate");
         if current.as_deref() == Some(session_id) {
             found = Some((socket, pane, surface, false));
             break;
@@ -600,6 +602,8 @@ pub async fn resolve_codex_tab(
         found.get_or_insert((socket, pane, surface, current.is_some()));
     }
     let (socket, pane, surface, other_session) = found?;
+    tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
+        other_session, "Codex route selected");
     let client = try_connect(&socket, HOOK_CONNECT_TIMEOUT).await?;
     Some((client, pane, surface, other_session))
 }

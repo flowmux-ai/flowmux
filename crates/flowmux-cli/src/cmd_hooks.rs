@@ -948,21 +948,24 @@ pub(crate) async fn run_generic_agent_hook_event(
     // windows which tab runs this session instead. The daemon outlives the
     // tab, so it is not the agent PID either.
     let mut session_route = None;
-    let (pane, surface, pid) =
-        if reported_agent.eq_ignore_ascii_case("codex") && started_by_codex_app_server() {
-            let Some(session_id) = input.session_id.as_deref() else {
-                return Ok(());
-            };
-            let Some((client, pane, surface, other_session)) =
-                resolve_codex_tab(session_id, input.cwd.as_deref()).await
-            else {
-                return Ok(());
-            };
-            session_route = Some((client, other_session));
-            (Some(pane), Some(surface), None)
-        } else {
-            (pane, surface, pid)
+    let (pane, surface, pid) = if reported_agent.eq_ignore_ascii_case("codex")
+        && started_by_codex_app_server()
+    {
+        let Some(session_id) = input.session_id.as_deref() else {
+            tracing::debug!(target: "flowmux_agent", reason = "missing_session", "Codex route rejected");
+            return Ok(());
         };
+        let Some((client, pane, surface, other_session)) =
+            resolve_codex_tab(session_id, input.cwd.as_deref()).await
+        else {
+            tracing::debug!(target: "flowmux_agent", reason = "route_unavailable", "Codex route rejected");
+            return Ok(());
+        };
+        session_route = Some((client, other_session));
+        (Some(pane), Some(surface), None)
+    } else {
+        (pane, surface, pid)
+    };
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
     let mut reqs: Vec<_> = Vec::new();
