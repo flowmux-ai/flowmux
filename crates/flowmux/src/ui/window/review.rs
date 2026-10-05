@@ -273,7 +273,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
     std::fs::write(dir.path().join("review.txt"), "fixture\n").unwrap();
     std::fs::write(
         dir.path().join(".git/info/exclude"),
-        "receiver.py\nreceipt.bin\n",
+        "receiver.py\nreceipt.bin*\nsource-receipt.bin*\n",
     )
     .unwrap();
     let root = flowmux_vcs::review::repository_root(dir.path()).unwrap();
@@ -389,29 +389,45 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
     // A real child PTY records a bracketed multiline paste and its submit key.
     terminal.write_input(b"\x15").unwrap();
     let receiver = dir.path().join("receiver.py");
+    #[cfg(target_os = "macos")]
     let receipt = dir.path().join("receipt.bin");
+    let source_receipt = dir.path().join("source-receipt.bin");
     std::fs::write(
         &receiver,
-        format!(
-            r#"import os, sys, termios, tty
+        r#"import os, sys, termios, tty
 previous = termios.tcgetattr(0)
 tty.setraw(0)
 try:
     os.write(1, '\x1b[?2004h\r\n› '.encode())
     data = b''
-    while not data.endswith(b'\x1b[201~\r'):
-        data += os.read(0, 65536)
-    open({:?}, 'wb').write(data)
+    while True:
+        chunk = os.read(0, 65536)
+        if not chunk or chunk == b'\x04':
+            break
+        data += chunk
+        # Publish complete bytes atomically; existence must not race the write.
+        with open(sys.argv[1] + '.tmp', 'wb') as output:
+            output.write(data)
+        os.replace(sys.argv[1] + '.tmp', sys.argv[1])
+        if len(sys.argv) == 2 and data.endswith(b'\x1b[201~\r'):
+            break
 finally:
-    os.write(1, b'\x1b[?2004l\r\n')
+    os.write(1, b'\x1b[?2004l\r\nREVIEW_RECEIVER_EXITED\r\n')
     termios.tcsetattr(0, termios.TCSANOW, previous)
 "#,
-            receipt.to_string_lossy()
-        ),
     )
     .unwrap();
+    // Keep the source alive across split/resizing. Its byte receipt detects a
+    // misrouted send without mistaking shell prompt reflow for terminal input.
     terminal
-        .write_input(format!("python3 '{}'\r", receiver.display()).as_bytes())
+        .write_input(
+            format!(
+                "python3 '{}' '{}' monitor\r",
+                receiver.display(),
+                source_receipt.display()
+            )
+            .as_bytes(),
+        )
         .unwrap();
     glib::future_with_timeout(Duration::from_secs(10), async {
         loop {
@@ -450,13 +466,13 @@ finally:
         .focus_review_target(pane, target, prompt.into())
         .await;
     glib::future_with_timeout(Duration::from_secs(10), async {
-        while !receipt.exists() {
+        while !std::fs::read(&source_receipt).is_ok_and(|bytes| bytes.ends_with(b"\x1b[201~\r")) {
             glib::timeout_future(Duration::from_millis(20)).await;
         }
     })
     .await
     .unwrap();
-    let received = std::fs::read(&receipt).unwrap();
+    let received = std::fs::read(&source_receipt).unwrap();
     assert_eq!(
         received,
         format!("\x1b[200~{}\x1b[201~\r", prompt.replace('\n', "\r")).as_bytes()
@@ -477,9 +493,10 @@ finally:
                 registry.stack_for_pane(destination).unwrap(),
             )
         };
-        std::fs::remove_file(&receipt).unwrap();
         destination_terminal
-            .write_input(format!("python3 '{}'\r", receiver.display()).as_bytes())
+            .write_input(
+                format!("python3 '{}' '{}'\r", receiver.display(), receipt.display()).as_bytes(),
+            )
             .unwrap();
         glib::future_with_timeout(Duration::from_secs(10), async {
             loop {
@@ -545,10 +562,10 @@ finally:
                 .await;
         }
         controller.refresh_review_targets().await;
-        let source_before = terminal.screen_text().unwrap();
+        let source_before = std::fs::read(&source_receipt).unwrap();
         review.smoke_activate_target(destination_surface);
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !receipt.exists()
+            while !std::fs::read(&receipt).is_ok_and(|bytes| bytes.ends_with(b"\x1b[201~\r"))
                 || controller.focused_pane.get() != Some(destination)
                 || review.root_widget.is_mapped()
                 || target_review.root_widget.is_mapped()
@@ -566,7 +583,7 @@ finally:
         assert!(String::from_utf8_lossy(&received).contains("Review target: Unstaged + Staged"));
         assert!(!review.root_widget.is_mapped());
         assert!(!target_review.root_widget.is_mapped());
-        assert_eq!(terminal.screen_text().unwrap(), source_before);
+        assert_eq!(std::fs::read(&source_receipt).unwrap(), source_before);
         target_review.present();
         glib::future_with_timeout(Duration::from_secs(5), async {
             while destination_stack.is_transition_running() {
@@ -621,7 +638,9 @@ finally:
             .await;
         std::fs::remove_file(&receipt).unwrap();
         destination_terminal
-            .write_input(format!("python3 '{}'\r", receiver.display()).as_bytes())
+            .write_input(
+                format!("python3 '{}' '{}'\r", receiver.display(), receipt.display()).as_bytes(),
+            )
             .unwrap();
         glib::future_with_timeout(Duration::from_secs(10), async {
             loop {
@@ -651,7 +670,7 @@ finally:
         controller.refresh_review_targets().await;
         review.smoke_activate_target(destination_surface);
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !receipt.exists() {
+            while !std::fs::read(&receipt).is_ok_and(|bytes| bytes.ends_with(b"\x1b[201~\r")) {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
@@ -665,6 +684,7 @@ finally:
         assert!(received.contains(&format!("Review target: commit {oid}")));
         assert!(received.contains("Send this historical commit review"));
         assert!(!received.contains("Send unchanged Edit to the chosen Codex pane"));
+        assert_eq!(std::fs::read(&source_receipt).unwrap(), source_before);
         println!("DIFF_REVIEW_COMMIT_TEMPLATE_PTY_HANDOFF_OK");
         controller
             .store
@@ -677,6 +697,22 @@ finally:
         println!("DIFF_REVIEW_MENU_MULTI_CODEX_PTY_HANDOFF_OK");
     }
 
+    terminal.write_input(b"\x04").unwrap();
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while !terminal
+            .screen_text()
+            .is_some_and(|text| text.contains("REVIEW_RECEIVER_EXITED"))
+        {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("source receiver must exit before the next scenario");
+    assert_eq!(
+        std::fs::read(&source_receipt).unwrap(),
+        format!("\x1b[200~{}\x1b[201~\r", prompt.replace('\n', "\r")).as_bytes(),
+        "only the initial direct send may reach the source PTY"
+    );
     controller.store.set_agent_activity(surface, None).await;
     review.smoke_set_draft("Keep unfinished review");
     controller.close_window().await;
