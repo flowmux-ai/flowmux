@@ -666,6 +666,24 @@ impl ReviewWindow {
             // Measure the allocated child on a later frame, and let GTK own
             // validation/animation instead of overwriting its adjustment.
             let oversized = card.height() > diff.height();
+            let crowded = (card.height() + card.margin_top() + card.margin_bottom()) as f64
+                > diff.height() as f64 * 0.9;
+            // A nearly full-height card cannot fit inside a 5% scroll margin.
+            // Center it without that margin; align an oversized card at its top.
+            // Update the destination before accepting a transient visible frame.
+            diff.scroll_to_mark(
+                &mark,
+                if crowded { 0.0 } else { 0.05 },
+                align || crowded,
+                0.0,
+                if oversized {
+                    0.0
+                } else if crowded {
+                    0.5
+                } else {
+                    yalign
+                },
+            );
             if requested.replace(true) && card.is_mapped() && card.height() > 0 {
                 if let Some(bounds) = card.compute_bounds(diff) {
                     let visible = bounds.y() >= 0.0
@@ -679,13 +697,6 @@ impl ReviewWindow {
                     }
                 }
             }
-            diff.scroll_to_mark(
-                &mark,
-                if oversized { 0.0 } else { 0.05 },
-                align || oversized,
-                0.0,
-                if oversized { 0.0 } else { yalign },
-            );
             glib::ControlFlow::Continue
         });
     }

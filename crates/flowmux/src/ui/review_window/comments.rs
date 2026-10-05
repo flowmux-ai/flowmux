@@ -1128,17 +1128,37 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
         assert_eq!(text(&review.comments.writer), "changed draft");
         review.comments.writer.buffer().set_text(&original_text);
         assert!(!review.has_unsaved_review());
+        // A composer that nearly fills a short pane must still fit onscreen.
+        if index == 4 {
+            review
+                .comments
+                .composer
+                .set_height_request(review.diff.height() - 24);
+        }
         glib::future_with_timeout(std::time::Duration::from_secs(10), async {
+            let mut previous = None;
+            let mut stable = 0;
             loop {
                 let bounds = review
                     .comments
                     .composer
                     .compute_bounds(&review.diff)
                     .unwrap();
-                if bounds.y() >= 0.0 && bounds.y() + bounds.height() <= review.diff.height() as f32
+                let adjustment = review.diff.vadjustment().unwrap();
+                let geometry = (bounds.y(), bounds.height(), adjustment.value(), adjustment.upper());
+                if previous == Some(geometry)
+                    && bounds.height() >= review.comments.composer.height_request().max(0) as f32
+                    && bounds.y() >= 0.0
+                    && bounds.y() + bounds.height() <= review.diff.height() as f32
                 {
-                    break;
+                    stable += 1;
+                    if stable == 3 {
+                        break;
+                    }
+                } else {
+                    stable = 0;
                 }
+                previous = Some(geometry);
                 glib::timeout_future(std::time::Duration::from_millis(20)).await;
             }
         })
@@ -1151,6 +1171,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
                 review.diff.vadjustment().map(|a| (a.value(), a.upper(), a.page_size())),
             )
         });
+        review.comments.composer.set_height_request(-1);
         review.send_review(None);
         ready(review).await;
         assert_eq!(review.status.text(), "Feedback copied");
