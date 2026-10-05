@@ -494,6 +494,7 @@ finally:
         Some(std::process::id()),
     );
     ready.status = AgentStatus::Idle;
+    ready.source = Some("flowmux:hook".into());
     ready.session_id = Some("receiver".into());
     let target = ReviewTarget {
         surface,
@@ -584,6 +585,7 @@ finally:
             let mut agent =
                 AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
             agent.status = AgentStatus::Idle;
+            agent.source = Some("flowmux:hook".into());
             agent.session_id = Some(session.into());
             controller
                 .store
@@ -667,19 +669,20 @@ finally:
             .await;
         wait_receiver_exit(&destination_terminal, "worktree").await;
         // Model delayed terminal repaint: the prior prompt is still visible
-        // while a new receiver has not acknowledged startup.
-        destination_terminal
+        // while a new receiver has not acknowledged startup. Use the live
+        // raw-mode source so shell prompt redraw cannot overwrite this frame.
+        terminal
             .widget
             .feed(b"\r\nREVIEW_READY:worktree\r\n\xe2\x80\xba ");
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !receiver_ready(&destination_terminal, "worktree") {
+            while !receiver_ready(&terminal, "worktree") {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
         .await
         .expect("stale receiver prompt must be rendered");
         assert!(
-            !receiver_ready(&destination_terminal, "commit"),
+            !receiver_ready(&terminal, "commit"),
             "a prior receiver's empty prompt must not acknowledge the next launch"
         );
         println!("DIFF_REVIEW_STALE_RECEIVER_PROMPT_REJECTED_OK");
@@ -687,11 +690,29 @@ finally:
         start_receiver(&destination_terminal, &receiver, &receipt, "commit", false).await;
         let mut agent = AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
         agent.status = AgentStatus::Idle;
+        agent.source = Some("flowmux:hook".into());
         agent.session_id = Some("destination-commit-codex".into());
         controller
             .store
             .set_agent_activity(destination_surface, Some(agent))
             .await;
+        // Deliver repeated screen updates before Send, as focus/repaint events
+        // can do while the asynchronous review payload is being prepared.
+        for _ in 0..2 {
+            controller
+                .refresh_agent_screen_status(destination_surface, None)
+                .await;
+        }
+        assert!(
+            controller
+                .store
+                .located_agent_presence(destination_surface)
+                .await
+                .is_some_and(|located| located.presence.session_id.as_deref()
+                    == Some("destination-commit-codex")),
+            "receiver session must survive repeated screen refreshes before Send"
+        );
+        println!("DIFF_REVIEW_RECEIVER_SESSION_SURVIVES_SCREEN_REFRESH_OK");
         controller.refresh_review_targets().await;
         review.smoke_activate_target(destination_surface);
         glib::future_with_timeout(Duration::from_secs(10), async {

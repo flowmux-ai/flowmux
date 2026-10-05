@@ -106,3 +106,12 @@ namespace support, unmasked `/proc` mounts, and a Bash login shell for the
 SSH fixture account (its input test exercises readline); the
 hosted Ubuntu job uses the packaged AppArmor profile directly. Do not disable or
 skip the sandbox assertion to make a restricted container pass.
+
+The follow-up run `37283968929` confirmed that the receiver was ready but Send
+rejected its session as ended/restarted. The fixture injected `AgentPresence`
+without a source: one bare-prompt refresh claimed it as `flowmux:screen`, and
+a subsequent refresh with no agent name removed it. Explicitly refreshing the
+screen twice reproduces the session loss locally. Receiver identities now use
+`flowmux:hook`, matching the authoritative sessions they simulate; the native
+scenario requires the same session to survive those refreshes before Send.
+Production agent-lifecycle and stale-session rejection rules are unchanged.
