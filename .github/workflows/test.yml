@@ -14,7 +14,7 @@ on:
 jobs:
   editor-web:
     name: editor web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: editor/flowmux-editor-web
@@ -44,27 +44,15 @@ jobs:
 
   cargo-test:
     name: cargo test and coverage
-    runs-on: ubuntu-latest
-    env:
-      GDK_BACKEND: x11
-      GTK_A11Y: test
-      G_DEBUG: fatal-criticals
-      RUST_BACKTRACE: "1"
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_BUILD_JOBS: "2"
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview, rustfmt
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: |
+          rustup show active-toolchain
+          rustup component add llvm-tools-preview
 
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.6.24 --locked
@@ -101,38 +89,30 @@ jobs:
           fi
           sudo sh packaging/debian/postinst configure
 
-      - name: Run tests
+      - name: Run the shared Linux gate
         timeout-minutes: 30
-        run: aa-exec -p flowmux-webkit -- xvfb-run -a dbus-run-session -- bash scripts/test-coverage.sh -- --nocapture
+        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
 
-      - name: Export coverage
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p target/llvm-cov
-          cargo llvm-cov report --json --summary-only --output-path target/llvm-cov/summary.json
-          cargo llvm-cov report --html
-
-      - name: Upload coverage report
-        if: ${{ !cancelled() }}
+      - name: Upload test and coverage evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-workspace-coverage
-          path: target/llvm-cov
-          if-no-files-found: error
-
-      - name: Enforce coverage floor
-        run: cargo llvm-cov report --fail-under-lines 79 --fail-under-regions 78 --fail-under-functions 78
+          name: linux-test-evidence
+          path: |
+            target/ci/linux
+            target/llvm-cov
+          if-no-files-found: warn
 
   stress:
     name: headless stress probes
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        run: rustup show active-toolchain
       - name: Run the separately ignored stress probes
         run: cargo test -p flowmux-core -p flowmux-daemon -p flowmux-notify --locked -- --ignored --nocapture
 
@@ -140,36 +120,19 @@ jobs:
     name: macOS build and native smoke
     runs-on: macos-15
     timeout-minutes: 35
-    env:
-      CARGO_BUILD_JOBS: "2"
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      RUST_BACKTRACE: "1"
-      G_DEBUG: fatal-criticals
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        run: rustup show active-toolchain
       - name: Install native dependencies
         run: brew install pkg-config gtk4 libadwaita vte3
-      - name: Build the workspace
-        run: cargo build --workspace --locked
-      - name: Test IPC and GTK bridge contracts
-        run: |
-          cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
-          cargo test -p flowmux --bin flowmux --locked bridge::tests
-      - name: Run isolated native smoke on the main thread
-        env:
-          FLOWMUX_BUNDLED_CLI_PATH: ${{ github.workspace }}/target/debug/flowmuxctl
-        run: |
-          cargo test -p flowmux --test macos_native --features native-smoke --locked 2>&1 | tee target/macos-native-smoke.log
-          grep -q '^MACOS_NATIVE_SMOKE_OK$' target/macos-native-smoke.log
-      - name: Upload native smoke log
+      - name: Run the shared macOS gate
+        run: bash scripts/test-ci.sh macos
+      - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-native-smoke
-          path: target/macos-native-smoke.log
+          name: macos-test-evidence
+          path: target/ci/macos
           if-no-files-found: warn

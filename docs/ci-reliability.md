@@ -1,0 +1,79 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+# CI reliability
+
+CI must fail on regressions. The goal is reproducible failures and reliable
+oracles, not a green result obtained by retries, ignored assertions, longer
+blanket timeouts, or lower coverage floors.
+
+## Reproduced failures
+
+The Test run `37207522195` exposed two different problems:
+
+- Linux: editing stacked comments near line 20,000 could leave the composer
+  outside the viewport. TextView validates line heights incrementally. The
+  previous code overwrote GTK's scroll adjustment and treated an unchanged
+  (temporarily clamped) value as completion, before the scroll extent was ready.
+  `scroll_to_cursor` now lets GTK validate/scroll to the mark and completes only
+  when the allocated card is actually visible. A newer render cancels the old
+  request through the existing generation counter.
+- macOS: the multi-pane handoff test compared the source's complete terminal
+  screen before/after resizing. Bash redrew its long host prompt as the pane
+  resized, so correct input routing looked like a changed input buffer. The
+  source now remains a live raw-mode receiver. The assertion compares actual
+  PTY bytes, including after the receiver exits, while the destination still
+  verifies bracketed paste, submit, review content, scope, and focus.
+
+The scroll regression test holds the adjustment range at its viewport size
+through the initial allocation frames, then releases it. This deterministically
+models delayed range validation; the old implementation times out with the card
+still hundreds of thousands of pixels below the viewport. Both the first and
+last stacked comment must become fully visible with the fix. This runs in the
+Linux coverage test and the macOS main-thread native smoke.
+
+PTY receipts are published atomically and waits require the full paste/submit
+terminator. File existence alone is not a receipt-completion signal.
+
+## One execution path
+
+`.github/workflows/test.yml` invokes `scripts/test-ci.sh linux|macos`, exactly as
+a developer can locally. The runner owns private XDG/runtime/temp directories,
+clears inherited FlowMux pane/socket identity, keeps fatal GTK criticals, and
+records toolchain/native-library versions and the complete output. It does not
+restart the installed app or disable WebKit sandboxing.
+
+`rust-toolchain.toml` pins Rust; the Test workflow reads that file through rustup.
+Ubuntu is pinned to 24.04, and the native runner remains macOS 15. Updating the
+compiler/OS is an explicit change to validate on both platforms. Homebrew/apt
+package updates and hosted-runner hardware can still vary; logs record relevant
+versions rather than pretending these environments are bit-for-bit identical.
+
+The Linux gate runs instrumented workspace tests and the live SSH fixture,
+exports JSON/HTML coverage even after a test failure, and enforces the existing
+79% line / 78% region / 78% function floors. Coverage environment setup must
+succeed before any test starts; a failed `show-env` cannot silently fall through
+to uninstrumented tests. The macOS gate builds the workspace, checks IPC/bridge
+contracts, and requires the main-thread native suite's completion marker.
+
+`scripts/test-ci-runner.py` verifies failure-code propagation through log pipes,
+no retry of failed suites, state isolation/cleanup, report export after failure,
+and rejection of failed coverage setup. These checks run in both gates.
+
+Evidence is uploaded even on failure from `target/ci/{linux,macos}` and Linux
+`target/llvm-cov`. Do not describe a local uninstrumented pass as CI verification;
+run the shared gate, push, then check both Test and Sanitizers for that exact SHA.
+
+For a new timing-sensitive regression: capture the failed state, reproduce the
+same state transition with a controlled fixture, prove failure before the fix,
+and verify the actual mapped UI/PTY outcome. Fixed sleeps and whole-screen
+snapshots are not substitutes for the condition being tested.
+
+## Validation of this change
+
+- The delayed-range regression failed before the scroll fix and passed after it;
+  five additional Linux runs under LLVM instrumentation passed consecutively.
+- The shared macOS gate passed: workspace build, 54 IPC tests, 4 bridge tests,
+  and the complete isolated native suite, including comment geometry and actual
+  multi-pane PTY handoff for working-tree and commit reviews.
+- Runner contract tests, shell syntax, Rust formatting, and workflow actionlint
+  passed. Coverage thresholds and GTK fatal-critical handling remain enabled.

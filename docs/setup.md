@@ -7,7 +7,7 @@ Run source build commands and helper scripts from the repository root.
 
 ## Build from source
 
-Prerequisites on Ubuntu 24.04+ (Rust stable, MSRV 1.93):
+Prerequisites on Ubuntu 24.04+ (Rust from `rust-toolchain.toml`, MSRV 1.93):
 
 ```bash
 sudo apt install build-essential pkg-config git curl ca-certificates \
@@ -57,13 +57,28 @@ with Homebrew `pkg-config`, `gtk4`, `libadwaita`, and `vte3`, and runs an
 isolated main-thread GTK/WKWebView smoke test. It checks browser state,
 native focus, dirty-editor close cancellation, and persistence failure/retry.
 
-To run that native check locally, build the CLI first, then run:
+Run the same complete gate as CI locally:
 
 ```sh
-cargo build -p flowmux-cli --locked
-FLOWMUX_BUNDLED_CLI_PATH="$PWD/target/debug/flowmuxctl" \
-  cargo test -p flowmux --test macos_native --features native-smoke --locked
+bash scripts/test-ci.sh macos
 ```
+
+On Ubuntu 24.04, install `cargo-llvm-cov` 0.6.24 and the dependencies
+listed in `.github/workflows/test.yml`, including the ThorVG backend and
+WebKit AppArmor profile, then run:
+
+```sh
+cargo install cargo-llvm-cov --version 0.6.24 --locked
+aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
+```
+
+Both gates use the pinned repository Rust toolchain, private state/runtime
+directories, and fatal GTK criticals. Logs and environment versions are in
+`target/ci/{linux,macos}`; Linux coverage is in `target/llvm-cov`.
+`CARGO_TARGET_DIR` can relocate both build output and evidence. The Linux
+gate includes instrumented workspace tests, the live SSH fixture, and the
+same coverage floors as CI. See [CI reliability](ci-reliability.md) for the
+failure policy and regression scenarios.
 
 The smoke executable owns temporary state/configuration and its own window;
 it does not restart an installed FlowMux. A logged-in macOS desktop is
