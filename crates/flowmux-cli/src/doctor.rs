@@ -269,7 +269,8 @@ fn log_directory_entry_at(dir: &Path) -> Entry {
 // ---- AI agents ------------------------------------------------------
 
 fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
-    let skill_report = agent::doctor_all(agent::Target::ALL, home, codex_home);
+    let overrides = agent::SkillOverrides::from_env();
+    let skill_report = agent::doctor_all(agent::Target::ALL, home, codex_home, &overrides);
     let hook_report = hook_install::check_all();
 
     let mut entries = Vec::new();
@@ -494,8 +495,11 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
 /// `~/.gemini/config` with Gemini, so its own state root or binary is the signal.
 fn agent_is_installed(t: agent::Target, home: &Path, codex_home: Option<&Path>) -> bool {
     match t {
-        agent::Target::ClaudeCode => home.join(".claude").exists(),
-        agent::Target::OpenCode => home.join(".config").join("opencode").exists(),
+        agent::Target::ClaudeCode | agent::Target::OpenCode => agent::SkillOverrides::from_env()
+            .path(t, home, codex_home)
+            .ancestors()
+            .nth(3)
+            .is_some_and(Path::is_dir),
         agent::Target::Codex => codex_home
             .map(Path::to_path_buf)
             .unwrap_or_else(|| home.join(".codex"))
@@ -527,7 +531,7 @@ fn skill_detail(status: &agent::DoctorStatus, path: &Path, agent_present: bool) 
             format!("{} (missing — `flowmux fix` installs)", path.display())
         }
         agent::DoctorStatus::Missing => {
-            "agent not installed; will install when you run the agent".to_string()
+            "agent config not found; use `flowmux agent install --agent <name>` to install explicitly".to_string()
         }
         agent::DoctorStatus::Error(e) => format!("{}: {e}", path.display()),
     }
@@ -931,6 +935,7 @@ impl FixReport {
 /// agents whose home dir is missing.
 pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> FixReport {
     let mut outcomes = Vec::new();
+    let overrides = agent::SkillOverrides::from_env();
 
     // Skills — only attempt agents whose home dir actually exists, so
     // a fresh box that hasn't run Claude / Codex yet doesn't get a
@@ -944,12 +949,17 @@ pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> Fix
             });
             continue;
         }
-        let path = target.resolved_install_path(home, codex_home);
+        let path = overrides.path(*target, home, codex_home);
         match agent::install_one(&path, agent::Target::payload(), true) {
             Ok(agent::InstallOutcome::Written) => outcomes.push(FixOutcome {
                 area: format!("{} skill", target.slug()),
                 status: Status::Ok,
                 detail: format!("wrote {}", path.display()),
+            }),
+            Ok(agent::InstallOutcome::Updated { backup }) => outcomes.push(FixOutcome {
+                area: format!("{} skill", target.slug()),
+                status: Status::Ok,
+                detail: format!("updated {} (backup: {})", path.display(), backup.display()),
             }),
             Ok(agent::InstallOutcome::AlreadyUpToDate) => outcomes.push(FixOutcome {
                 area: format!("{} skill", target.slug()),
@@ -1140,11 +1150,16 @@ fn run_codex_legacy_cleanup(home: &Path, codex_home: Option<&Path>) -> Option<Fi
     if !path.exists() {
         return None;
     }
-    match std::fs::remove_file(&path) {
-        Ok(()) => Some(FixOutcome {
+    match agent::uninstall_one(&path) {
+        Ok(outcome) => Some(FixOutcome {
             area: "codex legacy skill".into(),
             status: Status::Ok,
-            detail: format!("removed {}", path.display()),
+            detail: match outcome {
+                agent::UninstallOutcome::Preserved { backup } => {
+                    format!("removed {} (backup: {})", path.display(), backup.display())
+                }
+                _ => format!("removed {}", path.display()),
+            },
         }),
         Err(e) => Some(FixOutcome {
             area: "codex legacy skill".into(),

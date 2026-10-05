@@ -826,7 +826,7 @@ fn antigravity_is_supported_by_skill_and_hook_management_parsers() {
                 op: AgentOp::Doctor { agent },
             }
             | Cmd::Agent {
-                op: AgentOp::Uninstall { agent },
+                op: AgentOp::Uninstall { agent, .. },
             } => agent,
             _ => panic!("expected agent {operation}"),
         };

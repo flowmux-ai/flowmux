@@ -135,7 +135,11 @@ pub fn host_config_dir_for(agent_subdir: &str) -> Option<PathBuf> {
     if is_flatpak_sandbox() {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join(agent_subdir))
     } else {
-        base_config_dir().map(|d| d.join(agent_subdir))
+        // These host CLIs follow XDG on macOS too, rather than using
+        // ~/Library/Application Support like the native flowmux app.
+        env_dir("XDG_CONFIG_HOME")
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+            .map(|dir| dir.join(agent_subdir))
     }
 }
 
@@ -234,8 +238,8 @@ mod tests {
 
     #[test]
     fn host_config_dir_for_returns_xdg_when_not_sandbox() {
-        // FLATPAK_ID unset → fall back to the dirs crate (XDG_CONFIG_HOME
-        // or ~/.config). We only assert the trailing segment because the
+        // FLATPAK_ID unset → use XDG_CONFIG_HOME or ~/.config on all platforms.
+        // We only assert the trailing segment because the
         // root depends on the runner's env.
         let _g = crate::test_env::env_lock().lock().unwrap();
         let prev_id = std::env::var_os("FLATPAK_ID");

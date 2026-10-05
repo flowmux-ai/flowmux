@@ -99,6 +99,7 @@ pub(crate) fn claude_session_name(
 pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
     let home = agent::resolved_home()?;
     let codex_home = agent::resolved_codex_home();
+    let overrides = agent::SkillOverrides::from_env();
 
     let parse_targets = |slugs: &[String]| -> anyhow::Result<Vec<agent::Target>> {
         if slugs.is_empty() {
@@ -119,7 +120,8 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
             force,
         } => {
             let targets = parse_targets(slugs)?;
-            let outcomes = agent::install_all(&targets, &home, codex_home.as_deref(), *force)?;
+            let outcomes =
+                agent::install_all(&targets, &home, codex_home.as_deref(), *force, &overrides)?;
             if json {
                 let body = outcomes
                     .iter()
@@ -129,7 +131,12 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                             "path": p.display().to_string(),
                             "outcome": match o {
                                 agent::InstallOutcome::Written => "written",
+                                agent::InstallOutcome::Updated { .. } => "written",
                                 agent::InstallOutcome::AlreadyUpToDate => "already_up_to_date",
+                            },
+                            "backup": match o {
+                                agent::InstallOutcome::Updated { backup } => Some(backup),
+                                _ => None,
                             },
                         })
                     })
@@ -139,16 +146,20 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                 for (t, p, o) in &outcomes {
                     let label = match o {
                         agent::InstallOutcome::Written => "wrote   ",
+                        agent::InstallOutcome::Updated { .. } => "updated ",
                         agent::InstallOutcome::AlreadyUpToDate => "up-to-date",
                     };
                     println!("{label}  {:12}  {}", t.slug(), p.display());
+                    if let agent::InstallOutcome::Updated { backup } = o {
+                        println!("backup   {:12}  {}", t.slug(), backup.display());
+                    }
                 }
             }
             Ok(())
         }
         AgentOp::Doctor { agent: slugs } => {
             let targets = parse_targets(slugs)?;
-            let report = agent::doctor_all(&targets, &home, codex_home.as_deref());
+            let report = agent::doctor_all(&targets, &home, codex_home.as_deref(), &overrides);
             let codex_duplicates = if targets.contains(&agent::Target::Codex) {
                 agent::codex_unmanaged_skill_paths(&home, codex_home.as_deref())
             } else {
@@ -165,6 +176,10 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                             "agent": e.target.slug(),
                             "path": e.path.display().to_string(),
                             "status": e.status.label(),
+                            "detail": match &e.status {
+                                agent::DoctorStatus::Error(message) => Some(message),
+                                _ => None,
+                            },
                             "unmanaged_duplicates": if e.target == agent::Target::Codex {
                                 codex_duplicates
                                     .iter()
@@ -185,6 +200,9 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                         entry.target.slug(),
                         entry.path.display()
                     );
+                    if let agent::DoctorStatus::Error(message) = &entry.status {
+                        println!("           {message}");
+                    }
                 }
                 for path in &codex_duplicates {
                     println!(
@@ -198,17 +216,37 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        AgentOp::Uninstall { agent: slugs } => {
+        AgentOp::Uninstall {
+            agent: slugs,
+            skills_only,
+        } => {
             let targets = parse_targets(slugs)?;
-            let remove_tmux = targets.contains(&agent::Target::ClaudeCode);
+            let remove_tmux = !skills_only && targets.contains(&agent::Target::ClaudeCode);
+            let mut removed = Vec::new();
             for t in targets {
-                let path = t.resolved_install_path(&home, codex_home.as_deref());
+                let path = overrides.path(t, &home, codex_home.as_deref());
                 let outcome = agent::uninstall_one(&path)?;
                 let label = match outcome {
                     agent::UninstallOutcome::Removed => "removed",
+                    agent::UninstallOutcome::Preserved { .. } => "removed",
                     agent::UninstallOutcome::AlreadyAbsent => "absent ",
                 };
-                println!("{label}  {:12}  {}", t.slug(), path.display());
+                let backup = match &outcome {
+                    agent::UninstallOutcome::Preserved { backup } => Some(backup),
+                    _ => None,
+                };
+                removed.push(serde_json::json!({
+                    "agent": t.slug(), "path": path, "outcome": label.trim(), "backup": backup,
+                }));
+                if !json {
+                    println!("{label}  {:12}  {}", t.slug(), path.display());
+                    if let Some(backup) = backup {
+                        println!("backup   {:12}  {}", t.slug(), backup.display());
+                    }
+                }
+                if *skills_only {
+                    continue;
+                }
                 let shim = match t {
                     agent::Target::ClaudeCode => "claude",
                     agent::Target::OpenCode => "opencode",
@@ -217,13 +255,22 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                     agent::Target::Cline => "cline",
                 };
                 for path in hook_install::uninstall_agent_shim(shim)? {
-                    println!("removed  {shim:12}  {}", path.display());
+                    removed.push(serde_json::json!({"agent": t.slug(), "path": path, "outcome": "removed", "kind": "shim"}));
+                    if !json {
+                        println!("removed  {shim:12}  {}", path.display());
+                    }
                 }
             }
             if remove_tmux {
                 if let Some(path) = hook_install::uninstall_tmux_shim()? {
-                    println!("removed  {:12}  {}", "tmux", path.display());
+                    removed.push(serde_json::json!({"agent": "claude-code", "path": path, "outcome": "removed", "kind": "shim"}));
+                    if !json {
+                        println!("removed  {:12}  {}", "tmux", path.display());
+                    }
                 }
+            }
+            if json {
+                println!("{}", serde_json::to_string(&removed)?);
             }
             Ok(())
         }

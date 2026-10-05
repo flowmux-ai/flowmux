@@ -1,7 +1,7 @@
 ---
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: flowmux-browser
-description: Drive the in-app browser pane that ships with flowmux. Use when you need to open URLs, take page snapshots, or interact with web pages from inside a flowmux terminal pane — instead of spawning Playwright / Puppeteer / a system Chromium.
+description: Drive FlowMux's in-app browser to open URLs, inspect pages, fill forms, or verify web UI. Use inside a FlowMux terminal or with an explicitly supplied FlowMux pane and socket.
 ---
 
 # flowmux browser automation
@@ -22,6 +22,12 @@ When this is true, use the workflow below. When it is false, the agent
 is not inside a flowmux PTY — fall back to whatever the user expects
 (curl / Playwright / etc.) unless the user supplied an explicit pane.
 
+Check `"$FLOWMUX_CLI" ping` before opening a pane. Environment variables can
+outlive their GUI socket; `identify` only reports the environment and does not
+prove connectivity. If the socket is unavailable, report it and use the user's
+chosen fallback. Do not restart their GUI or silently target another window.
+Use `"$FLOWMUX_CLI" --json capabilities` to check the CLI's command contract.
+
 ## Standard loop
 
 The shell example uses `jq` to read the returned pane ID; install it first
@@ -30,13 +36,13 @@ if absent (`sudo apt install jq` on Ubuntu).
 ```bash
 # Open. If a browser pane already exists to the right, the URL is
 # added there as a tab; otherwise flowmux splits the source pane.
-PANE=$("$FLOWMUX_CLI" --json browser open https://example.com \
-  | jq -r '.browser_pane_opened.pane')
+OPEN=$("$FLOWMUX_CLI" --json browser open https://example.com) || exit 1
+PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 
 # A new WebView starts at about:blank, so first wait for the requested URL,
 # then for that document to finish before taking refs from it.
-"$FLOWMUX_CLI" browser wait pane:$PANE --url example.com
-"$FLOWMUX_CLI" browser wait pane:$PANE --ready-state complete
+[ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
+[ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
 # Each wait prints true on success and false on timeout. Do not continue
 # to snapshot or act when it prints false.
 
@@ -74,31 +80,11 @@ Browser `--json` responses are single-line for easy parsing
 (`jq -r .browser_pane_opened.pane`); without it, browser reads and probes
 print their raw string, boolean, or integer value.
 
-## Claude Code session messaging
-
-Claude Code 2.1.224+ can message independent Claude sessions on the same
-machine. flowmux gives unnamed Claude sessions a stable name and exposes the
-live pane-to-session mapping:
-
-```bash
-"$FLOWMUX_CLI" --json agents
-```
-
-Find the target's `session_name`, confirm it with Claude's `ListAgents` tool,
-then send plain text with `SendMessage`. `ListAgents` is authoritative: after
-`/rename`, or when Claude was launched outside the flowmux shim, match its
-working directory against the `root` in the flowmux output instead.
-
-Use session messaging for an existing Claude, `send-keys` for non-Claude
-programs or when messaging is unavailable, and agent teams when a lead must
-create teammates. Messages cannot approve permissions, change settings, or
-run slash commands; never use another session to bypass a denied permission.
-
 ## Ref token lifetime
 
 - Refs are scoped to one snapshot per browser surface. After navigation,
-  reload, or a DOM mutation, wait for the expected URL, selector, text, or
-  ready state and then take a fresh `browser snapshot`.
+  switching browser tabs, reload, or a DOM mutation, wait for the expected URL,
+  selector, text, or ready state and then take a fresh `browser snapshot`.
 - Both `e3` and `@e3` resolve.
 - A ref-not-found error means: take a new snapshot first.
 
@@ -116,7 +102,7 @@ in via `flowmux browser open`).
 - Do not call `playwright install`, `npx playwright open`,
   `puppeteer.launch`, or system `chromium` / `chrome` to read a
   public URL when `FLOWMUX_PANE_ID` is set.
-- Do not modify the page DOM yourself. The snapshot intentionally
+- Do not add reference-tracking attributes to the page DOM. The snapshot
   does not stamp `data-flowmux-ref` or any other attribute — the server
   resolves ref tokens to selectors on its side.
 - Do not assume a `eN` token from a previous snapshot is still valid

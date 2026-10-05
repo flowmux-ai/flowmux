@@ -30,9 +30,9 @@ toml_edit = { workspace = true }
 dirs = "5"
 nix = { workspace = true }
 libc = { workspace = true }
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 # End-to-end tmux-compat tests: an in-process daemon serves the socket
 # the real `flowmuxctl` binary (and the bash tmux shim) talk to.
 flowmux-daemon = { workspace = true }

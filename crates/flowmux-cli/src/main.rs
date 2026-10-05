@@ -598,7 +598,7 @@ enum AgentOp {
         /// multiple. Omit to install for all known agents.
         #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity"])]
         agent: Vec<String>,
-        /// Overwrite drifted on-disk files instead of erroring.
+        /// Back up and replace drifted files instead of erroring.
         #[arg(long)]
         force: bool,
     },
@@ -614,6 +614,9 @@ enum AgentOp {
     Uninstall {
         #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity"])]
         agent: Vec<String>,
+        /// Remove only the skill, preserving agent and tmux wrapper shims.
+        #[arg(long)]
+        skills_only: bool,
     },
 }
 

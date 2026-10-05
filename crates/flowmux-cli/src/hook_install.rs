@@ -815,7 +815,11 @@ fn remove_owned_shim(path: &Path, marker: &str) -> Result<bool> {
 // ---- Claude Code ----------------------------------------------------
 
 fn claude_settings_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("settings.json"))
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude")))
+        .map(|root| root.join("settings.json"))
 }
 
 fn install_claude(flowmux_bin: &str) -> Result<HookInstallReport> {
