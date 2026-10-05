@@ -48,7 +48,8 @@ compiler/OS is an explicit change to validate on both platforms. Homebrew/apt
 package updates and hosted-runner hardware can still vary; logs record relevant
 versions rather than pretending these environments are bit-for-bit identical.
 
-The Linux gate runs instrumented workspace tests and the live SSH fixture,
+The Linux gate runs instrumented workspace tests (all test executables finish
+even if one fails, so later failures are not hidden) and the live SSH fixture,
 exports JSON/HTML coverage even after a test failure, and enforces the existing
 79% line / 78% region / 78% function floors. Coverage environment setup must
 succeed before any test starts; a failed `show-env` cannot silently fall through
@@ -82,6 +83,7 @@ The Linux browser integration fixture now prints the failed IPC request and the
 child GUI log before its temporary directory is removed. This was verified with
 a denied nested sandbox (failure included the bubblewrap/dbus-proxy cause), then
 with namespace/mount support enabled (both sandbox-on and opt-out tests passed).
-Local Docker validation needs nested namespace and `/proc` mount support; the
+Local Docker validation needs an init/reaper (`docker run --init`), nested
+namespace support, and unmasked `/proc` mounts; the
 hosted Ubuntu job uses the packaged AppArmor profile directly. Do not disable or
 skip the sandbox assertion to make a restricted container pass.
