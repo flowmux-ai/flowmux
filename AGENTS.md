@@ -2,6 +2,10 @@
 
 # Agents working inside flowmux
 
+Use **Flowmux** for the product display name and **flowmux** for commands,
+packages, and identifiers. Keep this spelling in UI text, documentation, and
+new assets; do not capitalize the middle letter of the product name.
+
 This file tells AI coding agents (Claude Code, Codex CLI, OpenCode,
 similar) how to drive `flowmux` from inside one of its panes — the
 in-app browser, plus terminal automation, layout inspection, and
@@ -11,7 +15,7 @@ do not need to instruct agents to read it.
 
 For code changes in this repository, also read [CLAUDE.md](CLAUDE.md) for the
 build, test, and implementation rules. The filename does not restrict that
-development guide to Claude. [FlowMux CLI skill](docs/agent-skills.md) covers
+development guide to Claude. [Flowmux CLI skill](docs/agent-skills.md) covers
 feature categories, CLI workflows, and how to install, inspect, update, or
 remove the skill.
 
@@ -238,5 +242,5 @@ Notes:
 
 ## Reference
 
-- Skill: `.agents/skills/flowmux-browser/SKILL.md` (categorized FlowMux CLI manual).
+- Skill: `.agents/skills/flowmux-browser/SKILL.md` (categorized Flowmux CLI manual).
 - Project rules: [`CLAUDE.md`](CLAUDE.md).

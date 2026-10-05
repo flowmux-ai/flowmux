@@ -3,7 +3,7 @@
 # ANSI colors: @primer/primitives 7.10.0, dist/json/colors/dark.json.
 # Source: https://github.com/primer/github-vscode-theme
 # Source: https://github.com/primer/primitives
-# FlowMux uses an opaque selection for consistent terminal/editor rendering.
+# Flowmux uses an opaque selection for consistent terminal/editor rendering.
 background = #0d1117
 foreground = #e6edf3
 cursor-color = #58a6ff

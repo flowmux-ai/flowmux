@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Replace a staged FlowMux.app only after the running host exits.
+# Replace a staged Flowmux.app only after the running host exits.
 # Always exit successfully so launchctl does not restart a failed swap.
 set -u
 
@@ -15,7 +15,7 @@ destination_bundle="$3"
 backup_bundle="$4"
 
 valid_staged_name() {
-    name="$(basename "$1")"
+    name="$(basename "$1" | tr '[:upper:]' '[:lower:]')"
     base="$2"
     if [ "$name" = "$base" ]; then
         return 0
@@ -30,9 +30,9 @@ valid_staged_name() {
     esac
 }
 
-if ! valid_staged_name "$staged_bundle" ".FlowMux.app.pending" || \
-    [ "$(basename "$destination_bundle")" != "FlowMux.app" ] || \
-    ! valid_staged_name "$backup_bundle" ".FlowMux.app.previous"; then
+if ! valid_staged_name "$staged_bundle" ".flowmux.app.pending" || \
+    [ "$(basename "$destination_bundle" | tr '[:upper:]' '[:lower:]')" != "flowmux.app" ] || \
+    ! valid_staged_name "$backup_bundle" ".flowmux.app.previous"; then
     echo "refusing deferred app swap with unexpected bundle paths" >&2
     exit 0
 fi

@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# FlowMux CLI skill: features and installation
+# Flowmux CLI skill: features and installation
 
-FlowMux ships **one product skill, `flowmux-browser`**. Its source is
+Flowmux ships **one product skill, `flowmux-browser`**. Its source is
 [`.agents/skills/flowmux-browser/SKILL.md`](../.agents/skills/flowmux-browser/SKILL.md).
-The **FlowMux CLI** skill is a user guide for operating FlowMux, organized by task:
+The **Flowmux CLI** skill is a user guide for operating Flowmux, organized by task:
 
 | Category | Covered features |
 |---|---|
@@ -17,7 +17,7 @@ The **FlowMux CLI** skill is a user guide for operating FlowMux, organized by ta
 | GUI features | Code Review comments, terminal search, Files, editor and AI Usage |
 
 The skill's existing `flowmux-browser` identifier and install directory are kept
-for compatibility. Its title and description cover the full user guide. FlowMux
+for compatibility. Its title and description cover the full user guide. Flowmux
 does not bundle development, design, skill-discovery or MCP-builder skills.
 
 The CLI embeds that file at build time. Installation copies the embedded
@@ -28,22 +28,22 @@ After changing the source, rebuild the CLI before updating installed copies.
 
 Open **Options → Skills** and click **Install** beside the agent you use
 (Codex, Claude Code, OpenCode, Antigravity, or Cline). Each row shows whether the
-FlowMux CLI skill is missing, installed, or different from the bundled version.
+Flowmux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
-shows the backup location. **Refresh status** checks changes made outside FlowMux.
+shows the backup location. **Refresh status** checks changes made outside Flowmux.
 Hover over an agent row to inspect its destination path. Expand **View skill
 contents** to inspect the exact bundled instructions without installing them.
-The display name is **FlowMux CLI**; agents discover it under the existing
+The display name is **Flowmux CLI**; agents discover it under the existing
 `flowmux-browser` identifier. A known extra Codex copy is shown in the row and
 remains visible there after removal of the managed copy.
 
-Click **Remove** beside an installed skill to delete that agent's FlowMux skill.
+Click **Remove** beside an installed skill to delete that agent's Flowmux skill.
 Modified content is backed up before deletion, and the row shows its backup path.
 Other agents' copies, supporting files, hooks, wrappers and settings are preserved.
 A file symlink is unlinked without deleting its target; linked skill directories
 must be managed manually and are labeled in the row. After removal the row offers **Install** again.
 
-Installation is per agent and affects only the FlowMux CLI skill. It does not
+Installation is per agent and affects only the Flowmux CLI skill. It does not
 install the agent itself, change its hooks/settings, or restart running sessions.
 Check the agent's skill list or open a new session to load the updated guide.
 User-managed symlinks and filesystem errors are explained in the affected row.
@@ -73,7 +73,7 @@ and [configuration](https://code.claude.com/docs/en/env-vars) documentation,
 [Antigravity](https://antigravity.google/docs/skills), and
 [Cline](https://docs.cline.bot/customization/skills) documentation on 2026-10-05.
 Agents' additional project, plugin, or custom search directories remain under
-that agent's management; FlowMux does not scan every possible discovery source.
+that agent's management; Flowmux does not scan every possible discovery source.
 Gemini has lifecycle-hook support but is not a product-skill install target.
 
 ```sh
@@ -95,7 +95,7 @@ flowmux agent uninstall --agent codex --skills-only --json
 - `uninstall --skills-only`: removes the selected active skill entry while
   preserving hooks and agent/tmux wrappers. A modified skill is backed up first.
   Supporting files and backups remain; an empty skill directory is removed.
-- `uninstall` without `--skills-only`: also removes FlowMux-owned wrappers
+- `uninstall` without `--skills-only`: also removes Flowmux-owned wrappers
   for those targets, including the tmux wrapper for Claude. Hook settings are
   separate: use `flowmux hooks uninstall` when intentionally removing hooks.
 - `fix`: repairs multiple integrations, including skills, hooks, wrappers and
@@ -113,7 +113,7 @@ matching content is healthy and a no-op. If content differs or a link is
 broken, installation/repair refuses to overwrite its source and doctor explains why.
 Uninstall can unlink a `SKILL.md` symlink, including a dangling one, while
 preserving its target. A symlinked skill directory must be managed manually.
-FlowMux does not rewrite `AGENTS.md`, `CLAUDE.md`, other skill directories, or
+Flowmux does not rewrite `AGENTS.md`, `CLAUDE.md`, other skill directories, or
 Codex hook trust decisions during skill installation.
 
 ## Discovery and activation
@@ -126,7 +126,7 @@ establish launch identity. These are independent integrations.
 
 Some agents also discover compatible agents' skill directories. Removing one
 copy may leave another discoverable copy. Codex can show duplicate names rather
-than merging them; FlowMux reports an existing `$CODEX_HOME/skills/flowmux-browser`
+than merging them; Flowmux reports an existing `$CODEX_HOME/skills/flowmux-browser`
 copy without modifying it. Inspect user and project copies before removing any.
 
 For persistent activation controls, use the agent's own settings:
@@ -134,7 +134,7 @@ For persistent activation controls, use the agent's own settings:
 [Claude skill visibility](https://code.claude.com/docs/en/skills),
 [OpenCode skill permissions](https://opencode.ai/docs/skills/), or
 [Cline's skills controls](https://docs.cline.bot/customization/skills).
-FlowMux's `doctor` deliberately does not change these settings or claim a
+Flowmux's `doctor` deliberately does not change these settings or claim a
 file check proves that a skill is enabled.
 
 `AGENTS.md` describes this repository's runtime/CLI contract; `CLAUDE.md`

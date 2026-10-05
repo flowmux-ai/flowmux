@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Build and install a local macOS FlowMux.app bundle.
+# Build and install a local macOS Flowmux.app bundle.
 #
 # Usage:
 #   scripts/install-macos.sh [--check] [--fast|--debug|--release] [--launch]
@@ -108,7 +108,7 @@ EOF
 Install the macOS native prerequisites:
   brew install pkg-config gtk4 libadwaita
 
-FlowMux uses Homebrew GTK/libadwaita and Apple WebKit.framework for the
+Flowmux uses Homebrew GTK/libadwaita and Apple WebKit.framework for the
 browser pane; do not install WebKitGTK.
 
 Install Rust with rustup if `cargo` is missing:
@@ -143,14 +143,14 @@ running_flowmux_pid() {
     local pid command
 
     while read -r pid command; do
-        if [ "$command" = "$executable" ]; then
+        if [ "$command" = "$executable" ] || [ "$command" -ef "$executable" ]; then
             printf '%s\n' "$pid"
             return 0
         fi
     done < <(ps -ww -p "$candidate" -o pid=,comm= 2>/dev/null)
 
     while read -r pid command; do
-        if [ "$command" = "$executable" ]; then
+        if [ "$command" = "$executable" ] || [ "$command" -ef "$executable" ]; then
             printf '%s\n' "$pid"
             return 0
         fi
@@ -181,7 +181,7 @@ submit_deferred_app_swap() {
 
 create_icon() {
     local resources="$1"
-    local iconset="$REPO_ROOT/target/macos-bundle/FlowMux.iconset"
+    local iconset="$REPO_ROOT/target/macos-bundle/Flowmux.iconset"
 
     rm -rf "$iconset"
     mkdir -p "$iconset"
@@ -210,7 +210,7 @@ write_info_plist() {
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>FlowMux</string>
+  <string>Flowmux</string>
   <key>CFBundleExecutable</key>
   <string>flowmux</string>
   <key>CFBundleIconFile</key>
@@ -220,7 +220,7 @@ write_info_plist() {
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>FlowMux</string>
+  <string>Flowmux</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -234,11 +234,11 @@ write_info_plist() {
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSDocumentsFolderUsageDescription</key>
-  <string>FlowMux needs access to Documents so terminal panes and file tools can use workspace files.</string>
+  <string>Flowmux needs access to Documents so terminal panes and file tools can use workspace files.</string>
   <key>NSDesktopFolderUsageDescription</key>
-  <string>FlowMux needs access to Desktop so terminal panes and file tools can use workspace files.</string>
+  <string>Flowmux needs access to Desktop so terminal panes and file tools can use workspace files.</string>
   <key>NSDownloadsFolderUsageDescription</key>
-  <string>FlowMux needs access to Downloads so terminal panes and file tools can use workspace files.</string>
+  <string>Flowmux needs access to Downloads so terminal panes and file tools can use workspace files.</string>
 </dict>
 </plist>
 EOF
@@ -277,11 +277,22 @@ else
 fi
 
 version="$(workspace_version)"
-bundle_work="$REPO_ROOT/target/macos-bundle/FlowMux.app"
+bundle_work="$REPO_ROOT/target/macos-bundle/Flowmux.app"
 contents="$bundle_work/Contents"
 macos="$contents/MacOS"
 resources="$contents/Resources"
-bundle_dest="$APP_DIR/FlowMux.app"
+bundle_dest="$APP_DIR/Flowmux.app"
+# Preserve an existing bundle's path on case-sensitive volumes. Its display
+# name is refreshed by Info.plist; do not create a duplicate or rename a live app.
+if [ ! -d "$bundle_dest" ]; then
+    for existing_bundle in "$APP_DIR"/*.[aA][pP][pP]; do
+        if [ -d "$existing_bundle" ] && \
+            [ "$(basename "$existing_bundle" | tr '[:upper:]' '[:lower:]')" = "flowmux.app" ]; then
+            bundle_dest="$existing_bundle"
+            break
+        fi
+    done
+fi
 
 echo "==> creating $bundle_work"
 rm -rf "$bundle_work"
@@ -303,15 +314,15 @@ codesign --force --deep --sign - "$bundle_work" >/dev/null
 mkdir -p "$APP_DIR" "$BIN_DIR"
 running_pid="$(running_flowmux_pid "$bundle_dest/Contents/MacOS/flowmux" || true)"
 if [ -n "$running_pid" ]; then
-    bundle_pending="$APP_DIR/.FlowMux.app.pending.$running_pid"
-    bundle_backup="$APP_DIR/.FlowMux.app.previous.$running_pid"
-    echo "==> staging app update until FlowMux exits"
+    bundle_pending="$APP_DIR/.Flowmux.app.pending.$running_pid"
+    bundle_backup="$APP_DIR/.Flowmux.app.previous.$running_pid"
+    echo "==> staging app update until Flowmux exits"
     rm -rf "$bundle_pending"
     cp -R "$bundle_work" "$bundle_pending"
     submit_deferred_app_swap "$running_pid" "$bundle_pending" "$bundle_dest" "$bundle_backup"
 else
-    bundle_pending="$APP_DIR/.FlowMux.app.pending"
-    bundle_backup="$APP_DIR/.FlowMux.app.previous"
+    bundle_pending="$APP_DIR/.Flowmux.app.pending"
+    bundle_backup="$APP_DIR/.Flowmux.app.previous"
     echo "==> installing app to $bundle_dest"
     rm -rf "$bundle_dest" "$bundle_pending" "$bundle_backup"
     cp -R "$bundle_work" "$bundle_dest"
@@ -327,7 +338,7 @@ if [ -n "$running_pid" ]; then
     echo "==> installed CLI:"
     echo "    $BIN_DIR/flowmux"
     echo "    $BIN_DIR/flowmuxctl"
-    echo "==> restart FlowMux to finish installing $bundle_dest"
+    echo "==> restart Flowmux to finish installing $bundle_dest"
 else
     echo "==> installed:"
     echo "    $bundle_dest"

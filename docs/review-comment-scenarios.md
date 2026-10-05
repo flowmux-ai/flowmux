@@ -42,7 +42,7 @@ SQLite를 사용하며, 화면 테스트는 macOS native main-thread harness에�
 새 화면 시나리오의 수신 대상은 테스트용 bridge다. 실제 제공자에 프롬프트를
 보내지 않는다. 기존 native smoke의 별도 수신 PTY handoff 검사도 통과했다.
 
-추가로 `/tmp/fm-scenario-live/FlowMux.app`을 새로 빌드해 별도 bundle ID,
+추가로 `/tmp/fm-scenario-live/Flowmux.app`을 새로 빌드해 별도 bundle ID,
 config/state/runtime 디렉터리로 실행했다. 4번 줄에 코멘트를 직접 작성한 뒤
 27번 줄만 수정해 4번 줄이 diff에서 사라지게 했다. 화면의 Comments 수가 1로
 유지되고 Reattach 안내가 나타났으며 SQLite에도 코멘트가 보존됐다. 원래

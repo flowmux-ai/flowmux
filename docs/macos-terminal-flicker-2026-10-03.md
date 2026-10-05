@@ -5,7 +5,7 @@
 Verified on macOS 27.0 (26A428), GTK 4.22.3, VTE 0.82.3 and Codex 0.160.0.
 Baseline: `8868c86d`. All GUI probes used separate app bundles, bundle IDs,
 processes, XDG config/data/state directories and per-process sockets under
-`/tmp/fm-flicker`. The installed FlowMux process (PID 25627, started October 2
+`/tmp/fm-flicker`. The installed Flowmux process (PID 25627, started October 2
 at 22:19:31) was neither closed nor restarted.
 
 ## Reproduction and diagnosis

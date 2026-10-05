@@ -15,7 +15,7 @@ struct AgentIcon {
 }
 
 const INDEX_THEME: &str = r#"[Icon Theme]
-Name=FlowMux Builtin
+Name=Flowmux Builtin
 Comment=Built-in fallback icons for flowmux
 Directories=scalable/actions,scalable/apps
 

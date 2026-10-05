@@ -87,7 +87,7 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
 
 - Read [AGENTS.md](AGENTS.md) for the pane/browser command contract, including
   the preference for the in-app browser.
-- The [FlowMux CLI skill](docs/agent-skills.md) covers product CLI and GUI
+- The [Flowmux CLI skill](docs/agent-skills.md) covers product CLI and GUI
   workflows. Keep it user-facing; do not bundle development skills.
 - New pane commands accept explicit IDs and use pane context where supported.
   Distinguish a pane's UUID from its individual tab surface UUID.

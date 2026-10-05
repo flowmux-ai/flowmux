@@ -999,7 +999,7 @@ fn hook_is_flowmux_owned(hook: &Value) -> bool {
         .is_some_and(|command| command.contains(FLOWMUX_HOOK_MARKER))
 }
 
-/// Remove only FlowMux-owned nested handlers. Matcher groups can be shared by
+/// Remove only Flowmux-owned nested handlers. Matcher groups can be shared by
 /// multiple integrations, so deleting the whole group would also delete user
 /// hooks that happen to sit beside ours.
 fn prune_flowmux_claude_entries(arr: &mut Vec<Value>) -> bool {
@@ -1023,7 +1023,7 @@ fn prune_flowmux_hook_handlers(entries: &mut Vec<Value>) -> bool {
     removed_any
 }
 
-/// Refresh the first canonical FlowMux handler in place and remove duplicates.
+/// Refresh the first canonical Flowmux handler in place and remove duplicates.
 /// Codex persists hook trust by array position, so retaining the surrounding
 /// group and handler index avoids invalidating unrelated user approvals.
 fn upsert_flowmux_hook_entry(entries: &mut Vec<Value>, replacement: Value) {
@@ -1033,7 +1033,7 @@ fn upsert_flowmux_hook_entry(entries: &mut Vec<Value>, replacement: Value) {
         .and_then(Value::as_array)
         .and_then(|hooks| hooks.first())
         .cloned()
-        .expect("FlowMux hook entries always contain one handler");
+        .expect("Flowmux hook entries always contain one handler");
     let mut replacement_with_extensions = replacement;
     for entry in entries.iter() {
         let Some(hooks) = entry.get("hooks").and_then(Value::as_array) else {
@@ -1399,7 +1399,7 @@ fn codex_entry_matches(entry: &Value, event: CodexEvent) -> bool {
 /// A direct absolute binary can be checked locally. Relative commands depend
 /// on the agent's PATH, while Flatpak commands contain multiple argv words and
 /// resolve inside the sandbox; keep those compatible and validate their shape
-/// only. FlowMux quotes paths as one POSIX single-quoted word, including the
+/// only. Flowmux quotes paths as one POSIX single-quoted word, including the
 /// standard `'\''` spelling for an embedded quote.
 fn codex_direct_executable_available(command: &str, event: CodexEvent) -> bool {
     let separator = format!(" hooks codex {}", event.subcommand);
@@ -1889,7 +1889,7 @@ fn codex_config_hooks_disabled(config_path: &Path) -> Result<bool> {
     }))
 }
 
-/// Remove only FlowMux's old direct `notify` command. Native hooks coexist
+/// Remove only Flowmux's old direct `notify` command. Native hooks coexist
 /// with unrelated user notification commands and explicit feature settings.
 fn remove_owned_codex_notify(config_path: &Path) -> Result<bool> {
     use toml_edit::DocumentMut;
@@ -1975,7 +1975,7 @@ fn notify_args_contain_flowmux_owned(args: &[&str]) -> bool {
         })
 }
 
-/// Remove a FlowMux callback nested behind a wrapper's `--previous-notify`
+/// Remove a Flowmux callback nested behind a wrapper's `--previous-notify`
 /// argument while preserving the wrapper itself and all of its other flags.
 fn prune_nested_flowmux_notify(item: &mut toml_edit::Item) -> bool {
     let Some(array) = item.as_array_mut() else {
@@ -4157,7 +4157,7 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         let wrapped = dir.path().join("wrapped.toml");
         fs::write(
             &wrapped,
-            r#"notify = ["/usr/local/bin/user-wrapper", "turn-ended", "--previous-notify", "[\"/Applications/FlowMux.app/Contents/MacOS/flowmuxctl\",\"hooks\",\"codex\",\"stop\"]", "--keep"]
+            r#"notify = ["/usr/local/bin/user-wrapper", "turn-ended", "--previous-notify", "[\"/Applications/Flowmux.app/Contents/MacOS/flowmuxctl\",\"hooks\",\"codex\",\"stop\"]", "--keep"]
 "#,
         )
         .unwrap();

@@ -11,14 +11,14 @@ not normalized: they continue to take precedence.
 | Theme | Intended use | Color distribution |
 | --- | --- | --- |
 | GitHub Dark | Neutral dark canvas for code, diffs and command output | Distinct red/green/yellow/blue/magenta/cyan families; all 12 chromatic ANSI slots exceed 4.5:1. Black/bright black remain subdued. |
-| Gruvbox Light | Warm cream canvas for a light desktop | FlowMux adaptation: dark neutral slots, deeper ANSI accents for readable logs. All 12 chromatic slots exceed 4.5:1; neutral 7/8 remain subdued. |
-| FlowMux Contrast Dark | Dense colored logs on a dark canvas | Original palette; all 16 ANSI foregrounds exceed 4.5:1, body text exceeds 7:1. Bright slots are lighter and all 16 colors are distinct. |
-| FlowMux Contrast Light | Dense colored logs on a light desktop | Original palette; all 16 ANSI foregrounds exceed 4.5:1, body text exceeds 7:1. Bright slots remain distinguishable without becoming pastel. |
+| Gruvbox Light | Warm cream canvas for a light desktop | Flowmux adaptation: dark neutral slots, deeper ANSI accents for readable logs. All 12 chromatic slots exceed 4.5:1; neutral 7/8 remain subdued. |
+| Flowmux Contrast Dark | Dense colored logs on a dark canvas | Original palette; all 16 ANSI foregrounds exceed 4.5:1, body text exceeds 7:1. Bright slots are lighter and all 16 colors are distinct. |
+| Flowmux Contrast Light | Dense colored logs on a light desktop | Original palette; all 16 ANSI foregrounds exceed 4.5:1, body text exceeds 7:1. Bright slots remain distinguishable without becoming pastel. |
 
 GitHub Dark uses the [GitHub theme](https://github.com/primer/github-vscode-theme)
 foreground and [Primer Primitives 7.10.0](https://unpkg.com/@primer/primitives@7.10.0/dist/json/colors/dark.json)
 ANSI values. Gruvbox Light starts from the [upstream palette](https://github.com/morhetz/gruvbox/blob/master/colors/gruvbox.vim),
-with FlowMux's contrast adjustments identified in the theme file. Credits and
+with Flowmux's contrast adjustments identified in the theme file. Credits and
 MIT terms are retained in the bundled notices.
 
 ## Corrections to existing themes
@@ -55,12 +55,12 @@ The preview includes both ANSI banks so these tradeoffs can be inspected directl
 
 Ratios use linearized sRGB relative luminance `(lighter + 0.05) / (darker + 0.05)`.
 The [W3C text contrast reference](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)
-provides the 4.5:1 ordinary-text benchmark. FlowMux's test gates are:
+provides the 4.5:1 ordinary-text benchmark. Flowmux's test gates are:
 
 - Every built-in preset: body and selected text >= 4.5:1; cursor/canvas >= 3:1.
 - Selection/canvas >= 1.25:1 is a local visibility heuristic, not a WCAG criterion.
 - New GitHub Dark and Gruvbox Light: all 12 chromatic ANSI slots >= 4.5:1.
-- FlowMux Contrast pair: body >= 7:1, all 16 ANSI foregrounds >= 4.5:1,
+- Flowmux Contrast pair: body >= 7:1, all 16 ANSI foregrounds >= 4.5:1,
   no duplicate colors, and each bright slot lighter than its normal counterpart.
 
 This evaluates foregrounds against the default canvas, not every possible ANSI
@@ -91,11 +91,11 @@ cargo test -p flowmux --bin flowmux theme::tests::preset_contrast_audit -- --noc
 | Catppuccin Latte | 7.06 | 4.77 | 1.91 | 4.79 | 2 (2.96), 3 (2.31), 4 (4.34), 5 (2.34), 6 (3.31), 7 (1.91), 8 (4.37), 10 (2.96), 11 (2.31), 12 (4.34), 13 (2.34), 14 (3.31), 15 (1.61) | 1/9, 2/10, 3/11, 4/12, 5/13, 6/14 |
 | GitHub Dark | 16.02 | 7.19 | 2.23 | 7.49 | 0 (2.28), 8 (4.12) |  |
 | Gruvbox Light | 10.22 | 6.76 | 1.51 | 5.40 | 7 (4.29), 8 (3.24) |  |
-| FlowMux Contrast Dark | 17.54 | 8.21 | 2.14 | 14.88 |  |  |
-| FlowMux Contrast Light | 15.51 | 10.86 | 1.45 | 7.52 |  |  |
+| Flowmux Contrast Dark | 17.54 | 8.21 | 2.14 | 14.88 |  |  |
+| Flowmux Contrast Light | 15.51 | 10.86 | 1.45 | 7.52 |  |  |
 
 Native verification in `macos_native` switches through every preset in an isolated
 window, checks persisted selection and rendered backgrounds, and checks each
 ANSI color in VTE's rendered HTML. The same run covers custom resets, browser
 navigation, editor/terminal focus, IPC, and unsaved-document close cancellation.
-The original running FlowMux/Codex window is not closed or restarted.
+The original running Flowmux/Codex window is not closed or restarted.

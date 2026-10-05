@@ -120,7 +120,7 @@ fn output_progress(stage: Stage, line: &str, current: u8) -> Option<u8> {
             {
                 Some(95)
             } else if line.contains("==> done.")
-                || line.contains("==> restart FlowMux")
+                || line.to_ascii_lowercase().contains("==> restart flowmux")
                 || line.contains("==> launch with:")
             {
                 Some(100)
@@ -980,6 +980,17 @@ mod tests {
     }
 
     #[test]
+    fn restart_progress_accepts_existing_capitalization() {
+        for line in [
+            "==> restart Flowmux",
+            "==> restart FLOWMUX",
+            "==> restart flowmux",
+        ] {
+            assert_eq!(output_progress(Stage::Installing, line, 90), Some(100));
+        }
+    }
+
+    #[test]
     fn adjusted_path_finds_macos_prerequisite_tools() {
         let temp = tempfile::tempdir().unwrap();
         let tool_dir = temp.path().join(".cargo/bin");
@@ -1001,15 +1012,21 @@ mod tests {
 
     #[test]
     fn deferred_macos_swap_waits_for_the_running_app() {
+        for bundle_name in ["Flowmux.app", "FLOWMUX.APP"] {
+            check_deferred_macos_swap(bundle_name);
+        }
+    }
+
+    fn check_deferred_macos_swap(bundle_name: &str) {
         let temp = tempfile::tempdir().unwrap();
-        let destination = temp.path().join("FlowMux.app");
+        let destination = temp.path().join(bundle_name);
         let mut host = Command::new("sleep").arg("30").spawn().unwrap();
         let staged = temp
             .path()
-            .join(format!(".FlowMux.app.pending.{}", host.id()));
+            .join(format!(".{bundle_name}.pending.{}", host.id()));
         let backup = temp
             .path()
-            .join(format!(".FlowMux.app.previous.{}", host.id()));
+            .join(format!(".{bundle_name}.previous.{}", host.id()));
         std::fs::create_dir_all(&destination).unwrap();
         std::fs::create_dir_all(&staged).unwrap();
         std::fs::write(destination.join("version"), "old").unwrap();

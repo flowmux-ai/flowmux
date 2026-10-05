@@ -1,10 +1,10 @@
 ---
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: flowmux-browser
-description: Operate FlowMux workspaces, terminal panes, in-app browser, SSH connections and notifications through its CLI. Use for FlowMux feature guidance or automation inside a FlowMux pane or with an explicitly supplied socket and pane.
+description: Operate Flowmux workspaces, terminal panes, in-app browser, SSH connections and notifications through its CLI. Use for Flowmux feature guidance or automation inside a Flowmux pane or with an explicitly supplied socket and pane.
 ---
 
-# FlowMux CLI
+# Flowmux CLI
 
 Use the category matching the user's task. This skill describes product usage;
 it does not install development tools or prescribe a software development process.
@@ -29,10 +29,10 @@ FLOWMUX_CLI="${FLOWMUX_BUNDLED_CLI_PATH:-flowmux}"
 "$FLOWMUX_CLI" --help
 ```
 
-`FLOWMUX_PANE_ID` means the shell was launched inside FlowMux. `identify` reads
+`FLOWMUX_PANE_ID` means the shell was launched inside Flowmux. `identify` reads
 context; only a successful `ping` proves the GUI socket is reachable. If the
 socket is stale, report it. Do not restart the user's app or silently select
-another window. Outside FlowMux, use the user's supplied socket with the global
+another window. Outside Flowmux, use the user's supplied socket with the global
 `--socket /path/to/socket` option **before** the command; use explicit pane IDs.
 
 - `FLOWMUX_SOCKET_PATH`: window connection; different windows have different sockets.
@@ -92,7 +92,7 @@ for confirmation; a pending request is not a completed close. Do not bypass it.
 
 ## Browser
 
-Inside FlowMux, prefer its visible in-app browser for web tasks. Do not launch
+Inside Flowmux, prefer its visible in-app browser for web tasks. Do not launch
 Playwright, Puppeteer or system Chromium merely to read a page.
 
 The example uses `jq` to extract the opened pane ID. If unavailable, read the JSON
@@ -141,17 +141,17 @@ for the current page; these are independent examples, not a script to run blindl
 Refs belong to the latest snapshot of one browser tab. After navigation, reload,
 tab switches or page changes, wait and take a fresh snapshot before using refs.
 A ref-not-found error also requires a fresh snapshot. Never add tracking
-attributes to the DOM; FlowMux resolves refs without modifying the page.
+attributes to the DOM; Flowmux resolves refs without modifying the page.
 
 Screenshots cover the visible viewport. WebKitGTK/WKWebView do not expose CDP:
 no device viewport emulation, network mocking, full-page tracing or screencast.
 When a task requires those, explain the need for external tooling and keep the
-user-visible URL/results in FlowMux. Cookie import currently extracts/counts
+user-visible URL/results in Flowmux. Cookie import currently extracts/counts
 cookies; it does not insert them into the WebView.
 
 ## SSH
 
-Run these commands from the local FlowMux context. Remote shells do not inherit
+Run these commands from the local Flowmux context. Remote shells do not inherit
 its pane/socket context. Replace the sample host and ports with the user's target.
 
 ```bash
@@ -188,7 +188,7 @@ remote hook installation are not supported.
 names help map panes to sessions. If Claude's `ListAgents` and `SendMessage`
 tools are available and the task calls for coordination, verify the name with
 `ListAgents` before messaging; a user rename can make the mapping stale.
-Notifications appear in FlowMux/desktop notification surfaces; they are not
+Notifications appear in Flowmux/desktop notification surfaces; they are not
 messages to another agent. `notifications open ID` focuses the source pane,
 `mark-read ID` marks without focusing, and `clear` removes all notifications.
 Do not simulate lifecycle hooks to make an agent appear active.

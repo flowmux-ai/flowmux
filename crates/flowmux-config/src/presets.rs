@@ -85,12 +85,12 @@ pub const PRESETS: &[ThemePreset] = &[
     },
     ThemePreset {
         id: "flowmux-contrast-dark",
-        name: "FlowMux Contrast Dark",
+        name: "Flowmux Contrast Dark",
         source: include_str!("../themes/flowmux-contrast-dark.theme"),
     },
     ThemePreset {
         id: "flowmux-contrast-light",
-        name: "FlowMux Contrast Light",
+        name: "Flowmux Contrast Light",
         source: include_str!("../themes/flowmux-contrast-light.theme"),
     },
 ];

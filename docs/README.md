@@ -8,7 +8,7 @@
 - [SSH workspaces](ssh-workspaces.md)
 - [Agent session history](agent-sessions.md)
 - [Agent CLI and browser automation](../AGENTS.md)
-- [FlowMux CLI skill: features and installation](agent-skills.md)
+- [Flowmux CLI skill: features and installation](agent-skills.md)
 - [Development guide](../CLAUDE.md)
 - [Memory sanitizer checks](sanitizers.md)
 - [Contributing](../.github/CONTRIBUTING.md)

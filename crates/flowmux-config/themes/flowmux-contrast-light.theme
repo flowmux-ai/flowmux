@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Original FlowMux palette for colored logs on a light canvas.
+# Original Flowmux palette for colored logs on a light canvas.
 # All 16 ANSI foregrounds target at least 4.5:1 against the default background.
 background = #fafafa
 foreground = #18212f

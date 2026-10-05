@@ -37,10 +37,12 @@ pub fn classify_install_origin(
     // The macOS app bundle is only ever produced by scripts/install-macos.sh
     // (there is no packaged macOS release), so a bundle-resident executable
     // is a source build regardless of which app directory it landed in.
-    if executable
-        .components()
-        .any(|component| component.as_os_str() == "FlowMux.app")
-    {
+    if executable.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("Flowmux.app")
+    }) {
         return InstallOrigin::Source;
     }
     InstallOrigin::Unknown
@@ -102,7 +104,7 @@ mod tests {
         );
         assert_eq!(
             classify_install_origin(
-                Path::new("/Users/alice/Applications/FlowMux.app/Contents/MacOS/flowmux"),
+                Path::new("/Users/alice/Applications/Flowmux.app/Contents/MacOS/flowmux"),
                 Some(Path::new("/Users/alice")),
                 false
             ),
@@ -111,6 +113,27 @@ mod tests {
         assert_eq!(
             classify_install_origin(Path::new("/opt/flowmux"), Some(home), true),
             InstallOrigin::Deb
+        );
+    }
+
+    #[test]
+    fn bundle_origin_accepts_existing_capitalization() {
+        for name in ["Flowmux.app", "flowmux.app", "FLOWMUX.APP"] {
+            let executable = Path::new("/Applications")
+                .join(name)
+                .join("Contents/MacOS/flowmux");
+            assert_eq!(
+                classify_install_origin(&executable, None, false),
+                InstallOrigin::Source
+            );
+        }
+        assert_eq!(
+            classify_install_origin(
+                Path::new("/Applications/Other.app/Contents/MacOS/flowmux"),
+                None,
+                false
+            ),
+            InstallOrigin::Unknown
         );
     }
 

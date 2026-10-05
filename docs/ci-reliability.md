@@ -44,7 +44,7 @@ terminator. File existence alone is not a receipt-completion signal.
 
 `.github/workflows/test.yml` invokes `scripts/test-ci.sh linux|macos`, exactly as
 a developer can locally. The runner owns private XDG/runtime/temp directories,
-clears inherited FlowMux pane/socket identity, keeps fatal GTK criticals, and
+clears inherited Flowmux pane/socket identity, keeps fatal GTK criticals, and
 records toolchain/native-library versions and the complete output. It does not
 restart the installed app or disable WebKit sandboxing.
 

@@ -71,4 +71,4 @@ also opened through keyboard navigation and Escape dismissed only its child; its
 encountered a computer-use pipe error while the app process remained healthy.
 The Linux mapped-widget test covers its complete toggle/action/release sequence.
 
-The user's running FlowMux sessions were not restarted or replaced.
+The user's running Flowmux sessions were not restarted or replaced.

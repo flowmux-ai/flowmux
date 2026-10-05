@@ -661,7 +661,7 @@ enum HooksOp {
     /// setup`. Reads stdin JSON, fires a desktop notification.
     Claude {
         /// Explicit source pane for Flatpak hook commands whose environment is
-        /// filtered while crossing back into the FlowMux sandbox.
+        /// filtered while crossing back into the Flowmux sandbox.
         #[arg(long, global = true)]
         pane: Option<PaneId>,
         /// Explicit source tab surface; falls back to FLOWMUX_SURFACE_ID.

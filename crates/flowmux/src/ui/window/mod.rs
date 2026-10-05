@@ -2188,7 +2188,7 @@ impl WindowController {
             if let Some(host) = self.pane_registry.borrow().stack_for_pane(review.pane) {
                 review.attach(&host);
             }
-            review.status.set_text("Save or clear your review draft before closing FlowMux. If a save is running, wait for it to finish.");
+            review.status.set_text("Save or clear your review draft before closing Flowmux. If a save is running, wait for it to finish.");
             review.present();
             self.window_close.prompting.set(false);
             return;

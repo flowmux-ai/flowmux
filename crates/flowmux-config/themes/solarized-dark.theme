@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Solarized Dark — Copyright (c) 2011 Ethan Schoonover.
 # Source: https://github.com/altercation/solarized
-# FlowMux adaptation: improve text, selection, or cursor contrast; ANSI palette retained.
+# Flowmux adaptation: improve text, selection, or cursor contrast; ANSI palette retained.
 background = #002b36
 foreground = #839496
 cursor-color = #839496

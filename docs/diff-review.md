@@ -70,12 +70,12 @@ edited, the local text is preserved and saving is blocked until that edit is
 cancelled; copy any text you want to keep first. Concurrent saves also use
 revision checks; **Reload saved comments** recovers a storage revision conflict.
 Closing
-FlowMux with an unfinished comment brings it forward for saving or cancellation.
+Flowmux with an unfinished comment brings it forward for saving or cancellation.
 A forced process termination can lose unfinished text.
 
 ## Send feedback
 
-Open **Send** and select an agent in the same workspace. FlowMux checks
+Open **Send** and select an agent in the same workspace. Flowmux checks
 comments against the selected comparison's code, verifies the live session, and sends the
 batch as a bracketed paste followed by Enter. An agent must be idle or done and
 show an empty recognized prompt (`›`, `❯`, or `>`), or Codex's known empty-input placeholder with the cursor at its start. Existing input, working
@@ -140,6 +140,6 @@ feedback, existing terminal input protection, session identity checks, and an
 actual child PTY's receipt of the multiline bracketed paste and submit key.
 They do not assert that every third-party agent recognizes every prompt style.
 Installed-app keyboard/mouse verification uses a separate app bundle and state
-directory, preserving the user's running FlowMux sessions.
+directory, preserving the user's running Flowmux sessions.
 
 Detailed event coverage and outstanding verification limits: [event audit](diff-review-event-audit.md).

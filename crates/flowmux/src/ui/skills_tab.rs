@@ -14,14 +14,14 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     content.set_margin_end(20);
 
     let description = gtk::Label::new(Some(
-        "Install the FlowMux CLI skill for the agents you use. It teaches workspace and terminal control, browser automation, SSH, notifications, and GUI features such as Code Review and search.",
+        "Install the Flowmux CLI skill for the agents you use. It teaches workspace and terminal control, browser automation, SSH, notifications, and GUI features such as Code Review and search.",
     ));
     description.set_wrap(true);
     description.set_xalign(0.0);
     content.append(&description);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("FlowMux CLI");
+    group.set_title("Flowmux CLI");
     group.set_description(Some(
         "Choose an agent below. Updates and removal back up modified content.",
     ));
@@ -54,7 +54,7 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     });
     content.append(&refresh);
     let note = gtk::Label::new(Some(
-        "In your agent's skill list, look for flowmux-browser (the existing installation identifier). Start a new session if needed. Existing sessions are not restarted. Only the FlowMux CLI skill is managed here; agent hooks and settings are unchanged.",
+        "In your agent's skill list, look for flowmux-browser (the existing installation identifier). Start a new session if needed. Existing sessions are not restarted. Only the Flowmux CLI skill is managed here; agent hooks and settings are unchanged.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
@@ -126,7 +126,7 @@ impl SkillRow {
         remove.add_css_class("destructive-action");
         remove.set_widget_name(&format!("flowmux-skill-remove-{}", target.slug()));
         remove.set_tooltip_text(Some(
-            "Remove only the FlowMux skill. Modified content is backed up.",
+            "Remove only the Flowmux skill. Modified content is backed up.",
         ));
         remove.set_sensitive(false);
         widget.add_suffix(&remove);

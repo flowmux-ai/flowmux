@@ -396,7 +396,7 @@ fn rank_agent_tree_matches(mut matches: Vec<AgentTreeMatch>) -> Vec<&'static str
         .collect()
 }
 
-/// Process evidence scoped to one terminal, excluding nested FlowMux windows.
+/// Process evidence scoped to one terminal, excluding nested Flowmux windows.
 #[derive(Debug, Default)]
 pub struct AgentProcessTree {
     pub agents: Vec<&'static str>,
@@ -412,7 +412,7 @@ fn is_agent_transport(comm: &str) -> bool {
 }
 
 /// Inspect at most `AGENT_TREE_NODE_CAP` processes in a terminal's subtree.
-/// Another FlowMux window owns its own terminals and must not contribute here.
+/// Another Flowmux window owns its own terminals and must not contribute here.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn agent_process_tree(root: u32) -> AgentProcessTree {
     #[cfg(target_os = "linux")]
@@ -480,7 +480,7 @@ pub fn agent_process_tree(root: u32) -> AgentProcessTree {
 }
 
 /// Detect agent identities deepest-first, with lower PIDs breaking ties.
-/// Repeated names are returned once; nested FlowMux windows are excluded.
+/// Repeated names are returned once; nested Flowmux windows are excluded.
 pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
     agent_process_tree(root).agents
 }

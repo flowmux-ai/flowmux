@@ -81,7 +81,7 @@ same coverage floors as CI. See [CI reliability](ci-reliability.md) for the
 failure policy and regression scenarios.
 
 The smoke executable owns temporary state/configuration and its own window;
-it does not restart an installed FlowMux. A logged-in macOS desktop is
+it does not restart an installed Flowmux. A logged-in macOS desktop is
 required. [`install-macos.sh`](../scripts/install-macos.sh) builds a local
 application bundle. There is no native Windows build or installer in this tree.
 

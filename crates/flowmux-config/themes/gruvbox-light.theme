@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Gruvbox Light — by Pavel Pertsev (morhetz).
 # Source: https://github.com/morhetz/gruvbox
-# FlowMux uses dark neutral slots on the light canvas and an opaque selection.
+# Flowmux uses dark neutral slots on the light canvas and an opaque selection.
 # ANSI accents are darkened to >=4.5:1 for readable logs on the cream canvas.
 background = #fbf1c7
 foreground = #3c3836

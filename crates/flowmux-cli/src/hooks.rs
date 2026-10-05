@@ -95,7 +95,7 @@ pub struct ClaudeHookInput {
     pub stop_hook_active: bool,
 }
 
-/// Stream JSON from stdin and retain only the small fields FlowMux uses.
+/// Stream JSON from stdin and retain only the small fields Flowmux uses.
 /// This matters for Claude `PostToolBatch`, whose ignored tool responses may
 /// be much larger than a fixed read cap. Empty stdin / parse failures degrade
 /// to a default payload so the user still gets a generic toast.

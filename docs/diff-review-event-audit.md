@@ -78,7 +78,7 @@
 
 ## 실행 증거와 남은 항목
 
-격리 앱: `/tmp/flowmux-diff-events/FlowMux.app` (`com.flowmux.DiffEvents`).
+격리 앱: `/tmp/flowmux-diff-events/Flowmux.app` (`com.flowmux.DiffEvents`).
 기존 설치 앱과 사용 중인 ReviewUX 앱은 종료하거나 교체하지 않았다.
 
 - `cargo test -p flowmux-vcs --test review --locked`: 13개 통과.
@@ -98,7 +98,7 @@ GTK 내부 위젯이 접근성 트리에 노출되지 않고 팝오버를 별도
 
 ## 후속 변경: 댓글 삭제
 
-Resolve/Reopen을 Delete로 대체했다. `/tmp/flowmux-review-delete/FlowMux.app`에서
+Resolve/Reopen을 Delete로 대체했다. `/tmp/flowmux-review-delete/Flowmux.app`에서
 댓글 저장 후 Delete를 마우스로 클릭하여 카드 제거, Comments/Send 카운트 0,
 `Comment deleted` 상태를 확인했다. 네이티브 검증도 통과했으며, 삭제 후 재로드와
 다른 작성 중 초안 보존을 검사한다. 로그: `/tmp/flowmux-review-delete-native.log`.
@@ -146,7 +146,7 @@ Resolve/Reopen을 Delete로 대체했다. `/tmp/flowmux-review-delete/FlowMux.ap
 | 기존 busy/approval/종료/session 변경/기존 입력 보호 | Native | 기존 provider handoff 회귀 검사 재통과 |
 | 팝업 내부 항목의 좌표 마우스 클릭 | 미확정 | 자동화에서는 메뉴만 닫힘. 아래 한계 유지 |
 
-GUI는 새로 빌드한 `/tmp/flowmux-popup-repro/FlowMux.app`에서 수행했다. 첫 카드의 Edit를 마우스로 누른 뒤 원래 위치와 입력칸/Save/Cancel의 노출을 확인했다. 두 pane에 Diff를 열고 왼쪽에서 변경하지 않은 Edit 상태로 Send를 열어 Tab/Enter로 오른쪽 대상을 선택했다. 양쪽 Diff가 닫히고 오른쪽 terminal에 `GUI_FEEDBACK_RECEIVED`가 표시됐다. `/tmp/flowmux-popup-repro/gui-receipt.bin`은 780 bytes이며 bracketed paste 시작/끝과 submit 키, 코멘트 1~5가 각각 정확히 한 번 포함됨을 확인했다.
+GUI는 새로 빌드한 `/tmp/flowmux-popup-repro/Flowmux.app`에서 수행했다. 첫 카드의 Edit를 마우스로 누른 뒤 원래 위치와 입력칸/Save/Cancel의 노출을 확인했다. 두 pane에 Diff를 열고 왼쪽에서 변경하지 않은 Edit 상태로 Send를 열어 Tab/Enter로 오른쪽 대상을 선택했다. 양쪽 Diff가 닫히고 오른쪽 terminal에 `GUI_FEEDBACK_RECEIVED`가 표시됐다. `/tmp/flowmux-popup-repro/gui-receipt.bin`은 780 bytes이며 bracketed paste 시작/끝과 submit 키, 코멘트 1~5가 각각 정확히 한 번 포함됨을 확인했다.
 
 이 대상들은 Codex presence를 사용하는 **격리된 테스트 수신 프로세스**다. 실제 사용 중인 Codex에게 테스트 메시지를 보내지 않았으며, 실제 Codex의 응답 생성까지 검증한 것은 아니다. GUI 메뉴 선택은 키보드로 수행했고, Native 메뉴 검사는 실제 버튼의 clicked signal을 사용했다. 앞서 기록한 팝업 좌표 클릭의 도구 입력 전달 문제와 앱 문제는 아직 구분하지 못했으므로 모든 마우스 경로가 해결됐다고 주장하지 않는다.
 
@@ -186,5 +186,5 @@ GUI는 새로 빌드한 `/tmp/flowmux-popup-repro/FlowMux.app`에서 수행했�
 - 사이드바 하단 AI 사용량 바로 오른쪽에 내장 Diff 아이콘을 추가했다. `win.open-diff-review`를 호출하므로 현재 포커스된 pane의 Git 경로를 사용한다.
 - 설정 버튼은 왼쪽에 고정하고 나머지 아이콘을 가로 스크롤 영역으로 묶었다. 처음 표시하거나 영역 폭이 바뀌면 배치 완료 후 오른쪽 끝으로 정렬한다. 폭이 부족하면 왼쪽 아이콘부터 잘리며, 수동 휠/가로 스크롤 위치는 다음 크기 변경 전까지 유지한다.
 - 네이티브 검사에서 아이콘 순서·액션·E accelerator, 좁은 폭의 왼쪽 clipping과 마지막 아이콘 노출, 수동 스크롤 유지, 확대 후 재축소의 오른쪽 정렬을 검사했다. `/tmp/flowmux-footer-native.log`: `DIFF_REVIEW_SIDEBAR_FOOTER_OK`와 기존 Diff suite의 `MACOS_NATIVE_SMOKE_OK`.
-- `/tmp/fm-footer/FlowMux.app` (`com.flowmux.FooterRepro`)의 실제 창에서 Diff 아이콘 클릭 및 Back 이후 Ctrl+Alt+E로 `/private/tmp/fm-footer/project`의 Diff가 열림을 확인했다. 좁은 사이드바의 오른쪽 아이콘 우선 표시, 휠로 숨겨진 Agents/AI usage 아이콘 다시 노출도 확인했다. 자동화 드래그로 sidebar 폭 변경은 발생하지 않아 폭 변경 자체는 위 네이티브 GTK 검사로 검증했다.
+- `/tmp/fm-footer/Flowmux.app` (`com.flowmux.FooterRepro`)의 실제 창에서 Diff 아이콘 클릭 및 Back 이후 Ctrl+Alt+E로 `/private/tmp/fm-footer/project`의 Diff가 열림을 확인했다. 좁은 사이드바의 오른쪽 아이콘 우선 표시, 휠로 숨겨진 Agents/AI usage 아이콘 다시 노출도 확인했다. 자동화 드래그로 sidebar 폭 변경은 발생하지 않아 폭 변경 자체는 위 네이티브 GTK 검사로 검증했다.
 - `cargo test -p flowmux-config keybindings --locked`: 19개 통과 (`/tmp/flowmux-footer-config.log`). `git diff --check` 통과. 사용 중인 사용자 앱은 교체하거나 재시작하지 않았다.

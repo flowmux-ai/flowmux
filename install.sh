@@ -218,7 +218,7 @@ done
 if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
     && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ] \
     && [ ! -e /etc/apparmor.d/flowmux-webkit ]; then
-    confirm "Install the FlowMux AppArmor profile to enable WebKit's sandbox?"
+    confirm "Install the Flowmux AppArmor profile to enable WebKit's sandbox?"
     sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
     sudo sh packaging/debian/postinst configure
 fi
