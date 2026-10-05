@@ -230,6 +230,74 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         "› Ask Codex to do anything",
         2
     ));
+    fn receiver_ready(terminal: &crate::ui::pane_terminal::PaneTerminal, phase: &str) -> bool {
+        let (column, row) = terminal.widget.cursor_position();
+        let (line, _) = terminal
+            .widget
+            .text_range_format(vte::Format::Text, row, 0, row + 1, 0);
+        let (marker, _) = terminal
+            .widget
+            .text_range_format(vte::Format::Text, row - 1, 0, row, 0);
+        marker.as_deref().unwrap_or_default().trim() == format!("REVIEW_READY:{phase}")
+            && empty_agent_prompt("codex", line.as_deref().unwrap_or_default(), column)
+    }
+
+    async fn start_receiver(
+        terminal: &crate::ui::pane_terminal::PaneTerminal,
+        receiver: &std::path::Path,
+        receipt: &std::path::Path,
+        phase: &str,
+        monitor: bool,
+    ) {
+        // Each launch prints a different marker next to its actual raw-mode
+        // prompt. A previous receiver's prompt cannot acknowledge this launch.
+        terminal
+            .write_input(
+                format!(
+                    "python3 '{}' '{}' {phase}{}; printf '\\nREVIEW_DONE:%s\\n' {phase}\r",
+                    receiver.display(),
+                    receipt.display(),
+                    if monitor { " monitor" } else { "" },
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            loop {
+                if receiver_ready(terminal, phase) {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "receiver {phase} not ready: {error:?}; screen={:?}",
+                terminal.screen_text()
+            )
+        });
+    }
+
+    async fn wait_receiver_exit(terminal: &crate::ui::pane_terminal::PaneTerminal, phase: &str) {
+        // The shell emits this only after Python exits and restores termios.
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !terminal.screen_text().is_some_and(|text| {
+                text.lines()
+                    .any(|line| line.trim() == format!("REVIEW_DONE:{phase}"))
+            }) {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "receiver {phase} did not exit: {error:?}; screen={:?}",
+                terminal.screen_text()
+            )
+        });
+    }
+
     let workspace = controller.store.active_workspace().await.unwrap();
     let ws = controller.store.get_workspace(workspace).await.unwrap();
     let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
@@ -398,7 +466,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
 previous = termios.tcgetattr(0)
 tty.setraw(0)
 try:
-    os.write(1, '\x1b[?2004h\r\n› '.encode())
+    os.write(1, ('\x1b[?2004h\r\nREVIEW_READY:' + sys.argv[2] + '\r\n› ').encode())
     data = b''
     while True:
         chunk = os.read(0, 65536)
@@ -409,7 +477,7 @@ try:
         with open(sys.argv[1] + '.tmp', 'wb') as output:
             output.write(data)
         os.replace(sys.argv[1] + '.tmp', sys.argv[1])
-        if len(sys.argv) == 2 and data.endswith(b'\x1b[201~\r'):
+        if len(sys.argv) == 3 and data.endswith(b'\x1b[201~\r'):
             break
 finally:
     os.write(1, b'\x1b[?2004l\r\nREVIEW_RECEIVER_EXITED\r\n')
@@ -419,31 +487,7 @@ finally:
     .unwrap();
     // Keep the source alive across split/resizing. Its byte receipt detects a
     // misrouted send without mistaking shell prompt reflow for terminal input.
-    terminal
-        .write_input(
-            format!(
-                "python3 '{}' '{}' monitor\r",
-                receiver.display(),
-                source_receipt.display()
-            )
-            .as_bytes(),
-        )
-        .unwrap();
-    glib::future_with_timeout(Duration::from_secs(10), async {
-        loop {
-            let (column, row) = terminal.widget.cursor_position();
-            let (line, _) =
-                terminal
-                    .widget
-                    .text_range_format(vte::Format::Text, row, 0, row + 1, 0);
-            if empty_agent_prompt("fixture-agent", line.as_deref().unwrap_or_default(), column) {
-                break;
-            }
-            glib::timeout_future(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap();
+    start_receiver(&terminal, &receiver, &source_receipt, "source", true).await;
     let mut ready = AgentPresence::new(
         "fixture-agent",
         AgentActivity::Idle,
@@ -493,29 +537,14 @@ finally:
                 registry.stack_for_pane(destination).unwrap(),
             )
         };
-        destination_terminal
-            .write_input(
-                format!("python3 '{}' '{}'\r", receiver.display(), receipt.display()).as_bytes(),
-            )
-            .unwrap();
-        glib::future_with_timeout(Duration::from_secs(10), async {
-            loop {
-                let (column, row) = destination_terminal.widget.cursor_position();
-                let (line, _) = destination_terminal.widget.text_range_format(
-                    vte::Format::Text,
-                    row,
-                    0,
-                    row + 1,
-                    0,
-                );
-                if empty_agent_prompt("codex", line.as_deref().unwrap_or_default(), column) {
-                    break;
-                }
-                glib::timeout_future(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .unwrap();
+        start_receiver(
+            &destination_terminal,
+            &receiver,
+            &receipt,
+            "worktree",
+            false,
+        )
+        .await;
         let target_review = ReviewWindow::new(
             &controller.window,
             &destination_stack,
@@ -636,30 +665,26 @@ finally:
         review
             .smoke_prepare_unchanged_edit("Send this historical commit review")
             .await;
-        std::fs::remove_file(&receipt).unwrap();
+        wait_receiver_exit(&destination_terminal, "worktree").await;
+        // Model delayed terminal repaint: the prior prompt is still visible
+        // while a new receiver has not acknowledged startup.
         destination_terminal
-            .write_input(
-                format!("python3 '{}' '{}'\r", receiver.display(), receipt.display()).as_bytes(),
-            )
-            .unwrap();
+            .widget
+            .feed(b"\r\nREVIEW_READY:worktree\r\n\xe2\x80\xba ");
         glib::future_with_timeout(Duration::from_secs(10), async {
-            loop {
-                let (column, row) = destination_terminal.widget.cursor_position();
-                let (line, _) = destination_terminal.widget.text_range_format(
-                    vte::Format::Text,
-                    row,
-                    0,
-                    row + 1,
-                    0,
-                );
-                if empty_agent_prompt("codex", line.as_deref().unwrap_or_default(), column) {
-                    break;
-                }
+            while !receiver_ready(&destination_terminal, "worktree") {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
         .await
-        .unwrap();
+        .expect("stale receiver prompt must be rendered");
+        assert!(
+            !receiver_ready(&destination_terminal, "commit"),
+            "a prior receiver's empty prompt must not acknowledge the next launch"
+        );
+        println!("DIFF_REVIEW_STALE_RECEIVER_PROMPT_REJECTED_OK");
+        let receipt = dir.path().join("receipt.bin.commit");
+        start_receiver(&destination_terminal, &receiver, &receipt, "commit", false).await;
         let mut agent = AgentPresence::new("codex", AgentActivity::Idle, Some(std::process::id()));
         agent.status = AgentStatus::Idle;
         agent.session_id = Some("destination-commit-codex".into());
@@ -675,7 +700,7 @@ finally:
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("commit review handoff timed out: {error:?}; receipt={:?}, focused={:?}, expected={destination:?}, status={}, screen={:?}", std::fs::read(&receipt), controller.focused_pane.get(), review.status.text(), destination_terminal.screen_text()));
         let received = std::fs::read_to_string(&receipt).unwrap();
         assert!(
             received.starts_with("\x1b[200~Code review feedback")
@@ -685,6 +710,7 @@ finally:
         assert!(received.contains("Send this historical commit review"));
         assert!(!received.contains("Send unchanged Edit to the chosen Codex pane"));
         assert_eq!(std::fs::read(&source_receipt).unwrap(), source_before);
+        wait_receiver_exit(&destination_terminal, "commit").await;
         println!("DIFF_REVIEW_COMMIT_TEMPLATE_PTY_HANDOFF_OK");
         controller
             .store
@@ -698,16 +724,7 @@ finally:
     }
 
     terminal.write_input(b"\x04").unwrap();
-    glib::future_with_timeout(Duration::from_secs(10), async {
-        while !terminal
-            .screen_text()
-            .is_some_and(|text| text.contains("REVIEW_RECEIVER_EXITED"))
-        {
-            glib::timeout_future(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("source receiver must exit before the next scenario");
+    wait_receiver_exit(&terminal, "source").await;
     assert_eq!(
         std::fs::read(&source_receipt).unwrap(),
         format!("\x1b[200~{}\x1b[201~\r", prompt.replace('\n', "\r")).as_bytes(),

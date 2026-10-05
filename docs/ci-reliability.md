@@ -40,6 +40,17 @@ position/range to stabilize, so a briefly visible animation frame cannot pass.
 PTY receipts are published atomically and waits require the full paste/submit
 terminator. File existence alone is not a receipt-completion signal.
 
+The macOS run `37272406730` timed out waiting for the second (commit-review)
+PTY receipt; the same scenario passed locally, so the log alone does not prove
+its cause. The fixture now requires a launch-specific marker immediately above
+the raw-mode prompt, waits for the shell to acknowledge the prior receiver's
+exit, and uses separate worktree/commit receipt files. This prevents a stale
+prompt or receipt from acknowledging a new receiver. Commit-handoff timeouts
+include the received bytes, focus, review status, and terminal screen. Timeouts
+and the actual paste/content/focus assertions remain unchanged. A native
+regression renders the prior receiver's empty prompt and requires the next
+launch to reject it; reverting to the old prompt-only check fails that assertion.
+
 ## One execution path
 
 `.github/workflows/test.yml` invokes `scripts/test-ci.sh linux|macos`, exactly as
