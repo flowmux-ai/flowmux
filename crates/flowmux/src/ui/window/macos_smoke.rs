@@ -6,7 +6,10 @@ use flowmux_state::{State, WindowOwner};
 use std::io::{BufRead, Read, Write};
 
 pub(crate) fn run() {
-    let isolated = tempfile::tempdir().expect("isolated native smoke directory");
+    let isolated = tempfile::Builder::new()
+        .prefix("fm-native-")
+        .tempdir_in("/tmp")
+        .expect("isolated native smoke directory");
     for (key, directory) in [
         ("XDG_CONFIG_HOME", "config"),
         ("XDG_DATA_HOME", "data"),
@@ -99,6 +102,45 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
+        controller.options.borrow_mut().system_notifications_enabled = false;
+        let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
+        let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
+            flowmux_daemon::DaemonHandler::new(store.clone()),
+            bridge.clone(),
+        ));
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move {
+            flowmux_ipc::server::run(&server_socket, handler)
+                .await
+                .unwrap();
+        });
+        wait_until("agent IPC listening", || socket.exists()).await;
+        let cli = std::env::var_os("FLOWMUX_BUNDLED_CLI_PATH")
+            .expect("agent smoke requires the built flowmuxctl");
+        let output = tokio::process::Command::new("python3")
+            .arg(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../scripts/test-agent-hooks-gui.py"),
+            )
+            .args(["--socket", socket.to_str().unwrap(), "--cli"])
+            .arg(cli)
+            .kill_on_drop(true)
+            .output();
+        let output = glib::future_with_timeout(Duration::from_secs(180), output)
+            .await
+            .expect("agent hook replay timed out")
+            .unwrap();
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "agent hook replay failed");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE_NATIVE_HOOK_MATRIX_OK"));
+        server.abort();
+        controller.window.destroy();
+        println!("MACOS_NATIVE_AGENT_HOOKS_OK");
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_SKILLS_SMOKE_ONLY").is_some() {
         check_skills(&controller).await;

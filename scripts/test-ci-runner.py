@@ -19,12 +19,18 @@ with open(os.environ['CALLS'], 'a') as log:
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
         'tmp': os.environ.get('TMPDIR'),
         'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
-        'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY')}) + '\n')
+        'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
+        'agents': os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY')}) + '\n')
 if name == 'uname': print(os.environ.get('TEST_OS', 'Linux'))
 if name == 'xvfb-run': sys.exit(int(os.environ.get('TEST_EXIT', '0')))
 if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
     sys.exit(23)
+if name == 'python3' and args == ['scripts/test-agent-unit.py']:
+    sys.exit(int(os.environ.get('AGENT_UNIT_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
+    if os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY'):
+        print('MACOS_NATIVE_AGENT_HOOKS_OK')
+        sys.exit(int(os.environ.get('AGENT_GUI_EXIT', '0')))
     if os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'):
         print('MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK')
         sys.exit(int(os.environ.get('SKILLS_TEST_EXIT', '0')))
@@ -73,9 +79,21 @@ class RunnerTests(unittest.TestCase):
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 2)
+                self.assertEqual(len(native), 3 if exit_code == 0 else 2)
                 self.assertIsNone(native[0]['skills'])
                 self.assertEqual(native[1]['skills'], '1')
+
+    def test_macos_agent_gates_run_and_propagate_failure(self):
+        for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):
+            with self.subTest(variable=variable):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                                                **{variable: '27'})
+                self.assertEqual(result.returncode, 27, result.stdout + result.stderr)
+                units = [c for c in calls if c['args'] == ['scripts/test-agent-unit.py']]
+                self.assertEqual(len(units), 1)
+                self.assertIsNone(units[0]['socket'])
+                hooks = [c for c in calls if c['agents'] == '1']
+                self.assertEqual(len(hooks), 0 if variable == 'AGENT_UNIT_EXIT' else 1)
 
     def test_coverage_environment_failure_cannot_run_uninstrumented_tests(self):
         result, calls = self.run_script('test-coverage.sh')

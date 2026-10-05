@@ -59,6 +59,9 @@ if [[ $mode == linux ]]; then
 fi
 
 cargo build --workspace --locked
+git rev-parse HEAD
+python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CARGO_TARGET_DIR/debug/flowmuxctl"
+python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"
 cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
 cargo test -p flowmux --bin flowmux --locked bridge::tests
 export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
@@ -70,3 +73,8 @@ grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
 FLOWMUX_SKILLS_SMOKE_ONLY=1 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/skills-smoke.log"
 grep -q '^MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK$' "$report_dir/skills-smoke.log"
+
+# The same CLI/PTY/VTE hook matrix used by the Linux SSH GUI gate.
+FLOWMUX_AGENT_SMOKE_ONLY=1 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/agent-hooks.log"
+grep -q '^MACOS_NATIVE_AGENT_HOOKS_OK$' "$report_dir/agent-hooks.log"

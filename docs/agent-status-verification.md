@@ -32,3 +32,22 @@ Reproduce completion with and without Stop, both focused and hidden, while a
 second session remains working. Then begin another turn and replay stale output.
 `scripts/test-agent-hooks-gui.py` runs these cases through the actual CLI, IPC,
 PTY and VTE. Never add a focus change just to make hidden completion pass.
+
+## Platform gates
+
+`bash scripts/test-ci.sh macos` runs core/daemon/CLI/process unit tests plus the
+same hook replay on the AppKit main thread (`FLOWMUX_AGENT_SMOKE_ONLY=1`). The
+Linux coverage gate invokes the replay through the isolated SSH GUI harness.
+Both must exercise hidden and focused terminals without changing the scenario.
+
+For a focused local unit run, use `python3 scripts/test-agent-unit.py`. It strips
+pane/runtime context and reparents only its own test worker before launching
+Cargo: merely removing environment variables or calling setsid still leaves a
+managed Codex daemon in the test process ancestry. Native-daemon detection tests
+continue to create their explicit daemon ancestor inside that isolated worker.
+The normal runner returns Cargo's failure status; CI runner checks also inject
+unit/native failures to prove that later gates cannot mask them.
+
+The macOS gate records the Git revision, CLI checksum, unit results and native
+hook marker in `target/ci/macos/`. A configured Linux gate is not evidence that it
+ran on a macOS workstation; report unavailable platform execution separately.

@@ -447,7 +447,7 @@ mod tests {
             .unwrap();
         let output = std::process::Command::new("/bin/sh")
             .args(["-c", argv.last().unwrap()])
-            .env("SHELL", "/bin/true")
+            .env("SHELL", "true")
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -465,7 +465,7 @@ mod tests {
                 .unwrap();
             let output = std::process::Command::new("/bin/sh")
                 .args(["-c", argv.last().unwrap()])
-                .env("SHELL", "/bin/true")
+                .env("SHELL", "true")
                 .output()
                 .unwrap();
             assert!(!output.status.success());
