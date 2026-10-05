@@ -254,10 +254,11 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         terminal
             .write_input(
                 format!(
-                    "python3 '{}' '{}' {phase}{}; printf '\\nREVIEW_DONE:%s\\n' {phase}\r",
+                    "python3 '{}' '{}' {phase}{}; printf '\\nREVIEW_DONE:%s\\n' {phase} > '{}'\r",
                     receiver.display(),
                     receipt.display(),
                     if monitor { " monitor" } else { "" },
+                    receipt.with_extension("exit").display(),
                 )
                 .as_bytes(),
             )
@@ -279,13 +280,17 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         });
     }
 
-    async fn wait_receiver_exit(terminal: &crate::ui::pane_terminal::PaneTerminal, phase: &str) {
-        // The shell emits this only after Python exits and restores termios.
+    async fn wait_receiver_exit(
+        terminal: &crate::ui::pane_terminal::PaneTerminal,
+        receipt: &std::path::Path,
+        phase: &str,
+    ) {
+        // The shell writes this only after Python exits and restores termios.
+        // Unlike terminal text, the acknowledgement survives redraws and clears.
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !terminal.screen_text().is_some_and(|text| {
-                text.lines()
-                    .any(|line| line.trim() == format!("REVIEW_DONE:{phase}"))
-            }) {
+            while !std::fs::read_to_string(receipt.with_extension("exit"))
+                .is_ok_and(|text| text.trim() == format!("REVIEW_DONE:{phase}"))
+            {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
@@ -341,7 +346,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
     std::fs::write(dir.path().join("review.txt"), "fixture\n").unwrap();
     std::fs::write(
         dir.path().join(".git/info/exclude"),
-        "receiver.py\nreceipt.bin*\nsource-receipt.bin*\n",
+        "receiver.py\nreceipt.*\nsource-receipt.*\n",
     )
     .unwrap();
     let root = flowmux_vcs::review::repository_root(dir.path()).unwrap();
@@ -667,7 +672,7 @@ finally:
         review
             .smoke_prepare_unchanged_edit("Send this historical commit review")
             .await;
-        wait_receiver_exit(&destination_terminal, "worktree").await;
+        wait_receiver_exit(&destination_terminal, &receipt, "worktree").await;
         // Model delayed terminal repaint: the prior prompt is still visible
         // while a new receiver has not acknowledged startup. Use the live
         // raw-mode source so shell prompt redraw cannot overwrite this frame.
@@ -731,7 +736,7 @@ finally:
         assert!(received.contains("Send this historical commit review"));
         assert!(!received.contains("Send unchanged Edit to the chosen Codex pane"));
         assert_eq!(std::fs::read(&source_receipt).unwrap(), source_before);
-        wait_receiver_exit(&destination_terminal, "commit").await;
+        wait_receiver_exit(&destination_terminal, &receipt, "commit").await;
         println!("DIFF_REVIEW_COMMIT_TEMPLATE_PTY_HANDOFF_OK");
         controller
             .store
@@ -745,7 +750,11 @@ finally:
     }
 
     terminal.write_input(b"\x04").unwrap();
-    wait_receiver_exit(&terminal, "source").await;
+    wait_receiver_exit(&terminal, &source_receipt, "source").await;
+    // Exit acknowledgement must survive a later redraw that removes its text.
+    terminal.widget.reset(true, true);
+    assert!(terminal.screen_text().unwrap().trim().is_empty());
+    wait_receiver_exit(&terminal, &source_receipt, "source").await;
     assert_eq!(
         std::fs::read(&source_receipt).unwrap(),
         format!("\x1b[200~{}\x1b[201~\r", prompt.replace('\n', "\r")).as_bytes(),

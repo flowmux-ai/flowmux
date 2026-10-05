@@ -51,6 +51,15 @@ and the actual paste/content/focus assertions remain unchanged. A native
 regression renders the prior receiver's empty prompt and requires the next
 launch to reject it; reverting to the old prompt-only check fails that assertion.
 
+Run `37309769011` passed Linux but the macOS handoff fixture timed out waiting
+for `REVIEW_DONE:source`. Its captured terminal showed the receiver exit and
+shell prompt, with the expected marker absent. Exit acknowledgement now uses
+a phase-specific file written by the shell after Python exits and restores
+termios. It does not depend on terminal text surviving a redraw. The native
+regression clears the terminal after exit and checks acknowledgement again;
+the previous screen-based wait fails this case. Paste bytes, destination,
+session, review scope, and the 10-second exit deadline remain checked.
+
 ## One execution path
 
 `.github/workflows/test.yml` invokes `scripts/test-ci.sh linux|macos`, exactly as
