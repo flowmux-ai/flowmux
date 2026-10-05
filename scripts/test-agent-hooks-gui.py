@@ -68,16 +68,28 @@ int main(int argc, char **argv) {
             pid = int(pid_file.read_text())
             hook_env = dict(env, FLOWMUX_PANE_ID=pane, FLOWMUX_SURFACE_ID=surface,
                             FLOWMUX_WORKSPACE_ID=workspace, FLOWMUX_AGENT_PID=str(pid),
-                            FLOWMUX_AGENT_NAME=name)
+                            FLOWMUX_AGENT_NAME=name,
+                            FLOWMUX_RUNTIME_DIR=str(Path(args.socket).parent))
+            other_pid = None
+            other_surface = None
 
             def observed():
                 return next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
                             for p in w["panes"] for t in p["tabs"] if t["id"] == surface).get("agent")
 
+            deadline = time.monotonic() + 10
+            while not observed():
+                assert time.monotonic() < deadline, f"{name} process was not detected"
+                time.sleep(.05)
+
             def hook(event, activity, **fields):
                 payload = dict(session_id=f"fixture-{name}", hook_event_name=event,
-                               future_extension={"ignored": True}, **fields)
-                subprocess.run([args.cli, "--socket", args.socket, "hooks", name, event],
+                               cwd=str(root), future_extension={"ignored": True}, **fields)
+                command = [args.cli, "--socket", args.socket, "hooks", name, event]
+                if other_surface:
+                    command = ["/bin/sh", "-c", '"$@"; result=$?; exit $result',
+                               "--managed-daemon", *command]
+                subprocess.run(command,
                                input=json.dumps(payload), text=True, env=hook_env,
                                capture_output=True, check=True, timeout=10)
                 if event in ("stop", "subagent-stop") and activity == "running":
@@ -88,7 +100,8 @@ int main(int argc, char **argv) {
                 deadline = time.monotonic() + 5
                 while True:
                     value = observed()
-                    if value and value["activity"] == activity:
+                    if (value and value["activity"] == activity
+                            and value.get("session_id") == payload["session_id"]):
                         break
                     assert time.monotonic() < deadline, (name, event, payload, activity, value)
                     time.sleep(.05)
@@ -98,6 +111,11 @@ int main(int argc, char **argv) {
                             "idle": ("idle", "done")}
                 expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
                 assert value["status"] in expected, value
+                if other_surface:
+                    other = next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
+                                 for p in w["panes"] for t in p["tabs"]
+                                 if t["id"] == other_surface).get("agent")
+                    assert other and other["status"] == "idle" and not other.get("session_id"), other
                 evidence.write(json.dumps(dict(agent=name, event=event, payload=payload, observed=value)) + "\n")
 
             try:
@@ -128,6 +146,31 @@ int main(int argc, char **argv) {
                     hook("stop", "idle")
                 else:
                     hook("session-start", "idle")
+                    # A shared Codex daemon inherited another, now idle tab's
+                    # environment. Every hook must still reach this session.
+                    other_root = root / "idle-tab"
+                    other_root.mkdir()
+                    other_ws = rpc("workspace_create", name="Idle Codex", root=str(other_root))
+                    other_ws = next(w for w in rpc("workspace_tree")["tree"]["workspaces"]
+                                    if w["id"] == other_ws["workspace_created"]["id"])
+                    other_pane = other_ws["panes"][0]["id"]
+                    other_surface = other_ws["panes"][0]["tabs"][0]["id"]
+                    other_pid_file = root / "idle-codex.pid"
+                    rpc("pane_send_keys", pane=other_pane,
+                        keys=f"exec {shlex.quote(str(executable))} {shlex.quote(str(other_pid_file))}\r")
+                    deadline = time.monotonic() + 10
+                    while not other_pid_file.exists() or not other_pid_file.read_text():
+                        assert time.monotonic() < deadline, "idle Codex fixture did not start"
+                        time.sleep(.05)
+                    other_pid = int(other_pid_file.read_text())
+                    hook_env.update(FLOWMUX_PANE_ID=other_pane, FLOWMUX_SURFACE_ID=other_surface,
+                                    FLOWMUX_WORKSPACE_ID=other_ws["id"], FLOWMUX_AGENT_PID=str(other_pid))
+                    # Wait for the independent process scan to establish presence.
+                    deadline = time.monotonic() + 10
+                    while not any(t.get("agent") for w in rpc("workspace_tree")["tree"]["workspaces"]
+                                  for p in w["panes"] for t in p["tabs"] if t["id"] == other_surface):
+                        assert time.monotonic() < deadline, "idle Codex was not detected"
+                        time.sleep(.05)
                     hook("turn-start", "running", turn_id="root-1")
                     child = dict(agent_id="child", turn_id="child-1")
                     hook("subagent-start", "running", **child)
@@ -151,10 +194,12 @@ int main(int argc, char **argv) {
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
                 # Only the executable started in this test's new terminal.
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                for fixture_pid in (pid, other_pid):
+                    if fixture_pid:
+                        try:
+                            os.kill(fixture_pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
     print("LIVE_NATIVE_HOOK_MATRIX_OK", flush=True)
 
 

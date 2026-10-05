@@ -542,27 +542,19 @@ pub fn started_by_codex_app_server() -> bool {
     let mut app_server = false;
     let mut pid = std::process::id();
     for _ in 0..32 {
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
-            break;
-        };
-        // `pid (comm) state ppid ...`; comm may itself contain spaces.
-        let parent = stat
-            .rsplit_once(") ")
-            .and_then(|(_, rest)| rest.split(' ').nth(1))
-            .and_then(|parent| parent.parse::<u32>().ok());
-        let Some(parent) = parent.filter(|parent| *parent > 1) else {
+        let Some(parent) = flowmux_procmon::parent_pid(pid).filter(|parent| *parent > 1) else {
             break;
         };
         if window_socket == Some(flowmux_config::paths::runtime_socket_for_pid(parent)) {
             return false;
         }
-        let cmdline = std::fs::read(format!("/proc/{parent}/cmdline")).unwrap_or_default();
-        let has = |name: &[u8]| cmdline.split(|byte| *byte == 0).any(|arg| arg == name);
+        let cmdline = flowmux_procmon::cmdline_of(parent);
+        let has = |name: &str| cmdline.iter().any(|arg| arg == name);
         // The shared daemon serves other tabs even while its first pane lives.
-        if has(b"--managed-daemon") {
+        if has("--managed-daemon") {
             return true;
         }
-        app_server |= has(b"app-server");
+        app_server |= has("app-server");
         pid = parent;
     }
     app_server
@@ -668,6 +660,27 @@ fn pid_sockets_in(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn codex_managed_daemon_is_detected_on_the_host_platform() {
+        const CHILD: &str = "FLOWMUX_TEST_CODEX_DAEMON_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(started_by_codex_app_server());
+            return;
+        }
+        let status = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "\"$1\" --exact hooks::tests::codex_managed_daemon_is_detected_on_the_host_platform --nocapture; result=$?; exit $result",
+                "--managed-daemon",
+            ])
+            .arg(std::env::current_exe().unwrap())
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 
     #[test]
     fn shorten_collapses_whitespace_and_caps_length() {

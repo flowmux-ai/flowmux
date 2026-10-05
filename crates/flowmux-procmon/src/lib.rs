@@ -57,7 +57,7 @@ pub fn descendants(root: u32) -> Result<HashSet<u32>, ProcError> {
             Ok(p) => p,
             Err(_) => continue,
         };
-        if let Some(ppid) = read_ppid(pid) {
+        if let Some(ppid) = parent_pid(pid) {
             by_parent.entry(ppid).or_default().push(pid);
         }
     }
@@ -187,10 +187,10 @@ fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
     })
 }
 
-/// The argv of a process from `/proc/<pid>/cmdline` (NUL-separated fields), or
+/// The argv of a process from procfs or the native process API, or
 /// an empty vec when it can't be read (the process exited, or permissions).
 #[cfg(target_os = "linux")]
-fn cmdline_of(pid: u32) -> Vec<String> {
+pub fn cmdline_of(pid: u32) -> Vec<String> {
     fs::read(format!("/proc/{pid}/cmdline"))
         .map(|raw| {
             raw.split(|b| *b == 0)
@@ -202,7 +202,7 @@ fn cmdline_of(pid: u32) -> Vec<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn cmdline_of(pid: u32) -> Vec<String> {
+pub fn cmdline_of(pid: u32) -> Vec<String> {
     let mut argmax_mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
     let mut argmax = 0_i32;
     let mut argmax_size = std::mem::size_of_val(&argmax);
@@ -506,13 +506,14 @@ fn process_depth_from_root(root: u32, pid: u32) -> Option<usize> {
         if current == root {
             return Some(depth);
         }
-        current = read_ppid(current)?;
+        current = parent_pid(current)?;
     }
     None
 }
 
+/// Parent PID from the platform process table, or None after exit/read failure.
 #[cfg(target_os = "linux")]
-fn read_ppid(pid: u32) -> Option<u32> {
+pub fn parent_pid(pid: u32) -> Option<u32> {
     let text = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("PPid:") {
@@ -520,6 +521,32 @@ fn read_ppid(pid: u32) -> Option<u32> {
         }
     }
     None
+}
+
+#[cfg(target_os = "macos")]
+pub fn parent_pid(pid: u32) -> Option<u32> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    (read == size).then(|| unsafe { info.assume_init().pbi_ppid })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn parent_pid(_pid: u32) -> Option<u32> {
+    None
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn cmdline_of(_pid: u32) -> Vec<String> {
+    Vec::new()
 }
 
 /// Local TCP ports in LISTEN state owned by any pid in `pids`.
