@@ -1190,7 +1190,10 @@ impl GhosttyPane {
             .vadjustment()
             .map(|adjustment| (adjustment.upper().ceil() as i64).saturating_sub(1))
             .map_or(cursor_row, |row| row.max(cursor_row));
-        let first_row = last_row.saturating_sub(AGENT_STATUS_TEXT_ROWS - 1);
+        // ED2 may move the replaced frame into scrollback (notably VTE 0.76).
+        // Read the live grid, never an old spinner above it, even when scrolled back.
+        let rows = self.widget.row_count().clamp(1, AGENT_STATUS_TEXT_ROWS);
+        let first_row = last_row.saturating_sub(rows - 1);
         let last_column = self.widget.column_count().max(1) - 1;
         self.widget
             .text_range_format(vte::Format::Text, first_row, 0, last_row, last_column)
@@ -3994,6 +3997,56 @@ mod tests {
         }
         assert_eq!(calls.get(), 1, "mapping catches up the visible Agent state");
         pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_status_text_excludes_replaced_frames_in_scrollback() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sleep".into(), "30".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        );
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&pane.container));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let frames: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/fixtures/agent-status/codex-goal.json"
+        )))
+        .unwrap();
+        pane.widget
+            .feed(frames["working"].as_str().unwrap().as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        window.set_visible(false);
+        pane.widget
+            .feed(format!("\x1b[2J\x1b[H{}", frames["completed"].as_str().unwrap()).as_bytes());
+        for _ in 0..20 {
+            if pane
+                .screen_text()
+                .is_some_and(|text| text.contains("Goal achieved"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(pane.screen_text().unwrap().contains("Goal achieved"));
+        let adjustment = pane.widget.vadjustment().unwrap();
+        adjustment.set_value(adjustment.lower());
+        let text = pane.agent_status_text().unwrap();
+        pane.close_pty();
+        window.destroy();
+        assert_eq!(
+            flowmux_core::detect_agent_status_from_signals(Some(&text), None),
+            Some(flowmux_core::AgentStatus::Idle),
+            "{text}"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
