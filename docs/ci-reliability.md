@@ -77,3 +77,11 @@ snapshots are not substitutes for the condition being tested.
   multi-pane PTY handoff for working-tree and commit reviews.
 - Runner contract tests, shell syntax, Rust formatting, and workflow actionlint
   passed. Coverage thresholds and GTK fatal-critical handling remain enabled.
+
+The Linux browser integration fixture now prints the failed IPC request and the
+child GUI log before its temporary directory is removed. This was verified with
+a denied nested sandbox (failure included the bubblewrap/dbus-proxy cause), then
+with namespace/mount support enabled (both sandbox-on and opt-out tests passed).
+Local Docker validation needs nested namespace and `/proc` mount support; the
+hosted Ubuntu job uses the packaged AppArmor profile directly. Do not disable or
+skip the sandbox assertion to make a restricted container pass.

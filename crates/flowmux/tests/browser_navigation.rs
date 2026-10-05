@@ -15,12 +15,18 @@ use std::{
     time::Duration,
 };
 
-struct App(Child);
+struct App(Child, std::path::PathBuf);
 
 impl Drop for App {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
+        if std::thread::panicking() {
+            eprintln!(
+                "GUI child log:\n{}",
+                std::fs::read_to_string(&self.1).unwrap_or_default()
+            );
+        }
     }
 }
 
@@ -29,7 +35,7 @@ async fn call(client: &Client, request: Request) -> Response {
     tokio::time::timeout(Duration::from_secs(45), client.call(request))
         .await
         .unwrap_or_else(|_| panic!("GUI IPC response timed out: {description}"))
-        .expect("GUI IPC failed")
+        .unwrap_or_else(|error| panic!("GUI IPC failed for {description}: {error}"))
 }
 
 async fn wait_page(client: &Client, pane: PaneId, title: &str) {
@@ -215,7 +221,7 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
     if sandbox_opt_out {
         command.env("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
     }
-    let mut app = App(command.spawn().unwrap());
+    let mut app = App(command.spawn().unwrap(), dir.path().join("gui.log"));
     let socket = runtime.join(format!("flowmux-{}.sock", app.0.id()));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let client = loop {
