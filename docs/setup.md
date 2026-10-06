@@ -77,8 +77,7 @@ directories, and fatal GTK criticals. Logs and environment versions are in
 `target/ci/{linux,macos}`; Linux coverage is in `target/llvm-cov`.
 `CARGO_TARGET_DIR` can relocate both build output and evidence. The Linux
 gate includes instrumented workspace tests, the live SSH fixture, and the
-same coverage floors as CI. See [CI reliability](ci-reliability.md) for the
-failure policy and regression scenarios.
+same coverage floors as CI.
 
 The smoke executable owns temporary state/configuration and its own window;
 it does not restart an installed Flowmux. A logged-in macOS desktop is

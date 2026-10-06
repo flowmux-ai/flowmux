@@ -85,8 +85,6 @@ does not execute commands. Each source is labeled **Light** or **Dark**.
 Both normal and bright ANSI banks are shown in the preview. GitHub Dark offers
 a neutral dark palette; Gruvbox Light uses a warm cream canvas with stronger
 accents. The Flowmux Contrast Dark/Light pair prioritizes colored-log legibility.
-See the [theme palette review](theme-review.md) for all presets' measured
-contrast, color distribution, and remaining tradeoffs.
 A `theme = ...` line does not load another theme
 file; choose a built-in preset through Options instead. Other unsupported
 keys are parsed but do not affect the UI.

@@ -23,7 +23,7 @@ bash scripts/test-ci.sh macos       # on macOS: shared CI gate, native main-thre
 
 The shared gates isolate runtime state and retain failure logs. macOS GTK
 tests requiring AppKit must use the native main-thread harness; a generic
-`cargo test --workspace` is not a substitute. See [CI reliability](docs/ci-reliability.md).
+`cargo test --workspace` is not a substitute.
 
 The binaries are `flowmux` (GUI and CLI delegation), `flowmuxctl` (IPC client),
 `flowmux-md-viewer` (Markdown reader), and `flowmux-daemon` (headless handler).
@@ -116,10 +116,8 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
   can block Stop. The observed ledger is not a complete process inventory;
   retain process/screen fallbacks.
 
-The [agent status verification contract](docs/agent-status-verification.md) maps
-these rules to regression cases and diagnostic evidence. Keep a failing case's
-workspace visibility and event ordering intact; check both early completion and
-stuck working before committing lifecycle changes.
+Keep a failing case's workspace visibility and event ordering intact; check both
+early completion and stuck working before committing lifecycle changes.
 
 ## Conventions
 

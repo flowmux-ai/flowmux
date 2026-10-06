@@ -98,48 +98,9 @@ removed selected code, or changed binary content are removed during validation.
 Whole-file text comments stay attached across edits. If no valid comments remain,
 the list is cleared and no feedback is copied or sent.
 
-## Limits and verification
+## Limits
 
 Only local checkouts are supported. Git reads run outside the GUI thread with
 a 30-second command timeout and an explicit 8 MiB output limit. Non-UTF-8 patch
 content reports an error. Git paths retain their original bytes; control
 characters are escaped for display. Untracked symlinks are never followed.
-
-Model and persistence checks:
-
-```sh
-cargo test -p flowmux-vcs -p flowmux-state --locked
-```
-
-Linux native GUI checks (GTK on X11):
-
-```sh
-GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals \
-  xvfb-run -a dbus-run-session -- \
-  cargo test -p flowmux --bin flowmux ui::review_window --locked -- --test-threads=1
-GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals \
-  xvfb-run -a dbus-run-session -- \
-  cargo test -p flowmux --bin flowmux ui::window::review --locked -- --test-threads=1
-```
-
-macOS native GUI checks:
-
-```sh
-./scripts/test-diff-review-macos.sh
-```
-
-The native scenarios check 50/100/103-commit dropdown scrolling, commit and
-uncommitted comment isolation, scope-specific feedback, historical review reopening,
-and protection of unfinished comments when switching scopes. The macOS handoff
-scenario verifies both message templates at the receiving child PTY.
-They also check continuous 20,000-line rendering, pane-local navigation and checkout selection,
-menu dismissal and comment cancellation, stacked comment edit geometry,
-unchanged Edit versus unsaved text, menu-to-PTY delivery between two Codex targets,
-inline Unicode comments, persistence, relocation after insertion, missing-file
-feedback, existing terminal input protection, session identity checks, and an
-actual child PTY's receipt of the multiline bracketed paste and submit key.
-They do not assert that every third-party agent recognizes every prompt style.
-Installed-app keyboard/mouse verification uses a separate app bundle and state
-directory, preserving the user's running Flowmux sessions.
-
-Detailed event coverage and outstanding verification limits: [event audit](diff-review-event-audit.md).

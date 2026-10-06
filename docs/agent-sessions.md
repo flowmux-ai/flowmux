@@ -51,10 +51,8 @@ Another session can be opened while the focused agent is working or waiting for
 input; the original tab remains untouched. The currently active session cannot
 be opened again from that tab. The session ID remains visible for manual use.
 
-## Implementation and limits
+## History and limits
 
-This uses existing GTK panels, process identity, and terminal input; it needs
-no model call. Database adapters reuse the workspace’s SQLite and URL libraries.
 Titles come from native titles or the first user message. The summary is a recent conversation excerpt, not a generated
 summary. Conversation previews include user/assistant text and supported image
 placeholders;
@@ -101,20 +99,3 @@ existing agent processes are never restarted or sent an automatic Enter.
 
 The native commands are supported by
 [Codex's CLI and slash-command reference](https://developers.openai.com/codex/cli/reference/).
-Live integration was checked with Codex 0.154.0 and Claude Code 2.1.273 in an
-isolated flowmux instance: selecting, previewing, switching both agents, changing
-active tabs, and preserving nonempty inputs. Both agents' cross-project resume
-was also verified in a new tab while preserving the original tab's Unicode draft.
-OpenCode 1.18.27 and Cline CLI 3.0.62 were also checked with synthetic histories
-in a running isolated flowmux: list, preview, native restoration in a new tab,
-project directory, and original Unicode draft preservation. Antigravity's list,
-summary preview, and new-tab `--conversation` launch were checked; full native
-restoration could not be checked because the isolated agy home requires Google
-login. Gemini CLI 0.62.0 on Node.js 24 was checked with a history recorded
-against a local stub API: process identity, list, and native `--resume` by ID. No model request was submitted during these checks.
-Parser and GTK tests cover missing
-and damaged histories, Unicode, long records, child sessions, search, stale
-results, busy agents, current sessions, and preservation of other panels.
-
-Build with `cargo build -p flowmux`. Running `./target/debug/flowmux` opens a new
-window with the updated UI; already-running windows keep their current binary.
