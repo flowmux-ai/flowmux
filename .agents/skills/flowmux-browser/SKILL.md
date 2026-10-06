@@ -1,5 +1,4 @@
 ---
-# SPDX-License-Identifier: GPL-3.0-or-later
 name: flowmux-browser
 description: Operate Flowmux workspaces, terminal panes, in-app browser, SSH connections and notifications through its CLI. Use for Flowmux feature guidance or automation inside a Flowmux pane or with an explicitly supplied socket and pane.
 ---
