@@ -313,10 +313,10 @@ impl WindowController {
                 self.refresh_window_title().await;
                 Ok(())
             }
-            IncrementalSplitOutcome::Failed => {
+            IncrementalSplitOutcome::Failed(error) => {
                 let _ = self.store.close_pane(new_pane).await;
                 self.refresh_window_title().await;
-                Err("incremental split failed".to_string())
+                Err(error)
             }
         }
     }
@@ -349,14 +349,26 @@ impl WindowController {
             .find_map(|s| s.root_pane.find_surface(pane, surface_id))
             .ok_or_else(|| format!("surface not found in pane {pane}: {surface_id}"))?;
         {
-            let attached = attach_surface_to_pane(
+            let previous = self.pane_registry.borrow().active_surface(pane);
+            let attached = match attach_surface_to_pane(
                 pane,
                 ws.id,
                 &surface,
                 &self.callbacks,
                 self.pane_registry.clone(),
                 self.current_theme(),
-            );
+            ) {
+                Ok(attached) => attached,
+                Err(error) => {
+                    self.pane_registry
+                        .borrow_mut()
+                        .detach_surface_widget(pane, surface_id);
+                    if let Some(previous) = previous {
+                        self.store.set_active_surface(pane, previous).await;
+                    }
+                    return Err(error);
+                }
+            };
             if attached {
                 self.refresh_workspace_solo(&ws);
                 self.refresh_window_title().await;
@@ -383,6 +395,26 @@ impl WindowController {
         }
         self.rerender_workspace(&ws);
         self.refresh_window_title().await;
+        let terminal_required = matches!(surface.kind, SurfaceKind::Terminal { .. })
+            || (matches!(surface.kind, SurfaceKind::SshTerminal { .. })
+                && self
+                    .pane_registry
+                    .borrow()
+                    .ssh
+                    .get(&ws_id)
+                    .is_some_and(|runtime| runtime.borrow().is_connected()));
+        if terminal_required
+            && !self
+                .pane_registry
+                .borrow()
+                .terminals
+                .contains_key(&surface_id)
+        {
+            self.pane_registry
+                .borrow_mut()
+                .detach_surface_widget(pane, surface_id);
+            return Err("Could not start terminal".into());
+        }
         if self.pane_registry.borrow().has_surface(pane, surface_id) {
             Ok(())
         } else {
@@ -1041,9 +1073,9 @@ impl WindowController {
                 self.surfaces.borrow_mut().insert(ws.id, new_root);
             }
             IncrementalSplitOutcome::SucceededNested => {}
-            IncrementalSplitOutcome::Failed => {
+            IncrementalSplitOutcome::Failed(error) => {
                 let _ = self.store.close_pane(new_pane).await;
-                return Err("incremental split failed".to_string());
+                return Err(error);
             }
         }
 
@@ -1160,7 +1192,7 @@ impl WindowController {
                 Some(moving)
             }
             IncrementalSplitOutcome::SucceededNested => Some(moving),
-            IncrementalSplitOutcome::Failed => {
+            IncrementalSplitOutcome::Failed(_) => {
                 // The model already owns the split. Recover its live sessions
                 // and finish source cleanup before reporting the actual result.
                 self.rerender_with_moving_surface(dst_ws, moving).await;

@@ -977,7 +977,8 @@ mod tests {
             Vec::new(),
             1000,
             PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         let window = gtk::Window::builder()
             .default_width(600)
             .default_height(300)

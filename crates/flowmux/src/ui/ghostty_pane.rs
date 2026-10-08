@@ -655,7 +655,7 @@ impl GhosttyPane {
         extra_env: Vec<(String, String)>,
         scrollback_lines: u32,
         callbacks: PaneCallbacks,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let is_ssh = last_env_value(&extra_env, "FLOWMUX_SSH_TERMINAL") == Some("1");
         let pane_id = Rc::new(Cell::new(id));
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
@@ -1081,7 +1081,7 @@ impl GhosttyPane {
             init_cols,
             init_rows,
         )
-        .expect("forkpty spawn");
+        .map_err(|error| format!("Could not start terminal: {error}"))?;
         pid.set(Some(pty.child_pid()));
         let child_pid = pty.child_pid();
         // F_DUPFD_CLOEXEC, not dup(2): a plain dup clears CLOEXEC, and a
@@ -1089,15 +1089,20 @@ impl GhosttyPane {
         // after the GUI dies (slave writers then spin on EAGAIN forever
         // instead of seeing a hangup).
         let dup_fd = unsafe { libc::fcntl(pty.master_fd(), libc::F_DUPFD_CLOEXEC, 0) };
-        assert!(dup_fd >= 0, "F_DUPFD_CLOEXEC on PTY master failed");
+        if dup_fd < 0 {
+            return Err(format!(
+                "Could not attach terminal: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
         let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(dup_fd) };
-        let vpty =
-            vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE).expect("vte foreign pty");
+        let vpty = vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE)
+            .map_err(|error| format!("Could not attach terminal: {error}"))?;
         term.set_pty(Some(&vpty));
         pty.set_external_child_watch();
         term.watch_child(glib::Pid(child_pid));
 
-        Self {
+        Ok(Self {
             id: pane_id,
             is_ssh,
             widget: term,
@@ -1113,7 +1118,7 @@ impl GhosttyPane {
             terminal_minimap,
             last_selection,
             _pty: Rc::new(RefCell::new(Some(pty))),
-        }
+        })
     }
 
     /// Plain-text dump of the terminal buffer for `flowmux read-screen`.
@@ -3058,7 +3063,8 @@ mod tests {
             vec![("FLOWMUX_SSH_TERMINAL".into(), "1".into())],
             100,
             PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         assert!(pane.is_ssh);
         // A live local wrapper PID is never the remote shell's directory.
         pane.pid.set(Some(std::process::id() as i32));
@@ -3693,7 +3699,8 @@ mod tests {
             Vec::new(),
             5_000,
             callbacks,
-        );
+        )
+        .unwrap();
         let terminal = pane.widget.downgrade();
         let container = pane.container.downgrade();
         pane.set_minimap(true, 24, 20);
@@ -3916,7 +3923,8 @@ mod tests {
             Vec::new(),
             5_000,
             callbacks,
-        );
+        )
+        .unwrap();
         let window = gtk::Window::new();
         window.set_child(Some(&pane.container));
         window.present();
@@ -3973,7 +3981,8 @@ mod tests {
             Vec::new(),
             5_000,
             callbacks,
-        );
+        )
+        .unwrap();
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         calls.set(0);
 
@@ -4010,7 +4019,8 @@ mod tests {
             Vec::new(),
             5_000,
             PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         let window = gtk::Window::new();
         window.set_default_size(800, 600);
         window.set_child(Some(&pane.container));
@@ -4060,7 +4070,8 @@ mod tests {
             Vec::new(),
             5_000,
             PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         let window = gtk::Window::new();
         window.set_default_size(800, 600);
         window.set_child(Some(&pane.container));
@@ -4109,7 +4120,8 @@ mod tests {
             Vec::new(),
             5_000,
             PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         let lines = (0..100)
             .map(|index| format!("agent-row-{index:03}"))
             .collect::<Vec<_>>()

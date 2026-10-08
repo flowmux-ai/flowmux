@@ -1278,7 +1278,7 @@ pub enum IncrementalSplitOutcome {
     /// surfaces map to this new widget for later rerender / drop_workspace paths.
     SucceededRoot { new_root: gtk::Widget },
     /// The target is missing or its parent cannot be updated incrementally.
-    Failed,
+    Failed(String),
 }
 
 enum IncrementalSplitSlot {
@@ -1370,15 +1370,33 @@ pub fn split_pane_incremental(
     empty_sibling: bool,
 ) -> IncrementalSplitOutcome {
     let Some(target_frame) = registry.borrow().pane_frame(target_pane) else {
-        return IncrementalSplitOutcome::Failed;
+        return IncrementalSplitOutcome::Failed("split target is unavailable".into());
     };
     let Some(slot) = incremental_split_slot(&target_frame) else {
-        return IncrementalSplitOutcome::Failed;
+        return IncrementalSplitOutcome::Failed("split target is unavailable".into());
     };
     let target_was_visible = match &slot {
         IncrementalSplitSlot::Stack(s) => s.visible_child().as_ref() == Some(&target_frame),
         _ => false,
     };
+    // Build the new sibling pane widget. cwd / argv belong only to the sibling;
+    // the target reuses its already-built frame.
+    let new_sibling = match build_leaf_pane(
+        workspace,
+        new_pane_id,
+        &new_content,
+        Vec::new(),
+        new_cwd,
+        callbacks,
+        registry.clone(),
+        theme.clone(),
+        empty_sibling,
+        false,
+    ) {
+        Ok(widget) => widget,
+        Err(error) => return IncrementalSplitOutcome::Failed(error),
+    };
+
     let restore_parent_focus = match &slot {
         IncrementalSplitSlot::PanedStart(p) | IncrementalSplitSlot::PanedEnd(p) => {
             handoff_paned_focus_before_detach(p, &target_frame)
@@ -1394,20 +1412,6 @@ pub fn split_pane_incremental(
         IncrementalSplitSlot::Stack(s) => s.remove(&target_frame),
         IncrementalSplitSlot::SshContent(container) => container.remove(&target_frame),
     }
-
-    // Build the new sibling pane widget. cwd / argv belong only to the sibling;
-    // the target reuses its already-built frame.
-    let new_sibling = build_leaf_pane(
-        workspace,
-        new_pane_id,
-        &new_content,
-        Vec::new(),
-        new_cwd,
-        callbacks,
-        registry.clone(),
-        theme.clone(),
-        empty_sibling,
-    );
 
     let orient = match direction {
         SplitDirection::Horizontal => gtk::Orientation::Vertical,
@@ -1502,8 +1506,9 @@ fn build_pane(
 ) -> gtk::Widget {
     match pane {
         Pane::Leaf { id, content } => build_leaf_pane(
-            workspace, *id, content, argv, cwd, callbacks, registry, theme, false,
-        ),
+            workspace, *id, content, argv, cwd, callbacks, registry, theme, false, true,
+        )
+        .unwrap_or_else(failed_panel),
         Pane::Split {
             id: split_id,
             direction,
@@ -1570,7 +1575,9 @@ fn build_leaf_pane(
     // `attach_moved_surface`, so spawning a throwaway terminal here would be
     // wasteful and would briefly flash an extra shell.
     empty: bool,
-) -> gtk::Widget {
+    // Restored layouts keep failed tabs visible; new splits must roll back.
+    restoring: bool,
+) -> Result<gtk::Widget, String> {
     let surfaces = if empty {
         Vec::new()
     } else {
@@ -1639,6 +1646,23 @@ fn build_leaf_pane(
             theme.clone(),
             frame.clone(),
         );
+        let widget = match widget {
+            Ok(widget) => widget,
+            Err(error) if restoring => {
+                registry
+                    .borrow_mut()
+                    .surface_workspace
+                    .insert(surface.id, workspace);
+                failed_panel(error)
+            }
+            Err(error) => {
+                let mut registry = registry.borrow_mut();
+                for surface in &surfaces {
+                    registry.detach_surface_widget(pane_id, surface.id);
+                }
+                return Err(error);
+            }
+        };
         stack.add_named(&widget, Some(&surface.id.to_string()));
     }
 
@@ -1749,7 +1773,7 @@ fn build_leaf_pane(
         r.refresh_tab_multi_class(pane_id);
     }
 
-    frame.upcast()
+    Ok(frame.upcast())
 }
 
 fn materialize_surfaces(
@@ -3474,27 +3498,26 @@ pub fn attach_surface_to_pane(
     callbacks: &PaneCallbacks,
     registry: Rc<RefCell<PaneRegistry>>,
     theme: Arc<ResolvedTheme>,
-) -> bool {
+) -> Result<bool, String> {
     let (tabs, stack, frame) = {
         let r = registry.borrow();
         let Some(tabs) = r.pane_tab_containers.get(&pane_id).cloned() else {
-            return false;
+            return Ok(false);
         };
         let Some(stack) = r.surface_stacks.get(&pane_id).cloned() else {
-            return false;
+            return Ok(false);
         };
         let Some(frame) = r
             .pane_frames
             .get(&pane_id)
             .and_then(|w| w.downcast_ref::<gtk::Frame>().cloned())
         else {
-            return false;
+            return Ok(false);
         };
         (tabs, stack, frame)
     };
 
     let (tab, label) = build_surface_tab_widget(pane_id, surface, true, callbacks);
-    tabs.append(&tab);
 
     let widget = build_panel(
         pane_id,
@@ -3505,7 +3528,8 @@ pub fn attach_surface_to_pane(
         registry.clone(),
         theme,
         frame,
-    );
+    )?;
+    tabs.append(&tab);
     stack.add_named(&widget, Some(&surface.id.to_string()));
 
     {
@@ -3518,7 +3542,7 @@ pub fn attach_surface_to_pane(
         r.activate_surface(pane_id, surface.id);
         r.refresh_tab_multi_class(pane_id);
     }
-    true
+    Ok(true)
 }
 
 fn surface_tab(surface: &PaneSurface, active: bool) -> (gtk::Box, gtk::Label) {
@@ -3756,6 +3780,15 @@ mod pane_menu_tests {
     }
 }
 
+fn failed_panel(error: String) -> gtk::Widget {
+    tracing::warn!(%error, "could not create terminal surface");
+    let label = gtk::Label::new(Some(&error));
+    label.set_wrap(true);
+    label.set_hexpand(true);
+    label.set_vexpand(true);
+    label.upcast()
+}
+
 fn build_panel(
     pane_id: PaneId,
     workspace: WorkspaceId,
@@ -3765,11 +3798,11 @@ fn build_panel(
     registry: Rc<RefCell<PaneRegistry>>,
     theme: Arc<ResolvedTheme>,
     frame: gtk::Frame,
-) -> gtk::Widget {
-    match &surface.kind {
+) -> Result<gtk::Widget, String> {
+    Ok(match &surface.kind {
         SurfaceKind::SshTerminal { .. } => super::window::ssh::build_ssh_panel(
             workspace, pane_id, surface, callbacks, registry, theme,
-        ),
+        )?,
         SurfaceKind::Terminal { cwd, shell } => {
             let reused = registry
                 .borrow_mut()
@@ -3857,7 +3890,7 @@ fn build_panel(
                     extra_env,
                     opts.scrollback_lines_or_default(),
                     callbacks.clone(),
-                );
+                )?;
                 theme.apply_to_ghostty(&pane);
                 pane.set_font(&font);
                 pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
@@ -3930,10 +3963,10 @@ fn build_panel(
                     .borrow_mut()
                     .surface_workspace
                     .insert(surface.id, workspace);
-                return gtk::Label::new(Some(
+                return Ok(gtk::Label::new(Some(
                     "SSH preview inactive — connect and enable its forwarding",
                 ))
-                .upcast();
+                .upcast());
             }
             let opts = (callbacks.read_options)();
             let reused = registry
@@ -4038,7 +4071,7 @@ fn build_panel(
                         label.set_vexpand(true);
                         let mut registry = registry.borrow_mut();
                         registry.surface_workspace.insert(surface.id, workspace);
-                        return label.upcast::<gtk::Widget>();
+                        return Ok(label.upcast::<gtk::Widget>());
                     }
                 };
                 editor
@@ -4082,7 +4115,7 @@ fn build_panel(
             registry.surface_workspace.insert(surface.id, workspace);
             widget
         }
-    }
+    })
 }
 
 fn preferred_shell<'a>(per_tab: Option<&'a str>, default: Option<&'a str>) -> Option<&'a str> {

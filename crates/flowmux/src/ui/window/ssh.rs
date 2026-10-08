@@ -30,6 +30,10 @@ pub(crate) struct SshRuntime {
 }
 
 impl SshRuntime {
+    pub(super) fn is_connected(&self) -> bool {
+        self.state == "connected"
+    }
+
     pub(super) fn agent_signals_active(&self, surface: SurfaceId) -> bool {
         self.state == "connected"
             && self
@@ -151,10 +155,10 @@ pub(crate) fn build_ssh_panel(
     callbacks: &PaneCallbacks,
     registry: Rc<RefCell<PaneRegistry>>,
     theme: Arc<ResolvedTheme>,
-) -> gtk::Widget {
+) -> Result<gtk::Widget, String> {
     let runtime = registry.borrow().ssh.get(&workspace).cloned();
     let Some(runtime) = runtime else {
-        return gtk::Label::new(Some("SSH workspace unavailable")).upcast();
+        return Ok(gtk::Label::new(Some("SSH workspace unavailable")).upcast());
     };
     registry
         .borrow_mut()
@@ -165,24 +169,24 @@ pub(crate) fn build_ssh_panel(
     };
     let mut runtime_state = runtime.borrow_mut();
     if runtime_state.state != "connected" {
-        return gtk::Label::new(Some("SSH disconnected — use Connect above")).upcast();
+        return Ok(gtk::Label::new(Some("SSH disconnected — use Connect above")).upcast());
     }
     let generation = runtime_state.generation;
     if let Some(terminal) = runtime_state.reusable.remove(&surface.id) {
         terminal.set_pane_id(pane);
         let widget = terminal.root_widget();
         registry.borrow_mut().terminals.insert(surface.id, terminal);
-        return widget;
+        return Ok(widget);
     }
     if runtime_state
         .tabs
         .get(&surface.id)
         .is_some_and(|status| status.starts_with("exited"))
     {
-        return gtk::Label::new(Some(
+        return Ok(gtk::Label::new(Some(
             "SSH session exited — open a new tab to start another session",
         ))
-        .upcast();
+        .upcast());
     }
     let instance = uuid::Uuid::new_v4();
     runtime_state.instances.insert(surface.id, instance);
@@ -204,7 +208,13 @@ pub(crate) fn build_ssh_panel(
     drop(runtime_state);
     let argv = match argv {
         Ok(argv) => argv,
-        Err(error) => return gtk::Label::new(Some(&error)).upcast(),
+        Err(error) => {
+            runtime
+                .borrow_mut()
+                .tabs
+                .insert(surface.id, format!("failed: {error}"));
+            return Err(error);
+        }
     };
     let mut scoped = callbacks.clone();
     let weak = Rc::downgrade(&runtime);
@@ -251,7 +261,13 @@ pub(crate) fn build_ssh_panel(
         ssh_env(workspace, pane, id),
         opts.scrollback_lines_or_default(),
         scoped,
-    );
+    )
+    .inspect_err(|error| {
+        runtime
+            .borrow_mut()
+            .tabs
+            .insert(id, format!("failed: {error}"));
+    })?;
     theme.apply_to_ghostty(&terminal);
     terminal.set_font(&theme.terminal_font(&opts));
     terminal.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
@@ -263,7 +279,7 @@ pub(crate) fn build_ssh_panel(
     runtime.borrow_mut().tabs.insert(id, "running".into());
     let widget = terminal.root_widget();
     registry.borrow_mut().terminals.insert(id, terminal);
-    widget
+    Ok(widget)
 }
 
 impl WindowController {
@@ -949,7 +965,12 @@ impl WindowController {
             ssh_env(workspace, pane, surface),
             opts.scrollback_lines_or_default(),
             callbacks,
-        );
+        )
+        .inspect_err(|error| {
+            let mut state = runtime.borrow_mut();
+            state.state = "failed";
+            state.error = Some(error.clone());
+        })?;
         self.current_theme().apply_to_ghostty(&master);
         master.set_font(&self.current_theme().terminal_font(&opts));
         let window = gtk::Window::builder()

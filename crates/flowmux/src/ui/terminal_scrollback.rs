@@ -643,7 +643,8 @@ mod tests {
             Vec::new(),
             5_000,
             crate::ui::pane_terminal::PaneCallbacks::noop_for_test(),
-        );
+        )
+        .unwrap();
         let window = gtk::Window::new();
         window.set_default_size(800, 600);
         window.set_child(Some(&pane.container));
