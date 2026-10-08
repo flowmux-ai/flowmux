@@ -461,6 +461,7 @@ struct PendingPaneZoomTransition {
 struct WindowCloseState {
     approved: Rc<Cell<bool>>,
     prompting: Rc<Cell<bool>>,
+    session_save_error: Rc<RefCell<Option<String>>>,
 }
 
 fn dirty_editor_labels(editors: &[EditorPane]) -> Vec<String> {
@@ -2149,6 +2150,33 @@ impl WindowController {
         confirm_dirty_editor_close(&self.window, self.editors_for_surfaces(surfaces)).await
     }
 
+    /// Failed startup must not look like an ordinary, persisted session.
+    /// The original state stays untouched until the user repairs it.
+    pub fn show_session_save_error(&self, error: &str) {
+        *self.window_close.session_save_error.borrow_mut() = Some(error.to_string());
+        let banner = adw::Banner::new("Session saving is unavailable. Workspace and layout changes will be lost when this window closes.");
+        banner.set_widget_name("flowmux-session-save-warning");
+        banner.set_button_label(Some("Details"));
+        banner.set_revealed(true);
+        let window = self.window.downgrade();
+        let message = format!("Flowmux could not open the saved session. Your existing session file has been left unchanged.\n\nThis window cannot save workspace or layout changes. Files saved in the editor are unaffected.\n\n{error}");
+        banner.connect_button_clicked(move |_| {
+            if let Some(window) = window.upgrade() {
+                let message = message.clone();
+                glib::spawn_future_local(async move {
+                    show_error_dialog(&window, "Session saving unavailable", &message).await;
+                });
+            }
+        });
+        if let Some(view) = self
+            .sidebar_split
+            .end_child()
+            .and_then(|child| child.downcast::<adw::ToolbarView>().ok())
+        {
+            view.add_top_bar(&banner);
+        }
+    }
+
     fn install_state_flush_on_close(&self) {
         let controller = self.clone();
         self.window.connect_close_request(move |_| {
@@ -2175,6 +2203,26 @@ impl WindowController {
     }
 
     async fn close_window(&self) {
+        let session_save_error = self.window_close.session_save_error.borrow().clone();
+        if let Some(error) = session_save_error {
+            let dialog = adw::AlertDialog::new(
+                Some("Close without saving the session?"),
+                Some(&format!("Session saving is unavailable. Workspace and layout changes in this window will be lost. Your existing session file will remain unchanged.\n\n{error}")),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("close", "Close Without Saving Session");
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+            let _native_view_suspend =
+                crate::ui::browser_pane::suspend_native_browser_views_for_window(
+                    self.window.upcast_ref(),
+                );
+            if dialog.choose_future(&self.window).await != "close" {
+                self.window_close.prompting.set(false);
+                return;
+            }
+        }
         let pending_review = self
             .reviews
             .borrow()

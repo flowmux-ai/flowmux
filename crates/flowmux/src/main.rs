@@ -206,17 +206,20 @@ fn main() -> anyhow::Result<()> {
     // briefly locks state.json, reloads it, replaces this window's slice, and
     // preserves slices owned by other live windows.
     let owner = flowmux_state::WindowOwner::current();
-    let store = match flowmux_state::claim_window(owner) {
+    let (store, session_save_error) = match flowmux_state::claim_window(owner) {
         Ok(initial) => {
             info!(
                 workspaces = initial.workspaces.len(),
                 "claimed persisted workspaces for this window"
             );
-            StateStore::new_lazy_window(initial, owner)
+            (StateStore::new_lazy_window(initial, owner), None)
         }
         Err(e) => {
             tracing::warn!(error = %e, "could not claim persisted state, running ephemeral");
-            StateStore::new_lazy_ephemeral(flowmux_state::State::default())
+            (
+                StateStore::new_lazy_ephemeral(flowmux_state::State::default()),
+                Some(e.to_string()),
+            )
         }
     };
     store.spawn_persist(rt.handle());
@@ -363,6 +366,9 @@ fn main() -> anyhow::Result<()> {
             Some(tokio_handle_for_activate.clone()),
         );
         controller.use_shared_notifier(shared_notifier_for_activate.clone());
+        if let Some(error) = session_save_error.as_deref() {
+            controller.show_session_save_error(error);
+        }
         keybindings::install_actions(
             &controller.window,
             bridge_for_activate.clone(),
