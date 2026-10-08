@@ -32,7 +32,6 @@ use objc2_web_kit::{
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -113,25 +112,32 @@ define_class!(
                 tracing::warn!("editor WKWebView sent a non-string bridge message");
                 return;
             };
-            let dispatch =
-                handle_bridge_message(&self.ivars().bridge, &self.ivars().host, &body.to_string());
-            if let Some(direction) = dispatch.focus_direction {
-                if let Some(callback) = self.ivars().on_focus_direction.borrow_mut().as_mut() {
-                    callback(self.ivars().pane_id.get(), direction);
+            let raw = body.to_string();
+            let bridge = self.ivars().bridge.clone();
+            let host = self.ivars().host.clone();
+            let on_focus_direction = self.ivars().on_focus_direction.clone();
+            let pane_id = self.ivars().pane_id.clone();
+            let web_view = unsafe { message.webView() };
+            glib::spawn_future_local(async move {
+                let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
+                if let Some(direction) = dispatch.focus_direction {
+                    if let Some(callback) = on_focus_direction.borrow_mut().as_mut() {
+                        callback(pane_id.get(), direction);
+                    }
                 }
-            }
-            let Some(web_view) = (unsafe { message.webView() }) else {
-                return;
-            };
-            if let Some(zoom_percent) = dispatch.zoom_percent {
-                unsafe { web_view.setPageZoom(zoom_percent as f64 / 100.0) };
-            }
-            if let Some(action) = dispatch.native_edit_action {
-                perform_native_edit(&web_view, action, dispatch.native_edit_text.as_deref());
-            }
-            for script in dispatch.scripts {
-                evaluate_script(&web_view, &script);
-            }
+                let Some(web_view) = web_view else {
+                    return;
+                };
+                if let Some(zoom_percent) = dispatch.zoom_percent {
+                    unsafe { web_view.setPageZoom(zoom_percent as f64 / 100.0) };
+                }
+                if let Some(action) = dispatch.native_edit_action {
+                    perform_native_edit(&web_view, action, dispatch.native_edit_text.as_deref());
+                }
+                for script in dispatch.scripts {
+                    evaluate_script(&web_view, &script);
+                }
+            });
         }
     }
 );
@@ -230,15 +236,19 @@ define_class!(
             tracing::warn!("editor WKWebView web content process terminated; reloading");
             let ivars = self.ivars();
             ivars.bridge.reset();
-            let mut messages = vec![HostMessage::SetAppearance {
-                appearance: ivars.appearance.borrow().clone(),
-            }];
-            messages.extend(ivars.host.reinitialize_messages());
-            for message in messages {
-                if let Err(error) = ivars.bridge.queue(message) {
-                    tracing::warn!(%error, "failed to queue editor reinitialization");
+            let bridge = ivars.bridge.clone();
+            let host = ivars.host.clone();
+            let appearance = ivars.appearance.clone();
+            let reloaded_view = web_view.retain();
+            glib::spawn_future_local(async move {
+                let mut messages = vec![HostMessage::SetAppearance {
+                    appearance: appearance.borrow().clone(),
+                }];
+                messages.extend(host.reinitialize_messages().await);
+                for script in queue_host_messages(&bridge, messages) {
+                    evaluate_script(&reloaded_view, &script);
                 }
-            }
+            });
             let _ = unsafe { web_view.reload() };
         }
     }
@@ -365,15 +375,20 @@ impl EditorPane {
         };
         let initial_appearance = pane.appearance.borrow().clone();
         pane.apply_appearance(initial_appearance);
-        for message in pane.host.initialize_messages() {
-            if let Err(error) = pane.send(message) {
-                tracing::error!(%error, "failed to queue editor initialization");
-            }
-        }
-        for message in pane.host.take_startup_messages() {
-            if let Err(error) = pane.send(message) {
-                tracing::warn!(%error, "failed to queue restored editor state");
-            }
+        {
+            let pane = pane.clone();
+            glib::spawn_future_local(async move {
+                for message in pane.host.initialize_messages().await {
+                    if let Err(error) = pane.send(message) {
+                        tracing::error!(%error, "failed to queue editor initialization");
+                    }
+                }
+                for message in pane.host.take_startup_messages() {
+                    if let Err(error) = pane.send(message) {
+                        tracing::warn!(%error, "failed to queue restored editor state");
+                    }
+                }
+            });
         }
         {
             let bridge = pane.bridge.clone();
@@ -400,9 +415,14 @@ impl EditorPane {
                 let next_tick = tick.get().wrapping_add(1);
                 tick.set(next_tick);
                 if next_tick.is_multiple_of(10) {
-                    for script in queue_host_messages(&bridge, host.poll_external_changes()) {
-                        evaluate_script(&native.web_view, &script);
-                    }
+                    let bridge = bridge.clone();
+                    glib::spawn_future_local(async move {
+                        for script in
+                            queue_host_messages(&bridge, host.poll_external_changes().await)
+                        {
+                            evaluate_script(&native.web_view, &script);
+                        }
+                    });
                 }
                 glib::ControlFlow::Continue
             });
@@ -514,8 +534,8 @@ impl EditorPane {
         }
     }
 
-    pub fn open_file(&self, path: &Path) -> Result<(), String> {
-        let messages = self.host.open_document(path)?;
+    pub async fn open_file(&self, path: &Path) -> Result<(), String> {
+        let messages = self.host.open_document(path).await?;
         self.install_file_monitor(path);
         for message in messages {
             self.send(message).map_err(|error| error.to_string())?;
@@ -547,8 +567,8 @@ impl EditorPane {
         self.host.wait_for_flush(request_id, completion).await
     }
 
-    pub fn save_all_dirty(&self) -> Result<(), String> {
-        let (messages, result) = self.host.save_all_dirty();
+    pub async fn save_all_dirty(&self) -> Result<(), String> {
+        let (messages, result) = self.host.save_all_dirty().await;
         for message in messages {
             if let Err(error) = self.send(message) {
                 tracing::warn!(%error, "failed to resynchronize editor after close-guard save");
@@ -557,15 +577,15 @@ impl EditorPane {
         result
     }
 
-    pub fn discard_all_dirty(&self) {
-        self.host.discard_all_dirty();
+    pub async fn discard_all_dirty(&self) -> Result<(), String> {
+        self.host.discard_all_dirty().await
     }
 
     fn install_file_monitor(&self, path: &Path) {
         let Some(parent) = path.parent() else {
             return;
         };
-        let directory = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+        let directory = parent.to_path_buf();
         if self.file_monitors.borrow().contains_key(&directory) {
             return;
         }
@@ -597,11 +617,14 @@ impl EditorPane {
                 let Some(native) = native.upgrade() else {
                     return;
                 };
-                for script in
-                    queue_host_messages(&bridge, host.poll_external_changes_after_fs_event())
-                {
-                    evaluate_script(&native.web_view, &script);
-                }
+                glib::spawn_future_local(async move {
+                    for script in queue_host_messages(
+                        &bridge,
+                        host.poll_external_changes_after_fs_event().await,
+                    ) {
+                        evaluate_script(&native.web_view, &script);
+                    }
+                });
             });
         });
         self.file_monitors.borrow_mut().insert(directory, monitor);

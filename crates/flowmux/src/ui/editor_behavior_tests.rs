@@ -3,6 +3,7 @@
 
 use super::*;
 use gtk::glib;
+use std::fs;
 use std::time::Instant;
 
 struct EditorPage {
@@ -77,7 +78,7 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     window.present();
     let page = EditorPage { pane, window };
     // Queue the open before editor_ready: the real handshake must deliver it.
-    page.pane.open_file(&path).unwrap();
+    page.pane.open_file(&path).await.unwrap();
     page.wait("typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('original') === true").await;
     assert!(page.pane.bridge.ready.get());
     assert_eq!(page.pane.session_state().active_file.as_ref(), Some(&path));
@@ -96,7 +97,7 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     // Native file monitoring/polling must update the actual conflict UI.
     page.wait("!document.querySelector('#conflict-banner').hidden")
         .await;
-    assert!(page.pane.save_all_dirty().is_err());
+    assert!(page.pane.save_all_dirty().await.is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "external update\n");
     page.eval("document.querySelector('#conflict-reload').click()")
         .await;
@@ -108,7 +109,7 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     page.pane.web_view.terminate_web_process();
     page.wait("typeof window.beforeCrash === 'undefined' && typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('recovered') === true").await;
     page.pane.flush_pending_changes().await.unwrap();
-    page.pane.save_all_dirty().unwrap();
+    page.pane.save_all_dirty().await.unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "recovered external update\n"

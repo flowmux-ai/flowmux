@@ -188,43 +188,18 @@ impl EditorBridgeState {
     }
 }
 
-pub(super) struct EditorHostState {
-    workspace_root: PathBuf,
-    session: RefCell<Result<EditorSession, String>>,
-    zoom_percent: Cell<u16>,
-    startup_messages: RefCell<Vec<HostMessage>>,
-    recovery_sender: Option<RecoverySender>,
-    recovery_worker: Option<JoinHandle<()>>,
-    pending_recovery: RefCell<HashMap<PathBuf, RecoveryOperation>>,
-    recovery_flush_pending: Cell<bool>,
-    search_worker: RefCell<Option<SearchWorker>>,
-    next_flush_request: Cell<u64>,
-    pending_flushes: RefCell<HashMap<u64, FlushCompletion>>,
+struct EditorSessionWorker {
+    session: Result<EditorSession, String>,
+    startup_messages: Vec<HostMessage>,
+    recovery_store: Option<RecoveryStore>,
 }
 
-impl EditorHostState {
-    #[cfg(test)]
-    pub(super) fn new(workspace_root: &Path, restored: EditorSessionState) -> Self {
-        Self::create(workspace_root, restored, None)
-    }
-
-    pub(super) fn new_scoped(
-        workspace_root: &Path,
-        restored: EditorSessionState,
-        surface_id: SurfaceId,
-    ) -> Self {
-        Self::create(workspace_root, restored, Some(surface_id.0.to_string()))
-    }
-
+impl EditorSessionWorker {
     fn create(
         workspace_root: &Path,
         restored: EditorSessionState,
         recovery_scope: Option<String>,
     ) -> Self {
-        let zoom_percent = restored
-            .zoom_percent
-            .map(clamp_editor_zoom)
-            .unwrap_or_else(load_last_editor_zoom);
         let recovery_store = flowmux_config::paths::state_dir().and_then(|state_root| {
             let store = match recovery_scope.as_deref() {
                 Some(scope) => RecoveryStore::new_scoped(state_root, workspace_root, scope),
@@ -272,62 +247,182 @@ impl EditorHostState {
                 session.activate_path(active_file);
             }
         }
-        let (recovery_sender, recovery_worker) = recovery_store
-            .and_then(start_recovery_worker)
-            .map_or((None, None), |(sender, worker)| {
-                (Some(sender), Some(worker))
-            });
-        let host = Self {
+        Self {
+            session,
+            startup_messages,
+            recovery_store,
+        }
+    }
+}
+
+pub(super) struct EditorHostState {
+    workspace_root: PathBuf,
+    // One FIFO lock covers both document mutations and I/O. Only a worker
+    // owns the guard while touching the filesystem; GTK reads the last snapshot.
+    // ponytail: a slow file delays this editor's other documents; use per-document
+    // queues if they need independent progress within the same editor surface.
+    session: Arc<tokio::sync::Mutex<Option<EditorSessionWorker>>>,
+    restored: EditorSessionState,
+    recovery_scope: Option<String>,
+    snapshot: RefCell<EditorSessionState>,
+    dirty_paths: RefCell<Vec<PathBuf>>,
+    recovery_operations: RefCell<Vec<RecoveryOperation>>,
+    polling: Cell<bool>,
+    poll_after_fs_event: Cell<bool>,
+    zoom_percent: Cell<u16>,
+    startup_messages: RefCell<Vec<HostMessage>>,
+    recovery_sender: RefCell<Option<RecoverySender>>,
+    recovery_worker: RefCell<Option<JoinHandle<()>>>,
+    pending_recovery: RefCell<HashMap<PathBuf, RecoveryOperation>>,
+    recovery_flush_pending: Cell<bool>,
+    search_worker: RefCell<Option<SearchWorker>>,
+    next_flush_request: Cell<u64>,
+    pending_flushes: RefCell<HashMap<u64, FlushCompletion>>,
+}
+
+impl EditorHostState {
+    #[cfg(test)]
+    pub(super) fn new(workspace_root: &Path, restored: EditorSessionState) -> Self {
+        Self::create(workspace_root, restored, None)
+    }
+
+    pub(super) fn new_scoped(
+        workspace_root: &Path,
+        restored: EditorSessionState,
+        surface_id: SurfaceId,
+    ) -> Self {
+        Self::create(workspace_root, restored, Some(surface_id.0.to_string()))
+    }
+
+    fn create(
+        workspace_root: &Path,
+        restored: EditorSessionState,
+        recovery_scope: Option<String>,
+    ) -> Self {
+        let zoom_percent = restored
+            .zoom_percent
+            .map(clamp_editor_zoom)
+            .unwrap_or_else(load_last_editor_zoom);
+        let mut snapshot = restored.clone();
+        snapshot.zoom_percent = Some(zoom_percent);
+        Self {
             workspace_root: workspace_root.to_path_buf(),
-            session: RefCell::new(session),
+            session: Arc::new(tokio::sync::Mutex::new(None)),
+            restored,
+            recovery_scope,
+            snapshot: RefCell::new(snapshot),
+            dirty_paths: RefCell::new(Vec::new()),
+            recovery_operations: RefCell::new(Vec::new()),
+            polling: Cell::new(false),
+            poll_after_fs_event: Cell::new(false),
             zoom_percent: Cell::new(zoom_percent),
-            startup_messages: RefCell::new(startup_messages),
-            recovery_sender,
-            recovery_worker,
+            startup_messages: RefCell::new(Vec::new()),
+            recovery_sender: RefCell::new(None),
+            recovery_worker: RefCell::new(None),
             pending_recovery: RefCell::new(HashMap::new()),
             recovery_flush_pending: Cell::new(false),
             search_worker: RefCell::new(None),
             next_flush_request: Cell::new(0),
             pending_flushes: RefCell::new(HashMap::new()),
-        };
-        host.stage_recovery_operations();
-        host
+        }
     }
 
-    pub(super) fn initialize_messages(&self) -> Vec<HostMessage> {
-        match &*self.session.borrow() {
-            Ok(session) => session.initialize_messages(self.zoom_percent.get()),
-            Err(_) => vec![HostMessage::InitializeEditor {
-                documents: Vec::new(),
-                active_document_id: None,
-                zoom_percent: self.zoom_percent.get(),
-                max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
-            }],
+    async fn with_session<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Result<EditorSession, String>) -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let mut guard = self.session.clone().lock_owned().await;
+        let root = self.workspace_root.clone();
+        let restored = self.restored.clone();
+        let scope = self.recovery_scope.clone();
+        let (guard, result, snapshot, dirty, operations, startup, recovery_store) =
+            gtk::gio::spawn_blocking(move || {
+                let worker = guard
+                    .get_or_insert_with(|| EditorSessionWorker::create(&root, restored, scope));
+                let result = operation(&mut worker.session);
+                let (snapshot, dirty, operations) = match &mut worker.session {
+                    Ok(session) => (
+                        Some(session.session_snapshot()),
+                        session.dirty_document_paths(),
+                        session.take_recovery_operations(),
+                    ),
+                    Err(_) => (None, Vec::new(), Vec::new()),
+                };
+                let startup = std::mem::take(&mut worker.startup_messages);
+                let recovery_store = worker.recovery_store.take();
+                (
+                    guard,
+                    result,
+                    snapshot,
+                    dirty,
+                    operations,
+                    startup,
+                    recovery_store,
+                )
+            })
+            .await
+            .map_err(|_| "Editor file worker stopped unexpectedly.".to_string())?;
+        if let Some(snapshot) = snapshot {
+            *self.snapshot.borrow_mut() = core_session_state(snapshot, self.zoom_percent.get());
         }
+        *self.dirty_paths.borrow_mut() = dirty;
+        self.recovery_operations.borrow_mut().extend(operations);
+        self.startup_messages.borrow_mut().extend(startup);
+        if let Some((sender, worker)) = recovery_store.and_then(start_recovery_worker) {
+            *self.recovery_sender.borrow_mut() = Some(sender);
+            *self.recovery_worker.borrow_mut() = Some(worker);
+        }
+        // Publish the snapshot before the next ordered operation can complete.
+        drop(guard);
+        Ok(result)
+    }
+
+    pub(super) async fn initialize_messages(&self) -> Vec<HostMessage> {
+        let zoom = self.zoom_percent.get();
+        let messages = self
+            .with_session(move |session| match session {
+                Ok(session) => session.initialize_messages(zoom),
+                Err(_) => vec![HostMessage::InitializeEditor {
+                    documents: Vec::new(),
+                    active_document_id: None,
+                    zoom_percent: zoom,
+                    max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
+                }],
+            })
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error);
+                Vec::new()
+            });
+        self.stage_recovery_operations();
+        messages
     }
 
     pub(super) fn take_startup_messages(&self) -> Vec<HostMessage> {
         std::mem::take(&mut *self.startup_messages.borrow_mut())
     }
 
-    /// Everything a freshly reloaded page needs after a web-process crash:
-    /// the full document set plus any still-undecided recovery proposals.
-    pub(super) fn reinitialize_messages(&self) -> Vec<HostMessage> {
-        let mut messages = self.initialize_messages();
-        if let Ok(session) = &*self.session.borrow() {
-            messages.extend(session.pending_recovery_messages());
-        }
-        messages
+    pub(super) async fn reinitialize_messages(&self) -> Vec<HostMessage> {
+        let zoom = self.zoom_percent.get();
+        self.with_session(move |session| match session {
+            Ok(session) => {
+                let mut messages = session.initialize_messages(zoom);
+                messages.extend(session.pending_recovery_messages());
+                messages
+            }
+            Err(_) => Vec::new(),
+        })
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error);
+            Vec::new()
+        })
     }
 
     pub(super) fn session_state(&self) -> EditorSessionState {
-        match &*self.session.borrow() {
-            Ok(session) => core_session_state(session.session_snapshot(), self.zoom_percent.get()),
-            Err(_) => EditorSessionState {
-                zoom_percent: Some(self.zoom_percent.get()),
-                ..Default::default()
-            },
-        }
+        let mut snapshot = self.snapshot.borrow().clone();
+        snapshot.zoom_percent = Some(self.zoom_percent.get());
+        snapshot
     }
 
     pub(super) fn zoom_factor(&self) -> f64 {
@@ -341,22 +436,22 @@ impl EditorHostState {
         }
     }
 
-    pub(super) fn open_document(&self, path: &Path) -> Result<Vec<HostMessage>, String> {
-        let result = match &mut *self.session.borrow_mut() {
-            Ok(session) => session
-                .open_document(path)
-                .map_err(|error| error.to_string()),
-            Err(error) => Err(error.clone()),
-        };
+    pub(super) async fn open_document(&self, path: &Path) -> Result<Vec<HostMessage>, String> {
+        let path = path.to_path_buf();
+        let result = self
+            .with_session(move |session| match session {
+                Ok(session) => session
+                    .open_document(path)
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error.clone()),
+            })
+            .await?;
         self.stage_recovery_operations();
         result
     }
 
     pub(super) fn dirty_document_paths(&self) -> Vec<PathBuf> {
-        match &*self.session.borrow() {
-            Ok(session) => session.dirty_document_paths(),
-            Err(_) => Vec::new(),
-        }
+        self.dirty_paths.borrow().clone()
     }
 
     pub(super) fn start_flush(&self) -> (u64, FlushCompletion, HostMessage) {
@@ -399,33 +494,43 @@ impl EditorHostState {
         Err("Timed out while synchronizing editor changes.".into())
     }
 
-    pub(super) fn save_all_dirty(&self) -> (Vec<HostMessage>, Result<(), String>) {
-        let result = match &mut *self.session.borrow_mut() {
-            Ok(session) => {
-                let (messages, result) = session.save_all_dirty();
-                (messages, result.map_err(|error| error.to_string()))
-            }
-            Err(error) => (Vec::new(), Err(error.clone())),
-        };
+    pub(super) async fn save_all_dirty(&self) -> (Vec<HostMessage>, Result<(), String>) {
+        let result = self
+            .with_session(|session| match session {
+                Ok(session) => {
+                    let (messages, result) = session.save_all_dirty();
+                    (messages, result.map_err(|error| error.to_string()))
+                }
+                Err(error) => (Vec::new(), Err(error.clone())),
+            })
+            .await
+            .unwrap_or_else(|error| (Vec::new(), Err(error)));
         self.stage_recovery_operations();
         result
     }
 
-    pub(super) fn discard_all_dirty(&self) {
-        if let Ok(session) = &mut *self.session.borrow_mut() {
-            session.discard_all_dirty();
-        }
+    pub(super) async fn discard_all_dirty(&self) -> Result<(), String> {
+        self.with_session(|session| {
+            if let Ok(session) = session {
+                session.discard_all_dirty();
+            }
+        })
+        .await?;
         self.stage_recovery_operations();
+        Ok(())
     }
 
-    fn handle(&self, message: EditorMessage) -> Vec<HostMessage> {
+    async fn handle(&self, message: EditorMessage) -> Vec<HostMessage> {
         match message {
             EditorMessage::QuickOpenRequested { request_id } => self.start_quick_open(request_id),
             EditorMessage::WorkspaceSearchRequested {
                 request_id,
                 query,
                 options,
-            } => self.start_workspace_search(request_id, query, options),
+            } => {
+                self.start_workspace_search(request_id, query, options)
+                    .await
+            }
             EditorMessage::SearchCancelled { request_id } => {
                 self.cancel_search(&request_id);
                 Vec::new()
@@ -435,26 +540,24 @@ impl EditorHostState {
                 line,
                 column,
                 length,
-            } => self.open_search_result(path, line, column, length),
-            message => self.handle_session_message(message),
+            } => self.open_search_result(path, line, column, length).await,
+            message => self.handle_session_message(message).await,
         }
     }
 
-    fn handle_session_message(&self, message: EditorMessage) -> Vec<HostMessage> {
-        let result = match &mut *self.session.borrow_mut() {
-            Ok(session) => session.handle_editor_message(message),
-            Err(error) => {
-                tracing::warn!(%error, "editor document session is unavailable");
-                return Vec::new();
-            }
-        };
-        match result {
-            Ok(messages) => messages,
-            Err(error) => {
-                tracing::warn!(%error, "editor document message was rejected");
-                Vec::new()
-            }
-        }
+    async fn handle_session_message(&self, message: EditorMessage) -> Vec<HostMessage> {
+        self.with_session(move |session| match session {
+            Ok(session) => session
+                .handle_editor_message(message)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.clone()),
+        })
+        .await
+        .and_then(|result| result)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "editor document message was rejected");
+            Vec::new()
+        })
     }
 
     fn start_quick_open(&self, request_id: String) -> Vec<HostMessage> {
@@ -501,16 +604,36 @@ impl EditorHostState {
         Vec::new()
     }
 
-    fn start_workspace_search(
+    async fn start_workspace_search(
         &self,
         request_id: String,
         query: String,
         options: SearchOptions,
     ) -> Vec<HostMessage> {
         self.cancel_current_search();
-        let documents = match &*self.session.borrow() {
-            Ok(session) => session.search_documents(),
+        let cancellation = SearchCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let (sender, receiver) = mpsc::channel();
+        *self.search_worker.borrow_mut() = Some(SearchWorker {
+            request_id: request_id.clone(),
+            kind: SearchWorkerKind::WorkspaceSearch,
+            cancellation: cancellation.clone(),
+            receiver,
+        });
+        let documents = self
+            .with_session(|session| match session {
+                Ok(session) => Ok(session.search_documents()),
+                Err(error) => Err(error.clone()),
+            })
+            .await
+            .and_then(|result| result);
+        if cancellation.is_cancelled() {
+            return Vec::new();
+        }
+        let documents = match documents {
+            Ok(documents) => documents,
             Err(error) => {
+                self.search_worker.borrow_mut().take();
                 return vec![HostMessage::WorkspaceSearchCompleted {
                     request_id,
                     result: WorkspaceSearchResult::default(),
@@ -519,9 +642,6 @@ impl EditorHostState {
             }
         };
         let root = self.workspace_root.clone();
-        let cancellation = SearchCancellation::default();
-        let worker_cancellation = cancellation.clone();
-        let (sender, receiver) = mpsc::channel();
         let worker_request_id = request_id.clone();
         let spawned = std::thread::Builder::new()
             .name("flowmux-editor-search".into())
@@ -543,6 +663,7 @@ impl EditorHostState {
                 });
             });
         if let Err(error) = spawned {
+            self.search_worker.borrow_mut().take();
             tracing::warn!(%error, "failed to start editor workspace search worker");
             return vec![HostMessage::WorkspaceSearchCompleted {
                 request_id,
@@ -550,12 +671,6 @@ impl EditorHostState {
                 error: Some("Workspace search could not be started.".into()),
             }];
         }
-        *self.search_worker.borrow_mut() = Some(SearchWorker {
-            request_id,
-            kind: SearchWorkerKind::WorkspaceSearch,
-            cancellation,
-            receiver,
-        });
         Vec::new()
     }
 
@@ -576,7 +691,7 @@ impl EditorHostState {
         }
     }
 
-    fn open_search_result(
+    async fn open_search_result(
         &self,
         relative_path: String,
         line: u32,
@@ -584,20 +699,18 @@ impl EditorHostState {
         length: u32,
     ) -> Vec<HostMessage> {
         let path = self.workspace_root.join(relative_path);
-        let result = match &mut *self.session.borrow_mut() {
-            Ok(session) => session.open_search_result(path, line, column, length),
-            Err(error) => {
-                tracing::warn!(%error, "editor document session is unavailable");
-                return Vec::new();
-            }
-        };
-        match result {
-            Ok(messages) => messages,
-            Err(error) => {
-                tracing::warn!(%error, "failed to open editor workspace search result");
-                Vec::new()
-            }
-        }
+        self.with_session(move |session| match session {
+            Ok(session) => session
+                .open_search_result(path, line, column, length)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.clone()),
+        })
+        .await
+        .and_then(|result| result)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "failed to open editor workspace search result");
+            Vec::new()
+        })
     }
 
     pub(super) fn poll_search_messages(&self) -> Vec<HostMessage> {
@@ -656,15 +769,13 @@ impl EditorHostState {
     }
 
     fn stage_recovery_operations(&self) -> bool {
-        let operations = match &mut *self.session.borrow_mut() {
-            Ok(session) => session.take_recovery_operations(),
-            Err(_) => Vec::new(),
-        };
+        let operations = std::mem::take(&mut *self.recovery_operations.borrow_mut());
         if operations.is_empty() {
             return false;
         }
 
-        let Some(sender) = &self.recovery_sender else {
+        let sender = self.recovery_sender.borrow();
+        let Some(sender) = sender.as_ref() else {
             return false;
         };
         let mut pending = self.pending_recovery.borrow_mut();
@@ -688,7 +799,8 @@ impl EditorHostState {
     }
 
     fn flush_recovery(&self) {
-        let Some(sender) = &self.recovery_sender else {
+        let sender = self.recovery_sender.borrow();
+        let Some(sender) = sender.as_ref() else {
             return;
         };
         for operation in self
@@ -704,30 +816,50 @@ impl EditorHostState {
         }
     }
 
-    pub(super) fn poll_external_changes(&self) -> Vec<HostMessage> {
-        self.poll_external_changes_inner(false)
+    pub(super) async fn poll_external_changes(&self) -> Vec<HostMessage> {
+        self.poll_external_changes_inner(false).await
     }
 
-    pub(super) fn poll_external_changes_after_fs_event(&self) -> Vec<HostMessage> {
-        self.poll_external_changes_inner(true)
+    pub(super) async fn poll_external_changes_after_fs_event(&self) -> Vec<HostMessage> {
+        self.poll_external_changes_inner(true).await
     }
 
-    fn poll_external_changes_inner(&self, after_fs_event: bool) -> Vec<HostMessage> {
-        let result = match &mut *self.session.borrow_mut() {
-            Ok(session) if after_fs_event => session.poll_external_changes_after_fs_event(),
-            Ok(session) => session.poll_external_changes(),
-            Err(error) => {
-                tracing::warn!(%error, "editor document session is unavailable");
-                return Vec::new();
+    async fn poll_external_changes_inner(&self, after_fs_event: bool) -> Vec<HostMessage> {
+        if after_fs_event {
+            self.poll_after_fs_event.set(true);
+        }
+        if self.polling.replace(true) {
+            return Vec::new();
+        }
+        let mut messages = Vec::new();
+        // Coalesce file-monitor events while I/O is pending, without building
+        // an unbounded queue behind a stalled filesystem.
+        for _ in 0..2 {
+            let after_fs_event = self.poll_after_fs_event.replace(false);
+            let result = self
+                .with_session(move |session| match session {
+                    Ok(session) => {
+                        let result = if after_fs_event {
+                            session.poll_external_changes_after_fs_event()
+                        } else {
+                            session.poll_external_changes()
+                        };
+                        result.map_err(|error| error.to_string())
+                    }
+                    Err(error) => Err(error.clone()),
+                })
+                .await
+                .and_then(|result| result);
+            match result {
+                Ok(received) => messages.extend(received),
+                Err(error) => tracing::warn!(%error, "failed to inspect open editor documents"),
             }
-        };
-        match result {
-            Ok(messages) => messages,
-            Err(error) => {
-                tracing::warn!(%error, "failed to inspect open editor documents");
-                Vec::new()
+            if !self.poll_after_fs_event.get() {
+                break;
             }
         }
+        self.polling.set(false);
+        messages
     }
 }
 
@@ -739,8 +871,8 @@ impl Drop for EditorHostState {
         // close, workspace rerender, app quit).
         self.stage_recovery_operations();
         self.flush_recovery();
-        self.recovery_sender.take();
-        if let Some(worker) = self.recovery_worker.take() {
+        self.recovery_sender.get_mut().take();
+        if let Some(worker) = self.recovery_worker.get_mut().take() {
             if worker.join().is_err() {
                 tracing::warn!("editor recovery worker panicked during shutdown");
             }
@@ -769,7 +901,7 @@ pub(super) fn queue_host_messages(
         .collect()
 }
 
-pub(super) fn handle_bridge_message(
+pub(super) async fn handle_bridge_message(
     bridge: &EditorBridgeState,
     host: &Rc<EditorHostState>,
     raw: &str,
@@ -796,10 +928,13 @@ pub(super) fn handle_bridge_message(
                 native_edit_text = text;
             }
             EditorMessage::FlushCompleted { request_id, error } => {
-                host.finish_flush(request_id, error);
+                // The WebView ack follows its edit messages. Wait for their
+                // queued file-worker operations before deciding whether close is safe.
+                let synchronized = host.with_session(|_| ()).await;
+                host.finish_flush(request_id, error.or_else(|| synchronized.err()));
             }
             message => {
-                scripts.extend(queue_host_messages(bridge, host.handle(message)));
+                scripts.extend(queue_host_messages(bridge, host.handle(message).await));
                 if host.stage_recovery_operations() {
                     schedule_recovery_flush(host);
                 }
@@ -1082,8 +1217,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn focus_navigation_message_bypasses_document_session() {
+    #[tokio::test]
+    async fn focus_navigation_message_bypasses_document_session() {
         let workspace = tempfile::tempdir().unwrap();
         let host = Rc::new(EditorHostState::new(
             workspace.path(),
@@ -1098,14 +1233,14 @@ mod tests {
         })
         .to_string();
 
-        let dispatch = handle_bridge_message(&bridge, &host, &raw);
+        let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
 
         assert_eq!(dispatch.focus_direction, Some(EditorFocusDirection::Down));
         assert!(dispatch.scripts.is_empty());
     }
 
-    #[test]
-    fn flush_completion_releases_the_native_close_waiter() {
+    #[tokio::test]
+    async fn flush_completion_releases_the_native_close_waiter() {
         let workspace = tempfile::tempdir().unwrap();
         let host = Rc::new(EditorHostState::new(
             workspace.path(),
@@ -1122,7 +1257,7 @@ mod tests {
         })
         .to_string();
 
-        handle_bridge_message(&bridge, &host, &raw);
+        handle_bridge_message(&bridge, &host, &raw).await;
 
         assert_eq!(*completion.borrow(), Some(Ok(())));
 
@@ -1135,15 +1270,15 @@ mod tests {
             "error": "Document exceeds the editing limit.",
         })
         .to_string();
-        handle_bridge_message(&bridge, &host, &raw);
+        handle_bridge_message(&bridge, &host, &raw).await;
         assert_eq!(
             *completion.borrow(),
             Some(Err("Document exceeds the editing limit.".into()))
         );
     }
 
-    #[test]
-    fn native_copy_message_preserves_the_monaco_selection() {
+    #[tokio::test]
+    async fn native_copy_message_preserves_the_monaco_selection() {
         let workspace = tempfile::tempdir().unwrap();
         let host = Rc::new(EditorHostState::new(
             workspace.path(),
@@ -1159,7 +1294,7 @@ mod tests {
         })
         .to_string();
 
-        let dispatch = handle_bridge_message(&bridge, &host, &raw);
+        let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
 
         assert_eq!(
             dispatch.native_edit_action,
@@ -1292,8 +1427,44 @@ mod tests {
         assert_eq!(recovered.content, "unsaved\n");
     }
 
-    #[test]
-    fn latest_workspace_search_opens_multilingual_result_at_range() {
+    #[tokio::test]
+    async fn search_waiting_for_file_io_respects_cancellation_and_newer_requests() {
+        use std::future::Future;
+        use std::task::Poll;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+        for replacement in [false, true] {
+            let guard = host.session.clone().lock_owned().await;
+            let mut search = std::pin::pin!(host.start_workspace_search(
+                "old".into(),
+                "query".into(),
+                SearchOptions::default(),
+            ));
+            std::future::poll_fn(|cx| {
+                assert!(search.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            if replacement {
+                host.start_quick_open("new".into());
+            } else {
+                host.cancel_search("old");
+            }
+            drop(guard);
+            assert!(search.await.is_empty());
+            assert_eq!(
+                host.search_worker
+                    .borrow()
+                    .as_ref()
+                    .map(|worker| worker.request_id.as_str()),
+                replacement.then_some("new")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn latest_workspace_search_opens_multilingual_result_at_range() {
         let workspace = tempfile::tempdir().unwrap();
         let path = workspace.path().join("문서-日本語🙂.txt");
         fs::write(&path, "첫 줄\n찾을 값🙂\n").unwrap();
@@ -1303,12 +1474,14 @@ mod tests {
             request_id: "search-old".into(),
             query: "missing".into(),
             options: SearchOptions::default(),
-        });
+        })
+        .await;
         host.handle(EditorMessage::WorkspaceSearchRequested {
             request_id: "search-latest".into(),
             query: "값🙂".into(),
             options: SearchOptions::default(),
-        });
+        })
+        .await;
 
         let completion = wait_for_search(&host);
         let [HostMessage::WorkspaceSearchCompleted {
@@ -1324,12 +1497,14 @@ mod tests {
         assert_eq!(result.matches.len(), 1);
         assert_eq!(result.matches[0].path, "문서-日本語🙂.txt");
 
-        let messages = host.handle(EditorMessage::SearchResultOpenRequested {
-            path: result.matches[0].path.clone(),
-            line: result.matches[0].line,
-            column: result.matches[0].column,
-            length: result.matches[0].length,
-        });
+        let messages = host
+            .handle(EditorMessage::SearchResultOpenRequested {
+                path: result.matches[0].path.clone(),
+                line: result.matches[0].line,
+                column: result.matches[0].column,
+                length: result.matches[0].length,
+            })
+            .await;
         assert!(matches!(
             messages.as_slice(),
             [

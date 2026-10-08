@@ -561,13 +561,16 @@ async fn confirm_dirty_editor_close(
     match rx.await.as_deref() {
         Ok("discard") => {
             for editor in editors {
-                editor.discard_all_dirty();
+                if let Err(error) = editor.discard_all_dirty().await {
+                    show_error_dialog(parent, "Could not discard changes", &error).await;
+                    return false;
+                }
             }
             true
         }
         Ok("save") => {
             for editor in editors {
-                if let Err(error) = editor.save_all_dirty() {
+                if let Err(error) = editor.save_all_dirty().await {
                     show_error_dialog(parent, "Could not save changes", &error).await;
                     return false;
                 }

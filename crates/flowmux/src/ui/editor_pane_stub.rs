@@ -72,7 +72,7 @@ impl EditorPane {
 
     pub fn show_workspace_search(&self) {}
 
-    pub fn open_file(&self, _path: &Path) -> Result<(), String> {
+    pub async fn open_file(&self, _path: &Path) -> Result<(), String> {
         Err("the embedded editor is unavailable on this platform".into())
     }
 
@@ -84,11 +84,13 @@ impl EditorPane {
         Ok(())
     }
 
-    pub fn save_all_dirty(&self) -> Result<(), String> {
+    pub async fn save_all_dirty(&self) -> Result<(), String> {
         Ok(())
     }
 
-    pub fn discard_all_dirty(&self) {}
+    pub async fn discard_all_dirty(&self) -> Result<(), String> {
+        Ok(())
+    }
 
     pub fn send(&self, message: HostMessage) -> Result<(), ProtocolError> {
         flowmux_editor::serialize_host_message("unavailable", &message).map(|_| ())

@@ -281,7 +281,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .await
         .unwrap();
     let editor = controller.pane_registry.borrow().editors[&surface].clone();
-    editor.open_file(&file).unwrap();
+    editor.open_file(&file).await.unwrap();
     editor.flush_pending_changes().await.unwrap();
     editor.grab_focus();
     wait_until("editor focused", || editor.has_native_focus()).await;
@@ -527,7 +527,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     assert_eq!(terminal.pid.get(), Some(pid));
     println!("MACOS_NATIVE_CLOSE_CANCEL_OK");
 
-    editor.save_all_dirty().unwrap();
+    editor.save_all_dirty().await.unwrap();
     wait_until("editor saved", || editor.dirty_document_paths().is_empty()).await;
     let state_path = flowmux_state::default_path().unwrap();
     if state_path.exists() {

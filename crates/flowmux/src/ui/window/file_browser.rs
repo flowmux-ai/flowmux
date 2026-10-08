@@ -137,13 +137,16 @@ impl WindowController {
         self.pane_registry
             .borrow_mut()
             .activate_surface(target_pane, editor_surface);
-        let open_result = self
+        let editor = self
             .pane_registry
             .borrow()
             .editors
             .get(&editor_surface)
-            .ok_or_else(|| "the editor view is not ready".to_string())
-            .and_then(|editor| editor.open_file(&path));
+            .cloned();
+        let open_result = match editor {
+            Some(editor) => editor.open_file(&path).await,
+            None => Err("the editor view is not ready".to_string()),
+        };
         if let Err(error) = open_result {
             tracing::warn!(path = %path.display(), %error, "failed to open file in editor");
             match self.store.close_surface(target_pane, editor_surface).await {
