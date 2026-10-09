@@ -16,7 +16,9 @@ use gtk::glib::{self, translate::ToGlibPtr};
 use gtk::prelude::*;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, ProtocolObject};
-use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{
+    define_class, msg_send, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
+};
 use objc2_app_kit::{
     NSPasteboard, NSPasteboardTypeString, NSResponder, NSView, NSWindow, NSWindowOrderingMode,
 };
