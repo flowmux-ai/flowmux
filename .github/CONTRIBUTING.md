@@ -53,5 +53,5 @@ the generated distribution notice and asset/editor credits live in `docs/legal/`
 Run the dependency policy check from the repository root:
 
 ```sh
-cargo deny --locked --config packaging/licenses/deny.toml check licenses sources
+cargo deny --locked check --config packaging/licenses/deny.toml advisories licenses sources
 ```

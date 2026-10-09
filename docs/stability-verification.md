@@ -111,3 +111,18 @@ three configured floors. The SSH fixture used private sshd/tmux executables
 on its service PATH, not changes to user SSH configuration.
 Regression review: the full suite and native driver use isolated state and
 owned process handles; no user window was closed. macOS was not executed.
+
+## 5. Advisory CI gate
+
+The existing license workflow now checks advisories, licenses and sources in
+one command. Corrected cargo-deny's `--config` placement in CI and contributor
+instructions. Dependency push/PR paths, weekly schedule and release workflow
+reuse remain intact; asset and editor license checks are unchanged.
+
+Verification: the exact CI command passes on this lockfile. A separate temporary
+crate pinned to anyhow 1.0.102 fails with exit 1 and RUSTSEC-2026-0190, proving
+that an affected dependency blocks the gate. YAML parsing and assertions checked
+the command and all five trigger types. No advisory suppression was added.
+Regression review: no runtime code changes; future advisories intentionally fail
+both dependency updates and scheduled/release audits. GitHub-hosted execution
+itself was not triggered from this local branch.
