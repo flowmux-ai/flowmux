@@ -638,6 +638,30 @@ fn hex(b: u8) -> Option<u8> {
     }
 }
 
+/// Why a terminal could not be created, and whether the child process was
+/// already forked when it happened. Callers that replay a one-shot startup
+/// command on retry must not replay it once the child has run; a failure
+/// before the fork leaves nothing behind and the command is still pending.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalSpawnError {
+    pub message: String,
+    pub child_started: bool,
+}
+
+impl std::fmt::Display for TerminalSpawnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TerminalSpawnError {}
+
+impl From<TerminalSpawnError> for String {
+    fn from(error: TerminalSpawnError) -> Self {
+        error.message
+    }
+}
+
 impl GhosttyPane {
     /// Build a fresh terminal widget and spawn `argv` in `cwd`. If
     /// `argv` is empty we fall back to the user's `$SHELL`.
@@ -655,7 +679,7 @@ impl GhosttyPane {
         extra_env: Vec<(String, String)>,
         scrollback_lines: u32,
         callbacks: PaneCallbacks,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, TerminalSpawnError> {
         let is_ssh = last_env_value(&extra_env, "FLOWMUX_SSH_TERMINAL") == Some("1");
         let pane_id = Rc::new(Cell::new(id));
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
@@ -1081,7 +1105,10 @@ impl GhosttyPane {
             init_cols,
             init_rows,
         )
-        .map_err(|error| format!("Could not start terminal: {error}"))?;
+        .map_err(|error| TerminalSpawnError {
+            message: format!("Could not start terminal: {error}"),
+            child_started: false,
+        })?;
         pid.set(Some(pty.child_pid()));
         let child_pid = pty.child_pid();
         // F_DUPFD_CLOEXEC, not dup(2): a plain dup clears CLOEXEC, and a
@@ -1089,15 +1116,24 @@ impl GhosttyPane {
         // after the GUI dies (slave writers then spin on EAGAIN forever
         // instead of seeing a hangup).
         let dup_fd = unsafe { libc::fcntl(pty.master_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+        // From here the child exists. Dropping `pty` on the error path hangs
+        // it up and reaps it, but whatever it managed to run has run.
         if dup_fd < 0 {
-            return Err(format!(
-                "Could not attach terminal: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(TerminalSpawnError {
+                message: format!(
+                    "Could not attach terminal: {}",
+                    std::io::Error::last_os_error()
+                ),
+                child_started: true,
+            });
         }
         let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(dup_fd) };
-        let vpty = vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE)
-            .map_err(|error| format!("Could not attach terminal: {error}"))?;
+        let vpty = vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE).map_err(|error| {
+            TerminalSpawnError {
+                message: format!("Could not attach terminal: {error}"),
+                child_started: true,
+            }
+        })?;
         term.set_pty(Some(&vpty));
         pty.set_external_child_watch();
         term.watch_child(glib::Pid(child_pid));

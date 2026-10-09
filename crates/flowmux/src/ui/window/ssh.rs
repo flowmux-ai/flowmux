@@ -30,10 +30,6 @@ pub(crate) struct SshRuntime {
 }
 
 impl SshRuntime {
-    pub(super) fn is_connected(&self) -> bool {
-        self.state == "connected"
-    }
-
     pub(super) fn agent_signals_active(&self, surface: SurfaceId) -> bool {
         self.state == "connected"
             && self
@@ -191,9 +187,13 @@ pub(crate) fn build_ssh_panel(
     let instance = uuid::Uuid::new_v4();
     runtime_state.instances.insert(surface.id, instance);
     let attach = runtime_state.launched.contains(&surface.id);
+    // Borrow, do not consume: a spawn that fails before the PTY exists has not
+    // run the command, so the next rerender must replay it rather than
+    // attach to a tmux session that was never created.
     let command = runtime_state
         .commands
-        .remove(&surface.id)
+        .get(&surface.id)
+        .cloned()
         .unwrap_or_default();
     let argv = runtime_state.config.target.terminal_argv(
         &runtime_state.socket,
@@ -202,8 +202,6 @@ pub(crate) fn build_ssh_panel(
         attach,
         &command,
     );
-    // Once attempted, a command is never replayed and tmux reconnect is attach-only.
-    runtime_state.launched.insert(surface.id);
     runtime_state.tabs.insert(surface.id, "starting".into());
     drop(runtime_state);
     let argv = match argv {
@@ -262,11 +260,17 @@ pub(crate) fn build_ssh_panel(
         opts.scrollback_lines_or_default(),
         scoped,
     )
-    .inspect_err(|error| {
-        runtime
-            .borrow_mut()
-            .tabs
-            .insert(id, format!("failed: {error}"));
+    .map_err(|error| {
+        let mut state = runtime.borrow_mut();
+        state.tabs.insert(id, format!("failed: {error}"));
+        if error.child_started {
+            // The command may have reached tmux before the child was hung
+            // up. Replaying it could run it twice; the next rerender is
+            // attach-only, the same as any other post-launch failure.
+            state.commands.remove(&id);
+            state.launched.insert(id);
+        }
+        error.message
     })?;
     theme.apply_to_ghostty(&terminal);
     terminal.set_font(&theme.terminal_font(&opts));
@@ -276,7 +280,14 @@ pub(crate) fn build_ssh_panel(
             terminal.restore_scrollback(snapshot);
         }
     }
-    runtime.borrow_mut().tabs.insert(id, "running".into());
+    {
+        // The PTY exists, so the command is now running in tmux. From here a
+        // rerender is attach-only and the command is never replayed.
+        let mut state = runtime.borrow_mut();
+        state.commands.remove(&id);
+        state.launched.insert(id);
+        state.tabs.insert(id, "running".into());
+    }
     let widget = terminal.root_widget();
     registry.borrow_mut().terminals.insert(id, terminal);
     Ok(widget)
@@ -608,7 +619,7 @@ impl WindowController {
             .await
             .ok_or("Could not open preview")?;
         if let Err(error) = self
-            .attach_or_rerender_surface(workspace, pane, surface)
+            .attach_or_rerender_surface(workspace, pane, surface, None)
             .await
         {
             self.store.close_surface(pane, surface).await;
@@ -966,10 +977,11 @@ impl WindowController {
             opts.scrollback_lines_or_default(),
             callbacks,
         )
-        .inspect_err(|error| {
+        .map_err(|error| {
             let mut state = runtime.borrow_mut();
             state.state = "failed";
-            state.error = Some(error.clone());
+            state.error = Some(error.message.clone());
+            error.message
         })?;
         self.current_theme().apply_to_ghostty(&master);
         master.set_font(&self.current_theme().terminal_font(&opts));

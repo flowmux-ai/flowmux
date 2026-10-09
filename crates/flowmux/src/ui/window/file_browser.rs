@@ -123,7 +123,7 @@ impl WindowController {
             return;
         };
         if let Err(error) = self
-            .attach_or_rerender_surface(workspace_id, target_pane, editor_surface)
+            .attach_or_rerender_surface(workspace_id, target_pane, editor_surface, None)
             .await
         {
             self.store.close_surface(target_pane, editor_surface).await;

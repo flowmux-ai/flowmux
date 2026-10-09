@@ -3947,7 +3947,7 @@ mod tests {
             .await
             .unwrap();
         controller
-            .attach_or_rerender_surface(workspace, pane, browser_id)
+            .attach_or_rerender_surface(workspace, pane, browser_id, None)
             .await
             .unwrap();
         let (_, editor_id) = store
@@ -3955,7 +3955,7 @@ mod tests {
             .await
             .unwrap();
         controller
-            .attach_or_rerender_surface(workspace, pane, editor_id)
+            .attach_or_rerender_surface(workspace, pane, editor_id, None)
             .await
             .unwrap();
         let browser_root = controller.pane_registry.borrow().browsers[&browser_id]
@@ -4055,7 +4055,7 @@ mod tests {
             .is_err());
         let terminal = controller.pane_registry.borrow().terminals[&original].root_widget();
         assert!(controller
-            .attach_or_rerender_surface(workspace, pane, SurfaceId::new())
+            .attach_or_rerender_surface(workspace, pane, SurfaceId::new(), None)
             .await
             .is_err());
         assert_eq!(
@@ -4063,6 +4063,132 @@ mod tests {
             terminal
         );
         controller.drop_workspace(workspace);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn failed_surface_rerender_restores_the_active_tab_without_a_ghost() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.FailedFallback").await;
+        controller.window.present();
+        let first = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let original = controller.pane_registry.borrow().terminals[&first].clone();
+        let (_, second) = controller
+            .store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, second, None)
+            .await
+            .unwrap();
+        controller.activate_surface_now(pane, first).await.unwrap();
+        // Missing tab-bar handle forces the full render while preserving the live PTYs.
+        controller
+            .pane_registry
+            .borrow_mut()
+            .forget_pane_tab_container(pane);
+        let (_, failed) = controller
+            .store
+            .add_terminal_surface_to_pane(pane, Some(PathBuf::from("/invalid\0cwd/normal")))
+            .await
+            .unwrap();
+        let error = controller
+            .attach_or_rerender_surface(workspace, pane, failed, None)
+            .await
+            .unwrap_err();
+        assert!(error.contains("cwd has NUL"), "{error}");
+        controller.store.close_surface(pane, failed).await.unwrap();
+        assert_eq!(
+            active_surface_from_workspace(
+                &controller.store.get_workspace(workspace).await.unwrap(),
+                pane
+            ),
+            Some(first)
+        );
+        {
+            let r = controller.pane_registry.borrow();
+            assert_eq!(r.active_surface(pane), Some(first));
+            assert!(!r.has_surface(pane, failed));
+            assert_eq!(r.surface_tabs[&pane].len(), 2);
+            assert_eq!(
+                r.stack_for_pane(pane)
+                    .unwrap()
+                    .visible_child_name()
+                    .as_deref(),
+                Some(first.to_string().as_str())
+            );
+            assert_eq!(r.terminals[&first].root_widget(), original.root_widget());
+            assert_eq!(r.terminals[&first].pid.get(), original.pid.get());
+            assert!(!r.surface_errors.contains_key(&failed));
+        }
+        // A failed restored surface must not poison a later successful rebuild.
+        let (_, retry) = controller
+            .store
+            .add_terminal_surface_to_pane(pane, Some(PathBuf::from("/invalid\0cwd/normal")))
+            .await
+            .unwrap();
+        controller.rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+        assert!(controller
+            .pane_registry
+            .borrow()
+            .surface_errors
+            .contains_key(&retry));
+        controller.store.close_surface(pane, retry).await.unwrap();
+        controller.rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .surface_errors
+            .contains_key(&retry));
+        controller.drop_workspace(workspace);
+        controller.window.destroy();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn failed_surface_in_unrendered_workspace_preserves_model_selection() {
+        let (controller, visible, _) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.UnrenderedFailure").await;
+        let workspace = controller
+            .store
+            .create_workspace(Some("hidden".into()), std::env::temp_dir())
+            .await;
+        let ws = controller.store.get_workspace(workspace).await.unwrap();
+        let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let first = active_surface_from_workspace(&ws, pane).unwrap();
+        controller
+            .store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        controller
+            .store
+            .set_active_surface(pane, first)
+            .await
+            .unwrap();
+        let (ack, result) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::CreateSurface {
+                workspace,
+                cwd: Some(PathBuf::from("/invalid\0cwd/normal")),
+                shell: None,
+                ack,
+            })
+            .await;
+        assert!(result.await.unwrap().is_err());
+        let ws = controller.store.get_workspace(workspace).await.unwrap();
+        assert_eq!(active_surface_from_workspace(&ws, pane), Some(first));
+        let r = controller.pane_registry.borrow();
+        assert_eq!(r.active_surface(pane), Some(first));
+        assert_eq!(r.surface_tabs[&pane].len(), 2);
+        drop(r);
+        controller.drop_workspace(workspace);
+        controller.drop_workspace(visible);
     }
 
     #[test]
@@ -4172,7 +4298,7 @@ mod tests {
             .await
             .unwrap();
         controller
-            .attach_or_rerender_surface(workspace, pane, second)
+            .attach_or_rerender_surface(workspace, pane, second, None)
             .await
             .unwrap();
         let (bridge, rx) = Bridge::new();
@@ -8052,7 +8178,7 @@ mod tests {
             .await
             .expect("agent tab should be added");
         controller
-            .attach_or_rerender_surface(ws_id, pane, agent_surface)
+            .attach_or_rerender_surface(ws_id, pane, agent_surface, None)
             .await
             .unwrap();
         store

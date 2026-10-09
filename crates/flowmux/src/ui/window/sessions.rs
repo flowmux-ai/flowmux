@@ -383,7 +383,7 @@ impl WindowController {
             return;
         };
         if let Err(error) = self
-            .attach_or_rerender_surface(workspace, target.pane, surface)
+            .attach_or_rerender_surface(workspace, target.pane, surface, None)
             .await
         {
             self.store.close_surface(target.pane, surface).await;

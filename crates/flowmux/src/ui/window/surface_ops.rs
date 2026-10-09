@@ -335,6 +335,7 @@ impl WindowController {
         ws_id: WorkspaceId,
         pane: PaneId,
         surface_id: SurfaceId,
+        previous: Option<SurfaceId>,
     ) -> Result<(), String> {
         let ws = self
             .store
@@ -348,8 +349,9 @@ impl WindowController {
             .iter()
             .find_map(|s| s.root_pane.find_surface(pane, surface_id))
             .ok_or_else(|| format!("surface not found in pane {pane}: {surface_id}"))?;
+        // Unrendered panes need the caller's model snapshot from before insertion.
+        let previous = previous.or_else(|| self.pane_registry.borrow().active_surface(pane));
         {
-            let previous = self.pane_registry.borrow().active_surface(pane);
             let attached = match attach_surface_to_pane(
                 pane,
                 ws.id,
@@ -395,25 +397,26 @@ impl WindowController {
         }
         self.rerender_workspace(&ws);
         self.refresh_window_title().await;
-        let terminal_required = matches!(surface.kind, SurfaceKind::Terminal { .. })
-            || (matches!(surface.kind, SurfaceKind::SshTerminal { .. })
-                && self
-                    .pane_registry
-                    .borrow()
-                    .ssh
-                    .get(&ws_id)
-                    .is_some_and(|runtime| runtime.borrow().is_connected()));
-        if terminal_required
-            && !self
-                .pane_registry
-                .borrow()
-                .terminals
-                .contains_key(&surface_id)
-        {
+        // A full render keeps a failed surface as a placeholder and records
+        // why in the registry. For a surface the user just asked for, that
+        // placeholder is the failure: report it and roll the tab back.
+        let build_error = self
+            .pane_registry
+            .borrow()
+            .surface_errors
+            .get(&surface_id)
+            .cloned();
+        if let Some(error) = build_error {
             self.pane_registry
                 .borrow_mut()
                 .detach_surface_widget(pane, surface_id);
-            return Err("Could not start terminal".into());
+            if let Some(previous) = previous {
+                self.store.set_active_surface(pane, previous).await;
+                self.pane_registry
+                    .borrow_mut()
+                    .activate_surface(pane, previous);
+            }
+            return Err(error);
         }
         if self.pane_registry.borrow().has_surface(pane, surface_id) {
             Ok(())
@@ -998,7 +1001,7 @@ impl WindowController {
         };
 
         if let Err(error) = self
-            .attach_or_rerender_surface(ws_id, dst_pane, surface_id)
+            .attach_or_rerender_surface(ws_id, dst_pane, surface_id, None)
             .await
         {
             self.store.close_surface(dst_pane, surface_id).await;

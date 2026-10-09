@@ -56,7 +56,21 @@ def main():
                 stream.sendall(b'{"id":1,"kind":"request","verb":"ping"}\n')
                 assert "pong" in json.loads(reader.readline())
                 limits = resource.prlimit(process.pid, resource.RLIMIT_NOFILE)
-                open_fds = [int(fd.name) for fd in Path(f"/proc/{process.pid}/fd").iterdir()]
+                # VTE releases spawn-time FDs asynchronously; wait before
+                # choosing a cap so those closes cannot open a hole below it.
+                def fd_table():
+                    return {int(fd.name) for fd in Path(f"/proc/{process.pid}/fd").iterdir()}
+
+                open_fds = fd_table()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    time.sleep(0.2)
+                    current = fd_table()
+                    if current == open_fds:
+                        break
+                    open_fds = current
+                else:
+                    raise AssertionError("GUI file descriptor table did not settle")
                 limit = next(fd for fd in range(max(open_fds) + 2) if fd not in open_fds)
                 try:
                     resource.prlimit(process.pid, resource.RLIMIT_NOFILE, (limit, limits[1]))

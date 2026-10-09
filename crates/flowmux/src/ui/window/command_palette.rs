@@ -873,7 +873,7 @@ impl WindowController {
                     .add_terminal_surface_to_pane(pane, Some(cwd))
                     .await?;
                 if let Err(error) = self
-                    .attach_or_rerender_surface(ws_id, pane, surface_id)
+                    .attach_or_rerender_surface(ws_id, pane, surface_id, None)
                     .await
                 {
                     self.store.close_surface(pane, surface_id).await;

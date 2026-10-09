@@ -161,6 +161,11 @@ impl PaneToolButton {
 #[derive(Default)]
 pub struct PaneRegistry {
     pub ssh: HashMap<WorkspaceId, Rc<RefCell<super::window::ssh::SshRuntime>>>,
+    /// Surfaces whose panel could not be built during a full workspace
+    /// render and show a placeholder instead. The rerender fallback consults
+    /// this rather than guessing from the surface kind which widget must
+    /// exist. Cleared when the surface is detached or the pane forgotten.
+    pub surface_errors: HashMap<SurfaceId, String>,
     pub terminals: HashMap<SurfaceId, PaneTerminal>,
     pub browsers: HashMap<SurfaceId, BrowserPane>,
     pub editors: HashMap<SurfaceId, EditorPane>,
@@ -683,6 +688,7 @@ impl PaneRegistry {
             }
             self.surface_tab_labels.remove(&surface);
             self.surface_workspace.remove(&surface);
+            self.surface_errors.remove(&surface);
         }
     }
 
@@ -805,6 +811,11 @@ impl PaneRegistry {
         self.surface_stacks.get(&pane).cloned()
     }
 
+    #[cfg(test)]
+    pub fn forget_pane_tab_container(&mut self, pane: PaneId) {
+        self.pane_tab_containers.remove(&pane);
+    }
+
     /// Whether `pane` is currently rendered (its surface stack exists).
     pub fn has_pane(&self, pane: PaneId) -> bool {
         self.surface_stacks.contains_key(&pane)
@@ -912,6 +923,7 @@ impl PaneRegistry {
             .map(|tabs| tabs.iter().map(|(id, _)| *id).collect())
             .unwrap_or_default();
         for s in surfaces {
+            self.surface_errors.remove(&s);
             if let Some(terminal) = self.terminals.remove(&s) {
                 terminal.close_pty();
             }
@@ -999,6 +1011,7 @@ impl PaneRegistry {
         }
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
         }
@@ -1084,6 +1097,7 @@ impl PaneRegistry {
         };
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
         }
@@ -1146,6 +1160,7 @@ impl PaneRegistry {
         stack.remove(&content);
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
         }
@@ -1649,10 +1664,10 @@ fn build_leaf_pane(
         let widget = match widget {
             Ok(widget) => widget,
             Err(error) if restoring => {
-                registry
-                    .borrow_mut()
-                    .surface_workspace
-                    .insert(surface.id, workspace);
+                let mut r = registry.borrow_mut();
+                r.surface_workspace.insert(surface.id, workspace);
+                r.surface_errors.insert(surface.id, error.clone());
+                drop(r);
                 failed_panel(error)
             }
             Err(error) => {

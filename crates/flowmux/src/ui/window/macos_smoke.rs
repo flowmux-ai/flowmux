@@ -277,7 +277,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .await
         .unwrap();
     controller
-        .attach_or_rerender_surface(workspace, pane, surface)
+        .attach_or_rerender_surface(workspace, pane, surface, None)
         .await
         .unwrap();
     let editor = controller.pane_registry.borrow().editors[&surface].clone();

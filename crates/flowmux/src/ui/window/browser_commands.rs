@@ -332,7 +332,12 @@ impl WindowController {
                             // here would kill claude/codex running in the
                             // caller's terminal (regression #pane-reset).
                             if let Err(error) = self
-                                .attach_or_rerender_surface(workspace, reuse_target, surface_id)
+                                .attach_or_rerender_surface(
+                                    workspace,
+                                    reuse_target,
+                                    surface_id,
+                                    None,
+                                )
                                 .await
                             {
                                 self.store.close_surface(reuse_target, surface_id).await;
@@ -395,7 +400,7 @@ impl WindowController {
                     self.store.add_browser_surface_to_pane(pane, url).await
                 {
                     if let Err(error) = self
-                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .attach_or_rerender_surface(ws_id, pane, surface_id, None)
                         .await
                     {
                         self.store.close_surface(pane, surface_id).await;

@@ -124,7 +124,7 @@ impl WindowController {
                     self.store.add_terminal_surface_to_pane(pane, cwd).await
                 {
                     if let Err(error) = self
-                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .attach_or_rerender_surface(ws_id, pane, surface_id, None)
                         .await
                     {
                         self.store.close_surface(pane, surface_id).await;
@@ -143,7 +143,7 @@ impl WindowController {
                     self.store.add_terminal_surface_to_pane(pane, cwd).await
                 {
                     if let Err(error) = self
-                        .attach_or_rerender_surface(workspace, pane, surface)
+                        .attach_or_rerender_surface(workspace, pane, surface, None)
                         .await
                     {
                         self.store.close_surface(pane, surface).await;
@@ -183,6 +183,14 @@ impl WindowController {
                             workspace.surfaces.first()?.root_pane.first_leaf_id()
                         }),
                 };
+                let previous = match pane {
+                    Some(pane) => self
+                        .store
+                        .get_workspace(workspace)
+                        .await
+                        .and_then(|ws| active_surface_from_workspace(&ws, pane)),
+                    None => None,
+                };
                 let result = match pane {
                     Some(pane) => match self
                         .store
@@ -190,7 +198,10 @@ impl WindowController {
                         .await
                     {
                         Some((ws_id, surface)) => {
-                            match self.attach_or_rerender_surface(ws_id, pane, surface).await {
+                            match self
+                                .attach_or_rerender_surface(ws_id, pane, surface, previous)
+                                .await
+                            {
                                 Ok(()) => Ok((pane, surface)),
                                 Err(error) => {
                                     self.store.close_surface(pane, surface).await;
@@ -211,7 +222,7 @@ impl WindowController {
                     .await
                 {
                     if let Err(error) = self
-                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .attach_or_rerender_surface(ws_id, pane, surface_id, None)
                         .await
                     {
                         self.store.close_surface(pane, surface_id).await;
