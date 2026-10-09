@@ -159,7 +159,7 @@ def main():
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
         assert room("Product studio") and not room("Quiet corner")
         # Exercise the side-by-side floor plan at portrait and landscape ratios.
-        for _ in range((-uuid.UUID(workspace).int) % 4):
+        for _ in range((-uuid.UUID(workspace).int) % 24):
             click(find("Next office design"))
             time.sleep(.3)
         actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
@@ -193,10 +193,29 @@ def main():
         before = gemini.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         report(residents[2], "idle")
         gui.wait_for(lambda: next((n for n in nodes() if "Done · taking a break" in n.get_name()), None), "completed scene")
+        # A small native resize during the walk must not snap to the lounge.
+        walking_before = gemini.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        geometry = native_window().get_geometry()
+        started = time.monotonic()
+        native_window().configure(width=geometry.width - 4, height=geometry.height)
+        connection.sync()
+        time.sleep(.1)
+        walking_after = gemini.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        elapsed = time.monotonic() - started
+        distance = ((walking_after.x - walking_before.x) ** 2 + (walking_after.y - walking_before.y) ** 2) ** .5
+        assert distance < 60 + elapsed * 400, f"resize teleported actor by {distance}px"
+        native_window().configure(width=geometry.width, height=geometry.height)
+        connection.sync()
         time.sleep(5)
         after = gemini.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         assert (before.x, before.y) != (after.x, after.y), "completed character walks to lounge"
         screenshot("mixed-status")
+        report(residents[0], "working", "Read README.md")
+        time.sleep(2)
+        screenshot("reading-at-desk")
+        report(residents[0], "working", "Edit scene.rs")
+        time.sleep(8)
+        screenshot("coffee-break")
         h.pass_check("live workspaces, three agent providers, working / blocked / completed scenes")
 
         target = gui.wait_for(lambda: next((node for node in nodes()
@@ -210,6 +229,10 @@ def main():
         assert next(tab for tab in tabs if tab["id"] == residents[1][2])["active"]
         click(gui.wait_for(lambda: find("AgentOffice"), "footer button after return"))
         gui.wait_for(lambda: find("Back to workspace"), "office reopened")
+        design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
+        # The first selection was West wing; recreation must preserve it.
+        if design_file.exists():
+            assert json.loads(design_file.read_text()) == 0
         key = connection.keysym_to_keycode(XK.string_to_keysym("Escape"))
         xtest.fake_input(connection, X.KeyPress, key)
         xtest.fake_input(connection, X.KeyRelease, key)
@@ -282,17 +305,47 @@ def main():
         gui.wait_for(all_rooms_visible, "all eight offices fit in one viewport")
         packed_floor("eight-offices")
         # Real disposable agent processes exercise density without touching user sessions.
+        dense_residents = []
         for index in range(29):
             name = ("codex", "claude", "gemini")[index % 3]
             tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(studio_root))["surface_created"]
             h.send(socket, tab["pane"], f"exec {shlex.quote(str(h.root / name))} 600")
-            report((name, tab["pane"], tab["id"]), "working")
+            dense_residents.append((name, tab["pane"], tab["id"]))
+            report(dense_residents[-1], "working")
         gui.wait_for(lambda: any("39 teammates" in n.get_name() for n in nodes()), "32 agents in shared office")
         gui.wait_for(all_rooms_visible, "dense office leaves every other room visible")
         packed_floor("dense-all-offices")
         click(room("Product studio"))
         time.sleep(.5)
         screenshot("dense-office-detail")
+        for index, resident in enumerate(dense_residents[:8]):
+            report(resident, "blocked", f"Review request {index}")
+        time.sleep(3)
+        bubbles = [n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                   for n in office_nodes() if n.get_role() == Atspi.Role.LABEL
+                   and n.get_name().startswith("Need your input")
+                   and n.get_state_set().contains(Atspi.StateType.SHOWING)]
+        assert len(bubbles) >= 2, "dense office must expose multiple pending approvals"
+        for index, a in enumerate(bubbles):
+            assert a.width >= 110 and a.height >= 30, "speech stays readable when office shrinks"
+            for b in bubbles[index + 1:]:
+                assert a.x + a.width <= b.x or b.x + b.width <= a.x or a.y + a.height <= b.y or b.y + b.height <= a.y, "approval bubbles must not overlap"
+        screenshot("dense-approvals")
+        for resident in dense_residents[:8]:
+            report(resident, "working")
+        h.pass_check("multiple approval bubbles remain readable without overlapping")
+        design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
+        for design in range(1, 25):
+            click(next(n for n in office_nodes() if n.get_name() == "Next office design"
+                       and n.get_state_set().contains(Atspi.StateType.SHOWING)))
+            gui.wait_for(lambda: design_file.exists() and json.loads(design_file.read_text()) == design % 24,
+                         "workspace design persisted")
+            screenshot(f"layout-{design % 24:02}")
+        click(find("Back to workspace"))
+        click(gui.wait_for(lambda: find("AgentOffice"), "reopen saved office"))
+        gui.wait_for(lambda: room("Product studio"), "saved office restored")
+        assert json.loads(design_file.read_text()) == 0
+        h.pass_check("24 spatial layouts render with 32 agents; workspace design survives reopening")
         assert find("All offices")
         click(find("All offices"))
         gui.wait_for(all_rooms_visible, "return from detail restores all offices")
