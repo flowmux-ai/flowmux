@@ -1,16 +1,67 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! First-launch tour; screenshots are embedded so packaged installs work offline.
 use adw::prelude::*;
+use flowmux_config::keybindings::ActionId;
 use std::{cell::Cell, path::Path, rc::Rc};
 
-const PAGES: [(&str, &str, &[u8]); 6] = [
-    ("Stay on top of notifications", "The bell collects task updates and approval requests. Select a notification to jump to its pane. Enable desktop notifications in Options → General; check agent hooks in Options → Update → Integration status.", include_bytes!("../../../../resources/welcome/notifications.png")),
-    ("Split your workspace", "Use the pane menu to split right or down and work in several terminals at once. Default shortcuts: Ctrl+Shift+Page Up / Page Down (Command instead of Ctrl on macOS). Each pane can hold several tabs.", include_bytes!("../../../../resources/welcome/split.png")),
-    ("Return to an agent session", "Open Sessions to browse saved conversations for the agent in the focused terminal. Search the list, preview a conversation, then resume it. Default shortcut: Ctrl+Alt+J (Command+Option+J on macOS).", include_bytes!("../../../../resources/welcome/sessions.png")),
-    ("Find what you need", "Use the magnifier beside Files to search all open terminals, including SSH. Select a result to jump to it. Ctrl+Shift+F searches the focused terminal; editor focus searches editor content. On macOS, use Command instead of Ctrl.", include_bytes!("../../../../resources/welcome/search.png")),
-    ("Browse and edit files", "Open Files to browse the focused pane’s local project. Double-click a file to open an editor tab, then save with Ctrl+S (Command+S on macOS). The file list follows the selected project.", include_bytes!("../../../../resources/welcome/files.png")),
-    ("See every workspace", "Open workspace overview to see your workspaces and agent activity together. Select a workspace to return to it. Default shortcut: Ctrl+Alt+K (Command+Option+K on macOS). Customize shortcuts in Options → Keybindings.", include_bytes!("../../../../resources/welcome/overview.png")),
+struct Page {
+    title: &'static str,
+    description: &'static str,
+    screenshot: &'static [u8],
+    actions: &'static [ActionId],
+}
+
+const PAGES: [Page; 6] = [
+    Page {
+        title: "Agent completion",
+        description:
+            "See when agents finish in other workspaces. Look for Done in the left sidebar.",
+        screenshot: include_bytes!("../../../../resources/welcome/notifications.png"),
+        actions: &[],
+    },
+    Page {
+        title: "Split panes",
+        description: "Split right or down to work in several terminals side by side.",
+        screenshot: include_bytes!("../../../../resources/welcome/split.png"),
+        actions: &[ActionId::SplitRight, ActionId::SplitDown],
+    },
+    Page {
+        title: "Agent sessions",
+        description: "Open Sessions to find and resume a saved conversation.",
+        screenshot: include_bytes!("../../../../resources/welcome/sessions.png"),
+        actions: &[ActionId::ToggleSessionPanel],
+    },
+    Page {
+        title: "Search",
+        description: "Search your terminals, then select a result to jump to it.",
+        screenshot: include_bytes!("../../../../resources/welcome/search.png"),
+        actions: &[ActionId::SearchAllTerminals, ActionId::TerminalSearch],
+    },
+    Page {
+        title: "Files and editor",
+        description: "Open Files to browse your project. Double-click a file to edit it.",
+        screenshot: include_bytes!("../../../../resources/welcome/files.png"),
+        actions: &[ActionId::ToggleFileBrowser],
+    },
+    Page {
+        title: "Workspace overview",
+        description: "See all workspaces and agent activity. Select a workspace to open it.",
+        screenshot: include_bytes!("../../../../resources/welcome/overview.png"),
+        actions: &[ActionId::ToggleWorkspaceOverview],
+    },
 ];
+
+fn shortcut_text(actions: &[ActionId]) -> String {
+    actions
+        .iter()
+        .filter_map(|&action| {
+            let labels = crate::keybindings::action_accel_labels(action);
+            (!labels.is_empty())
+                .then(|| crate::keybindings::tooltip_with_accels(action.label(), &labels))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
 
 // Claim before presenting so concurrent windows do not each show the first-run tour.
 fn claim_first_launch(marker: &Path, force: bool) -> std::io::Result<bool> {
@@ -52,26 +103,34 @@ fn build_dialog() -> adw::Dialog {
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
     stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
-    for (index, (title, description, bytes)) in PAGES.iter().enumerate() {
+    for (index, info) in PAGES.iter().enumerate() {
         let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
         page.set_margin_start(24);
         page.set_margin_end(24);
-        let texture = gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_static(bytes))
-            .expect("bundled welcome screenshot must decode");
+        let texture =
+            gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_static(info.screenshot))
+                .expect("bundled welcome screenshot must decode");
         let picture = gtk::Picture::for_paintable(&texture);
         picture.set_can_shrink(true);
         picture.set_content_fit(gtk::ContentFit::Contain);
         picture.set_vexpand(true);
-        picture.set_alternative_text(Some(title));
+        picture.set_alternative_text(Some(info.title));
         page.append(&picture);
-        let heading = gtk::Label::new(Some(title));
+        let heading = gtk::Label::new(Some(info.title));
         heading.add_css_class("title-1");
         heading.set_wrap(true);
         page.append(&heading);
-        let body = gtk::Label::new(Some(description));
+        let body = gtk::Label::new(Some(info.description));
         body.set_wrap(true);
         body.set_max_width_chars(85);
         page.append(&body);
+        let shortcuts = shortcut_text(info.actions);
+        if !shortcuts.is_empty() {
+            let label = gtk::Label::new(Some(&shortcuts));
+            label.set_wrap(true);
+            label.set_max_width_chars(85);
+            page.append(&label);
+        }
         stack.add_named(&page, Some(&index.to_string()));
     }
     content.append(&stack);
@@ -175,6 +234,48 @@ mod tests {
         assert_eq!(stack.visible_child_name().as_deref(), Some("0"));
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn shortcuts_follow_platform_defaults_overrides_and_unbinding() {
+        use crate::keybindings::{accelerator_label, install_accels};
+        use flowmux_config::{keybindings::default_accels, options::Options};
+
+        adw::init().unwrap();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.WelcomeShortcuts")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        app.set_default();
+        let mut options = Options::default();
+        install_accels(&app, &options);
+        for page in &PAGES {
+            let text = shortcut_text(page.actions);
+            for &action in page.actions {
+                for accel in default_accels(action) {
+                    assert!(text.contains(&accelerator_label(accel).unwrap()), "{text}");
+                }
+            }
+        }
+        options
+            .keybindings
+            .set(ActionId::SplitRight, vec!["<Alt>r".into(), "F6".into()]);
+        options.keybindings.set(ActionId::SplitDown, vec![]);
+        install_accels(&app, &options);
+        assert_eq!(
+            shortcut_text(PAGES[1].actions),
+            format!(
+                "Split pane right ({}, {})",
+                accelerator_label("<Alt>r").unwrap(),
+                accelerator_label("F6").unwrap()
+            ),
+        );
+        options.keybindings.set(ActionId::SplitRight, vec![]);
+        install_accels(&app, &options);
+        assert!(shortcut_text(PAGES[1].actions).is_empty());
+        assert!(shortcut_text(PAGES[0].actions).is_empty());
+    }
+
     #[test]
     fn tour_is_claimed_once_and_can_be_forced() {
         let dir = tempfile::tempdir().unwrap();
@@ -188,9 +289,13 @@ mod tests {
 
     #[test]
     fn all_six_screenshots_decode() {
-        for (title, _, bytes) in PAGES {
-            let image = image::load_from_memory(bytes).expect(title);
-            assert!(image.width() >= 800 && image.height() >= 500, "{title}");
+        for page in PAGES {
+            let image = image::load_from_memory(page.screenshot).expect(page.title);
+            assert!(
+                image.width() >= 800 && image.height() >= 500,
+                "{}",
+                page.title
+            );
         }
     }
 }
