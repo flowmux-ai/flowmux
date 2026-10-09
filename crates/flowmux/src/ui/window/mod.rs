@@ -2806,7 +2806,25 @@ impl WindowController {
     }
 
     pub async fn dispatch(&self, cmd: GtkCommand) {
+        let office_data_change = matches!(
+            &cmd,
+            GtkCommand::WorkspaceCreated { .. }
+                | GtkCommand::NewWorkspace { .. }
+                | GtkCommand::RemoveWorkspace { .. }
+                | GtkCommand::RemoveAllWorkspaces { .. }
+                | GtkCommand::RenameWorkspace { .. }
+                | GtkCommand::SetWorkspaceColor { .. }
+                | GtkCommand::ReorderWorkspace { .. }
+                | GtkCommand::CreateSurface { .. }
+                | GtkCommand::NewSurface { .. }
+                | GtkCommand::CloseSurface { .. }
+                | GtkCommand::RenameSurface { .. }
+                | GtkCommand::TerminalCwdChanged { .. }
+                | GtkCommand::TerminalTitleChanged { .. }
+                | GtkCommand::SshCwd { .. }
+        );
         if !matches!(&cmd, GtkCommand::ToggleAgentOffice)
+            && !office_data_change
             && (command_dismisses_workspace_overview(&cmd)
                 || matches!(
                     &cmd,
@@ -2949,6 +2967,15 @@ impl WindowController {
             | GtkCommand::CopyFocusedPaneText { .. }
             | GtkCommand::ShowFocusedPaneFolder { .. }) => {
                 self.dispatch_window_chrome_command(command).await;
+            }
+        }
+        if office_data_change && self.agent_office.borrow().is_some() {
+            self.refresh_agent_displays().await;
+            if let Some(office) = self.agent_office.borrow().as_ref() {
+                let focus = gtk::prelude::GtkWindowExt::focus(&self.window);
+                if focus.is_none_or(|focus| !focus.is_ancestor(&office.view.root)) {
+                    office.view.close.grab_focus();
+                }
             }
         }
     }

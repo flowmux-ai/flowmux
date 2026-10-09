@@ -799,6 +799,26 @@ impl PaneRegistry {
             for (id, tab) in tabs {
                 if *id == surface {
                     tab.add_css_class("active");
+                    tab.add_tick_callback(|tab, _| {
+                        if !tab.has_css_class("active") {
+                            return gtk::glib::ControlFlow::Break;
+                        }
+                        if let Some(scroll) = tab
+                            .ancestor(gtk::ScrolledWindow::static_type())
+                            .and_downcast::<gtk::ScrolledWindow>()
+                        {
+                            if tab.width() == 0 || scroll.hadjustment().page_size() == 0.0 {
+                                return gtk::glib::ControlFlow::Continue;
+                            }
+                            if let Some(bounds) = tab.compute_bounds(&tab.parent().unwrap()) {
+                                scroll.hadjustment().clamp_page(
+                                    bounds.x() as f64,
+                                    (bounds.x() + bounds.width()) as f64,
+                                );
+                            }
+                        }
+                        gtk::glib::ControlFlow::Break
+                    });
                 } else {
                     tab.remove_css_class("active");
                 }
@@ -1629,8 +1649,22 @@ fn build_leaf_pane(
     tabs.add_css_class("flowmux-pane-tabs");
     tabs.set_hexpand(false);
 
-    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
+    // Many agent tabs must not increase the window's minimum width.
+    tabs.set_halign(gtk::Align::Start);
+    let tab_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .hexpand(true)
+        .child(&tabs)
+        .build();
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+    let adjustment = tab_scroll.hadjustment();
+    wheel.connect_scroll(move |_, dx, dy| {
+        let delta = if dx.abs() > dy.abs() { dx } else { dy };
+        adjustment.set_value(adjustment.value() + delta * 32.0);
+        gtk::glib::Propagation::Stop
+    });
+    tab_scroll.add_controller(wheel);
 
     let tools = gtk::Box::new(gtk::Orientation::Horizontal, 1);
     tools.add_css_class("flowmux-pane-tools");
@@ -1725,8 +1759,7 @@ fn build_leaf_pane(
     if !empty {
         stack.set_visible_child_name(&active.to_string());
     }
-    tabbar.append(&tabs);
-    tabbar.append(&spacer);
+    tabbar.append(&tab_scroll);
     tabbar.append(&tools);
     root.append(&tabbar);
     root.append(&stack);

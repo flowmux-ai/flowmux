@@ -61,9 +61,13 @@ Click a notification to jump straight back to that agent.
 
 Open **AgentOffice** immediately left of **Agents bar** in the scrollable footer
 of the side panel. Options stays fixed at the far left.
-Each workspace becomes a shared pixel-art room with desks and a lounge.
-Live agents walk between those spaces, type at their desks, wait
-for your input, or rest on a sofa when idle or done. There are 120 animal and
+All workspaces fit into one adaptive map, with more space and seats for larger teams.
+Office signs follow workspace names live. Select a sign to enlarge that office,
+or **All offices** to fit the whole map again. The design button cycles through
+24 furnished designs: six themes with four spatial layouts each.
+Speech bubbles show work, input waits, completion, rest, and session departure,
+including the agent's reported task text. Agents follow clear paths between
+desks, review positions, sofas, coffee spots, and the exit. There are 120 animal and
 outfit combinations, with agent names and icons identifying Claude, Codex,
 Gemini, and other agents. Select a character to return to its terminal; press
 **Esc** to leave the office. Animation follows the desktop's reduced-motion setting.

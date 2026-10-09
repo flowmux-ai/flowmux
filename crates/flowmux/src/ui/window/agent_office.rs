@@ -72,6 +72,67 @@ mod tests {
             .unwrap();
         controller.dispatch(GtkCommand::ToggleAgentOffice).await;
         assert!(controller.agent_office.borrow().is_some());
+        let (ack, reply) = tokio::sync::oneshot::channel();
+        controller
+            .dispatch(GtkCommand::RenameWorkspace {
+                id: workspace,
+                name: "Live office name".into(),
+                ack,
+            })
+            .await;
+        reply.await.unwrap();
+        assert!(controller
+            .agent_office
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .view
+            .room_titles()[0]
+            .starts_with("Live office name"));
+        let added = controller
+            .store
+            .create_workspace(
+                Some("Second office".into()),
+                std::path::PathBuf::from("/tmp"),
+            )
+            .await;
+        let (ack, reply) = tokio::sync::oneshot::channel();
+        controller
+            .dispatch(GtkCommand::WorkspaceCreated { id: added, ack })
+            .await;
+        reply.await.unwrap().unwrap();
+        assert_eq!(
+            controller
+                .agent_office
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .view
+                .room_titles()
+                .len(),
+            2
+        );
+        let (ack, reply) = tokio::sync::oneshot::channel();
+        controller
+            .dispatch(GtkCommand::RemoveWorkspace {
+                id: added,
+                confirm: false,
+                ack,
+            })
+            .await;
+        reply.await.unwrap().unwrap();
+        assert_eq!(
+            controller
+                .agent_office
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .view
+                .room_titles()
+                .len(),
+            1
+        );
+
         for activity in [
             flowmux_core::AgentActivity::Running,
             flowmux_core::AgentActivity::NeedsInput,

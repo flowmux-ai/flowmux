@@ -755,10 +755,24 @@ paned > separator {{
     padding: 10px 16px;
     color: #aebbc7;
 }}
-.flowmux-office-rooms {{
-    padding: 12px 20px 24px;
-    background: #171f2b;
-    color: #ded6c5;
+.flowmux-office-title {{
+    background: #263345;
+    color: #eee3cf;
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    border: none;
+    border-radius: 3px;
+    font-size: 13px;
+    box-shadow: none;
+}}
+.flowmux-office-bubble {{
+    background: #f0e6cb;
+    color: #293648;
+    border: 2px solid #39465a;
+    border-radius: 6px 6px 6px 0;
+    font-size: 12px;
+    padding: 0;
 }}
 .flowmux-office-resident {{
     background: transparent;
