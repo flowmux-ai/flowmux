@@ -149,7 +149,7 @@ impl AgentOffice {
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&adw::WindowTitle::new(
             "AgentOffice",
-            "Every workspace, under one roof",
+            "Your agents, under one roof",
         )));
         let close = gtk::Button::from_icon_name("go-previous-symbolic");
         close.set_tooltip_text(Some("Back to workspace (Esc)"));
@@ -190,7 +190,7 @@ impl AgentOffice {
                 cr.set_source_rgb(0.8, 0.8, 0.8);
                 cr.set_font_size(16.0);
                 cr.move_to((width as f64 / 2.0 - 170.0).max(10.0), height as f64 / 2.0);
-                let _ = cr.show_text("Create a workspace to open an office.");
+                let _ = cr.show_text("Start an agent in a workspace to open an office.");
             }
             for room in &world.rooms {
                 if world.selected.is_some_and(|id| id != room.id) {
@@ -306,15 +306,16 @@ impl AgentOffice {
         let mut world = self.world.borrow_mut();
         let mut rooms = Vec::new();
         for (id, name) in workspaces {
+            let live_count = model.items.iter().filter(|i| i.workspace == *id).count();
+            if live_count == 0 {
+                continue;
+            }
             let mut room = if let Some(index) = world.rooms.iter().position(|r| r.id == *id) {
                 world.rooms.remove(index)
             } else {
                 self.new_room(*id)
             };
-            room.title.set_label(&format!(
-                "{name} · {}",
-                model.items.iter().filter(|i| i.workspace == *id).count()
-            ));
+            room.title.set_label(&format!("{name} · {live_count}"));
             if let Some(label) = room.title.child().and_downcast::<gtk::Label>() {
                 label.set_ellipsize(gtk::pango::EllipsizeMode::End);
             }
@@ -340,7 +341,6 @@ impl AgentOffice {
                     .find(|i| i.surface == *surface)
                     .is_none_or(|i| i.workspace == *id)
             });
-            let live_count = model.items.iter().filter(|i| i.workspace == *id).count();
             room.title.set_tooltip_text(Some(&format!(
                 "{name} · {live_count} teammates\n{}\nSelect to enlarge",
                 scene::design_name(room.design)
@@ -354,7 +354,7 @@ impl AgentOffice {
         world.rooms = rooms;
         if world
             .selected
-            .is_some_and(|id| !workspaces.iter().any(|(w, _)| *w == id))
+            .is_some_and(|id| !world.rooms.iter().any(|room| room.id == id))
         {
             world.selected = None;
         }
@@ -440,7 +440,7 @@ impl AgentOffice {
             .iter()
             .filter(|i| matches!(i.status, AgentStatus::Idle | AgentStatus::Done))
             .count();
-        self.summary.set_text(&format!("{} offices · {} teammates · {working} working · {waiting} need you · {resting} resting", workspaces.len(), model.items.len()));
+        self.summary.set_text(&format!("{} offices · {} teammates · {working} working · {waiting} need you · {resting} resting", world.rooms.len(), model.items.len()));
         self.drawing.queue_draw();
     }
 

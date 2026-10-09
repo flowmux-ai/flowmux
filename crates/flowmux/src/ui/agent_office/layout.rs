@@ -102,7 +102,7 @@ impl Plan {
         };
         let cols = if let Some(aspect) = aspect {
             // Choose rows and columns before sizing the room; never stretch the artwork.
-            (2..=capacity)
+            (1..=capacity)
                 .min_by(|&a, &b| {
                     let (aw, ah) = dimensions(a);
                     let (bw, bh) = dimensions(b);
@@ -306,6 +306,17 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+    #[test]
+    fn office_desks_reflow_with_the_available_aspect() {
+        for design in 0..4 {
+            let narrow = Plan::fit(2, design, 0.2);
+            let wide = Plan::fit(2, design, 2.4);
+            assert_eq!(narrow.desk(0).0, narrow.desk(1).0);
+            assert_ne!(narrow.desk(0).1, narrow.desk(1).1);
+            assert_ne!(wide.desk(0).0, wide.desk(1).0);
+            assert_eq!(wide.desk(0).1, wide.desk(1).1);
         }
     }
     #[test]

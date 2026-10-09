@@ -72,6 +72,28 @@ mod tests {
             .unwrap();
         controller.dispatch(GtkCommand::ToggleAgentOffice).await;
         assert!(controller.agent_office.borrow().is_some());
+        assert!(controller
+            .agent_office
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .view
+            .room_titles()
+            .is_empty());
+        controller
+            .store
+            .set_agent_activity(
+                surface,
+                Some(flowmux_core::AgentPresence::new(
+                    "codex",
+                    flowmux_core::AgentActivity::Running,
+                    Some(42),
+                )),
+            )
+            .await;
+        controller
+            .dispatch(GtkCommand::SetAgentStatus { workspace })
+            .await;
         let (ack, reply) = tokio::sync::oneshot::channel();
         controller
             .dispatch(GtkCommand::RenameWorkspace {
@@ -110,7 +132,7 @@ mod tests {
                 .view
                 .room_titles()
                 .len(),
-            2
+            1
         );
         let (ack, reply) = tokio::sync::oneshot::channel();
         controller
@@ -173,6 +195,14 @@ mod tests {
                 .rendered_status(surface),
             None
         );
+        assert!(controller
+            .agent_office
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .view
+            .room_titles()
+            .is_empty());
         controller
             .dispatch(GtkCommand::OpenAgentBarItem {
                 workspace,

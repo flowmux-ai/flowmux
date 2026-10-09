@@ -15,6 +15,7 @@ import shlex
 import shutil
 import sys
 import time
+import uuid
 
 from PIL import Image
 from Xlib import X, XK, display
@@ -116,8 +117,14 @@ def main():
         studio_root.mkdir()
         quiet_root.mkdir()
         workspace = h.rpc(socket, "workspace_create", name="Product studio", root=str(studio_root))["workspace_created"]["id"]
+        click(gui.wait_for(lambda: find("AgentOffice"), "footer button"))
+        gui.wait_for(lambda: find("Back to workspace"), "empty office open")
+        assert not room("Product studio")
+        assert find("0 offices · 0 teammates · 0 working · 0 need you · 0 resting")
+        screenshot("empty-office")
+        click(find("Back to workspace"))
         residents = []
-        for index, name in enumerate(("codex", "claude", "gemini")):
+        for index, name in enumerate(("codex", "claude")):
             if index:
                 tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(studio_root))["surface_created"]
                 pane, surface = tab["pane"], tab["id"]
@@ -150,7 +157,35 @@ def main():
         click(gui.wait_for(lambda: find("AgentOffice"), "footer button"))
         gui.wait_for(lambda: find("Back to workspace"), "office open")
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
-        assert room("Product studio") and room("Quiet corner")
+        assert room("Product studio") and not room("Quiet corner")
+        # Exercise the side-by-side floor plan at portrait and landscape ratios.
+        for _ in range((-uuid.UUID(workspace).int) % 4):
+            click(find("Next office design"))
+            time.sleep(.3)
+        actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
+                  and any(n.get_name().startswith(name + " · ") for name in ("codex", "claude", "gemini"))]
+        assert len(actors) == 2
+        for width, height, columns in [(600, 950, 1), (1280, 700, 2)]:
+            native_window().configure(width=width, height=height)
+            connection.sync()
+            gui.wait_for(lambda: native_window().get_geometry().width == width, "ratio resize")
+            def desk_columns():
+                return len({actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x for actor in actors}) == columns
+            try:
+                gui.wait_for(desk_columns, "desk columns follow available ratio")
+            finally:
+                screenshot(f"desk-ratio-{width}x{height}")
+                h.log("desk_ratio", width=width, height=height, expected_columns=columns,
+                      actors=[(actor.get_name(), actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x)
+                              for actor in actors])
+        h.pass_check("empty workspaces hidden; desk columns reflow from portrait to landscape")
+        tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(studio_root))["surface_created"]
+        executable = h.root / "gemini"
+        shutil.copyfile(shutil.which("sleep"), executable)
+        executable.chmod(0o755)
+        h.send(socket, tab["pane"], f"exec {shlex.quote(str(executable))} 600")
+        residents.append(("gemini", tab["pane"], tab["id"]))
+        report(residents[2], "working")
         screenshot("working")
         report(residents[1], "blocked", "승인 대기 / Review changes")
         gui.wait_for(lambda: next((n for n in nodes() if "Needs you · waiting for input" in n.get_name()), None), "blocked scene")
@@ -207,7 +242,14 @@ def main():
         click(find("AgentOffice"))
         gui.wait_for(lambda: find("Back to workspace"), "office reopened for adaptive map")
         quiet_pane = h.workspace(socket, quiet_id)["panes"][0]["id"]
-        h.send(socket, quiet_pane, "printf '\\033]0;Realtime office\\007'")
+        assert not room("Quiet corner")
+        quiet_surface = h.workspace(socket, quiet_id)["panes"][0]["tabs"][0]["id"]
+        h.send(socket, quiet_pane, f"exec {shlex.quote(str(h.root / 'codex'))} 600")
+        report(("codex", quiet_pane, quiet_surface), "working")
+        gui.wait_for(lambda: room("Quiet corner"), "agent makes hidden workspace appear")
+        # A separate shell can rename the workspace while the agent keeps running.
+        quiet_shell = h.rpc(socket, "surface_create", workspace=quiet_id, cwd=str(quiet_root))["surface_created"]
+        h.send(socket, quiet_shell["pane"], "printf '\\033]0;Realtime office\\007'")
         gui.wait_for(lambda: room("Realtime office"), "live workspace name on office sign")
         assert find("Back to workspace"), "renaming must keep AgentOffice open"
         room_names = ["Product studio", "Realtime office"]
@@ -215,7 +257,12 @@ def main():
             name = f"Studio {index + 3:02}"
             folder = h.root / name
             folder.mkdir()
-            h.rpc(socket, "workspace_create", name=name, root=str(folder))
+            added = h.rpc(socket, "workspace_create", name=name, root=str(folder))["workspace_created"]["id"]
+            assert not room(name)
+            added_pane = h.workspace(socket, added)["panes"][0]
+            added_surface = added_pane["tabs"][0]["id"]
+            h.send(socket, added_pane["id"], f"exec {shlex.quote(str(h.root / 'codex'))} 600")
+            report(("codex", added_pane["id"], added_surface), "working")
             room_names.append(name)
             gui.wait_for(lambda: room(name), "new room appears without reopening")
         def all_rooms_visible():
@@ -240,7 +287,7 @@ def main():
             tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(studio_root))["surface_created"]
             h.send(socket, tab["pane"], f"exec {shlex.quote(str(h.root / name))} 600")
             report((name, tab["pane"], tab["id"]), "working")
-        gui.wait_for(lambda: any("32 teammates" in n.get_name() for n in nodes()), "32 agents in shared office")
+        gui.wait_for(lambda: any("39 teammates" in n.get_name() for n in nodes()), "32 agents in shared office")
         gui.wait_for(all_rooms_visible, "dense office leaves every other room visible")
         packed_floor("dense-all-offices")
         click(room("Product studio"))
@@ -255,7 +302,23 @@ def main():
             gui.wait_for(lambda: native_window().get_geometry().width == width, "native resize")
             gui.wait_for(all_rooms_visible, "every office fits after resize")
             packed_floor(f"resized-{width}x{height}")
-        # Removing the disposable tab should announce departure, not disappear silently.
+        # Losing a selected office's last agent returns to the remaining offices.
+        click(room("Realtime office"))
+        gui.wait_for(lambda: room("Product studio") is None
+                     or not room("Product studio").get_state_set().contains(Atspi.StateType.SHOWING),
+                     "single-agent office is enlarged before removal")
+        h.rpc(socket, "surface_close", pane=quiet_pane, surface=quiet_surface)
+        gui.wait_for(lambda: room("Realtime office") is None, "last agent hides selected office")
+        assert h.workspace(socket, quiet_id), "empty workspace itself must remain"
+        room_names.remove("Realtime office")
+        gui.wait_for(all_rooms_visible, "remaining offices reappear after selected office empties")
+        packed_floor("empty-room-removed")
+        h.send(socket, quiet_shell["pane"], f"exec {shlex.quote(str(h.root / 'codex'))} 600")
+        report(("codex", quiet_shell["pane"], quiet_shell["id"]), "working")
+        room_names.append("Realtime office")
+        gui.wait_for(all_rooms_visible, "office reappears when an agent rejoins")
+        h.pass_check("last agent hides selected office and repacks map; joining agent restores office")
+        # Removing one agent from an occupied office still announces departure.
         ended_actor = next(n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                            and n.get_name().startswith("gemini · ")
                            and "resting" in n.get_name())
