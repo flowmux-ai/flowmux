@@ -111,6 +111,9 @@ pub(super) struct EditorBridgeState {
     surface_id: String,
     ready: Cell<bool>,
     pending: RefCell<Vec<HostMessage>>,
+    // Bumped by `reset`. A bridge message that was still waiting on the file
+    // worker when the page died must not queue its replies for the new page.
+    generation: Cell<u64>,
 }
 
 impl EditorBridgeState {
@@ -119,6 +122,7 @@ impl EditorBridgeState {
             surface_id: surface_id.0.to_string(),
             ready: Cell::new(false),
             pending: RefCell::new(Vec::new()),
+            generation: Cell::new(0),
         }
     }
 
@@ -128,6 +132,11 @@ impl EditorBridgeState {
     pub(super) fn reset(&self) {
         self.ready.set(false);
         self.pending.borrow_mut().clear();
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.get()
     }
 
     pub(super) fn queue(&self, message: HostMessage) -> Result<Option<String>, ProtocolError> {
@@ -193,6 +202,9 @@ struct EditorSessionWorker {
     startup_messages: Vec<HostMessage>,
     recovery_store: Option<RecoveryStore>,
 }
+
+type SessionMutex = tokio::sync::Mutex<Option<EditorSessionWorker>>;
+type SessionGuard = tokio::sync::OwnedMutexGuard<Option<EditorSessionWorker>>;
 
 impl EditorSessionWorker {
     fn create(
@@ -261,9 +273,13 @@ pub(super) struct EditorHostState {
     // owns the guard while touching the filesystem; GTK reads the last snapshot.
     // ponytail: a slow file delays this editor's other documents; use per-document
     // queues if they need independent progress within the same editor surface.
-    session: Arc<tokio::sync::Mutex<Option<EditorSessionWorker>>>,
-    restored: EditorSessionState,
-    recovery_scope: Option<String>,
+    session: Arc<SessionMutex>,
+    // Inputs for the lazily created worker; consumed by the first lock holder.
+    creation: RefCell<Option<(EditorSessionState, Option<String>)>>,
+    // Held from construction until `initialize_messages` runs, so a caller
+    // that opens a file right after the pane is created cannot overtake the
+    // page's InitializeEditor message.
+    initialization_guard: RefCell<Option<SessionGuard>>,
     snapshot: RefCell<EditorSessionState>,
     dirty_paths: RefCell<Vec<PathBuf>>,
     recovery_operations: RefCell<Vec<RecoveryOperation>>,
@@ -305,11 +321,16 @@ impl EditorHostState {
             .unwrap_or_else(load_last_editor_zoom);
         let mut snapshot = restored.clone();
         snapshot.zoom_percent = Some(zoom_percent);
+        let session: Arc<SessionMutex> = Arc::new(tokio::sync::Mutex::new(None));
+        let initialization_guard = session
+            .clone()
+            .try_lock_owned()
+            .expect("fresh editor session mutex is unlocked");
         Self {
             workspace_root: workspace_root.to_path_buf(),
-            session: Arc::new(tokio::sync::Mutex::new(None)),
-            restored,
-            recovery_scope,
+            session,
+            creation: RefCell::new(Some((restored, recovery_scope))),
+            initialization_guard: RefCell::new(Some(initialization_guard)),
             snapshot: RefCell::new(snapshot),
             dirty_paths: RefCell::new(Vec::new()),
             recovery_operations: RefCell::new(Vec::new()),
@@ -331,14 +352,27 @@ impl EditorHostState {
         &self,
         operation: impl FnOnce(&mut Result<EditorSession, String>) -> T + Send + 'static,
     ) -> Result<T, String> {
-        let mut guard = self.session.clone().lock_owned().await;
+        let guard = self.session.clone().lock_owned().await;
+        self.with_session_guard(guard, operation).await
+    }
+
+    async fn with_session_guard<T: Send + 'static>(
+        &self,
+        mut guard: SessionGuard,
+        operation: impl FnOnce(&mut Result<EditorSession, String>) -> T + Send + 'static,
+    ) -> Result<T, String> {
         let root = self.workspace_root.clone();
-        let restored = self.restored.clone();
-        let scope = self.recovery_scope.clone();
+        let creation = if guard.is_none() {
+            self.creation.borrow_mut().take()
+        } else {
+            None
+        };
         let (guard, result, snapshot, dirty, operations, startup, recovery_store) =
             gtk::gio::spawn_blocking(move || {
-                let worker = guard
-                    .get_or_insert_with(|| EditorSessionWorker::create(&root, restored, scope));
+                let worker = guard.get_or_insert_with(|| {
+                    let (restored, scope) = creation.unwrap_or_default();
+                    EditorSessionWorker::create(&root, restored, scope)
+                });
                 let result = operation(&mut worker.session);
                 let (snapshot, dirty, operations) = match &mut worker.session {
                     Ok(session) => (
@@ -377,22 +411,33 @@ impl EditorHostState {
         Ok(result)
     }
 
+    fn empty_initialize_message(zoom: u16) -> HostMessage {
+        HostMessage::InitializeEditor {
+            documents: Vec::new(),
+            active_document_id: None,
+            zoom_percent: zoom,
+            max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
+        }
+    }
+
     pub(super) async fn initialize_messages(&self) -> Vec<HostMessage> {
         let zoom = self.zoom_percent.get();
+        // Reuse the guard taken at construction so this runs before any
+        // open/edit queued by callers between `new` and the first poll here.
+        let taken = self.initialization_guard.borrow_mut().take();
+        let guard = match taken {
+            Some(guard) => guard,
+            None => self.session.clone().lock_owned().await,
+        };
         let messages = self
-            .with_session(move |session| match session {
+            .with_session_guard(guard, move |session| match session {
                 Ok(session) => session.initialize_messages(zoom),
-                Err(_) => vec![HostMessage::InitializeEditor {
-                    documents: Vec::new(),
-                    active_document_id: None,
-                    zoom_percent: zoom,
-                    max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
-                }],
+                Err(_) => vec![Self::empty_initialize_message(zoom)],
             })
             .await
             .unwrap_or_else(|error| {
                 tracing::warn!(%error);
-                Vec::new()
+                vec![Self::empty_initialize_message(zoom)]
             });
         self.stage_recovery_operations();
         messages
@@ -402,6 +447,10 @@ impl EditorHostState {
         std::mem::take(&mut *self.startup_messages.borrow_mut())
     }
 
+    /// Everything a freshly reloaded page needs after a web-process crash:
+    /// the full document set plus any still-undecided recovery proposals.
+    /// A session that never came up still gets an empty InitializeEditor so
+    /// the page leaves its pre-init state.
     pub(super) async fn reinitialize_messages(&self) -> Vec<HostMessage> {
         let zoom = self.zoom_percent.get();
         self.with_session(move |session| match session {
@@ -410,12 +459,12 @@ impl EditorHostState {
                 messages.extend(session.pending_recovery_messages());
                 messages
             }
-            Err(_) => Vec::new(),
+            Err(_) => vec![Self::empty_initialize_message(zoom)],
         })
         .await
         .unwrap_or_else(|error| {
             tracing::warn!(%error);
-            Vec::new()
+            vec![Self::empty_initialize_message(zoom)]
         })
     }
 
@@ -934,7 +983,17 @@ pub(super) async fn handle_bridge_message(
                 host.finish_flush(request_id, error.or_else(|| synchronized.err()));
             }
             message => {
-                scripts.extend(queue_host_messages(bridge, host.handle(message).await));
+                let generation = bridge.generation();
+                let replies = host.handle(message).await;
+                // The page that sent this message is gone when the bridge was
+                // reset while the file worker ran. Its replies name document ids
+                // the reloaded page never received; reinitialization resends
+                // the whole set, so drop them instead of queueing them ahead.
+                if bridge.generation() == generation {
+                    scripts.extend(queue_host_messages(bridge, replies));
+                } else {
+                    tracing::debug!("dropping editor replies for a reloaded page");
+                }
                 if host.stage_recovery_operations() {
                     schedule_recovery_flush(host);
                 }
@@ -1240,12 +1299,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialization_precedes_an_open_already_waiting_on_the_session() {
+        use std::future::Future;
+        use std::task::Poll;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("ordered.txt");
+        fs::write(&path, "original").unwrap();
+        let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+        let mut open = std::pin::pin!(host.open_document(&path));
+        std::future::poll_fn(|cx| {
+            assert!(open.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        let initialized = host.initialize_messages().await;
+        assert!(matches!(initialized.as_slice(),
+            [HostMessage::InitializeEditor { documents, .. }] if documents.is_empty()));
+        let opened = tokio::time::timeout(Duration::from_secs(2), open)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            opened.first(),
+            Some(HostMessage::OpenDocument { .. })
+        ));
+        assert_eq!(host.session_state().active_file.as_ref(), Some(&path));
+    }
+
+    #[tokio::test]
+    async fn unavailable_session_still_initializes_after_a_crash() {
+        let workspace = tempfile::tempdir().unwrap();
+        let host = EditorHostState::new(
+            &workspace.path().join("missing"),
+            EditorSessionState {
+                zoom_percent: Some(140),
+                ..Default::default()
+            },
+        );
+        let initial = host.initialize_messages().await;
+        assert_eq!(
+            initial,
+            vec![EditorHostState::empty_initialize_message(140)]
+        );
+        assert_eq!(host.reinitialize_messages().await, initial);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn crash_drops_waiting_replies_but_reinitializes_with_the_applied_edit() {
+        use std::future::Future;
+        use std::task::Poll;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("crash.txt");
+        fs::write(&path, "original").unwrap();
+        let host = Rc::new(EditorHostState::new(
+            workspace.path(),
+            EditorSessionState::default(),
+        ));
+        host.initialize_messages().await;
+        let opened = host.open_document(&path).await.unwrap();
+        let HostMessage::OpenDocument { document } = &opened[0] else {
+            panic!("missing document")
+        };
+        let bridge = EditorBridgeState::new(SurfaceId::new());
+        let raw = serde_json::json!({
+            "protocolVersion": flowmux_editor::PROTOCOL_VERSION,
+            "surfaceId": bridge.surface_id,
+            "type": "document_changed",
+            "documentId": document.id,
+            "documentVersion": document.version,
+            "changeSequence": 1,
+            "content": "unsaved before crash"
+        })
+        .to_string();
+        let guard = host.session.clone().lock_owned().await;
+        let mut dispatch = std::pin::pin!(handle_bridge_message(&bridge, &host, &raw));
+        std::future::poll_fn(|cx| {
+            assert!(dispatch.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        bridge.reset();
+        drop(guard);
+        assert!(dispatch.await.scripts.is_empty());
+        assert!(bridge.pending.borrow().is_empty());
+        let restored = host.reinitialize_messages().await;
+        assert!(
+            matches!(&restored[0], HostMessage::InitializeEditor { documents, .. }
+            if documents[0].content == "unsaved before crash" && documents[0].dirty)
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), "original");
+    }
+
+    #[tokio::test]
     async fn flush_completion_releases_the_native_close_waiter() {
         let workspace = tempfile::tempdir().unwrap();
         let host = Rc::new(EditorHostState::new(
             workspace.path(),
             EditorSessionState::default(),
         ));
+        host.initialize_messages().await;
         let bridge = EditorBridgeState::new(SurfaceId::new());
         let (request_id, completion, message) = host.start_flush();
         assert_eq!(message, HostMessage::FlushChanges { request_id });
@@ -1434,6 +1589,7 @@ mod tests {
 
         let workspace = tempfile::tempdir().unwrap();
         let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+        host.initialize_messages().await;
         for replacement in [false, true] {
             let guard = host.session.clone().lock_owned().await;
             let mut search = std::pin::pin!(host.start_workspace_search(
@@ -1469,6 +1625,7 @@ mod tests {
         let path = workspace.path().join("문서-日本語🙂.txt");
         fs::write(&path, "첫 줄\n찾을 값🙂\n").unwrap();
         let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+        host.initialize_messages().await;
 
         host.handle(EditorMessage::WorkspaceSearchRequested {
             request_id: "search-old".into(),
