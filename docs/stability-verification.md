@@ -48,3 +48,26 @@ licenses sources` passes with zero exceptions. The distribution notice was
 regenerated with the required cargo-about 0.9.2; four notice tests pass.
 Workspace build, all-target Clippy, formatting and live degraded/healthy session
 save-and-restore checks also pass on the updated dependency graph.
+
+## 3. Linux test runner lifecycle
+
+Reproduced the original behavior: terminating the `systemd-run` client left its
+service running, and caller build settings did not reach the worker. Each run
+now names its own service with a UUID and stops that service on completion,
+interrupt or timeout. Systemd kills the entire service cgroup after a five-second
+grace period. Worker signal handling unwinds its temporary state directory.
+An explicit allowlist forwards build/toolchain settings without copying agent
+context or caller registry tokens. No fallback weakens the systemd isolation.
+
+Regression review: real SIGINT/SIGTERM tests verify Cargo and a child that
+ignores SIGTERM disappear, the service becomes inactive, and temporary state
+is removed. They also check a build directory containing spaces and profile
+settings. Thirteen pre-push/runner tests cover nonzero results, timeout cleanup,
+environment filtering and cleanup failures. Cleanup failure cannot report
+success. Signal handlers are restored, and macOS retains its existing process
+ancestry strategy.
+The updated runner's real `--all` headless run also passes (1,084 tests;
+eight existing ignored tests), with the caller's separate build cache.
+
+SIGKILL cannot run Python cleanup; the independent service still has its
+960-second runtime ceiling. A failed user service manager remains an error.

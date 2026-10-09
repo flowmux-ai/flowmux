@@ -25,6 +25,12 @@ Rebuilt assets must match the committed files. Native development dependencies
 are required; editor checks also need Node.js 22 and npm, as in CI.
 Linux tests use a systemd user service to avoid inheriting a coding agent's
 process ancestry; an unavailable user service manager blocks the push.
+Each run owns a unique service. Interrupts and timeouts stop all its processes,
+including children that ignore SIGTERM. Cargo/Rust toolchain, target,
+profile, compiler and pkg-config build settings are forwarded explicitly;
+agent context and registry tokens are not forwarded from the calling shell.
+Use `python3 scripts/test-agent-unit-lifecycle.py` on Linux with a working user
+service manager to check real cancellation and build-environment forwarding.
 
 The hook does not run license checks, GUI/SSH integration, sanitizers, or another
 platform's build. Run `scripts/test-ci.sh linux` or `scripts/test-ci.sh macos`

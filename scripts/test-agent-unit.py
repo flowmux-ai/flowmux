@@ -9,6 +9,11 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
+
+
+def interrupted(signum, _frame):
+    raise SystemExit(128 + signum)
 
 
 def run_tests(all_packages=False):
@@ -34,14 +39,43 @@ def run_tests(all_packages=False):
 def main(all_packages=False):
     if sys.platform == 'linux':
         # Linux subreapers can adopt a double-forked worker under the same agent.
+        unit = 'flowmux-unit-' + uuid.uuid4().hex + '.service'
         command = ['systemd-run', '--user', '--wait', '--pipe', '--collect',
+                   '--unit=' + unit,
                    '--service-type=exec', '--property=RuntimeMaxSec=960',
-                   '--property=WorkingDirectory=' + str(Path(__file__).resolve().parents[1]),
-                   '--setenv=PATH=' + os.environ['PATH'],
-                   sys.executable, str(Path(__file__).resolve()), '--worker']
+                   '--property=TimeoutStopSec=5', '--property=KillMode=control-group',
+                   '--property=WorkingDirectory=' + str(Path(__file__).resolve().parents[1])]
+        build_env = {'PATH', 'CARGO_HOME', 'CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS',
+                     'CARGO_INCREMENTAL', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN',
+                     'RUSTC', 'RUSTDOC', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER',
+                     'RUSTFLAGS', 'RUSTDOCFLAGS', 'CARGO_ENCODED_RUSTFLAGS',
+                     'CARGO_ENCODED_RUSTDOCFLAGS', 'CC', 'CXX', 'AR',
+                     'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR', 'PKG_CONFIG_SYSROOT_DIR'}
+        for key, value in os.environ.items():
+            if key in build_env or key.startswith(('CARGO_PROFILE_', 'CARGO_TARGET_')):
+                command.append('--setenv=' + key + '=' + value)
+        command += [sys.executable, str(Path(__file__).resolve()), '--worker']
         if all_packages:
             command.append('--all')
-        return subprocess.run(command).returncode
+
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            for sig in previous:
+                signal.signal(sig, interrupted)
+            return subprocess.run(command, timeout=970).returncode
+        finally:
+            # Killing systemd-run alone leaves its independently owned service alive.
+            for sig in previous:
+                signal.signal(sig, signal.SIG_IGN)
+            try:
+                result = subprocess.run(['systemctl', '--user', 'stop', unit],
+                                        capture_output=True, text=True, timeout=15)
+                # --collect may already have unloaded a completed service.
+                if result.returncode not in (0, 5):
+                    raise RuntimeError('test service cleanup failed: ' + result.stderr)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
     # setsid alone leaves the Codex app-server among the ancestors. A short
     # intermediate process lets only our test worker be reparented to init.
     read_fd, write_fd = os.pipe()
@@ -87,9 +121,6 @@ def main(all_packages=False):
     os.waitpid(intermediate, 0)
     with os.fdopen(read_fd) as result_stream:
         worker = int(result_stream.readline())
-        def interrupted(signum, _frame):
-            raise SystemExit(128 + signum)
-
         previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
             for sig in previous:
@@ -111,6 +142,8 @@ def main(all_packages=False):
 
 if __name__ == "__main__":
     if sys.argv[1:] in (["--worker"], ["--worker", "--all"]):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, interrupted)
         raise SystemExit(run_tests(all_packages='--all' in sys.argv[1:]))
     if sys.argv[1:] not in ([], ["--all"]):
         raise SystemExit('Usage: test-agent-unit.py [--all]')
