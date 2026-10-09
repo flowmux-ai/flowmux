@@ -64,7 +64,7 @@ impl World {
             .rooms
             .iter()
             .filter(|r| self.selected.is_none_or(|id| id == r.id))
-            .map(|r| r.plan.width * r.plan.height)
+            .map(|r| r.members.len().max(2) as f64)
             .collect();
         let mut bounds = layout::tiles(
             &weights,
@@ -102,12 +102,19 @@ impl World {
                 rect.y + 2.0,
                 header_scale,
             );
-            room.scale = ((rect.w - 12.0).max(1.0) / room.plan.width)
-                .min((rect.h - header - 12.0).max(1.0) / room.plan.height);
-            room.origin = (
-                rect.x + (rect.w - room.plan.width * room.scale) / 2.0,
-                rect.y + header + (rect.h - header - room.plan.height * room.scale) / 2.0,
-            );
+            let inner_width = (rect.w - 2.0).max(1.0);
+            let inner_height = (rect.h - header - 2.0).max(1.0);
+            let aspect = inner_width / inner_height;
+            if (room.plan.width / room.plan.height - aspect).abs() > 0.000_001 {
+                room.plan = Rc::new(Plan::fit(room.members.len(), room.design, aspect));
+                for (slot, id) in room.members.iter().enumerate() {
+                    if let Some(resident) = self.residents.get_mut(id) {
+                        resident.actor.replan(slot, room.plan.clone());
+                    }
+                }
+            }
+            room.scale = inner_width / room.plan.width;
+            room.origin = (rect.x + 1.0, rect.y + header + 1.0);
             for id in &room.members {
                 if let Some(resident) = self.residents.get(id) {
                     place_resident(stage, resident, room);

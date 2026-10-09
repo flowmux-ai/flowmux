@@ -102,6 +102,15 @@ def main():
             Image.frombytes("RGB", (geometry.width, geometry.height), raw.data,
                             "raw", "BGRX").save(h.root / f"{name}.png")
 
+        def packed_floor(name):
+            screenshot(name)
+            geometry = native_window().get_geometry()
+            picture = Image.open(h.root / f"{name}.png")
+            floor = picture.crop((4, 92, geometry.width - 4, geometry.height - 44))
+            pixels = floor.width * floor.height
+            empty = sum(count for count, color in floor.getcolors(pixels) if color == (17, 25, 35))
+            assert empty / pixels < .03, f"Offices leave {empty / pixels:.1%} unused space"
+
         studio_root = h.root / "Product studio"
         quiet_root = h.root / "Quiet corner"
         studio_root.mkdir()
@@ -224,7 +233,7 @@ def main():
                     return False
             return True
         gui.wait_for(all_rooms_visible, "all eight offices fit in one viewport")
-        screenshot("eight-offices")
+        packed_floor("eight-offices")
         # Real disposable agent processes exercise density without touching user sessions.
         for index in range(29):
             name = ("codex", "claude", "gemini")[index % 3]
@@ -233,7 +242,7 @@ def main():
             report((name, tab["pane"], tab["id"]), "working")
         gui.wait_for(lambda: any("32 teammates" in n.get_name() for n in nodes()), "32 agents in shared office")
         gui.wait_for(all_rooms_visible, "dense office leaves every other room visible")
-        screenshot("dense-all-offices")
+        packed_floor("dense-all-offices")
         click(room("Product studio"))
         time.sleep(.5)
         screenshot("dense-office-detail")
@@ -245,7 +254,7 @@ def main():
             connection.sync()
             gui.wait_for(lambda: native_window().get_geometry().width == width, "native resize")
             gui.wait_for(all_rooms_visible, "every office fits after resize")
-            screenshot(f"resized-{width}x{height}")
+            packed_floor(f"resized-{width}x{height}")
         # Removing the disposable tab should announce departure, not disappear silently.
         ended_actor = next(n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                            and n.get_name().startswith("gemini · ")

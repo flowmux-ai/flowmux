@@ -62,6 +62,8 @@ Click a notification to jump straight back to that agent.
 Open **AgentOffice** immediately left of **Agents bar** in the scrollable footer
 of the side panel. Options stays fixed at the far left.
 All workspaces fit into one adaptive map, with more space and seats for larger teams.
+Rooms share adjoining boundaries, and their furniture reflows to fill each room's
+shape without stretching characters or leaving gaps between offices.
 Office signs follow workspace names live. Select a sign to enlarge that office,
 or **All offices** to fit the whole map again. The design button cycles through
 24 furnished designs: six themes with four spatial layouts each.

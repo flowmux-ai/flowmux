@@ -81,18 +81,58 @@ pub(super) struct Plan {
 
 impl Plan {
     pub fn new(count: usize, design: usize) -> Self {
+        Self::build(count, design, None)
+    }
+
+    pub fn fit(count: usize, design: usize, aspect: f64) -> Self {
+        Self::build(count, design, Some(aspect))
+    }
+
+    fn build(count: usize, design: usize, aspect: Option<f64>) -> Self {
         let capacity = count.max(2);
         let vertical = design % 4 >= 2;
-        let cols = ((capacity as f64 * if vertical { 2.0 } else { 0.7 })
-            .sqrt()
-            .ceil() as usize)
-            .max(2);
-        let rows = capacity.div_ceil(cols);
+        let dimensions = |cols: usize| {
+            let zone_w = cols as f64 * 96.0 + 16.0;
+            let zone_h = capacity.div_ceil(cols) as f64 * 128.0 + 16.0;
+            if vertical {
+                (zone_w + 32.0, zone_h * 2.0 + 128.0)
+            } else {
+                (zone_w * 2.0 + 48.0, zone_h + 96.0)
+            }
+        };
+        let cols = if let Some(aspect) = aspect {
+            // Choose rows and columns before sizing the room; never stretch the artwork.
+            (2..=capacity)
+                .min_by(|&a, &b| {
+                    let (aw, ah) = dimensions(a);
+                    let (bw, bh) = dimensions(b);
+                    (aw / aspect).max(ah).total_cmp(&(bw / aspect).max(bh))
+                })
+                .unwrap()
+        } else {
+            ((capacity as f64 * if vertical { 2.0 } else { 0.7 })
+                .sqrt()
+                .ceil() as usize)
+                .max(2)
+        };
+        let (mut width, mut height) = dimensions(cols);
+        if let Some(aspect) = aspect {
+            width = width.max(height * aspect);
+            height = width / aspect;
+        }
         let zone = Rect {
             x: 16.0,
             y: 64.0,
-            w: cols as f64 * 96.0 + 16.0,
-            h: rows as f64 * 128.0 + 16.0,
+            w: if vertical {
+                width - 32.0
+            } else {
+                (width - 48.0) / 2.0
+            },
+            h: if vertical {
+                (height - 128.0) / 2.0
+            } else {
+                height - 96.0
+            },
         };
         let other = if vertical {
             Rect {
@@ -109,16 +149,6 @@ impl Plan {
             (zone, other)
         } else {
             (other, zone)
-        };
-        let width = if vertical {
-            zone.w + 32.0
-        } else {
-            zone.w * 2.0 + 48.0
-        };
-        let height = if vertical {
-            zone.h * 2.0 + 128.0
-        } else {
-            zone.h + 96.0
         };
         let grid_width = width as usize / 8 + 1;
         let grid_height = height as usize / 8 + 1;
@@ -165,10 +195,11 @@ impl Plan {
     }
 
     fn seat(&self, zone: Rect, slot: usize) -> (f64, f64) {
-        (
-            zone.x + 48.0 + (slot % self.cols) as f64 * 96.0,
-            zone.y + 104.0 + (slot / self.cols) as f64 * 128.0,
-        )
+        let pitch_x = (zone.w - 16.0) / self.cols as f64;
+        let pitch_y = (zone.h - 16.0) / self.capacity.div_ceil(self.cols) as f64;
+        let x = zone.x + pitch_x * (slot % self.cols) as f64 + pitch_x / 2.0;
+        let y = zone.y + pitch_y * (slot / self.cols) as f64 + 104.0 + (pitch_y - 128.0) / 2.0;
+        ((x / 8.0).round() * 8.0, (y / 8.0).round() * 8.0)
     }
     pub fn desk(&self, slot: usize) -> (f64, f64) {
         self.seat(self.work, slot)
@@ -260,6 +291,7 @@ mod tests {
                     },
                 );
                 assert_eq!(rooms.len(), count);
+                assert!((rooms.iter().map(|r| r.w * r.h).sum::<f64>() - w * h).abs() < 0.001);
                 for (i, a) in rooms.iter().enumerate() {
                     assert!(
                         a.w > 0.0 && a.h > 0.0 && a.x + a.w <= w + 0.001 && a.y + a.h <= h + 0.001
@@ -271,6 +303,37 @@ mod tests {
                                 || a.y + a.h <= b.y + 0.001
                                 || b.y + b.h <= a.y + 0.001
                         );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn fitted_offices_fill_their_tiles_and_keep_clear_routes() {
+        for design in 0..4 {
+            for count in [2, 32, 100] {
+                for aspect in [0.4, 1.0, 2.4] {
+                    let plan = Plan::fit(count, design, aspect);
+                    assert!((plan.width / plan.height - aspect).abs() < 0.000_001);
+                    let mut seats = std::collections::HashSet::new();
+                    for slot in 0..count {
+                        for status in [
+                            AgentStatus::Working,
+                            AgentStatus::Blocked,
+                            AgentStatus::Done,
+                            AgentStatus::Idle,
+                        ] {
+                            let end = plan.destination(slot, status, false);
+                            assert!(seats.insert((end.0 as i32, end.1 as i32)));
+                            let path = plan.route(plan.desk(slot), end);
+                            assert_eq!(path.back(), Some(&end));
+                            for (x, y) in path {
+                                assert!(
+                                    plan.walkable
+                                        [y as usize / 8 * plan.grid_width + x as usize / 8]
+                                );
+                            }
+                        }
                     }
                 }
             }

@@ -130,7 +130,7 @@ pub(super) fn draw_room(cr: &Context, plan: &Plan, design: usize, actors: &[&Act
     let (w, h) = (plan.width, plan.height);
     cr.set_antialias(gtk::cairo::Antialias::None);
     rect(cr, 0.0, 0.0, w, h, 0x17212b);
-    rect(cr, 8.0, 8.0, w - 16.0, h - 16.0, floor);
+    rect(cr, 2.0, 2.0, w - 4.0, h - 4.0, floor);
     for row in 0..((h - 56.0) / 16.0) as usize {
         let y = 56.0 + row as f64 * 16.0;
         rect(cr, 8.0, y, w - 16.0, 1.0, seam);
@@ -141,7 +141,7 @@ pub(super) fn draw_room(cr: &Context, plan: &Plan, design: usize, actors: &[&Act
             }
         }
     }
-    rect(cr, 8.0, 8.0, w - 16.0, 48.0, wall);
+    rect(cr, 2.0, 2.0, w - 4.0, 54.0, wall);
     rect(cr, 8.0, 53.0, w - 16.0, 3.0, 0x25313e);
     rect(cr, plan.rest.x, plan.rest.y, plan.rest.w, plan.rest.h, rug);
     for x in [plan.rest.x + 3.0, plan.rest.x + plan.rest.w - 4.0] {
