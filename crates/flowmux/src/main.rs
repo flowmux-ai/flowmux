@@ -8,6 +8,7 @@
 
 mod activity;
 mod bridge;
+mod browser_automation;
 mod builtin_icons;
 mod ipc_handler;
 mod keybindings;
@@ -81,6 +82,7 @@ fn main() -> anyhow::Result<()> {
     if delegate_to_cli_if_needed()? {
         return Ok(());
     }
+    let webkit_automation = browser_automation::requested()?;
     let first_screen = is_first_screen(&std::env::args_os().skip(1).collect::<Vec<_>>());
 
     #[cfg(target_os = "linux")]
@@ -367,6 +369,12 @@ fn main() -> anyhow::Result<()> {
             Some(tokio_handle_for_activate.clone()),
         );
         controller.use_shared_notifier(shared_notifier_for_activate.clone());
+        #[cfg(target_os = "linux")]
+        if webkit_automation {
+            controller.enable_webkit_automation();
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = webkit_automation;
         if let Some(error) = session_save_error.as_deref() {
             controller.show_session_save_error(error);
         }
@@ -383,7 +391,9 @@ fn main() -> anyhow::Result<()> {
         gtk::glib::MainContext::default().spawn_local(async move {
             controller_for_init.restore_from_store().await;
             controller_for_init.show_status_when_empty();
-            ui::welcome::present_if_needed(&controller_for_init.window, first_screen);
+            if !webkit_automation {
+                ui::welcome::present_if_needed(&controller_for_init.window, first_screen);
+            }
         });
         *active_window_for_activate.borrow_mut() = Some(controller.window.downgrade());
         controller.window.present();

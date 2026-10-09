@@ -124,6 +124,12 @@ flowmux browser title pane:$PANE
 
 ## When the task really needs Playwright / Puppeteer
 
+For Linux tasks requiring trusted input through WebKit, see
+[WebKitWebDriver automation](docs/webkit-automation.md). This opt-in mode creates
+separate ephemeral Flowmux browser windows for WebDriver clients. It requires
+an input-enabled WebKitGTK build, does not attach to existing pane tabs, and does
+not change the input implementation of the browser CLI below.
+
 The in-app browser runs on WebKitGTK 6 (Linux) or WKWebView (macOS),
 neither of which exposes the Chrome
 DevTools Protocol. If a task strictly requires CDP-only features

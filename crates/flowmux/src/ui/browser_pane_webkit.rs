@@ -73,8 +73,6 @@ impl BrowserPane {
         engine: BrowserEngine,
         persist_session: bool,
     ) -> Self {
-        let pane_id = Rc::new(Cell::new(id));
-        let navigation_enabled = Rc::new(Cell::new(true));
         // BrowserEngine labels affect only WebsiteDataStore isolation, matching
         // upstream cmux. Every tab renders through the same WebKitGTK engine.
         // Map them 1:1 to flowmux-browser::BrowserProfile to split data dirs.
@@ -95,6 +93,30 @@ impl BrowserPane {
             // more immediately after build.
             .is_muted(false)
             .build();
+        Self::with_web_view(
+            id,
+            surface_id,
+            initial_url.or(Some("about:blank")),
+            callbacks,
+            web_view,
+            profile,
+        )
+    }
+
+    /// None leaves a supplied view's pending navigation (such as window.open) intact.
+    pub(crate) fn with_web_view(
+        id: PaneId,
+        surface_id: SurfaceId,
+        initial_url: Option<&str>,
+        callbacks: PaneCallbacks,
+        web_view: webkit6::WebView,
+        profile: BrowserProfile,
+    ) -> Self {
+        let pane_id = Rc::new(Cell::new(id));
+        let navigation_enabled = Rc::new(Cell::new(true));
+        let network_session = web_view
+            .network_session()
+            .expect("WebView has a network session");
         webkit6::prelude::WebViewExt::set_is_muted(&web_view, false);
         web_view.set_hexpand(true);
         web_view.set_vexpand(true);
@@ -171,7 +193,7 @@ impl BrowserPane {
             tracing::warn!("WebView::settings() returned None — media options skipped");
         }
 
-        {
+        if !web_view.is_controlled_by_automation() {
             let pane_id = pane_id.clone();
             let open_url = callbacks.on_open_url.clone();
             let navigation_enabled = navigation_enabled.clone();
@@ -306,7 +328,9 @@ impl BrowserPane {
         bookmarks.button.set_tooltip_text(Some(&format!(
             "Bookmarks\nProfile: {}\n{}",
             profile.display_name(),
-            if persist_session {
+            if web_view.is_controlled_by_automation() {
+                "Cookies and site data are discarded when this WebDriver session ends"
+            } else if !network_session.is_ephemeral() {
                 "Cookies and site data are saved in this browser profile"
             } else {
                 "Cookies and site data are discarded when flowmux exits"
@@ -594,8 +618,6 @@ impl BrowserPane {
             let normalized = normalize_uri(url);
             address.set_text(&normalized);
             web_view.load_uri(&normalized);
-        } else {
-            web_view.load_uri("about:blank");
         }
 
         Self {

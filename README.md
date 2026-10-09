@@ -64,6 +64,10 @@ Browse next to your terminals, or let your agents do it. With the
 and click through it in a pane you can watch. Browser tabs share WebKit
 session data within each flowmux profile, separately from your host browsers.
 
+Linux also offers opt-in [WebKitWebDriver automation](docs/webkit-automation.md)
+for Selenium clients and engine-level mouse/keyboard input in ephemeral browser
+windows. It requires a WebKitGTK runtime built with WebDriver input enabled.
+
 <img src="resources/screenshot/video_control_browser.gif" alt="browser control" width="100%" />
 
 ### Split panes and overview mode

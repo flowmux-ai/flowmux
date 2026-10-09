@@ -79,6 +79,10 @@ sources. Neither exposes CDP. Browser engine labels select profiles; they do
 not switch to Chrome or Firefox. Host-cookie extraction is separate from
 WebView insertion, which is not implemented.
 
+Opt-in Linux WebKitWebDriver sessions use separate ephemeral browser windows;
+see [WebKit automation](docs/webkit-automation.md) for runtime requirements and
+the native-input smoke test. Regular pane CLI input remains JavaScript-based.
+
 The image viewer loads ThorVG dynamically through `ui/thorvg.rs`; missing
 ThorVG affects the viewer, not the application build. The helper script builds
 v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
