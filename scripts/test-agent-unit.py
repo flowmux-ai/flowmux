@@ -5,28 +5,43 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 
 
-def run_tests():
+def run_tests(all_packages=False):
     with tempfile.TemporaryDirectory(prefix="fm-unit-", dir="/tmp") as directory:
         root = Path(directory)
         env = {k: v for k, v in os.environ.items() if not k.startswith("FLOWMUX_")}
-        for key, child in [("FLOWMUX_RUNTIME_DIR", "run"), ("XDG_CONFIG_HOME", "config"),
+        for key, child in [("FLOWMUX_RUNTIME_DIR", "run"), ("XDG_RUNTIME_DIR", "run"),
+                           ("XDG_CONFIG_HOME", "config"),
                            ("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state"),
                            ("XDG_CACHE_HOME", "cache")]:
-            (root / child).mkdir(mode=0o700)
+            (root / child).mkdir(mode=0o700, exist_ok=True)
             env[key] = str(root / child)
+        command = ["cargo", "test", "--locked"]
+        if not all_packages:
+            command += ["--lib", "--bins", "-p", "flowmux-core", "-p", "flowmux-daemon",
+                        "-p", "flowmux-cli", "-p", "flowmux-procmon"]
         return subprocess.run(
-            ["cargo", "test", "--locked", "--lib", "--bins", "-p", "flowmux-core",
-             "-p", "flowmux-daemon", "-p", "flowmux-cli", "-p", "flowmux-procmon"],
+            command,
             cwd=Path(__file__).resolve().parents[1], env=env, timeout=900,
         ).returncode
 
 
-def main():
+def main(all_packages=False):
+    if sys.platform == 'linux':
+        # Linux subreapers can adopt a double-forked worker under the same agent.
+        command = ['systemd-run', '--user', '--wait', '--pipe', '--collect',
+                   '--service-type=exec', '--property=RuntimeMaxSec=960',
+                   '--property=WorkingDirectory=' + str(Path(__file__).resolve().parents[1]),
+                   '--setenv=PATH=' + os.environ['PATH'],
+                   sys.executable, str(Path(__file__).resolve()), '--worker']
+        if all_packages:
+            command.append('--all')
+        return subprocess.run(command).returncode
     # setsid alone leaves the Codex app-server among the ancestors. A short
     # intermediate process lets only our test worker be reparented to init.
     read_fd, write_fd = os.pipe()
@@ -54,7 +69,7 @@ def main():
                 if time.monotonic() > deadline:
                     raise RuntimeError("test worker was not reparented")
                 time.sleep(.01)
-            result = run_tests()
+            result = run_tests(all_packages)
         except Exception as error:
             print(f"agent unit runner failed: {error}", flush=True)
         finally:
@@ -95,4 +110,8 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if sys.argv[1:] in (["--worker"], ["--worker", "--all"]):
+        raise SystemExit(run_tests(all_packages='--all' in sys.argv[1:]))
+    if sys.argv[1:] not in ([], ["--all"]):
+        raise SystemExit('Usage: test-agent-unit.py [--all]')
+    raise SystemExit(main(all_packages=sys.argv[1:] == ["--all"]))

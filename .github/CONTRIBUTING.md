@@ -7,6 +7,30 @@ Keep changes focused, run
 `cargo fmt --all`, Clippy with warnings denied, and the locked workspace test
 suite before committing. Contributions are licensed under GPL-3.0-or-later.
 
+Enable the versioned pre-push hook once per clone:
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+Check for an existing `core.hooksPath` or `.git/hooks/pre-push` before enabling
+it; preserve any existing hooks. The hook requires a clean working tree
+(including untracked files) and validates the checked-out commit being pushed.
+Push other commits separately after checking them out. Ref deletions need no
+checks. It runs formatting, locked Clippy for all workspace targets, and the
+headless workspace tests with isolated state and process ancestry. Editor
+changes also run `npm ci`, coverage tests, build, and asset verification; new
+remote refs or unavailable remote commits conservatively run these checks too.
+Rebuilt assets must match the committed files. Native development dependencies
+are required; editor checks also need Node.js 22 and npm, as in CI.
+Linux tests use a systemd user service to avoid inheriting a coding agent's
+process ancestry; an unavailable user service manager blocks the push.
+
+The hook does not run license checks, GUI/SSH integration, sanitizers, or another
+platform's build. Run `scripts/test-ci.sh linux` or `scripts/test-ci.sh macos`
+for the full local gate, and require CI before merging to `main`. Local hooks
+can be bypassed and do not replace branch protection.
+
 When `Cargo.lock` or dependency license policy changes, install `cargo-about 0.9.2`
 and refresh the checked-in inventory with
 `scripts/generate-third-party-licenses.py`. Editor frontend changes use the
