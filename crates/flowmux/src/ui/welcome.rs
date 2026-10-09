@@ -240,6 +240,19 @@ mod tests {
         use crate::keybindings::{accelerator_label, install_accels};
         use flowmux_config::{keybindings::default_accels, options::Options};
 
+        struct RestoreDefault(Option<gtk::gio::Application>);
+        impl Drop for RestoreDefault {
+            fn drop(&mut self) {
+                if let Some(app) = &self.0 {
+                    app.set_default();
+                } else {
+                    // The safe binding cannot restore a null default application.
+                    unsafe { gtk::gio::ffi::g_application_set_default(std::ptr::null_mut()) };
+                }
+            }
+        }
+        let previous = gtk::gio::Application::default();
+        let restore = RestoreDefault(previous.clone());
         adw::init().unwrap();
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.WelcomeShortcuts")
@@ -274,6 +287,8 @@ mod tests {
         install_accels(&app, &options);
         assert!(shortcut_text(PAGES[1].actions).is_empty());
         assert!(shortcut_text(PAGES[0].actions).is_empty());
+        drop(restore);
+        assert_eq!(gtk::gio::Application::default(), previous);
     }
 
     #[test]

@@ -205,3 +205,18 @@ or user installation was performed. Local detailed evidence is retained in
 `/tmp/flowmux-stability-ci-final.log`, `-pid-before.log`, `-pid-after.log`,
 `-inspector-before.log`, `-inspector-after.log` and `-webdriver-lifecycle.log`
 (the latter names share the `/tmp/flowmux-stability` prefix).
+
+## Main integration verification
+
+Replayed the six stability commits on main through `5d435938`. The first
+combined GUI run exposed global application state left by the welcome shortcut
+test: two later pane-tooltip tests incorrectly inherited its accelerators.
+The welcome test now restores the previous default application on both normal
+return and panic, and asserts restoration. Existing tooltip assertions remain
+unchanged; no runtime behavior was modified by this integration fix.
+
+The complete rerun passed (`CI_GATE_EXIT=0`): 1,845 Rust tests passed, zero
+failed, eight existing ignored, and 42 live checks passed. Coverage was
+83.08% regions, 82.60% functions and 83.60% lines. The earlier
+LLVM function-data warning still applies. The log is retained at
+`/tmp/flowmux-stability-main-ci-current.log`.
