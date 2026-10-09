@@ -1147,7 +1147,9 @@ mod tests {
             active.as_ref().unwrap().cards[0].texture.clone().unwrap()
         };
         let marker_pixels = texture_bytes(&overview_texture)
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| pixel[0] > 240 && pixel[1] < 15 && pixel[2] > 240)
             .count();
         assert!(

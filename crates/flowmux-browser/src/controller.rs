@@ -27,6 +27,9 @@ pub enum BrowserError {
     Transport(String),
 }
 
+// `async_trait` adds `#[must_use]` to each generated `Pin<Box<dyn Future>>`
+// method; rustc 1.99's clippy flags that as redundant on a `Result` future.
+#[allow(clippy::double_must_use)]
 #[async_trait(?Send)]
 pub trait BrowserController {
     // ---- navigation ----------------------------------------------------

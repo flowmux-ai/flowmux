@@ -278,8 +278,10 @@ fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
     let rgba = image.to_rgba8();
     let (source_width, source_height) = rgba.dimensions();
     let source_pixels = rgba
-        .chunks_exact(4)
-        .map(|px| u32::from_le_bytes([px[0], px[1], px[2], px[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|px| u32::from_le_bytes(*px))
         .collect::<Vec<_>>();
     let (width, height) = fit_size(source_width, source_height);
 

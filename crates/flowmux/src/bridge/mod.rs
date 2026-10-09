@@ -848,6 +848,8 @@ impl Bridge {
     /// Status reads and hook telemetry can run while a layout mutation waits
     /// for I/O or confirmation. These commands cannot close or replace widgets.
     /// Keep other effects on the ordered lane, including raw JS.
+    // `SendError` hands the unsent `GtkCommand` back; callers rely on that.
+    #[allow(clippy::result_large_err)]
     pub async fn send(
         &self,
         command: GtkCommand,
@@ -874,6 +876,7 @@ impl Bridge {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub async fn send_priority(
         &self,
         command: GtkCommand,
