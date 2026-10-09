@@ -28,6 +28,7 @@ def main():
     args.gui = str(Path(args.gui).resolve(strict=True))
     args.cli = str(Path(args.cli).resolve(strict=True))
     h = gui.Harness(args)
+    h.env["NO_COLOR"] = "1"
     try:
         shell = h.root / "clean-shell"
         shell.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")
@@ -40,12 +41,13 @@ def main():
         workspace = h.rpc(path, "workspace_create", name="Recovery", root=str(h.root))["workspace_created"]["id"]
         pane = h.workspace(path, workspace)["panes"][0]["id"]
         h.rpc(path, "workspace_focus", workspace=workspace)
-        h.send(path, pane, "printf 'ready-for-ipc-test\\n'")
+        h.send(path, pane, "printf 'ready-for-ipc-%s\\n' test")
         gui.wait_for(lambda: "ready-for-ipc-test" in h.screen(path, pane), "terminal ready")
         time.sleep(1)
         before = h.tree(path)
         log = h.root / "ipc-recovery.log"
         for endpoint in (path, Path(str(path) + ".ctl")):
+            control = "true" if endpoint != path else "false"
             with socket.socket(socket.AF_UNIX) as admitted, ExitStack() as connections:
                 admitted.settimeout(3)
                 admitted.connect(str(path))
@@ -57,9 +59,11 @@ def main():
                 # Keep poll() valid; fill the spare slots with admitted connections.
                 limits = resource.prlimit(process.pid, resource.RLIMIT_NOFILE)
                 offset = log.stat().st_size
+                started = time.monotonic()
                 try:
                     limit = max(int(fd.name) for fd in Path(f"/proc/{process.pid}/fd").iterdir()) + 8
                     resource.prlimit(process.pid, resource.RLIMIT_NOFILE, (limit, limits[1]))
+                    # Fill regular admission so queued probes cannot hit the control pool's cap.
                     for _ in range(32):
                         pending = connections.enter_context(socket.socket(socket.AF_UNIX))
                         pending.settimeout(3)
@@ -69,6 +73,9 @@ def main():
                     pending.settimeout(3)
                     pending.connect(str(endpoint))
                     pending.sendall(ping)
+                    gui.wait_for(lambda: any(
+                        "IPC accept failed; retrying" in line and f"control={control}" in line
+                        for line in log.read_text()[offset:].splitlines()), "target listener accept failure", timeout=3)
                     time.sleep(.4)
                     admitted.sendall(ping)
                     assert "pong" in json.loads(reader.readline()), "admitted requests stopped"
@@ -77,7 +84,7 @@ def main():
                 with pending.makefile("rb") as response:
                     assert "pong" in json.loads(response.readline()), "listener did not recover"
                 errors = log.read_text()[offset:].count("IPC accept failed; retrying")
-                assert 1 <= errors <= 15, f"accept retries missing or spinning: {errors}"
+                assert 1 <= errors <= (time.monotonic() - started) * 10 + 2, f"accept retries missing or spinning: {errors}"
             assert process.poll() is None
             assert h.tree(path) == before, "FD exhaustion changed the workspace"
             assert "pong" in h.rpc(Path(str(path) + ".ctl"), "ping")

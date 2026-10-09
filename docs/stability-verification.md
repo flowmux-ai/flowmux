@@ -220,3 +220,22 @@ failed, eight existing ignored, and 42 live checks passed. Coverage was
 83.08% regions, 82.60% functions and 83.60% lines. The earlier
 LLVM function-data warning still applies. The log is retained at
 `/tmp/flowmux-stability-main-ci-current.log`.
+
+## IPC recovery regression follow-up
+
+Main already contains the accept-retry implementation in `8aef7efe`. Applied
+the remaining regression-test improvements from `9782151a` on top of `57a40caa`.
+Each socket must log its own accept failure before restoring resource limits;
+console colors are disabled so this check works in systemd services too.
+The readiness marker requires actual shell execution, and the retry-count
+limit accounts for elapsed time instead of assuming a fixed test duration.
+Runtime code and Linux coverage-gate wiring are unchanged.
+
+Verification passed with `VERIFY_EXIT=0`: workspace formatting, all-target
+Clippy with warnings denied, the complete locked workspace test suite (zero
+failures, eight existing ignored), and 11 live GUI checks covering both IPC
+listeners, PTY allocation failure, session save/restore and PID reuse.
+The run used a private systemd service, display and state with the installed
+AppArmor profile. No regression was found; the active user GUI stayed alive.
+The log is retained in `.worktrees/ipc-main-regression/target/review/verify.log`.
+The full coverage/SSH gate and macOS checks were not rerun for this follow-up.
