@@ -606,8 +606,8 @@ fn build_update_tab(
     initial_state: BannerState,
     on_check: Rc<dyn Fn(UpdateCheckCompletion) -> bool>,
     on_update: Rc<dyn Fn(Version) -> bool>,
-) -> gtk::Box {
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+) -> gtk::ScrolledWindow {
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 24);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
     page.set_margin_start(20);
@@ -859,7 +859,11 @@ fn build_update_tab(
         });
     }
 
-    page
+    page.append(&super::integration_status::build());
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&page)
+        .build()
 }
 
 fn show_about_popup(parent: &impl IsA<gtk::Widget>) {

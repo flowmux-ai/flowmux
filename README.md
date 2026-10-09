@@ -35,6 +35,17 @@ Codex users must approve changed hooks in `/hooks`.
 
 Uninstall: `sudo apt remove flowmux`.
 
+On first launch, Flowmux shows a six-page welcome tour with screenshots of
+notifications, pane splitting, session history, search, Files and the editor,
+and workspace overview. Use `flowmux --first-screen` to show it again.
+
+For read-only integration diagnostics, open **Options → Update → Integration
+status → Run diagnostics**, or run `flowmux doctor` (`flowmux --json doctor`
+for scripts). Both check agent skills and hooks, IPC connectivity, browser data,
+and desktop installation. Rows tagged `fix` can be repaired with `flowmux fix`;
+errors include details for manual investigation. The CLI exits with status 1
+for `fix` or `error` rows; warnings alone do not change its exit status.
+
 ## Features
 
 ### Agent notifications

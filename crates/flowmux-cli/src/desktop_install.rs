@@ -186,6 +186,9 @@ fn check_text(path: &Path, expected: &str) -> AssetStatus {
 /// installs keep both binaries together; distro and Flatpak installs place the
 /// helper under `<prefix>/lib/flowmux/` and the GUI under `<prefix>/bin/`.
 fn paired_flowmux_executable(flowmuxctl: &Path) -> Option<PathBuf> {
+    if flowmuxctl.file_name()? == "flowmux" {
+        return Some(flowmuxctl.to_path_buf());
+    }
     if flowmuxctl.file_name()? != "flowmuxctl" {
         return None;
     }
@@ -374,6 +377,10 @@ mod tests {
 
     #[test]
     fn paired_gui_path_covers_local_and_private_helper_layouts() {
+        assert_eq!(
+            paired_flowmux_executable(Path::new("/home/u/.local/bin/flowmux")),
+            Some(PathBuf::from("/home/u/.local/bin/flowmux"))
+        );
         assert_eq!(
             paired_flowmux_executable(Path::new("/home/u/.local/bin/flowmuxctl")),
             Some(PathBuf::from("/home/u/.local/bin/flowmux"))

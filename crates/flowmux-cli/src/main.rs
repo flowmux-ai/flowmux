@@ -19,12 +19,9 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use flowmux_cli::agent;
+use flowmux_cli::{agent, doctor, hook_install};
 mod cmd_hooks;
 mod cmd_ops;
-mod desktop_install;
-mod doctor;
-mod hook_install;
 mod hooks;
 mod keys;
 mod output;
@@ -75,7 +72,8 @@ fn resolve_workspace(workspace: Option<WorkspaceId>) -> anyhow::Result<Workspace
 #[command(
     name = "flowmux",
     version,
-    about = "Linux/GTK4 terminal for AI coding agents"
+    about = "Linux/GTK4 terminal for AI coding agents",
+    after_help = "Launch the GUI welcome tour with: flowmux --first-screen"
 )]
 struct Cli {
     /// Override the daemon socket path. Defaults to `FLOWMUX_SOCKET_PATH`

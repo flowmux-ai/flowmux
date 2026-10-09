@@ -142,6 +142,10 @@ class Harness:
         self.env["DBUS_SESSION_BUS_ADDRESS"] = bus.stdout.readline().decode().strip()
 
     def window(self, name):
+        # These fixtures exercise the workspace UI, after onboarding.
+        marker = self.root / "state/flowmux/welcome-seen"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
         with (self.root / f"{name}.log").open("w") as log:
             process = self.spawn([self.args.gui], stdout=log, stderr=log, cwd=self.root)
         path = self.root / f"run/flowmux-{process.pid}.sock"

@@ -81,6 +81,7 @@ fn main() -> anyhow::Result<()> {
     if delegate_to_cli_if_needed()? {
         return Ok(());
     }
+    let first_screen = is_first_screen(&std::env::args_os().skip(1).collect::<Vec<_>>());
 
     #[cfg(target_os = "linux")]
     install_gtk_wayland_surface_workaround();
@@ -382,6 +383,7 @@ fn main() -> anyhow::Result<()> {
         gtk::glib::MainContext::default().spawn_local(async move {
             controller_for_init.restore_from_store().await;
             controller_for_init.show_status_when_empty();
+            ui::welcome::present_if_needed(&controller_for_init.window, first_screen);
         });
         *active_window_for_activate.borrow_mut() = Some(controller.window.downgrade());
         controller.window.present();
@@ -396,7 +398,8 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    let exit_code = app.run();
+    // GUI-only flags must not reach GApplication's option parser.
+    let exit_code = app.run_with_args::<&str>(&[]);
     drop(rt);
     let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_file(flowmux_ipc::control_socket_path(&socket));
@@ -647,7 +650,7 @@ fn flowmuxctl_program() -> PathBuf {
 
 fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if args.is_empty() {
+    if args.is_empty() || is_first_screen(&args) {
         return Ok(false);
     }
 
@@ -674,6 +677,10 @@ fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
     }
 
     Ok(true)
+}
+
+fn is_first_screen(args: &[OsString]) -> bool {
+    args.len() == 1 && args[0] == "--first-screen"
 }
 
 /// True when IBus advertises a live Unix socket. A stale daemon can keep
@@ -728,6 +735,17 @@ mod tests {
     use super::*;
     #[cfg(not(target_os = "macos"))]
     use gtk::gio::ApplicationFlags;
+
+    #[test]
+    fn first_screen_is_a_standalone_gui_flag() {
+        assert!(is_first_screen(&["--first-screen".into()]));
+        assert!(!is_first_screen(&[]));
+        assert!(!is_first_screen(&["doctor".into()]));
+        assert!(!is_first_screen(&[
+            "send-keys".into(),
+            "--first-screen".into()
+        ]));
+    }
 
     struct NotificationOpenHandler(tokio::sync::mpsc::Sender<flowmux_core::NotificationId>);
 

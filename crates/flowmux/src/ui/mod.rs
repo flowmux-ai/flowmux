@@ -7,6 +7,7 @@ pub mod editor_pane;
 pub mod file_browser;
 pub mod ghostty_pane;
 pub mod image_viewer;
+mod integration_status;
 pub mod keybindings_panel;
 #[cfg(target_os = "macos")]
 pub mod macos_ime;
@@ -26,6 +27,7 @@ pub mod thorvg;
 pub mod update_banner;
 pub(crate) mod usage_bar;
 pub mod usage_popover;
+pub(crate) mod welcome;
 pub mod window;
 pub mod workspace_view;
 pub mod worktree_panel;
