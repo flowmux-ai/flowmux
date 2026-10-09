@@ -44,10 +44,12 @@ fn requests_for_round_trip(rng: &mut Xs) -> Vec<Request> {
     vec![
         Request::Ping,
         Request::WorkspaceCreate {
+            team: false,
             name: Some(rng.ascii_word(12)),
             root: PathBuf::from("/tmp/x"),
         },
         Request::WorkspaceCreate {
+            team: false,
             name: None,
             root: PathBuf::from("/tmp/y"),
         },

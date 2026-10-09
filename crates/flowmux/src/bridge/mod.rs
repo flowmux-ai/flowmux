@@ -225,6 +225,13 @@ pub enum GtkCommand {
         direction: SplitDirection,
         ack: oneshot::Sender<Result<PaneId, String>>,
     },
+    TeamSpawn {
+        pane: PaneId,
+        cwd: std::path::PathBuf,
+        shell: String,
+        role: String,
+        ack: oneshot::Sender<Result<(PaneId, SurfaceId), String>>,
+    },
     /// Send keystrokes to a pane.
     PaneSendKeys {
         pane: PaneId,
@@ -517,6 +524,7 @@ pub enum GtkCommand {
         generation: u64,
     },
     NewWorkspace {
+        team: bool,
         root: std::path::PathBuf,
     },
     /// Remove a workspace entirely (sidebar row + stack page + state).

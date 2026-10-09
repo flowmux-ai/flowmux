@@ -10,6 +10,9 @@ use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
+mod skill;
+pub use skill::Skill;
+
 /// Repository skill embedded at compile time; rebuilding includes updated text.
 pub const SKILL_BODY: &str = include_str!("../../../.agents/skills/flowmux-browser/SKILL.md");
 
@@ -261,7 +264,12 @@ fn reject_linked_skill(path: &Path) -> Result<()> {
 /// discovered as an active skill. Backups remain after uninstall.
 fn backup_one(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
     let mut backup = tempfile::Builder::new()
-        .prefix("SKILL.md.flowmux-backup-")
+        .prefix(&format!(
+            "{}.flowmux-backup-",
+            path.file_name()
+                .context("skill has no filename")?
+                .to_string_lossy()
+        ))
         .tempfile_in(path.parent().context("skill has no parent")?)?;
     backup.write_all(bytes)?;
     backup.as_file().sync_all()?;
@@ -313,18 +321,7 @@ pub fn antigravity_is_installed(home: &Path) -> bool {
 /// flowmux-managed `~/.agents/skills` copy. These are user-owned, so doctor
 /// reports them but install/fix never overwrites or removes them.
 pub fn codex_unmanaged_skill_paths(home: &Path, codex_home: Option<&Path>) -> Vec<PathBuf> {
-    let managed = Target::Codex.resolved_install_path(home, codex_home);
-    let legacy = codex_home
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| home.join(".codex"))
-        .join("skills")
-        .join("flowmux-browser")
-        .join("SKILL.md");
-    if legacy != managed && legacy.exists() {
-        vec![legacy]
-    } else {
-        Vec::new()
-    }
+    Skill::Browser.codex_unmanaged_paths(home, codex_home)
 }
 
 /// Install for every requested target. Returns one outcome per
@@ -369,6 +366,10 @@ pub fn doctor_all(
 /// Idempotently remove the skill file and its `flowmux-browser` directory
 /// when empty. The agent's top-level directory is preserved.
 pub fn uninstall_one(path: &Path) -> Result<UninstallOutcome> {
+    uninstall_payload(path, SKILL_BODY)
+}
+
+fn uninstall_payload(path: &Path, payload: &str) -> Result<UninstallOutcome> {
     reject_linked_skill_dir(path)?;
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -382,7 +383,7 @@ pub fn uninstall_one(path: &Path) -> Result<UninstallOutcome> {
         None
     } else {
         let bytes = read_skill(path).with_context(|| format!("reading {}", path.display()))?;
-        if bytes == SKILL_BODY.as_bytes() {
+        if bytes == payload.as_bytes() {
             None
         } else {
             Some(backup_one(path, &bytes)?)

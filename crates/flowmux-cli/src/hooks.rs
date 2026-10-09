@@ -574,13 +574,64 @@ pub async fn resolve_codex_tab(
     let name = probe.file_name()?.to_string_lossy().into_owned();
     let mut sockets = pid_sockets_in(probe.parent()?, name.strip_suffix("0.sock")?);
     sockets.extend(scan_pid_sockets().unwrap_or_default());
-    resolve_codex_tab_at(sockets, session_id, cwd).await
+    resolve_codex_tab_at(sockets, session_id, cwd, false).await
+}
+
+/// Resolve an exact session binding for commands that create panes. Directory
+/// and title matches are insufficient evidence for choosing another window.
+pub async fn resolve_codex_source(
+    session_id: &str,
+    hint: Option<PathBuf>,
+) -> anyhow::Result<Option<(Client, PaneId, SurfaceId, bool)>> {
+    let hint = hint.or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from));
+    // The server sees the host PID even when this CLI is in Codex's PID namespace.
+    let current = std::env::var("CODEX_THREAD_ID").or_else(|_| std::env::var("CODEX_SESSION_ID"));
+    if current.as_deref() == Ok(session_id) {
+        if let Some(socket) = hint.as_ref() {
+            let response = tokio::time::timeout(
+                HOOK_NOTIFY_TIMEOUT,
+                ask_window(
+                    socket,
+                    Request::AgentSurfaceCurrent {
+                        agent: "codex".into(),
+                    },
+                ),
+            )
+            .await;
+            if let Ok(Err(error)) = &response {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    anyhow::bail!("Flowmux socket access denied at {}: {error}. Codex must be authorized to access this window’s Unix sockets; session discovery was not completed", socket.display());
+                }
+            }
+            if let Ok(Ok(Some(Response::AgentSurface { pane, surface, .. }))) = response {
+                if let Some(client) = try_connect(socket, HOOK_CONNECT_TIMEOUT).await {
+                    return Ok(Some((client, pane, surface, false)));
+                }
+            }
+        }
+    }
+    let probe = flowmux_config::paths::runtime_socket_for_pid(0);
+    let name = probe.file_name().unwrap_or_default().to_string_lossy();
+    let prefix = name.strip_suffix("0.sock").unwrap_or("flowmux-");
+    let mut sockets = probe
+        .parent()
+        .map(|parent| pid_sockets_in(parent, prefix))
+        .unwrap_or_default();
+    sockets.extend(scan_pid_sockets().unwrap_or_default());
+    if let Some(hint) = hint {
+        if let Some(parent) = hint.parent() {
+            sockets.extend(pid_sockets_in(parent, prefix));
+        }
+        sockets.push(hint);
+    }
+    Ok(resolve_codex_tab_at(sockets, session_id, None, true).await)
 }
 
 async fn resolve_codex_tab_at(
     mut sockets: Vec<PathBuf>,
     session_id: &str,
     cwd: Option<&str>,
+    exact_only: bool,
 ) -> Option<(Client, PaneId, SurfaceId, bool)> {
     // Count endpoints, not aliases (including symlinked runtime directories).
     for socket in &mut sockets {
@@ -602,11 +653,11 @@ async fn resolve_codex_tab_at(
         };
         let reply = tokio::time::timeout(HOOK_NOTIFY_TIMEOUT, ask_window(&socket, request)).await;
         match reply {
-            Ok(Some(Response::AgentSurface {
+            Ok(Ok(Some(Response::AgentSurface {
                 pane,
                 surface,
                 session_id: current,
-            })) => {
+            }))) => {
                 let exact_session = current.as_deref() == Some(session_id);
                 tracing::debug!(target: "flowmux_agent", pane = %pane, surface = %surface,
                     exact_session, "Codex route candidate");
@@ -617,7 +668,7 @@ async fn resolve_codex_tab_at(
                     heuristic.push(candidate);
                 }
             }
-            Ok(Some(Response::AgentSurfaceAmbiguous { exact_session })) => {
+            Ok(Ok(Some(Response::AgentSurfaceAmbiguous { exact_session }))) => {
                 if exact_session {
                     ambiguous_exact = true;
                 } else {
@@ -627,7 +678,8 @@ async fn resolve_codex_tab_at(
             _ => {}
         }
     }
-    if ambiguous_exact
+    if (exact_only && exact.is_empty())
+        || ambiguous_exact
         || exact.len() > 1
         || (exact.is_empty() && (ambiguous_heuristic || heuristic.len() > 1))
     {
@@ -644,34 +696,33 @@ async fn resolve_codex_tab_at(
 /// One query to a window that may predate its verb. Such a window skips the
 /// line without replying, so a ping rides along: whichever reply comes first
 /// tells an unknown verb from a slow answer.
-async fn ask_window(socket: &Path, request: Request) -> Option<Response> {
+async fn ask_window(socket: &Path, request: Request) -> std::io::Result<Option<Response>> {
     use flowmux_ipc::protocol::{Envelope, Payload};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
     let stream = match UnixStream::connect(flowmux_ipc::control_socket_path(socket)).await {
         Ok(stream) => stream,
-        Err(_) => UnixStream::connect(socket).await.ok()?,
+        Err(_) => UnixStream::connect(socket).await?,
     };
     let (reader, mut writer) = stream.into_split();
     let mut lines = String::new();
     for (id, request) in [(1, request), (2, Request::Ping)] {
         let payload = Payload::Request(request);
-        lines.push_str(&serde_json::to_string(&Envelope { id, payload }).ok()?);
+        lines.push_str(&serde_json::to_string(&Envelope { id, payload })?);
         lines.push('\n');
     }
-    writer.write_all(lines.as_bytes()).await.ok()?;
+    writer.write_all(lines.as_bytes()).await?;
     let mut reply = String::new();
     tokio::io::BufReader::new(reader)
         .read_line(&mut reply)
-        .await
-        .ok()?;
-    match serde_json::from_str(&reply).ok()? {
+        .await?;
+    Ok(match serde_json::from_str(&reply)? {
         Envelope {
             id: 1,
             payload: Payload::Response(response),
         } => Some(response),
         _ => None,
-    }
+    })
 }
 
 /// Enumerate `$HOME/.cache/flowmux/flowmux-*.sock` entries. Returns
@@ -697,6 +748,15 @@ fn pid_sockets_in(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn window_query_preserves_connection_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let error = ask_window(&root.path().join("missing.sock"), Request::Ping)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
 
     #[tokio::test]
     async fn codex_routing_rejects_ties_and_prefers_unique_exact_session() {
@@ -778,7 +838,14 @@ mod tests {
                     }
                 }));
             }
-            let chosen = resolve_codex_tab_at(sockets, "session", Some("/same")).await;
+            let strict = resolve_codex_tab_at(sockets.clone(), "session", None, true).await;
+            let strict_expected = expected.filter(|i| kinds.chars().nth(*i) == Some('e'));
+            assert_eq!(
+                strict.map(|(_, _, surface, _)| surface),
+                strict_expected.map(|i| surfaces[i]),
+                "strict {kinds}"
+            );
+            let chosen = resolve_codex_tab_at(sockets, "session", Some("/same"), false).await;
             assert_eq!(
                 chosen.map(|(_, _, surface, _)| surface),
                 expected.map(|i| surfaces[i]),

@@ -2,7 +2,7 @@
 //! User-level skill installation, sharing the CLI's paths and backup semantics.
 use adw::prelude::*;
 use flowmux_cli::agent::{
-    self, DoctorStatus, InstallOutcome, SkillOverrides, Target, UninstallOutcome,
+    self, DoctorStatus, InstallOutcome, Skill, SkillOverrides, Target, UninstallOutcome,
 };
 use std::{cell::Cell, path::PathBuf, rc::Rc};
 
@@ -14,28 +14,33 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     content.set_margin_end(20);
 
     let description = gtk::Label::new(Some(
-        "Install the Flowmux CLI skill for the agents you use. It teaches workspace and terminal control, browser automation, SSH, notifications, and GUI features such as Code Review and search.",
+        "Choose a skill, then install it for the agents you use. Updates and removal preserve modified files in backups.",
     ));
     description.set_wrap(true);
     description.set_xalign(0.0);
     content.append(&description);
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Flowmux CLI");
-    group.set_description(Some(
-        "Choose an agent below. Updates and removal back up modified content.",
-    ));
-    content.append(&group);
     let mut rows = Vec::new();
     match agent::resolved_home() {
         Ok(home) => {
             let overrides = SkillOverrides::from_env();
             let codex_home = agent::resolved_codex_home();
-            for &target in Target::ALL {
-                let path = overrides.path(target, &home, codex_home.as_deref());
-                let row = SkillRow::new(target, path);
-                group.add(&row.widget);
-                rows.push(row);
+            for &skill in Skill::ALL {
+                let group = adw::PreferencesGroup::new();
+                let (title, description) = match skill {
+                    Skill::Browser => ("Flowmux CLI", "flowmux-browser · Workspaces, terminals, browser automation, SSH and notifications."),
+                    Skill::Team => ("Flowmux Team", "flowmux-team · Work inline in ordinary workspaces, or delegate to interactive Claude Code and Codex split panes in Team workspaces. Requires Python 3.9+ and authenticated agent CLIs."),
+                };
+                group.set_title(title);
+                group.set_description(Some(description));
+                for &target in skill.targets() {
+                    let path = skill.path(target, &home, codex_home.as_deref(), &overrides);
+                    let row = SkillRow::new(skill, target, path);
+                    group.add(&row.widget);
+                    rows.push(row);
+                }
+                content.append(&group);
+                content.append(&skill_preview(skill));
             }
         }
         Err(error) => {
@@ -54,36 +59,57 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     });
     content.append(&refresh);
     let note = gtk::Label::new(Some(
-        "In your agent's skill list, look for flowmux-browser (the existing installation identifier). Start a new session if needed. Existing sessions are not restarted. Only the Flowmux CLI skill is managed here; agent hooks and settings are unchanged.",
+        "Start a new agent session to discover installed skills if needed. Existing sessions, agent hooks and settings are unchanged.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
     note.add_css_class("dim-label");
     content.append(&note);
 
+    let clamp = adw::Clamp::builder()
+        .maximum_size(800)
+        .child(&content)
+        .build();
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&clamp)
+        .build()
+}
+
+fn skill_preview(skill: Skill) -> gtk::Expander {
     let manual = gtk::TextView::builder()
         .editable(false)
         .cursor_visible(false)
         .monospace(true)
         .wrap_mode(gtk::WrapMode::WordChar)
         .build();
-    manual.set_widget_name("flowmux-skill-contents");
-    manual.buffer().set_text(Target::payload());
+    let prefix = widget_prefix(skill);
+    manual.set_widget_name(&format!("{prefix}-contents"));
+    manual.buffer().set_text(
+        skill
+            .files()
+            .iter()
+            .find(|(name, _)| *name == "SKILL.md")
+            .unwrap()
+            .1,
+    );
     let manual_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_height(260)
+        .min_content_height(220)
         .child(&manual)
         .build();
-    let preview = gtk::Expander::new(Some("View skill contents"));
-    preview.set_widget_name("flowmux-skill-preview");
+    let preview = gtk::Expander::new(Some("View skill instructions"));
+    preview.set_widget_name(&format!("{prefix}-preview"));
     preview.set_child(Some(&manual_scroll));
-    content.append(&preview);
+    preview
+}
 
-    gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&content)
-        .build()
+fn widget_prefix(skill: Skill) -> &'static str {
+    match skill {
+        Skill::Browser => "flowmux-skill",
+        Skill::Team => "flowmux-team",
+    }
 }
 
 struct SkillRow {
@@ -92,6 +118,7 @@ struct SkillRow {
     remove: gtk::Button,
     path: PathBuf,
     target: Target,
+    skill: Skill,
     busy: Cell<bool>,
     update: Cell<bool>,
 }
@@ -104,7 +131,7 @@ enum Action {
 }
 
 impl SkillRow {
-    fn new(target: Target, path: PathBuf) -> Rc<Self> {
+    fn new(skill: Skill, target: Target, path: PathBuf) -> Rc<Self> {
         let title = match target {
             Target::ClaudeCode => "Claude Code",
             Target::Codex => "Codex",
@@ -112,19 +139,20 @@ impl SkillRow {
             Target::Antigravity => "Antigravity",
             Target::Cline => "Cline",
         };
+        let prefix = widget_prefix(skill);
         let widget = adw::ActionRow::builder().title(title).build();
         widget.set_use_markup(false);
-        widget.set_widget_name(&format!("flowmux-skill-{}", target.slug()));
+        widget.set_widget_name(&format!("{prefix}-{}", target.slug()));
         widget.set_tooltip_text(Some(&path.display().to_string()));
         let button = gtk::Button::with_label("Checking…");
         button.set_valign(gtk::Align::Center);
-        button.set_widget_name(&format!("flowmux-skill-install-{}", target.slug()));
+        button.set_widget_name(&format!("{prefix}-install-{}", target.slug()));
         button.set_sensitive(false);
         widget.add_suffix(&button);
         let remove = gtk::Button::with_label("Remove");
         remove.set_valign(gtk::Align::Center);
         remove.add_css_class("destructive-action");
-        remove.set_widget_name(&format!("flowmux-skill-remove-{}", target.slug()));
+        remove.set_widget_name(&format!("{prefix}-remove-{}", target.slug()));
         remove.set_tooltip_text(Some(
             "Remove only the Flowmux skill. Modified content is backed up.",
         ));
@@ -136,6 +164,7 @@ impl SkillRow {
             remove,
             path,
             target,
+            skill,
             busy: Cell::new(false),
             update: Cell::new(false),
         });
@@ -170,6 +199,7 @@ impl SkillRow {
         let row = self.clone();
         let path = self.path.clone();
         let target = self.target;
+        let skill = self.skill;
         // A file created/changed after a Missing check must not be overwritten
         // by an Install click. Only an explicit Update permits replacement.
         let force = self.update.get();
@@ -177,18 +207,14 @@ impl SkillRow {
             let result = gtk::gio::spawn_blocking(move || {
                 let outcome = match action {
                     Action::Refresh => Ok(None),
-                    Action::Install => {
-                        agent::install_one(&path, Target::payload(), force).map(|outcome| {
-                            match outcome {
-                                InstallOutcome::Updated { backup } => Some(format!(
-                                    "Installed · Previous version saved to {}",
-                                    backup.display()
-                                )),
-                                _ => None,
-                            }
-                        })
-                    }
-                    Action::Remove => agent::uninstall_one(&path).map(|outcome| match outcome {
+                    Action::Install => skill.install(&path, force).map(|outcome| match outcome {
+                        InstallOutcome::Updated { backup } => Some(format!(
+                            "Installed · Previous version saved to {}",
+                            backup.display()
+                        )),
+                        _ => None,
+                    }),
+                    Action::Remove => skill.uninstall(&path).map(|outcome| match outcome {
                         UninstallOutcome::Preserved { backup } => Some(format!(
                             "Removed · Modified content saved to {}",
                             backup.display()
@@ -203,7 +229,7 @@ impl SkillRow {
                 let duplicates = if target == Target::Codex {
                     agent::resolved_home()
                         .map(|home| {
-                            agent::codex_unmanaged_skill_paths(
+                            skill.codex_unmanaged_paths(
                                 &home,
                                 agent::resolved_codex_home().as_deref(),
                             )
@@ -212,12 +238,9 @@ impl SkillRow {
                 } else {
                     Vec::new()
                 };
-                let removable = path
-                    .symlink_metadata()
-                    .is_ok_and(|meta| meta.is_file() || meta.file_type().is_symlink())
-                    && !linked_directory;
+                let removable = skill.removable(&path);
                 (
-                    agent::doctor_one(&path, Target::payload()),
+                    skill.doctor(&path),
                     outcome,
                     removable,
                     linked_directory,

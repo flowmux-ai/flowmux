@@ -81,6 +81,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::FocusWorkspaceAt { .. }
             | GtkCommand::ActivateWorkspace { .. }
             | GtkCommand::SplitPane { .. }
+            | GtkCommand::TeamSpawn { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::NewSurface { .. }
@@ -134,6 +135,7 @@ fn agent_surface_is_visible(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandPaletteCommand {
+    NewTeamWorkspace,
     NewSshWorkspace,
     OpenBrowser,
     RenameTab,
@@ -187,6 +189,7 @@ impl CopyableText {
 
 fn command_palette_commands() -> &'static [CommandPaletteCommand] {
     &[
+        CommandPaletteCommand::NewTeamWorkspace,
         CommandPaletteCommand::NewSshWorkspace,
         CommandPaletteCommand::OpenBrowser,
         CommandPaletteCommand::RenameTab,
@@ -197,6 +200,7 @@ fn command_palette_commands() -> &'static [CommandPaletteCommand] {
 
 fn command_palette_label(command: CommandPaletteCommand) -> &'static str {
     match command {
+        CommandPaletteCommand::NewTeamWorkspace => "New Team Workspace",
         CommandPaletteCommand::NewSshWorkspace => "New SSH Workspace",
         CommandPaletteCommand::OpenBrowser => "Open browser",
         CommandPaletteCommand::RenameTab => "Rename tab",
@@ -2906,6 +2910,7 @@ impl WindowController {
                 self.dispatch_workspace_command(command).await;
             }
             command @ (GtkCommand::SplitPane { .. }
+            | GtkCommand::TeamSpawn { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::FocusDirection { .. }
@@ -10197,6 +10202,7 @@ mod tests {
         assert_eq!(
             labels,
             vec![
+                "New Team Workspace",
                 "New SSH Workspace",
                 "Open browser",
                 "Rename tab",

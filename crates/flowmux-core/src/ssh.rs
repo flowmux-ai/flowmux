@@ -13,13 +13,14 @@ use std::path::{Path, PathBuf};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkspaceLocation {
     Local { root_dir: PathBuf },
+    Team { root_dir: PathBuf },
     Ssh { config: SshWorkspaceConfig },
 }
 
 impl WorkspaceLocation {
     pub fn local_root(&self) -> Option<&Path> {
         match self {
-            Self::Local { root_dir } => Some(root_dir),
+            Self::Local { root_dir } | Self::Team { root_dir } => Some(root_dir),
             Self::Ssh { .. } => None,
         }
     }
@@ -27,13 +28,13 @@ impl WorkspaceLocation {
     pub fn ssh(&self) -> Option<&SshWorkspaceConfig> {
         match self {
             Self::Ssh { config } => Some(config),
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::Team { .. } => None,
         }
     }
 
     pub fn display(&self) -> String {
         match self {
-            Self::Local { root_dir } => root_dir.display().to_string(),
+            Self::Local { root_dir } | Self::Team { root_dir } => root_dir.display().to_string(),
             Self::Ssh { config } => format!(
                 "{}:{}",
                 config.target.destination(),

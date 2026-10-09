@@ -101,6 +101,7 @@ async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
     let (handler, rx, _pane, _tab) = single_pane_handler().await;
     let root = std::path::PathBuf::from("/tmp/flowmux-ipc-create-workspace");
     let response = handler.handle(Request::WorkspaceCreate {
+        team: false,
         name: Some("created".into()),
         root: root.clone(),
     });
@@ -127,6 +128,7 @@ async fn workspace_creation_failure_rolls_back_the_model() {
         let (handler, rx, _, _) = single_pane_handler().await;
         let before = handler.inner.store().list_workspaces().await;
         let response = handler.handle(Request::WorkspaceCreate {
+            team: false,
             name: Some("must not survive".into()),
             root: std::env::temp_dir(),
         });
@@ -2655,4 +2657,48 @@ async fn tmux_compat_external_swarm_drives_bridge_commands() {
     .await;
     assert_eq!(seen, ["remove-workspace"]);
     assert_eq!(out.code, 0);
+}
+
+#[tokio::test]
+async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_callers() {
+    let (handler, _rx, pane, surface) = single_pane_handler().await;
+    let mut child = std::process::Command::new("sleep")
+        .arg("10")
+        .spawn()
+        .unwrap();
+    handler
+        .inner
+        .store()
+        .set_agent_activity(
+            surface,
+            Some(flowmux_core::AgentPresence::new(
+                "codex",
+                AgentActivity::Running,
+                Some(child.id()),
+            )),
+        )
+        .await;
+    let request = || Request::AgentSurfaceCurrent {
+        agent: "codex".into(),
+    };
+    let resolved = handler.handle_from(request(), Some(child.id())).await;
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(
+        matches!(resolved, Response::AgentSurface { pane: p, surface: s, .. } if p == pane && s == surface)
+    );
+    assert!(matches!(
+        handler.handle_from(request(), None).await,
+        Response::Error(_)
+    ));
+    assert!(matches!(
+        handler
+            .handle_from(request(), Some(std::process::id()))
+            .await,
+        Response::Error(_)
+    ));
+    assert!(matches!(
+        handler.handle_from(request(), Some(child.id())).await,
+        Response::Error(_)
+    ));
 }

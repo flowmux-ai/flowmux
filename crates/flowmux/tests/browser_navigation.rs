@@ -238,6 +238,7 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
     let workspace = match call(
         &client,
         Request::WorkspaceCreate {
+            team: false,
             name: Some("browser regression".into()),
             root: dir.path().into(),
         },

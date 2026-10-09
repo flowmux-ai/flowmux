@@ -36,6 +36,7 @@ fn query_timeout(request: &Request) -> Option<Duration> {
         | Request::PaneReadScreen { .. }
         | Request::NotificationsList { .. }
         | Request::AgentSessionGet { .. }
+        | Request::AgentSurfaceCurrent { .. }
         | Request::AgentSurfaceResolve { .. }
         | Request::Ssh {
             request: SshRequest::Status { .. },
@@ -58,6 +59,15 @@ fn query_timeout(request: &Request) -> Option<Duration> {
 
 pub trait Handler: Send + Sync + 'static {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
+
+    /// PID supplied by the kernel, never by the request payload.
+    fn handle_from<'a>(
+        &'a self,
+        req: Request,
+        _peer_pid: Option<u32>,
+    ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+        self.handle(req)
+    }
 }
 
 pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<()> {
@@ -137,6 +147,12 @@ async fn serve_connection<H: Handler>(
     control: bool,
     mutations: Arc<Semaphore>,
 ) -> anyhow::Result<()> {
+    let peer_pid = stream
+        .peer_cred()
+        .ok()
+        .and_then(|cred| cred.pid())
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid > 0);
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut buf = String::new();
@@ -181,7 +197,7 @@ async fn serve_connection<H: Handler>(
                         "request requires the regular socket; not started".into(),
                     ))
                 } else if let Some(budget) = query_timeout(&req) {
-                    timeout(budget, handler.handle(req))
+                    timeout(budget, handler.handle_from(req, peer_pid))
                         .await
                         .unwrap_or_else(|_| {
                             Response::Error(RpcError::Io(format!(
@@ -190,13 +206,13 @@ async fn serve_connection<H: Handler>(
                             )))
                         })
                 } else if is_control {
-                    handler.handle(req).await
+                    handler.handle_from(req, peer_pid).await
                 } else {
                     // No hidden admission queue: reject before calling the handler.
                     // After admission, even a dropped client or a confirmation
                     // dialog cannot cause us to cancel/replay an ambiguous effect.
                     match mutations.try_acquire() {
-                        Ok(_permit) => handler.handle(req).await,
+                        Ok(_permit) => handler.handle_from(req, peer_pid).await,
                         Err(_) => Response::Error(RpcError::Busy(
                             "mutation capacity reached; request not started".into(),
                         )),
@@ -341,6 +357,51 @@ mod tests {
         ] {
             assert_eq!(query_timeout(&request), None);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn dispatch_passes_kernel_peer_pid() {
+        struct PeerHandler;
+        impl Handler for PeerHandler {
+            fn handle<'a>(
+                &'a self,
+                _: Request,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                panic!("must dispatch with peer credentials")
+            }
+            fn handle_from<'a>(
+                &'a self,
+                _: Request,
+                peer: Option<u32>,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                Box::pin(async move {
+                    assert_eq!(peer, Some(std::process::id()));
+                    Response::Ok
+                })
+            }
+        }
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let task = tokio::spawn(serve_one(server, Arc::new(PeerHandler)));
+        write_envelope(
+            &mut client,
+            Envelope {
+                id: 1,
+                payload: Payload::Request(Request::AgentSurfaceCurrent {
+                    agent: "codex".into(),
+                }),
+            },
+        )
+        .await;
+        let mut reader = BufReader::new(client);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Envelope>(&line).unwrap().payload,
+            Payload::Response(Response::Ok)
+        ));
+        drop(reader);
+        task.await.unwrap().unwrap();
     }
 
     #[tokio::test]

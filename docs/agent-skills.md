@@ -2,7 +2,7 @@
 
 # Flowmux CLI skill: features and installation
 
-Flowmux's built-in installer manages **`flowmux-browser`**. Its source is
+Flowmux's CLI skill is **`flowmux-browser`**. Its source is
 [`.agents/skills/flowmux-browser/SKILL.md`](../.agents/skills/flowmux-browser/SKILL.md).
 The **Flowmux CLI** skill is a user guide for operating Flowmux, organized by task:
 
@@ -21,8 +21,9 @@ for compatibility. Its title and description cover the full user guide. Flowmux
 does not bundle development, design, skill-discovery or MCP-builder skills.
 
 The optional [Flowmux team skill](agent-teams.md) adds role-based pane delegation
-and result collection. It is installed separately as a complete skill directory;
-the built-in installer and Options → Skills still manage only `flowmux-browser`.
+and result collection. Options → Skills manages both skills in separate sections.
+Flowmux Team supports Claude Code and Codex and installs its scripts and sample
+along with its instructions.
 
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
@@ -30,13 +31,13 @@ After changing the source, rebuild the CLI before updating installed copies.
 
 ## Install from Settings
 
-Open **Options → Skills** and click **Install** beside the agent you use
+Open **Options → Skills → Flowmux CLI** and click **Install** beside the agent you use
 (Codex, Claude Code, OpenCode, Antigravity, or Cline). Each row shows whether the
 Flowmux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
 shows the backup location. **Refresh status** checks changes made outside Flowmux.
 Hover over an agent row to inspect its destination path. Expand **View skill
-contents** to inspect the exact bundled instructions without installing them.
+instructions** to inspect the exact bundled instructions without installing them.
 The display name is **Flowmux CLI**; agents discover it under the existing
 `flowmux-browser` identifier. A known extra Codex copy is shown in the row and
 remains visible there after removal of the managed copy.

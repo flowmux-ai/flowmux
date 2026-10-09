@@ -149,6 +149,7 @@ fn workspace_create_uses_explicit_root_and_name() {
     let root = PathBuf::from("/tmp/flowmux-cli-test");
     let req = build_request(Cmd::Workspace {
         op: WorkspaceOp::New {
+            team: false,
             name: Some("demo".into()),
             root: Some(root.clone()),
         },
@@ -157,7 +158,7 @@ fn workspace_create_uses_explicit_root_and_name() {
 
     assert!(matches!(
         req,
-        Request::WorkspaceCreate { name, root: got_root }
+        Request::WorkspaceCreate { name, root: got_root, team: false }
             if name.as_deref() == Some("demo") && got_root == root
     ));
 }
@@ -722,8 +723,12 @@ fn render_tree_marks_active_tab_and_indents() {
 #[test]
 fn identify_and_capabilities_parse_as_local_commands() {
     assert!(matches!(
+        Cli::try_parse_from(["flowmuxctl", "identify", "--session", "current-session"]).unwrap().cmd,
+        Cmd::Identify { session: Some(id) } if id == "current-session"
+    ));
+    assert!(matches!(
         Cli::try_parse_from(["flowmuxctl", "identify"]).unwrap().cmd,
-        Cmd::Identify
+        Cmd::Identify { session: None }
     ));
     assert!(matches!(
         Cli::try_parse_from(["flowmuxctl", "capabilities"])

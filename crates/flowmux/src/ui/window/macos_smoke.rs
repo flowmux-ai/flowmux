@@ -921,7 +921,7 @@ fn save_theme_snapshot(widget: &gtk::Widget, name: &str) {
 }
 
 async fn check_skills(controller: &WindowController) {
-    use flowmux_cli::agent::{self, SkillOverrides, Target};
+    use flowmux_cli::agent::{self, Skill, SkillOverrides, Target};
     let legacy = agent::resolved_codex_home()
         .unwrap()
         .join("skills/flowmux-browser/SKILL.md");
@@ -965,6 +965,59 @@ async fn check_skills(controller: &WindowController) {
     }
     let home = agent::resolved_home().unwrap();
     let overrides = SkillOverrides::from_env();
+    for &target in Skill::Team.targets() {
+        let button: gtk::Button = theme_widget(
+            dialog.upcast_ref(),
+            &format!("flowmux-team-install-{}", target.slug()),
+        );
+        wait_until("team install ready", || {
+            button.label().as_deref() == Some("Install")
+        })
+        .await;
+        let path = Skill::Team.path(target, &home, None, &overrides);
+        assert!(!path.exists());
+        button.emit_clicked();
+        wait_until("team bundle installed", || {
+            button.label().as_deref() == Some("Installed")
+        })
+        .await;
+        assert_eq!(Skill::Team.doctor(&path), agent::DoctorStatus::Ok);
+        let root = path.parent().unwrap();
+        std::fs::write(root.join("scripts/team.py"), "custom helper").unwrap();
+        std::fs::remove_file(root.join("references/sample.md")).unwrap();
+        refresh.emit_clicked();
+        wait_until("team repair offered", || {
+            button.label().as_deref() == Some("Update")
+        })
+        .await;
+        button.emit_clicked();
+        wait_until("team repaired", || {
+            button.label().as_deref() == Some("Installed")
+        })
+        .await;
+        assert_eq!(Skill::Team.doctor(&path), agent::DoctorStatus::Ok);
+        let backups: Vec<_> = std::fs::read_dir(root.join("scripts"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name() != "team.py")
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(backups[0].path()).unwrap(),
+            "custom helper"
+        );
+        let remove: gtk::Button = theme_widget(
+            dialog.upcast_ref(),
+            &format!("flowmux-team-remove-{}", target.slug()),
+        );
+        remove.emit_clicked();
+        wait_until("team removed", || {
+            button.label().as_deref() == Some("Install")
+        })
+        .await;
+        assert!(!Skill::Team.is_present(&path));
+        assert!(backups[0].path().exists());
+    }
     let mut paths = Vec::new();
     for &target in Target::ALL {
         let button: gtk::Button = theme_widget(

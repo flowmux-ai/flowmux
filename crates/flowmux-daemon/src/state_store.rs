@@ -478,6 +478,15 @@ impl StateStore {
         name: Option<String>,
         root: std::path::PathBuf,
     ) -> WorkspaceId {
+        self.create_workspace_kind(name, root, false).await
+    }
+
+    pub async fn create_workspace_kind(
+        &self,
+        name: Option<String>,
+        root: std::path::PathBuf,
+        team: bool,
+    ) -> WorkspaceId {
         let id = WorkspaceId::new();
         let surface_id = SurfaceId::new();
         let pane_id = PaneId::new();
@@ -505,8 +514,14 @@ impl StateStore {
             id,
             name: auto_name,
             custom_title: None,
-            location: flowmux_core::WorkspaceLocation::Local {
-                root_dir: root.clone(),
+            location: if team {
+                flowmux_core::WorkspaceLocation::Team {
+                    root_dir: root.clone(),
+                }
+            } else {
+                flowmux_core::WorkspaceLocation::Local {
+                    root_dir: root.clone(),
+                }
             },
             git: None,
             listening_ports: vec![],
@@ -743,6 +758,52 @@ impl StateStore {
             }
         }
         None
+    }
+
+    /// Team workers start in the split's sole terminal tab; check the type under the same lock.
+    pub async fn spawn_team_worker(
+        &self,
+        target: PaneId,
+        cwd: std::path::PathBuf,
+        shell: String,
+        role: String,
+    ) -> Result<(WorkspaceId, PaneId, SurfaceId), String> {
+        if !cwd.is_absolute() || !cwd.is_dir() || role.trim().is_empty() {
+            return Err("Team worker needs an absolute directory and a role".into());
+        }
+        let mut state = self.inner.lock().await;
+        for ws in state.workspaces.iter_mut() {
+            for surface in ws.surfaces.iter_mut() {
+                if surface.root_pane.find_leaf_content(target).is_none() {
+                    continue;
+                }
+                if !matches!(ws.location, flowmux_core::WorkspaceLocation::Team { .. }) {
+                    return Err(
+                        "Flowmux team requires a Team workspace. Use New Team Workspace.".into(),
+                    );
+                }
+                let mut tab = flowmux_core::PaneSurface::terminal(role, Some(cwd.clone()));
+                tab.title_locked = true;
+                tab.kind = SurfaceKind::Terminal {
+                    shell: Some(shell),
+                    cwd: Some(cwd),
+                };
+                let id = tab.id;
+                let content = PaneContent::Tabs {
+                    active: id,
+                    surfaces: vec![tab],
+                };
+                let pane = surface
+                    .root_pane
+                    .split_leaf(target, SplitDirection::Vertical, 0.5, content)
+                    .ok_or("Could not split the source pane")?;
+                let workspace = ws.id;
+                drop(state);
+                self.mark_dirty();
+                return Ok((workspace, pane, id));
+            }
+        }
+        Err(format!("pane not found: {target}"))
     }
 
     /// Remove the leaf pane and collapse its split. Returns the
@@ -2172,6 +2233,51 @@ mod tests {
         let id = store.create_ssh_workspace(None, config).await.unwrap();
         let ws = store.get_workspace(id).await.unwrap();
         (id, first_pane(&ws), first_pane_active_surface(&ws))
+    }
+
+    #[tokio::test]
+    async fn team_workers_require_team_workspace_and_use_one_tab() {
+        let store = StateStore::new_lazy(State::default());
+        let root = std::env::temp_dir();
+        let local = store.create_workspace(None, root.clone()).await;
+        let local_pane = first_pane(&store.get_workspace(local).await.unwrap());
+        let (_, ssh_pane, _) = ssh_workspace(&store).await;
+        for pane in [local_pane, ssh_pane] {
+            let before = format!("{:?}", store.snapshot().await);
+            assert!(store
+                .spawn_team_worker(pane, root.clone(), "/bin/sh".into(), "Reviewer".into())
+                .await
+                .unwrap_err()
+                .contains("Team workspace"));
+            assert_eq!(before, format!("{:?}", store.snapshot().await));
+        }
+        let team = store.create_workspace_kind(None, root.clone(), true).await;
+        let source = first_pane(&store.get_workspace(team).await.unwrap());
+        let (workspace, pane, tab) = store
+            .spawn_team_worker(source, root.clone(), "/bin/sh".into(), "Reviewer".into())
+            .await
+            .unwrap();
+        assert_eq!(workspace, team);
+        assert_ne!(pane, source);
+        let restored = store.snapshot().await;
+        let ws = restored.workspaces.iter().find(|w| w.id == team).unwrap();
+        assert_eq!(
+            ws.location,
+            flowmux_core::WorkspaceLocation::Team {
+                root_dir: root.clone()
+            }
+        );
+        let PaneContent::Tabs { active, surfaces } =
+            ws.surfaces[0].root_pane.find_leaf_content(pane).unwrap()
+        else {
+            panic!("worker tabs missing")
+        };
+        assert_eq!(active, tab);
+        assert_eq!(surfaces.len(), 1);
+        assert_eq!(surfaces[0].title, "Reviewer");
+        assert!(
+            matches!(&surfaces[0].kind, SurfaceKind::Terminal { shell: Some(shell), cwd: Some(cwd) } if shell == "/bin/sh" && cwd == &root)
+        );
     }
 
     #[tokio::test]

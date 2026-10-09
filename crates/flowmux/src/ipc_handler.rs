@@ -210,7 +210,87 @@ impl GuiHandler {
     }
 }
 
+// Resolve outside the caller's sandbox: /proc there can contain only namespace PIDs.
+fn direct_window_ancestors(mut pid: u32, window: u32) -> Vec<u32> {
+    let mut ancestors = Vec::new();
+    for _ in 0..64 {
+        if pid == window {
+            return ancestors;
+        }
+        if flowmux_procmon::cmdline_of(pid)
+            .iter()
+            .any(|arg| arg == "--managed-daemon")
+        {
+            return Vec::new();
+        }
+        ancestors.push(pid);
+        let Some(parent) = flowmux_procmon::parent_pid(pid).filter(|p| *p > 1) else {
+            break;
+        };
+        pid = parent;
+    }
+    Vec::new()
+}
+
 impl Handler for GuiHandler {
+    fn handle_from<'a>(
+        &'a self,
+        req: Request,
+        peer_pid: Option<u32>,
+    ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+        Box::pin(async move {
+            let Request::AgentSurfaceCurrent { agent } = req else {
+                return self.handle(req).await;
+            };
+            let missing =
+                || Response::Error(RpcError::NotFound("caller has no direct agent pane".into()));
+            let Some(peer_pid) = peer_pid else {
+                return missing();
+            };
+            let ancestors = direct_window_ancestors(peer_pid, std::process::id());
+            tracing::debug!(target: "flowmux_agent", peer_pid, ?ancestors, "direct agent source lookup");
+            if ancestors.is_empty() {
+                return missing();
+            }
+            let Response::Tree { workspaces } = self.inner.handle(Request::WorkspaceTree).await
+            else {
+                return missing();
+            };
+            let mut matches = Vec::new();
+            for workspace in workspaces {
+                for pane in workspace.panes {
+                    for tab in pane.tabs {
+                        if let Some(located) =
+                            self.inner.store().located_agent_presence(tab.id).await
+                        {
+                            if located.presence.name == agent {
+                                if let Some(rank) = located.presence.pid.and_then(|pid| {
+                                    ancestors.iter().position(|ancestor| *ancestor == pid)
+                                }) {
+                                    matches.push((rank, pane.id, tab.id));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tracing::debug!(target: "flowmux_agent", ?matches, "direct agent source candidates");
+            matches.sort_unstable_by_key(|candidate| candidate.0);
+            match matches.as_slice() {
+                [(rank, pane, surface), rest @ ..]
+                    if rest.first().is_none_or(|next| next.0 != *rank) =>
+                {
+                    Response::AgentSurface {
+                        pane: *pane,
+                        surface: *surface,
+                        session_id: None,
+                    }
+                }
+                _ => missing(),
+            }
+        })
+    }
+
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async move {
             match req {
@@ -226,7 +306,8 @@ impl Handler for GuiHandler {
                 Request::WorkspaceCreate { .. }
                 | Request::WorkspaceFocus { .. }
                 | Request::SurfaceCreate { .. } => self.handle_workspace_verb(req).await,
-                Request::PaneSplit { .. }
+                Request::TeamSpawn { .. }
+                | Request::PaneSplit { .. }
                 | Request::PaneSendKeys { .. }
                 | Request::PaneReadScreen { .. }
                 | Request::TerminalOutput { .. }
@@ -381,6 +462,34 @@ impl GuiHandler {
     /// Dispatch for the pane verb group (split out of the `handle` match).
     async fn handle_pane_verb(&self, req: Request) -> Response {
         match req {
+            Request::TeamSpawn {
+                pane,
+                cwd,
+                shell,
+                role,
+            } => {
+                let (ack, reply) = oneshot::channel();
+                if self
+                    .bridge
+                    .tx
+                    .send(GtkCommand::TeamSpawn {
+                        pane,
+                        cwd,
+                        shell,
+                        role,
+                        ack,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return Response::Error(RpcError::Internal("bridge closed".into()));
+                }
+                match reply.await {
+                    Ok(Ok((pane, id))) => Response::SurfaceCreated { pane, id },
+                    Ok(Err(error)) => Response::Error(RpcError::Internal(error)),
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                }
+            }
             Request::PaneSplit { pane, direction } => {
                 if self.inner.store().workspace_for_pane(pane).await.is_none() {
                     return Response::Error(RpcError::NotFound(pane.to_string()));

@@ -33,6 +33,10 @@ impl Client {
         })
     }
 
+    pub fn socket_path(&self) -> &Path {
+        &self.socket
+    }
+
     pub async fn call(&self, req: Request) -> anyhow::Result<Response> {
         let id = self
             .next_id

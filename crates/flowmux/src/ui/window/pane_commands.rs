@@ -9,7 +9,8 @@ impl WindowController {
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
-            GtkCommand::SplitPane { .. }
+            GtkCommand::TeamSpawn { .. }
+            | GtkCommand::SplitPane { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::FocusDirection { .. }
@@ -27,6 +28,31 @@ impl WindowController {
         }
 
         match cmd {
+            GtkCommand::TeamSpawn {
+                pane,
+                cwd,
+                shell,
+                role,
+                ack,
+            } => {
+                let result = async {
+                    flowmux_terminal::validate_shell_command(&shell).map_err(|e| e.to_string())?;
+                    let (workspace, child, surface) =
+                        self.store.spawn_team_worker(pane, cwd, shell, role).await?;
+                    self.apply_split_incremental_or_rerender(
+                        workspace,
+                        pane,
+                        child,
+                        SplitDirection::Vertical,
+                    )
+                    .await?;
+                    self.activate_workspace(workspace).await;
+                    self.activate_surface_now(child, surface).await?;
+                    Ok((child, surface))
+                }
+                .await;
+                let _ = ack.send(result);
+            }
             GtkCommand::SplitPane {
                 pane,
                 direction,

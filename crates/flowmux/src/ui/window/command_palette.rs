@@ -757,6 +757,13 @@ impl WindowController {
     }
     pub(super) async fn run_command_palette_command(&self, command: CommandPaletteCommand) {
         match command {
+            CommandPaletteCommand::NewTeamWorkspace => {
+                self.dispatch_workspace_command(GtkCommand::NewWorkspace {
+                    root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+                    team: true,
+                })
+                .await;
+            }
             CommandPaletteCommand::NewSshWorkspace => self.show_ssh_dialog(),
             CommandPaletteCommand::OpenBrowser => {
                 if let Some(pane) = self.focused_pane.get() {

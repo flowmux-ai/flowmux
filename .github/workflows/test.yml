@@ -71,7 +71,8 @@ jobs:
             libwebkitgtk-6.0-dev libssl-dev \
             libssh2-1-dev libdbus-1-dev \
             meson ninja-build \
-            dbus-x11 xvfb openssh-server tmux python3-xlib apparmor
+            dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \
+            python3-gi gir1.2-atspi-2.0 python3-pil
 
       - name: Install ThorVG (image viewer backend, all loaders + C API)
         run: sudo ./scripts/install-thorvg.sh

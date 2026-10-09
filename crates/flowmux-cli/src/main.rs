@@ -99,7 +99,11 @@ enum Cmd {
     /// workspace, socket) resolved from the `FLOWMUX_*` env vars that
     /// flowmux injects into every PTY. One command for an agent to
     /// discover where it is running.
-    Identify,
+    Identify {
+        /// Resolve the exact live Codex session instead of inherited pane variables.
+        #[arg(long)]
+        session: Option<String>,
+    },
 
     /// Print what this flowmux build supports: the `browser` verb set
     /// and the explicitly-unsupported (CDP-only) features.
@@ -175,6 +179,17 @@ enum Cmd {
         right: bool,
         #[arg(long)]
         down: bool,
+    },
+
+    /// Launch a worker directly in a split of a Team workspace.
+    TeamSpawn {
+        pane: PaneId,
+        #[arg(long)]
+        cwd: PathBuf,
+        #[arg(long)]
+        shell: String,
+        #[arg(long)]
+        role: String,
     },
 
     /// Send keystrokes to a pane (escape sequences accepted).
@@ -911,6 +926,9 @@ enum SshForwardOp {
 enum WorkspaceOp {
     /// Create a new workspace rooted at `--root` (defaults to cwd).
     New {
+        /// Enable Flowmux team workers in this workspace.
+        #[arg(long)]
+        team: bool,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
@@ -977,10 +995,11 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             return Ok(());
         }
         Cmd::Agent { op } => return run_agent_op(op, cli.json),
-        // Context/capability probes resolve from env + static data;
-        // no daemon round-trip needed, so they work even before the GUI
-        // is up and from inside `flatpak run` sandboxes.
-        Cmd::Identify => return run_identify(cli.json),
+        // Plain identity/capability probes work offline. Session identity
+        // resolves a live binding instead of the shared server environment.
+        Cmd::Identify { session } => {
+            return run_identify(cli.json, session.as_deref(), cli.socket).await
+        }
         Cmd::Capabilities => return run_capabilities(cli.json),
         // Hook runtime handlers connect to the daemon themselves. Setup and
         // uninstall only edit configuration; hooks doctor also probes the socket.

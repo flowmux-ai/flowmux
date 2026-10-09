@@ -131,8 +131,9 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::Ssh { op } => ssh_op_to_request(op)?,
         Cmd::Tree | Cmd::Agents | Cmd::SessionName => Request::WorkspaceTree,
         Cmd::Workspace {
-            op: WorkspaceOp::New { name, root },
+            op: WorkspaceOp::New { name, root, team },
         } => Request::WorkspaceCreate {
+            team,
             name,
             root: root.map(Ok).unwrap_or_else(std::env::current_dir)?,
         },
@@ -188,6 +189,17 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             };
             Request::PaneSplit { pane, direction }
         }
+        Cmd::TeamSpawn {
+            pane,
+            cwd,
+            shell,
+            role,
+        } => Request::TeamSpawn {
+            pane,
+            cwd,
+            shell,
+            role,
+        },
         Cmd::SendKeys { pane, keys } => Request::PaneSendKeys { pane, keys },
         Cmd::SendKey { pane, key } => Request::PaneSendKeys {
             pane: resolve_pane(pane)?,
@@ -277,7 +289,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::Doctor => unreachable!("handled before request build"),
         Cmd::Fix => unreachable!("handled before request build"),
         Cmd::PtyTee { .. } => unreachable!("handled before request build"),
-        Cmd::Identify => unreachable!("handled before request build"),
+        Cmd::Identify { .. } => unreachable!("handled before request build"),
         Cmd::Capabilities => unreachable!("handled before request build"),
     })
 }

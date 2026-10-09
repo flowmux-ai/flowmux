@@ -3,8 +3,42 @@
 
 use super::*;
 
-pub(crate) fn run_identify(json: bool) -> anyhow::Result<()> {
-    let id = Identity::from_env();
+pub(crate) async fn run_identify(
+    json: bool,
+    session: Option<&str>,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let id = if let Some(session) = session {
+        let (client, pane, surface, _) = hooks::resolve_codex_source(session, socket)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("No unique live Flowmux pane for Codex session {session}; do not select another window or create a replacement workspace"))?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            client.call(Request::WorkspaceTree),
+        )
+        .await??;
+        let Response::Tree { workspaces } = response else {
+            anyhow::bail!("Could not verify the session's workspace");
+        };
+        let workspace = workspaces
+            .iter()
+            .find(|ws| {
+                ws.panes
+                    .iter()
+                    .any(|p| p.id == pane && p.tabs.iter().any(|tab| tab.id == surface))
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("Session pane disappeared; retry from the originating pane")
+            })?;
+        Identity {
+            pane: Some(pane.to_string()),
+            surface: Some(surface.to_string()),
+            workspace: Some(workspace.id.to_string()),
+            socket: Some(client.socket_path().to_string_lossy().into_owned()),
+        }
+    } else {
+        Identity::from_env()
+    };
     if json {
         let v = serde_json::json!({
             "pane": id.pane,
@@ -72,7 +106,8 @@ pub(crate) fn claude_session_name(
     surface: SurfaceId,
 ) -> String {
     let base = match &workspace.location {
-        flowmux_core::WorkspaceLocation::Local { root_dir } => root_dir
+        flowmux_core::WorkspaceLocation::Local { root_dir }
+        | flowmux_core::WorkspaceLocation::Team { root_dir } => root_dir
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("workspace"),

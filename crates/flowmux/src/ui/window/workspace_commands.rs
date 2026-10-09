@@ -20,7 +20,7 @@ impl WindowController {
                 };
                 let _ = ack.send(result);
             }
-            GtkCommand::NewWorkspace { root } => {
+            GtkCommand::NewWorkspace { root, team } => {
                 // Prefer the focused pane's cwd so a new tab opens
                 // where the user was working, falling back to the
                 // root the caller suggested (typically the daemon's
@@ -34,7 +34,7 @@ impl WindowController {
                     })
                     .and_then(|p| p.current_dir())
                     .unwrap_or(root);
-                let id = self.store.create_workspace(None, resolved).await;
+                let id = self.store.create_workspace_kind(None, resolved, team).await;
                 if let Some(ws) = self.store.get_workspace(id).await {
                     self.render_workspace(&ws);
                 }

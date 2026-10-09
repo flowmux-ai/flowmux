@@ -106,8 +106,11 @@ impl Handler for DaemonHandler {
             match req {
                 Request::Ping => Response::Pong,
 
-                Request::WorkspaceCreate { name, root } => {
-                    let id = self.store.create_workspace(name, root.clone()).await;
+                Request::WorkspaceCreate { name, root, team } => {
+                    let id = self
+                        .store
+                        .create_workspace_kind(name, root.clone(), team)
+                        .await;
                     info!(%id, root = %root.display(), "workspace created");
                     // Best-effort enrichment.
                     let store = self.store.clone();
@@ -217,6 +220,7 @@ mod tests {
         let root = std::path::PathBuf::from("/tmp/flowmux-handler-test");
         let response = handler
             .handle(Request::WorkspaceCreate {
+                team: false,
                 name: Some("demo".into()),
                 root,
             })
@@ -243,6 +247,7 @@ mod tests {
         }
         let created = match handler
             .handle(Request::WorkspaceCreate {
+                team: false,
                 name: None,
                 root: std::path::PathBuf::from("/tmp/flowmux-current-test"),
             })
@@ -263,6 +268,7 @@ mod tests {
         let handler = DaemonHandler::new(StateStore::new_lazy(State::default()));
         let id = match handler
             .handle(Request::WorkspaceCreate {
+                team: false,
                 name: Some("demo".into()),
                 root: std::path::PathBuf::from("/tmp/flowmux-tree-test"),
             })

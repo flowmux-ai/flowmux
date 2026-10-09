@@ -370,6 +370,8 @@ pub enum Request {
 
     /// `flowmux workspace new --root .`
     WorkspaceCreate {
+        #[serde(default)]
+        team: bool,
         name: Option<String>,
         root: PathBuf,
     },
@@ -404,6 +406,14 @@ pub enum Request {
     PaneSplit {
         pane: PaneId,
         direction: SplitDirection,
+    },
+
+    /// Create a worker in the first tab of a new split, only in a Team workspace.
+    TeamSpawn {
+        pane: PaneId,
+        cwd: PathBuf,
+        shell: String,
+        role: String,
     },
 
     /// `flowmux send-keys <pane> "<keys>"`
@@ -646,6 +656,11 @@ pub enum Request {
         agent: String,
         surface: SurfaceId,
     },
+    /// Resolve the calling agent from kernel socket credentials and host ancestry.
+    /// Shared/reparented daemons cannot use this direct-pane route.
+    AgentSurfaceCurrent {
+        agent: String,
+    },
     /// Find the tab running session `session_id` of `agent`, which was
     /// started in `cwd`. Codex's shared app-server daemon runs hooks outside
     /// the pane, so they know their session but not their tab. Replies
@@ -787,6 +802,7 @@ impl Request {
                 | Self::AgentSessionGet { .. }
                 | Self::AgentSessionUpdate { .. }
                 | Self::AgentSessionForget { .. }
+                | Self::AgentSurfaceCurrent { .. }
                 | Self::AgentSurfaceResolve { .. }
                 | Self::AgentActivityUpdate { .. }
                 | Self::AgentLifecycleUpdate { .. }

@@ -1800,7 +1800,7 @@ fn create_local_workspace(bridge: &Bridge) {
     gtk::glib::MainContext::default().spawn_local(async move {
         let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         let _ = bridge
-            .send_priority(GtkCommand::NewWorkspace { root })
+            .send_priority(GtkCommand::NewWorkspace { root, team: false })
             .await;
     });
 }
@@ -1810,6 +1810,7 @@ fn workspace_creation_items(
     on_new_ssh: Rc<dyn Fn()>,
 ) -> Vec<crate::ui::overlay_menu::MenuItem> {
     use crate::ui::overlay_menu::MenuItem;
+    let team_bridge = bridge.clone();
     let bridge = bridge.clone();
     vec![
         MenuItem::Action {
@@ -1819,6 +1820,19 @@ fn workspace_creation_items(
         MenuItem::Action {
             label: "New SSH Workspace",
             activate: Box::new(move || on_new_ssh()),
+        },
+        MenuItem::Action {
+            label: "New Team Workspace",
+            activate: Box::new(move || {
+                let bridge = team_bridge.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let root =
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                    let _ = bridge
+                        .send_priority(GtkCommand::NewWorkspace { root, team: true })
+                        .await;
+                });
+            }),
         },
     ]
 }
@@ -2144,6 +2158,13 @@ fn build_meta_column_widget(ws: &Workspace, details: &WorkspaceRowDetails) -> Wo
     // still provide the same compact visual rhythm.
     let v = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
+    if matches!(ws.location, flowmux_core::WorkspaceLocation::Team { .. }) {
+        let kind = gtk::Label::new(Some("Team"));
+        kind.set_halign(gtk::Align::Start);
+        kind.add_css_class("caption");
+        kind.add_css_class("accent");
+        v.append(&kind);
+    }
     let title = gtk::Label::new(Some(ws.display_title()));
     title.set_halign(gtk::Align::Start);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -2526,7 +2547,7 @@ mod tests {
         let ssh_calls = Rc::new(Cell::new(0));
         let calls = ssh_calls.clone();
         let items = workspace_creation_items(&bridge, Rc::new(move || calls.set(calls.get() + 1)));
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 3);
         let MenuItem::Action { label, activate } = &items[0] else {
             panic!("missing local action")
         };
@@ -2544,6 +2565,15 @@ mod tests {
         activate();
         assert_eq!(ssh_calls.get(), 1);
         assert!(rx.try_recv().is_err());
+        let MenuItem::Action { label, activate } = &items[2] else {
+            panic!("missing Team action")
+        };
+        assert_eq!(*label, "New Team Workspace");
+        activate();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::NewWorkspace { team: true, .. }
+        ));
     }
 
     #[cfg(not(target_os = "macos"))]

@@ -287,6 +287,16 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
             detail: skill_detail(&skill.status, &skill.path, agent_present),
         };
         entries.push(skill_entry);
+        let team = agent::Skill::Team;
+        let team_path = team.path(*target, home, codex_home, &overrides);
+        if team.targets().contains(target) && team.is_present(&team_path) {
+            let status = team.doctor(&team_path);
+            entries.push(Entry {
+                name: format!("{} team skill", target.slug()),
+                status: skill_status(&status, true),
+                detail: skill_detail(&status, &team_path, true),
+            });
+        }
         // Legacy Codex sibling file (`$CODEX_HOME/flowmux-browser.md`)
         // from before Codex standardized on `~/.agents/skills/...`. The file is
         // harmless but no longer referenced; if any survived an upgrade,
@@ -936,6 +946,31 @@ impl FixReport {
 pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> FixReport {
     let mut outcomes = Vec::new();
     let overrides = agent::SkillOverrides::from_env();
+
+    // Team orchestration is opt-in; repair installed bundles without enabling it.
+    let team = agent::Skill::Team;
+    for &target in team.targets() {
+        let path = team.path(target, home, codex_home, &overrides);
+        if !team.is_present(&path) {
+            continue;
+        }
+        let result = team.install(&path, true);
+        outcomes.push(FixOutcome {
+            area: format!("{} team skill", target.slug()),
+            status: if result.is_ok() {
+                Status::Ok
+            } else {
+                Status::Error
+            },
+            detail: match result {
+                Ok(agent::InstallOutcome::Updated { backup }) => {
+                    format!("updated {} (backups: {})", path.display(), backup.display())
+                }
+                Ok(_) => format!("up-to-date: {}", path.display()),
+                Err(error) => error.to_string(),
+            },
+        });
+    }
 
     // Skills — only attempt agents whose home dir actually exists, so
     // a fresh box that hasn't run Claude / Codex yet doesn't get a
@@ -1735,6 +1770,50 @@ mod tests {
                 None => std::env::remove_var("HOME"),
             }
         }
+    }
+
+    #[test]
+    fn team_diagnostics_and_repair_only_manage_existing_bundles() {
+        let _lock = home_env_lock();
+        let home = fake_home();
+        let _h = HomeOverride::set(home.path());
+        let team = agent::Skill::Team;
+        let path = team.path(
+            agent::Target::Codex,
+            home.path(),
+            None,
+            &agent::SkillOverrides::default(),
+        );
+        assert!(!section_agents(home.path(), None)
+            .entries
+            .iter()
+            .any(|e| e.name == "codex team skill"));
+        team.install(&path, false).unwrap();
+        let helper = path.parent().unwrap().join("scripts/team.py");
+        fs::write(&helper, "custom helper").unwrap();
+        let report = section_agents(home.path(), None);
+        let row = report
+            .entries
+            .iter()
+            .find(|e| e.name == "codex team skill")
+            .unwrap();
+        assert_ne!(row.status, Status::Ok);
+        let fix = run_fix(home.path(), None, "flowmux");
+        assert_eq!(
+            fix.outcomes
+                .iter()
+                .find(|e| e.area == "codex team skill")
+                .unwrap()
+                .status,
+            Status::Ok
+        );
+        assert_eq!(team.doctor(&path), agent::DoctorStatus::Ok);
+        team.uninstall(&path).unwrap();
+        assert!(!run_fix(home.path(), None, "flowmux")
+            .outcomes
+            .iter()
+            .any(|e| e.area == "codex team skill"));
+        assert!(!path.exists());
     }
 
     /// Cargo runs tests in parallel within a single binary, and they

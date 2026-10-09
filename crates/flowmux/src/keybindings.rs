@@ -250,7 +250,7 @@ pub fn install_actions(
                     let root =
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                     let _ = bridge
-                        .send_priority(GtkCommand::NewWorkspace { root })
+                        .send_priority(GtkCommand::NewWorkspace { root, team: false })
                         .await;
                 });
             })
