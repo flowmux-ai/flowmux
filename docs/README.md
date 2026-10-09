@@ -10,6 +10,7 @@
 - [Code Review](diff-review.md)
 - [Agent CLI and browser automation](../AGENTS.md)
 - [Flowmux CLI skill: features and installation](agent-skills.md)
+- [Flowmux team skill: design and runnable sample](agent-teams.md)
 - [Development guide](../CLAUDE.md)
 - [Contributing](../.github/CONTRIBUTING.md)
 - [Release history](https://github.com/flowmux-ai/flowmux/releases)

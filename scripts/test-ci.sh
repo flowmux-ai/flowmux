@@ -37,6 +37,7 @@ cargo --version
 pkg-config --modversion gtk4 libadwaita-1
 python3 scripts/test-ci-runner.py
 python3 -B scripts/test-pre-push.py
+python3 scripts/test-agent-team.py
 cargo fmt --all -- --check
 
 if [[ $mode == linux ]]; then

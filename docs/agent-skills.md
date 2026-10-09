@@ -2,7 +2,7 @@
 
 # Flowmux CLI skill: features and installation
 
-Flowmux ships **one product skill, `flowmux-browser`**. Its source is
+Flowmux's built-in installer manages **`flowmux-browser`**. Its source is
 [`.agents/skills/flowmux-browser/SKILL.md`](../.agents/skills/flowmux-browser/SKILL.md).
 The **Flowmux CLI** skill is a user guide for operating Flowmux, organized by task:
 
@@ -19,6 +19,10 @@ The **Flowmux CLI** skill is a user guide for operating Flowmux, organized by ta
 The skill's existing `flowmux-browser` identifier and install directory are kept
 for compatibility. Its title and description cover the full user guide. Flowmux
 does not bundle development, design, skill-discovery or MCP-builder skills.
+
+The optional [Flowmux team skill](agent-teams.md) adds role-based pane delegation
+and result collection. It is installed separately as a complete skill directory;
+the built-in installer and Options → Skills still manage only `flowmux-browser`.
 
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
