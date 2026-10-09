@@ -23,21 +23,25 @@ pub(crate) fn requested() -> anyhow::Result<bool> {
 }
 
 fn validate(enabled: Option<&str>, address: Option<&str>) -> anyhow::Result<bool> {
-    match enabled {
-        None | Some("0") => return Ok(false),
-        Some("1") => {}
+    let enabled = match enabled {
+        None | Some("0") => false,
+        Some("1") => true,
         _ => anyhow::bail!("FLOWMUX_WEBKIT_AUTOMATION must be 0 or 1"),
-    }
-    let address: std::net::SocketAddr = address
-        .ok_or_else(|| {
-            anyhow::anyhow!("Set WEBKIT_INSPECTOR_SERVER=127.0.0.1:<port> for WebKitWebDriver")
-        })?
-        .parse()?;
+    };
+    let Some(address) = address else {
+        anyhow::ensure!(
+            !enabled,
+            "Set WEBKIT_INSPECTOR_SERVER=127.0.0.1:<port> for WebKitWebDriver"
+        );
+        return Ok(false);
+    };
+    // WebKit starts its inspector independently of Flowmux's automation opt-in.
+    let address: std::net::SocketAddr = address.parse()?;
     anyhow::ensure!(
         address.ip().is_loopback() && address.port() != 0,
-        "WebKit automation requires a loopback inspector address with a nonzero port"
+        "WebKit requires a loopback inspector address with a nonzero port"
     );
-    Ok(true)
+    Ok(enabled)
 }
 
 #[cfg(test)]
@@ -46,20 +50,31 @@ mod tests {
 
     #[test]
     fn automation_is_opt_in_and_local_only() {
-        assert!(!validate(None, None).unwrap());
-        assert!(!validate(Some("0"), Some("0.0.0.0:9222")).unwrap());
-        assert!(validate(Some("1"), Some("127.0.0.1:9222")).unwrap());
-        assert!(validate(Some("1"), Some("[::1]:9222")).unwrap());
-        for address in [
-            None,
-            Some("0.0.0.0:9222"),
-            Some("192.0.2.1:9222"),
-            Some("localhost:9222"),
-            Some("127.0.0.1:0"),
-            Some("bad"),
-        ] {
-            assert!(validate(Some("1"), address).is_err(), "{address:?}");
+        for enabled in [None, Some("0"), Some("1")] {
+            for address in ["127.0.0.1:9222", "[::1]:9222"] {
+                assert_eq!(
+                    validate(enabled, Some(address)).unwrap(),
+                    enabled == Some("1")
+                );
+            }
+            for address in [
+                "0.0.0.0:9222",
+                "[::]:9222",
+                "192.0.2.1:9222",
+                "localhost:9222",
+                "127.0.0.1:0",
+                "bad",
+                "",
+            ] {
+                assert!(
+                    validate(enabled, Some(address)).is_err(),
+                    "{enabled:?}, {address}"
+                );
+            }
         }
+        assert!(!validate(None, None).unwrap());
+        assert!(!validate(Some("0"), None).unwrap());
+        assert!(validate(Some("1"), None).is_err());
         assert!(validate(Some("true"), Some("127.0.0.1:9222")).is_err());
     }
 }

@@ -41,6 +41,40 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Process birth marker: Linux boot ticks or macOS epoch microseconds.
+/// Compare only on the same platform/boot; unavailable metadata returns None.
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    if pid == 0 || pid > i32::MAX as u32 {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        start_time_from_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let info = bsd_info(pid)?;
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_time_from_stat(stat: &str) -> Option<u64> {
+    // comm can contain spaces and parentheses; fields start after its final ')'.
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
 /// Return all PIDs descended from `root` (inclusive), using `/proc/<pid>/status`
 /// PPid edges. Scans all processes; the returned root is not checked for liveness.
 #[cfg(target_os = "linux")]
@@ -525,6 +559,11 @@ pub fn parent_pid(pid: u32) -> Option<u32> {
 
 #[cfg(target_os = "macos")]
 pub fn parent_pid(pid: u32) -> Option<u32> {
+    bsd_info(pid).map(|info| info.pbi_ppid)
+}
+
+#[cfg(target_os = "macos")]
+fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let read = unsafe {
@@ -536,7 +575,7 @@ pub fn parent_pid(pid: u32) -> Option<u32> {
             size,
         )
     };
-    (read == size).then(|| unsafe { info.assume_init().pbi_ppid })
+    (read == size).then(|| unsafe { info.assume_init() })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -638,6 +677,32 @@ fn collect_socket_inodes(pids: &HashSet<u32>) -> Result<HashSet<u64>, ProcError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn process_birth_marker_is_stable_and_requires_a_real_pid() {
+        let first = process_start_time(std::process::id()).unwrap();
+        assert!(first > 0);
+        assert_eq!(process_start_time(std::process::id()), Some(first));
+        assert_eq!(process_start_time(0), None);
+        assert_eq!(process_start_time(u32::MAX), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn stat_birth_marker_handles_parentheses_and_truncated_input() {
+        let fields = (4..=21)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let stat = format!("42 (name ) with (parens)) S {fields} 123456 999");
+        assert_eq!(start_time_from_stat(&stat), Some(123456));
+        assert_eq!(start_time_from_stat("42 (short) S 1 2"), None);
+        assert_eq!(
+            start_time_from_stat(&stat.replace("123456", "invalid")),
+            None
+        );
+    }
 
     #[test]
     fn current_process_is_in_its_own_descendants() {

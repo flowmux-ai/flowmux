@@ -93,6 +93,24 @@ def main():
         assert any(w["id"] == workspace for w in h.tree(socket))
         h.close_window(process)
         h.pass_check("healthy startup saves and restores normally without extra confirmation")
+        # Simulate same-boot PID reuse without changing kernel PID allocation.
+        unrelated = h.spawn(["sleep", "120"])
+        saved = json.loads(h.state_path.read_text())
+        owner = next(w for w in saved["windows"] if workspace in w["workspace_order"])
+        owner["owner_pid"] = unrelated.pid
+        owner["owner_start_time"] = 0  # Deliberately not this live process's birth marker.
+        h.state_path.write_text(json.dumps(saved))
+        process, socket = h.window("pid-reused")
+        gui.wait_for(lambda: window(process), "PID reuse restored window")
+        assert any(w["id"] == workspace for w in h.tree(socket)), "reused PID hid saved workspace"
+        assert unrelated.poll() is None, "recovery must not signal an unrelated process"
+        second, second_socket = h.window("live-owner")
+        gui.wait_for(lambda: window(second), "second mapped window")
+        assert not any(w["id"] == workspace for w in h.tree(second_socket)), "live owner's workspace stolen"
+        h.close_window(second)
+        h.close_window(process)
+        h.stop(unrelated)
+        h.pass_check("PID reuse restores saved workspace; live owner and unrelated process are preserved")
         connection.close()
     finally:
         h.cleanup()

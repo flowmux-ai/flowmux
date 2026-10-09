@@ -55,6 +55,9 @@ impl WindowOwner {
 pub struct SavedWindow {
     pub instance_id: Uuid,
     pub owner_pid: u32,
+    /// Distinguishes a live owner from a different process reusing its PID.
+    #[serde(default)]
+    pub owner_start_time: Option<u64>,
     /// Kernel boot id at save time. A record from a different boot predates a
     /// reboot: every PTY it owned is dead and its pid may have been reused, so
     /// restart discards its local workspaces instead of restoring dead panes.
@@ -334,6 +337,7 @@ fn migrate_legacy_state(state: &mut State) {
         state.windows.push(SavedWindow {
             instance_id: legacy_id,
             owner_pid: 0,
+            owner_start_time: None,
             boot_id: None,
             layout: state.window.take(),
             sidebar_position: state.sidebar_position.take(),
@@ -478,7 +482,18 @@ fn claim_window_impl(
     let live_owners = disk
         .windows
         .iter()
-        .filter(|window| !stale_boot(window) && flowmux_procmon::pid_alive(window.owner_pid))
+        .filter(|window| {
+            !stale_boot(window)
+                && flowmux_procmon::pid_alive(window.owner_pid)
+                && match (
+                    window.owner_start_time,
+                    flowmux_procmon::process_start_time(window.owner_pid),
+                ) {
+                    (Some(saved), Some(current)) => saved == current,
+                    // shortcut: legacy/unreadable birth markers retain PID-only ownership until a successful save.
+                    _ => true,
+                }
+        })
         .map(|window| window.instance_id)
         .collect::<HashSet<_>>();
     let expired_owners = disk
@@ -553,6 +568,7 @@ fn claim_window_impl(
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
         owner_pid: owner.pid,
+        owner_start_time: flowmux_procmon::process_start_time(owner.pid),
         boot_id: current_boot.clone(),
         layout: layout.clone(),
         sidebar_position,
@@ -623,6 +639,7 @@ fn save_window_owned_to(
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
         owner_pid: owner.pid,
+        owner_start_time: flowmux_procmon::process_start_time(owner.pid),
         boot_id: current_boot_id(),
         layout: snapshot.window.clone(),
         sidebar_position: snapshot.sidebar_position,
@@ -697,6 +714,7 @@ mod tests {
         state.windows.push(SavedWindow {
             instance_id: owner.instance_id,
             owner_pid: owner.pid,
+            owner_start_time: flowmux_procmon::process_start_time(owner.pid),
             boot_id: boot_id.map(str::to_string),
             layout: None,
             sidebar_position: None,
@@ -725,6 +743,47 @@ mod tests {
             claim_window_impl(&path, WindowOwner::current(), Some("boot-a".into())).unwrap();
         assert_eq!(claimed.workspaces.len(), 1, "same-boot crash must restore");
         assert!(expired.is_empty());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn same_boot_pid_reuse_reclaims_only_a_mismatched_birth_marker() {
+        let current = flowmux_procmon::process_start_time(std::process::id()).unwrap();
+        for marker in [None, Some(current), Some(current + 1)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("state.json");
+            let old = WindowOwner::current();
+            let mut state = state_with_owned_workspace(old, Some("boot-a"), SurfaceId::new());
+            state.windows[0].owner_start_time = marker;
+            let workspace = state.workspaces[0].id;
+            save_to(&path, &state).unwrap();
+            if marker.is_none() {
+                let mut json = serde_json::to_value(&state).unwrap();
+                json["windows"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("owner_start_time");
+                std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+            }
+            let new = WindowOwner::current();
+            let (claimed, expired) = claim_window_impl(&path, new, Some("boot-a".into())).unwrap();
+            let reused = marker == Some(current + 1);
+            assert_eq!(claimed.workspaces.len(), usize::from(reused));
+            assert!(
+                expired.is_empty(),
+                "PID reuse must not expire workspace data"
+            );
+            let disk = load_from(&path).unwrap();
+            assert_eq!(
+                disk.workspace_owners[&workspace],
+                if reused {
+                    new.instance_id
+                } else {
+                    old.instance_id
+                }
+            );
+            assert_eq!(disk.windows.last().unwrap().owner_start_time, Some(current));
+        }
     }
 
     #[test]
@@ -837,6 +896,10 @@ mod tests {
         assert_eq!(loaded.workspace_order, vec![id]);
         assert_eq!(loaded.workspace_owners.get(&id), Some(&owner.instance_id));
         assert_eq!(loaded.windows[0].active_workspace, Some(id));
+        assert_eq!(
+            loaded.windows[0].owner_start_time,
+            flowmux_procmon::process_start_time(owner.pid)
+        );
     }
 
     #[test]

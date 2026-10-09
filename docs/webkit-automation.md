@@ -56,7 +56,9 @@ In another terminal, start the driver:
 WebKitWebDriver --host=127.0.0.1 --port=4444 --target=127.0.0.1:9223
 ```
 
-The inspector address must be a numeric loopback address with a nonzero port.
+The inspector address must be a numeric loopback address with a nonzero port,
+even when `FLOWMUX_WEBKIT_AUTOMATION` is unset or `0`: WebKit starts its
+inspector independently. A disabled automation flag does not disable inspection.
 Both endpoints provide browser control without authentication; keep the driver
 on loopback too. One driver session may be active at a time.
 

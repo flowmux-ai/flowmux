@@ -126,3 +126,82 @@ the command and all five trigger types. No advisory suppression was added.
 Regression review: no runtime code changes; future advisories intentionally fail
 both dependency updates and scheduled/release audits. GitHub-hosted execution
 itself was not triggered from this local branch.
+
+## 6. Remaining risk validation
+
+### Inspector address validation — confirmed and fixed
+
+With automation set to `0`, a real browser still started WebKit's loopback
+inspector listener. The old validator returned before inspecting the address.
+It now validates every supplied address before WebKit initialization, regardless
+of opt-in state. Unit coverage includes unset/0/1, IPv4/IPv6 loopback, wildcard,
+non-loopback, malformed, empty and zero-port addresses. The live GUI retains
+loopback inspection with automation disabled and refuses wildcard addresses
+in all three modes before opening a listener. No public inspector was exposed
+to reproduce the old behavior. Normal opt-in native WebDriver still passes.
+
+### Same-boot PID reuse — confirmed and fixed
+
+The isolated live fixture substituted an owned, unrelated `sleep` process for a
+closed window's PID. Before the change, its saved workspace disappeared from
+the restored UI. Window records now include an optional process start marker
+(Linux procfs ticks; macOS process birth microseconds). A differing marker
+permits recovery without signaling the unrelated process. Existing live window
+ownership, boot handling, atomic merging and workspace contents are preserved.
+The live test now checks both recovery and a second window not stealing the
+first window's workspace; it runs in the existing session-save CI suite.
+
+Regression review: parser tests include parentheses/spaces in process names,
+truncation and invalid numbers. State tests cover matching/mismatching markers,
+legacy JSON without the field, new claim/save metadata and existing migrations.
+The optional field requires no schema bump. Missing or unreadable markers keep
+the conservative PID-only behavior: already-reused PIDs in old files cannot be
+disambiguated until new metadata is saved. No executable-name heuristic is used.
+macOS API field types were checked against libc; its runtime was not available.
+
+### WebKit lifecycle — no additional defect established
+
+Native source confirms that automation uses an ephemeral network session and
+clears its automation-session reference after `will-close`. Related views
+inherit automation control; re-setting it is not a required fix. Existing popup
+callbacks retain their widgets in the session map without adding an extra
+return reference. No ownership or FFI rewrite was justified by these hypotheses.
+
+Repeated the native smoke suite five times in one GUI (15 sessions), then
+repeated with a monitor that identifies sandbox children by the private
+inspector endpoint and verifies it detects them while sessions are active.
+After every batch: one mapped main window, zero matching WebKit web/network
+processes, no sandbox fallback or fatal GTK critical. GUI RSS in the second
+run was 188,624 / 190,820 / 190,892 / 190,684 / 190,780 KiB. This bounded run
+shows no accumulating windows/processes or continuing RSS growth; it is not
+a heap-leak proof or an extended soak test. Native input and storage isolation
+passed in all 30 sessions across the two runs.
+
+### Poisoned save mutex — no production trigger established
+
+Reviewed all synchronous save callers: GUI close uses `gio::spawn_blocking`;
+asynchronous/autosave paths use `tokio::spawn_blocking`. None call the Tokio
+`blocking_lock` from a runtime worker. State serialization and filesystem errors
+propagate as `Result`; close failures keep the window open. Artificially
+panicking while holding the mutex would demonstrate poisoning, not establish a
+reachable user defect. Automatic poison recovery was therefore not added.
+An unexpected future worker panic can still leave saves blocked by poison;
+that limitation remains explicit rather than concealing a failed save.
+
+## Final regression gate
+
+After the inspector and process-identity changes, the complete Linux gate
+passed again with `CI_GATE_EXIT=0`: 1,840 Rust tests passed, zero failed,
+eight existing ignored; 42 live checks passed. Regions 83.18%, functions
+82.68%, lines 83.69% satisfy the configured thresholds. LLVM still warns about
+216 functions with mismatched data; retain the coverage precision limitation
+noted above. Workspace build, locked all-target Clippy with warnings denied,
+formatting and the combined advisory/license/source gate passed.
+
+The separate worktree is `../flowmux-stability` on `fix/functional-stability`.
+The original user GUI remained running throughout. The temporary Flatpak test
+application was uninstalled; the shared runtime was retained. No merge, push
+or user installation was performed. Local detailed evidence is retained in
+`/tmp/flowmux-stability-ci-final.log`, `-pid-before.log`, `-pid-after.log`,
+`-inspector-before.log`, `-inspector-after.log` and `-webdriver-lifecycle.log`
+(the latter names share the `/tmp/flowmux-stability` prefix).
