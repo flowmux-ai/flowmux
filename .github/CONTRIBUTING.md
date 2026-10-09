@@ -36,6 +36,12 @@ The hook does not run license checks, GUI/SSH integration, sanitizers, or anothe
 platform's build. Run `scripts/test-ci.sh linux` or `scripts/test-ci.sh macos`
 for the full local gate, and require CI before merging to `main`. Local hooks
 can be bypassed and do not replace branch protection.
+When launching the full Linux gate from a coding agent, run the gate itself in
+a separate systemd user service as well: clearing environment variables alone
+does not remove agent ancestors from the process table. Use the installed
+`flowmux-webkit` AppArmor profile for WebKit user namespaces; do not disable its
+sandbox. Give that service a runtime limit and stop the owned service if the
+gate is interrupted.
 
 When `Cargo.lock` or dependency license policy changes, install `cargo-about 0.9.2`
 and refresh the checked-in inventory with

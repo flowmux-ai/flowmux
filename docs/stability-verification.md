@@ -71,3 +71,43 @@ eight existing ignored tests), with the caller's separate build cache.
 
 SIGKILL cannot run Python cleanup; the independent service still has its
 960-second runtime ceiling. A failed user service manager remains an error.
+
+## 4. Sandboxed GUI and native WebDriver verification
+
+The host has the `flowmux-webkit` AppArmor profile. `aa-exec -p flowmux-webkit`
+allows WebKit's user namespaces without disabling the sandbox or changing host
+policy. A full gate launched directly below Codex hung in three hook tests that
+inspect real agent ancestry; the isolated headless runner passed them. Run the
+full gate in a dedicated systemd user service too, with a runtime ceiling and
+the separate build target. The normal hosted CI environment has no agent parent.
+
+Native input was verified against GNOME Platform 49's WebKitGTK/WebKitWebDriver
+2.54.1. A minimal, private `com.flowmux.Stability` test application references
+that runtime. A private D-Bus session inherits the test Flatpak installation's
+data directory, allowing its spawn portal to find the application. Running a
+runtime directly is insufficient: its metadata has no `Application` group and
+WebKit warns that subprocess sandboxing is unavailable. The installed test
+application passes `flatpak-spawn --sandbox true` and the repository WebDriver
+smoke test with fatal GTK criticals enabled, without sandbox fallback warnings.
+
+The native test verifies trusted mouse/key/input events, Korean editing,
+Enter/Tab, separate windows, popup closure, screenshots, three sessions,
+cookie/localStorage isolation and disposing a still-open popup at session end.
+The GUI remains alive afterward. Ordinary user windows and state are untouched.
+The Ubuntu host's 2.52.6 library still lacks native WebDriver input; this is a
+runtime build limitation, not a reason to substitute JavaScript input.
+
+A second full run encountered transient host disk exhaustion: four GUI tests
+failed while creating temporary files. That run is failed evidence, not a
+passing gate; its log is retained separately. Coverage also reports mismatched
+function data between compiled variants, so the aggregate percentages are gate
+measurements, not a claim of exact per-function coverage.
+
+The complete rerun passed with `CI_GATE_EXIT=0`: 1,837 Rust tests passed,
+eight existing tests ignored, and 41 live checks passed (session persistence,
+PTY failure, both IPC endpoints, editor I/O, SSH/tmux lifecycle and native hook
+replay). Coverage: regions 83.17%, functions 82.69%, lines 83.68%, above all
+three configured floors. The SSH fixture used private sshd/tmux executables
+on its service PATH, not changes to user SSH configuration.
+Regression review: the full suite and native driver use isolated state and
+owned process handles; no user window was closed. macOS was not executed.

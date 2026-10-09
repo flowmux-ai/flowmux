@@ -30,6 +30,15 @@ runtime built with them enabled; GNOME Platform 49 with WebKitGTK/WebKitWebDrive
 2.54.1 was used for the live check.
 Flowmux does not silently fall back to JavaScript when a WebDriver action fails.
 
+For isolated Flatpak verification, use an installed test application referencing
+that runtime, with private state and a private D-Bus session. Running the runtime
+itself as an application lacks the `Application` metadata needed by the Flatpak
+spawn portal. Check that `flatpak-spawn --sandbox true` succeeds in the test
+application, and reject runs logging `Sandboxed processes will be spawned
+without a sandbox`. The portal needs access to the same Flatpak installation as
+the test application; a private D-Bus session can inherit its `XDG_DATA_HOME`.
+Keep any additional portal permission confined to the test application.
+
 ## Connect
 
 Start a new Flowmux instance with automation explicitly enabled. Do not restart
