@@ -91,7 +91,15 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
             result = async { control_listener.as_ref().unwrap().accept().await },
                 if control_listener.is_some() => (result, true),
         };
-        let (stream, _) = accepted?;
+        let (stream, _) = match accepted {
+            Ok(connection) => connection,
+            Err(error) => {
+                // Resource exhaustion must not permanently disconnect a live GUI.
+                warn!(control, %error, "IPC accept failed; retrying");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         let pool = if control {
             &control_connections
         } else {
