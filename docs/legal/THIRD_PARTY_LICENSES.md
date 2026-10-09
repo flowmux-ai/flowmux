@@ -1496,24 +1496,6 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~~
 
-### BSD 3-Clause "New" or "Revised" License
-
-Used by: sha1_smol 1.0.1
-
-~~~~text
-Copyright (c) <year> <owner>.
-
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-~~~~
-
 ### Community Data License Agreement Permissive 2.0
 
 Used by: webpki-roots 1.0.8
@@ -2180,7 +2162,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ### ISC License
 
-Used by: rustls-webpki 0.103.13
+Used by: rustls-webpki 0.103.15
 
 ~~~~text
 Except as otherwise noted, this project is licensed under the following
@@ -2269,65 +2251,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 ---
-~~~~
-
-### MIT License
-
-Used by: onig_sys 69.9.3
-
-~~~~text
-# Rust-Onig is Open Source!
-
-All source code in this repository is distributed under the terms of
-the *MIT License* unless otherwise stated. The Oniguruma source code
-remains the property of the original authors and is re-distributed
-under the original license, see [COPYING](oniguruma/COPYING) for more
-information.
-
-> The MIT License (MIT)
->
-> Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
-> <defuz@me.com>, and contributors.
->
->
-~~~~
-
-Used by: onig 6.5.3
-
-~~~~text
-# Rust-Onig is Open Source!
-
-All source code in this repository is distributed under the terms of
-the *MIT License* unless otherwise stated. The Oniguruma source code
-remains the property of the original authors and is re-distributed
-under the original license.
-
-> The MIT License (MIT)
->
-> Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
-> <defuz@me.com>, and contributors.
->
->
-~~~~
-
-~~~~text
-Permission is hereby granted, free of charge, to any person obtaining a copy
-> of this software and associated documentation files (the "Software"), to deal
-> in the Software without restriction, including without limitation the rights
-> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-> copies of the Software, and to permit persons to whom the Software is
-> furnished to do so, subject to the following conditions:
->
-> The above copyright notice and this permission notice shall be included in all
-> copies or substantial portions of the Software.
->
-> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-> SOFTWARE.
 ~~~~
 
 ### MIT License
@@ -2421,7 +2344,7 @@ Used by: errno 0.3.14
 Copyright (c) 2014 Chris Wong
 ~~~~
 
-Used by: bitflags 2.11.1, log 0.4.29, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10, xdg 3.0.0
+Used by: bitflags 2.11.1, log 0.4.29, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
 
 ~~~~text
 Copyright (c) 2014 The Rust Project Developers
@@ -2452,19 +2375,13 @@ Used by: hyper 1.10.1
 Copyright (c) 2014-2026 Sean McArthur
 ~~~~
 
-Used by: plist 1.9.0
-
-~~~~text
-Copyright (c) 2015 Edward Barnard
-~~~~
-
 Used by: tempfile 3.27.0
 
 ~~~~text
 Copyright (c) 2015 Steven Allen
 ~~~~
 
-Used by: fs2 0.4.3, heck 0.5.0, linked-hash-map 0.5.6, unicode-normalization 0.1.25
+Used by: fs2 0.4.3, heck 0.5.0, unicode-normalization 0.1.25
 
 ~~~~text
 Copyright (c) 2015 The Rust Project Developers
@@ -2480,12 +2397,6 @@ Used by: fallible-iterator 0.3.0
 
 ~~~~text
 Copyright (c) 2015 The rust-openssl-verify Developers
-~~~~
-
-Used by: terminal_size 0.4.4
-
-~~~~text
-Copyright (c) 2015 The terminal-size Developers
 ~~~~
 
 Used by: png 0.18.1
@@ -2543,7 +2454,7 @@ Used by: utf8parse 0.2.2
 Copyright (c) 2016 Joe Wilm
 ~~~~
 
-Used by: hyper-rustls 0.27.9, rustls 0.23.42, rustls-native-certs 0.8.3
+Used by: hyper-rustls 0.27.9, rustls 0.23.45, rustls-native-certs 0.8.3
 
 ~~~~text
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
@@ -2603,12 +2514,6 @@ Used by: digest 0.10.7
 Copyright (c) 2017 Artyom Pavlov
 ~~~~
 
-Used by: fnv 1.0.7
-
-~~~~text
-Copyright (c) 2017 Contributors
-~~~~
-
 Used by: memoffset 0.9.1
 
 ~~~~text
@@ -2619,6 +2524,12 @@ Used by: vcpkg 0.2.15
 
 ~~~~text
 Copyright (c) 2017 Jim McGrath
+~~~~
+
+Used by: heapless 0.8.0
+
+~~~~text
+Copyright (c) 2017 Jorge Aparicio
 ~~~~
 
 Used by: enumflags2_derive 0.7.12
@@ -2691,7 +2602,13 @@ Used by: bytes 1.11.1
 Copyright (c) 2018 Carl Lerche
 ~~~~
 
-Used by: autocfg 1.5.0
+Used by: hash32 0.3.1
+
+~~~~text
+Copyright (c) 2018 Jorge Aparicio
+~~~~
+
+Used by: autocfg 1.5.1
 
 ~~~~text
 Copyright (c) 2018 Josh Stone
@@ -2814,6 +2731,12 @@ Used by: iana-time-zone 0.1.65, iana-time-zone-haiku 0.1.2
 Copyright (c) 2020 Andrew D. Straw
 ~~~~
 
+Used by: maybe-async 0.2.11
+
+~~~~text
+Copyright (c) 2020 Guoli Lyu
+~~~~
+
 Used by: memmap2 0.9.10
 
 ~~~~text
@@ -2851,12 +2774,6 @@ Used by: powerfmt 0.2.0
 Copyright (c) 2023 Jacob Pratt et al.
 ~~~~
 
-Used by: bit-set 0.8.0, bit-vec 0.8.0
-
-~~~~text
-Copyright (c) 2023 The Rust Project Developers
-~~~~
-
 Used by: hyper-util 0.1.20
 
 ~~~~text
@@ -2867,6 +2784,12 @@ Used by: deranged 0.5.8
 
 ~~~~text
 Copyright (c) 2024 Jacob Pratt et al.
+~~~~
+
+Used by: sha1-checked 0.10.0
+
+~~~~text
+Copyright (c) 2024 The RustCrypto Project Developers
 ~~~~
 
 Used by: zbus 4.4.0, zbus_macros 4.4.0, zvariant 4.2.0, zvariant_derive 4.2.0
@@ -2958,23 +2881,7 @@ MIT License
 Copyright (c) 2017 Nikolai Vazquez
 ~~~~
 
-Used by: darling 0.23.0, darling_core 0.23.0, darling_macro 0.23.0
-
-~~~~text
-MIT License
-
-Copyright (c) 2017 Ted Driggs
-~~~~
-
-Used by: syntect 5.3.0
-
-~~~~text
-MIT License
-
-Copyright (c) 2017 Tristan Hume, Keith Hall, Google Inc and other contributors
-~~~~
-
-Used by: faster-hex 0.9.0
+Used by: faster-hex 0.10.1
 
 ~~~~text
 MIT License
@@ -3082,21 +2989,13 @@ Copyright (c) 2017 Frommi
 Copyright (c) 2017-2024 oyvindln
 ~~~~
 
-Used by: fdeflate 0.3.7, ident_case 1.0.1, image 0.25.10, image-webp 0.2.4
+Used by: fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
 
 ~~~~text
 MIT License
 ~~~~
 
-Used by: allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-recursion 1.1.1, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.89, atomic-waker 1.1.2, blocking 1.6.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, futures-lite 2.6.1, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.66.0, gix-actor 0.32.0, gix-chunk 0.4.12, gix-commitgraph 0.24.3, gix-config 0.40.0, gix-config-value 0.14.12, gix-date 0.9.4, gix-diff 0.46.0, gix-discover 0.35.0, gix-features 0.38.2, gix-fs 0.11.3, gix-glob 0.16.5, gix-hash 0.14.2, gix-hashtable 0.5.2, gix-lock 14.0.0, gix-object 0.44.0, gix-odb 0.63.0, gix-pack 0.53.0, gix-path 0.10.22, gix-quote 0.4.15, gix-ref 0.47.0, gix-refspec 0.25.0, gix-revision 0.29.0, gix-revwalk 0.15.0, gix-sec 0.10.12, gix-tempfile 14.0.2, gix-trace 0.1.19, gix-traverse 0.41.0, gix-url 0.27.5, gix-utils 0.1.14, gix-validate 0.10.1, gix-validate 0.9.4, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, home 0.5.12, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, prettyplease 0.2.37, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.6.26, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, xdg-home 1.3.0, zbus_names 3.0.0, zmij 1.0.21, zvariant_utils 2.1.0
-
-Used by: fancy-regex 0.16.2
-
-~~~~text
-The MIT License
-
-Copyright 2015 The Fancy Regex Authors.
-~~~~
+Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-recursion 1.1.1, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.89, atomic-waker 1.1.2, blocking 1.6.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, futures-lite 2.6.1, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, xdg-home 1.3.0, zbus_names 3.0.0, zmij 1.0.21, zvariant_utils 2.1.0
 
 Used by: android_system_properties 0.1.5
 
@@ -3146,7 +3045,7 @@ The MIT License (MIT)
 Copyright (c) 2015 Alice Maz
 ~~~~
 
-Used by: aho-corasick 1.1.4, byteorder-lite 0.1.0, globset 0.4.19, ignore 0.4.30, jiff 0.2.24, jiff-tzdb 0.1.6, jiff-tzdb-platform 0.1.3, memchr 2.8.0, walkdir 2.5.0
+Used by: aho-corasick 1.1.4, byteorder 1.5.0, byteorder-lite 0.1.0, globset 0.4.19, ignore 0.4.30, jiff 0.2.24, jiff-tzdb 0.1.6, jiff-tzdb-platform 0.1.3, memchr 2.8.0, walkdir 2.5.0
 
 ~~~~text
 The MIT License (MIT)
@@ -3160,14 +3059,6 @@ Used by: nix 0.29.0
 The MIT License (MIT)
 
 Copyright (c) 2015 Carl Lerche + nix-rust Authors
-~~~~
-
-Used by: yaml-rust 0.4.5
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2015 Chen Yuheng
 ~~~~
 
 Used by: strsim 0.11.1
@@ -3236,14 +3127,6 @@ The MIT License (MIT)
 Copyright (c) 2020 Yoshua Wuyts
 ~~~~
 
-Used by: bon 3.9.3, bon-macros 3.9.3
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2024 Elastio Software Inc
-~~~~
-
 Used by: version_check 0.9.5
 
 ~~~~text
@@ -3260,14 +3143,6 @@ Copyright (c) 2014 Benjamin Sago
 Copyright (c) 2021-2022 The Nushell Project Developers
 ~~~~
 
-Used by: bincode 1.3.3
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2014 Ty Overby
-~~~~
-
 Used by: generic-array 0.14.7
 
 ~~~~text
@@ -3276,7 +3151,7 @@ The MIT License (MIT)
 Copyright (c) 2015 Bartłomiej Kamiński
 ~~~~
 
-Used by: quick-xml 0.39.4
+Used by: quick-xml 0.41.0
 
 ~~~~text
 The MIT License (MIT)
@@ -3370,7 +3245,7 @@ licences; see files named LICENSE.*.txt for details.
 
 ### MIT License
 
-Used by: prodash 28.0.0
+Used by: prodash 30.0.1
 
 ~~~~text
 The MIT License (MIT)
@@ -3400,22 +3275,6 @@ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### MIT +no-false-attribs license
-
-Used by: fmt2io 1.0.0
-
-~~~~text
-Copyright (c) 2024 Martin Habovštiak
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-Distributions of all or part of the Software intended to be used by the recipients as they would use the unmodified Software, containing modifications that substantially alter, remove, or disable functionality of the Software, outside of the documented configuration mechanisms provided by the Software, shall be modified such that the Original Author's bug reporting email addresses and urls are either replaced with the contact information of the parties responsible for the changes, or removed entirely.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~
 
 ### Mozilla Public License 2.0
@@ -4304,6 +4163,32 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA FILES OR SOFTWARE.
 
 Except as contained in this notice, the name of a copyright holder shall not be used in advertising or otherwise to promote the sale, use or other dealings in these Data Files or Software without prior written authorization of the copyright holder.
+~~~~
+
+### zlib License
+
+Used by: zlib-rs 0.5.5
+
+~~~~text
+(C) 2024 Trifecta Tech Foundation
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 ~~~~
 
 ### zlib License

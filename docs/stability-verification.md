@@ -24,3 +24,27 @@ interval, but does not delay admitted handlers. Persistent exhaustion remains
 unserviceable until resources are freed; retries are bounded to ten per second.
 The test restores only its own GUI's original resource limits in a `finally`
 block. It does not raise process limits or cancel in-flight mutations.
+
+## 2. Dependency advisories
+
+Updated anyhow to 1.0.103, rustls to 0.23.45, quick-xml to 0.41.0 and gix to
+0.77.0 (the first gix release using fixed gix-date 0.12). The locked graph uses
+gix-date 0.12.1 and gix-features 0.45.2. Removed unused Comrak default features;
+the renderer uses `markdown_to_html`, not its optional Syntect adapter or CLI.
+The explicitly retained `shortcodes` feature preserves emoji rendering. This
+also removes unmaintained bincode/yaml-rust and the vulnerable indirect XML
+parser, without advisory exceptions.
+
+Regression review: gix repository/worktree discovery is covered by 15 tests;
+Markdown rendering by four tests, including escaped fenced code and emoji.
+Eleven scrollback tests include actual VTE export/replay, styled minimap pixels,
+malformed/oversized input and HTML attribute whitespace. Attribute decoding
+retains the previous HTML behavior instead of applying XML normalization.
+TLS configuration is unchanged; the TLS implementation receives its patch
+update. This does not constitute a separate cryptographic audit.
+
+`cargo deny --locked check --config packaging/licenses/deny.toml advisories
+licenses sources` passes with zero exceptions. The distribution notice was
+regenerated with the required cargo-about 0.9.2; four notice tests pass.
+Workspace build, all-target Clippy, formatting and live degraded/healthy session
+save-and-restore checks also pass on the updated dependency graph.

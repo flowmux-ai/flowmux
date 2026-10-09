@@ -316,6 +316,15 @@ mod tests {
     }
 
     #[test]
+    fn retains_shortcodes_and_escaped_code_without_syntax_plugins() {
+        let html = render_markdown_body(":smile:\n\n```rust\nlet value = \"<tag>\";\n```\n");
+        assert!(html.contains('😄'));
+        assert!(html.contains("class=\"language-rust\""));
+        assert!(html.contains("&lt;tag&gt;"));
+        assert!(!html.contains("<tag>"));
+    }
+
+    #[test]
     fn wraps_html_as_full_document() {
         let html = render_markdown("# Title\n\nBody", &RenderOptions::default())
             .expect("render markdown")

@@ -63,7 +63,7 @@ pub async fn list_worktrees(start: &Path) -> Result<WorktreeList, WorktreeListEr
     let repo =
         gix::discover(start).map_err(|_| WorktreeListError::NotRepository(start.to_path_buf()))?;
     let current_worktree = repo
-        .work_dir()
+        .workdir()
         .map(Path::to_path_buf)
         .ok_or_else(|| WorktreeListError::NotRepository(start.to_path_buf()))?;
     let current_worktree = normalize_existing_path(&current_worktree);

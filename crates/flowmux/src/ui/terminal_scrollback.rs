@@ -360,8 +360,9 @@ fn attribute_value(start: &BytesStart<'_>, key: &[u8]) -> Result<Option<String>,
     for attribute in start.attributes().with_checks(false) {
         let attribute = attribute.map_err(|error| error.to_string())?;
         if attribute.key.as_ref() == key {
-            return attribute
-                .unescape_value()
+            let value =
+                std::str::from_utf8(attribute.value.as_ref()).map_err(|error| error.to_string())?;
+            return quick_xml::escape::unescape(value)
                 .map(|value| Some(value.into_owned()))
                 .map_err(|error| error.to_string());
         }
@@ -612,6 +613,18 @@ mod tests {
         let replay = String::from_utf8(replay_bytes(&snapshot).unwrap().unwrap()).unwrap();
         assert!(replay.contains("\x1b[3;4:3;5;9;53;58;2;1;2;3mA<&🙂"));
         assert!(replay.ends_with("\x1b[0m\r\nplain\r\n"));
+    }
+
+    #[test]
+    fn html_attributes_keep_whitespace_and_decode_entities() {
+        let start =
+            BytesStart::from_content("span style=\"color:&#35;112233;\nfont-weight:bold\"", 4);
+        assert_eq!(
+            attribute_value(&start, b"style").unwrap().as_deref(),
+            Some("color:#112233;\nfont-weight:bold")
+        );
+        let malformed = BytesStart::from_content("span style=\"&unknown;\"", 4);
+        assert!(attribute_value(&malformed, b"style").is_err());
     }
 
     #[test]
