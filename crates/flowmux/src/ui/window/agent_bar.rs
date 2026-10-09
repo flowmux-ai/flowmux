@@ -57,6 +57,11 @@ impl WindowController {
         }
         self.refresh_session_panel(false).await;
         let model = self.store.agent_bar_model().await;
+        if let Some(office) = self.agent_office.borrow().as_ref() {
+            office
+                .view
+                .render(&self.sidebar.workspace_titles().borrow(), &model);
+        }
         if self.options.borrow().agent_bar_mode {
             self.render_agent_bar(&model);
         } else {

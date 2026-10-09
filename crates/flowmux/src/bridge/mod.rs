@@ -250,6 +250,8 @@ pub enum GtkCommand {
     },
     /// Toggle the full-window workspace overview.
     ToggleWorkspaceOverview,
+    /// Show the live 2D office for all workspaces.
+    ToggleAgentOffice,
     ResizePane {
         pane: PaneId,
         ratio: f32,

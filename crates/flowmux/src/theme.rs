@@ -747,6 +747,40 @@ paned > separator {{
     color: {fg};
     padding: 14px 28px 28px 28px;
 }}
+.flowmux-agent-office {{
+    background-color: {bg};
+    color: {fg};
+}}
+.flowmux-office-summary {{
+    padding: 10px 16px;
+    color: #aebbc7;
+}}
+.flowmux-office-rooms {{
+    padding: 12px 20px 24px;
+    background: #171f2b;
+    color: #ded6c5;
+}}
+.flowmux-office-resident {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    box-shadow: none;
+}}
+.flowmux-office-nameplate {{
+    background: alpha(#17212d, 0.88);
+    color: #f1e3cb;
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 11px;
+}}
+.flowmux-office-resident:hover,
+.flowmux-office-resident:focus-visible {{
+    border-color: #e3c38e;
+    background: alpha(#e3c38e, 0.12);
+}}
 .flowmux-workspace-overview-title {{
     padding: 0 0 8px 0;
 }}

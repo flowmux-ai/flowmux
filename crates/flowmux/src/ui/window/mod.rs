@@ -102,6 +102,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::BrowserOpenSplit { .. }
             | GtkCommand::OpenUrlInBrowserTab { .. }
             | GtkCommand::ShowOptionsDialog
+            | GtkCommand::ToggleAgentOffice
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
@@ -595,6 +596,7 @@ pub struct WindowController {
         Rc<RefCell<std::collections::HashMap<PaneId, Rc<crate::ui::review_window::ReviewWindow>>>>,
     file_browser: FileBrowserState,
     agent_bar: AgentBarState,
+    agent_office: Rc<RefCell<Option<agent_office::ActiveAgentOffice>>>,
     pane_zoom: PaneZoomState,
     workspace_overview: workspace_overview::WorkspaceOverviewState,
     content_overlay: gtk::Overlay,
@@ -1227,6 +1229,7 @@ fn add_resize_handle(
 }
 
 mod agent_bar;
+mod agent_office;
 mod browser_commands;
 mod command_palette;
 mod file_browser;
@@ -1920,6 +1923,7 @@ impl WindowController {
                 attentions: agent_bar_attentions,
             },
             pane_zoom: PaneZoomState::default(),
+            agent_office: Rc::new(RefCell::new(None)),
             workspace_overview: workspace_overview::WorkspaceOverviewState::default(),
             content_overlay,
             callbacks,
@@ -2661,6 +2665,9 @@ impl WindowController {
         source_pane: Option<PaneId>,
         source_surface: Option<SurfaceId>,
     ) -> bool {
+        if self.agent_office.borrow().is_some() {
+            return false;
+        }
         let Some(pane) = source_pane else {
             return false;
         };
@@ -2680,6 +2687,9 @@ impl WindowController {
     }
 
     fn is_agent_surface_visible(&self, surface: SurfaceId) -> bool {
+        if self.agent_office.borrow().is_some() {
+            return false;
+        }
         let focused_pane = self.focused_pane.get();
         let active_surface =
             focused_pane.and_then(|pane| self.pane_registry.borrow().active_surface(pane));
@@ -2796,6 +2806,15 @@ impl WindowController {
     }
 
     pub async fn dispatch(&self, cmd: GtkCommand) {
+        if !matches!(&cmd, GtkCommand::ToggleAgentOffice)
+            && (command_dismisses_workspace_overview(&cmd)
+                || matches!(
+                    &cmd,
+                    GtkCommand::ToggleWorkspaceOverview | GtkCommand::CloseWindow
+                ))
+        {
+            self.close_agent_office();
+        }
         if self.workspace_overview.is_active() && command_dismisses_workspace_overview(&cmd) {
             self.dismiss_workspace_overview_immediately();
         }
@@ -2910,6 +2929,7 @@ impl WindowController {
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::ToggleWorkspaceOverview
+            | GtkCommand::ToggleAgentOffice
             | GtkCommand::FileBrowserFocusOut { .. }
             | GtkCommand::FileBrowserCloseAndRestoreFocus
             | GtkCommand::OpenFileInEditor { .. }

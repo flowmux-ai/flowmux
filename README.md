@@ -57,6 +57,17 @@ Click a notification to jump straight back to that agent.
 
 <img src="resources/screenshot/claude_notification.gif" alt="agent notifications" width="100%" />
 
+### AgentOffice
+
+Open **AgentOffice** immediately left of **Agents bar** in the scrollable footer
+of the side panel. Options stays fixed at the far left.
+Each workspace becomes a shared pixel-art room with desks and a lounge.
+Live agents walk between those spaces, type at their desks, wait
+for your input, or rest on a sofa when idle or done. There are 120 animal and
+outfit combinations, with agent names and icons identifying Claude, Codex,
+Gemini, and other agents. Select a character to return to its terminal; press
+**Esc** to leave the office. Animation follows the desktop's reduced-motion setting.
+
 ### Browser tab
 
 Browse next to your terminals, or let your agents do it. With the

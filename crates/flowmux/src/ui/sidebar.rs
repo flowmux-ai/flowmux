@@ -338,6 +338,19 @@ impl Sidebar {
         footer.set_margin_bottom(4);
         footer.set_margin_start(4);
         footer.set_margin_end(4);
+        let office_btn = gtk::Button::from_icon_name("user-home-symbolic");
+        office_btn.add_css_class("flat");
+        office_btn.add_css_class("flowmux-sidebar-options");
+        office_btn.set_widget_name("flowmux-agent-office-button");
+        office_btn.set_tooltip_text(Some("AgentOffice"));
+        office_btn.update_property(&[gtk::accessible::Property::Label("AgentOffice")]);
+        let office_bridge = bridge.clone();
+        office_btn.connect_clicked(move |_| {
+            let bridge = office_bridge.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::ToggleAgentOffice).await;
+            });
+        });
         let options_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
         options_btn.add_css_class("flat");
         options_btn.set_tooltip_text(Some("Options"));
@@ -356,7 +369,7 @@ impl Sidebar {
         footer.append(&options_btn);
 
         let footer_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        footer_actions.set_halign(gtk::Align::End);
+        footer_actions.set_halign(gtk::Align::Start);
         footer_actions.set_widget_name("flowmux-footer-actions");
         let footer_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::External)
@@ -365,14 +378,6 @@ impl Sidebar {
             .child(&footer_actions)
             .build();
         footer_scroll.set_widget_name("flowmux-footer-actions-scroll");
-        // Resize from the right edge; manual scrolling only changes the value,
-        // so it remains available until the content or viewport size changes.
-        footer_scroll.hadjustment().connect_changed(|adjustment| {
-            let adjustment = adjustment.clone();
-            gtk::glib::idle_add_local_once(move || {
-                adjustment.set_value((adjustment.upper() - adjustment.page_size()).max(0.0));
-            });
-        });
         let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
         let adjustment = footer_scroll.hadjustment();
         wheel.connect_scroll(move |_, dx, dy| {
@@ -382,6 +387,7 @@ impl Sidebar {
         });
         footer_scroll.add_controller(wheel);
         footer.append(&footer_scroll);
+        footer_actions.append(&office_btn);
 
         let agent_bar_button = gtk::ToggleButton::new();
         agent_bar_button.set_icon_name("view-list-symbolic");
@@ -3445,6 +3451,31 @@ mod tests {
             .unwrap()
             .downcast::<gtk::Box>()
             .unwrap();
+        let office = descendant_widgets(&sidebar.root)
+            .into_iter()
+            .find(|widget| widget.widget_name() == "flowmux-agent-office-button")
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap();
+        assert_eq!(
+            office.parent().unwrap().first_child().as_ref(),
+            Some(office.upcast_ref())
+        );
+        assert_eq!(office.tooltip_text().as_deref(), Some("AgentOffice"));
+        let scroll = descendant_widgets(&sidebar.root)
+            .into_iter()
+            .find(|widget| widget.widget_name() == "flowmux-footer-actions-scroll")
+            .unwrap();
+        assert_eq!(
+            scroll.prev_sibling().unwrap().tooltip_text().as_deref(),
+            Some("Options")
+        );
+        assert!(scroll.prev_sibling().unwrap().prev_sibling().is_none());
+        office.emit_clicked();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::ToggleAgentOffice
+        ));
         let mut names = Vec::new();
         let mut child = footer.first_child();
         while let Some(widget) = child {
@@ -3461,6 +3492,7 @@ mod tests {
             .position(|name| name == "flowmux-agent-bar-button")
             .expect("Agents bar button must exist");
         assert_eq!(agents + 1, usage);
+        assert_eq!(agents, 1, "AgentOffice is immediately before Agents bar");
         assert_eq!(
             sidebar.agent_bar_button.tooltip_text().as_deref(),
             Some("Agents bar")

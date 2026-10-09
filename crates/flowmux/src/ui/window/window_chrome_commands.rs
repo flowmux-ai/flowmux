@@ -107,6 +107,9 @@ impl WindowController {
             GtkCommand::ToggleWorkspaceOverview => {
                 self.toggle_workspace_overview();
             }
+            GtkCommand::ToggleAgentOffice => {
+                self.toggle_agent_office().await;
+            }
 
             GtkCommand::FileBrowserFocusOut { dir } => {
                 self.focus_out_of_file_browser(dir);
