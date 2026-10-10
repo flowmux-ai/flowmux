@@ -2822,6 +2822,8 @@ impl WindowController {
                 | GtkCommand::RenameWorkspace { .. }
                 | GtkCommand::SetWorkspaceColor { .. }
                 | GtkCommand::ReorderWorkspace { .. }
+                | GtkCommand::SplitPane { .. }
+                | GtkCommand::TeamSpawn { .. }
                 | GtkCommand::CreateSurface { .. }
                 | GtkCommand::NewSurface { .. }
                 | GtkCommand::CloseSurface { .. }

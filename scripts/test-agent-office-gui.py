@@ -199,8 +199,19 @@ def main():
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
         assert room("Product studio") and not room("Quiet corner")
         # Background workspace changes must not redirect native keys away from the map.
-        covered = h.rpc(socket, "workspace_create", name="Covered terminal", root=str(h.root))["workspace_created"]["id"]
+        covered = h.rpc(socket, "workspace_create", name="Covered terminal", root=str(h.root), team=True)["workspace_created"]["id"]
         covered_pane = h.workspace(socket, covered)["panes"][0]["id"]
+        for direction in ("vertical", "horizontal"):
+            h.rpc(socket, "pane_split", pane=covered_pane, direction=direction)
+            time.sleep(.3)
+            assert shown("Back to workspace"), "background pane split closed AgentOffice"
+        h.rpc(socket, "team_spawn", pane=covered_pane, cwd=str(h.root),
+              shell=str(shell), role="Office focus regression")
+        time.sleep(.3)
+        assert shown("Back to workspace"), "team worker spawn closed AgentOffice"
+        covered_panes = h.workspace(socket, covered)["panes"]
+        assert len(covered_panes) == 4, "background splits and team worker must still be created"
+        screenshot("background-team-splits")
         time.sleep(.5)
         native_window().set_input_focus(X.RevertToParent, X.CurrentTime)
         for key in "officefocusprobe":
@@ -209,15 +220,17 @@ def main():
             xtest.fake_input(connection, X.KeyRelease, code)
         connection.sync()
         time.sleep(.3)
-        assert "officefocusprobe" not in h.screen(socket, covered_pane), "queued focus sent keys behind AgentOffice"
+        for pane in covered_panes:
+            assert "officefocusprobe" not in h.screen(socket, pane["id"]), "queued focus sent keys behind AgentOffice"
         for key in ["Tab"] * 10 + list("officefocusprobe"):
             code = connection.keysym_to_keycode(XK.string_to_keysym(key))
             xtest.fake_input(connection, X.KeyPress, code)
             xtest.fake_input(connection, X.KeyRelease, code)
         connection.sync()
         time.sleep(.3)
-        assert "officefocusprobe" not in h.screen(socket, covered_pane), "AgentOffice leaked keyboard input to a hidden terminal"
-        h.pass_check("workspace creation and Tab navigation keep native keys out of the covered terminal")
+        for pane in covered_panes:
+            assert "officefocusprobe" not in h.screen(socket, pane["id"]), "AgentOffice leaked keyboard input to a hidden terminal"
+        h.pass_check("workspace creation, pane splits, team spawn and Tab navigation preserve AgentOffice and keyboard focus")
         assert find("Next office design") is None, "office refresh button must be removed"
         actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                   and any(n.get_name().startswith(name + " · ") for name in ("codex", "claude", "gemini"))]
