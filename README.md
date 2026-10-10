@@ -57,32 +57,35 @@ Click a notification to jump straight back to that agent.
 
 <img src="resources/screenshot/claude_notification.gif" alt="agent notifications" width="100%" />
 
+### Team workspace
+
+Give one lead agent a task and let it coordinate the team. In a **Team workspace**,
+Claude Code and Codex workers run in visible split panes, each with its own
+assignment. The lead collects their results, asks for corrections, and checks the
+finished work. You can follow every conversation and continue with the same
+workers for the next round.
+
+Install **Flowmux Team** for your agent from **Options → Skills**, then choose
+**New Team Workspace** from the sidebar menu or command palette. Start your lead
+agent there and ask it to delegate research, implementation, or review.
+See the [team guide](docs/agent-teams.md) for setup and example workflows.
+
+<img src="resources/screenshot/flowmux-team-workspace.gif" alt="Team workspace: a lead agent delegates tasks to workers in visible split panes" width="100%" />
+
 ### AgentOffice
 
-Open **AgentOffice** immediately left of **Agents bar** in the scrollable footer
-of the side panel. Options stays fixed at the far left.
-Workspaces with agents fit into one map, with more space and seats for larger teams.
-Empty workspaces stay hidden; offices appear and disappear as agents join and leave.
-Each office keeps one fixed floor plan for its team size and design, whatever the
-window size. The map shows every office at one shared scale, so the overview and
-an enlarged office show the same room, and characters are the same size in each.
-Office signs follow workspace names live. Select a sign to enlarge that office,
-or **All offices** to fit the whole map again. The design button cycles through
-48 furnished designs: twelve themes, from a daylight atelier and a fern
-conservatory to a neon night shift and an orbital station, with four spatial
-layouts each. Lounges, pantries, focal pieces, and a few plants furnish the floor,
-and pixel art stays crisp at every size.
-Status icons above each head show typing, reading, input waits, completion, and
-rest at a glance; speech bubbles add the agent's reported task text when status
-changes, and an input wait keeps its bubble until it is answered. Agents walk in
-through the office door, ease along clear paths between desks, lounges, coffee
-counters, and plants, and leave through the door when a session ends. Resting
-teammates wander between points of interest and occasionally gather for a
-stand-up or a pizza delivery. Windows and clocks follow the local time of day.
-There are 120 animal and outfit combinations, with agent names and icons
-identifying Claude, Codex, Gemini, and other agents. Select a character to
-return to its terminal; press **Esc** to leave the office. Animation follows the
-desktop's reduced-motion setting.
+See your agents at work in a living pixel-art office. Each workspace with active
+agents becomes a room, where characters work at desks, wait for your input, or
+relax when their task is done. Status icons and speech bubbles help you spot who
+needs attention across Claude Code, Codex, and other agents.
+
+Open **AgentOffice** with the home icon in the side panel's **Agents** header.
+Select an office sign to enlarge that room, or **All offices** to return to the
+map. Click an agent to jump to its terminal, and press **Esc** to return to your
+workspace. Team workers can create new split panes in the background while you
+keep watching the office.
+
+<img src="resources/screenshot/flowmux-agent-office.gif" alt="AgentOffice: watch agents across workspaces and select a character to open its terminal" width="100%" />
 
 ### Browser tab
 
