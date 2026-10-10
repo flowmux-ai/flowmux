@@ -2660,6 +2660,115 @@ async fn tmux_compat_external_swarm_drives_bridge_commands() {
 }
 
 #[tokio::test]
+async fn current_agent_source_reads_terminal_ownership_before_presence_exists() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("codex");
+    std::fs::copy("/bin/sleep", &executable).unwrap();
+    let mut child = std::process::Command::new(&executable)
+        .arg("10")
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    for terminal_pid in [pid, std::process::id()] {
+        let request = handler.handle_from(
+            Request::AgentSurfaceCurrent {
+                agent: "codex".into(),
+            },
+            Some(pid),
+        );
+        let gui = async {
+            let GtkCommand::QueryTerminalAgentPids { ack } = rx.recv().await.unwrap() else {
+                panic!("expected terminal ownership query");
+            };
+            ack.send(vec![(surface, terminal_pid)]).unwrap();
+        };
+        let (response, ()) = tokio::join!(request, gui);
+        if terminal_pid == pid {
+            assert!(
+                matches!(response, Response::AgentSurface { pane: p, surface: s, .. }
+                if p == pane && s == surface)
+            );
+        } else {
+            assert!(matches!(response, Response::Error(_)));
+        }
+    }
+    assert!(handler
+        .inner
+        .store()
+        .located_agent_presence(surface)
+        .await
+        .is_none());
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[tokio::test]
+async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_terminal() {
+    use std::io::BufRead;
+    let (handler, rx, pane, stale_surface) = single_pane_handler().await;
+    let (_, live_surface) = handler
+        .inner
+        .store()
+        .add_terminal_surface_to_pane(pane, None)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("codex");
+    std::fs::copy("/bin/sleep", &executable).unwrap();
+    let mut terminal = std::process::Command::new("/bin/sh")
+        .args(["-c", "\"$1\" 10 & echo $!; wait", "fixture"])
+        .arg(executable)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(terminal.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let peer = line.trim().parse::<u32>().unwrap();
+    // The shell reports its background PID before that child necessarily execs.
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while flowmux_procmon::agent_name_for_pid(peer) != Some("codex") {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fixture child must exec codex");
+    handler
+        .inner
+        .store()
+        .set_agent_activity(
+            stale_surface,
+            Some(flowmux_core::AgentPresence::new(
+                "codex",
+                AgentActivity::Running,
+                Some(peer),
+            )),
+        )
+        .await;
+    let request = handler.handle_from(
+        Request::AgentSurfaceCurrent {
+            agent: "codex".into(),
+        },
+        Some(peer),
+    );
+    let gui = async {
+        let GtkCommand::QueryTerminalAgentPids { ack } = rx.recv().await.unwrap() else {
+            panic!("expected terminal ownership query");
+        };
+        ack.send(vec![(stale_surface, peer), (live_surface, terminal.id())])
+            .unwrap();
+    };
+    let (response, ()) = tokio::join!(request, gui);
+    unsafe {
+        libc::kill(peer as i32, libc::SIGTERM);
+    }
+    terminal.wait().unwrap();
+    assert!(matches!(response, Response::AgentSurface { surface, .. } if surface == live_surface));
+}
+
+#[tokio::test]
 async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_callers() {
     let (handler, _rx, pane, surface) = single_pane_handler().await;
     let mut child = std::process::Command::new("sleep")

@@ -648,6 +648,9 @@ enum ThemeOp {
 
 #[derive(Subcommand)]
 enum HooksOp {
+    /// Refresh existing Flowmux agent wrappers, including legacy PATH wrappers.
+    /// Does not install missing integrations or change provider settings/hooks.
+    RefreshShims,
     /// Install / refresh hook entries for every supported agent. Run
     /// once after `flowmux` is installed; safe to re-run after agent
     /// upgrades. Skips agents whose home directory is missing.

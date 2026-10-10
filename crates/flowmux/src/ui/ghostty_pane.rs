@@ -894,7 +894,9 @@ impl GhosttyPane {
         {
             let cb = callbacks.on_child_exited.clone();
             let pane_id = pane_id.clone();
+            let pid = pid.clone();
             term.connect_child_exited(move |_term, status| {
+                pid.set(None);
                 (cb.borrow_mut())(pane_id.get(), status);
             });
         }
@@ -2702,6 +2704,10 @@ fn prepend_agent_shim_dir(extra_env: &mut Vec<(String, String)>) {
     // Put agent wrappers first, retaining any PATH override already supplied.
     if let Some(shim) = flowmux_config::paths::agent_shim_dir() {
         if shim.is_dir() {
+            extra_env.push((
+                "FLOWMUX_AGENT_SHIM_DIR".to_string(),
+                shim.to_string_lossy().into_owned(),
+            ));
             let base = last_env_value(extra_env, "PATH")
                 .map(str::to_string)
                 .or_else(|| std::env::var("PATH").ok())

@@ -135,6 +135,12 @@ pub(crate) fn generic_resume_return_forget_request(
 pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyhow::Result<()> {
     use hook_install::HookInstallStatus;
     match op {
+        HooksOp::RefreshShims => {
+            for path in hook_install::refresh_agent_shims()? {
+                println!("updated {}", path.display());
+            }
+            Ok(())
+        }
         HooksOp::Setup { agent, flowmux_bin } => {
             let bin = flowmux_bin
                 .clone()

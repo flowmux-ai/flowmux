@@ -278,7 +278,8 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -qtf "$DATA_DIR/icons/hicolor" 2>/dev/null || true
 fi
 
-echo "==> agent integrations unchanged"
-echo "    Run '$PRIMARY_BIN_DIR/flowmuxctl fix' to enable or refresh them."
+"$PRIMARY_BIN_DIR/flowmuxctl" hooks refresh-shims
+echo "==> existing agent wrappers refreshed; provider settings and hooks unchanged"
+echo "    Run '$PRIMARY_BIN_DIR/flowmuxctl fix' to enable or repair other integrations."
 
 echo "==> done. Fully restart the running flowmux GUI to pick up the new binary."

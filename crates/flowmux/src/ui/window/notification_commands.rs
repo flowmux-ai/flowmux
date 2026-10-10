@@ -305,6 +305,9 @@ impl WindowController {
             GtkCommand::SetAgentStatus { workspace } => {
                 self.sync_workspace_agent_status(workspace).await;
             }
+            GtkCommand::QueryTerminalAgentPids { ack } => {
+                let _ = ack.send(self.pane_registry.borrow().terminal_agent_pids());
+            }
             GtkCommand::QueryAgentSurfaceVisible { surface, ack } => {
                 let _ = ack.send(self.is_agent_surface_visible(surface));
             }

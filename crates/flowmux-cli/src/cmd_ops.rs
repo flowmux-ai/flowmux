@@ -25,7 +25,10 @@ pub(crate) async fn run_identify(
                     "No unique live Flowmux pane for Codex session {session}.{missing} \
                      The exact session binding may not have been reported yet. Retry this read-only \
                      lookup once in a separate tool call after this call completes. If still unresolved, \
-                     stop; do not select another window or create a replacement workspace."
+                     stop; do not select another window or create a replacement workspace. \
+                     Retrying cannot establish a missing shared-daemon binding. For future local \
+                     sessions, update the Flowmux agent shim with `flowmux hooks refresh-shims` or start Codex \
+                     with `codex --no-daemon` in the intended pane; keep active sessions open."
                 )
             })?;
         let response = tokio::time::timeout(

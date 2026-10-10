@@ -4349,7 +4349,11 @@ fn take_restored_agent_shell_command(
 /// Interactive, so the alias or function the user starts the agent with
 /// applies to the resumed one too.
 fn resumed_agent_shell_argv(shell: &str, command: &str) -> Vec<String> {
-    let shell_command = format!("{command}; exec {} -l", shell_quote(shell));
+    // Login startup files can reorder PATH before an interactive -c command.
+    let shell_command = format!(
+        r#"if [ -n "${{FLOWMUX_AGENT_SHIM_DIR:-}}" ]; then export PATH="$FLOWMUX_AGENT_SHIM_DIR:$PATH"; fi; {command}; exec {} -l"#,
+        shell_quote(shell)
+    );
     vec![shell.into(), "-lic".into(), shell_command]
 }
 
@@ -4407,9 +4411,30 @@ mod resume_tests {
         let argv = resumed_agent_shell_argv("/bin/zsh", "resume-command");
         assert_eq!(argv[0], "/bin/zsh");
         assert_eq!(argv[1], "-lic");
-        assert_eq!(
-            argv[2], "resume-command; exec '/bin/zsh' -l",
+        assert!(
+            argv[2].ends_with("resume-command; exec '/bin/zsh' -l"),
             "resume text must be a shell argv, never terminal input"
+        );
+    }
+
+    #[test]
+    fn resumed_agent_restores_shim_path_after_shell_startup() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("codex");
+        std::fs::write(&shim, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let argv = resumed_agent_shell_argv("/bin/sh", "command -v codex; exit");
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &argv[2]])
+            .env("PATH", "/usr/bin:/bin")
+            .env("FLOWMUX_AGENT_SHIM_DIR", dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            shim.to_str().unwrap()
         );
     }
 

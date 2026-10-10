@@ -771,6 +771,10 @@ pub enum GtkCommand {
         surface: SurfaceId,
         ack: oneshot::Sender<bool>,
     },
+    /// Read terminal ownership before agent hooks or process polling have run.
+    QueryTerminalAgentPids {
+        ack: oneshot::Sender<Vec<(SurfaceId, u32)>>,
+    },
 }
 
 #[derive(Clone)]
@@ -868,6 +872,7 @@ impl Bridge {
             GtkCommand::PaneReadScreen { .. }
             | GtkCommand::ListNotifications { .. }
             | GtkCommand::QueryAgentSurfaceVisible { .. }
+            | GtkCommand::QueryTerminalAgentPids { .. }
             | GtkCommand::SetAgentStatus { .. }
             | GtkCommand::AddActivity { .. }
             | GtkCommand::AddNotification { .. }

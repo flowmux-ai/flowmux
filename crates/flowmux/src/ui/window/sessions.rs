@@ -36,7 +36,17 @@ fn resume_shell_line(session: &HistorySession, home: &SessionHome) -> Result<Str
     let environment = home
         .environment
         .iter()
-        .map(|(key, value)| shell_quote(&format!("{key}={value}")))
+        .map(|(key, value)| {
+            if key == "PATH" {
+                // Retain the provider's PATH, with this pane's wrapper first.
+                format!(
+                    "PATH=\"${{FLOWMUX_AGENT_SHIM_DIR:+$FLOWMUX_AGENT_SHIM_DIR:}}\"{}",
+                    shell_quote(value)
+                )
+            } else {
+                shell_quote(&format!("{key}={value}"))
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let arguments = home
@@ -462,7 +472,7 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let cwd = root.path().join("other project ' 한글 $(exit 9)");
             std::fs::create_dir(&cwd).unwrap();
-            let home = SessionHome {
+            let mut home = SessionHome {
                 path: root.path().join("config ' $(exit 8)"),
                 environment: [(
                     variable.into(),
@@ -502,10 +512,13 @@ mod tests {
             .unwrap();
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            home.environment
+                .insert("PATH".into(), "/usr/bin:/bin".into());
             let output = std::process::Command::new("/bin/sh")
                 .arg("-c")
                 .arg(resume_shell_line(&session, &home).unwrap())
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("FLOWMUX_AGENT_SHIM_DIR", &bin)
                 .output()
                 .unwrap();
             assert!(output.status.success());

@@ -252,6 +252,27 @@ impl Handler for GuiHandler {
             if ancestors.is_empty() {
                 return missing();
             }
+            // First tools can beat both native hooks and the periodic process poll.
+            let agent_rank = ancestors
+                .iter()
+                .position(|pid| flowmux_procmon::agent_name_for_pid(*pid) == Some(agent.as_str()));
+            let terminal_pids = if agent_rank.is_some() {
+                let (ack, rx) = oneshot::channel();
+                let query = async {
+                    self.bridge
+                        .send(GtkCommand::QueryTerminalAgentPids { ack })
+                        .await
+                        .ok()?;
+                    rx.await.ok()
+                };
+                tokio::time::timeout(std::time::Duration::from_secs(1), query)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let Response::Tree { workspaces } = self.inner.handle(Request::WorkspaceTree).await
             else {
                 return missing();
@@ -260,16 +281,26 @@ impl Handler for GuiHandler {
             for workspace in workspaces {
                 for pane in workspace.panes {
                     for tab in pane.tabs {
-                        if let Some(located) =
-                            self.inner.store().located_agent_presence(tab.id).await
-                        {
-                            if located.presence.name == agent {
-                                if let Some(rank) = located.presence.pid.and_then(|pid| {
-                                    ancestors.iter().position(|ancestor| *ancestor == pid)
-                                }) {
-                                    matches.push((rank, pane.id, tab.id));
+                        let mut rank = terminal_pids
+                            .iter()
+                            .find(|(surface, _)| *surface == tab.id)
+                            .and_then(|(_, pid)| ancestors.iter().position(|p| p == pid))
+                            // A terminal root is the window's direct child. A recycled
+                            // PID deeper in another terminal cannot establish ownership.
+                            .filter(|rank| *rank + 1 == ancestors.len());
+                        if terminal_pids.is_empty() {
+                            if let Some(located) =
+                                self.inner.store().located_agent_presence(tab.id).await
+                            {
+                                if located.presence.name == agent {
+                                    rank = located.presence.pid.and_then(|pid| {
+                                        ancestors.iter().position(|ancestor| *ancestor == pid)
+                                    });
                                 }
                             }
+                        }
+                        if let Some(rank) = rank {
+                            matches.push((rank, pane.id, tab.id));
                         }
                     }
                 }

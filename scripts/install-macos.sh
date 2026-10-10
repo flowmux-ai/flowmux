@@ -330,8 +330,9 @@ fi
 install -m755 "$REPO_ROOT/target/$target_subdir/flowmux" "$BIN_DIR/flowmux"
 install -m755 "$REPO_ROOT/target/$target_subdir/flowmuxctl" "$BIN_DIR/flowmuxctl"
 
-echo "==> agent integrations unchanged"
-echo "    Run '$BIN_DIR/flowmuxctl fix' to enable or refresh them."
+"$BIN_DIR/flowmuxctl" hooks refresh-shims
+echo "==> existing agent wrappers refreshed; provider settings and hooks unchanged"
+echo "    Run '$BIN_DIR/flowmuxctl fix' to enable or repair other integrations."
 
 if [ -n "$running_pid" ]; then
     echo "==> staged app update: $bundle_pending"

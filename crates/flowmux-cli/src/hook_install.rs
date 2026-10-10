@@ -494,8 +494,10 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 /// Agents that get a PID-capturing wrapper shim. The GUI prepends the
 /// shim dir to a PTY's `PATH`, so typing `claude` / `codex` resolves to
 /// these scripts first. They export `FLOWMUX_AGENT_PID=$$` and the canonical
-/// agent name (read by the hooks), then `exec` the real binary, so they are
-/// otherwise fully transparent. Lifecycle presence comes from each agent's
+/// agent name (read by the hooks), then `exec` the real binary, preserving
+/// provider settings. Codex runs locally so hooks and tools retain
+/// their pane's process ancestry instead of a shared daemon's environment.
+/// Lifecycle presence comes from each agent's
 /// native hook (or the process-tree fallback), so the shim never emits a
 /// competing synthetic SessionStart.
 pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini", "cline", "agy"];
@@ -504,6 +506,25 @@ pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini
 /// resolving the real binary so it never re-execs itself or another copy.
 pub(crate) fn shim_script(agent: &str) -> String {
     let canonical_agent = if agent == "agy" { "antigravity" } else { agent };
+    let codex_local = if agent == "codex" {
+        r#"
+if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
+  local_codex=1
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      --no-daemon|--remote|--remote=*) local_codex=0 ;;
+    esac
+  done
+  # Older clients predate shared daemons; preserve their command line.
+  if [ "$local_codex" = 1 ] && "$real" --help 2>/dev/null | grep -q -- '--no-daemon'; then
+    set -- --no-daemon "$@"
+  fi
+fi
+"#
+    } else {
+        ""
+    };
     let claude_session_name = if agent == "claude" {
         r#"
 if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
@@ -579,7 +600,7 @@ if [ -z "$real" ]; then
   echo "flowmux shim: {agent} not found on PATH" >&2
   exit 127
 fi
-{claude_session_name}
+{claude_session_name}{codex_local}
 exec "$real" "$@"
 "#
     )
@@ -622,6 +643,33 @@ pub fn install_agent_shims() -> Result<Vec<PathBuf>> {
             if !written.contains(&path) {
                 written.push(path.clone());
             }
+        }
+    }
+    Ok(written)
+}
+
+/// Upgrade already-enabled wrappers without installing integrations or hooks.
+pub fn refresh_agent_shims() -> Result<Vec<PathBuf>> {
+    let mut written = Vec::new();
+    for dir in [
+        flowmux_config::paths::agent_shim_dir(),
+        user_local_bin_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        written.extend(refresh_agent_shims_in(&dir)?);
+    }
+    Ok(written)
+}
+
+fn refresh_agent_shims_in(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut written = Vec::new();
+    for agent in SHIM_AGENTS {
+        let path = dir.join(agent);
+        if is_legacy_local_agent_shim(&path) && write_atomic(&path, shim_script(agent).as_bytes())?
+        {
+            written.push(path);
         }
     }
     Ok(written)
@@ -3247,6 +3295,120 @@ mod tests {
         assert_eq!(run(&["--name", "mine"], "2.1.226"), "mine|--name mine\n");
         assert_eq!(run(&[], "2.1.223"), "|\n");
         assert_eq!(run(&["--bare"], "2.1.226"), "|--bare\n");
+    }
+
+    #[test]
+    fn refresh_shims_updates_only_owned_existing_wrappers() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp();
+        let owned = dir.path().join("codex");
+        fs::write(&owned, "#!/bin/sh\n# flowmux agent wrapper shim\nexit 9\n").unwrap();
+        fs::set_permissions(&owned, fs::Permissions::from_mode(0o755)).unwrap();
+        let custom = dir.path().join("claude");
+        fs::write(&custom, "#!/bin/sh\necho custom\n").unwrap();
+
+        assert_eq!(
+            refresh_agent_shims_in(dir.path()).unwrap(),
+            vec![owned.clone()]
+        );
+        assert_eq!(fs::read_to_string(&owned).unwrap(), shim_script("codex"));
+        assert_eq!(
+            fs::metadata(&owned).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert_eq!(
+            fs::read_to_string(&custom).unwrap(),
+            "#!/bin/sh\necho custom\n"
+        );
+        assert!(!dir.path().join("opencode").exists());
+        assert!(refresh_agent_shims_in(dir.path()).unwrap().is_empty());
+        assert!(refresh_agent_shims_in(&dir.path().join("absent"))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn codex_shim_keeps_local_pane_ancestry_without_changing_provider_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let dir = tmp();
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let shim = dir.path().join("codex");
+        fs::write(&shim, shim_script("codex")).unwrap();
+        let real = bin.join("codex");
+        fs::write(
+            &real,
+            "#!/bin/bash\nif [ \"$1\" = --help ]; then echo \"${FAKE_HELP}\"; exit; fi\nprintf '%s\\n' \"$@\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o755)).unwrap();
+        let run = |args: &[&str], inside: bool, supported: bool| {
+            let output = Command::new("/bin/bash")
+                .arg(&shim)
+                .args(args)
+                .env_clear()
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("FLOWMUX_SURFACE_ID", if inside { "surface" } else { "" })
+                .env("FAKE_HELP", if supported { "  --no-daemon" } else { "" })
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{:?}", output);
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        for args in [
+            vec![],
+            vec!["resume", "session-id"],
+            vec!["fork", "--last"],
+            vec!["exec", "explain this"],
+            vec!["--", "--remote"],
+            vec!["--", "--no-daemon"],
+            vec![
+                "--sandbox",
+                "read-only",
+                "-a",
+                "never",
+                "-p",
+                "my-profile",
+                "a prompt",
+            ],
+        ] {
+            let mut expected = vec!["--no-daemon"];
+            expected.extend(&args);
+            assert_eq!(run(&args, true, true), expected);
+        }
+        for args in [
+            vec!["--no-daemon", "resume", "session-id"],
+            vec!["--remote", "unix:///tmp/provider.sock"],
+            vec!["--remote=wss://example.test"],
+        ] {
+            assert_eq!(run(&args, true, true), args);
+        }
+        let args = ["resume", "session-id"];
+        assert_eq!(run(&args, false, true), args);
+        assert_eq!(run(&args, true, false), args);
+    }
+
+    #[test]
+    #[ignore = "requires built Flowmux GUI, Xvfb and python3-xlib (Linux)"]
+    fn codex_shim_first_tool_gui() {
+        let dir = tmp();
+        let shim = dir.path().join("codex");
+        fs::write(&shim, shim_script("codex")).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let status = std::process::Command::new("python3")
+            .current_dir(root)
+            .arg("scripts/test-codex-source-gui.py")
+            .arg("--shim")
+            .arg(&shim)
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]

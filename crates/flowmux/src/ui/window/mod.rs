@@ -2892,6 +2892,7 @@ impl WindowController {
             | GtkCommand::ClearAllNotifications
             | GtkCommand::SetAgentStatus { .. }
             | GtkCommand::QueryAgentSurfaceVisible { .. }
+            | GtkCommand::QueryTerminalAgentPids { .. }
             | GtkCommand::OpenAgentBarItem { .. }) => {
                 self.dispatch_notification_command(command).await;
             }
