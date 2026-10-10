@@ -873,6 +873,10 @@ fn write_pending(fd: RawFd, pending: &mut VecDeque<u8>) -> std::io::Result<()> {
     let n = unsafe { libc::write(fd, bytes.as_ptr() as *const _, bytes.len()) };
     if n > 0 {
         pending.drain(..n as usize);
+        // A burst should not leave a full backpressure buffer in every idle PTY.
+        if pending.is_empty() && pending.capacity() > 16 * 1024 {
+            *pending = VecDeque::new();
+        }
         return Ok(());
     }
     if n == 0 {
@@ -1130,6 +1134,32 @@ impl Drop for SavedTermios {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drained_burst_releases_buffer_without_losing_bytes() {
+        use std::io::Read;
+        for size in [0, 16 * 1024, 16 * 1024 + 1, PENDING_BYTES] {
+            let mut file = tempfile::tempfile().unwrap();
+            let mut expected: Vec<_> = (0..size).map(|i| (i % 251) as u8).collect();
+            let mut pending = VecDeque::from(expected.clone());
+            let prefix: Vec<_> = pending.drain(..size / 3).collect();
+            pending.extend(prefix);
+            expected.rotate_left(size / 3);
+            let capacity = pending.capacity();
+            write_pending(file.as_raw_fd(), &mut pending).unwrap();
+            while !pending.is_empty() {
+                write_pending(file.as_raw_fd(), &mut pending).unwrap();
+            }
+            assert_eq!(
+                pending.capacity(),
+                if capacity > 16 * 1024 { 0 } else { capacity }
+            );
+            std::io::Seek::rewind(&mut file).unwrap();
+            let mut received = Vec::new();
+            file.read_to_end(&mut received).unwrap();
+            assert_eq!(received, expected);
+        }
+    }
 
     #[tokio::test]
     async fn ipc_worker_reconnects_between_terminal_event_batches() {

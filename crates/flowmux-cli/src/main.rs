@@ -924,8 +924,7 @@ enum WorkspaceOp {
     Focus { workspace: WorkspaceId },
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     // ponytail: two glibc arenas cap long-lived per-thread fragmentation;
     // raise the limit only if allocator contention shows up in profiles.
     #[cfg(target_env = "gnu")]
@@ -947,6 +946,23 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cli = Cli::parse();
+    // PTY helpers use their IPC worker's runtime; do not retain a second one.
+    if let Cmd::PtyTee {
+        pane,
+        surface,
+        argv,
+    } = cli.cmd
+    {
+        let exit_code = pty_tee::run(pane, surface, cli.socket, argv)?;
+        std::process::exit(exit_code);
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(run_cli(cli))
+}
+
+async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     let cmd = cli.cmd;
 
     // Local-only commands — handled before the daemon connect so they
@@ -983,22 +999,6 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::PtyTee { .. } => {}
         _ => {}
-    }
-
-    // pty-tee owns its synchronous PTY pump and a separate IPC runtime.
-    // Dispatch it before any outer-runtime tasks or daemon connection, so the
-    // blocking pump starves nothing and its worker can reconnect independently.
-    if matches!(cmd, Cmd::PtyTee { .. }) {
-        let Cmd::PtyTee {
-            pane,
-            surface,
-            argv,
-        } = cmd
-        else {
-            unreachable!("matches! just confirmed the variant")
-        };
-        let exit_code = pty_tee::run(pane, surface, cli.socket.clone(), argv)?;
-        std::process::exit(exit_code);
     }
 
     let json_mode = cli.json;
