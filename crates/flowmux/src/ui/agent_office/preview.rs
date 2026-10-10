@@ -28,8 +28,8 @@ fn actors(plan: &Rc<Plan>, count: usize) -> Vec<Actor> {
 }
 
 fn paint_room(cr: &Context, bounds: Rect, count: usize, design: usize, frame: u32, hour: u32) {
-    let (plan, scale) = Plan::fill(count, design, bounds.w, bounds.h, 1.0);
-    let plan = Rc::new(plan);
+    let plan = Rc::new(Plan::fit(count, design, layout::ASPECT));
+    let scale = (bounds.w / plan.width).min(bounds.h / plan.height);
     let background = scene::Background::new(&plan, scale, Daylight::at(hour)).ok();
     let mut actors = actors(&plan, count);
     // Let walkers settle and resting teammates start their routines.
@@ -155,9 +155,16 @@ fn render_office_previews() {
     {
         let cr = Context::new(&surface).unwrap();
         let counts = [3, 1, 1, 2, 1, 4, 1, 2];
-        let weights: Vec<_> = counts.iter().map(|c| (*c + 4) as f64).collect();
-        let bounds = layout::tiles(
-            &weights,
+        let sizes: Vec<_> = counts
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let plan = Plan::fit(*c, (i * 7) % designs, layout::ASPECT);
+                (plan.width, plan.height)
+            })
+            .collect();
+        let (_, bounds) = layout::arrange(
+            &sizes,
             Rect {
                 x: 0.0,
                 y: 0.0,
@@ -243,9 +250,16 @@ fn render_character_sheet() {
 #[ignore = "timing report; run with --release"]
 fn bench_office_frames() {
     let counts = [6, 1, 3, 2, 1, 4, 1, 32];
-    let weights: Vec<_> = counts.iter().map(|c| (*c + 4) as f64).collect();
-    let bounds = layout::tiles(
-        &weights,
+    let sizes: Vec<_> = counts
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let plan = Plan::fit(*c, (i * 5) % scene::DESIGNS, layout::ASPECT);
+            (plan.width, plan.height)
+        })
+        .collect();
+    let (_, bounds) = layout::arrange(
+        &sizes,
         Rect {
             x: 0.0,
             y: 0.0,
@@ -259,8 +273,8 @@ fn bench_office_frames() {
         .enumerate()
         .map(|(i, rect)| {
             let design = (i * 5) % scene::DESIGNS;
-            let (plan, scale) = Plan::fill(counts[i], design, rect.w, rect.h, 1.0);
-            let plan = Rc::new(plan);
+            let plan = Rc::new(Plan::fit(counts[i], design, layout::ASPECT));
+            let scale = (rect.w / plan.width).min(rect.h / plan.height);
             let actors = actors(&plan, counts[i]);
             (*rect, design, plan, scale, actors)
         })

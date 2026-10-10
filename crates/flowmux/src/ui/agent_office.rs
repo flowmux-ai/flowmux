@@ -42,7 +42,6 @@ struct Room {
     bounds: Rect,
     scale: f64,
     origin: (f64, f64),
-    fitted_size: Option<(f64, f64, f64)>,
     background: RefCell<Option<scene::Background>>,
     event: Option<Event>,
     event_clock: f64,
@@ -65,8 +64,6 @@ struct World {
     selected: Option<WorkspaceId>,
     all_button: gtk::glib::WeakRef<gtk::Button>,
     frame: u32,
-    /// Device pixels per logical pixel, for whole-pixel art scaling.
-    factor: f64,
     /// Local hour and minute for clocks and windows.
     now: (u32, u32),
     /// After the first render, teammates who join an existing office walk in.
@@ -77,7 +74,6 @@ impl World {
     fn replan(&mut self, index: usize) {
         self.end_event(index);
         let room = &mut self.rooms[index];
-        room.fitted_size = None;
         room.background.take();
         room.planned_count = room.members.len();
         let mut capacity = room
@@ -93,11 +89,7 @@ impl World {
             room.members.sort_by_key(|id| self.residents[id].actor.slot);
             capacity = room.members.len();
         }
-        room.plan = Rc::new(Plan::fit(
-            capacity,
-            room.design,
-            room.plan.width / room.plan.height,
-        ));
+        room.plan = Rc::new(Plan::fit(capacity, room.design, layout::ASPECT));
         for (slot, id) in room.members.iter().enumerate() {
             if let Some(resident) = self.residents.get_mut(id) {
                 let slot = if compact { slot } else { resident.actor.slot };
@@ -113,14 +105,16 @@ impl World {
         if width <= 0 || height <= 0 {
             return;
         }
-        let weights: Vec<_> = self
+        let sizes: Vec<_> = self
             .rooms
             .iter()
             .filter(|r| self.selected.is_none_or(|id| id == r.id))
-            .map(|r| (r.plan.capacity + 4) as f64)
+            .map(|r| (r.plan.width, r.plan.height))
             .collect();
-        let bounds = layout::tiles(
-            &weights,
+        // Fixed floor plans at one shared scale: the overview shows each office
+        // exactly as its enlarged view does, only smaller.
+        let (scale, bounds) = layout::arrange(
+            &sizes,
             Rect {
                 x: 0.0,
                 y: 0.0,
@@ -146,9 +140,10 @@ impl World {
                 continue;
             }
             let rect = bounds.next().unwrap();
+            room.scale = scale;
             room.bounds = rect;
-            let header = 28.0_f64.min(rect.h * 0.18);
-            let header_scale = header / 28.0;
+            let header = layout::TITLE;
+            let header_scale = 1.0;
             room.title
                 .set_size_request(((rect.w - 8.0) / header_scale - 32.0).max(1.0) as i32, 28);
             transform(stage, &room.title, rect.x + 4.0, rect.y + 2.0, header_scale);
@@ -159,31 +154,6 @@ impl World {
                 rect.y + 2.0,
                 header_scale,
             );
-            let inner_width = (rect.w - 2.0).max(1.0);
-            let inner_height = (rect.h - header - 2.0).max(1.0);
-            let factor = if self.factor > 0.0 { self.factor } else { 1.0 };
-            if room.fitted_size != Some((inner_width, inner_height, factor)) {
-                let (plan, scale) = Plan::fill(
-                    room.plan.capacity,
-                    room.design,
-                    inner_width,
-                    inner_height,
-                    factor,
-                );
-                room.plan = Rc::new(plan);
-                room.scale = scale;
-                room.fitted_size = Some((inner_width, inner_height, factor));
-                room.background.take();
-                room.event = None;
-                for id in &room.members {
-                    if let Some(resident) = self.residents.get_mut(id) {
-                        resident.actor.set_errand(None);
-                        resident
-                            .actor
-                            .replan(resident.actor.slot, room.plan.clone());
-                    }
-                }
-            }
             room.origin = (rect.x + 1.0, rect.y + header + 1.0);
             for id in &room.members {
                 if let Some(resident) = self.residents.get(id) {
@@ -426,11 +396,7 @@ impl AgentOffice {
         });
         let resize_world = world.clone();
         let resize_stage = stage.clone();
-        drawing.connect_resize(move |drawing, w, h| {
-            let mut world = resize_world.borrow_mut();
-            world.factor = drawing.scale_factor() as f64;
-            world.place(&resize_stage, w, h);
-        });
+        drawing.connect_resize(move |_, w, h| resize_world.borrow_mut().place(&resize_stage, w, h));
         let all_world = world.clone();
         let all_stage = stage.downgrade();
         let all_drawing = drawing.downgrade();
@@ -477,13 +443,6 @@ impl AgentOffice {
                 let now = (local.hour() as u32, local.minute() as u32);
                 changed |= world.now != now;
                 world.now = now;
-            }
-            let factor = drawing.scale_factor() as f64;
-            if world.factor != factor {
-                world.factor = factor;
-                if let Some(stage) = weak_stage.upgrade() {
-                    world.place(&stage, drawing.width(), drawing.height());
-                }
             }
             if animate {
                 changed |= world.run_events(dt);
@@ -611,11 +570,7 @@ impl AgentOffice {
                     .unwrap();
                 room.members.push(item.surface);
                 let plan = if slot >= room.plan.capacity {
-                    Rc::new(Plan::fit(
-                        slot + 1,
-                        room.design,
-                        room.plan.width / room.plan.height,
-                    ))
+                    Rc::new(Plan::fit(slot + 1, room.design, layout::ASPECT))
                 } else {
                     room.plan.clone()
                 };
@@ -835,13 +790,12 @@ impl AgentOffice {
             title,
             design_button,
             design,
-            plan: Rc::new(Plan::fit(0, design, 1.6)),
+            plan: Rc::new(Plan::fit(0, design, layout::ASPECT)),
             planned_count: 0,
             members: Vec::new(),
             bounds: Rect::default(),
             scale: 1.0,
             origin: (0.0, 0.0),
-            fitted_size: None,
             background: RefCell::new(None),
             event: None,
             event_clock: 0.0,
@@ -1140,7 +1094,7 @@ mod tests {
             .get_mut(&survivor)
             .unwrap()
             .actor
-            .replan(30, Rc::new(Plan::fit(31, design, 1.6)));
+            .replan(30, Rc::new(Plan::fit(31, design, layout::ASPECT)));
         world.replan(0);
         assert_eq!(
             world.rooms[0].plan.capacity, 3,

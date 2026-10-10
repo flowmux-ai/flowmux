@@ -215,6 +215,8 @@ pub(super) fn cached(key: impl Hash, build: impl FnOnce() -> Canvas) -> ImageSur
         // Designs cycle rarely; a full reset bounds memory without bookkeeping.
         if cache.len() > 6000 {
             cache.clear();
+            // Enlarged copies are keyed by surface address and must not outlive it.
+            ENLARGED.with(|enlarged| enlarged.borrow_mut().clear());
         }
         cache.insert(id, surface.clone());
     });
@@ -226,6 +228,72 @@ pub(super) fn paint(cr: &Context, surface: &ImageSurface, x: f64, y: f64) {
     let _ = cr.set_source_surface(surface, x, y);
     cr.source().set_filter(Filter::Nearest);
     let _ = cr.paint();
+}
+
+fn whole(scale: f64) -> bool {
+    scale >= 1.0 && (scale - scale.round()).abs() < 1e-6
+}
+
+/// `surface` enlarged `k` times, each art pixel becoming a `k` x `k` block.
+pub(super) fn enlarged(surface: &ImageSurface, k: u32) -> ImageSurface {
+    let (w, h) = (surface.width(), surface.height());
+    let big = ImageSurface::create(Format::ARgb32, w * k as i32, h * k as i32)
+        .expect("enlarged sprite surface");
+    {
+        let cr = Context::new(&big).expect("enlarged sprite context");
+        cr.scale(k as f64, k as f64);
+        paint(&cr, surface, 0.0, 0.0);
+    }
+    big
+}
+
+thread_local! {
+    static ENLARGED: RefCell<HashMap<(usize, u32), ImageSurface>> = RefCell::new(HashMap::new());
+}
+
+/// Paints a cached sprite at `scale` device pixels per art pixel. Between whole
+/// scales it enlarges with whole pixels first and then smooths the small
+/// remainder, so pixels keep crisp, even edges at any office size.
+pub(super) fn paint_scaled(
+    cr: &Context,
+    surface: &ImageSurface,
+    x: f64,
+    y: f64,
+    scale: f64,
+    alpha: f64,
+) {
+    let _ = cr.save();
+    if whole(scale) || scale < 1.0 {
+        let _ = cr.set_source_surface(surface, x, y);
+        cr.source().set_filter(if whole(scale) {
+            Filter::Nearest
+        } else {
+            Filter::Good
+        });
+    } else {
+        let k = scale.ceil() as u32;
+        let key = (surface.to_raw_none() as usize, k);
+        let big = ENLARGED.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() > 4000 {
+                cache.clear();
+            }
+            cache
+                .entry(key)
+                .or_insert_with(|| enlarged(surface, k))
+                .clone()
+        });
+        cr.translate(x, y);
+        cr.scale(1.0 / k as f64, 1.0 / k as f64);
+        let _ = cr.set_source_surface(&big, 0.0, 0.0);
+        cr.source().set_filter(Filter::Good);
+    }
+    if alpha < 1.0 {
+        let _ = cr.paint_with_alpha(alpha);
+    } else {
+        let _ = cr.paint();
+    }
+    let _ = cr.restore();
 }
 
 #[cfg(test)]

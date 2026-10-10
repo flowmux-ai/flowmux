@@ -61,17 +61,17 @@ Click a notification to jump straight back to that agent.
 
 Open **AgentOffice** immediately left of **Agents bar** in the scrollable footer
 of the side panel. Options stays fixed at the far left.
-Workspaces with agents fit into one adaptive map, with more space and seats for larger teams.
+Workspaces with agents fit into one map, with more space and seats for larger teams.
 Empty workspaces stay hidden; offices appear and disappear as agents join and leave.
-Rooms share adjoining boundaries, and their furniture reflows to fill each room's
-shape, from a single column to multiple columns, without stretching characters
-or leaving gaps between offices.
+Each office keeps one fixed floor plan for its team size and design, whatever the
+window size. The map shows every office at one shared scale, so the overview and
+an enlarged office show the same room, and characters are the same size in each.
 Office signs follow workspace names live. Select a sign to enlarge that office,
 or **All offices** to fit the whole map again. The design button cycles through
 48 furnished designs: twelve themes, from a daylight atelier and a fern
 conservatory to a neon night shift and an orbital station, with four spatial
-layouts each. Pixel art stays crisp at whole-pixel scales, and spare floor fills
-with lounges, pantries, focal pieces, and plants instead of empty space.
+layouts each. Lounges, pantries, focal pieces, and a few plants furnish the floor,
+and pixel art stays crisp at every size.
 Status icons above each head show typing, reading, input waits, completion, and
 rest at a glance; speech bubbles add the agent's reported task text when status
 changes, and an input wait keeps its bubble until it is answered. Agents walk in

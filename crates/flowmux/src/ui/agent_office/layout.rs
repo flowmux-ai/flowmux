@@ -23,6 +23,10 @@ const STRIP: f64 = 30.0;
 const SIDE_STRIP: f64 = 24.0;
 /// Rooms never enlarge art beyond this many logical pixels per art pixel.
 pub(super) const MAX_SCALE: f64 = 4.0;
+/// Every office keeps this shape, so its floor plan never depends on the window.
+pub(super) const ASPECT: f64 = 16.0 / 9.0;
+/// Logical height of the office name bar above each plan.
+pub(super) const TITLE: f64 = 28.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Rect {
@@ -54,81 +58,115 @@ impl Rect {
     }
 }
 
-/// Splits `bounds` into rows of tiles whose areas follow `weights`.
-pub(super) fn tiles(weights: &[f64], bounds: Rect) -> Vec<Rect> {
-    if weights.is_empty() {
-        return Vec::new();
+/// Space between neighbouring offices on the map.
+const SPACING: f64 = 4.0;
+
+/// Lowest-then-leftmost spot for a `w` x `h` box on `skyline` (x, width, top
+/// segments) within `width` x `height`.
+fn skyline_spot(
+    skyline: &[(f64, f64, f64)],
+    w: f64,
+    h: f64,
+    width: f64,
+    height: f64,
+) -> Option<(f64, f64)> {
+    let mut best: Option<(f64, f64)> = None;
+    for &(x, _, _) in skyline {
+        if x + w > width + 1e-6 {
+            continue;
+        }
+        let top = skyline
+            .iter()
+            .filter(|(sx, sw, _)| *sx < x + w - 1e-6 && sx + sw > x + 1e-6)
+            .map(|s| s.2)
+            .fold(0.0, f64::max);
+        if top + h <= height + 1e-6
+            && best.is_none_or(|(bx, by)| top < by - 1e-6 || (top < by + 1e-6 && x < bx))
+        {
+            best = Some((x, top));
+        }
     }
-    let total: f64 = weights.iter().sum();
-    // Variable row lengths give large teams their own row without squeezing small teams.
-    [false, true]
-        .into_iter()
-        .map(|vertical| {
-            let (width, height) = if vertical {
-                (bounds.h, bounds.w)
-            } else {
-                (bounds.w, bounds.h)
-            };
-            let target = if vertical { 1.0 / 1.25 } else { 1.25 };
-            let mut scores = vec![f64::INFINITY; weights.len() + 1];
-            let mut previous = vec![0; weights.len() + 1];
-            scores[0] = 0.0;
-            for end in 1..=weights.len() {
-                let (mut sum, mut smallest, mut largest) = (0.0, f64::INFINITY, 0.0_f64);
-                for start in (0..end).rev() {
-                    sum += weights[start];
-                    smallest = smallest.min(weights[start]);
-                    largest = largest.max(weights[start]);
-                    let aspect = width * total / (height * sum * sum * target);
-                    let score = scores[start]
-                        .max((smallest * aspect).ln().abs())
-                        .max((largest * aspect).ln().abs());
-                    if score < scores[end] {
-                        scores[end] = score;
-                        previous[end] = start;
-                    }
-                }
-            }
-            let mut rows = Vec::new();
-            let mut end = weights.len();
-            while end > 0 {
-                let start = previous[end];
-                rows.push(start..end);
-                end = start;
-            }
-            let mut result = Vec::with_capacity(weights.len());
-            let mut y = 0.0;
-            for row in rows.into_iter().rev() {
-                let members = &weights[row];
-                let sum: f64 = members.iter().sum();
-                let h = height * sum / total;
-                let mut x = 0.0;
-                for &weight in members {
-                    let w = width * weight / sum;
-                    result.push(if vertical {
-                        Rect {
-                            x: bounds.x + y,
-                            y: bounds.y + x,
-                            w: h,
-                            h: w,
-                        }
-                    } else {
-                        Rect {
-                            x: bounds.x + x,
-                            y: bounds.y + y,
-                            w,
-                            h,
-                        }
-                    });
-                    x += w;
-                }
-                y += h;
-            }
-            (scores[weights.len()], result)
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .unwrap()
-        .1
+    best
+}
+
+fn raise(skyline: &mut Vec<(f64, f64, f64)>, x: f64, w: f64, top: f64) {
+    let mut next = Vec::with_capacity(skyline.len() + 2);
+    for &(sx, sw, sy) in skyline.iter() {
+        let end = sx + sw;
+        if end <= x + 1e-6 || sx >= x + w - 1e-6 {
+            next.push((sx, sw, sy));
+            continue;
+        }
+        if sx < x {
+            next.push((sx, x - sx, sy));
+        }
+        if end > x + w {
+            next.push((x + w, end - x - w, sy));
+        }
+    }
+    next.push((x, w, top));
+    next.sort_by(|a, b| a.0.total_cmp(&b.0));
+    *skyline = next;
+}
+
+/// Places offices of fixed plan sizes at one shared scale, the largest that
+/// fits `bounds`, so every office keeps its proportions and its people match
+/// the size in every other office. Larger offices go first and smaller ones
+/// stack beside them. Returns the scale and each office's rectangle, title
+/// bar included, in the order of `sizes`.
+pub(super) fn arrange(sizes: &[(f64, f64)], bounds: Rect) -> (f64, Vec<Rect>) {
+    if sizes.is_empty() || bounds.w <= 0.0 || bounds.h <= 0.0 {
+        return (1.0, vec![Rect::default(); sizes.len()]);
+    }
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by(|a, b| {
+        (sizes[*b].0 * sizes[*b].1)
+            .total_cmp(&(sizes[*a].0 * sizes[*a].1))
+            .then(a.cmp(b))
+    });
+    let tile = |(w, h): (f64, f64), scale: f64| (w * scale + 2.0, h * scale + TITLE + 2.0);
+    let pack = |scale: f64| -> Option<Vec<Rect>> {
+        let mut skyline = vec![(0.0, bounds.w + SPACING, 0.0)];
+        let mut rects = vec![Rect::default(); sizes.len()];
+        for &index in &order {
+            let (w, h) = tile(sizes[index], scale);
+            let (x, y) = skyline_spot(
+                &skyline,
+                w + SPACING,
+                h + SPACING,
+                bounds.w + SPACING,
+                bounds.h + SPACING,
+            )?;
+            raise(&mut skyline, x, w + SPACING, y + h + SPACING);
+            rects[index] = Rect { x, y, w, h };
+        }
+        Some(rects)
+    };
+    let (mut low, mut high) = (0.02, MAX_SCALE);
+    if pack(high).is_some() {
+        low = high;
+    }
+    for _ in 0..40 {
+        let middle = (low + high) / 2.0;
+        if pack(middle).is_some() {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let scale = low;
+    let Some(mut rects) = pack(scale) else {
+        return (scale, vec![Rect::default(); sizes.len()]);
+    };
+    // Centre the whole arrangement in the window.
+    let right = rects.iter().map(|r| r.x + r.w).fold(0.0, f64::max);
+    let bottom = rects.iter().map(|r| r.y + r.h).fold(0.0, f64::max);
+    let (dx, dy) = ((bounds.w - right) / 2.0, (bounds.h - bottom) / 2.0);
+    for r in &mut rects {
+        r.x = (bounds.x + r.x + dx).round();
+        r.y = (bounds.y + r.y + dy).round();
+    }
+    (scale, rects)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -540,30 +578,6 @@ impl Plan {
             (w, w / aspect)
         };
         Self::build(capacity, design, shape, w, h)
-    }
-
-    /// Plan filling `width` x `height` logical pixels at the largest whole art
-    /// scale that fits; returns the plan and its scale.
-    pub fn fill(count: usize, design: usize, width: f64, height: f64, factor: f64) -> (Self, f64) {
-        let capacity = count.max(1);
-        let (width, height) = (width.max(1.0), height.max(1.0));
-        let (shape, w, h) = best_shape(capacity, design, width, height);
-        let exact = (width / w).min(height / h);
-        // Whole device pixels per art pixel keep every sprite pixel the same size.
-        let device = (exact * factor).floor();
-        let scale = if device >= 1.0 {
-            device.min(MAX_SCALE * factor) / factor
-        } else {
-            exact
-        };
-        let plan = Self::build(
-            capacity,
-            design,
-            shape,
-            (width / scale).max(w),
-            (height / scale).max(h),
-        );
-        (plan, scale)
     }
 
     fn build(capacity: usize, design: usize, shape: Shape, width: f64, height: f64) -> Self {
@@ -1154,7 +1168,7 @@ impl Plan {
                 h: 34.0,
             };
             if Self::hole(&taken, span) && self.try_place(&group, &mut taken, &cells) {
-                x = cx + 64.0 + (index % 3) as f64 * 20.0;
+                x = cx + 150.0 + (index % 3) as f64 * 40.0;
                 index += 1;
             } else {
                 x += 8.0;
@@ -1174,7 +1188,7 @@ impl Plan {
                 let item = Item::new(kind, x, y, index);
                 let span = item.rect().inflate(12.0);
                 if Self::hole(&taken, span) && self.try_place(&[item], &mut taken, &cells) {
-                    y += h as f64 + 56.0;
+                    y += h as f64 + 130.0;
                     index += 1;
                 } else {
                     y += 8.0;
@@ -1201,7 +1215,7 @@ impl Plan {
             let item = Item::new(kind, x, self.height - FRONT - h as f64 - 1.0, index);
             let span = item.rect().inflate(10.0);
             if Self::hole(&taken, span) && self.try_place(&[item], &mut taken, &cells) {
-                x += w as f64 + 72.0 + (index % 2) as f64 * 24.0;
+                x += w as f64 + 170.0 + (index % 2) as f64 * 40.0;
                 index += 1;
             } else {
                 x += 8.0;
@@ -1209,11 +1223,9 @@ impl Plan {
         }
     }
 
-    /// Furnishes large empty stretches with small corners, then medium ones with a
-    /// single plant; small gaps stay open floor.
+    /// Furnishes large empty stretches with small corners; smaller gaps stay open floor.
     fn fill_gaps(&mut self, theme: &theme::Theme) {
         self.fill_holes(theme, 60.0);
-        self.fill_holes(theme, 34.0);
     }
 
     fn fill_holes(&mut self, theme: &theme::Theme, size: f64) {
@@ -1261,7 +1273,7 @@ impl Plan {
                         .any(|group| self.try_place(group, &mut taken, &cells))
                     {
                         variant += 1;
-                        x += size * 2.0;
+                        x += size * 3.0;
                         continue;
                     }
                 }
@@ -1583,71 +1595,31 @@ mod tests {
     }
 
     #[test]
-    fn filled_offices_turn_desk_rows_into_columns_in_narrow_tiles() {
-        for design in 0..theme::DESIGNS {
-            let (narrow, _) = Plan::fill(2, design, 260.0, 900.0, 1.0);
-            let (wide, _) = Plan::fill(2, design, 1200.0, 320.0, 1.0);
-            assert_eq!(narrow.desk(0).0, narrow.desk(1).0, "design={design}");
-            assert_eq!(wide.desk(0).1, wide.desk(1).1, "design={design}");
+    fn office_plans_depend_only_on_team_size_and_design() {
+        for design in [0, 13, 30, 47] {
+            let a = Plan::fit(5, design, ASPECT);
+            let b = Plan::fit(5, design, ASPECT);
+            assert_eq!(a.items, b.items);
+            assert_eq!((a.width, a.height), (b.width, b.height));
+            assert!(((a.width / a.height) - ASPECT).abs() < 1e-9);
         }
     }
 
     #[test]
-    fn filled_offices_use_whole_pixel_scales_and_cover_their_tile() {
-        for design in [0, 5, 22, 47] {
-            for count in [1, 3, 9, 40] {
-                for (w, h) in [
-                    (1272.0, 590.0),
-                    (300.0, 260.0),
-                    (600.0, 900.0),
-                    (120.0, 90.0),
-                ] {
-                    for factor in [1.0, 2.0] {
-                        let (plan, scale) = Plan::fill(count, design, w, h, factor);
-                        let device = scale * factor;
-                        assert!(scale <= MAX_SCALE + 1e-9);
-                        if device >= 1.0 {
-                            assert!((device - device.round()).abs() < 1e-9, "{scale}");
-                        }
-                        assert!(plan.width * scale >= w - 1e-6 && plan.height * scale >= h - 1e-6);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn spare_floor_is_furnished_instead_of_left_empty() {
-        // Coverage counts sprites standing on the floor and rugs, per 16px tile.
+    fn spare_floor_is_lightly_furnished() {
+        // Loose decoration stays sparse: a few pieces per desk, never a carpet of clutter.
         for design in 0..theme::DESIGNS {
-            for (count, w, h) in [(1, 1272.0, 590.0), (3, 600.0, 400.0), (12, 1272.0, 590.0)] {
-                let (plan, _) = Plan::fill(count, design, w, h, 1.0);
-                let floor_w = plan.width - 2.0 * SIDE;
-                let floor_h = plan.height - WALL - FRONT;
-                let (cols, rows) = ((floor_w / 16.0) as usize, (floor_h / 16.0) as usize);
-                let mut covered = 0;
-                for row in 0..rows {
-                    for col in 0..cols {
-                        let tile = Rect {
-                            x: SIDE + col as f64 * 16.0,
-                            y: WALL + row as f64 * 16.0,
-                            w: 16.0,
-                            h: 16.0,
-                        };
-                        if plan
-                            .items
-                            .iter()
-                            .filter(|i| i.layer != Layer::Wall)
-                            .any(|i| i.rect().inflate(8.0).intersects(&tile))
-                        {
-                            covered += 1;
-                        }
-                    }
-                }
-                let ratio = covered as f64 / (cols * rows) as f64;
+            for count in [1, 3, 12, 32] {
+                let plan = Plan::fit(count, design, ASPECT);
+                let decor = plan
+                    .items
+                    .iter()
+                    .filter(|i| matches!(i.kind, Kind::Plant(_) | Kind::Clutter(_)))
+                    .count();
+                assert!(decor >= 2, "design={design} count={count} decor={decor}");
                 assert!(
-                    ratio > 0.62,
-                    "design={design} count={count} coverage={ratio:.2}"
+                    decor <= 6 + count * 2,
+                    "design={design} count={count} decor={decor}"
                 );
             }
         }
@@ -1675,21 +1647,38 @@ mod tests {
     }
 
     #[test]
-    fn tiles_keep_dense_offices_from_turning_into_slivers() {
-        let rooms = tiles(
-            &[36., 6., 6., 6., 6., 6., 6., 6.],
-            Rect {
-                x: 0.,
-                y: 0.,
-                w: 1280.,
-                h: 620.,
-            },
-        );
-        assert!(rooms.iter().all(|r| (0.5..2.5).contains(&(r.w / r.h))));
-        for (i, a) in rooms.iter().enumerate() {
-            for b in &rooms[i + 1..] {
-                assert!(!a.inflate(-0.01).intersects(b));
+    fn map_shares_one_scale_without_overlap_or_distortion() {
+        let plans: Vec<_> = [32, 1, 3, 1, 2, 1, 5, 1]
+            .into_iter()
+            .enumerate()
+            .map(|(i, count)| Plan::fit(count, i * 7, ASPECT))
+            .collect();
+        let sizes: Vec<_> = plans.iter().map(|p| (p.width, p.height)).collect();
+        for (w, h) in [
+            (1280.0, 620.0),
+            (900.0, 900.0),
+            (600.0, 1000.0),
+            (2400.0, 1300.0),
+        ] {
+            let bounds = Rect {
+                x: 0.0,
+                y: 0.0,
+                w,
+                h,
+            };
+            let (scale, rects) = arrange(&sizes, bounds);
+            assert!(scale > 0.0 && scale <= MAX_SCALE);
+            for (index, r) in rects.iter().enumerate() {
+                assert!((r.w - (sizes[index].0 * scale + 2.0)).abs() < 1e-6);
+                assert!((r.h - (sizes[index].1 * scale + TITLE + 2.0)).abs() < 1e-6);
+                assert!(r.x >= -0.5 && r.y >= -0.5 && r.x + r.w <= w + 0.5 && r.y + r.h <= h + 0.5);
+                for other in &rects[index + 1..] {
+                    assert!(!r.inflate(-0.6).intersects(other), "{w}x{h}");
+                }
             }
+            // A slightly larger scale no longer fits: the map is as large as it can be.
+            let used: f64 = rects.iter().map(|r| r.w * r.h).sum();
+            assert!(used / (w * h) > 0.55, "{w}x{h} uses {:.2}", used / (w * h));
         }
     }
 }

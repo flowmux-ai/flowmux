@@ -457,14 +457,6 @@ pub(super) struct Background {
     pub daylight: Daylight,
 }
 
-fn filter(scale: f64) -> Filter {
-    if scale >= 1.0 && (scale - scale.round()).abs() < 1e-6 {
-        Filter::Nearest
-    } else {
-        Filter::Good
-    }
-}
-
 fn cairo_rgba(cr: &Context, color: u32, alpha: f64) {
     cr.set_source_rgba(
         ((color >> 16) & 255) as f64 / 255.0,
@@ -522,9 +514,17 @@ impl Background {
         {
             let cr = Context::new(&device)?;
             cr.scale(scale, scale);
-            let _ = cr.set_source_surface(&art, 0.0, 0.0);
-            cr.source().set_filter(filter(scale));
-            let _ = cr.paint();
+            // The baked room is used once, so enlarge it directly rather than through the cache.
+            if scale > 1.0 && (scale - scale.round()).abs() > 1e-6 {
+                let k = scale.ceil();
+                let big = sprite::enlarged(&art, k as u32);
+                cr.scale(1.0 / k, 1.0 / k);
+                let _ = cr.set_source_surface(&big, 0.0, 0.0);
+                cr.source().set_filter(Filter::Good);
+                let _ = cr.paint();
+            } else {
+                sprite::paint_scaled(&cr, &art, 0.0, 0.0, scale, 1.0);
+            }
         }
         Ok(Self {
             surface: device,
@@ -606,7 +606,7 @@ fn animated(item: &Item, actors: &[&Actor]) -> bool {
 }
 
 /// Moving parts painted over an item's sprite in art coordinates.
-fn overlay(cr: &Context, item: &Item, design: usize, frame: u32, now: (u32, u32)) {
+fn overlay(cr: &Context, item: &Item, design: usize, frame: u32, now: (u32, u32), scale: f64) {
     let t = theme::theme(design);
     match item.kind {
         Kind::Desk { down: false } => {
@@ -616,7 +616,7 @@ fn overlay(cr: &Context, item: &Item, design: usize, frame: u32, now: (u32, u32)
                 0.0
             };
             let screen = props::screen(design, frame / 2 + item.slot.unwrap_or(0) as u32);
-            sprite::paint(cr, &screen, item.x + 11.0, item.y + 3.0 + low);
+            sprite::paint_scaled(cr, &screen, item.x + 11.0, item.y + 3.0 + low, scale, 1.0);
         }
         Kind::Counter { .. } => {
             // Steam curls above the espresso machine.
@@ -699,17 +699,11 @@ fn overlay(cr: &Context, item: &Item, design: usize, frame: u32, now: (u32, u32)
     }
 }
 
-fn draw_actor(cr: &Context, actor: &Actor, frame: u32, alpha: f64) {
+fn draw_actor(cr: &Context, actor: &Actor, frame: u32, alpha: f64, scale: f64) {
     let (dir, flip, pose) = actor.appearance(frame);
     let surface = character::sprite(actor.style, dir, flip, pose, actor.blinking());
     let (x, y) = (actor.position.0.round(), actor.position.1.round());
-    let _ = cr.set_source_surface(&surface, x - 12.0, y - 35.0);
-    cr.source().set_filter(Filter::Nearest);
-    if alpha < 1.0 {
-        let _ = cr.paint_with_alpha(alpha);
-    } else {
-        let _ = cr.paint();
-    }
+    sprite::paint_scaled(cr, &surface, x - 12.0, y - 35.0, scale, alpha);
 }
 
 /// Paints one office in art coordinates; `scale` is device pixels per art pixel.
@@ -763,25 +757,27 @@ pub(super) fn draw_room(
         match draw {
             Draw::Item(item) => {
                 let surface = props::item_sprite(item, plan.design, background.daylight);
-                sprite::paint(cr, &surface, item.x, item.y);
+                sprite::paint_scaled(cr, &surface, item.x, item.y, scale, 1.0);
                 if animated(item, actors) {
-                    overlay(cr, item, plan.design, frame, now);
+                    overlay(cr, item, plan.design, frame, now, scale);
                 }
             }
-            Draw::Pizza((x, y)) => sprite::paint(cr, &props::pizza_box(), x - 9.0, y - 7.0),
+            Draw::Pizza((x, y)) => {
+                sprite::paint_scaled(cr, &props::pizza_box(), x - 9.0, y - 7.0, scale, 1.0)
+            }
             Draw::Actor(actor) => {
                 let alpha = if actor.at_exit() {
                     (1.0 - actor.exit_age / 0.6).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
-                draw_actor(cr, actor, frame, alpha);
+                draw_actor(cr, actor, frame, alpha, scale);
             }
         }
     }
     // Wall-mounted pieces never overlap characters, but the clock still ticks.
     for item in plan.items.iter().filter(|i| i.kind == Kind::Clock) {
-        overlay(cr, item, plan.design, frame, now);
+        overlay(cr, item, plan.design, frame, now, scale);
     }
     let door = plan.door();
     let open = everyone
@@ -800,17 +796,19 @@ fn effects(cr: &Context, actors: &[&Actor], frame: u32, scale: f64) {
             for i in 0..4u8 {
                 let phase = ((age * 6.0) as u8).wrapping_add(i) % 4;
                 let angle = i as f64 * 1.7 + age * 3.0;
-                sprite::paint(
+                sprite::paint_scaled(
                     cr,
                     &props::sparkle(phase),
                     (x + angle.cos() * 13.0 - 3.0).round(),
                     (y - 18.0 + angle.sin() * 16.0 - 3.0).round(),
+                    scale,
+                    1.0,
                 );
             }
         }
         if actor.at_exit() && actor.exit_age < 0.6 {
             let phase = (actor.exit_age * 8.0) as u8 % 4;
-            sprite::paint(cr, &props::sparkle(phase), x - 3.0, y - 24.0);
+            sprite::paint_scaled(cr, &props::sparkle(phase), x - 3.0, y - 24.0, scale, 1.0);
         }
         if let Some(age) = actor.cheer {
             for i in 0..14u32 {
@@ -842,9 +840,7 @@ fn effects(cr: &Context, actors: &[&Actor], frame: u32, scale: f64) {
         let top = y - 36.0 + if seated { 3.0 } else { 0.0 } - 15.0 * zoom - bob;
         cr.translate((x + 4.0).round(), top.round());
         cr.scale(zoom, zoom);
-        let _ = cr.set_source_surface(&surface, 0.0, 0.0);
-        cr.source().set_filter(filter(scale * zoom));
-        let _ = cr.paint();
+        sprite::paint_scaled(cr, &surface, 0.0, 0.0, scale * zoom, 1.0);
         let _ = cr.restore();
     }
 }

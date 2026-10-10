@@ -127,13 +127,30 @@ def main():
                             "raw", "BGRX").save(h.root / f"{name}.png")
 
         def packed_floor(name):
+            # Offices keep fixed 16:9 floor plans at one shared scale, so the map
+            # letterboxes rather than stretching rooms; it must still use the window
+            # well, and office signs (one per room) must not overlap.
             screenshot(name)
             geometry = native_window().get_geometry()
             picture = Image.open(h.root / f"{name}.png")
             floor = picture.crop((4, 92, geometry.width - 4, geometry.height - 44))
             pixels = floor.width * floor.height
             empty = sum(count for count, color in floor.getcolors(pixels) if color == (17, 25, 35))
-            assert empty / pixels < .03, f"Offices leave {empty / pixels:.1%} unused space"
+            assert empty / pixels < .45, f"Offices leave {empty / pixels:.1%} unused space"
+            # AT-SPI can list one widget twice; compare each distinct sign once.
+            signs = {}
+            for n in office_nodes():
+                if (n.get_role() == Atspi.Role.PUSH_BUTTON and " · " in n.get_name()
+                        and n.get_name().split(" · ")[-1].isdigit()
+                        and n.get_state_set().contains(Atspi.StateType.SHOWING)):
+                    r = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                    signs[n.get_name()] = r
+            h.log("office_signs", name=name, signs={k: (r.x, r.y, r.width, r.height) for k, r in signs.items()})
+            signs = list(signs.values())
+            for index, a in enumerate(signs):
+                for b in signs[index + 1:]:
+                    assert a.x + a.width <= b.x or b.x + b.width <= a.x or a.y + a.height <= b.y \
+                        or b.y + b.height <= a.y, "office signs must not overlap"
 
         studio_root = h.root / "Product studio"
         quiet_root = h.root / "Quiet corner"
