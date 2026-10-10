@@ -400,12 +400,16 @@ impl WindowController {
         // A full render keeps a failed surface as a placeholder and records
         // why in the registry. For a surface the user just asked for, that
         // placeholder is the failure: report it and roll the tab back.
-        let build_error = self
-            .pane_registry
-            .borrow()
-            .surface_errors
-            .get(&surface_id)
-            .cloned();
+        let build_error =
+            crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface_id)
+                .err()
+                .or_else(|| {
+                    self.pane_registry
+                        .borrow()
+                        .surface_errors
+                        .get(&surface_id)
+                        .cloned()
+                });
         if let Some(error) = build_error {
             self.pane_registry
                 .borrow_mut()
@@ -695,6 +699,12 @@ impl WindowController {
             tracing::warn!(%pane, %surface, "tab tear-off skipped: surface not found in store");
             return;
         };
+        if let Err(error) =
+            crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)
+        {
+            tracing::warn!(%error, "cannot materialize tab for tear-off");
+            return;
+        }
         let Some(torn) = self
             .pane_registry
             .borrow_mut()
@@ -798,6 +808,7 @@ impl WindowController {
             };
         };
 
+        crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)?;
         let moving = self
             .pane_registry
             .borrow_mut()
@@ -1124,6 +1135,7 @@ impl WindowController {
             };
         };
 
+        crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)?;
         let moving = self
             .pane_registry
             .borrow_mut()

@@ -226,6 +226,18 @@ impl WindowController {
             return Some(root);
         }
 
+        if let Some(flowmux_core::PaneSurface {
+            kind:
+                SurfaceKind::Editor {
+                    workspace_root,
+                    session,
+                },
+            ..
+        }) = self.pane_registry.borrow().active_deferred_surface(pane)
+        {
+            return Some(editor_file_browser_root(session, workspace_root));
+        }
+
         if let Some(dir) = self.pane_registry.borrow().current_dir_for_pane(pane) {
             return Some(dir);
         }

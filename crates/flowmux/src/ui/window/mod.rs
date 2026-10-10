@@ -1562,6 +1562,9 @@ impl WindowController {
 
         let font = resolved.terminal_font(opts);
         self.sidebar.usage.bar.set_font(&font);
+        self.pane_registry
+            .borrow_mut()
+            .update_deferred_theme(&resolved);
         let registry = self.pane_registry.borrow();
         for terminal in registry.terminals.values() {
             resolved.apply_to_ghostty(terminal);
@@ -6691,8 +6694,294 @@ mod tests {
         );
         assert_eq!(
             controller.file_browser_root_for_pane(pane).await,
+            Some(workspace_root.clone())
+        );
+        controller.show_file_browser_for_pane(pane).await;
+        assert_eq!(
+            controller.file_browser.panel.pane_state().root,
+            Some(workspace_root.clone())
+        );
+        assert!(controller.pane_registry.borrow().editors.is_empty());
+        controller.window.present();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !controller.file_browser.panel.widget().is_mapped() {
+                glib::timeout_future(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("file browser must be visible");
+        assert_eq!(
+            controller.file_browser.panel.pane_state().root,
             Some(workspace_root)
         );
+        controller.window.destroy();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn restored_web_tabs_survive_reorder_failed_move_cross_workspace_move_and_split() {
+        for browser in [true, false] {
+            let (controller, workspace, source) = build_single_workspace_controller(if browser {
+                "com.flowmux.App.UiTest.DeferredBrowserMoves"
+            } else {
+                "com.flowmux.App.UiTest.DeferredEditorMoves"
+            })
+            .await;
+            let root = controller
+                .store
+                .get_workspace(workspace)
+                .await
+                .unwrap()
+                .local_root()
+                .unwrap()
+                .to_path_buf();
+            let (_, surface) = if browser {
+                controller
+                    .store
+                    .add_browser_surface_to_pane(source, "about:blank".into())
+                    .await
+                    .unwrap()
+            } else {
+                controller
+                    .store
+                    .add_editor_surface_to_pane(source, root.clone())
+                    .await
+                    .unwrap()
+            };
+            controller
+                .rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+            let placeholder = controller
+                .pane_registry
+                .borrow()
+                .stack_for_pane(source)
+                .unwrap()
+                .child_by_name(&surface.to_string())
+                .unwrap();
+            controller
+                .move_surface(source, surface, None, source, 0)
+                .await
+                .unwrap();
+            assert!(controller
+                .move_surface(source, surface, None, PaneId::new(), 0)
+                .await
+                .is_err());
+            assert_eq!(
+                controller
+                    .pane_registry
+                    .borrow()
+                    .stack_for_pane(source)
+                    .unwrap()
+                    .child_by_name(&surface.to_string()),
+                Some(placeholder.clone())
+            );
+
+            let target_workspace = controller
+                .store
+                .create_workspace(Some("target".into()), root)
+                .await;
+            let target_state = controller
+                .store
+                .get_workspace(target_workspace)
+                .await
+                .unwrap();
+            let target = target_state.surfaces[0].root_pane.first_leaf_id().unwrap();
+            controller.render_workspace(&target_state);
+            controller
+                .move_surface(source, surface, None, target, usize::MAX)
+                .await
+                .unwrap();
+            let live = controller
+                .pane_registry
+                .borrow()
+                .stack_for_pane(target)
+                .unwrap()
+                .child_by_name(&surface.to_string())
+                .unwrap();
+            assert_ne!(
+                live, placeholder,
+                "moving a deferred tab must materialize it"
+            );
+            assert_eq!(
+                controller
+                    .pane_registry
+                    .borrow()
+                    .surface_workspace
+                    .get(&surface),
+                Some(&target_workspace)
+            );
+            controller
+                .move_surface(target, surface, None, source, usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(
+                controller
+                    .pane_registry
+                    .borrow()
+                    .stack_for_pane(source)
+                    .unwrap()
+                    .child_by_name(&surface.to_string()),
+                Some(live.clone())
+            );
+            let (tx, rx) = oneshot::channel();
+            controller
+                .dispatch(GtkCommand::SplitSurfaceIntoPane {
+                    src_pane: source,
+                    surface,
+                    surface_model: None,
+                    dst_pane: source,
+                    direction: flowmux_core::SplitDirection::Horizontal,
+                    ack: tx,
+                })
+                .await;
+            rx.await.unwrap().unwrap();
+            let state = controller.store.get_workspace(workspace).await.unwrap();
+            let split_pane = pane_of_surface(&state, surface).unwrap();
+            assert_ne!(split_pane, source);
+            assert_eq!(
+                controller
+                    .pane_registry
+                    .borrow()
+                    .stack_for_pane(split_pane)
+                    .unwrap()
+                    .child_by_name(&surface.to_string()),
+                Some(live)
+            );
+            controller.window.destroy();
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn restored_active_web_tab_loads_on_map_without_loading_hidden_siblings() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.DeferredMapping").await;
+        let root = controller
+            .store
+            .get_workspace(workspace)
+            .await
+            .unwrap()
+            .local_root()
+            .unwrap()
+            .to_path_buf();
+        let (_, browser) = controller
+            .store
+            .add_browser_surface_to_pane(pane, "about:blank".into())
+            .await
+            .unwrap();
+        let (_, editor) = controller
+            .store
+            .add_editor_surface_to_pane(pane, root)
+            .await
+            .unwrap();
+        controller
+            .store
+            .set_active_surface(pane, browser)
+            .await
+            .unwrap();
+        controller.rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .browsers
+            .contains_key(&browser));
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .editors
+            .contains_key(&editor));
+        controller.window.present();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !controller
+                .pane_registry
+                .borrow()
+                .browsers
+                .contains_key(&browser)
+            {
+                glib::timeout_future(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("mapping the restored active tab must initialize it");
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .editors
+            .contains_key(&editor));
+        controller.window.destroy();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn restored_editor_uses_theme_changed_before_first_activation() {
+        use webkit6::prelude::*;
+
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.DeferredEditorTheme").await;
+        let dark = flowmux_config::options::Options {
+            theme: Some("one-dark".into()),
+            ..Default::default()
+        };
+        controller.apply_runtime_theme(&dark);
+        let root = controller
+            .store
+            .get_workspace(workspace)
+            .await
+            .unwrap()
+            .local_root()
+            .unwrap()
+            .to_path_buf();
+        let (_, surface) = controller
+            .store
+            .add_editor_surface_to_pane(pane, root)
+            .await
+            .unwrap();
+        controller.rerender_workspace(&controller.store.get_workspace(workspace).await.unwrap());
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .editors
+            .contains_key(&surface));
+
+        let light = flowmux_config::options::Options {
+            theme: Some("github-light".into()),
+            ..Default::default()
+        };
+        *controller.options.borrow_mut() = light.clone();
+        controller.apply_runtime_theme(&light);
+        controller
+            .activate_surface_now(pane, surface)
+            .await
+            .unwrap();
+        let view = controller.pane_registry.borrow().editors[&surface]
+            .focus_widget()
+            .downcast::<webkit6::WebView>()
+            .unwrap();
+        controller.window.present();
+        let expected = controller
+            .current_theme()
+            .editor_appearance(&light)
+            .background;
+        glib::future_with_timeout(Duration::from_secs(20), async {
+            loop {
+                if let Ok(value) = view
+                    .evaluate_javascript_future(
+                        "document.documentElement.style.getPropertyValue('--ink')",
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    if !value.to_str().is_empty() {
+                        assert_eq!(value.to_str().as_str(), expected);
+                        break;
+                    }
+                }
+                glib::timeout_future(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("restored editor must render with the current theme");
+        controller.window.destroy();
     }
 
     #[cfg(not(target_os = "macos"))]

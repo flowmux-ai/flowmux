@@ -5,6 +5,19 @@ use super::*;
 
 impl WindowController {
     pub(super) async fn dispatch_browser_command(&self, cmd: GtkCommand) {
+        let pane = match &cmd {
+            GtkCommand::BrowserEval { pane, .. } | GtkCommand::BrowserAction { pane, .. } => {
+                Some(*pane)
+            }
+            _ => None,
+        };
+        if let Some(pane) = pane {
+            let surface = self.pane_registry.borrow().active_surface(pane);
+            if let Some(surface) = surface {
+                let _ =
+                    crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface);
+            }
+        }
         match cmd {
             GtkCommand::BrowserEval { pane, source, ack } => {
                 let registry = self.pane_registry.borrow();

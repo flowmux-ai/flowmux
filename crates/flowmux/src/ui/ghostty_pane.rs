@@ -3079,6 +3079,46 @@ except (ChildProcessError, ValueError):
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn closed_terminal_releases_widgets_and_callbacks() {
+        let sentinel = Rc::new(());
+        let weak_callbacks = Rc::downgrade(&sentinel);
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        callbacks.on_terminal_contents_changed = Rc::new(RefCell::new(move |_| {
+            let _ = &sentinel;
+        }));
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            10000,
+            callbacks,
+        )
+        .unwrap();
+        let weak = pane.widget.downgrade();
+        let root = pane.container.downgrade();
+        pane.close_pty();
+        drop(pane);
+        for _ in 0..100 {
+            if weak.upgrade().is_none() && weak_callbacks.upgrade().is_none() {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+        assert!(
+            root.upgrade().is_none(),
+            "closed terminal container retained"
+        );
+        assert!(weak.upgrade().is_none(), "closed VTE terminal retained");
+        assert!(
+            weak_callbacks.upgrade().is_none(),
+            "closed terminal callbacks retained"
+        );
+    }
+
     #[test]
     fn ssh_links_cannot_open_local_files() {
         assert!(!terminal_url_allowed("file:///tmp/private.md", true));

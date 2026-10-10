@@ -69,11 +69,15 @@ impl WindowController {
         if !self.options.borrow().restore_terminal_scrollback {
             return;
         }
-        let snapshots = self.pane_registry.borrow().terminal_scrollback_snapshots();
-        for (pane, surface, snapshot) in snapshots {
-            let _ = self
-                .store
-                .update_surface_scrollback_blocking(pane, surface, snapshot);
+        let registry = self.pane_registry.borrow();
+        for (surface, terminal) in &registry.terminals {
+            if let Some(snapshot) = terminal.scrollback_snapshot() {
+                let _ = self.store.update_surface_scrollback_blocking(
+                    terminal.id(),
+                    *surface,
+                    snapshot,
+                );
+            }
         }
     }
 
@@ -128,20 +132,40 @@ impl WindowController {
     /// and debounces disk writes.
     pub(super) fn install_scrollback_persistence(&self) {
         let controller = self.clone();
+        let running = Rc::new(Cell::new(false));
         glib::timeout_add_local(Duration::from_secs(15), move || {
-            if controller.options.borrow().restore_terminal_scrollback {
-                let snapshots = controller
-                    .pane_registry
-                    .borrow()
-                    .dirty_terminal_scrollback_snapshots();
+            if controller.options.borrow().restore_terminal_scrollback && !running.replace(true) {
                 let controller = controller.clone();
+                let running = running.clone();
                 glib::MainContext::default().spawn_local(async move {
-                    for (pane, surface, snapshot) in snapshots {
-                        let _ = controller
-                            .store
-                            .update_surface_scrollback(pane, surface, snapshot)
-                            .await;
+                    // Hold identifiers only; closed tabs must not survive a pending capture.
+                    let surfaces: Vec<_> = controller
+                        .pane_registry
+                        .borrow()
+                        .terminals
+                        .keys()
+                        .copied()
+                        .collect();
+                    for surface in surfaces {
+                        let snapshot = controller
+                            .pane_registry
+                            .borrow()
+                            .terminals
+                            .get(&surface)
+                            .and_then(|terminal| {
+                                terminal
+                                    .dirty_scrollback_snapshot()
+                                    .map(|snapshot| (terminal.id(), snapshot))
+                            });
+                        if let Some((pane, snapshot)) = snapshot {
+                            let _ = controller
+                                .store
+                                .update_surface_scrollback(pane, surface, snapshot)
+                                .await;
+                            glib::timeout_future(Duration::from_millis(1)).await;
+                        }
                     }
+                    running.set(false);
                 });
             }
             glib::ControlFlow::Continue

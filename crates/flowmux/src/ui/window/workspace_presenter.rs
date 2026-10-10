@@ -22,6 +22,7 @@ impl WorkspacePresenter {
         if !self.pane_registry.borrow().has_surface(pane, surface) {
             return Err(format!("surface is not rendered in pane {pane}: {surface}"));
         }
+        crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)?;
         let workspace = self
             .store
             .set_active_surface(pane, surface)

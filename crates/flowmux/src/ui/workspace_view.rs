@@ -158,8 +158,15 @@ impl PaneToolButton {
     }
 }
 
+struct DeferredPanel {
+    surface: PaneSurface,
+    callbacks: PaneCallbacks,
+    theme: Arc<ResolvedTheme>,
+}
+
 #[derive(Default)]
 pub struct PaneRegistry {
+    deferred: HashMap<SurfaceId, DeferredPanel>,
     pub ssh: HashMap<WorkspaceId, Rc<RefCell<super::window::ssh::SshRuntime>>>,
     /// Surfaces whose panel could not be built during a full workspace
     /// render and show a placeholder instead. The rerender fallback consults
@@ -212,6 +219,12 @@ pub struct TornOffSurface {
 }
 
 impl PaneRegistry {
+    pub fn update_deferred_theme(&mut self, theme: &Arc<ResolvedTheme>) {
+        for panel in self.deferred.values_mut() {
+            panel.theme = theme.clone();
+        }
+    }
+
     pub fn pane_for_surface(&self, surface: SurfaceId) -> Option<PaneId> {
         self.surface_tabs.iter().find_map(|(pane, tabs)| {
             tabs.iter()
@@ -236,6 +249,12 @@ impl PaneRegistry {
         self.active_editor_by_pane
             .get(&pane)
             .and_then(|surface| self.editors.get(surface))
+    }
+
+    pub fn active_deferred_surface(&self, pane: PaneId) -> Option<&PaneSurface> {
+        self.deferred
+            .get(&self.active_surface(pane)?)
+            .map(|panel| &panel.surface)
     }
 
     pub fn pane_frame(&self, pane: PaneId) -> Option<gtk::Widget> {
@@ -429,30 +448,6 @@ impl PaneRegistry {
                 terminal
                     .poll_cwd_if_changed()
                     .map(|cwd| (terminal.id(), *surface, cwd))
-            })
-            .collect()
-    }
-
-    pub fn terminal_scrollback_snapshots(&self) -> Vec<(PaneId, SurfaceId, TerminalScrollback)> {
-        self.terminals
-            .iter()
-            .filter_map(|(surface, terminal)| {
-                terminal
-                    .scrollback_snapshot()
-                    .map(|snapshot| (terminal.id(), *surface, snapshot))
-            })
-            .collect()
-    }
-
-    pub fn dirty_terminal_scrollback_snapshots(
-        &self,
-    ) -> Vec<(PaneId, SurfaceId, TerminalScrollback)> {
-        self.terminals
-            .iter()
-            .filter_map(|(surface, terminal)| {
-                terminal
-                    .dirty_scrollback_snapshot()
-                    .map(|snapshot| (terminal.id(), *surface, snapshot))
             })
             .collect()
     }
@@ -688,6 +683,7 @@ impl PaneRegistry {
             }
             self.surface_tab_labels.remove(&surface);
             self.surface_workspace.remove(&surface);
+            self.deferred.remove(&surface);
             self.surface_errors.remove(&surface);
         }
     }
@@ -786,11 +782,21 @@ impl PaneRegistry {
             self.active_terminal_by_pane.insert(pane, surface);
             self.active_browser_by_pane.remove(&pane);
             self.active_editor_by_pane.remove(&pane);
-        } else if self.browsers.contains_key(&surface) {
+        } else if self.browsers.contains_key(&surface)
+            || self
+                .deferred
+                .get(&surface)
+                .is_some_and(|panel| matches!(panel.surface.kind, SurfaceKind::Browser { .. }))
+        {
             self.active_browser_by_pane.insert(pane, surface);
             self.active_terminal_by_pane.remove(&pane);
             self.active_editor_by_pane.remove(&pane);
-        } else if self.editors.contains_key(&surface) {
+        } else if self.editors.contains_key(&surface)
+            || self
+                .deferred
+                .get(&surface)
+                .is_some_and(|panel| matches!(panel.surface.kind, SurfaceKind::Editor { .. }))
+        {
             self.active_editor_by_pane.insert(pane, surface);
             self.active_terminal_by_pane.remove(&pane);
             self.active_browser_by_pane.remove(&pane);
@@ -958,6 +964,7 @@ impl PaneRegistry {
             }
             self.surface_tab_labels.remove(&s);
             self.surface_workspace.remove(&s);
+            self.deferred.remove(&s);
         }
         self.surface_tabs.remove(&pane);
         self.surface_stacks.remove(&pane);
@@ -1031,6 +1038,7 @@ impl PaneRegistry {
         }
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.deferred.remove(&surface);
         self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
@@ -1117,6 +1125,7 @@ impl PaneRegistry {
         };
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.deferred.remove(&surface);
         self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
@@ -1180,6 +1189,7 @@ impl PaneRegistry {
         stack.remove(&content);
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
+        self.deferred.remove(&surface);
         self.surface_errors.remove(&surface);
         if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
             self.active_terminal_by_pane.remove(&pane);
@@ -1461,10 +1471,7 @@ pub fn split_pane_incremental(
     paned.set_resize_end_child(true);
     paned.set_shrink_start_child(false);
     paned.set_shrink_end_child(false);
-    {
-        let p = paned.clone();
-        paned.connect_realize(move |_| apply_ratio_when_sized(&p, ratio));
-    }
+    paned.connect_realize(move |paned| apply_ratio_when_sized(paned, ratio));
 
     registry
         .borrow_mut()
@@ -1583,10 +1590,7 @@ fn build_pane(
             paned.set_shrink_start_child(false);
             paned.set_shrink_end_child(false);
             let r = *ratio;
-            {
-                let p = paned.clone();
-                paned.connect_realize(move |_| apply_ratio_when_sized(&p, r));
-            }
+            paned.connect_realize(move |paned| apply_ratio_when_sized(paned, r));
             registry
                 .borrow_mut()
                 .register_split(*split_id, workspace, paned.clone());
@@ -1685,16 +1689,62 @@ fn build_leaf_pane(
             .surface_tab_labels
             .insert(surface.id, label);
 
-        let widget = build_panel(
-            pane_id,
-            workspace,
-            surface,
-            argv.clone(),
-            callbacks,
-            registry.clone(),
-            theme.clone(),
-            frame.clone(),
-        );
+        let defer = restoring
+            && matches!(
+                surface.kind,
+                SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. }
+            )
+            && !registry
+                .borrow()
+                .pending_browser_reuse
+                .contains_key(&surface.id)
+            && !registry
+                .borrow()
+                .pending_editor_reuse
+                .contains_key(&surface.id);
+        let widget = if defer {
+            let placeholder = gtk::Label::new(Some("Loading…"));
+            let weak = Rc::downgrade(&registry);
+            let id = surface.id;
+            placeholder.connect_map(move |placeholder| {
+                let weak = weak.clone();
+                let placeholder = placeholder.downgrade();
+                // Mapping can occur while the registry is updating its visible child.
+                gtk::glib::idle_add_local_once(move || {
+                    if !placeholder
+                        .upgrade()
+                        .is_some_and(|widget| widget.is_mapped())
+                    {
+                        return;
+                    }
+                    if let Some(registry) = weak.upgrade() {
+                        let _ = materialize_surface(&registry, id);
+                    }
+                });
+            });
+            let mut r = registry.borrow_mut();
+            r.surface_workspace.insert(id, workspace);
+            r.deferred.insert(
+                id,
+                DeferredPanel {
+                    surface: surface.clone(),
+                    callbacks: callbacks.clone(),
+                    theme: theme.clone(),
+                },
+            );
+            Ok(placeholder.upcast())
+        } else {
+            build_panel(
+                pane_id,
+                workspace,
+                surface,
+                argv.clone(),
+                callbacks,
+                registry.clone(),
+                theme.clone(),
+                frame.clone(),
+            )
+        };
         let widget = match widget {
             Ok(widget) => widget,
             Err(error) if restoring => {
@@ -2113,6 +2163,61 @@ fn file_drop_parts(path: &Path) -> Result<(PaneId, SurfaceId, PaneSurface), Stri
 #[cfg(test)]
 mod tab_dnd_tests {
     use super::*;
+
+    #[gtk::test]
+    fn restored_web_panels_are_deferred_and_split_widgets_are_released() {
+        let browser = PaneSurface::browser("Browser", "about:blank".into());
+        let editor = PaneSurface::editor("Editor", std::env::temp_dir());
+        let browser_id = browser.id;
+        let editor_id = editor.id;
+        let left_id = PaneId::new();
+        let left = Pane::Leaf {
+            id: left_id,
+            content: PaneContent::Tabs {
+                active: browser_id,
+                surfaces: vec![browser],
+            },
+        };
+        let right = Pane::Leaf {
+            id: PaneId::new(),
+            content: PaneContent::Tabs {
+                active: editor_id,
+                surfaces: vec![editor],
+            },
+        };
+        let tree = Pane::Split {
+            id: PaneId::new(),
+            direction: SplitDirection::Vertical,
+            ratio: 0.5,
+            first: Box::new(left),
+            second: Box::new(right),
+        };
+        let registry = Rc::new(RefCell::new(PaneRegistry::default()));
+        let root = build_pane(
+            WorkspaceId::new(),
+            &tree,
+            Vec::new(),
+            None,
+            &PaneCallbacks::noop_for_test(),
+            registry.clone(),
+            Arc::new(ResolvedTheme::load()),
+        );
+        assert_eq!(registry.borrow().deferred.len(), 2);
+        assert!(registry.borrow().browsers.is_empty());
+        assert!(registry.borrow().editors.is_empty());
+        assert_eq!(registry.borrow().active_surface(left_id), Some(browser_id));
+        registry
+            .borrow_mut()
+            .detach_surface_widget(left_id, browser_id);
+        assert!(!registry.borrow().deferred.contains_key(&browser_id));
+        let weak = root.downgrade();
+        drop(root);
+        drop(registry);
+        assert!(
+            weak.upgrade().is_none(),
+            "split signals must not retain the pane tree"
+        );
+    }
 
     #[gtk::test]
     fn pane_body_dnd_releases_terminal_widgets() {
@@ -3826,6 +3931,62 @@ mod pane_menu_tests {
         close.emit_clicked();
         assert_eq!(&*closed.borrow(), &[pane]);
     }
+}
+
+/// Build restored web content only when displayed or explicitly addressed by IPC.
+pub(super) fn materialize_surface(
+    registry: &Rc<RefCell<PaneRegistry>>,
+    surface: SurfaceId,
+) -> Result<(), String> {
+    let deferred = registry.borrow_mut().deferred.remove(&surface);
+    let Some(deferred) = deferred else {
+        return Ok(());
+    };
+    let (pane, workspace, stack, frame) = {
+        let r = registry.borrow();
+        let pane = r
+            .pane_for_surface(surface)
+            .ok_or("deferred surface has no pane")?;
+        (
+            pane,
+            r.surface_workspace[&surface],
+            r.surface_stacks[&pane].clone(),
+            r.pane_frames[&pane]
+                .clone()
+                .downcast::<gtk::Frame>()
+                .map_err(|_| "deferred surface has no frame")?,
+        )
+    };
+    let old = stack.child_by_name(&surface.to_string());
+    let active = old.is_some() && stack.visible_child() == old;
+    let result = build_panel(
+        pane,
+        workspace,
+        &deferred.surface,
+        Vec::new(),
+        &deferred.callbacks,
+        registry.clone(),
+        deferred.theme,
+        frame,
+    );
+    let (widget, error) = match result {
+        Ok(widget) => (widget, None),
+        Err(error) => {
+            registry
+                .borrow_mut()
+                .surface_errors
+                .insert(surface, error.clone());
+            (failed_panel(error.clone()), Some(error))
+        }
+    };
+    if let Some(old) = old {
+        stack.remove(&old);
+    }
+    stack.add_named(&widget, Some(&surface.to_string()));
+    if active {
+        registry.borrow_mut().activate_surface(pane, surface);
+    }
+    error.map_or(Ok(()), Err)
 }
 
 fn failed_panel(error: String) -> gtk::Widget {
