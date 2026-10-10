@@ -4,12 +4,14 @@
 
 Build flowmux and flowmuxctl, then run:
 uv run --with python-xlib --with pillow python scripts/test-terminal-output-search-gui.py
-Requires Xvfb and dbus-daemon. Screenshots and IPC traces remain in the printed
+Requires Xvfb, dbus-daemon and the Atspi GI binding. Screenshots and IPC traces remain in the printed
 artifact directory. Only test-owned processes and XDG directories are used.
 """
 
+import argparse
 import importlib.util
 import json
+import os
 import sys
 import time
 
@@ -22,6 +24,10 @@ from Xlib import XK, X, display
 from Xlib.ext import xtest
 
 repo = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--gui", default=str(repo / "target/debug/flowmux"))
+parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
+args = parser.parse_args()
 spec = importlib.util.spec_from_file_location(
     "fixture", repo / "scripts/test-ssh-workspace-gui.py"
 )
@@ -37,12 +43,13 @@ for entry in Path("/proc").iterdir():
             pass
 h = m.Harness(
     SimpleNamespace(
-        gui=str(repo / "target/debug/flowmux"),
-        cli=str(repo / "target/debug/flowmuxctl"),
+        gui=str(Path(args.gui).resolve(strict=True)),
+        cli=str(Path(args.cli).resolve(strict=True)),
         protected_pid=protected,
     )
 )
 h.env["GTK_USE_PORTAL"] = "0"
+h.env["GTK_A11Y"] = "atspi"
 clean = h.root / "clean-shell"
 clean.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")
 clean.chmod(0o755)
@@ -94,6 +101,11 @@ def shot(name):
 
 try:
     h.start_display()
+    os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
+    import gi
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+    Atspi.set_timeout(3000, 3000)
     proc, sock = h.window("search")
     d = display.Display(h.env["DISPLAY"])
     w1 = h.rpc(
@@ -145,15 +157,21 @@ try:
     )
     main.set_input_focus(X.RevertToParent, X.CurrentTime)
     d.sync()
-    # The footer's Files button is followed immediately by the search button.
-    geometry = main.get_geometry()
-    xtest.fake_input(d, X.MotionNotify, x=geometry.x + 244, y=geometry.y + geometry.height - 26)
-    d.sync()
-    time.sleep(0.8)
+    def search_button():
+        desktop = Atspi.get_desktop(0)
+        apps = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+        pending = [app for app in apps if app is not None and app.get_process_id() == proc.pid]
+        while pending:
+            node = pending.pop()
+            if node is None:
+                continue
+            if node.get_name() == "Search all terminals" and node.get_role() == Atspi.Role.PUSH_BUTTON:
+                return node
+            pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
+
+    button = m.wait_for(search_button, "accessible side panel search button")
+    assert button.get_action_iface().do_action(0), "search button activation failed"
     shot("side-panel-search-button.png")
-    xtest.fake_input(d, X.ButtonPress, 1)
-    xtest.fake_input(d, X.ButtonRelease, 1)
-    d.sync()
     button_dialog = m.wait_for(
         lambda: next((w for w in windows() if title(w) == "Search all terminals"), None),
         "side panel search button opens dialog",

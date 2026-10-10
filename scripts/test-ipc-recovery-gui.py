@@ -29,6 +29,7 @@ def main():
     args.cli = str(Path(args.cli).resolve(strict=True))
     h = gui.Harness(args)
     h.env["NO_COLOR"] = "1"
+    h.env["FLOWMUX_LOG"] = "warn"
     try:
         shell = h.root / "clean-shell"
         shell.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")

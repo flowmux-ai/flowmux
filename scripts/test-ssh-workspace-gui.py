@@ -133,7 +133,10 @@ class Harness:
         os.close(write_fd)
         try:
             assert select.select([read_fd], [], [], 10)[0], "Xvfb failed to report display"
-            self.env["DISPLAY"] = ":" + os.read(read_fd, 64).decode().strip()
+            with os.fdopen(read_fd, "r", closefd=False) as pipe:
+                number = pipe.readline().strip()
+            assert number.isdigit(), f"Invalid Xvfb display: {number!r}"
+            self.env["DISPLAY"] = ":" + number
         finally:
             os.close(read_fd)
         with (self.root / "dbus.log").open("w") as log:

@@ -162,10 +162,10 @@ try:
         assert len(saved) == 1, saved
         result = {"old_retained": "H0000" in saved[0], "latest_retained": "H0499" in saved[0]}
         process, sock = h.window("restored-scrollback")
-        fixture.wait_for(lambda: h.tree(sock), "workspace restored")
-        pane = h.tree(sock)[0]["panes"][0]["id"]
-        time.sleep(.5)
-        result["latest_restored"] = "H0499" in h.screen(sock, pane)
+        restored = fixture.wait_for(lambda: h.workspace(sock, workspace), "target workspace restored")
+        pane = restored["panes"][0]["id"]
+        screen = fixture.wait_for(lambda: h.screen(sock, pane), "restored terminal ready")
+        result["latest_restored"] = "H0499" in screen
         (h.root / "scrollback.json").write_text(json.dumps(result))
         print(json.dumps(result), flush=True)
         if not args.baseline:
