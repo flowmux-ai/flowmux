@@ -7,7 +7,8 @@ workers in visible panes. The lead collects evidence, requests corrections from
 the same workers, and verifies the user's acceptance checks. A role describes a
 worker's responsibility; each assignment supplies context, file ownership and
 acceptance checks. The [communication cookbook](../.agents/skills/flowmux-team/references/cookbook.md)
-contains runnable review, clarification and test-driven correction examples.
+contains copyable user prompts, expected lead/worker conversations, acceptance
+checks and runnable review, clarification and test-driven correction examples.
 
 ## Design
 
