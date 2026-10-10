@@ -60,7 +60,9 @@ def main():
             if root is not None:
                 yield root
                 for i in range(root.get_child_count()):
-                    yield from nodes(root.get_child_at_index(i))
+                    child = root.get_child_at_index(i)
+                    if child is not None:
+                        yield from nodes(child)
                 return
             desktop = Atspi.get_desktop(0)
             pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
