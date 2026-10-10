@@ -202,6 +202,7 @@ def main():
     (h.root / 'claude').mkdir()
     try:
         h.start_display()
+        os.environ['DISPLAY'] = h.env['DISPLAY']
         os.environ['DBUS_SESSION_BUS_ADDRESS'] = h.env['DBUS_SESSION_BUS_ADDRESS']
         os.environ.pop('AT_SPI_BUS_ADDRESS', None)
         import gi
@@ -438,6 +439,10 @@ time.sleep(1)
         h.pass_check('Team workspace persists and restoring workers does not rerun tasks')
         h.close_window(process)
         team_lifecycle(h)
+    except Exception:
+        for path in sorted(h.root.glob('*.log')):
+            print(f'--- {path.name} ---\n{path.read_text(errors="replace")[-16000:]}', file=sys.stderr)
+        raise
     finally:
         h.cleanup()
 
