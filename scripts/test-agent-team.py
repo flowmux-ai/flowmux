@@ -608,5 +608,155 @@ time.sleep(30 if primary else .8)
                 team.flowmux('flowmux', '/test.sock', 'split', 'missing')
 
 
+class FollowupTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='fm-turn-test-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.transcript = self.root / 'session.jsonl'
+        self.transcript.write_text('old completed turn\n')
+        self.manifest = dict(agent='codex', token='original', model='fixture', effort='high', role='reviewer',
+                             allow_edits=False, workspace='team', pane='worker', surface='tab',
+                             socket='/fixture.sock', session_id='session', transcript=str(self.transcript))
+        team.write_json(self.root / 'job.json', self.manifest)
+        team.write_json(self.root / 'status.json', dict(state='completed', task_status='completed',
+                        session_id='session', transcript=str(self.transcript)))
+        (self.root / 'result.md').write_text('original result')
+        self.task = self.root / 'next.txt'
+        self.task.write_text('Check the changed requirement')
+        self.args = type('Args', (), dict(job=self.root, task_file=self.task, cli=sys.executable))()
+        self.tab = dict(id='tab', active=True, kind='terminal', agent=dict(
+            name='codex', session_id='session', activity='idle', status='idle'))
+        self.calls = []
+        self.pasted = ''
+        patcher = patch.object(team, 'flowmux', side_effect=self.rpc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def rpc(self, cli, socket, *args):
+        self.calls.append(args)
+        if args[0] == 'tree':
+            return {'tree': {'workspaces': [dict(id='team', location={'type': 'team'},
+                    panes=[dict(id='worker', tabs=[self.tab])])]}}
+        if args[0] == 'send-keys':
+            self.pasted = args[-1]
+        if args[0] == 'read-screen':
+            return {'screen_contents': {'text': self.pasted}}
+        return {}
+
+    def dispatch(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            team.followup(self.args)
+        return Path(json.loads(out.getvalue())['job'])
+
+    def answer(self, turn, outcome='completed', report='new evidence'):
+        manifest = json.loads((turn / 'job.json').read_text())
+        events = [dict(type='event_msg', payload=dict(type='user_message',
+                       message='FLOWMUX_TEAM_JOB:' + manifest['token'])),
+                  dict(type='event_msg', payload=dict(type='task_complete',
+                       last_agent_message=json.dumps(dict(task_status=outcome, report=report))))]
+        with self.transcript.open('a') as out:
+            out.write(''.join(json.dumps(e) + '\n' for e in events))
+
+    def test_three_turns_preserve_session_and_original_result(self):
+        for outcome in ('blocked', 'failed', 'completed'):
+            turn = self.dispatch()
+            self.assertEqual(team.collect_turn(turn)['state'], 'dispatch_unknown')
+            with self.assertRaisesRegex(ValueError, 'Previous assignment'):
+                self.dispatch()
+            self.answer(turn, outcome)
+            self.assertEqual(team.collect_turn(turn)['task_status'], outcome)
+            self.assertEqual((turn / 'result.md').read_text(), 'new evidence')
+            self.assertEqual(json.loads((turn / 'job.json').read_text())['session_id'], 'session')
+        self.assertEqual((self.root / 'result.md').read_text(), 'original result')
+        self.assertEqual(len(list((self.root / 'turns').iterdir())), 3)
+        self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 3)
+
+    def test_busy_inactive_replaced_and_shell_targets_receive_no_input(self):
+        for field, value in [('active', False), ('kind', 'browser'), ('agent', {}),
+                             ('agent', dict(self.tab['agent'], session_id='other')),
+                             ('agent', dict(self.tab['agent'], activity='running', status='working')),
+                             ('agent', dict(self.tab['agent'], activity='needs_input', status='blocked'))]:
+            with self.subTest(field=field, value=value), patch.dict(self.tab, {field: value}):
+                with self.assertRaises(ValueError):
+                    self.dispatch()
+        self.assertFalse(any(c[0].startswith('send-') for c in self.calls))
+        self.assertFalse((self.root / 'turns').exists())
+
+    def test_uncertain_enter_is_not_retried_and_late_answer_recovers(self):
+        original = self.rpc
+        def fail(cli, socket, *args):
+            if args[0] == 'send-key':
+                raise RuntimeError('IPC timeout after delivery')
+            return original(cli, socket, *args)
+        with patch.object(team, 'flowmux', side_effect=fail):
+            with self.assertRaisesRegex(RuntimeError, 'Do not resend'):
+                self.dispatch()
+        turn = self.root / 'turns/0001'
+        with self.assertRaisesRegex(ValueError, 'Previous assignment'):
+            self.dispatch()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(team.inspect(turn, timeout=0.01), 124)
+        self.answer(turn)
+        self.assertEqual(team.collect_turn(turn)['state'], 'completed')
+        self.assertEqual(self.dispatch().name, '0002')
+
+    def test_malformed_or_interrupted_turn_cannot_authorize_another_send(self):
+        turn = self.dispatch()
+        self.answer(turn, report='')
+        self.assertEqual(team.collect_turn(turn)['state'], 'failed')
+        with self.assertRaisesRegex(ValueError, 'Previous assignment'):
+            self.dispatch()
+
+    def test_dispatch_lock_prevents_duplicate_turn(self):
+        with (self.root / 'followup.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ValueError, 'Another followup'):
+                self.dispatch()
+        self.assertFalse(self.calls)
+
+    def test_followup_uses_effective_provider_after_fallback(self):
+        team.write_json(self.root / 'job.json', dict(self.manifest, agent='claude'))
+        state = json.loads((self.root / 'status.json').read_text())
+        team.write_json(self.root / 'status.json', dict(state, agent='codex', fallback_used=True))
+        turn = self.dispatch()
+        self.assertEqual(json.loads((turn / 'job.json').read_text())['agent'], 'codex')
+
+    def test_missing_session_on_both_sides_is_not_an_identity_match(self):
+        state = json.loads((self.root / 'status.json').read_text())
+        team.write_json(self.root / 'status.json', dict(state, session_id=None))
+        self.tab['agent'].pop('session_id')
+        with self.assertRaisesRegex(ValueError, 'no session identity'):
+            self.dispatch()
+        self.assertFalse(self.calls)
+
+    def test_claude_tool_results_are_not_prompts_or_completion(self):
+        path = self.root / 'claude.jsonl'
+        marker = 'FLOWMUX_TEAM_JOB:next'
+        manifest = dict(agent='claude', token='next', session_id='same')
+        tool = dict(type='user', sessionId='same', message=dict(content=[dict(type='tool_result', content=marker)]))
+        final = dict(type='assistant', message=dict(stop_reason='end_turn', content=[dict(type='text', text='not our answer')]))
+        path.write_text(json.dumps(tool) + '\n' + json.dumps(final) + '\n')
+        self.assertFalse(team.transcript_report(path, manifest)[0])
+        user = dict(type='user', sessionId='same', message=dict(content=[dict(type='text', text=marker)]))
+        path.write_text(json.dumps(user) + '\n' + json.dumps(tool) + '\n' + json.dumps(final) + '\n')
+        self.assertEqual(team.transcript_report(path, manifest)[2], 'not our answer')
+        user['sessionId'] = 'different'
+        path.write_text(json.dumps(user) + '\n')
+        with self.assertRaisesRegex(ValueError, 'session changed'):
+            team.transcript_report(path, manifest)
+
+    def test_intervening_user_prompt_and_truncated_transcript_fail_closed(self):
+        turn = self.dispatch()
+        manifest = json.loads((turn / 'job.json').read_text())
+        with self.transcript.open('a') as out:
+            for message in ('FLOWMUX_TEAM_JOB:' + manifest['token'], 'unrelated manual task'):
+                out.write(json.dumps(dict(type='event_msg', payload=dict(type='user_message', message=message))) + '\n')
+        self.assertIn('interrupted', team.collect_turn(turn)['error'])
+        self.transcript.write_text('')
+        with self.assertRaisesRegex(ValueError, 'truncated'):
+            team.transcript_report(self.transcript, manifest)
+
+
 if __name__ == '__main__':
     unittest.main()

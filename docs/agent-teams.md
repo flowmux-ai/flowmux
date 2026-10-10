@@ -2,10 +2,12 @@
 
 # Flowmux team skill
 
-`flowmux-team` delegates a bounded task from a lead agent to a new Claude Code
-or Codex process in another visible pane, then returns a file-backed result to
-the lead. A role describes the worker's responsibility; a task file supplies
-context, file ownership and acceptance checks.
+`flowmux-team` delegates bounded assignments to interactive Claude Code or Codex
+workers in visible panes. The lead collects evidence, requests corrections from
+the same workers, and verifies the user's acceptance checks. A role describes a
+worker's responsibility; each assignment supplies context, file ownership and
+acceptance checks. The [communication cookbook](../.agents/skills/flowmux-team/references/cookbook.md)
+contains runnable review, clarification and test-driven correction examples.
 
 ## Design
 
@@ -23,7 +25,15 @@ sequenceDiagram
     Helper->>Helper: atomic result.md + status.json
     Lead->>Helper: status / bounded wait
     Helper-->>Lead: result or failure
-    Lead->>Lead: review evidence, integrate, report
+    loop until acceptance checks pass or review budget is exhausted
+        Lead->>Lead: review evidence and user changes
+        Lead->>Helper: followup(original job, correction file)
+        Helper->>Agent: same idle session, unique turn marker
+        Agent-->>Helper: completed turn in pinned transcript
+        Lead->>Helper: wait(returned turn job)
+        Helper-->>Lead: separate turn result + session evidence
+    end
+    Lead->>Lead: verify, integrate, report remaining gaps or completion
 ```
 
 The helper first resolves the lead's workspace with `team.py context`. Normal
@@ -46,9 +56,14 @@ intermediate commentary cannot complete a task. Missing, malformed and ambiguous
 reports fail closed. Reports, session/transcript IDs and pane receipts stay in
 the private job directory. Read-only sandbox/tool restrictions remain in place.
 
-The interactive agent stays open after completing its turn. Flowmux CLI
-`read-screen`, `send-keys` and `send-key` support inspecting and continuing an
-idle worker's conversation. The original job records only its initial turn.
+The interactive agent stays open after completing its turn. `team.py followup
+JOB --task-file FILE` sends another assignment to the same idle worker and returns
+a separate turn job for `status`/`wait`. The original job records only its initial
+turn; subsequent immutable reports live in `turns/0001`, `turns/0002`, etc.
+The helper verifies the live session, workspace, pane and active surface before
+input, retains paste evidence, and correlates completion with a unique user-prompt
+marker after the recorded transcript offset. Concurrent or unresolved assignments
+prevent another dispatch. Uncertain delivery is retained, never blindly retried.
 A report-collection timeout preserves the session for diagnosis; it does not
 kill the agent or approve dialogs. A restored launcher never reruns its task.
 With automatic agent restoration enabled, the launcher passes the saved resume
@@ -90,9 +105,10 @@ so that setting alone is not a working solution on that build. Installing the
 skill does not grant socket access, disable the sandbox, or change hook trust.
 
 Open **Options → Skills → Flowmux Team** to install for Claude Code or Codex.
-Each row checks the complete bundle: `SKILL.md`, `scripts/team.py`, and
-`references/sample.md`. Missing or changed resources offer **Update**, which
-backs up changed files before replacement. **Remove** deletes those three
+Each row checks the complete bundle: `SKILL.md`, `scripts/team.py`,
+`scripts/examples.py`, `references/sample.md` and `references/cookbook.md`.
+Missing or changed resources offer **Update**, which
+backs up changed files before replacement. **Remove** deletes the five
 managed files, preserves modified content in backups, and leaves unrelated files
 alone. Linked resource directories are user-managed and cannot be changed here.
 The instructions preview is read-only; Python and agent CLIs must already be
@@ -143,6 +159,12 @@ Provider configuration, hook trust and authentication are retained. Permission
 failures remain blockers; do not weaken permissions to pass a demo.
 
 Run the account-free regression checks with `python3 scripts/test-agent-team.py`.
+After building current binaries, `python3 scripts/test-team-pingpong-gui.py` runs
+all three cookbook cases with both provider fixtures in isolated real GUI PTYs.
+Append `--real-agent claude` or `--real-agent codex` to test the same examples with
+an installed, authenticated native CLI. These live-account checks consume quota
+and can stop on trust, permissions, missing hooks or unavailable models. Fixtures
+alone do not prove native CLI behavior or model quality.
 Run the sample to verify actual pane creation, provider execution and handoff;
 mocked agent checks alone do not establish that authentication or a model works.
 On Linux, `python3 scripts/test-skills-gui.py` checks the actual Settings controls,

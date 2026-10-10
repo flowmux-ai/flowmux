@@ -202,14 +202,48 @@ rule below; a screen message alone does not authorize substitution. A terminal s
 proof of task completion. If the provider does not save a supported conversation
 record, report that limitation rather than claiming success.
 
-After collecting the original result, follow-up conversation can use Flowmux's
-`send-keys pane:PANE 'prompt'` and `send-key Enter --pane pane:PANE`. First confirm
-that the recorded surface is active and that the agent is idle at its prompt;
-do not type into a permission dialog, shell, busy agent or another tab. Inspect
-the screen after pasting before sending Enter: interactive CLIs can briefly
-buffer pasted input. Inspect the new answer in that session; the original job's result remains an immutable
-record of its initial assignment. Never send slash commands or approve dialogs
-on the user's behalf to force a result.
+## Continue orchestration
+
+Own the user's acceptance checks through the whole task: assign, collect, inspect
+evidence, request corrections, and verify again. A worker's completed turn does not
+complete the team's goal. Reuse idle workers for related assignments and send the
+actual review or failing-check path. Incorporate user changes in the next assignment
+and its acceptance checks. Choose a finite review/time budget; when exhausted,
+report the remaining gap instead of declaring success or repeating indefinitely.
+
+```bash
+python3 /path/to/flowmux-team/scripts/team.py followup /original/worker/job \
+  --task-file /absolute/correction.txt
+# Use the returned job (a turns/0001 directory), not the original job:
+python3 /path/to/flowmux-team/scripts/team.py wait /returned/turn/job --timeout 60
+```
+
+`followup` checks the exact live session, active surface and idle state before
+input. It records the assignment, paste evidence and a unique marker, and collects
+only the matching turn from the pinned transcript. Every follow-up returns its own
+job receipt. The original report and earlier turns stay unchanged. Always pass the
+original worker job to `followup`; pass a turn's receipt to `status`/`wait`.
+Existing jobs can continue if their session is still uniquely identified and idle.
+
+Only one unresolved assignment per worker is allowed. `dispatch_unknown` means
+receipt is not yet proven by the saved user prompt; `running` with `received: true`
+means it was received, not completed. A wait timeout does not cancel or resend.
+Inspect `dispatch-error.json` and the pane on uncertainty; never automatically
+resend or send Enter. Busy/blocked UI, inactive tabs and changed/missing session
+bindings reject input. Missing hooks/session identity must be diagnosed, not
+replaced with an invented idle event. Task-level `blocked` can be followed up with
+the missing information once the real agent is idle; a permission dialog cannot.
+No provider substitution is performed for follow-up turns.
+
+Keep a bounded wait/inspect loop active while work is outstanding. Retain pending
+user changes until an idle worker can receive them. This helper does not interrupt
+a busy agent or wake an orchestrator after its final response. If manual input or
+session replacement interferes, inspect the retained evidence before proceeding.
+Never approve dialogs or send slash commands to force progress.
+
+For runnable multi-turn examples, expected evidence and troubleshooting, read the
+[communication cookbook](references/cookbook.md). The examples cover review and
+revision, missing input, and a real failing-check → correction → passing-check loop.
 
 Retain panes and artifacts for review. Close only recorded worker panes when
 cleanup is requested; never close the lead or another user's session. Restoring

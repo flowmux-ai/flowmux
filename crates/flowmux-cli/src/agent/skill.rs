@@ -61,6 +61,14 @@ impl Skill {
                     include_str!("../../../../.agents/skills/flowmux-team/references/sample.md"),
                 ),
                 (
+                    "scripts/examples.py",
+                    include_str!("../../../../.agents/skills/flowmux-team/scripts/examples.py"),
+                ),
+                (
+                    "references/cookbook.md",
+                    include_str!("../../../../.agents/skills/flowmux-team/references/cookbook.md"),
+                ),
+                (
                     "SKILL.md",
                     include_str!("../../../../.agents/skills/flowmux-team/SKILL.md"),
                 ),
@@ -248,7 +256,12 @@ mod tests {
         let backups: Vec<_> = fs::read_dir(root.join("scripts"))
             .unwrap()
             .flatten()
-            .filter(|entry| entry.file_name() != "team.py")
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".flowmux-backup-")
+            })
             .collect();
         assert_eq!(backups.len(), 1);
         assert_eq!(fs::read_to_string(backups[0].path()).unwrap(), "user edits");

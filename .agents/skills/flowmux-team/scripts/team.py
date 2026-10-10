@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Launch a bounded Claude/Codex task in a new Flowmux pane and collect its result."""
+"""Run and continue bounded Claude/Codex tasks in visible Flowmux panes."""
 import argparse
 import fcntl
 import json
@@ -217,9 +217,15 @@ def transcript_report(path, manifest):
     marker = "FLOWMUX_TEAM_JOB:" + manifest["token"]
     matched = False
     answer = None
-    session = None
+    session = manifest.get("session_id")
     blocker = None
-    for line in path.read_text(errors="replace").splitlines():
+    offset = manifest.get("transcript_offset", 0)
+    with path.open("rb") as stream:
+        if os.fstat(stream.fileno()).st_size < offset:
+            raise ValueError("Recorded transcript was truncated; inspect the session")
+        stream.seek(offset)
+        lines = stream.read().decode(errors="replace").splitlines()
+    for line in lines:
         try:
             event = json.loads(line)
         except ValueError:
@@ -227,6 +233,8 @@ def transcript_report(path, manifest):
         payload = event.get("payload", {})
         if event.get("type") == "session_meta":
             session = payload.get("id") or payload.get("session_id")
+            if manifest.get("session_id") and session != manifest["session_id"]:
+                raise ValueError("Follow-up transcript session changed")
         if manifest["agent"] == "codex":
             item = payload.get("item", {})
             user = ((event.get("type") == "response_item" and payload.get("role") == "user")
@@ -234,6 +242,8 @@ def transcript_report(path, manifest):
                     or (event.get("type") == "event_msg" and payload.get("type") == "user_message"))
             if user and marker in json.dumps(payload, ensure_ascii=False):
                 matched = True
+            elif user and matched and offset:
+                raise ValueError("Another user prompt interrupted the tracked turn")
             elif (matched and event.get("type") == "event_msg"
                   and payload.get("type") in ("error", "task_complete")):
                 error = payload if payload["type"] == "error" else payload.get("error")
@@ -247,9 +257,16 @@ def transcript_report(path, manifest):
                     answer = payload.get("last_agent_message")
                 break
         else:
-            if event.get("type") == "user" and marker in json.dumps(event.get("message", {}), ensure_ascii=False):
+            content = event.get("message", {}).get("content", "")
+            user_text = content if isinstance(content, str) else "\n".join(
+                b.get("text", "") for b in content if b.get("type") == "text")
+            if event.get("type") == "user" and marker in user_text:
                 matched = True
                 session = event.get("sessionId")
+                if manifest.get("session_id") and session != manifest["session_id"]:
+                    raise ValueError("Follow-up transcript session changed")
+            elif matched and offset and event.get("type") == "user" and user_text:
+                raise ValueError("Another user prompt interrupted the tracked turn")
             elif matched and event.get("type") == "assistant":
                 message = event.get("message", {})
                 text = "\n".join(b.get("text", "") for b in message.get("content", []) if b.get("type") == "text")
@@ -262,6 +279,113 @@ def transcript_report(path, manifest):
                     answer = text
                     break
     return matched, session, answer, blocker
+
+
+def idle_worker(cli, manifest):
+    """Fail closed before terminal input: exact live session, active surface, idle."""
+    if not manifest.get("session_id"):
+        raise ValueError("Worker receipt has no session identity; no input sent")
+    tree = flowmux(cli, manifest["socket"], "tree")["tree"]["workspaces"]
+    tab = next((t for w in tree if w["id"] == manifest["workspace"]
+                and w["location"]["type"] == "team"
+                for p in w["panes"] if p["id"] == manifest["pane"]
+                for t in p["tabs"] if t["id"] == manifest["surface"]), None)
+    if not tab or not tab["active"] or tab["kind"] != "terminal":
+        raise ValueError("Recorded worker surface is missing or inactive; no input sent")
+    agent = tab.get("agent") or {}
+    if agent.get("name") != manifest["agent"] or agent.get("session_id") != manifest["session_id"]:
+        raise ValueError("Live worker session does not match the receipt; no input sent")
+    if agent.get("activity") != "idle" or agent.get("status") not in ("idle", "done"):
+        raise ValueError("Worker is busy or needs input; inspect its pane before continuing")
+
+
+def collect_turn(job):
+    with (job / "worker.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = json.loads((job / "status.json").read_text())
+        if state["state"] in TERMINAL:
+            return state
+        manifest = json.loads((job / "job.json").read_text())
+        try:
+            matched, session, answer, blocker = transcript_report(Path(manifest["transcript"]), manifest)
+            if matched:
+                state.update(state="running", received=True)
+            if answer is not None:
+                (job / "answer.txt").write_text(answer)
+                outcome, report = task_report(answer)
+                (job / "result.md").write_text(report)
+                state.update(state=outcome, task_status=outcome, session_id=session)
+                if blocker:
+                    state["blocker_kind"] = blocker
+        except (OSError, ValueError) as error:
+            state.update(state="failed", error=str(error))
+        write_json(job / "status.json", state)
+        return state
+
+
+def followup(args):
+    root = args.job
+    manifest = json.loads((root / "job.json").read_text())
+    if "root_job" in manifest:
+        raise ValueError("Use the original worker job, not a turn directory, for followup")
+    task = args.task_file.read_text().strip()
+    if not task:
+        raise ValueError("Task must not be empty")
+    cli = shutil.which(args.cli)
+    if not cli:
+        raise ValueError(f"Flowmux CLI not found: {args.cli}")
+    with (root / "followup.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("Another followup is being dispatched; do not retry blindly") from error
+        state = json.loads((root / "status.json").read_text())
+        turns = sorted((root / "turns").glob("[0-9]*"))
+        previous = collect_turn(turns[-1]) if turns else state
+        if not previous.get("task_status") or previous.get("blocker_kind"):
+            raise ValueError("Previous assignment has no completed task report; inspect it before continuing")
+        # The effective attempt may have switched providers for quota.
+        manifest.update({key: state[key] for key in ("agent", "model", "effort") if key in state})
+        manifest.update(session_id=state["session_id"], transcript=state["transcript"])
+        idle_worker(cli, manifest)
+        turn = root / "turns" / f"{len(turns) + 1:04d}"
+        turn.mkdir(parents=True)
+        token = str(uuid.uuid4())
+        manifest.update(root_job=str(root), token=token, created_at=time.time(),
+                        transcript_offset=Path(manifest["transcript"]).stat().st_size)
+        (turn / "task.txt").write_text(task + "\n")
+        (turn / "prompt.txt").write_text(worker_prompt(turn, manifest))
+        write_json(turn / "job.json", manifest)
+        receipt = {"job": str(turn), "root_job": str(root),
+                   **{key: manifest[key] for key in ("pane", "surface", "workspace", "socket", "session_id")}}
+        # Persist uncertainty before any input; status can recover a received reply.
+        write_json(turn / "status.json", {"state": "dispatch_unknown", "received": False,
+                   **{key: manifest[key] for key in ("agent", "model", "effort", "session_id", "transcript") if key in manifest}})
+        try:
+            before = flowmux(cli, manifest["socket"], "read-screen", manifest["pane"])["screen_contents"]["text"]
+            (turn / "screen-before.txt").write_text(before)
+            prompt = f"FLOWMUX_TEAM_JOB:{token} Read the assignment and response contract at {turn / 'prompt.txt'}."
+            if any(ord(c) < 32 for c in prompt):
+                raise ValueError("Control characters in prompt path")
+            idle_worker(cli, manifest)
+            flowmux(cli, manifest["socket"], "send-keys", manifest["pane"], prompt.replace("\\", "\\\\"))
+            deadline = time.monotonic() + 5
+            while True:
+                screen = flowmux(cli, manifest["socket"], "read-screen", manifest["pane"])["screen_contents"]["text"]
+                (turn / "screen-pasted.txt").write_text(screen)
+                if token in "".join(screen.split()):
+                    break
+                if time.monotonic() >= deadline:
+                    raise ValueError("Pasted marker not visible; inspect the pane, Enter was not sent")
+                time.sleep(0.1)
+            idle_worker(cli, manifest)
+            flowmux(cli, manifest["socket"], "send-key", "Enter", "--pane", manifest["pane"])
+        except Exception as error:
+            write_json(turn / "dispatch-error.json", {"error": str(error)})
+            raise RuntimeError(f"Follow-up unconfirmed; inspect {turn}. Do not resend: {error}") from error
+        collect_turn(turn)
+        print(json.dumps(receipt, ensure_ascii=False))
+    return 0
 
 
 def transcript_candidates(manifest):
@@ -428,20 +552,26 @@ def run_worker(job):
 
 def inspect(job, timeout=0):
     deadline = time.monotonic() + timeout
+    is_turn = "root_job" in json.loads((job / "job.json").read_text())
     while True:
-        with (job / "worker.lock").open("a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                state = json.loads((job / "status.json").read_text())
-            else:
-                state = reconcile_stopped_worker(job)
+        if is_turn:
+            state = collect_turn(job)
+        else:
+            with (job / "worker.lock").open("a") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    state = json.loads((job / "status.json").read_text())
+                else:
+                    state = reconcile_stopped_worker(job)
         if state["state"] in TERMINAL or time.monotonic() >= deadline:
             break
         time.sleep(min(0.25, max(0, deadline - time.monotonic())))
     report = {"job": str(job), **state}
     if (job / "launch-error.json").exists():
         report["launch_error"] = json.loads((job / "launch-error.json").read_text())
+    if (job / "dispatch-error.json").exists():
+        report["dispatch_error"] = json.loads((job / "dispatch-error.json").read_text())
     if "task_status" in state:
         report["result"] = (job / "result.md").read_text()
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -478,6 +608,10 @@ def main():
     launch.add_argument("--timeout", type=positive, default=300)
     launch.add_argument("--allow-edits", action="store_true")
     launch.add_argument("--no-fallback", action="store_true", help="Do not substitute providers on native quota errors")
+    continuation = commands.add_parser("followup", help="Send another tracked assignment to the same idle worker")
+    continuation.add_argument("job", type=lambda value: Path(value).resolve())
+    continuation.add_argument("--task-file", type=Path, required=True)
+    continuation.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
     for name in ("status", "wait", "_worker"):
         command = commands.add_parser(name)
         command.add_argument("job", type=lambda value: Path(value).resolve())
@@ -493,6 +627,8 @@ def main():
             return 0
         if args.command == "start":
             return start(args)
+        if args.command == "followup":
+            return followup(args)
         if args.command == "_worker":
             return worker(args.job)
         return inspect(args.job, args.timeout if args.command == "wait" else 0)

@@ -18,6 +18,9 @@ cargo build --workspace --locked --target-dir "$CARGO_LLVM_COV_TARGET_DIR"
 python3 scripts/test-skills-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
+python3 scripts/test-team-pingpong-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-session-save-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"

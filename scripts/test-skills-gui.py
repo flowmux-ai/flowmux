@@ -198,7 +198,7 @@ def main():
     team = h.root / 'claude/skills/flowmux-team'
     browser = h.root / 'claude/skills/flowmux-browser/SKILL.md'
     source = REPO / '.agents/skills/flowmux-team'
-    files = ['SKILL.md', 'scripts/team.py', 'references/sample.md']
+    files = ['SKILL.md', 'scripts/team.py', 'scripts/examples.py', 'references/sample.md', 'references/cookbook.md']
     (h.root / 'claude').mkdir()
     try:
         h.start_display()
