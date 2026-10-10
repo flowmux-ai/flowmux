@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise Skills through AT-SPI in an isolated live Flowmux window (Linux).
 
-Requires Xvfb, D-Bus, python3-xlib, python3-pil, python3-gi and gir1.2-atspi-2.0.
+Requires Xvfb, D-Bus, at-spi2-core, python3-xlib, python3-pil, python3-gi and gir1.2-atspi-2.0.
 Only test-owned provider config roots are mutated; HOME and real agent files stay
 unchanged. Screenshots, backups and task artifacts remain in the printed folder.
 """
