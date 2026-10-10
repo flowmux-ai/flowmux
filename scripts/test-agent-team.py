@@ -617,7 +617,8 @@ class FollowupTests(unittest.TestCase):
         self.transcript.write_text('old completed turn\n')
         self.manifest = dict(agent='codex', token='original', model='fixture', effort='high', role='reviewer',
                              allow_edits=False, workspace='team', pane='worker', surface='tab',
-                             socket='/fixture.sock', session_id='session', transcript=str(self.transcript))
+                             socket='/fixture.sock', source_pane='lead', cli=sys.executable,
+                             session_id='session', transcript=str(self.transcript))
         team.write_json(self.root / 'job.json', self.manifest)
         team.write_json(self.root / 'status.json', dict(state='completed', task_status='completed',
                         session_id='session', transcript=str(self.transcript)))
@@ -632,6 +633,10 @@ class FollowupTests(unittest.TestCase):
         patcher = patch.object(team, 'flowmux', side_effect=self.rpc)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.origin = dict(socket='/fixture.sock', workspace='team', pane='lead', mode='team')
+        origin = patch.object(team, 'context', return_value=self.origin)
+        origin.start()
+        self.addCleanup(origin.stop)
 
     def rpc(self, cli, socket, *args):
         self.calls.append(args)
@@ -671,6 +676,51 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual((self.root / 'result.md').read_text(), 'original result')
         self.assertEqual(len(list((self.root / 'turns').iterdir())), 3)
         self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 3)
+
+    def test_other_lead_workspace_or_window_cannot_followup(self):
+        for key in ('pane', 'workspace', 'socket', 'mode'):
+            with self.subTest(key=key), patch.dict(self.origin, {key: 'other'}):
+                with self.assertRaisesRegex(ValueError, 'original lead pane'):
+                    self.dispatch()
+        self.assertFalse(self.calls)
+        self.assertFalse((self.root / 'turns').exists())
+
+    def test_input_handoff_is_observed_without_completing_or_sending(self):
+        turn = self.dispatch()
+        self.calls.clear()
+        with patch.dict(self.tab['agent'], activity='needs_input', status='blocked', message='Approval needed'):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(team.inspect(turn, timeout=30), 2)
+            report = json.loads(out.getvalue())
+            self.assertEqual(report['state'], 'waiting_input')
+            self.assertEqual(report['input_required']['pane'], 'worker')
+            self.assertEqual(report['input_required']['source_pane'], 'lead')
+            self.assertNotIn('task_status', report)
+            self.assertTrue((turn / 'input-required.json').exists())
+            self.assertEqual(json.loads((turn / 'status.json').read_text())['state'], 'dispatch_unknown')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(team.inspect(turn, timeout=.01), 124)
+        self.answer(turn)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(team.inspect(turn), 0)
+        self.assertFalse(any(c[0].startswith('send-') for c in self.calls))
+
+    def test_unrelated_session_input_does_not_request_approval(self):
+        turn = self.dispatch()
+        with patch.dict(self.tab['agent'], session_id='other', activity='needs_input', status='blocked'):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(team.inspect(turn), 0)
+            self.assertIn('observation_error', json.loads(out.getvalue()))
+            self.assertNotIn('input_required', json.loads(out.getvalue()))
+
+    def test_missing_native_binding_can_report_ui_but_cannot_send(self):
+        turn = self.dispatch()
+        with patch.dict(self.tab['agent'], session_id=None, activity='needs_input', status='blocked'):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(team.inspect(turn), 2)
+            self.assertFalse(json.loads(out.getvalue())['input_required']['session_verified'])
+            with self.assertRaisesRegex(ValueError, 'does not match'):
+                team.idle_worker(sys.executable, self.manifest)
 
     def test_busy_inactive_replaced_and_shell_targets_receive_no_input(self):
         for field, value in [('active', False), ('kind', 'browser'), ('agent', {}),

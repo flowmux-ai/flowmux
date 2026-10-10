@@ -110,7 +110,7 @@ def start(args):
     (job / "task.txt").write_text(task + "\n")
     manifest = {"agent": args.agent, "executable": executable, "cwd": str(cwd),
                 "role": args.role, "allow_edits": args.allow_edits,
-                "timeout": args.timeout, "socket": socket,
+                "timeout": args.timeout, "socket": socket, "cli": cli,
                 "workspace": origin["workspace"], "source_pane": pane,
                 "token": token, "created_at": time.time(), **model_route(args),
                 # A resolved Flowmux shim still needs the lead's PATH to find its provider.
@@ -281,8 +281,8 @@ def transcript_report(path, manifest):
     return matched, session, answer, blocker
 
 
-def idle_worker(cli, manifest):
-    """Fail closed before terminal input: exact live session, active surface, idle."""
+def worker_tab(cli, manifest, allow_unbound=False):
+    """Resolve only the recorded live worker, never the focused pane."""
     if not manifest.get("session_id"):
         raise ValueError("Worker receipt has no session identity; no input sent")
     tree = flowmux(cli, manifest["socket"], "tree")["tree"]["workspaces"]
@@ -290,11 +290,22 @@ def idle_worker(cli, manifest):
                 and w["location"]["type"] == "team"
                 for p in w["panes"] if p["id"] == manifest["pane"]
                 for t in p["tabs"] if t["id"] == manifest["surface"]), None)
-    if not tab or not tab["active"] or tab["kind"] != "terminal":
-        raise ValueError("Recorded worker surface is missing or inactive; no input sent")
+    if not tab or tab["kind"] != "terminal":
+        raise ValueError("Recorded worker surface is missing; no input sent")
     agent = tab.get("agent") or {}
-    if agent.get("name") != manifest["agent"] or agent.get("session_id") != manifest["session_id"]:
+    if agent.get("name") != manifest["agent"] or (
+            agent.get("session_id") != manifest["session_id"]
+            and not (allow_unbound and not agent.get("session_id"))):
         raise ValueError("Live worker session does not match the receipt; no input sent")
+    return tab
+
+
+def idle_worker(cli, manifest):
+    """Fail closed before terminal input: exact live session, active surface, idle."""
+    tab = worker_tab(cli, manifest)
+    if not tab["active"]:
+        raise ValueError("Recorded worker surface is inactive; no input sent")
+    agent = tab["agent"]
     if agent.get("activity") != "idle" or agent.get("status") not in ("idle", "done"):
         raise ValueError("Worker is busy or needs input; inspect its pane before continuing")
 
@@ -339,6 +350,10 @@ def followup(args):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("Another followup is being dispatched; do not retry blindly") from error
+        origin = context(args)
+        if (origin["socket"], origin["workspace"], origin["pane"], origin["mode"]) != (
+                manifest["socket"], manifest["workspace"], manifest["source_pane"], "team"):
+            raise ValueError("Followup must come from the original lead pane and Team workspace; no input sent")
         state = json.loads((root / "status.json").read_text())
         turns = sorted((root / "turns").glob("[0-9]*"))
         previous = collect_turn(turns[-1]) if turns else state
@@ -419,6 +434,9 @@ def run_attempt(root, attempt, manifest, env):
                 raise RuntimeError("Job prompt appeared in multiple sessions; refusing an ambiguous result")
             if matches:
                 bound, session, answer, blocker = matches[0]
+                if state.get("session_id") != session:
+                    state.update(session_id=session, transcript=str(bound))
+                    write_json(root / "status.json", state)
                 if answer is not None:
                     (attempt / "answer.txt").write_text(answer)
                     outcome, report = task_report(answer)
@@ -552,7 +570,9 @@ def run_worker(job):
 
 def inspect(job, timeout=0):
     deadline = time.monotonic() + timeout
-    is_turn = "root_job" in json.loads((job / "job.json").read_text())
+    manifest = json.loads((job / "job.json").read_text())
+    is_turn = "root_job" in manifest
+    observation = {}
     while True:
         if is_turn:
             state = collect_turn(job)
@@ -564,10 +584,24 @@ def inspect(job, timeout=0):
                     state = json.loads((job / "status.json").read_text())
                 else:
                     state = reconcile_stopped_worker(job)
-        if state["state"] in TERMINAL or time.monotonic() >= deadline:
+        observation = {}
+        if state["state"] not in TERMINAL and state.get("session_id") and manifest.get("cli"):
+            try:
+                agent = worker_tab(manifest["cli"], {**manifest, **state}, allow_unbound=True)["agent"]
+                if agent.get("activity") == "needs_input" or agent.get("status") == "blocked":
+                    observation = {"state": "waiting_input", "input_required": {
+                        **{key: manifest[key] for key in ("socket", "workspace", "pane", "surface", "source_pane")},
+                        "session_id": state["session_id"], "message": agent.get("message"),
+                        "session_verified": agent.get("session_id") == state["session_id"],
+                        "action": "Inspect the worker pane and use the provider's normal approval/input UI."}}
+            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+                observation = {"observation_error": str(error)}
+        if state["state"] in TERMINAL or "input_required" in observation or time.monotonic() >= deadline:
             break
         time.sleep(min(0.25, max(0, deadline - time.monotonic())))
-    report = {"job": str(job), **state}
+    report = {"job": str(job), **state, **observation}
+    if "input_required" in observation:
+        write_json(job / "input-required.json", report)
     if (job / "launch-error.json").exists():
         report["launch_error"] = json.loads((job / "launch-error.json").read_text())
     if (job / "dispatch-error.json").exists():
@@ -577,6 +611,8 @@ def inspect(job, timeout=0):
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if state["state"] in TERMINAL:
         return 0 if state["state"] == "completed" else 1
+    if "input_required" in observation:
+        return 2
     return 124 if timeout else 0
 
 
@@ -612,6 +648,8 @@ def main():
     continuation.add_argument("job", type=lambda value: Path(value).resolve())
     continuation.add_argument("--task-file", type=Path, required=True)
     continuation.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
+    continuation.add_argument("--socket", help="Origin window when launched outside a pane")
+    continuation.add_argument("--pane", help="Origin pane when launched outside a pane")
     for name in ("status", "wait", "_worker"):
         command = commands.add_parser(name)
         command.add_argument("job", type=lambda value: Path(value).resolve())

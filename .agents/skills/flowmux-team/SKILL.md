@@ -20,7 +20,12 @@ python3 /path/to/flowmux-team/scripts/team.py context
   do the work; a request mentioning teams is not a reason to stop.
 - `mode: team`: delegate scoped work to real interactive Claude Code or Codex
   sessions in split panes of this workspace, then integrate their results.
-- Unresolved/ambiguous context: stop pane creation and report the diagnostic.
+- `No unique live Flowmux pane`: do not create panes yet. Retry `context` once
+  in a **separate tool call**, after the failed call completes: the first tool's
+  lifecycle hook may establish the exact session binding. Do not sleep/retry
+  inside the same shell call, where that hook cannot run. If still unresolved,
+  stop and report both diagnostics. Do not retry permission/authentication errors.
+- Other unresolved/ambiguous context: stop pane creation and report the diagnostic.
   Never choose a window by working directory, title, focus or visit order.
 
 The user creates a Team workspace through the sidebar menu or command palette
@@ -38,16 +43,8 @@ only to the new worker session; never rewrite provider defaults.
 
 ## Choose provider, model and scope
 
-Provider choice is an orchestration default, not a claim that only one provider
-can do a task. Honor explicit user choices first. Otherwise use Codex for code
-investigation, implementation and test-driven debugging; use Claude for an
-independent review of a Codex result, requirements synthesis or prose work.
-Review a Claude implementation with Codex when independent review is useful.
-Do not add a second provider for every trivial task. Use the current lead for
-quick coordination and at most the workers needed for separable assignments.
-An unavailable provider remains a blocker. Session/credit exhaustion can use
-the one-time provider substitution below; never rotate accounts. Disclose when
-substitution prevents a requested cross-provider review.
+Honor explicit provider choices. Otherwise use Codex for code and debugging,
+Claude for independent review or prose. Use only the workers the task needs.
 
 Classify each assignment by scope, uncertainty and consequence, not prompt
 length or role name. Start with the smallest tier that can meet its checks:
@@ -87,11 +84,6 @@ more detail is needed. Reuse an idle worker for related follow-ups instead of
 creating a fresh session for every message. Batch related checks into one
 assignment; avoid acknowledgement-only turns and repeatedly sending shared rules.
 
-The helper copies the assignment to the job's `task.txt` and sends a short
-initial prompt pointing to it. It does not silently truncate the assignment.
-This keeps the TUI readable; files the worker actually reads still use context,
-so reference only relevant sections. Provider/project instructions remain active.
-
 Give each worker a role, concrete assignment, context, permitted files and
 acceptance checks. Workers do not inherit this conversation. Read-only workers
 may share a checkout; editing workers need separate worktrees or disjoint files.
@@ -112,13 +104,8 @@ answer for the user to inspect and continue. Codex workers use a dedicated local
 TUI (`--no-daemon`) and a read-only sandbox by default; Claude workers have only
 Read/Glob/Grep, adding Edit/Write for an editing task.
 
-New jobs pin the lead's `PATH`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (including default
-paths) for execution, report collection and session restoration. This lets Flowmux
-shims and CLI interpreters find providers installed through the lead's shell. Quota fallback
-uses the other CLI resolved on the lead's PATH at launch. No credentials are
-copied into job files. Automatic session restoration resumes the saved
-conversation in the same pane with the worker's CLI, model and permission
-bounds; it does not replay the original assignment.
+Jobs retain provider paths and profiles for collection and restoration;
+credentials are not copied. Restoration resumes the conversation, not the task.
 
 Retain the JSON receipt: `job`, `pane`, `surface`, `workspace`, `socket` and
 `source_pane`. Launch subsequent workers from the lead's origin, never a prior
@@ -184,6 +171,14 @@ researcher's actual result as explicit context to a reviewer; a second
 `start --agent claude` can review a Codex worker, and vice versa. For a runnable
 handoff, read [the sample](references/sample.md).
 
+`waiting_input` (exit 2) means the recorded worker pane needs user input or approval.
+Inspect `input_required` for its pane and message; `input-required.json` preserves
+the handoff. Ask the user to act in that provider's UI, then call `wait` again.
+This is a live observation, not a task-level `blocked` report. Never approve
+on the user's behalf. An `observation_error` means live state could not be verified.
+Without native session hooks, `session_verified: false` permits UI inspection
+only; follow-up input still requires an exact live session binding.
+
 `pending`/`running` are incomplete. `wait` exits 124 if its wait deadline expires;
 it does not cancel work. A completed report exits 0; blocked/failed/timed-out
 reports exit 1. `--timeout` bounds **report collection per attempt**, not the interactive
@@ -198,7 +193,7 @@ Jobs started by older helpers lack this supervision evidence.
 Use `flowmux --socket SOCKET read-screen pane:PANE` to inspect the real UI.
 Authentication, trust dialogs and denied permissions are blockers, never
 permission to bypass controls. Session/credit quota follows the bounded substitution
-rule below; a screen message alone does not authorize substitution. A terminal screen is diagnostic evidence, not
+rule above; a screen message alone does not authorize substitution. A terminal screen is diagnostic evidence, not
 proof of task completion. If the provider does not save a supported conversation
 record, report that limitation rather than claiming success.
 
@@ -218,8 +213,8 @@ python3 /path/to/flowmux-team/scripts/team.py followup /original/worker/job \
 python3 /path/to/flowmux-team/scripts/team.py wait /returned/turn/job --timeout 60
 ```
 
-`followup` checks the exact live session, active surface and idle state before
-input. It records the assignment, paste evidence and a unique marker, and collects
+`followup` requires the original lead pane and Team workspace, then checks
+the exact worker session, active surface and idle state before input. It records the assignment, paste evidence and a unique marker, and collects
 only the matching turn from the pinned transcript. Every follow-up returns its own
 job receipt. The original report and earlier turns stay unchanged. Always pass the
 original worker job to `followup`; pass a turn's receipt to `status`/`wait`.

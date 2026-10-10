@@ -71,8 +71,13 @@ int main(void) {
         from gi.repository import Atspi
         Atspi.set_timeout(3000, 3000)
         connection = display.Display(h.env["DISPLAY"])
+        previous, stale_socket = h.window("previous-window")
+        # A workspace round trip also waits for the GUI command loop to be ready.
+        h.rpc(stale_socket, "workspace_create", name="Previous window", root=str(h.root))
+        h.close_window(previous)
+        assert not stale_socket.exists(), stale_socket
         process, socket = h.window("codex-status")
-        created = h.rpc(socket, "workspace_create", name="Codex status", root=str(h.root))
+        created = h.rpc(socket, "workspace_create", name="Codex status", root=str(h.root), team=True)
         ws = h.workspace(socket, created["workspace_created"]["id"])
         pane = ws["panes"][0]["id"]
         surface = ws["panes"][0]["tabs"][0]["id"]
@@ -110,11 +115,40 @@ int main(void) {
         assert observed()["status"] == "working", observed()
         assert observed().get("session_id") is None, observed()
         h.pass_check("ephemeral title completion cannot claim a Codex pane")
+        legacy_env = dict(h.env, FLOWMUX_SOCKET_PATH=str(socket), FLOWMUX_PANE_ID=pane,
+                          FLOWMUX_SURFACE_ID=surface)
+        def legacy(session):
+            subprocess.run([args.cli, '--socket', str(socket), 'hooks', 'codex', 'stop',
+                            json.dumps({'type': 'agent-turn-complete', 'thread-id': session,
+                                        'last-assistant-message': '{"title":"Task title"}'})],
+                           env=legacy_env, text=True, capture_output=True, check=True, timeout=10)
+        legacy('11111111-1111-4111-8111-111111111111')
+        assert observed().get('session_id') is None, observed()
+        assert observed()['status'] == 'working', observed()
+        h.pass_check('dedicated TUI legacy title notify cannot claim its parent pane')
 
         # Subagent histories must not claim a root pane either.
         for session, source_kind in (("22222222-2222-4222-8222-222222222222", {"subagent": {}}), (root_session, "cli")):
             (history / f"rollout-{session}.jsonl").write_text(json.dumps(dict(
                 type="session_meta", payload=dict(id=session, cwd=str(h.root), source=source_kind))) + "\n")
+        # A shared daemon keeps the closed window's environment. Until a hook
+        # reports the session, even a unique cwd candidate cannot host workers.
+        helper = Path(__file__).resolve().parents[1] / ".agents/skills/flowmux-team/scripts/team.py"
+        context_env = dict(h.env, CODEX_THREAD_ID=root_session,
+                           FLOWMUX_SOCKET_PATH=str(stale_socket), FLOWMUX_PANE_ID="stale-pane")
+
+        def context():
+            return subprocess.run([sys.executable, str(helper), "context", "--cli", args.cli],
+                                  env=context_env, capture_output=True, text=True, timeout=15)
+
+        unresolved = context()
+        (h.root / "context-before.txt").write_text(unresolved.stderr)
+        assert unresolved.returncode != 0, unresolved.stdout
+        assert f"Socket hint {stale_socket} does not exist" in unresolved.stderr, unresolved.stderr
+        assert "separate tool call" in unresolved.stderr, unresolved.stderr
+        assert observed().get("session_id") is None, observed()
+        h.pass_check("missing inherited socket is diagnosed without trusting a cwd candidate")
+
         hook("22222222-2222-4222-8222-222222222222", "stop", turn_id="child-turn")
         time.sleep(.6)
         assert observed().get("session_id") is None, observed()
@@ -122,6 +156,16 @@ int main(void) {
 
         hook(root_session, "stop", turn_id="legacy-first")
         gui.wait_for(lambda: observed().get("session_id") == root_session, "persisted root route")
+        resolved = context()
+        (h.root / "context-after.json").write_text(resolved.stdout)
+        assert resolved.returncode == 0, resolved.stderr
+        assert json.loads(resolved.stdout) == dict(socket=str(socket), pane=pane,
+            workspace=ws["id"], workspace_type="team", mode="team"), resolved.stdout
+        assert not stale_socket.exists(), "Recovery must not recreate the old socket"
+        assert len(h.workspace(socket, ws["id"])["panes"]) == 1
+        h.pass_check("next context call resolves the same session after its hook, despite the stale socket")
+        legacy(root_session)
+        assert observed().get('session_id') == root_session, observed()
         status(("idle", "done"))
         screen("1")
         time.sleep(.5)

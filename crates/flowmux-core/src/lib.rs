@@ -2818,6 +2818,7 @@ pub fn detect_agent_status_from_signals(
                 "requires permission",
                 "continue?",
                 "proceed?",
+                "press enter to confirm or esc to cancel",
                 "action required",
             ]
             .into_iter()

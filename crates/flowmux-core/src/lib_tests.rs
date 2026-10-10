@@ -3354,6 +3354,13 @@ fn detector_reads_tmux_title_spinner_while_codex_streams() {
 #[test]
 fn detector_reads_strong_osc_and_screen_signals() {
     assert_eq!(
+        detect_agent_status_from_signals(
+            Some("› 1. Yes, proceed (y)\n  2. Yes, and don't ask again\n  3. No, and tell Codex what to do differently\n  Press enter to confirm or esc to cancel"),
+            None
+        ),
+        Some(AgentStatus::Blocked)
+    );
+    assert_eq!(
         detect_agent_status_from_signals(None, Some("Codex Action Required")),
         Some(AgentStatus::Blocked)
     );

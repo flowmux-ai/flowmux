@@ -9,9 +9,25 @@ pub(crate) async fn run_identify(
     socket: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let id = if let Some(session) = session {
-        let (client, pane, surface, _) = hooks::resolve_codex_source(session, socket)
+        let hint = socket.or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from));
+        let (client, pane, surface, _) = hooks::resolve_codex_source(session, hint.clone())
             .await?
-            .ok_or_else(|| anyhow::anyhow!("No unique live Flowmux pane for Codex session {session}; do not select another window or create a replacement workspace"))?;
+            .ok_or_else(|| {
+                let missing = hint
+                    .as_ref()
+                    .filter(|path| matches!(path.try_exists(), Ok(false)))
+                    .map(|path| format!(
+                        " Socket hint {} does not exist; a Codex shared daemon can retain an earlier Flowmux window's environment after that window exits.",
+                        path.display()
+                    ))
+                    .unwrap_or_default();
+                anyhow::anyhow!(
+                    "No unique live Flowmux pane for Codex session {session}.{missing} \
+                     The exact session binding may not have been reported yet. Retry this read-only \
+                     lookup once in a separate tool call after this call completes. If still unresolved, \
+                     stop; do not select another window or create a replacement workspace."
+                )
+            })?;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(3),
             client.call(Request::WorkspaceTree),

@@ -71,8 +71,12 @@ class Examples:
         print(f"TURN {number}: {role}, {receipt['job']}", flush=True)
         deadline = time.monotonic() + self.args.timeout
         while True:
+            remaining = int(deadline - time.monotonic())
+            if remaining <= 0:
+                raise TimeoutError(f"No response: {receipt['job']}; no duplicate was sent")
             result = subprocess.run([sys.executable, str(self.helper), "wait", receipt["job"],
-                                     "--timeout", "15"], capture_output=True, text=True)
+                                     "--timeout", str(min(15, remaining))], capture_output=True, text=True,
+                                    timeout=remaining)
             (self.root / f"request-{number}-status.log").write_text(result.stdout + result.stderr)
             if result.returncode != 124:
                 break

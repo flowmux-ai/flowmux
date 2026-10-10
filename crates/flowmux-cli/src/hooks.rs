@@ -28,6 +28,8 @@ const HOOK_NOTIFY_TIMEOUT: Duration = Duration::from_millis(750);
 /// release doesn't break us.
 #[derive(Debug, Default, Deserialize)]
 pub struct ClaudeHookInput {
+    #[serde(default, rename = "type")]
+    pub event_type: Option<String>,
     #[serde(
         default,
         alias = "thread-id",

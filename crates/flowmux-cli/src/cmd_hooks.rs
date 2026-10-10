@@ -943,6 +943,19 @@ pub(crate) async fn run_generic_agent_hook_event(
     } else {
         read_codex_hook_input(args)
     };
+    // Legacy notify also fires for ephemeral title jobs in dedicated TUIs.
+    if reported_agent.eq_ignore_ascii_case("codex")
+        && input.event_type.as_deref() == Some("agent-turn-complete")
+    {
+        use flowmux_state::session_history::{codex_session_cwd, SessionAgent};
+        let root = input
+            .session_id
+            .as_deref()
+            .and_then(|id| codex_session_cwd(&SessionAgent::Codex.env_history_home()?, id));
+        if root.is_none() {
+            return Ok(());
+        }
+    }
     // Codex's shared app-server daemon runs every tab's hooks with the pane,
     // tab and socket of whichever pane first launched it. Ask the flowmux
     // windows which tab runs this session instead. The daemon outlives the

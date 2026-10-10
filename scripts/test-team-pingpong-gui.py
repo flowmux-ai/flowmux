@@ -11,8 +11,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
+import uuid
 
 from PIL import Image
 from Xlib import X, display
@@ -54,6 +57,11 @@ while prompt:
     activity('running')
     print('WORKING ' + agent + ': ' + task[:90], flush=True)
     time.sleep(.3)
+    if 'approval fixture' in task:
+        print('Approval required: inspect fixture command before continuing', flush=True)
+        activity('needs_input')
+        sys.stdin.readline()
+        raise SystemExit('No approval automation is expected in this test')
     outcome = 'completed'
     if 'capacity.txt' in task:
         source = pathlib.Path(re.search(r'(/\S+/capacity\.txt)', task)[1])
@@ -88,10 +96,13 @@ def main():
     parser.add_argument('--gui', default=str(REPO / 'target/debug/flowmux'))
     parser.add_argument('--cli', default=str(REPO / 'target/debug/flowmuxctl'))
     parser.add_argument('--real-agent', choices=('claude', 'codex'))
+    parser.add_argument('--expect-input', action='store_true', help='Verify a real provider input/approval handoff, without approving')
     parser.add_argument('--cases', nargs='+', choices=('review', 'clarify', 'repair'), default=['review', 'clarify', 'repair'])
     parser.add_argument('--timeout', type=int, default=180)
+    parser.add_argument('--protected-pid', type=int, action='append', default=[])
     args = parser.parse_args()
-    args.protected_pid = []
+    if args.expect_input and not args.real_agent:
+        parser.error('--expect-input requires --real-agent')
     h = fixture.Harness(args)
     for key in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDECODE'):
         h.env.pop(key, None)
@@ -109,6 +120,19 @@ def main():
             path.chmod(0o700)
         h.env.update(PATH=str(bin_dir) + os.pathsep + h.env['PATH'],
                      CLAUDE_CONFIG_DIR=str(h.root / 'claude'), CODEX_HOME=str(h.root / 'codex'))
+    elif args.real_agent == 'codex':
+        # Test the built legacy hook without changing the user's installed config or trust.
+        executable = shutil.which('codex')
+        if not executable:
+            raise RuntimeError('Codex is not installed')
+        bin_dir = h.root / 'bin'
+        bin_dir.mkdir()
+        wrapper = bin_dir / 'codex'
+        notify = 'notify=' + json.dumps([args.cli, 'hooks', 'codex', 'stop'])
+        wrapper.write_text('#!/bin/sh\nexport PATH=' + shlex.quote(h.env['PATH'])
+                           + '\nexec ' + shlex.join([executable, '-c', notify]) + ' "$@"\n')
+        wrapper.chmod(0o700)
+        h.env['PATH'] = str(bin_dir) + os.pathsep + h.env['PATH']
     try:
         h.start_display()
         process, socket = h.window('pingpong')
@@ -117,6 +141,9 @@ def main():
                 workspace = h.rpc(socket, 'workspace_create', name=f'Team {agent}: {case}',
                                   root=str(REPO), team=True)['workspace_created']['id']
                 pane = h.workspace(socket, workspace)['panes'][0]['id']
+                other_workspace = h.rpc(socket, 'workspace_create', name=f'Other Team {case}',
+                                        root=str(REPO), team=True)['workspace_created']['id']
+                other_before = h.workspace(socket, other_workspace)
                 env = dict(h.env, FLOWMUX_SOCKET_PATH=str(socket), FLOWMUX_PANE_ID=pane,
                            FLOWMUX_BUNDLED_CLI_PATH=args.cli)
                 log = h.root / f'{agent}-{case}.log'
@@ -137,9 +164,62 @@ def main():
                     Image.frombytes('RGB', (size.width, size.height), raw.data, 'raw', 'BGRX').save(h.root / f'{agent}-{case}.png')
                 finally:
                     connection.close()
+                if args.expect_input:
+                    artifacts = Path(next(line.removeprefix('ARTIFACTS: ') for line in log.read_text().splitlines()
+                                          if line.startswith('ARTIFACTS: ')))
+                    run = json.loads((artifacts / 'run.json').read_text())
+                    handoff = run['turns'][-1]['status']
+                    assert handoff['state'] == 'waiting_input' and 'task_status' not in handoff, handoff
+                    worker = handoff['input_required']
+                    assert worker['source_pane'] == pane and worker['workspace'] == workspace, worker
+                    assert any(p['id'] == worker['pane'] and any(t.get('agent', {}).get('status') == 'blocked'
+                               for t in p['tabs']) for p in workspace_tree['panes']), workspace_tree
+                    assert not (Path(handoff['job']) / 'result.md').exists()
+                    h.pass_check(f'{agent}: real provider input UI is blocked, handed to its lead, and not approved')
+                    continue
                 if result.returncode:
                     raise RuntimeError(f'{agent}/{case} failed; see {log} and *.screen.txt')
+                assert h.workspace(socket, other_workspace)['panes'] == other_before['panes']
+                if not args.real_agent:
+                    artifacts = Path(next(line.removeprefix('ARTIFACTS: ') for line in log.read_text().splitlines()
+                                          if line.startswith('ARTIFACTS: ')))
+                    run = json.loads((artifacts / 'run.json').read_text())
+                    worker = next(iter(run['workers'].values()))
+                    before = (Path(worker['job']) / 'result.md').read_bytes()
+                    wrong_env = dict(env, FLOWMUX_PANE_ID=other_before['panes'][0]['id'])
+                    rejected = subprocess.run([sys.executable, str(helper), 'followup', worker['job'],
+                        '--task-file', str(artifacts / 'request-1.txt'), '--cli', args.cli],
+                        env=wrong_env, capture_output=True, text=True, timeout=20)
+                    assert rejected.returncode and 'original lead pane' in rejected.stderr, rejected.stderr
+                    assert (Path(worker['job']) / 'result.md').read_bytes() == before
                 h.pass_check(f'{agent}/{case}: same-session ping-pong and semantic checks in real GUI PTYs')
+            if not args.real_agent:
+                # Resolve a lead session even when inherited context and focus point at another Team.
+                source = h.workspace(socket, workspace)['panes'][0]
+                session = str(uuid.uuid4())
+                h.rpc(socket, 'agent_activity_update', pane=pane, surface=source['tabs'][0]['id'],
+                      agent='codex', activity='running', session_id=session, source='flowmux:hook')
+                h.rpc(socket, 'workspace_focus', workspace=other_workspace)
+                env.update(CODEX_THREAD_ID=session, FLOWMUX_PANE_ID=other_before['panes'][0]['id'])
+                task = h.root / f'{agent}-approval.txt'
+                task.write_text('Show approval fixture and wait for a human. Do not complete.')
+                started = subprocess.run([sys.executable, str(helper), 'start', '--agent', agent,
+                    '--complexity', 'simple', '--role', 'approval fixture', '--cwd', str(REPO),
+                    '--task-file', str(task), '--cli', args.cli, '--timeout', '300', '--no-fallback'],
+                    env=env, capture_output=True, text=True, check=True, timeout=30)
+                worker = json.loads(started.stdout)
+                assert worker['source_pane'] == pane and worker['workspace'] == workspace, worker
+                waiting = subprocess.run([sys.executable, str(helper), 'wait', worker['job'], '--timeout', '30'],
+                                         env=env, capture_output=True, text=True, timeout=40)
+                (h.root / f'{agent}-approval-handoff.json').write_text(waiting.stdout)
+                assert waiting.returncode == 2, waiting.stdout + waiting.stderr
+                handoff = json.loads(waiting.stdout)
+                assert handoff['state'] == 'waiting_input' and 'task_status' not in handoff, handoff
+                assert handoff['input_required']['pane'] == worker['pane'], handoff
+                assert handoff['input_required']['source_pane'] == pane, handoff
+                assert 'Approval required' in h.screen(socket, worker['pane'])
+                assert len(h.workspace(socket, other_workspace)['panes']) == len(other_before['panes'])
+                h.pass_check(f'{agent}: stale pane and other Team focus retain lead; approval handoff targets exact worker')
         h.close_window(process)
     finally:
         h.cleanup()

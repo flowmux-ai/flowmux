@@ -20,6 +20,7 @@ flowmux-terminal = { workspace = true }
 flowmux-notify = { workspace = true }
 flowmux-cookies = { workspace = true }
 flowmux-procmon = { workspace = true }
+flowmux-state = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
@@ -36,4 +37,3 @@ tempfile = "3"
 # End-to-end tmux-compat tests: an in-process daemon serves the socket
 # the real `flowmuxctl` binary (and the bash tmux shim) talk to.
 flowmux-daemon = { workspace = true }
-flowmux-state = { workspace = true }

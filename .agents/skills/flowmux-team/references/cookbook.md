@@ -23,6 +23,10 @@
 
 역할별 worker는 첫 요청에서 한 번 생성합니다. 이어지는 관련 요청에는 원래 job의
 `followup`을 사용합니다. 사용자 후속 메시지도 **같은 리드 대화**에 입력하세요.
+다른 Team workspace나 리드 pane에서 보낸 `followup`은 입력 전에 거부됩니다.
+`wait`가 `waiting_input`(종료 코드 2)을 반환하면 `input_required`에 표시된
+worker pane에서 사용자가 승인 또는 입력을 처리한 뒤 같은 job을 다시 기다립니다.
+`input-required.json`은 이 기록을 보관하며, 작업의 최종 `blocked` 보고서와 구분됩니다.
 리드가 응답을 마친 뒤 스스로 깨어나는 기능은 없으므로, 아래의 두 번째 사용자
 프롬프트는 사용자가 실제로 보내야 진행됩니다.
 
@@ -217,6 +221,7 @@ status means the worker finished that assignment; the lead still checks it.
 
 | Observation | Lead action |
 |---|---|
+| Initial `context`: `No unique live Flowmux pane` | Retry `context` once in a separate tool call so the first call's lifecycle hook can report the session. If unresolved, retain both errors and stop; never redirect to a guessed window. |
 | `dispatch_unknown` | Receipt is not proven yet; inspect/wait on the same turn. Do not resend. |
 | `running`, `received: true` | The user prompt is in the pinned transcript; continue bounded waiting. |
 | `completed` | Inspect evidence and acceptance checks; revise or finish. |
@@ -239,6 +244,8 @@ python3 scripts/test-team-pingpong-gui.py
 # Explicit live-account checks, same examples and real provider CLIs:
 python3 scripts/test-team-pingpong-gui.py --real-agent claude
 python3 scripts/test-team-pingpong-gui.py --real-agent codex
+# Verify a provider approval/input handoff without approving it:
+python3 scripts/test-team-pingpong-gui.py --real-agent codex --cases clarify --expect-input --timeout 300
 ```
 
 The GUI harness uses a separate Xvfb display, D-Bus and XDG state. It retains
@@ -252,19 +259,20 @@ Linux requires the Xvfb/python3-xlib dependencies of the existing GUI harness.
 
 | Check | Observed result |
 |---|---|
-| Helper regression tests | 33 passed, including repeated follow-ups, immutable results, uncertain delivery recovery, concurrent dispatch rejection, missing identity, wrong/busy targets and provider substitution history. |
-| Isolated GUI + deterministic providers | All 6 runs passed: 3 cases × Claude/Codex transcript formats, 16 total assignment turns. Actual panes received terminal input and returned newly appended transcript answers. |
+| Helper regression tests | 37 passed, including original-lead enforcement, input handoff without terminal input, missing/mismatched identity, repeated follow-ups and immutable results. |
+| Isolated GUI + deterministic providers | All 6 runs passed: 3 cases × Claude/Codex transcript formats, 16 total assignment turns. Additional Team workspaces did not redirect creation or follow-ups; each provider's approval fixture returned its recorded pane to the lead. |
 | Skill bundle | Rust installation tests and the live Settings install/update/remove and session restoration suite passed with all five resources. |
 | Native Claude Code 2.1.296 / Haiku | Attempted clarification case; stopped at initial theme/onboarding UI before producing a task result. Native ping-pong remains unverified. |
-| Native Codex 0.162.1 / GPT-6 Luna | Attempted clarification case; the sandbox returned `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`, then the CLI requested escalation to read the task file. No approval was supplied; native ping-pong remains unverified. |
+| Native Codex 0.162.1 / GPT-6 Luna | Approval handoff passed: after sandbox startup failed, the actual permission dialog appeared, the sidebar showed blocked and `wait` returned `waiting_input` with the lead/worker IDs. No approval was supplied; native ping-pong remains unverified. |
+| Missing socket and title jobs | A closed window's socket was removed; exact-session lookup recovered the current pane after its hook. Ephemeral title completions were ignored, including legacy notify from dedicated TUIs. |
 
-The native runs timed out without replaying their assignments. No sandbox or
-trust setting was relaxed. Resolve native onboarding/sandbox prerequisites in the
+Earlier native runs timed out; the updated helper hands off a detected input wait
+immediately. No sandbox or trust setting was relaxed. Resolve native onboarding/sandbox prerequisites in the
 user's environment before claiming end-to-end model validation. Mock-provider
 passes establish the transport/state contract, not model behavior.
 
 Local evidence retained by this run (temporary paths, not distributed assets):
-`/tmp/fm-gui-spfx1rve` contains all six passing GUI logs, trees and screenshots;
-`/tmp/fm-gui-yrakb528` contains the bundle/lifecycle checks;
-`/tmp/fm-gui-__i2ndna` and `/tmp/fm-gui-by8sigiz` contain the respective native
-Claude/Codex blocked-run logs and terminal screens.
+`/tmp/fm-gui-wi8o527f` contains the six passing GUI logs, trees and screenshots;
+`/tmp/fm-gui-i0t0jqep` contains the bundle/lifecycle checks;
+`/tmp/fm-gui-hoqe2qdd` contains the socket/title regression;
+`/tmp/fm-gui-2m3qyu7e` contains the actual Codex approval screen and handoff record.
