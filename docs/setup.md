@@ -122,15 +122,22 @@ Chromium-family encrypted cookie extraction is also unavailable.
 ```bash
 flowmux doctor   # read-only audit; non-zero exit if anything needs fixing
 flowmux fix      # install / refresh what doctor flagged
+flowmux hooks refresh-shims  # update only wrappers already managed by Flowmux
 ```
 
-Both accept `--json`. `fix` is idempotent: hook entries without a flowmux
+`doctor` and `fix` accept `--json`. `fix` is idempotent: hook entries without a flowmux
 marker are preserved, and flowmux-managed SKILL copies are re-synced to the
 version embedded in the binary after backing up differing content. Symlinked
 skills remain user-managed. See [skill management](agent-skills.md) for target
 paths, skill-only installation/removal, backups, and agent activation controls.
 Reload hook configuration at a convenient session boundary; do not interrupt
 active agent sessions just to apply an update.
+
+The Linux/macOS source installers refresh existing Flowmux agent wrappers,
+including legacy wrappers under `~/.local/bin`, without installing missing
+integrations or changing provider hooks/settings. Binary-only updates can run
+`flowmux hooks refresh-shims` explicitly. Changes apply to new agent processes;
+a new chat inside an existing Codex TUI still uses that TUI's connection.
 
 Codex asks you to approve changed user hooks in `/hooks`; flowmux does not
 bypass that. Codex configurations with `allow_managed_hooks_only = true`

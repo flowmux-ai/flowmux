@@ -25,6 +25,9 @@ python3 /path/to/flowmux-team/scripts/team.py context
   lifecycle hook may establish the exact session binding. Do not sleep/retry
   inside the same shell call, where that hook cannot run. If still unresolved,
   stop and report both diagnostics. Do not retry permission/authentication errors.
+  A retry cannot create a missing shared-daemon binding. For future local Codex
+  leads, use the updated Flowmux shim or `codex --no-daemon` in the intended pane.
+  Keep active sessions open; do not restart or relocate them to recover context.
 - Other unresolved/ambiguous context: stop pane creation and report the diagnostic.
   Never choose a window by working directory, title, focus or visit order.
 
@@ -111,6 +114,13 @@ Retain the JSON receipt: `job`, `pane`, `surface`, `workspace`, `socket` and
 `source_pane`. Launch subsequent workers from the lead's origin, never a prior
 worker. Explicit pane IDs keep routing independent of focus. Working directory
 changes do not change the workspace that receives the split.
+
+The managed Flowmux Codex shim uses `--no-daemon` when supported, preserving
+explicit remote connections and provider permission/profile settings. Run
+`flowmux hooks refresh-shims` after a binary-only update to refresh existing
+wrappers without changing provider settings. The Linux/macOS installers do this
+automatically. This affects new invocations, not new chats inside an already-running
+shared TUI; keep those sessions open.
 
 Codex source discovery uses `identify --session ID`. A direct Codex process can
 prove its source through its agent and Flowmux process ancestry, including on

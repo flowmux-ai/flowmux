@@ -45,10 +45,27 @@ initial prompt carries a task-file reference and a unique job marker. Each worke
 different provider; pass the first report into the next worker's task file for
 cross-provider review.
 
+The managed Codex shim starts local invocations with `--no-daemon` when supported.
+The lead and its workers therefore keep the originating pane's environment and
+process ancestry. Explicit `--remote` connections and older clients keep their
+original arguments; sandbox, approval and profile settings are unchanged.
+`flowmux hooks refresh-shims` refreshes existing managed and legacy PATH wrappers
+after a binary-only update, without changing provider settings or hooks. The
+Linux/macOS installers run it automatically. Resume paths restore the pane’s
+wrapper precedence after login startup and when reusing a provider PATH. Existing
+sessions are not restarted or migrated; starting a new chat in an existing TUI
+does not change that TUI’s shared-daemon connection.
+
 Codex source resolution validates direct agent/window process ancestry on the
-first turn. Shared daemons still require a unique reported session binding;
+first turn, without waiting for a session hook. Existing shared-daemon sessions
+still require a unique reported session binding;
 working directory, window focus and tab titles cannot select a launch target.
 A worker remains in the lead's workspace even when its working directory differs.
+Retrying an unbound shared session cannot establish ownership: the daemon has
+already lost the pane-local origin. Keep the session open and report that limit.
+The GUI checks the requesting process against its live terminal PIDs as well as
+reported agent presence. Source discovery does not depend on the Agent Bar's
+periodic process poll and does not synthesize a session or activity event.
 
 Results come from a completed turn in the saved conversation containing the
 exact job marker in its user prompt. The final JSON report must declare
@@ -160,6 +177,9 @@ Provider configuration, hook trust and authentication are retained. Permission
 failures remain blockers; do not weaken permissions to pass a demo.
 
 Run the account-free regression checks with `python3 scripts/test-agent-team.py`.
+After building, run `cargo test -p flowmux-cli --lib codex_shim_first_tool_gui -- --ignored --nocapture`
+on Linux to verify first-tool discovery through the generated shim in two
+same-directory Team workspaces, without pre-registering session bindings.
 After building current binaries, `python3 scripts/test-team-pingpong-gui.py` runs
 all three cookbook cases with both provider fixtures in isolated real GUI PTYs.
 Append `--real-agent claude` or `--real-agent codex` to test the same examples with

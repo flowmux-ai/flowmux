@@ -8,6 +8,7 @@
 
 아래 대화는 **기대 동작을 설명하는 예시이며 실제 모델 대화 기록은 아닙니다.**
 현재 검증된 범위는 실제 GUI pane에서 모의 에이전트로 실행한 전달·응답·세션 재사용입니다.
+실제 Codex의 승인 화면을 감지하고 원래 리드에게 입력 대기를 알리는 동작도 검증했습니다.
 실제 Claude/Codex 모델로 끝까지 실행한 결과는 아직 확보하지 못했습니다.
 막힌 원인과 검증 기록은 문서 마지막에 있습니다.
 
@@ -20,6 +21,14 @@
    `Codex`를 `Claude Code`로 바꾸세요. 실제 실행에는 계정 사용량이 발생합니다.
 4. 리드는 `team.py context`로 Team 모드를 확인해야 합니다. 일반 workspace에서
    리드 혼자 수행한 결과는 이 사례의 통신 검증 성공으로 세지 않습니다.
+
+새 Codex 리드는 갱신된 Flowmux shim을 통해 `--no-daemon`으로 시작합니다.
+바이너리만 업데이트했다면 `flowmux hooks refresh-shims`로 기존 shim을 갱신하거나, 의도한 pane에서
+`codex --no-daemon`을 직접 실행하세요. 기존 공유 daemon 세션은 그대로 유지됩니다.
+그 세션의 연결 정보가 없다면 재조회만으로 복구되지 않으며, 활성 세션을 강제로
+종료하거나 다른 창의 경로·제목으로 위치를 추측하지 않습니다.
+Linux/macOS 설치 스크립트는 기존 wrapper를 자동 갱신합니다. 기존 TUI 안에서
+새 대화만 시작하면 공유 daemon 연결은 그대로이므로 새 프로세스 실행과 구분하세요.
 
 역할별 worker는 첫 요청에서 한 번 생성합니다. 이어지는 관련 요청에는 원래 job의
 `followup`을 사용합니다. 사용자 후속 메시지도 **같은 리드 대화**에 입력하세요.
@@ -167,10 +176,63 @@ shipping.py만 고치게 해줘. 테스트 수정은 허용하지 마.
 세 검사에 통과한 로그가 모두 있어야 합니다. 테스트 파일은 그대로여야 합니다.
 담당자의 “수정 완료” 응답만으로 리드가 성공을 선언하면 실패입니다.
 
+## 사례 4. 여러 Team workspace에서 원래 리드에게 후속 요청
+
+사례 1의 첫 보고서를 받은 뒤 다른 Team workspace를 열거나 포커스를 옮깁니다.
+두 workspace가 같은 프로젝트 경로나 이름을 사용해도 됩니다. 이어서 **처음 요청한
+리드 대화**에 다음 프롬프트를 입력하세요.
+
+```text
+다른 Team workspace도 열려 있어. 기존 조사 담당자에게 지역을 추가로 확인시켜줘.
+원래 job의 followup을 사용하고, 첫 영수증의 socket·workspace·source_pane과
+현재 리드의 위치가 일치하는지 확인해줘. 포커스나 프로젝트 경로로 대상을 고르지 마.
+기존 worker의 pane·surface·session이 유지됐는지 결과와 함께 알려줘.
+응답은 최대 300초만 기다려줘.
+```
+
+**완료 기준:** 원래 workspace의 같은 worker가 응답하고 최초 보고서가 보존됩니다.
+다른 리드에서 같은 job으로 `followup`을 시도하면 입력 전에 거부되어야 합니다.
+이때는 원래 리드 대화로 돌아가세요. 환경 변수나 영수증을 바꿔 우회하지 않습니다.
+대상 선택은 포커스와 독립적이지만, 작업 중 화면 포커스가 그대로 유지된다는 뜻은 아닙니다.
+
+## 사례 5. 승인·입력 대기 → 사용자 처리 → 같은 작업 결과 수집
+
+사례 1–3 실행 중 제공자 UI가 승인을 요구할 때 사용하는 흐름입니다. 승인 화면이
+나타나는지는 로컬 설정에 따라 다르므로 이를 만들려고 권한이나 신뢰 설정을 바꾸지 마세요.
+
+### 처음 작업에 덧붙일 프롬프트
+
+```text
+담당자가 승인이나 입력을 기다리면 대신 처리하지 마.
+waiting_input의 사유와 worker pane·surface, 원래 리드 위치를 알려주고
+현재 job 또는 turn 경로와 input-required.json을 보관해줘.
+이 상태를 작업의 task_status: blocked 보고서로 간주하지 마.
+```
+
+사용자가 표시된 worker pane에서 요청 내용을 확인하고 제공자의 UI로 직접 결정합니다.
+처리한 뒤 **원래 리드 대화**에 다음 프롬프트를 입력하세요.
+
+```text
+담당자 화면의 입력 요청을 처리했어. 보관한 같은 job 또는 turn을 최대 300초 다시 기다려줘.
+아직 끝나지 않은 작업에 start나 followup을 보내지 마.
+실제 최종 보고서를 확인하고 다음 단계를 진행해줘. 거부된 권한은 우회하지 마.
+```
+
+**완료 기준:** `waiting_input`은 종료 코드 2와 `input-required.json`으로 남고,
+최종 작업 보고서를 만들거나 덮어쓰지 않습니다. 입력 처리 뒤에는 **같은 요청**을
+`wait`로 다시 수집합니다. 계속 입력을 요구하거나 시간이 초과되면 그 상태를 보고합니다.
+사례 2라면 이후 실제 `task_status: blocked` 보고서를 받은 다음 신청 좌석 수를 묻고,
+사용자의 답을 파일에 반영한 뒤 idle 상태의 같은 worker에게 `followup`을 보냅니다.
+
+`session_verified: false`는 pane의 UI 대기는 관찰했지만 native hook으로 세션을
+확인하지 못했다는 뜻입니다. UI 확인까지만 가능하며, 후속 입력에는 정확한 세션 식별이
+필요합니다. `observation_error`가 있으면 먼저 기록된 pane과 세션을 진단하세요.
+side panel의 `blocked` 표시는 최종 `task_status: blocked` 보고서의 증거가 아닙니다.
+
 ## 자동으로 같은 흐름 재현하기
 
 위 프롬프트는 리드 에이전트가 판단하고 조작하는 수동 사례입니다. 아래 실행기는
-동일한 작업을 정해진 순서로 보내는 회귀 검증용이며, 자연어 프롬프트를 받은 리드의
+사례 1–3을 정해진 순서로 보내는 회귀 검증용이며, 자연어 프롬프트를 받은 리드의
 판단 능력까지 검증하지는 않습니다. `review`의 지역 추가와 `clarify`의 사용자 답 9는
 실행기에 포함되어 있습니다.
 
@@ -203,6 +265,9 @@ python3 "$TEAM_SKILL/scripts/examples.py" --case repair --agent codex
 worker pane은 종료하지 않아 대화를 확인할 수 있습니다. 진행 중에는 worker pane에
 직접 입력하지 마세요. 인증·신뢰·권한 화면이나 세션 식별 오류가 있으면 원인을 확인하고
 중단합니다. 불확실한 요청을 자동 재전송하거나 승인을 대신 입력하지 않습니다.
+`waiting_input`에서도 실행기는 실패로 종료하며 전체 사례를 자동 재개하지 않습니다.
+사용자 처리 뒤에는 `run.json`의 해당 요청 영수증에 있는 `job`으로 `team.py wait`를
+실행하세요. 실행기를 처음부터 다시 돌리면 새 worker가 생길 수 있습니다.
 
 ## Use the continuation contract directly
 
@@ -226,7 +291,10 @@ status means the worker finished that assignment; the lead still checks it.
 | `running`, `received: true` | The user prompt is in the pinned transcript; continue bounded waiting. |
 | `completed` | Inspect evidence and acceptance checks; revise or finish. |
 | Task report `blocked` | Supply actual missing information, then continue when idle. |
-| UI busy / needs input / missing session | Diagnose the recorded pane; do not type or fabricate state. |
+| `waiting_input`, exit 2 | Retain `input-required.json`, report the recorded worker pane and reason, and ask the user to handle the provider UI. Then wait on the same job/turn; do not dispatch another task. |
+| `session_verified: false` | UI observation only; establish the exact live session binding before follow-up input. |
+| `observation_error` / UI busy / missing session | Diagnose the recorded pane and session; do not type or fabricate state. |
+| Follow-up from a different lead/workspace | No input is sent. Return to the original lead; do not rewrite its origin. |
 | Wait exits 124 | Deadline elapsed, task not cancelled. Keep evidence and decide whether to wait more. |
 | Malformed report / changed transcript | Stop automated handoff; inspect the retained answer and session. |
 
@@ -240,6 +308,7 @@ restart the lead after the lead has ended its own turn.
 ```bash
 python3 scripts/test-agent-team.py
 cargo build -p flowmux -p flowmux-cli
+cargo test -p flowmux-cli --lib codex_shim_first_tool_gui -- --ignored --nocapture
 python3 scripts/test-team-pingpong-gui.py
 # Explicit live-account checks, same examples and real provider CLIs:
 python3 scripts/test-team-pingpong-gui.py --real-agent claude
@@ -253,6 +322,8 @@ terminal screens, workspace trees and logs and closes only its test-owned GUI.
 Default provider fixtures validate deterministic transport and state handling in
 real panes, not model quality or account access. The `--real-agent` runs validate
 native CLI conversations and content checks; report those results separately.
+`--expect-input` requires a real provider input/approval wait and verifies only that
+handoff. It never approves the request and fails if the task completes without one.
 Linux requires the Xvfb/python3-xlib dependencies of the existing GUI harness.
 
 ## Verification record — 2026-10-10, Linux
@@ -265,6 +336,8 @@ Linux requires the Xvfb/python3-xlib dependencies of the existing GUI harness.
 | Native Claude Code 2.1.296 / Haiku | Attempted clarification case; stopped at initial theme/onboarding UI before producing a task result. Native ping-pong remains unverified. |
 | Native Codex 0.162.1 / GPT-6 Luna | Approval handoff passed: after sandbox startup failed, the actual permission dialog appeared, the sidebar showed blocked and `wait` returned `waiting_input` with the lead/worker IDs. No approval was supplied; native ping-pong remains unverified. |
 | Missing socket and title jobs | A closed window's socket was removed; exact-session lookup recovered the current pane after its hook. Ephemeral title completions were ignored, including legacy notify from dedicated TUIs. |
+| New local lead, before any session hook | The generated Codex shim and live GUI terminal ownership lookup passed first-tool discovery in two same-directory Team workspaces, independent of focus. The test initially failed because agent presence had not yet been polled; direct terminal PID lookup fixed it. |
+| Native Codex first-tool probe after that repair | The local TUI started, but its read-only shell tool failed with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` before running `team.py context`. No approval or sandbox relaxation was supplied; this native first-tool check remains blocked. |
 
 Earlier native runs timed out; the updated helper hands off a detected input wait
 immediately. No sandbox or trust setting was relaxed. Resolve native onboarding/sandbox prerequisites in the
@@ -276,3 +349,26 @@ Local evidence retained by this run (temporary paths, not distributed assets):
 `/tmp/fm-gui-i0t0jqep` contains the bundle/lifecycle checks;
 `/tmp/fm-gui-hoqe2qdd` contains the socket/title regression;
 `/tmp/fm-gui-2m3qyu7e` contains the actual Codex approval screen and handoff record.
+The later first-tool regression failed in `/tmp/fm-gui-qtw25u0e` and passed after
+repair in `/tmp/fm-gui-ayhe32gl`, including shared-daemon rejection on the final
+PID-hardened build; `/tmp/fm-gui-muu000tw` records the native sandbox blocker.
+The structural review used a real Codex worker with three follow-ups in session
+`01a1263d-29a5-7da3-8e35-4034d423bf3d`; all four reports were retained in
+`~/.local/state/flowmux/team-jobs/job-a2k63gum`. This confirms delegation from an
+already-bound lead, not native first-tool bootstrap or completion of cases 1–3.
+
+## Verification record — 2026-10-11, Linux
+
+Session `01a12658-9502-72b3-ac0b-359dcd56b3a9` failed both source lookups before
+worker creation. The binary had been updated, but both installed Codex wrappers
+still lacked `--no-daemon`. The restored TUI continued using the shared daemon.
+The final lifecycle hook later established an exact binding; that does not prove
+first-tool discovery worked.
+
+The installer now refreshes existing managed and legacy wrappers without touching
+provider settings. Auto-resume repairs wrapper precedence after login startup;
+the session panel preserves that precedence when restoring the provider's PATH.
+The isolated live GUI check in `/tmp/fm-gui-3ncg9drf` passed wrapper upgrade,
+first-tool lookup, shared-daemon rejection and automatic restore with reordered
+PATH. Native new-lead model execution remains subject to the sandbox blocker
+recorded above; fixture success is not full native cookbook success.
