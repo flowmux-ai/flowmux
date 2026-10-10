@@ -941,9 +941,12 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
         host.visible_child(),
         Some(review.root_widget.clone().upcast())
     );
-    test_window.set_visible(false);
+    // Exercise embedded-view unmapping without recreating the native window surface.
+    host.set_visible(false);
+    assert!(!review.root_widget.is_mapped());
     assert!(review.patch.borrow().is_none());
-    test_window.present();
+    host.set_visible(true);
+    assert!(review.root_widget.is_mapped());
     glib::future_with_timeout(std::time::Duration::from_secs(20), async {
         while review.patch.borrow().is_none() {
             glib::timeout_future(std::time::Duration::from_millis(10)).await;
