@@ -268,6 +268,17 @@ impl SvgView {
     }
 }
 
+fn raster_preview(image: image::DynamicImage) -> image::RgbaImage {
+    let (width, height) = fit_size(image.width(), image.height());
+    if (width, height) == (image.width(), image.height()) {
+        image.into_rgba8()
+    } else {
+        image
+            .resize_exact(width, height, image::imageops::FilterType::Triangle)
+            .into_rgba8()
+    }
+}
+
 fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
     let image = image::ImageReader::open(path)
         .map_err(|err| format!("read failed: {err}"))?
@@ -275,7 +286,7 @@ fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
         .map_err(|err| format!("format detection failed: {err}"))?
         .decode()
         .map_err(|err| format!("decode failed: {err}"))?;
-    let rgba = image.to_rgba8();
+    let rgba = raster_preview(image);
     let (source_width, source_height) = rgba.dimensions();
     let source_pixels = rgba
         .as_chunks::<4>()
@@ -785,6 +796,17 @@ fn check_frame_set(result: tvg::Tvg_Result, context: &str) -> Result<(), String>
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn raster_preview_bounds_pixels_and_preserves_small_rgba_buffers() {
+        let small = image::RgbaImage::from_pixel(32, 24, image::Rgba([17, 33, 55, 128]));
+        let original = small.as_ptr();
+        let preview = raster_preview(image::DynamicImage::ImageRgba8(small));
+        assert_eq!(preview.as_ptr(), original);
+        assert_eq!(preview.get_pixel(0, 0).0, [17, 33, 55, 128]);
+        let large = image::DynamicImage::new_rgba8(2400, 1800);
+        assert_eq!(raster_preview(large).dimensions(), (1200, 900));
+    }
 
     #[test]
     fn fit_size_caps_large_images_without_upscaling() {

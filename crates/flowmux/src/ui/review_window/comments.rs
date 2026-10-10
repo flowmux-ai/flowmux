@@ -1665,9 +1665,9 @@ async fn event_smoke(review: &Rc<ReviewWindow>, missing: &Note) {
     );
     failed.detach();
     *review.selected_path.borrow_mut() = Some("alpha.txt".into());
-    *review.patch.borrow_mut() = Some(review::parse_patch(
+    *review.patch.borrow_mut() = Some(Rc::new(review::parse_patch(
         "@@ -1 +1 @@\n-old\n+new\n@@ -20 +20 @@\n-before\n+after\n",
-    ));
+    )));
     review.show_page();
     let buffer = review.diff.buffer();
     buffer.place_cursor(&buffer.start_iter());

@@ -350,6 +350,7 @@ impl WindowController {
             let ui = ui.clone();
             move |_| {
                 ui.generation.set(ui.generation.get().wrapping_add(1));
+                *ui.hits.borrow_mut() = Vec::new();
                 glib::Propagation::Proceed
             }
         });

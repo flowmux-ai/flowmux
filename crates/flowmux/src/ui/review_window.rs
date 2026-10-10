@@ -17,7 +17,7 @@ pub(crate) struct ReviewWindow {
     pub root_widget: gtk::Box,
     parent: adw::ApplicationWindow,
     host: RefCell<gtk::Stack>,
-    return_to: RefCell<Option<gtk::Widget>>,
+    return_to: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     pub root: PathBuf,
     pub workspace: Cell<Option<flowmux_core::WorkspaceId>>,
     pub pane: flowmux_core::PaneId,
@@ -38,7 +38,7 @@ pub(crate) struct ReviewWindow {
     pending_note: RefCell<Option<review::notes::Note>>,
     selected_path: RefCell<Option<PathBuf>>,
     snapshot: RefCell<Option<Snapshot>>,
-    patch: RefCell<Option<Patch>>,
+    patch: RefCell<Option<Rc<Patch>>>,
     generation: Cell<u64>,
     patch_generation: Cell<u64>,
     scroll_generation: Cell<u64>,
@@ -352,6 +352,23 @@ impl ReviewWindow {
             glib::Propagation::Proceed
         });
         this.root_widget.add_controller(keys);
+        let weak = Rc::downgrade(&this);
+        this.root_widget.connect_unmap(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.release_preview();
+            }
+        });
+        let weak = Rc::downgrade(&this);
+        this.root_widget.connect_map(move |_| {
+            if let Some(this) = weak.upgrade() {
+                if this.snapshot.borrow().is_none()
+                    && this.refresh.is_sensitive()
+                    && !this.has_unsaved_review()
+                {
+                    this.reload();
+                }
+            }
+        });
         this.connect_comments();
         this.connect_history();
         this.reload();
@@ -476,7 +493,7 @@ impl ReviewWindow {
                 self.heading
                     .set_text(&format!("{} · no longer in this comparison", note.label()));
                 *self.selected_path.borrow_mut() = Some(note.path());
-                *self.patch.borrow_mut() = Some(review::parse_patch(""));
+                *self.patch.borrow_mut() = Some(Rc::new(review::parse_patch("")));
                 self.show_page();
                 self.pending_note.borrow_mut().take();
                 self.focus_pending_comment(&note);
@@ -506,7 +523,7 @@ impl ReviewWindow {
             }
             match result {
                 Ok(Ok(patch)) => {
-                    *this.patch.borrow_mut() = Some(patch);
+                    *this.patch.borrow_mut() = Some(Rc::new(patch));
                     this.show_page();
                     if let Some(note) = this.pending_note.borrow_mut().take() {
                         this.focus_pending_comment(&note);
@@ -569,7 +586,7 @@ impl ReviewWindow {
             let previous = host.visible_child();
             host.add_child(&self.root_widget);
             *self.host.borrow_mut() = host.clone();
-            *self.return_to.borrow_mut() = previous;
+            *self.return_to.borrow_mut() = previous.map(|widget| widget.downgrade());
             if visible {
                 host.set_visible_child(&self.root_widget);
             }
@@ -584,8 +601,10 @@ impl ReviewWindow {
     pub fn present(self: &Rc<Self>) {
         let host = self.host.borrow();
         if host.visible_child().as_ref() != Some(self.root_widget.upcast_ref()) {
-            *self.return_to.borrow_mut() = host.visible_child();
-            if self.snapshot.borrow().is_some() && !self.has_unsaved_review() {
+            *self.return_to.borrow_mut() = host.visible_child().map(|widget| widget.downgrade());
+            if !self.has_unsaved_review()
+                && (self.snapshot.borrow().is_some() || self.refresh.is_sensitive())
+            {
                 self.reload();
             }
         }
@@ -603,11 +622,35 @@ impl ReviewWindow {
                 .return_to
                 .borrow()
                 .as_ref()
+                .and_then(glib::WeakRef::upgrade)
                 .filter(|p| p.parent().as_ref() == Some(host.upcast_ref()))
             {
-                host.set_visible_child(previous);
+                host.set_visible_child(&previous);
                 previous.child_focus(gtk::DirectionType::TabForward);
             }
+        }
+        self.release_preview();
+    }
+
+    fn release_preview(&self) {
+        if !self.has_unsaved_review() {
+            self.generation.set(self.generation.get().wrapping_add(1));
+            self.patch_generation
+                .set(self.patch_generation.get().wrapping_add(1));
+            self.scroll_generation
+                .set(self.scroll_generation.get().wrapping_add(1));
+            self.snapshot.borrow_mut().take();
+            self.patch.borrow_mut().take();
+            self.refresh.set_sensitive(true);
+            self.files.splice(0, self.files.n_items(), &[]);
+            *self.visible_files.borrow_mut() = Vec::new();
+            *self.display_lines.borrow_mut() = Vec::new();
+            for widget in self.inline_widgets.borrow_mut().drain(..) {
+                if widget.parent().as_ref() == Some(self.diff.upcast_ref()) {
+                    self.diff.remove(&widget);
+                }
+            }
+            self.diff.buffer().set_text("");
         }
     }
 
@@ -879,13 +922,35 @@ pub(crate) async fn smoke(parent: &adw::ApplicationWindow) {
     assert!(review.root_widget.is_mapped());
     comments::smoke(&review).await;
     history::smoke(parent).await;
+    review.smoke_set_draft("Keep this unsaved review");
     review.hide();
+    assert!(
+        review.patch.borrow().is_some(),
+        "draft context must survive hiding"
+    );
+    assert!(review.has_unsaved_review());
+    review.present();
+    review.smoke_set_draft("");
+    review.hide();
+    assert!(review.patch.borrow().is_none());
+    assert!(review.snapshot.borrow().is_none());
+    assert_eq!(review.diff.buffer().char_count(), 0);
     assert_eq!(host.visible_child(), Some(terminal.upcast()));
     review.present();
     assert_eq!(
         host.visible_child(),
         Some(review.root_widget.clone().upcast())
     );
+    test_window.set_visible(false);
+    assert!(review.patch.borrow().is_none());
+    test_window.present();
+    glib::future_with_timeout(std::time::Duration::from_secs(20), async {
+        while review.patch.borrow().is_none() {
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     host.remove(&review.root_widget);
     test_window.destroy();
     println!("DIFF_REVIEW_CONTINUOUS_EMBEDDED_OK");
