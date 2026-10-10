@@ -62,7 +62,7 @@ context or caller registry tokens. No fallback weakens the systemd isolation.
 Regression review: real SIGINT/SIGTERM tests verify Cargo and a child that
 ignores SIGTERM disappear, the service becomes inactive, and temporary state
 is removed. They also check a build directory containing spaces and profile
-settings. Thirteen pre-push/runner tests cover nonzero results, timeout cleanup,
+settings. Four runner tests cover nonzero results, timeout cleanup,
 environment filtering and cleanup failures. Cleanup failure cannot report
 success. Signal handlers are restored, and macOS retains its existing process
 ancestry strategy.
