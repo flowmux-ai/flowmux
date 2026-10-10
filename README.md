@@ -57,36 +57,6 @@ Click a notification to jump straight back to that agent.
 
 <img src="resources/screenshot/claude_notification.gif" alt="agent notifications" width="100%" />
 
-### Team workspace
-
-Give one lead agent a task and let it coordinate the team. In a **Team workspace**,
-Claude Code and Codex workers run in visible split panes, each with its own
-assignment. The lead collects their results, asks for corrections, and checks the
-finished work. You can follow every conversation and continue with the same
-workers for the next round.
-
-Install **Flowmux Team** for your agent from **Options → Skills**, then choose
-**New Team Workspace** from the sidebar menu or command palette. Start your lead
-agent there and ask it to delegate research, implementation, or review.
-See the [team guide](docs/agent-teams.md) for setup and example workflows.
-
-<img src="resources/screenshot/flowmux-team-workspace.gif" alt="Team workspace: a lead agent delegates tasks to workers in visible split panes" width="100%" />
-
-### AgentOffice
-
-See your agents at work in a living pixel-art office. Each workspace with active
-agents becomes a room, where characters work at desks, wait for your input, or
-relax when their task is done. Status icons and speech bubbles help you spot who
-needs attention across Claude Code, Codex, and other agents.
-
-Open **AgentOffice** with the home icon in the side panel's **Agents** header.
-Select an office sign to enlarge that room, or **All offices** to return to the
-map. Click an agent to jump to its terminal, and press **Esc** to return to your
-workspace. Team workers can create new split panes in the background while you
-keep watching the office.
-
-<img src="resources/screenshot/flowmux-agent-office.gif" alt="AgentOffice: watch agents across workspaces and select a character to open its terminal" width="100%" />
-
 ### Browser tab
 
 Browse next to your terminals, or let your agents do it. With the
@@ -155,6 +125,36 @@ write in the built-in editor and watch the result side by side. Images require
 
 Control browser tabs, panes, and terminals through `flowmux` commands.
 See the [CLI guide](AGENTS.md) for automation and JSON output.
+
+### Team workspace
+
+Give one lead agent a task and let it coordinate the team. In a **Team workspace**,
+Claude Code and Codex workers run in visible split panes, each with its own
+assignment. The lead collects their results, asks for corrections, and checks the
+finished work. You can follow every conversation and continue with the same
+workers for the next round.
+
+Install **Flowmux Team** for your agent from **Options → Skills**, then choose
+**New Team Workspace** from the sidebar menu or command palette. Start your lead
+agent there and ask it to delegate research, implementation, or review.
+See the [team guide](docs/agent-teams.md) for setup and example workflows.
+
+<img src="resources/screenshot/flowmux-team-workspace.gif" alt="Team workspace: a lead agent delegates tasks to workers in visible split panes" width="100%" />
+
+### AgentOffice
+
+See your agents at work in a living pixel-art office. Each workspace with active
+agents becomes a room, where characters work at desks, wait for your input, or
+relax when their task is done. Status icons and speech bubbles help you spot who
+needs attention across Claude Code, Codex, and other agents.
+
+Open **AgentOffice** with the home icon in the side panel's **Agents** header.
+Select an office sign to enlarge that room, or **All offices** to return to the
+map. Click an agent to jump to its terminal, and press **Esc** to return to your
+workspace. Team workers can create new split panes in the background while you
+keep watching the office.
+
+<img src="resources/screenshot/flowmux-agent-office.gif" alt="AgentOffice: watch agents across workspaces and select a character to open its terminal" width="100%" />
 
 ### SSH workspaces
 
