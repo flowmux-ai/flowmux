@@ -1342,11 +1342,15 @@ fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -
 /// A match may include trailing sentence punctuation, so trim it immediately
 /// before dispatch.
 const URL_REGEX_PATTERN: &str = r#"(?i)(?:https?|ftp|file)://[^\s<>"'`]+"#;
-const IMAGE_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`])(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:gif|svg|png|jpe?g|webp?|lottie|json)"#;
 // A leading parenthesis belongs to the filename only when its balanced group
 // ends before the extension. Otherwise start inside the surrounding delimiter.
 // The recursive group also preserves names such as `(draft(v2)).md`.
 // Possessive inner text avoids exhausting VTE's match limit on wrappers.
+const IMAGE_PATH_REGEX_PATTERN: &str = r#"(?ix)
+    (?<![^\s<>"'`(])
+    (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))|[^\s<>"'`:(])
+    [^\s<>"'`:]*\.(?:gif|svg|png|jpe?g|webp?|lottie|json)
+"#;
 const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?ix)
     (?<![^\s<>"'`(])
     (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))|[^\s<>"'`:(])
@@ -3342,16 +3346,7 @@ mod tests {
     }
 
     #[gtk::test]
-    async fn markdown_links_exclude_surrounding_parentheses() {
-        let term = vte::Terminal::new();
-        let regex = vte::Regex::for_match(MARKDOWN_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
-            .expect("markdown path regex compiles");
-        term.match_add_regex(&regex, 0);
-        let window = gtk::Window::new();
-        window.set_default_size(800, 600);
-        window.set_child(Some(&term));
-        window.present();
-
+    async fn terminal_file_links_exclude_surrounding_parentheses() {
         let cases = [
             ("(somepath/file.md)", "somepath/file.md"),
             ("(/tmp/file.md)", "/tmp/file.md"),
@@ -3365,28 +3360,66 @@ mod tests {
             ("((draft(v2)).md)", "(draft(v2)).md"),
             ("(somepath/file.md", "somepath/file.md"),
             ("README.md", "README.md"),
+            (
+                "(/tmp/fm-gui-bup2n_kv/agents-working.md)",
+                "/tmp/fm-gui-bup2n_kv/agents-working.md",
+            ),
+            (
+                "(/tmp/fm-gui-bup2n_kv/agents-working.md",
+                "/tmp/fm-gui-bup2n_kv/agents-working.md",
+            ),
         ];
-        for (line, _) in cases {
-            term.feed(format!("{line}\r\n").as_bytes());
-        }
-        glib::timeout_future(Duration::from_millis(100)).await;
-
-        for (row, (line, expected)) in cases.iter().enumerate() {
-            let start = line.find(expected).unwrap();
-            for column in 0..line.len() {
-                let (matched, _) = term.check_match_at(
-                    (column as f64 + 0.5) * term.char_width() as f64,
-                    (row as f64 + 0.5) * term.char_height() as f64,
-                );
-                let in_path = (start..start + expected.len()).contains(&column);
-                assert_eq!(
-                    matched.as_deref(),
-                    in_path.then_some(*expected),
-                    "{line}: column {column}"
-                );
+        for (pattern, extension) in [
+            (MARKDOWN_PATH_REGEX_PATTERN, "md"),
+            (IMAGE_PATH_REGEX_PATTERN, "png"),
+            (IMAGE_PATH_REGEX_PATTERN, "SVG"),
+            (IMAGE_PATH_REGEX_PATTERN, "jpg"),
+            (IMAGE_PATH_REGEX_PATTERN, "jpeg"),
+            (IMAGE_PATH_REGEX_PATTERN, "gif"),
+            (IMAGE_PATH_REGEX_PATTERN, "webp"),
+            (IMAGE_PATH_REGEX_PATTERN, "web"),
+            (IMAGE_PATH_REGEX_PATTERN, "lottie"),
+            (IMAGE_PATH_REGEX_PATTERN, "json"),
+        ] {
+            let term = vte::Terminal::new();
+            let regex = vte::Regex::for_match(pattern, URL_REGEX_COMPILE_FLAGS)
+                .expect("file path regex compiles");
+            term.match_add_regex(&regex, 0);
+            let window = gtk::Window::new();
+            window.set_default_size(900, 600);
+            window.set_child(Some(&term));
+            window.present();
+            let cases: Vec<_> = cases
+                .iter()
+                .map(|(line, expected)| {
+                    (
+                        line.replace(".md", &format!(".{extension}")),
+                        expected.replace(".md", &format!(".{extension}")),
+                    )
+                })
+                .collect();
+            for (line, _) in &cases {
+                term.feed(format!("{line}\r\n").as_bytes());
             }
+            glib::timeout_future(Duration::from_millis(100)).await;
+
+            for (row, (line, expected)) in cases.iter().enumerate() {
+                let start = line.find(expected).unwrap();
+                for column in 0..line.len() {
+                    let (matched, _) = term.check_match_at(
+                        (column as f64 + 0.5) * term.char_width() as f64,
+                        (row as f64 + 0.5) * term.char_height() as f64,
+                    );
+                    let in_path = (start..start + expected.len()).contains(&column);
+                    assert_eq!(
+                        matched.as_deref(),
+                        in_path.then_some(expected.as_str()),
+                        "{line}: column {column}"
+                    );
+                }
+            }
+            window.close();
         }
-        window.close();
     }
 
     #[test]

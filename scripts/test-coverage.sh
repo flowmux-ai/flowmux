@@ -27,6 +27,9 @@ python3 scripts/test-session-save-gui.py \
 python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
+python3 scripts/test-terminal-image-links-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-ipc-recovery-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
