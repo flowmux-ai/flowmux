@@ -7,6 +7,7 @@ use crate::ui::agent_office::AgentOffice;
 pub(super) struct ActiveAgentOffice {
     pub(super) view: AgentOffice,
     saved_focus: Option<glib::WeakRef<gtk::Widget>>,
+    background_can_focus: bool,
     _native_views: crate::ui::browser_pane::NativeBrowserViewsSuspend,
 }
 
@@ -23,6 +24,9 @@ impl WindowController {
         view.render(&self.sidebar.workspace_titles().borrow(), &model);
         let saved_focus =
             gtk::prelude::GtkWindowExt::focus(&self.window).map(|widget| widget.downgrade());
+        let background_can_focus = self.sidebar_split.can_focus();
+        // Queued pane focus and Tab navigation must not reach a covered terminal.
+        self.sidebar_split.set_can_focus(false);
         let native_views = crate::ui::browser_pane::suspend_native_browser_views_for_window(
             self.window.upcast_ref(),
         );
@@ -31,6 +35,7 @@ impl WindowController {
         *self.agent_office.borrow_mut() = Some(ActiveAgentOffice {
             view,
             saved_focus,
+            background_can_focus,
             _native_views: native_views,
         });
     }
@@ -40,6 +45,8 @@ impl WindowController {
             return;
         };
         self.content_overlay.remove_overlay(&office.view.root);
+        self.sidebar_split
+            .set_can_focus(office.background_can_focus);
         let focus = office.saved_focus.as_ref().and_then(glib::WeakRef::upgrade);
         drop(office);
         if let Some(focus) = focus {
@@ -51,6 +58,46 @@ impl WindowController {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    async fn agent_office_blocks_deferred_focus_into_hidden_terminals() {
+        let (controller, _, pane) = super::super::tests::build_single_workspace_controller(
+            "com.flowmux.App.UiTest.AgentOfficeFocus",
+        )
+        .await;
+        controller.window.present();
+        glib::timeout_future(Duration::from_millis(100)).await;
+        controller.focus_pane(pane);
+        controller.dispatch(GtkCommand::ToggleAgentOffice).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let root = controller
+            .agent_office
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .view
+            .root
+            .clone();
+        let focus = gtk::prelude::GtkWindowExt::focus(&controller.window).unwrap();
+        assert!(
+            focus.is_ancestor(&root),
+            "queued focus escaped behind AgentOffice"
+        );
+        for _ in 0..10 {
+            controller
+                .window
+                .child_focus(gtk::DirectionType::TabForward);
+            let focus = gtk::prelude::GtkWindowExt::focus(&controller.window).unwrap();
+            assert!(focus.is_ancestor(&root), "Tab escaped behind AgentOffice");
+        }
+        controller.dispatch(GtkCommand::ToggleAgentOffice).await;
+        controller.focus_pane(pane);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let frame = controller.pane_registry.borrow().pane_frame(pane).unwrap();
+        let focus = gtk::prelude::GtkWindowExt::focus(&controller.window).unwrap();
+        assert!(focus.is_ancestor(&frame));
+        controller.window.destroy();
+    }
 
     #[gtk::test]
     async fn agent_office_tracks_live_status_and_navigates_without_replacing_terminal() {

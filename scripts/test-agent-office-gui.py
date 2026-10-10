@@ -198,6 +198,26 @@ def main():
         gui.wait_for(lambda: find("Back to workspace"), "office open")
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
         assert room("Product studio") and not room("Quiet corner")
+        # Background workspace changes must not redirect native keys away from the map.
+        covered = h.rpc(socket, "workspace_create", name="Covered terminal", root=str(h.root))["workspace_created"]["id"]
+        covered_pane = h.workspace(socket, covered)["panes"][0]["id"]
+        time.sleep(.5)
+        native_window().set_input_focus(X.RevertToParent, X.CurrentTime)
+        for key in "officefocusprobe":
+            code = connection.keysym_to_keycode(XK.string_to_keysym(key))
+            xtest.fake_input(connection, X.KeyPress, code)
+            xtest.fake_input(connection, X.KeyRelease, code)
+        connection.sync()
+        time.sleep(.3)
+        assert "officefocusprobe" not in h.screen(socket, covered_pane), "queued focus sent keys behind AgentOffice"
+        for key in ["Tab"] * 10 + list("officefocusprobe"):
+            code = connection.keysym_to_keycode(XK.string_to_keysym(key))
+            xtest.fake_input(connection, X.KeyPress, code)
+            xtest.fake_input(connection, X.KeyRelease, code)
+        connection.sync()
+        time.sleep(.3)
+        assert "officefocusprobe" not in h.screen(socket, covered_pane), "AgentOffice leaked keyboard input to a hidden terminal"
+        h.pass_check("workspace creation and Tab navigation keep native keys out of the covered terminal")
         assert find("Next office design") is None, "office refresh button must be removed"
         actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                   and any(n.get_name().startswith(name + " · ") for name in ("codex", "claude", "gemini"))]
