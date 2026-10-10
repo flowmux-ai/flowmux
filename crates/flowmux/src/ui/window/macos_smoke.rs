@@ -190,12 +190,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let page = std::thread::spawn(move || {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
-            stream
+            // A speculative connection can close before its socket is configured.
+            if stream
                 .set_read_timeout(Some(Duration::from_secs(1)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+                .is_err()
+                || stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .is_err()
+            {
+                continue;
+            }
             // WebKit may preconnect without sending a request on that socket.
             let complete = std::io::BufReader::new((&stream).take(8192))
                 .lines()
@@ -205,8 +209,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
                 continue;
             }
             let body = "<!doctype html><title>Native smoke</title><input id=smoke>";
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-            break;
+            if write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).is_ok() {
+                break;
+            }
         }
     });
     let (ack, opened) = oneshot::channel();
