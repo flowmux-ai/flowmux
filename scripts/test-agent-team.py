@@ -33,7 +33,8 @@ class TeamTests(unittest.TestCase):
         self.addCleanup(clean.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="fm-team-test-")
         self.addCleanup(self.temporary.cleanup)
-        self.job = Path(self.temporary.name)
+        # Match start()'s canonical socket paths, including macOS /tmp aliases.
+        self.job = Path(self.temporary.name).resolve()
         self.socket = self.job / 'window.sock'
         self.socket.touch()
         self.env = dict(os.environ, FLOWMUX_PANE_ID='child', FLOWMUX_SOCKET_PATH=str(self.socket),
