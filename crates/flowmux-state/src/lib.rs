@@ -315,13 +315,15 @@ fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
     }
     migrate_legacy_state(&mut state);
     state.last_saved = chrono::Utc::now();
-    let json = serde_json::to_vec_pretty(&state)?;
 
     // Atomic replace: write a PID-suffixed temporary file, fsync, then rename.
     let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
     {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&json)?;
+        let mut writer = std::io::BufWriter::new(&mut f);
+        serde_json::to_writer_pretty(&mut writer, &state)?;
+        writer.flush()?;
+        drop(writer);
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)?;
@@ -986,6 +988,22 @@ mod tests {
         let state = load_from(&path).unwrap();
         assert_eq!(state.window, None);
         assert_eq!(state.sidebar_position, None);
+    }
+
+    #[test]
+    fn saving_rejects_corrupt_content_after_the_schema_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        for suffix in [
+            r#", "workspaces": ["unterminated"#,
+            r#", "workspaces": ["bad\qescape"]}"#,
+            "} trailing",
+        ] {
+            let bytes = format!("{{\"schema_version\":{SCHEMA_VERSION}{suffix}");
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(save_to(&path, &State::default()).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+        }
     }
 
     #[test]
