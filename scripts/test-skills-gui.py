@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import uuid
 from pathlib import Path
 import subprocess
@@ -92,6 +93,9 @@ time.sleep(120)
     env = dict(h.env, FLOWMUX_SOCKET_PATH=str(socket), FLOWMUX_PANE_ID=pane,
                PATH=str(native_dir) + os.pathsep + h.env['PATH'],
                CODEX_HOME=str(h.root / 'lead-codex'), CLAUDE_CONFIG_DIR=str(h.root / 'lead-claude'))
+    transient = h.root / 'worker-tmp'
+    transient.mkdir()
+    env['TMPDIR'] = str(transient)
 
     def start(agent):
         result = subprocess.run([sys.executable, str(helper), 'start', '--agent', agent,
@@ -153,6 +157,8 @@ time.sleep(120)
     # Native fixtures have no installed provider hooks; seed their saved session bindings.
     for job in jobs:
         (sessions / (job['agent'] + '.json')).write_text(json.dumps({job['surface']: job['token']}))
+    shutil.rmtree(transient)
+    helper.rename(helper.with_suffix('.disabled'))
     process, socket = h.window('lifecycle-restored')
     for job in jobs:
         evidence = h.root / (job['agent'] + '-resumed.json')
@@ -173,6 +179,8 @@ time.sleep(120)
     assert [p['id'] for p in after['panes']] == [p['id'] for p in before['panes']]
     fixture.wait_for(lambda: 'No task was repeated' in h.screen(socket, interrupted['pane']), 'interrupted assignment not repeated')
     h.pass_check('Claude and Codex resume in the same panes with lead profiles; original tasks and final results stay unchanged')
+    h.pass_check('Worker restoration survives temporary cleanup and removal of the installed helper')
+    helper.with_suffix('.disabled').rename(helper)
     h.close_window(process)
 
 

@@ -38,6 +38,9 @@ class TeamTests(unittest.TestCase):
         self.socket.touch()
         self.env = dict(os.environ, FLOWMUX_PANE_ID='child', FLOWMUX_SOCKET_PATH=str(self.socket),
                         CODEX_HOME=str(self.job / 'codex-home'), CLAUDE_CONFIG_DIR=str(self.job / 'claude-home'))
+        state_env = patch.dict(os.environ, XDG_STATE_HOME=str(self.job / 'state'))
+        state_env.start()
+        self.addCleanup(state_env.stop)
 
     def fixture(self, code, agent='codex', timeout=5):
         for attempt in self.job.glob('attempt-*'):
@@ -237,6 +240,42 @@ class TeamTests(unittest.TestCase):
                     team.start(args)
                 self.assertEqual(rpc.call_count, 1)
                 self.assertEqual(rpc.call_args.args[2], 'tree')
+
+    def test_saved_worker_launcher_survives_temporary_directory_cleanup(self):
+        transient = self.job / 'temporary'
+        transient.mkdir()
+        state = self.job / 'state'
+        task = self.job / 'assignment.txt'
+        task.write_text('Read-only fixture')
+        args = type('Args', (), dict(socket=str(self.socket), pane='source', cwd=self.job,
+                    task_file=task, role='reviewer', agent='codex', cli='flowmux',
+                    allow_edits=False, timeout=5, complexity='standard', model=None,
+                    effort=None, no_fallback=False))()
+        launchers = []
+
+        def cli(_cli, _socket, *command):
+            if command[0] == 'tree':
+                return {'tree': {'workspaces': [{'id': 'ws', 'location': {'type': 'team'},
+                                                 'panes': [{'id': 'source'}]}]}}
+            launchers.append(Path(command[-1]))
+            return {'surface_created': {'pane': 'child', 'id': 'tab'}}
+
+        with patch.dict(os.environ, XDG_STATE_HOME=str(state)), \
+                patch.object(team.tempfile, 'tempdir', str(transient)), \
+                patch.object(team, 'flowmux', side_effect=cli), \
+                patch.object(team.shutil, 'which', return_value='/bin/true'), \
+                contextlib.redirect_stdout(io.StringIO()):
+            team.start(args)
+        shutil.rmtree(transient)
+        launcher = launchers[0]
+        self.assertTrue(launcher.exists(), 'Saved shell disappeared with temporary files')
+        self.assertTrue(launcher.is_relative_to(state))
+        self.assertEqual(launcher.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((launcher.parent / 'worker.py').read_bytes(), HELPER.read_bytes())
+        restored = subprocess.run([str(launcher), '-l'], stdin=subprocess.DEVNULL,
+                                  capture_output=True, timeout=5)
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertFalse((launcher.parent / 'started').exists())
 
     def test_session_origin_overrides_stale_environment_and_rejects_redirection(self):
         other = self.job / 'other.sock'

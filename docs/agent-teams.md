@@ -53,6 +53,12 @@ A report-collection timeout preserves the session for diagnosis; it does not
 kill the agent or approve dialogs. A restored launcher never reruns its task.
 With automatic agent restoration enabled, the launcher passes the saved resume
 command to a real shell so the conversation reopens in its original pane.
+New jobs keep their private launchers, worker code and reports under
+`$XDG_STATE_HOME/flowmux/team-jobs` (the platform state directory by default).
+These files are needed to restore worker terminals; temporary-file cleanup or
+uninstalling the skill must not remove them. Jobs created by older versions
+still use their original temporary paths.
+
 New jobs pin the lead's provider configuration roots for execution, transcript
 lookup and restoration; quota fallback also uses the CLI resolved on the lead's
 PATH. Only paths are stored, not authentication tokens.

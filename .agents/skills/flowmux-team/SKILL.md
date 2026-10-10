@@ -168,8 +168,8 @@ manual follow-up turns and ordinary workspaces do not create replacement workers
 ## Receive and review results
 
 ```bash
-python3 /path/to/flowmux-team/scripts/team.py status /tmp/flowmux-team-JOB
-python3 /path/to/flowmux-team/scripts/team.py wait /tmp/flowmux-team-JOB --timeout 60
+python3 /path/to/flowmux-team/scripts/team.py status /path/from/receipt/job
+python3 /path/to/flowmux-team/scripts/team.py wait /path/from/receipt/job --timeout 60
 ```
 
 The helper observes the provider's saved conversation. It binds only to the

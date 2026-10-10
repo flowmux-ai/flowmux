@@ -98,7 +98,13 @@ def start(args):
     executable = shutil.which(args.agent)
     if executable is None:
         raise ValueError(f"{args.agent} is not installed/on PATH")
-    job = Path(tempfile.mkdtemp(prefix="flowmux-team-"))
+    state_home = os.environ.get("XDG_STATE_HOME") or (
+        os.environ.get("XDG_DATA_HOME") or Path.home() / "Library/Application Support"
+        if sys.platform == "darwin" else Path.home() / ".local/state")
+    jobs = Path(state_home) / "flowmux/team-jobs"
+    jobs.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # The saved terminal shell points here, so tmp cleanup must not remove it.
+    job = Path(tempfile.mkdtemp(prefix="job-", dir=jobs))
     print(f"Job artifacts: {job}", file=sys.stderr, flush=True)
     token = str(uuid.uuid4())
     (job / "task.txt").write_text(task + "\n")
@@ -118,7 +124,9 @@ def start(args):
     try:
         write_json(job / "job.json", manifest)
         launcher = job / "launch.sh"
-        command = shlex.join([sys.executable, str(Path(__file__).resolve()), "_worker", str(job)])
+        helper = job / "worker.py"
+        shutil.copyfile(Path(__file__).resolve(), helper)
+        command = shlex.join([sys.executable, str(helper), "_worker", str(job)])
         exports = "".join(f"export {key}={shlex.quote(value)}\n" for key, value in manifest["provider_env"].items())
         resume_commands = exports
         for agent, path in manifest["executables"].items():
