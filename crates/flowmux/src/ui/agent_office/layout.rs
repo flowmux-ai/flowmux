@@ -28,6 +28,11 @@ pub(super) const ASPECT: f64 = 16.0 / 9.0;
 /// Logical height of the office name bar above each plan.
 pub(super) const TITLE: f64 = 28.0;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static PLAN_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Rect {
     pub x: f64,
@@ -565,6 +570,8 @@ fn best_shape(capacity: usize, design: usize, target_w: f64, target_h: f64) -> (
 impl Plan {
     /// Smallest plan for `count` seats, enlarged to `aspect`.
     pub fn fit(count: usize, design: usize, aspect: f64) -> Self {
+        #[cfg(test)]
+        PLAN_BUILDS.with(|builds| builds.set(builds.get() + 1));
         let aspect = if aspect.is_finite() && aspect > 0.0 {
             aspect
         } else {

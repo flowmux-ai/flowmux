@@ -132,6 +132,8 @@ fn mug(c: &mut Canvas, x: i32, y: i32, color: u32) {
     c.set(x + 4, y + 2, color);
     c.set(x + 1, y, 0x6b4630);
     c.set(x + 2, y, 0x6b4630);
+    c.fine_rect(x * 2 + 1, y * 2 + 2, 1, 4, light(color, 0.55));
+    c.fine_rect(x * 2 + 8, y * 2 + 3, 1, 2, dark(color, 0.25));
 }
 
 fn desk_clutter(c: &mut Canvas, p: &Pal, v: usize, x: i32, y: i32) {
@@ -202,9 +204,14 @@ fn desk_up(c: &mut Canvas, p: &Pal, v: usize) {
     c.hline(15, surface_y + 1, 10, bezel);
     // Keyboard and mouse.
     c.rect(12, surface_y + 4, 14, 3, 0xdde1ea);
-    for x in (13..25).step_by(2) {
-        c.set(x, surface_y + 5, 0xa9b0c0);
+    for y in [surface_y * 2 + 9, surface_y * 2 + 11] {
+        for x in (25..50).step_by(3) {
+            c.fine_rect(x, y, 2, 1, 0x929bb0);
+        }
     }
+    c.fine_rect(33, surface_y * 2 + 13, 11, 1, 0x929bb0);
+    c.fine_rect(21, sy * 2 - 2, 37, 1, light(bezel, 0.25));
+    c.fine_rect(56, sy * 2 + 19, 1, 1, p.accent);
     c.rect(28, surface_y + 5, 2, 2, 0xdde1ea);
     desk_clutter(c, p, v, 31, surface_y - 1);
     if v % 3 == 1 {
@@ -266,6 +273,9 @@ fn sofa(c: &mut Canvas, p: &Pal, v: usize) {
     for x in [8, 24, 40] {
         c.round(x, 4, 16, 10, 2, f);
         c.hline(x + 2, 4, 12, light(f, 0.2));
+        c.fine_rect(x * 2 + 3, 11, 1, 13, light(f, 0.25));
+        c.fine_rect(x * 2 + 4, 25, 24, 1, dark(f, 0.2));
+        c.fine_rect(x * 2 + 15, 17, 2, 1, dark(f, 0.2));
     }
     c.rect(7, 14, 50, 8, light(f, 0.1));
     for x in [24, 40] {

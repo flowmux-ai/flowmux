@@ -185,6 +185,15 @@ fn torso(c: &mut Canvas, l: &Look, dir: Dir, dy: i32) {
     c.vline(17, y + 2, 7, shade);
     c.hline(7, y + 9, 10, shade);
     detail(c, l, dir, 6, y);
+    c.fine_rect(15, (y + 8) * 2 + 1, 17, 1, light(l.shirt, 0.25));
+    if dir == Dir::Front {
+        // A stitched pocket and tiny buttons stay legible at larger office sizes.
+        c.fine_rect(15, (y + 4) * 2, 5, 1, light(l.shirt, 0.4));
+        c.fine_rect(15, (y + 4) * 2, 1, 4, dark(l.shirt, 0.2));
+        for row in [3, 5, 7] {
+            c.fine_rect(25, (y + row) * 2, 1, 1, light(l.shirt, 0.65));
+        }
+    }
 }
 
 /// Outfit features drawn over the torso; each reads in silhouette from the front and back.
@@ -530,10 +539,11 @@ fn ears(c: &mut Canvas, l: &Look, dir: Dir, x: i32, y: i32, w: i32) {
 fn eyes(c: &mut Canvas, points: &[(i32, i32)], blink: bool, pupil: u32) {
     for &(x, y) in points {
         if blink {
-            c.hline(x, y + 1, 2, pupil);
+            c.fine_rect(x * 2, (y + 1) * 2, 4, 1, pupil);
         } else {
             c.rect(x, y, 2, 2, pupil);
-            c.set(x + 1, y, WHITE);
+            c.fine_rect(x * 2, y * 2 + 3, 2, 1, light(pupil, 0.35));
+            c.fine_rect(x * 2 + 2, y * 2, 1, 1, WHITE);
         }
     }
 }
@@ -621,6 +631,9 @@ fn face(c: &mut Canvas, l: &Look, x: i32, y: i32, blink: bool) {
     if !matches!(l.species, 4 | 6) {
         c.hline(x + 2, y + 10, 2, blush);
         c.hline(x + 14, y + 10, 2, blush);
+        for cheek in [x + 2, x + 14] {
+            c.fine_rect(cheek * 2 + 1, (y + 10) * 2, 2, 1, light(blush, 0.3));
+        }
     }
 }
 
@@ -661,13 +674,7 @@ fn profile(c: &mut Canvas, l: &Look, x: i32, y: i32, blink: bool) {
     if l.species == 5 {
         c.oval(eye.0 - 2, eye.1 - 2, 6, 6, WHITE);
     }
-    if blink {
-        c.hline(eye.0, eye.1 + 1, 2, INK);
-    } else {
-        c.rect(eye.0, eye.1, 1, 2, INK);
-        c.set(eye.0 + 1, eye.1, INK);
-        c.set(eye.0 + 1, eye.1 + 1, WHITE);
-    }
+    eyes(c, &[eye], blink, INK);
     if !matches!(l.species, 4 | 6) {
         c.hline(x + 10, y + 10, 2, mix(fur, BLUSH, 0.6));
     }

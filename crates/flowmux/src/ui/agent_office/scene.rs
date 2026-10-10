@@ -470,7 +470,9 @@ impl Background {
     /// Bakes the room at `scale` device pixels per art pixel.
     pub fn new(plan: &Plan, scale: f64, daylight: Daylight) -> Result<Self, gtk::cairo::Error> {
         let (w, h) = (plan.width.ceil() as i32, plan.height.ceil() as i32);
-        let art = ImageSurface::create(Format::ARgb32, w, h)?;
+        let density = sprite::DENSITY;
+        let art = ImageSurface::create(Format::ARgb32, w * density, h * density)?;
+        art.set_device_scale(density as f64, density as f64);
         {
             let cr = Context::new(&art)?;
             props::shell(&cr, plan.design, w as f64, h as f64);
@@ -506,26 +508,7 @@ impl Background {
                 sprite::paint(&cr, &surface, item.x, item.y);
             }
         }
-        let device = ImageSurface::create(
-            Format::ARgb32,
-            (plan.width * scale).ceil() as i32,
-            (plan.height * scale).ceil() as i32,
-        )?;
-        {
-            let cr = Context::new(&device)?;
-            cr.scale(scale, scale);
-            // The baked room is used once, so enlarge it directly rather than through the cache.
-            if scale > 1.0 && (scale - scale.round()).abs() > 1e-6 {
-                let k = scale.ceil();
-                let big = sprite::enlarged(&art, k as u32);
-                cr.scale(1.0 / k, 1.0 / k);
-                let _ = cr.set_source_surface(&big, 0.0, 0.0);
-                cr.source().set_filter(Filter::Good);
-                let _ = cr.paint();
-            } else {
-                sprite::paint_scaled(&cr, &art, 0.0, 0.0, scale, 1.0);
-            }
-        }
+        let device = sprite::scaled(&art, scale)?;
         Ok(Self {
             surface: device,
             scale,
@@ -535,7 +518,6 @@ impl Background {
 
     fn paint(&self, cr: &Context) {
         let _ = cr.save();
-        cr.scale(1.0 / self.scale, 1.0 / self.scale);
         let _ = cr.set_source_surface(&self.surface, 0.0, 0.0);
         cr.source().set_filter(Filter::Nearest);
         let _ = cr.paint();
@@ -568,7 +550,7 @@ fn light_pools(cr: &Context, plan: &Plan, dark: bool) {
 }
 
 enum Draw<'a> {
-    Item(&'a Item),
+    Item(&'a Item, bool),
     Actor(&'a Actor),
     Pizza((f64, f64)),
 }
@@ -742,8 +724,9 @@ pub(super) fn draw_room(
             continue;
         }
         let rect = item.rect();
-        if animated(item, actors) || boxes.iter().any(|b| b.intersects(&rect)) {
-            dynamic.push((item.sort, 0, Draw::Item(item)));
+        let moving = animated(item, actors);
+        if moving || boxes.iter().any(|b| b.intersects(&rect)) {
+            dynamic.push((item.sort, 0, Draw::Item(item, moving)));
         }
     }
     if let Some(table) = extras.pizza {
@@ -755,10 +738,10 @@ pub(super) fn draw_room(
     dynamic.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     for (_, _, draw) in &dynamic {
         match draw {
-            Draw::Item(item) => {
+            Draw::Item(item, moving) => {
                 let surface = props::item_sprite(item, plan.design, background.daylight);
                 sprite::paint_scaled(cr, &surface, item.x, item.y, scale, 1.0);
-                if animated(item, actors) {
+                if *moving {
                     overlay(cr, item, plan.design, frame, now, scale);
                 }
             }

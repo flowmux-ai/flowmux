@@ -338,19 +338,6 @@ impl Sidebar {
         footer.set_margin_bottom(4);
         footer.set_margin_start(4);
         footer.set_margin_end(4);
-        let office_btn = gtk::Button::from_icon_name("user-home-symbolic");
-        office_btn.add_css_class("flat");
-        office_btn.add_css_class("flowmux-sidebar-options");
-        office_btn.set_widget_name("flowmux-agent-office-button");
-        office_btn.set_tooltip_text(Some("AgentOffice"));
-        office_btn.update_property(&[gtk::accessible::Property::Label("AgentOffice")]);
-        let office_bridge = bridge.clone();
-        office_btn.connect_clicked(move |_| {
-            let bridge = office_bridge.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                let _ = bridge.tx.send(GtkCommand::ToggleAgentOffice).await;
-            });
-        });
         let options_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
         options_btn.add_css_class("flat");
         options_btn.set_tooltip_text(Some("Options"));
@@ -387,7 +374,6 @@ impl Sidebar {
         });
         footer_scroll.add_controller(wheel);
         footer.append(&footer_scroll);
-        footer_actions.append(&office_btn);
 
         let agent_bar_button = gtk::ToggleButton::new();
         agent_bar_button.set_icon_name("view-list-symbolic");
@@ -505,8 +491,22 @@ impl Sidebar {
         // finds a newer tag; the banner owns its own check/install wiring.
         let update_banner = UpdateBanner::new(tokio_handle);
 
+        let office_btn = gtk::Button::from_icon_name("user-home-symbolic");
+        office_btn.add_css_class("flat");
+        office_btn.add_css_class("flowmux-sidebar-options");
+        office_btn.set_widget_name("flowmux-agent-office-button");
+        office_btn.set_tooltip_text(Some("AgentOffice"));
+        office_btn.update_property(&[gtk::accessible::Property::Label("AgentOffice")]);
+        let office_bridge = bridge.clone();
+        office_btn.connect_clicked(move |_| {
+            let bridge = office_bridge.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::ToggleAgentOffice).await;
+            });
+        });
+
         let activity_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let (activity_list_root, activity_list, agent_sort_button) = activity_list();
+        let (activity_list_root, activity_list, agent_sort_button) = activity_list(&office_btn);
         let agent_sort_mode = Rc::new(Cell::new(AgentSortMode::default()));
         show_agent_sort_mode(&agent_sort_button, agent_sort_mode.get());
         let agent_sort_mode_for_click = agent_sort_mode.clone();
@@ -1078,7 +1078,7 @@ fn show_agent_sort_mode(button: &gtk::Button, mode: AgentSortMode) {
     button.update_property(&[gtk::accessible::Property::Label(label)]);
 }
 
-fn activity_list() -> (gtk::Widget, gtk::Box, gtk::Button) {
+fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Button) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     root.set_margin_top(8);
     root.set_margin_bottom(8);
@@ -1096,6 +1096,7 @@ fn activity_list() -> (gtk::Widget, gtk::Box, gtk::Button) {
     sort_button.add_css_class("flowmux-sidebar-options");
     sort_button.set_focus_on_click(false);
     sort_button.set_widget_name("flowmux-agent-sort-button");
+    header.append(office_button);
     header.append(&sort_button);
     root.append(&header);
 
@@ -3458,8 +3459,8 @@ mod tests {
             .downcast::<gtk::Button>()
             .unwrap();
         assert_eq!(
-            office.parent().unwrap().first_child().as_ref(),
-            Some(office.upcast_ref())
+            office.next_sibling().as_ref(),
+            Some(sidebar.agent_sort_button.upcast_ref())
         );
         assert_eq!(office.tooltip_text().as_deref(), Some("AgentOffice"));
         let scroll = descendant_widgets(&sidebar.root)
@@ -3492,7 +3493,13 @@ mod tests {
             .position(|name| name == "flowmux-agent-bar-button")
             .expect("Agents bar button must exist");
         assert_eq!(agents + 1, usage);
-        assert_eq!(agents, 1, "AgentOffice is immediately before Agents bar");
+        assert_eq!(
+            agents, 0,
+            "Agents bar is the first scrollable footer action"
+        );
+        assert!(!names
+            .iter()
+            .any(|name| name == "flowmux-agent-office-button"));
         assert_eq!(
             sidebar.agent_bar_button.tooltip_text().as_deref(),
             Some("Agents bar")

@@ -159,12 +159,7 @@ def main():
         studio_root.mkdir()
         quiet_root.mkdir()
         workspace = h.rpc(socket, "workspace_create", name="Product studio", root=str(studio_root))["workspace_created"]["id"]
-        click(gui.wait_for(lambda: find("AgentOffice"), "footer button"))
-        gui.wait_for(lambda: find("Back to workspace"), "empty office open")
-        assert not room("Product studio")
-        assert find("0 offices · 0 teammates · 0 working · 0 need you · 0 resting")
-        screenshot("empty-office")
-        click(find("Back to workspace"))
+        assert not shown("AgentOffice"), "Agents header is hidden without agents"
         residents = []
         for index, name in enumerate(("codex", "claude")):
             if index:
@@ -195,15 +190,15 @@ def main():
 
         for resident in residents:
             report(resident, "working")
+        design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
+        design_file.parent.mkdir(parents=True, exist_ok=True)
+        design_file.write_text("0")
         screenshot("footer-before")
-        click(gui.wait_for(lambda: find("AgentOffice"), "footer button"))
+        click(gui.wait_for(lambda: find("AgentOffice"), "Agents header button"))
         gui.wait_for(lambda: find("Back to workspace"), "office open")
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
         assert room("Product studio") and not room("Quiet corner")
-        # Exercise desk reflow and zoning: a tall room can fit a desk row above the lounge.
-        for _ in range((-uuid.UUID(workspace).int) % 48):
-            click(find("Next office design"))
-            time.sleep(.3)
+        assert find("Next office design") is None, "office refresh button must be removed"
         actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                   and any(n.get_name().startswith(name + " · ") for name in ("codex", "claude", "gemini"))]
         assert len(actors) == 2
@@ -231,14 +226,9 @@ def main():
         click(room("Product studio"))
         assert not shown("All offices")
         design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
-        for design in range(1, 49):
-            click(find("Next office design"))
-            gui.wait_for(lambda: design_file.exists() and json.loads(design_file.read_text()) == design % 48,
-                         "design change applied before checking character position")
-            assert_stationary(actors[0], "changing design must keep a working character at its desk")
         report(residents[0], "working", "Refresh same activity")
         assert_stationary(actors[0], "refreshing the model must preserve a working character's position")
-        h.pass_check("single office hides All offices; design changes and model refresh keep characters seated")
+        h.pass_check("single office hides All offices; model refresh keeps characters seated")
         # Three-seat sofas used to have overlapping speech-sized character buttons.
         for resident in residents:
             report(resident, "idle")
@@ -308,6 +298,10 @@ def main():
         screenshot("reading-at-desk")
         report(residents[0], "working", "Edit scene.rs")
         time.sleep(8)
+        assert any(node.get_role() == Atspi.Role.LABEL
+                   and node.get_name().startswith("Working")
+                   and node.get_state_set().contains(Atspi.StateType.SHOWING)
+                   for node in office_nodes()), "working speech must remain visible after its former timeout"
         screenshot("coffee-break")
         h.pass_check("live workspaces, three agent providers, working / blocked / completed scenes")
 
@@ -328,7 +322,7 @@ def main():
         assert current == workspace
         tabs = h.workspace(socket, workspace)["panes"][0]["tabs"]
         assert next(tab for tab in tabs if tab["id"] == residents[1][2])["active"]
-        click(gui.wait_for(lambda: find("AgentOffice"), "footer button after return"))
+        click(gui.wait_for(lambda: find("AgentOffice"), "Agents header button after return"))
         gui.wait_for(lambda: find("Back to workspace"), "office reopened")
         design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
         # The first selection was West wing; recreation must preserve it.
@@ -344,25 +338,28 @@ def main():
             return find(label).get_component_iface().get_extents(Atspi.CoordType.WINDOW)
 
         settings, office, agents = (bounds(label) for label in ("Options", "AgentOffice", "Agents bar"))
-        assert settings.x < office.x < agents.x
-        assert office.x + office.width == agents.x
+        sort = bounds("Sort: workspace order")
+        assert office.x + office.width <= sort.x
+        assert office.y == sort.y and office.height == sort.height
+        assert find("AgentOffice").get_parent() == find("Sort: workspace order").get_parent()
+        assert settings.x < agents.x and office.y < settings.y
         screenshot("footer-left")
-        xtest.fake_input(connection, X.MotionNotify, x=office.x + office.width + 10, y=settings.y + settings.height // 2)
+        xtest.fake_input(connection, X.MotionNotify, x=agents.x + agents.width + 10, y=settings.y + settings.height // 2)
         for _ in range(8):
             xtest.fake_input(connection, X.ButtonPress, 5)
             xtest.fake_input(connection, X.ButtonRelease, 5)
         connection.sync()
         time.sleep(.5)
         assert bounds("Options").x == settings.x, "settings stays fixed during scrolling"
-        assert bounds("AgentOffice").x < office.x, "footer actions scroll horizontally"
+        assert bounds("AgentOffice").x == office.x, "header button stays fixed during footer scrolling"
         screenshot("footer-right")
         for _ in range(8):
             xtest.fake_input(connection, X.ButtonPress, 4)
             xtest.fake_input(connection, X.ButtonRelease, 4)
         connection.sync()
         time.sleep(.5)
-        assert bounds("AgentOffice").x == office.x, "scroll back exposes AgentOffice"
-        h.pass_check("Settings fixed at far left; AgentOffice before Agents bar; native wheel scrolls other actions")
+        assert bounds("AgentOffice").x == office.x, "header button stays fixed after scrolling back"
+        h.pass_check("Settings fixed at far left; AgentOffice immediately before Agents sort button")
         click(find("AgentOffice"))
         gui.wait_for(lambda: find("Back to workspace"), "office reopened for adaptive map")
         quiet_pane = h.workspace(socket, quiet_id)["panes"][0]["id"]
@@ -455,17 +452,13 @@ def main():
             report(resident, "working")
         h.pass_check("multiple approval bubbles remain readable without overlapping")
         design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
-        for design in range(1, 49):
-            click(next(n for n in office_nodes() if n.get_name() == "Next office design"
-                       and n.get_state_set().contains(Atspi.StateType.SHOWING)))
-            gui.wait_for(lambda: design_file.exists() and json.loads(design_file.read_text()) == design % 48,
-                         "workspace design persisted")
-            screenshot(f"layout-{design % 48:02}")
+        assert not any(n.get_name() == "Next office design" for n in office_nodes())
+        screenshot("dense-office")
         click(find("Back to workspace"))
         click(gui.wait_for(lambda: find("AgentOffice"), "reopen saved office"))
         gui.wait_for(lambda: room("Product studio"), "saved office restored")
         assert json.loads(design_file.read_text()) == 0
-        h.pass_check("48 office designs render with 32 agents; workspace design survives reopening")
+        h.pass_check("32 agents render without refresh buttons; saved workspace design survives reopening")
         assert not shown("All offices"), "overview must hide the redundant All offices button"
         click(room("Product studio"))
         gui.wait_for(lambda: shown("All offices"), "detail exposes All offices")
