@@ -13,7 +13,7 @@
 
 <a href="https://flowmux.org/assets/flowmux-intro.mp4"><img src="resources/screenshot/flowmux-intro-preview.jpg" alt="Watch the flowmux introduction video" width="100%" /></a>
 
-[▶ Watch the introduction video](https://flowmux.org/assets/flowmux-intro.mp4)
+[▶ Watch the introduction video](https://www.youtube.com/watch?v=9o_WNinRjGY)
 
 </div>
 
