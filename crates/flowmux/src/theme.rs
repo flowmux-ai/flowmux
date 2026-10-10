@@ -756,8 +756,8 @@ paned > separator {{
     color: #aebbc7;
 }}
 .flowmux-office-title {{
-    background: #263345;
-    color: #eee3cf;
+    background: #2a2233;
+    color: #fff4dc;
     padding: 0 4px;
     min-height: 0;
     min-width: 0;
@@ -767,12 +767,30 @@ paned > separator {{
     box-shadow: none;
 }}
 .flowmux-office-bubble {{
-    background: #f0e6cb;
-    color: #293648;
-    border: 2px solid #39465a;
-    border-radius: 6px 6px 6px 0;
-    font-size: 12px;
-    padding: 0;
+    background: #fffaf0;
+    color: #241d33;
+    border: 2px solid #2a2233;
+    border-bottom-width: 3px;
+    border-radius: 8px 8px 8px 2px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 3px 8px;
+    box-shadow: 2px 2px 0 alpha(#1d1530, 0.28);
+}}
+.flowmux-office-bubble.waiting {{
+    background: #fff1c8;
+    border-color: #b8721b;
+    color: #3d2608;
+}}
+.flowmux-office-bubble.done {{
+    background: #e7f8ec;
+    border-color: #2f8f5b;
+    color: #12361f;
+}}
+.flowmux-office-bubble.ended {{
+    background: #ecebf2;
+    border-color: #6b6577;
+    color: #34303c;
 }}
 .flowmux-office-resident {{
     background: transparent;
@@ -784,11 +802,12 @@ paned > separator {{
     box-shadow: none;
 }}
 .flowmux-office-nameplate {{
-    background: alpha(#17212d, 0.88);
-    color: #f1e3cb;
-    border-radius: 3px;
-    padding: 1px 4px;
-    font-size: 11px;
+    background: alpha(#1d1530, 0.86);
+    color: #fff4dc;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+    font-weight: 600;
 }}
 .flowmux-office-resident:hover,
 .flowmux-office-resident:focus-visible {{

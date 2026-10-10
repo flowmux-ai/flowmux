@@ -68,13 +68,21 @@ shape, from a single column to multiple columns, without stretching characters
 or leaving gaps between offices.
 Office signs follow workspace names live. Select a sign to enlarge that office,
 or **All offices** to fit the whole map again. The design button cycles through
-24 furnished designs: six themes with four spatial layouts each.
-Speech bubbles show work, input waits, completion, rest, and session departure,
-including the agent's reported task text. Agents follow clear paths between
-desks, review positions, sofas, coffee spots, and the exit. There are 120 animal and
-outfit combinations, with agent names and icons identifying Claude, Codex,
-Gemini, and other agents. Select a character to return to its terminal; press
-**Esc** to leave the office. Animation follows the desktop's reduced-motion setting.
+48 furnished designs: twelve themes, from a daylight atelier and a fern
+conservatory to a neon night shift and an orbital station, with four spatial
+layouts each. Pixel art stays crisp at whole-pixel scales, and spare floor fills
+with lounges, pantries, focal pieces, and plants instead of empty space.
+Status icons above each head show typing, reading, input waits, completion, and
+rest at a glance; speech bubbles add the agent's reported task text when status
+changes, and an input wait keeps its bubble until it is answered. Agents walk in
+through the office door, ease along clear paths between desks, lounges, coffee
+counters, and plants, and leave through the door when a session ends. Resting
+teammates wander between points of interest and occasionally gather for a
+stand-up or a pizza delivery. Windows and clocks follow the local time of day.
+There are 120 animal and outfit combinations, with agent names and icons
+identifying Claude, Codex, Gemini, and other agents. Select a character to
+return to its terminal; press **Esc** to leave the office. Animation follows the
+desktop's reduced-motion setting.
 
 ### Browser tab
 
