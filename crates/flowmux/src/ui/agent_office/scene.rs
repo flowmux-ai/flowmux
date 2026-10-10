@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Original pixel characters and depth-sorted furniture for twenty-four floor plans.
 
-use super::layout::Plan;
+use super::{
+    art,
+    layout::{Plan, OBJECT_SCALE},
+};
 use flowmux_core::AgentStatus;
 use gtk::cairo::Context;
 use std::{collections::VecDeque, rc::Rc};
@@ -73,12 +76,17 @@ impl Actor {
         }
     }
     pub fn replan(&mut self, slot: usize, plan: Rc<Plan>) {
+        let settled = self.path.is_empty() && self.position == self.destination();
         self.slot = slot;
-        // Preserve the actor's position within the room instead of teleporting to its seat.
+        // Moving actors retain their relative position; settled actors stay with their furniture.
         self.position.0 *= plan.width / self.plan.width;
         self.position.1 *= plan.height / self.plan.height;
         self.plan = plan;
-        self.path = self.plan.route(self.position, self.destination());
+        if settled {
+            self.position = self.destination();
+        } else {
+            self.path = self.plan.route(self.position, self.destination());
+        }
     }
     fn destination(&self) -> (f64, f64) {
         if self.ended.is_none()
@@ -230,12 +238,12 @@ impl Actor {
 }
 
 pub(super) const THEMES: [&str; 6] = [
-    "Maple studio",
-    "Botanical lab",
-    "Harbor loft",
-    "Midnight arcade",
-    "Rose library",
-    "Desert workshop",
+    "Daylight atelier",
+    "Fern conservatory",
+    "Signal observatory",
+    "Folio library",
+    "Copper workshop",
+    "Tea commons",
 ];
 pub(super) fn design_name(design: usize) -> String {
     format!(
@@ -245,109 +253,82 @@ pub(super) fn design_name(design: usize) -> String {
     )
 }
 
-pub(super) fn draw_room(cr: &Context, plan: &Plan, design: usize, actors: &[&Actor], frame: u32) {
+pub(super) struct Background {
+    surface: gtk::cairo::ImageSurface,
+    pub scale: f64,
+}
+
+impl Background {
+    pub fn new(plan: &Plan, design: usize, scale: f64) -> Result<Self, gtk::cairo::Error> {
+        let surface = gtk::cairo::ImageSurface::create(
+            gtk::cairo::Format::ARgb32,
+            (plan.width * scale).ceil() as i32,
+            (plan.height * scale).ceil() as i32,
+        )?;
+        let cr = Context::new(&surface)?;
+        cr.set_antialias(gtk::cairo::Antialias::None);
+        cr.scale(scale, scale);
+        art::shell(&cr, plan, design);
+        cr.status()?;
+        Ok(Self { surface, scale })
+    }
+
+    fn paint(&self, cr: &Context) {
+        let _ = cr.save();
+        cr.scale(1.0 / self.scale, 1.0 / self.scale);
+        let _ = cr.set_source_surface(&self.surface, 0., 0.);
+        cr.source().set_filter(gtk::cairo::Filter::Nearest);
+        let _ = cr.paint();
+        let _ = cr.restore();
+    }
+}
+
+pub(super) fn draw_room(
+    cr: &Context,
+    plan: &Plan,
+    design: usize,
+    actors: &[&Actor],
+    frame: u32,
+    background: Option<&Background>,
+) {
     let theme = design / 4;
-    let (wall, floor, seam, rug, accent) = [
-        (0x39465a, 0x8d6546, 0x78563e, 0x466775, 0xd1ab79),
-        (0x36554b, 0xb0a889, 0x929a7b, 0x627f59, 0xbad19a),
-        (0x42677d, 0xd4c0a0, 0xbda88c, 0x578d9d, 0xe8d7aa),
-        (0x3a3258, 0x55516f, 0x47425f, 0x72456e, 0xb694dc),
-        (0x634655, 0xa47c6c, 0x8e695e, 0x896e84, 0xe0b6ac),
-        (0x755849, 0xc6a16c, 0xae895c, 0x6c817a, 0xe6ca90),
-    ][theme];
+    let accent = art::PALETTES[theme].accent;
     let (w, h) = (plan.width, plan.height);
     cr.set_antialias(gtk::cairo::Antialias::None);
-    rect(cr, 0.0, 0.0, w, h, 0x17212b);
-    rect(cr, 2.0, 2.0, w - 4.0, h - 4.0, floor);
-    for row in 0..((h - 56.0) / 16.0) as usize {
-        let y = 56.0 + row as f64 * 16.0;
-        rect(cr, 8.0, y, w - 16.0, 1.0, seam);
-        for col in 0..(w / 48.0) as usize {
-            let x = 8.0 + col as f64 * 48.0 + (row % 2) as f64 * 24.0;
-            if x < w - 8.0 {
-                rect(cr, x, y, 1.0, 16.0, seam);
-            }
-        }
-    }
-    rect(cr, 2.0, 2.0, w - 4.0, 54.0, wall);
-    rect(cr, 8.0, 53.0, w - 16.0, 3.0, 0x25313e);
-    for zone in &plan.rest {
-        rect(cr, zone.x, zone.y, zone.w, zone.h, rug);
-        for x in [zone.x + 3.0, zone.x + zone.w - 4.0] {
-            rect(cr, x, zone.y + 3.0, 1.0, zone.h - 6.0, accent);
-        }
-        text(cr, zone.x + 6.0, zone.y + 10.0, "LOUNGE", 7.0, accent);
-    }
-    for zone in &plan.work {
-        text(
-            cr,
-            zone.x + 6.0,
-            zone.y + 10.0,
-            "WORK / REVIEW",
-            7.0,
-            accent,
-        );
-    }
-    bookshelf(cr, 24.0, 17.0);
-    rect(cr, w / 2.0 - 27.0, 14.0, 54.0, 31.0, 0x202a39);
-    rect(
-        cr,
-        w / 2.0 - 24.0,
-        17.0,
-        48.0,
-        25.0,
-        if theme == 3 { 0x7584b7 } else { 0x8ec3c5 },
-    );
-    rect(cr, w / 2.0 - 1.0, 17.0, 2.0, 25.0, accent);
-    rect(cr, w / 2.0 - 24.0, 29.0, 48.0, 2.0, accent);
-    match theme {
-        0 | 4 => {
-            bookshelf(cr, w - 76.0, 17.0);
-            if theme == 4 {
-                bookshelf(cr, 90.0, 17.0);
-            }
-        }
-        1 => {
-            for x in [w - 36.0, w - 66.0, 106.0] {
-                plant(cr, x, 47.0);
-            }
-        }
-        2 => {
-            rect(cr, w - 72.0, 18.0, 48.0, 26.0, 0xd5bb87);
-            rect(cr, w - 69.0, 21.0, 42.0, 20.0, 0x74a6b0);
-            text(cr, w - 64.0, 35.0, "~ ~ ~", 8.0, 0xdcedd8);
-        }
-        3 => {
-            for x in [w - 72.0, w - 45.0] {
-                rect(cr, x, 13.0, 22.0, 32.0, 0x27283e);
-                rect(cr, x + 3.0, 17.0, 16.0, 14.0, 0xa470b5);
-                text(cr, x + 5.0, 27.0, ">_", 8.0, 0xefc684);
-                rect(cr, x + 4.0, 35.0, 14.0, 3.0, 0x829ccd);
-            }
-        }
-        _ => {
-            rect(cr, w - 78.0, 15.0, 56.0, 30.0, 0x3d494a);
-            for x in [w - 70.0, w - 54.0, w - 38.0] {
-                rect(cr, x, 21.0, 3.0, 17.0, accent);
-                rect(cr, x - 3.0, 20.0, 9.0, 4.0, 0xa9b7b3);
-            }
-        }
+    if let Some(background) = background {
+        background.paint(cr);
+    } else {
+        art::shell(cr, plan, design);
     }
     enum Object<'a> {
         Desk(usize),
         Sofa(usize),
+        Chair(usize),
+        Fixture(usize),
         Table(usize),
         Plant(f64, f64),
         Actor(&'a Actor),
     }
     let mut objects = Vec::new();
     for slot in 0..plan.capacity {
-        objects.push((plan.desk(slot).1 - 16.0, Object::Desk(slot)));
+        let y = plan.desk(slot).1;
+        objects.push((
+            y + if plan.desk_faces_south(slot) {
+                64.0
+            } else {
+                -16.0
+            } * OBJECT_SCALE,
+            Object::Desk(slot),
+        ));
+        objects.push((y - 1.0, Object::Chair(slot)));
     }
     for (slot, &(_, y)) in plan.benches.iter().enumerate() {
-        objects.push((y - 8.0, Object::Sofa(slot)));
-        let table = plan.coffee_table(slot);
+        objects.push((y - 8.0 * OBJECT_SCALE, Object::Sofa(slot)));
+        let table = plan.coffee_table(slot).enlarged(plan.benches[slot]);
         objects.push((table.y + table.h, Object::Table(slot)));
+    }
+    for (slot, area) in plan.fixtures.iter().enumerate() {
+        objects.push((area.y + area.h, Object::Fixture(slot)));
     }
     for (x, y) in plan.plants() {
         objects.push((y, Object::Plant(x, y)));
@@ -358,22 +339,50 @@ pub(super) fn draw_room(cr: &Context, plan: &Plan, design: usize, actors: &[&Act
     objects.sort_by(|a, b| a.0.total_cmp(&b.0));
     text(cr, w / 2.0 - 16.0, h - 13.0, "EXIT", 7.0, accent);
     for (_, object) in objects {
+        let origin = match object {
+            Object::Desk(slot) | Object::Chair(slot) => plan.desk(slot),
+            Object::Sofa(slot) | Object::Table(slot) => plan.benches[slot],
+            Object::Fixture(slot) => {
+                let r = plan.fixtures[slot];
+                (r.x + r.w / 2., r.y + r.h)
+            }
+            Object::Plant(x, y) => (x, y),
+            Object::Actor(actor) => actor.position,
+        };
+        let _ = cr.save();
+        cr.translate(origin.0, origin.1);
+        cr.scale(OBJECT_SCALE, OBJECT_SCALE);
+        cr.translate(-origin.0, -origin.1);
         match object {
             Object::Desk(slot) => {
                 let (x, y) = plan.desk(slot);
                 let active = actors.iter().any(|a| {
                     a.slot == slot && a.status == AgentStatus::Working && a.ended.is_none()
                 });
-                workstation(cr, x, y, active, frame);
+                workstation(
+                    cr,
+                    (x, y),
+                    theme,
+                    slot,
+                    plan.desk_faces_south(slot),
+                    active,
+                    frame,
+                );
                 rect(cr, x + 28.0, y - 4.0, 12.0, 12.0, accent);
             }
             Object::Sofa(slot) => {
                 let (x, y) = plan.benches[slot];
-                let _ = cr.save();
-                cr.translate(x, y);
-                cr.scale(2.0, 1.0);
-                sofa(cr, 0.0, 0.0);
-                let _ = cr.restore();
+                sofa(cr, x, y, theme, (design + slot) % 4);
+            }
+            Object::Chair(slot) => {
+                let (x, y) = plan.desk(slot);
+                rect(cr, x - 1., y - 2., 2., 10., 0x34414b);
+                rect(cr, x - 10., y + 7., 20., 3., 0x34414b);
+                rect(cr, x - 12., y - 9., 24., 12., 0x293844);
+                rect(cr, x - 10., y - 9., 20., 9., art::PALETTES[theme].seat);
+            }
+            Object::Fixture(slot) => {
+                art::fixture(cr, plan.fixtures[slot], theme, design % 4, frame)
             }
             Object::Table(slot) => {
                 let table = plan.coffee_table(slot);
@@ -391,10 +400,11 @@ pub(super) fn draw_room(cr: &Context, plan: &Plan, design: usize, actors: &[&Act
             Object::Plant(x, y) => plant(cr, x, y),
             Object::Actor(actor) => draw_actor(cr, actor, frame),
         }
+        let _ = cr.restore();
     }
 }
 
-fn rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, color: u32) {
+pub(super) fn rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, color: u32) {
     cr.set_source_rgb(
         ((color >> 16) & 255) as f64 / 255.0,
         ((color >> 8) & 255) as f64 / 255.0,
@@ -421,23 +431,6 @@ fn text(cr: &Context, x: f64, y: f64, value: &str, size: f64, color: u32) {
     cr.set_antialias(gtk::cairo::Antialias::None);
 }
 
-fn bookshelf(cr: &Context, x: f64, y: f64) {
-    rect(cr, x, y, 50.0, 29.0, 0x222936);
-    for row in 0..2 {
-        for i in 0..9 {
-            let height = 7.0 + (i % 3) as f64;
-            rect(
-                cr,
-                x + 3.0 + i as f64 * 5.0,
-                y + 12.0 + row as f64 * 13.0 - height,
-                3.0,
-                height,
-                [0xc78073, 0xddc08c, 0x819d86, 0x7a9cab][i % 4],
-            );
-        }
-        rect(cr, x, y + 12.0 + row as f64 * 13.0, 50.0, 3.0, 0xb18a63);
-    }
-}
 fn plant(cr: &Context, x: f64, y: f64) {
     rect(cr, x - 7.0, y - 8.0, 14.0, 10.0, 0x252d35);
     rect(cr, x - 6.0, y - 10.0, 12.0, 9.0, 0xb18b62);
@@ -452,55 +445,193 @@ fn plant(cr: &Context, x: f64, y: f64) {
         rect(cr, x + dx, y + dy, w, h, shade);
     }
 }
-fn workstation(cr: &Context, x: f64, y: f64, working: bool, frame: u32) {
-    rect(cr, x - 26.0, y - 34.0, 55.0, 28.0, 0x624f40);
-    for dx in [-24.0, 21.0] {
-        rect(cr, x + dx, y - 26.0, 4.0, 23.0, 0x43414a);
+fn workstation(
+    cr: &Context,
+    position: (f64, f64),
+    theme: usize,
+    slot: usize,
+    south: bool,
+    working: bool,
+    frame: u32,
+) {
+    let (x, y) = position;
+    let p = &art::PALETTES[theme];
+    let top = y + if south { 4. } else { -48. };
+    // A front and a rear view share the same footprint, with upright monitors in both.
+    let _ = cr.save();
+    cr.set_source_rgba(0.20, 0.18, 0.14, 0.16);
+    cr.rectangle(x - 31., top + 14., 69., 32.);
+    let _ = cr.fill();
+    let _ = cr.restore();
+    rect(cr, x - 31., top + 7., 62., 30., p.wall);
+    for dx in [-29., 26.] {
+        rect(cr, x + dx, top + 20., 4., 27., 0x34414b);
     }
-    rect(cr, x - 27.0, y - 37.0, 54.0, 24.0, 0xa77c50);
-    rect(cr, x - 27.0, y - 37.0, 54.0, 2.0, 0xe0b87d);
-    rect(cr, x - 25.0, y - 34.0, 50.0, 18.0, 0xc09765);
-    rect(cr, x - 13.0, y - 55.0, 26.0, 21.0, 0x242f3c);
-    rect(cr, x - 11.0, y - 53.0, 22.0, 17.0, 0xa6b0a8);
+    rect(cr, x - 34., top + 2., 68., 26., p.wood);
+    rect(cr, x - 32., top, 64., 30., p.wood);
+    rect(cr, x - 32., top, 64., 2., p.accent);
+    rect(cr, x - 32., top + 28., 64., 3., p.seam);
+    rect(cr, x - 32., top + 31., 64., 2., p.wall);
+    for (dx, dy, width) in [(-29., 24., 14.), (17., 4., 11.), (-30., 4., 9.)] {
+        rect(cr, x + dx, top + dy, width, 1., p.seam);
+    }
+    if theme == 4 {
+        rect(cr, x + 20., top + 32., 12., 12., p.wood);
+        rect(cr, x + 23., top + 36., 6., 2., p.accent);
+    }
+    let screen = top - if south { 8. } else { 20. };
+    rect(cr, x - 15., screen, 30., 24., 0x25333e);
     rect(
         cr,
-        x - 9.0,
-        y - 51.0,
-        18.0,
-        12.0,
-        if working { 0x283f47 } else { 0x516875 },
+        x - 12.,
+        screen + 3.,
+        24.,
+        17.,
+        if south { p.wall } else { 0x41616d },
     );
-    if working {
-        for i in 0..3 {
+    if south {
+        rect(cr, x - 8., screen + 7., 16., 2., p.seam);
+        rect(cr, x - 2., screen + 13., 4., 4., p.accent);
+    } else if working {
+        for i in 0..4 {
             rect(
                 cr,
-                x - 7.0,
-                y - 49.0 + i as f64 * 3.0,
-                (6 + (frame as usize + i) % 7) as f64,
-                1.0,
-                0x8fca91,
+                x - 9.,
+                screen + 5. + i as f64 * 3.,
+                (8 + (frame as usize + i) % 9) as f64,
+                1.,
+                p.accent,
             );
         }
+    } else {
+        rect(cr, x - 4., screen + 8., 8., 7., p.seat);
     }
-    rect(cr, x - 3.0, y - 34.0, 6.0, 3.0, 0x6c7880);
-    rect(cr, x - 9.0, y - 31.0, 18.0, 3.0, 0xc7c9bc);
-    rect(cr, x - 10.0, y - 25.0, 20.0, 5.0, 0x52606b);
-    for i in 0..6 {
-        rect(cr, x - 9.0 + i as f64 * 3.0, y - 24.0, 2.0, 2.0, 0xc5c9bf);
+    rect(cr, x - 2., screen + 24., 4., 4., 0x677984);
+    rect(cr, x - 8., screen + 27., 16., 2., 0x34414b);
+    if !south {
+        rect(cr, x - 12., top + 17., 24., 7., 0x43505a);
+        for i in 0..7 {
+            rect(cr, x - 10. + i as f64 * 3., top + 19., 2., 2., 0xc6d1cb);
+        }
     }
-    rect(cr, x + 17.0, y - 30.0, 5.0, 6.0, 0xf0dcb4);
-    rect(cr, x - 10.0, y - 3.0, 20.0, 8.0, 0x263b41);
-    rect(cr, x - 9.0, y - 5.0, 18.0, 7.0, 0x79a08a);
-    rect(cr, x - 1.0, y + 5.0, 2.0, 5.0, 0x343942);
-    rect(cr, x - 8.0, y + 9.0, 16.0, 2.0, 0x343942);
+    match (slot + theme) % 3 {
+        0 => {
+            rect(cr, x + 23., top + 9., 6., 8., 0xeee0bd);
+            rect(cr, x + 29., top + 10., 3., 5., p.accent);
+            rect(cr, x + 24., top + 9., 4., 2., 0x735944);
+        }
+        1 => {
+            rect(cr, x + 21., top + 12., 9., 7., p.seat);
+            rect(cr, x + 23., top + 3., 5., 10., 0x557e63);
+            rect(cr, x + 19., top + 6., 12., 4., 0xa4c68c);
+        }
+        _ => {
+            rect(cr, x + 19., top + 10., 11., 9., p.rug);
+            rect(cr, x + 20., top + 8., 11., 8., 0xefdbb9);
+            rect(cr, x + 22., top + 10., 7., 1., p.seat);
+        }
+    }
+    match theme {
+        0 => {
+            rect(cr, x - 31., top + 8., 13., 14., p.rug);
+            rect(cr, x - 29., top + 6., 10., 13., 0xf0dcbb);
+            rect(cr, x - 27., top + 8., 6., 2., p.seat);
+            rect(cr, x - 27., top + 12., 4., 3., p.rug);
+        }
+        1 => {
+            rect(cr, x - 31., top + 8., 13., 11., p.seat);
+            rect(cr, x - 27., top - 7., 3., 17., 0x476d53);
+            rect(cr, x - 32., top - 5., 14., 5., 0xa6c586);
+            rect(cr, x - 30., top + 2., 10., 4., 0x7da575);
+        }
+        2 => {
+            rect(cr, x - 32., top - 20., 14., 26., 0x25333e);
+            rect(cr, x - 30., top - 18., 10., 21., 0x35566c);
+            for i in 0..3 {
+                rect(cr, x - 28., top - 15. + i as f64 * 5., 6., 2., p.accent);
+            }
+            rect(cr, x - 28., top + 6., 6., 3., 0x34414b);
+        }
+        3 => {
+            rect(cr, x - 26., top - 18., 2., 31., 0x34414b);
+            rect(cr, x - 33., top - 20., 16., 7., p.seat);
+            rect(cr, x - 31., top - 13., 12., 2., p.accent);
+            rect(cr, x - 30., top + 12., 10., 3., 0x34414b);
+            rect(cr, x - 30., top + 18., 12., 5., p.rug);
+        }
+        4 => {
+            rect(cr, x - 30., top + 4., 10., 14., p.wall);
+            for i in 0..3 {
+                rect(
+                    cr,
+                    x - 29. + i as f64 * 3.,
+                    top - 5. + i as f64 * 2.,
+                    2.,
+                    11.,
+                    p.accent,
+                );
+            }
+            rect(cr, x - 31., top + 23., 20., 2., 0xf0d6ac);
+        }
+        _ => {
+            rect(cr, x - 32., top + 17., 16., 4., p.rug);
+            rect(cr, x - 30., top + 7., 12., 11., 0xece0c4);
+            rect(cr, x - 29., top + 4., 10., 3., p.seat);
+            rect(cr, x - 32., top + 10., 3., 5., p.seat);
+            rect(cr, x - 18., top + 9., 4., 3., 0xece0c4);
+        }
+    }
 }
-fn sofa(cr: &Context, x: f64, y: f64) {
-    rect(cr, x - 20.0, y - 20.0, 41.0, 27.0, 0x253944);
-    rect(cr, x - 19.0, y - 25.0, 38.0, 23.0, 0x905774);
-    rect(cr, x - 17.0, y - 23.0, 34.0, 12.0, 0xb7758b);
-    rect(cr, x - 16.0, y - 9.0, 32.0, 11.0, 0xc78999);
-    for dx in [-21.0, 16.0] {
-        rect(cr, x + dx, y - 15.0, 5.0, 19.0, 0x9d637d);
+fn sofa(cr: &Context, x: f64, y: f64, theme: usize, variant: usize) {
+    let p = &art::PALETTES[theme];
+    let _ = cr.save();
+    cr.set_source_rgba(0.20, 0.18, 0.14, 0.18);
+    cr.rectangle(x - 42., y - 24., 89., 28.);
+    let _ = cr.fill();
+    let _ = cr.restore();
+    for xx in [x - 37., x + 33.] {
+        rect(cr, xx, y - 5., 4., 7., p.wall);
+    }
+    let separate = matches!(theme, 1 | 4);
+    if !separate {
+        rect(cr, x - 41., y - 37., 82., 30., p.wall);
+        rect(cr, x - 39., y - 39., 78., 28., p.seat);
+        rect(cr, x - 39., y - 38., 78., 2., p.accent);
+        rect(cr, x - 40., y - 10., 80., 8., p.wood);
+    }
+    for i in 0..3 {
+        let xx = x - 35. + i as f64 * 24.;
+        if separate {
+            rect(cr, xx - 3., y - 37., 23., 34., p.wood);
+            for j in 0..4 {
+                rect(cr, xx + j as f64 * 5., y - 34., 2., 18., p.wall);
+            }
+        } else {
+            rect(cr, xx, y - 34., 22., 17., p.seat);
+            rect(cr, xx + 20., y - 32., 1., 15., p.rug);
+            rect(cr, xx + 10., y - 27., 2., 2., p.rug);
+        }
+        rect(cr, xx - 1., y - 16., 23., 11., p.seat);
+        rect(cr, xx, y - 16., 21., 2., p.accent);
+        if (i + variant).is_multiple_of(3) {
+            rect(cr, xx + 3., y - 29., 13., 10., p.rug);
+            rect(cr, xx + 4., y - 30., 11., 12., p.rug);
+            rect(cr, xx + 7., y - 28., 2., 8., p.accent);
+        }
+    }
+    if !separate {
+        for xx in [x - 44., x + 38.] {
+            rect(cr, xx, y - 24., 6., 21., p.wall);
+            rect(cr, xx, y - 25., 6., 17., p.seat);
+            rect(cr, xx + 1., y - 25., 4., 2., p.accent);
+        }
+        // A folded woven throw breaks the long upholstered silhouette.
+        if variant.is_multiple_of(2) {
+            rect(cr, x + 23., y - 21., 12., 17., p.rug);
+            for i in 0..4 {
+                rect(cr, x + 24. + i as f64 * 3., y - 21., 1., 19., p.accent);
+            }
+        }
     }
 }
 fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
@@ -509,7 +640,7 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
     let action = actor.action();
     let walking = action == Action::Walk;
     let facing = match action {
-        Action::Type => Facing::Up,
+        Action::Type if !actor.plan.desk_faces_south(actor.slot) => Facing::Up,
         Action::Walk => actor.facing,
         _ => Facing::Down,
     };
@@ -519,6 +650,7 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
     if matches!(facing, Facing::Left | Facing::Right) {
         cr.scale(0.8, 1.0);
     }
+    cr.scale(1.25, 1.25);
     let seated = matches!(action, Action::Type | Action::Read | Action::Sit);
     let beat = if walking || action == Action::Type {
         (frame % 2) as f64
@@ -535,12 +667,75 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
         rect(cr, x, y, 5.0, 4.0, INK);
         rect(cr, x + 1.0, y, 3.0, 2.0, 0xbfc3c6);
     }
+    // Tails and different body widths keep identities visible even from behind.
+    match species {
+        0 | 3 | 8 => {
+            rect(cr, -14., -13., 7., 8., fur);
+            rect(
+                cr,
+                -16.,
+                -17.,
+                5.,
+                8.,
+                if species == 3 { 0xf0ddba } else { fur },
+            );
+        }
+        1 | 2 | 4 | 9 => {
+            rect(cr, -11., -14., 22., 9., INK);
+            rect(cr, -9., -13., 18., 7., shirt);
+        }
+        6 | 7 => {
+            rect(cr, -11., -15., 22., 8., fur);
+        }
+        _ => {}
+    }
     rect(cr, -8.0, -16.0, 16.0, 13.0, INK);
     rect(cr, -6.0, -16.0, 12.0, 11.0, shirt);
-    for i in 0..=actor.style / 12 % 3 {
-        rect(cr, -4.0 + i as f64 * 3.0, -12.0, 1.0, 4.0, 0xf1ddbc);
+    let outfit = actor.style / 12;
+    match outfit % 5 {
+        0 => {
+            // Work apron.
+            rect(cr, -4., -15., 8., 9., 0xe5d4b3);
+            rect(cr, -3., -10., 6., 3., shirt);
+        }
+        1 => {
+            // Split jacket and zipper.
+            rect(cr, -1., -16., 2., 11., INK);
+            rect(cr, -5., -10., 3., 2., 0xf0d5b4);
+        }
+        2 => {
+            // Cross-body satchel, also recognizable from the rear.
+            for i in 0..5 {
+                rect(
+                    cr,
+                    -5. + i as f64 * 2.,
+                    -16. + i as f64 * 2.,
+                    3.,
+                    3.,
+                    0xe2c495,
+                );
+            }
+            rect(cr, 2., -10., 7., 7., 0x765748);
+        }
+        3 => {
+            // Wide knit stripes.
+            for yy in [-13., -8.] {
+                rect(cr, -6., yy, 12., 2., 0xf0d9b3);
+            }
+        }
+        _ => {
+            // Bib overalls.
+            rect(cr, -4., -14., 8., 9., 0x4a6680);
+            for xx in [-4., 2.] {
+                rect(cr, xx, -16., 2., 5., 0xadc4bc);
+            }
+        }
     }
-    let hands_y = if action == Action::Type { -22.0 } else { -13.0 };
+    let hands_y = match (action, facing) {
+        (Action::Type, Facing::Up) => -22.0,
+        (Action::Type, _) => -3.0,
+        _ => -13.0,
+    };
     rect(cr, -10.0, hands_y - beat, 4.0, 6.0, fur);
     rect(cr, 6.0, hands_y + beat, 4.0, 6.0, fur);
     // Different silhouettes as well as colors distinguish the twelve species.
@@ -569,7 +764,15 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
                 }
             }
         }
-        6 | 7 => {}
+        6 => {
+            rect(cr, -4., -33., 3., 5., INK);
+            rect(cr, 0., -32., 3., 4., INK);
+        }
+        7 => {
+            for xx in [-10., 5.] {
+                rect(cr, xx, -34., 5., 9., fur);
+            }
+        }
         _ => {
             for x in [-11.0, 6.0] {
                 rect(cr, x, -30.0, 6.0, 7.0, INK);
@@ -629,6 +832,18 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
                 INK
             },
         );
+        if species == 0 {
+            for xx in [-11., 7.] {
+                rect(cr, xx, -21., 4., 1., INK);
+                rect(cr, xx, -18., 4., 1., INK);
+            }
+        }
+        if species == 9 {
+            rect(cr, -3., -24., 6., 7., 0x4c515d);
+        }
+        if species == 5 {
+            rect(cr, -4., -18., 8., 1., 0x456446);
+        }
         if species == 10 {
             rect(cr, -3.0, -20.0, 6.0, 3.0, 0xc78693);
         }
@@ -643,9 +858,38 @@ fn draw_actor(cr: &Context, actor: &Actor, frame: u32) {
         rect(cr, -7.0, -16.0, 14.0, 7.0, 0xf0dfba);
         rect(cr, (frame % 2) as f64 - 1.0, -16.0, 1.0, 8.0, 0x887968);
     }
-    if actor.style / 12 >= 5 {
-        rect(cr, -9.0, -29.0, 18.0, 3.0, shirt);
-        rect(cr, -5.0, -34.0, 10.0, 5.0, shirt);
+    match outfit {
+        0 | 5 => {
+            // Asymmetric cap leaves the ears visible.
+            rect(cr, -7., -31., 14., 3., shirt);
+            rect(cr, -5., -35., 10., 5., shirt);
+            rect(cr, 4., -31., 7., 2., 0xe4c291);
+        }
+        1 | 6 => {
+            // Headset.
+            rect(cr, -9., -30., 18., 2., 0xd9c8a5);
+            for xx in [-11., 8.] {
+                rect(cr, xx, -26., 3., 7., shirt);
+            }
+            if facing != Facing::Up {
+                rect(cr, 6., -19., 5., 2., INK);
+            }
+        }
+        2 | 7 if facing != Facing::Up => {
+            for xx in [-7., 2.] {
+                rect(cr, xx, -25., 6., 5., INK);
+                rect(cr, xx + 1., -24., 4., 3., 0xc9d8d4);
+            }
+            rect(cr, -1., -24., 3., 1., INK);
+        }
+        3 | 8 => {
+            rect(cr, -7., -15., 14., 3., 0xe4c291);
+            rect(cr, 4., -13., 3., 8., 0xe4c291);
+        }
+        _ => {
+            rect(cr, 4., -30., 6., 4., shirt);
+            rect(cr, 6., -33., 3., 8., 0xf0d9b3);
+        }
     }
     rect(
         cr,
@@ -678,12 +922,55 @@ mod tests {
         {
             let cr = Context::new(&surface).unwrap();
             let actor = Actor::new(0, style, status, plan.clone());
-            draw_room(&cr, &plan, design, &[&actor], frame);
+            draw_room(&cr, &plan, design, &[&actor], frame, None);
             cr.status().unwrap();
         }
         let bytes = surface.data().unwrap().to_vec();
         bytes
     }
+    #[test]
+    fn cached_background_preserves_pixels_and_avoids_repainting_shapes() {
+        for design in [0, 5, 10, 15, 19, 23] {
+            let plan = Plan::new(32, design);
+            let scale = 0.75;
+            let cache = Background::new(&plan, design, scale).unwrap();
+            let render = |cached| {
+                let mut surface = gtk::cairo::ImageSurface::create(
+                    gtk::cairo::Format::ARgb32,
+                    (plan.width * scale).ceil() as i32,
+                    (plan.height * scale).ceil() as i32,
+                )
+                .unwrap();
+                {
+                    let cr = Context::new(&surface).unwrap();
+                    cr.set_antialias(gtk::cairo::Antialias::None);
+                    cr.scale(scale, scale);
+                    if cached {
+                        cache.paint(&cr);
+                    } else {
+                        art::shell(&cr, &plan, design);
+                    }
+                }
+                let pixels = surface.data().unwrap().to_vec();
+                pixels
+            };
+            assert_eq!(render(false), render(true), "cached design {design}");
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                std::hint::black_box(render(false));
+            }
+            let direct = start.elapsed();
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                std::hint::black_box(render(true));
+            }
+            eprintln!(
+                "Office background {design}: direct {direct:?}, cached {:?} (10 frames)",
+                start.elapsed()
+            );
+        }
+    }
+
     #[test]
     fn desk_occludes_a_character_walking_behind_it() {
         let plan = Rc::new(Plan::new(2, 0));
@@ -698,12 +985,19 @@ mod tests {
             {
                 let cr = Context::new(&surface).unwrap();
                 let mut actor = Actor::new(0, 0, AgentStatus::Idle, plan.clone());
-                actor.position = (x, y - 20.0);
+                actor.position = (x, y - 20.0 * OBJECT_SCALE);
                 let actors = [&actor];
-                draw_room(&cr, &plan, 0, if with_actor { &actors } else { &[] }, 0);
+                draw_room(
+                    &cr,
+                    &plan,
+                    0,
+                    if with_actor { &actors } else { &[] },
+                    0,
+                    None,
+                );
             }
             let stride = surface.stride() as usize;
-            let offset = (y as usize - 28) * stride + x as usize * 4;
+            let offset = (y as usize - (28.0 * OBJECT_SCALE) as usize) * stride + x as usize * 4;
             let pixel = surface.data().unwrap()[offset..offset + 4].to_vec();
             pixel
         };
@@ -789,6 +1083,36 @@ mod tests {
     }
 
     #[test]
+    fn reflow_keeps_settled_actors_at_their_places_without_restarting_activity() {
+        for status in [
+            AgentStatus::Working,
+            AgentStatus::Blocked,
+            AgentStatus::Done,
+            AgentStatus::Idle,
+            AgentStatus::Unknown,
+        ] {
+            let mut actor = Actor::new(0, 0, status, Rc::new(Plan::fit(3, 0, 1.3)));
+            for phase in 0..3 {
+                actor.rest_phase = phase;
+                actor.position = actor.destination();
+                actor.rest_elapsed = 2.5;
+                actor.status_age = 7.0;
+                let action = actor.action();
+                for design in 0..24 {
+                    for aspect in [0.7, 2.0, 0.7] {
+                        actor.replan(0, Rc::new(Plan::fit(3, design, aspect)));
+                        assert_eq!(actor.position, actor.destination());
+                        assert_eq!(actor.action(), action);
+                        assert!(actor.path.is_empty());
+                        assert_eq!(actor.rest_elapsed, 2.5);
+                        assert_eq!(actor.status_age, 7.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn reflow_preserves_relative_position_and_continues_walking() {
         let plan = Rc::new(Plan::fit(2, 0, 1.3));
         let mut actor = Actor::new(0, 0, AgentStatus::Working, plan.clone());
@@ -799,7 +1123,22 @@ mod tests {
             actor.position.1 / plan.height,
         );
         let next = Rc::new(Plan::fit(3, 0, 1.31));
+        let activity = (
+            actor.status_age,
+            actor.rest_elapsed,
+            actor.rest_phase,
+            actor.facing,
+        );
         actor.replan(0, next.clone());
+        assert_eq!(
+            activity,
+            (
+                actor.status_age,
+                actor.rest_elapsed,
+                actor.rest_phase,
+                actor.facing
+            )
+        );
         assert!((actor.position.0 / next.width - before.0).abs() < 0.000_001);
         assert!((actor.position.1 / next.height - before.1).abs() < 0.000_001);
         assert_ne!(actor.position, next.sofa(0));

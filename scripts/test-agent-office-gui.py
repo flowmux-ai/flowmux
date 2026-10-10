@@ -75,6 +75,10 @@ def main():
         def find(text):
             return next((node for node in nodes() if node.get_name() == text), None)
 
+        def shown(text):
+            node = find(text)
+            return node is not None and node.get_state_set().contains(Atspi.StateType.SHOWING)
+
         def office_nodes():
             root = find("AgentOffice map")
             return nodes(root) if root is not None else iter(())
@@ -94,6 +98,25 @@ def main():
 
         def click(node):
             assert node.get_action_iface().do_action(0), node.get_name()
+
+        def pointer_click(x, y):
+            point = connection.screen().root.translate_coords(native_window(), int(x), int(y))
+            xtest.fake_input(connection, X.MotionNotify, x=point.x, y=point.y)
+            xtest.fake_input(connection, X.ButtonPress, 1)
+            xtest.fake_input(connection, X.ButtonRelease, 1)
+            connection.sync()
+
+        def assert_stationary(actor, description):
+            # Allow GTK to allocate the new view, then detect unwanted walking.
+            time.sleep(.2)
+            before = actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            time.sleep(.6)
+            after = actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            h.log("stationary_actor", check=description, name=actor.get_name(),
+                  before=(before.x, before.y), after=(after.x, after.y))
+            if (before.x, before.y) != (after.x, after.y):
+                screenshot("unexpected-character-motion")
+            assert (before.x, before.y) == (after.x, after.y), description
 
         def screenshot(name):
             time.sleep(.3)
@@ -158,14 +181,14 @@ def main():
         gui.wait_for(lambda: find("Back to workspace"), "office open")
         gui.wait_for(lambda: next((n for n in nodes() if "Working · at the desk" in n.get_name()), None), "working scene")
         assert room("Product studio") and not room("Quiet corner")
-        # Exercise the side-by-side floor plan at portrait and landscape ratios.
+        # Exercise desk reflow and zoning: a tall room can fit a desk row above the lounge.
         for _ in range((-uuid.UUID(workspace).int) % 24):
             click(find("Next office design"))
             time.sleep(.3)
         actors = [n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
                   and any(n.get_name().startswith(name + " · ") for name in ("codex", "claude", "gemini"))]
         assert len(actors) == 2
-        for width, height, columns in [(600, 950, 1), (1280, 700, 2)]:
+        for width, height, columns in [(800, 950, 1), (1280, 700, 2)]:
             native_window().configure(width=width, height=height)
             connection.sync()
             gui.wait_for(lambda: native_window().get_geometry().width == width, "ratio resize")
@@ -178,7 +201,54 @@ def main():
                 h.log("desk_ratio", width=width, height=height, expected_columns=columns,
                       actors=[(actor.get_name(), actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x)
                               for actor in actors])
-        h.pass_check("empty workspaces hidden; desk columns reflow from portrait to landscape")
+        h.pass_check("empty workspaces hidden; desk columns and zoning reflow with available ratio")
+        click(room("Product studio"))
+        assert not shown("All offices"), "one office must hide All offices even in detail"
+        assert_stationary(actors[0], "selecting the sole office must not restart walking")
+        click(room("Product studio"))
+        assert not shown("All offices")
+        design_file = h.root / "state/flowmux/office-designs" / f"{workspace}.json"
+        for design in range(1, 25):
+            click(find("Next office design"))
+            gui.wait_for(lambda: design_file.exists() and json.loads(design_file.read_text()) == design % 24,
+                         "design change applied before checking character position")
+            assert_stationary(actors[0], "changing design must keep a working character at its desk")
+        report(residents[0], "working", "Refresh same activity")
+        assert_stationary(actors[0], "refreshing the model must preserve a working character's position")
+        h.pass_check("single office hides All offices; design changes and model refresh keep characters seated")
+        # Three-seat sofas used to have overlapping speech-sized character buttons.
+        for resident in residents:
+            report(resident, "idle")
+        time.sleep(5)
+        seated = [actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW) for actor in actors]
+        a, b = sorted(seated, key=lambda r: r.x)
+        h.log("seated_hitboxes", actors=[(r.x, r.y, r.width, r.height) for r in seated])
+        screenshot("adjacent-character-hitboxes")
+        assert abs(a.y - b.y) <= 2, "both characters must be seated on the same sofa"
+        assert a.x + a.width <= b.x + 1, "adjacent character hit areas must not overlap"
+        assert all(r.height > r.width * 2 for r in seated), "selection fits the body, not speech"
+        # This space above a character belonged to its old speech-sized button.
+        pointer_click(a.x + a.width / 2, a.y - a.height / 4)
+        time.sleep(.3)
+        assert find("Back to workspace"), "empty space above a character must not select it"
+        # Nameplates are separate noninteractive decorations.
+        pointer_click(a.x + a.width / 2, a.y + a.height + 4)
+        time.sleep(.3)
+        assert find("Back to workspace"), "nameplate must not select the character"
+        for name, pane, surface in residents:
+            target = next(n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
+                          and n.get_name().startswith(name + " · "))
+            rect = target.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            pointer_click(rect.x + rect.width / 2, rect.y + rect.height * .65)
+            gui.wait_for(lambda: find("Back to workspace") is None, "native character click opens terminal")
+            tabs = h.workspace(socket, workspace)["panes"][0]["tabs"]
+            assert next(tab for tab in tabs if tab["id"] == surface)["active"], name
+            click(gui.wait_for(lambda: find("AgentOffice"), "reopen after character click"))
+            gui.wait_for(lambda: find("Back to workspace"), "office reopened")
+            time.sleep(.3)
+        for resident in residents:
+            report(resident, "working")
+        h.pass_check("adjacent body hitboxes do not overlap; native clicks select each tab; labels do not select")
         tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(studio_root))["surface_created"]
         executable = h.root / "gemini"
         shutil.copyfile(shutil.which("sleep"), executable)
@@ -221,7 +291,15 @@ def main():
         target = gui.wait_for(lambda: next((node for node in nodes()
             if node.get_role() == Atspi.Role.PUSH_BUTTON
             and node.get_name().startswith("claude · ")), None), "Claude character")
-        click(target)
+        bubble = next(n for n in office_nodes() if n.get_role() == Atspi.Role.LABEL
+                      and n.get_name().startswith("Need your input")
+                      and n.get_state_set().contains(Atspi.StateType.SHOWING))
+        rect = bubble.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        pointer_click(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        time.sleep(.3)
+        assert find("Back to workspace"), "speech bubble must not select a character"
+        rect = target.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        pointer_click(rect.x + rect.width / 2, rect.y + rect.height * .65)
         gui.wait_for(lambda: find("Back to workspace") is None, "character returns to terminal")
         current = h.rpc(socket, "workspace_current")["workspace_current"]["id"]
         assert current == workspace
@@ -304,6 +382,17 @@ def main():
             return True
         gui.wait_for(all_rooms_visible, "all eight offices fit in one viewport")
         packed_floor("eight-offices")
+        click(room("Product studio"))
+        worker = next(n for n in office_nodes() if n.get_role() == Atspi.Role.PUSH_BUTTON
+                      and n.get_name().startswith("codex · ")
+                      and "Working · at the desk" in n.get_name()
+                      and n.get_state_set().contains(Atspi.StateType.SHOWING))
+        gui.wait_for(lambda: shown("All offices"), "office detail selected")
+        assert_stationary(worker, "office selection must keep the worker at its desk")
+        click(find("All offices"))
+        gui.wait_for(lambda: not shown("All offices"), "overview selected")
+        assert_stationary(worker, "returning to all offices must not restart walking")
+        h.pass_check("office selection and All offices preserve settled character positions")
         # Real disposable agent processes exercise density without touching user sessions.
         dense_residents = []
         for index in range(29):
@@ -326,11 +415,12 @@ def main():
                    and n.get_name().startswith("Need your input")
                    and n.get_state_set().contains(Atspi.StateType.SHOWING)]
         assert len(bubbles) >= 2, "dense office must expose multiple pending approvals"
+        screenshot("dense-approvals")
+        h.log("approval_bounds", bubbles=[(r.x, r.y, r.width, r.height) for r in bubbles])
         for index, a in enumerate(bubbles):
             assert a.width >= 110 and a.height >= 30, "speech stays readable when office shrinks"
             for b in bubbles[index + 1:]:
                 assert a.x + a.width <= b.x or b.x + b.width <= a.x or a.y + a.height <= b.y or b.y + b.height <= a.y, "approval bubbles must not overlap"
-        screenshot("dense-approvals")
         for resident in dense_residents[:8]:
             report(resident, "working")
         h.pass_check("multiple approval bubbles remain readable without overlapping")
@@ -346,8 +436,11 @@ def main():
         gui.wait_for(lambda: room("Product studio"), "saved office restored")
         assert json.loads(design_file.read_text()) == 0
         h.pass_check("24 spatial layouts render with 32 agents; workspace design survives reopening")
-        assert find("All offices")
+        assert not shown("All offices"), "overview must hide the redundant All offices button"
+        click(room("Product studio"))
+        gui.wait_for(lambda: shown("All offices"), "detail exposes All offices")
         click(find("All offices"))
+        gui.wait_for(lambda: not shown("All offices"), "return to overview hides All offices")
         gui.wait_for(all_rooms_visible, "return from detail restores all offices")
         for width, height in [(900, 900), (1280, 800)]:
             native_window().configure(width=width, height=height)
@@ -365,6 +458,8 @@ def main():
         assert h.workspace(socket, quiet_id), "empty workspace itself must remain"
         room_names.remove("Realtime office")
         gui.wait_for(all_rooms_visible, "remaining offices reappear after selected office empties")
+        assert not shown("All offices"), "removing selected office returns to overview without All offices"
+        h.pass_check("All offices only visible in detail; overview and selected office removal hide it")
         packed_floor("empty-room-removed")
         h.send(socket, quiet_shell["pane"], f"exec {shlex.quote(str(h.root / 'codex'))} 600")
         report(("codex", quiet_shell["pane"], quiet_shell["id"]), "working")
@@ -392,7 +487,12 @@ def main():
         first_button, last_button = tab_buttons[-1], tab_buttons[0]
         def tab_visible(button):
             rect = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-            return 240 <= rect.x < rect.x + rect.width <= 1280
+            parent = button.get_parent()
+            while parent and parent.get_role() != Atspi.Role.SCROLL_PANE:
+                parent = parent.get_parent()
+            assert parent, "terminal tab must belong to a scroll viewport"
+            viewport = parent.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            return viewport.x <= rect.x < rect.x + rect.width <= viewport.x + viewport.width
         gui.wait_for(lambda: tab_visible(first_button), "first tab scrolls into view")
         h.rpc(socket, "surface_focus", pane=tab["pane"], surface=tab["id"])
         gui.wait_for(lambda: tab_visible(last_button), "last tab scrolls into view")

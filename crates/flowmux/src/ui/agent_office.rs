@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One adaptive office map backed by the existing live-agent model.
 
+mod art;
 mod layout;
 mod scene;
 
 use crate::bridge::{Bridge, GtkCommand};
 use flowmux_core::{AgentBarItem, AgentBarModel, AgentStatus, PaneId, SurfaceId, WorkspaceId};
 use gtk::prelude::*;
-use layout::{Plan, Rect};
+use layout::{Plan, Rect, OBJECT_SCALE};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -17,6 +18,7 @@ use std::{
 struct Resident {
     button: gtk::Button,
     bubble: gtk::Label,
+    nameplate: gtk::Box,
     bubble_focused: Cell<bool>,
     icon: gtk::Image,
     name: gtk::Label,
@@ -35,6 +37,8 @@ struct Room {
     bounds: Rect,
     scale: f64,
     origin: (f64, f64),
+    fitted_size: Option<(f64, f64)>,
+    background: RefCell<Option<scene::Background>>,
 }
 
 #[derive(Default)]
@@ -42,12 +46,15 @@ struct World {
     rooms: Vec<Room>,
     residents: HashMap<SurfaceId, Resident>,
     selected: Option<WorkspaceId>,
+    all_button: gtk::glib::WeakRef<gtk::Button>,
     frame: u32,
 }
 
 impl World {
     fn replan(&mut self, index: usize) {
         let room = &mut self.rooms[index];
+        room.fitted_size = None;
+        room.background.take();
         room.planned_count = room.members.len();
         let mut capacity = room
             .members
@@ -57,29 +64,28 @@ impl World {
             .max()
             .unwrap_or(2);
         // Reclaim a mostly empty office without reshuffling seats on ordinary joins/leaves.
-        if capacity > room.members.len().max(3) * 2 {
-            let mut seats = room.members.clone();
-            seats.sort_by_key(|id| self.residents[id].actor.slot);
-            for (slot, id) in seats.iter().enumerate() {
-                self.residents.get_mut(id).unwrap().actor.slot = slot;
-            }
-            capacity = seats.len();
+        let compact = capacity > room.members.len().max(3) * 2;
+        if compact {
+            room.members.sort_by_key(|id| self.residents[id].actor.slot);
+            capacity = room.members.len();
         }
         room.plan = Rc::new(Plan::fit(
             capacity,
             room.design,
             room.plan.width / room.plan.height,
         ));
-        for id in &room.members {
+        for (slot, id) in room.members.iter().enumerate() {
             if let Some(resident) = self.residents.get_mut(id) {
-                resident
-                    .actor
-                    .replan(resident.actor.slot, room.plan.clone());
+                let slot = if compact { slot } else { resident.actor.slot };
+                resident.actor.replan(slot, room.plan.clone());
             }
         }
     }
 
     fn place(&mut self, stage: &gtk::Fixed, width: i32, height: i32) {
+        if let Some(button) = self.all_button.upgrade() {
+            button.set_visible(self.selected.is_some() && self.rooms.len() > 1);
+        }
         if width <= 0 || height <= 0 {
             return;
         }
@@ -87,9 +93,9 @@ impl World {
             .rooms
             .iter()
             .filter(|r| self.selected.is_none_or(|id| id == r.id))
-            .map(|r| r.members.len().max(2) as f64)
+            .map(|r| (r.plan.capacity + 4) as f64)
             .collect();
-        let mut bounds = layout::tiles(
+        let bounds = layout::tiles(
             &weights,
             Rect {
                 x: 0.0,
@@ -97,8 +103,8 @@ impl World {
                 w: width as f64,
                 h: height as f64,
             },
-        )
-        .into_iter();
+        );
+        let mut bounds = bounds.into_iter();
         for room in &mut self.rooms {
             let visible = self.selected.is_none_or(|id| id == room.id);
             room.title.set_visible(visible);
@@ -106,7 +112,10 @@ impl World {
             for id in &room.members {
                 if let Some(r) = self.residents.get(id) {
                     r.button.set_visible(visible);
-                    r.bubble.set_visible(false);
+                    r.nameplate.set_visible(visible);
+                    if !visible {
+                        r.bubble.set_visible(false);
+                    }
                 }
             }
             if !visible {
@@ -129,8 +138,10 @@ impl World {
             let inner_width = (rect.w - 2.0).max(1.0);
             let inner_height = (rect.h - header - 2.0).max(1.0);
             let aspect = inner_width / inner_height;
-            if (room.plan.width / room.plan.height - aspect).abs() > 0.000_001 {
+            if room.fitted_size != Some((inner_width, inner_height)) {
                 room.plan = Rc::new(Plan::fit(room.plan.capacity, room.design, aspect));
+                room.fitted_size = Some((inner_width, inner_height));
+                room.background.take();
                 for id in &room.members {
                     if let Some(resident) = self.residents.get_mut(id) {
                         resident
@@ -185,6 +196,8 @@ impl AgentOffice {
         let close_bridge = bridge.clone();
         close.connect_clicked(move |_| send_toggle(&close_bridge));
         let all = gtk::Button::with_label("All offices");
+        all.set_visible(false);
+        world.borrow_mut().all_button = all.downgrade();
         all.set_tooltip_text(Some("Fit every workspace into this window"));
         header.pack_end(&all);
         root.append(&header);
@@ -209,7 +222,7 @@ impl AgentOffice {
         hint.set_wrap(true);
         root.append(&hint);
         let draw_world = world.clone();
-        drawing.set_draw_func(move |_, cr, width, height| {
+        drawing.set_draw_func(move |drawing, cr, width, height| {
             cr.set_source_rgb(0.07, 0.10, 0.14);
             let _ = cr.paint();
             let world = draw_world.borrow();
@@ -233,7 +246,22 @@ impl AgentOffice {
                     .iter()
                     .filter_map(|id| world.residents.get(id).map(|r| &r.actor))
                     .collect();
-                scene::draw_room(cr, &room.plan, room.design, &actors, world.frame);
+                let pixel_scale = room.scale * drawing.scale_factor() as f64;
+                let mut background = room.background.borrow_mut();
+                if background
+                    .as_ref()
+                    .is_none_or(|cache| cache.scale != pixel_scale)
+                {
+                    *background = scene::Background::new(&room.plan, room.design, pixel_scale).ok();
+                }
+                scene::draw_room(
+                    cr,
+                    &room.plan,
+                    room.design,
+                    &actors,
+                    world.frame,
+                    background.as_ref(),
+                );
                 let _ = cr.restore();
             }
         });
@@ -267,7 +295,11 @@ impl AgentOffice {
         let last = Cell::new(0);
         drawing.add_tick_callback(move |drawing, clock| {
             let now = clock.frame_time();
-            let previous = last.replace(now);
+            let previous = last.get();
+            if previous != 0 && now - previous < 33_000 {
+                return gtk::glib::ControlFlow::Continue;
+            }
+            last.set(now);
             let dt = if previous == 0 {
                 0.0
             } else {
@@ -316,6 +348,7 @@ impl AgentOffice {
                 if let Some(resident) = world.residents.remove(id) {
                     stage.remove(&resident.button);
                     stage.remove(&resident.bubble);
+                    stage.remove(&resident.nameplate);
                 }
                 for room in &mut world.rooms {
                     room.members.retain(|member| member != id);
@@ -331,14 +364,15 @@ impl AgentOffice {
                 changed = true;
             } else if changed {
                 for room in &world.rooms {
+                    if world.selected.is_some_and(|id| id != room.id) {
+                        continue;
+                    }
                     for id in &room.members {
                         if let Some(resident) = world.residents.get(id) {
                             place_resident(&stage, resident, room);
                         }
                     }
-                    if world.selected.is_none_or(|id| id == room.id) {
-                        place_bubbles(&stage, &world.residents, room);
-                    }
+                    place_bubbles(&stage, &world.residents, room);
                 }
             }
             if changed {
@@ -403,10 +437,12 @@ impl AgentOffice {
                 };
                 let resident = resident(item, slot, plan, &self.bridge);
                 self.stage.put(&resident.button, 0.0, 0.0);
+                self.stage.put(&resident.nameplate, 0.0, 0.0);
                 self.stage.put(&resident.bubble, 0.0, 0.0);
                 if let Some(old) = world.residents.insert(item.surface, resident) {
                     self.stage.remove(&old.button);
                     self.stage.remove(&old.bubble);
+                    self.stage.remove(&old.nameplate);
                 }
             }
             room.members.retain(|surface| {
@@ -444,6 +480,7 @@ impl AgentOffice {
             } else {
                 self.stage.remove(&resident.button);
                 self.stage.remove(&resident.bubble);
+                self.stage.remove(&resident.nameplate);
                 false
             }
         });
@@ -597,6 +634,8 @@ impl AgentOffice {
             bounds: Rect::default(),
             scale: 1.0,
             origin: (0.0, 0.0),
+            fitted_size: None,
+            background: RefCell::new(None),
         }
     }
 
@@ -625,15 +664,24 @@ fn transform(stage: &gtk::Fixed, widget: &impl IsA<gtk::Widget>, x: f64, y: f64,
     let transform = gtk::gsk::Transform::new()
         .translate(&gtk::graphene::Point::new(x as f32, y as f32))
         .scale(scale as f32, scale as f32);
-    stage.set_child_transform(widget, Some(&transform));
+    if stage.child_transform(widget).as_ref() != Some(&transform) {
+        stage.set_child_transform(widget, Some(&transform));
+    }
 }
 fn place_resident(stage: &gtk::Fixed, resident: &Resident, room: &Room) {
     transform(
         stage,
         &resident.button,
-        room.origin.0 + (resident.actor.position.0 - 40.0) * room.scale,
-        room.origin.1 + (resident.actor.position.1 - 88.0) * room.scale,
-        room.scale / 2.0,
+        room.origin.0 + (resident.actor.position.0 - 12.0 * OBJECT_SCALE) * room.scale,
+        room.origin.1 + (resident.actor.position.1 - 48.0 * OBJECT_SCALE) * room.scale,
+        room.scale * OBJECT_SCALE / 2.0,
+    );
+    transform(
+        stage,
+        &resident.nameplate,
+        room.origin.0 + (resident.actor.position.0 - 40.0 * OBJECT_SCALE) * room.scale,
+        room.origin.1 + (resident.actor.position.1 + 4.0 * OBJECT_SCALE) * room.scale,
+        room.scale * OBJECT_SCALE / 2.0,
     );
 }
 fn place_bubbles(stage: &gtk::Fixed, residents: &HashMap<SurfaceId, Resident>, room: &Room) {
@@ -653,10 +701,8 @@ fn place_bubbles(stage: &gtk::Fixed, residents: &HashMap<SurfaceId, Resident>, r
         )
     });
     let scale = (room.scale / 2.0).clamp(0.75, 1.0);
-    let (w, h) = (156.0 * scale, 46.0 * scale);
     let mut occupied: Vec<Rect> = Vec::new();
     for r in candidates {
-        r.bubble.set_visible(false);
         let focus =
             r.button.has_focus() || r.button.state_flags().contains(gtk::StateFlags::PRELIGHT);
         let persistent = r.actor.status == AgentStatus::Blocked || r.actor.ended.is_some();
@@ -666,15 +712,23 @@ fn place_bubbles(stage: &gtk::Fixed, residents: &HashMap<SurfaceId, Resident>, r
             3.0
         };
         if !focus && !persistent && r.actor.status_age > duration {
+            r.bubble.set_visible(false);
             continue;
         }
+        // Font fallback and multiple lines can exceed the requested minimum height.
+        r.bubble.set_visible(true);
+        let (_, width, _, _) = r.bubble.measure(gtk::Orientation::Horizontal, -1);
+        let (_, height, _, _) = r.bubble.measure(gtk::Orientation::Vertical, width);
+        let (w, h) = (width as f64 * scale, height as f64 * scale);
         if room.bounds.w < w + 8.0 || room.bounds.h < h + 36.0 {
+            r.bubble.set_visible(false);
             continue;
         }
         let x = (room.origin.0 + r.actor.position.0 * room.scale - w / 2.0)
             .clamp(room.bounds.x + 4.0, room.bounds.x + room.bounds.w - w - 4.0);
-        let above = room.origin.1 + (r.actor.position.1 - 40.0) * room.scale - h;
+        let above = room.origin.1 + (r.actor.position.1 - 50.0 * OBJECT_SCALE) * room.scale - h;
         let top = room.bounds.y + 32.0;
+        let mut placed = false;
         for offset in [0.0, -h - 4.0, h + 4.0] {
             let rect = Rect {
                 x,
@@ -691,10 +745,11 @@ fn place_bubbles(stage: &gtk::Fixed, residents: &HashMap<SurfaceId, Resident>, r
                 continue;
             }
             transform(stage, &r.bubble, rect.x, rect.y, scale);
-            r.bubble.set_visible(true);
+            placed = true;
             occupied.push(rect);
             break;
         }
+        r.bubble.set_visible(placed);
     }
 }
 fn send_toggle(bridge: &Bridge) {
@@ -725,7 +780,6 @@ fn variant(surface: SurfaceId) -> usize {
     (surface.0.as_u128() % 120) as usize
 }
 fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -> Resident {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let bubble = gtk::Label::new(None);
     bubble.add_css_class("flowmux-office-bubble");
     bubble.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -733,12 +787,6 @@ fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -
     bubble.set_max_width_chars(18);
     bubble.set_size_request(156, 46);
     bubble.set_can_target(false);
-    let bubble_space = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    bubble_space.set_size_request(156, 46);
-    column.append(&bubble_space);
-    let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    spacer.set_size_request(1, 128);
-    column.append(&spacer);
     let heading = gtk::Box::new(gtk::Orientation::Horizontal, 3);
     heading.set_halign(gtk::Align::Center);
     heading.add_css_class("flowmux-office-nameplate");
@@ -749,11 +797,14 @@ fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     name.set_max_width_chars(16);
     heading.append(&name);
-    column.append(&heading);
+    let nameplate = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    nameplate.set_size_request(160, -1);
+    nameplate.set_can_target(false);
+    nameplate.append(&heading);
     let button = gtk::Button::new();
     button.add_css_class("flowmux-office-resident");
-    button.set_size_request(160, 196);
-    button.set_child(Some(&column));
+    // Only the body is interactive; speech and the nameplate must not steal nearby clicks.
+    button.set_size_request(48, 104);
     button.set_widget_name(&format!("flowmux-office-resident-{}", item.surface));
     let location = Rc::new(Cell::new((item.workspace, item.pane, item.surface)));
     let target = location.clone();
@@ -775,6 +826,7 @@ fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -
     Resident {
         button,
         bubble,
+        nameplate,
         bubble_focused: Cell::new(false),
         name,
         icon,
@@ -810,6 +862,16 @@ mod tests {
                 .collect(),
         };
         office.render(&rooms, &model);
+        let all = office.world.borrow().all_button.upgrade().unwrap();
+        let title = office.world.borrow().rooms[0].title.clone();
+        assert!(!all.is_visible());
+        title.emit_clicked();
+        assert!(
+            !all.is_visible(),
+            "one office never needs an overview button"
+        );
+        all.emit_clicked();
+        assert!(!all.is_visible());
         let survivor = model.items[1].surface;
         assert_eq!(office.world.borrow().residents[&survivor].actor.slot, 1);
         let first = model.items.remove(0);
@@ -819,6 +881,7 @@ mod tests {
             let departed = world.residents.remove(&first.surface).unwrap();
             office.stage.remove(&departed.button);
             office.stage.remove(&departed.bubble);
+            office.stage.remove(&departed.nameplate);
             world.rooms[0].members.retain(|id| *id != first.surface);
             world.replan(0);
         }
@@ -852,11 +915,61 @@ mod tests {
         reopened.render(&rooms, &model);
         assert_eq!(reopened.world.borrow().rooms[0].design, design);
         let mut world = reopened.world.borrow_mut();
-        world.residents.get_mut(&survivor).unwrap().actor.slot = 30;
+        world
+            .residents
+            .get_mut(&survivor)
+            .unwrap()
+            .actor
+            .replan(30, Rc::new(Plan::new(31, design)));
         world.replan(0);
         assert_eq!(
             world.rooms[0].plan.capacity, 3,
             "sparse offices reclaim unused furniture"
         );
+        drop(world);
+        let second = WorkspaceId::new();
+        let rooms = [(workspace, "Studio".into()), (second, "Workshop".into())];
+        for _ in 0..12 {
+            model.items.push(AgentBarItem {
+                workspace: second,
+                surface: SurfaceId::new(),
+                ..model.items[0].clone()
+            });
+        }
+        reopened.render(&rooms, &model);
+        let all = reopened.world.borrow().all_button.upgrade().unwrap();
+        let title = reopened.world.borrow().rooms[0].title.clone();
+        title.emit_clicked();
+        assert!(
+            all.is_visible(),
+            "multiple offices expose the overview from detail"
+        );
+        all.emit_clicked();
+        assert!(!all.is_visible());
+        let mut world = reopened.world.borrow_mut();
+        for (width, height) in [(1280, 700), (600, 900)] {
+            world.place(&reopened.stage, width, height);
+            assert_eq!(world.rooms.len(), 2);
+            for resident in world.residents.values() {
+                assert_ne!(resident.actor.action(), scene::Action::Walk);
+            }
+            assert!(world
+                .rooms
+                .iter()
+                .all(|r| (r.scale - ((r.bounds.w - 2.0) / r.plan.width)).abs() < 0.001));
+            let plans: Vec<_> = world.rooms.iter().map(|r| r.plan.clone()).collect();
+            world.place(&reopened.stage, width, height);
+            for (room, cached) in world.rooms.iter().zip(plans) {
+                assert!(
+                    Rc::ptr_eq(&room.plan, &cached),
+                    "unchanged view must reuse its navigation grid"
+                );
+                assert!((room.plan.width * room.scale - (room.bounds.w - 2.0)).abs() < 0.01);
+                let header = 28.0_f64.min(room.bounds.h * 0.18);
+                assert!(
+                    (room.plan.height * room.scale - (room.bounds.h - header - 2.0)).abs() < 0.01
+                );
+            }
+        }
     }
 }
