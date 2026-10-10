@@ -10279,8 +10279,7 @@ Do you want to continue?";
         let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
         let session_id = "session-1";
         let spinner = "• Ran git status\n• Working (44s • esc to interrupt)\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
-        // The final frame carries no completion footer and names another
-        // agent in scrollback, so it can never clear a hook Working by itself.
+        // A filename in scrollback must not override the live Codex composer.
         let final_frame =
             "?? .claude/\n• Done.\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
         let lifecycle = |event, seq| {
@@ -10335,6 +10334,18 @@ Do you want to continue?";
             .report_agent_screen_signals_with_visibility(surface, Some(spinner), None, false)
             .await;
         assert_eq!(status().await, AgentStatus::Idle);
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(final_frame), None, false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Idle);
+
+        // With legacy notify or a missed start hook, a changed live progress
+        // row must recover. A subsequent bare prompt must settle it again.
+        let next_spinner = spinner.replace("44s", "45s");
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(&next_spinner), None, false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Working);
         store
             .report_agent_screen_signals_with_visibility(surface, Some(final_frame), None, false)
             .await;

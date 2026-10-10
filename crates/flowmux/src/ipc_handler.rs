@@ -892,7 +892,7 @@ impl GuiHandler {
             Request::AgentSurfaceResolve {
                 agent,
                 session_id,
-                cwd,
+                cwd: _,
             } => {
                 let store = self.inner.store();
                 let mut tab = Ok(None);
@@ -900,11 +900,11 @@ impl GuiHandler {
                     tab = store.codex_session_tab(&session_id, None).await;
                     if matches!(tab, Ok(None)) {
                         let id = session_id.clone();
-                        // Hooks name their directory; the legacy notify
-                        // payload does not, but its session file does.
+                        // Shared-daemon title jobs also send Stop with a cwd.
+                        // Only persisted root sessions can claim an unbound tab.
                         let thread = tokio::task::spawn_blocking(move || {
                             let home = SessionAgent::Codex.env_history_home()?;
-                            let cwd = cwd.or_else(|| codex_session_cwd(&home, &id))?;
+                            let cwd = codex_session_cwd(&home, &id)?;
                             let names = codex_thread_names(&home).into_iter().collect();
                             Some((names, cwd))
                         });

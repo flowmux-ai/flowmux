@@ -208,6 +208,7 @@ pub(super) struct CodexTurnLedger {
     pub(super) child_agent_event_seq: HashMap<String, u64>,
     pub(super) pending_parent_stop: Option<PendingCodexStop>,
     pub(super) settled_parent_turns: VecDeque<String>,
+    last_screen_progress: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -2162,7 +2163,7 @@ impl StateStore {
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         // Screen evidence is already scoped to a tab and carries no local PID.
         // SSH remains excluded from process scans and native hook reports.
-        let lifecycle = self.agents.lifecycle.lock().await;
+        let mut lifecycle = self.agents.lifecycle.lock().await;
         if tracing::enabled!(target: "flowmux_agent", tracing::Level::DEBUG) {
             trace_agent_before(self.located_agent_presence(surface_id).await.as_ref());
         }
@@ -2203,8 +2204,8 @@ impl StateStore {
         let status = detected_status.or_else(|| prompt_agent_name.map(|_| AgentStatus::Idle));
         let agent_name = if status.is_some() {
             completed_agent
-                .or_else(|| detect_agent_name_from_signals(screen_text, osc_title))
                 .or(prompt_agent_name)
+                .or_else(|| detect_agent_name_from_signals(screen_text, osc_title))
         } else {
             None
         };
@@ -2331,23 +2332,28 @@ impl StateStore {
                                 && presence.session_id.as_deref().is_some_and(|session_id| {
                                     lifecycle
                                         .codex_turns
-                                        .get(&(surface_id, session_id.to_string()))
+                                        .get_mut(&(surface_id, session_id.to_string()))
                                         .is_some_and(|ledger| {
+                                            let unchanged = status_text.is_none()
+                                                || ledger.last_screen_progress.is_none()
+                                                || ledger.last_screen_progress.as_deref()
+                                                    == status_text;
+                                            if let Some(progress) = status_text {
+                                                ledger.last_screen_progress = Some(progress.into());
+                                            }
                                             !ledger.settled_parent_turns.is_empty()
                                                 && ledger.current_parent_turn.is_none()
                                                 && ledger.pending_parent_stop.is_none()
                                                 && ledger.active_children.is_empty()
+                                                && unchanged
                                         })
                                 })
                         })
                 })
             });
         if settled_codex_turn {
-            // The native lifecycle already settled this Codex turn and no new
-            // turn has started. The TUI repaints its last spinner frame after
-            // the Stop hook returns, so a screen Working here is stale and
-            // must not reopen the turn: a bare prompt cannot clear hook
-            // Working, so nothing would ever settle it again.
+            // Ignore the final spinner repaint, but let a changed progress row
+            // recover when TurnStarted is missing (including legacy notify).
             tracing::debug!(target: "flowmux_agent", reason = "settled_turn_spinner", changed = false, "agent decision");
             return None;
         }
