@@ -60,13 +60,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
+        run: cargo install cargo-deny --version 0.20.2 --locked
 
       - name: Install cargo-about
         run: cargo install cargo-about --version 0.9.2 --locked --features cli
 
       - name: Check dependency advisories, licenses and sources
-        run: cargo deny --locked check --config packaging/licenses/deny.toml advisories licenses sources
+        run: cargo deny --locked --config packaging/licenses/deny.toml check advisories licenses sources
 
       - name: Check third-party license notice
         run: |

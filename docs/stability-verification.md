@@ -43,7 +43,7 @@ retains the previous HTML behavior instead of applying XML normalization.
 TLS configuration is unchanged; the TLS implementation receives its patch
 update. This does not constitute a separate cryptographic audit.
 
-`cargo deny --locked check --config packaging/licenses/deny.toml advisories
+`cargo deny --locked --config packaging/licenses/deny.toml check advisories
 licenses sources` passes with zero exceptions. The distribution notice was
 regenerated with the required cargo-about 0.9.2; four notice tests pass.
 Workspace build, all-target Clippy, formatting and live degraded/healthy session

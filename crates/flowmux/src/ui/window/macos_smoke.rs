@@ -999,7 +999,12 @@ async fn check_skills(controller: &WindowController) {
         let backups: Vec<_> = std::fs::read_dir(root.join("scripts"))
             .unwrap()
             .flatten()
-            .filter(|entry| entry.file_name() != "team.py")
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".flowmux-backup-")
+            })
             .collect();
         assert_eq!(backups.len(), 1);
         assert_eq!(

@@ -41,5 +41,6 @@ the generated distribution notice and asset/editor credits live in `docs/legal/`
 Run the dependency policy check from the repository root:
 
 ```sh
-cargo deny --locked check --config packaging/licenses/deny.toml advisories licenses sources
+cargo install cargo-deny --version 0.20.2 --locked
+cargo deny --locked --config packaging/licenses/deny.toml check advisories licenses sources
 ```
