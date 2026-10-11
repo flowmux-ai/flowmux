@@ -2659,15 +2659,101 @@ async fn tmux_compat_external_swarm_drives_bridge_commands() {
     assert_eq!(out.code, 0);
 }
 
+struct AgentFixture(std::process::Child);
+
+impl AgentFixture {
+    fn spawn(command: &mut std::process::Command) -> Self {
+        use std::os::unix::process::CommandExt;
+        Self(
+            command
+                .process_group(0)
+                .spawn()
+                .expect("spawn agent fixture"),
+        )
+    }
+}
+
+impl Drop for AgentFixture {
+    fn drop(&mut self) {
+        // Each fixture owns its group, including children of the simulated terminal.
+        unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.0.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                status => {
+                    eprintln!("agent fixture {} cleanup failed: {status:?}", self.0.id());
+                    return;
+                }
+            }
+        }
+    }
+}
+
 // Use an interpreted agent fixture: copied system binaries can be killed by macOS code signing.
-async fn wait_for_codex_fixture(pid: u32) {
+async fn wait_for_codex_fixture(fixture: &mut AgentFixture, pid: u32) {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while flowmux_procmon::agent_name_for_pid(pid) != Some("codex") {
+            assert!(
+                fixture.0.try_wait().unwrap().is_none(),
+                "agent fixture {} exited before codex {pid} was ready",
+                fixture.0.id()
+            );
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("fixture child must be recognized as codex");
+    .unwrap_or_else(|_| panic!("fixture child {pid} must be recognized as codex"));
+}
+
+async fn fixture_child_pid(fixture: &mut AgentFixture, path: &Path) -> u32 {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(pid) = text.trim().parse() {
+                    return pid;
+                }
+            }
+            assert!(
+                fixture.0.try_wait().unwrap().is_none(),
+                "fixture exited before reporting child PID"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fixture must report child PID within two seconds")
+}
+
+#[tokio::test]
+async fn agent_fixture_cleans_up_parent_and_child_on_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pid");
+    let mut fixture = AgentFixture::spawn(
+        std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 30 & echo $! > \"$1\"; wait", "fixture"])
+            .arg(&path),
+    );
+    let parent = fixture.0.id();
+    let child = fixture_child_pid(&mut fixture, &path).await;
+    assert_ne!(unsafe { libc::getpgid(parent as i32) }, unsafe {
+        libc::getpgrp()
+    });
+    let result = std::panic::catch_unwind(move || {
+        let _fixture = fixture;
+        panic!("exercise fixture cleanup on assertion failure");
+    });
+    assert!(result.is_err());
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while flowmux_procmon::pid_alive(parent) || flowmux_procmon::pid_alive(child) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fixture processes survived panic cleanup");
 }
 
 #[tokio::test]
@@ -2676,12 +2762,9 @@ async fn current_agent_source_reads_terminal_ownership_before_presence_exists() 
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
     std::fs::write(&executable, "import time; time.sleep(10)\n").unwrap();
-    let mut child = std::process::Command::new("python3")
-        .arg(&executable)
-        .spawn()
-        .unwrap();
-    let pid = child.id();
-    wait_for_codex_fixture(pid).await;
+    let mut child = AgentFixture::spawn(std::process::Command::new("python3").arg(&executable));
+    let pid = child.0.id();
+    wait_for_codex_fixture(&mut child, pid).await;
     for terminal_pid in [pid, std::process::id()] {
         let request = handler.handle_from(
             Request::AgentSurfaceCurrent {
@@ -2715,13 +2798,10 @@ async fn current_agent_source_reads_terminal_ownership_before_presence_exists() 
         .located_agent_presence(surface)
         .await
         .is_none());
-    child.kill().unwrap();
-    child.wait().unwrap();
 }
 
 #[tokio::test]
 async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_terminal() {
-    use std::io::BufRead;
     let (handler, rx, pane, stale_surface) = single_pane_handler().await;
     let (_, live_surface) = handler
         .inner
@@ -2732,18 +2812,15 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
     std::fs::write(&executable, "import time; time.sleep(10)\n").unwrap();
-    let mut terminal = std::process::Command::new("/bin/sh")
-        .args(["-c", "python3 \"$1\" & echo $!; wait", "fixture"])
-        .arg(executable)
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut line = String::new();
-    std::io::BufReader::new(terminal.stdout.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
-    let peer = line.trim().parse::<u32>().unwrap();
-    wait_for_codex_fixture(peer).await;
+    let pid_file = dir.path().join("pid");
+    let mut terminal = AgentFixture::spawn(
+        std::process::Command::new("/bin/sh")
+            .args(["-c", "python3 \"$1\" & echo $! > \"$2\"; wait", "fixture"])
+            .arg(executable)
+            .arg(&pid_file),
+    );
+    let peer = fixture_child_pid(&mut terminal, &pid_file).await;
+    wait_for_codex_fixture(&mut terminal, peer).await;
     handler
         .inner
         .store()
@@ -2766,7 +2843,7 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
         let GtkCommand::QueryTerminalAgentPids { ack } = rx.recv().await.unwrap() else {
             panic!("expected terminal ownership query");
         };
-        ack.send(vec![(stale_surface, peer), (live_surface, terminal.id())])
+        ack.send(vec![(stale_surface, peer), (live_surface, terminal.0.id())])
             .unwrap();
     };
     let (response, ()) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -2774,20 +2851,14 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
     })
     .await
     .expect("terminal ownership query must complete");
-    unsafe {
-        libc::kill(peer as i32, libc::SIGTERM);
-    }
-    terminal.wait().unwrap();
     assert!(matches!(response, Response::AgentSurface { surface, .. } if surface == live_surface));
 }
 
 #[tokio::test]
 async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_callers() {
     let (handler, _rx, pane, surface) = single_pane_handler().await;
-    let mut child = std::process::Command::new("sleep")
-        .arg("10")
-        .spawn()
-        .unwrap();
+    let child = AgentFixture::spawn(std::process::Command::new("sleep").arg("10"));
+    let pid = child.0.id();
     handler
         .inner
         .store()
@@ -2796,16 +2867,15 @@ async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_call
             Some(flowmux_core::AgentPresence::new(
                 "codex",
                 AgentActivity::Running,
-                Some(child.id()),
+                Some(pid),
             )),
         )
         .await;
     let request = || Request::AgentSurfaceCurrent {
         agent: "codex".into(),
     };
-    let resolved = handler.handle_from(request(), Some(child.id())).await;
-    child.kill().unwrap();
-    child.wait().unwrap();
+    let resolved = handler.handle_from(request(), Some(pid)).await;
+    drop(child);
     assert!(
         matches!(resolved, Response::AgentSurface { pane: p, surface: s, .. } if p == pane && s == surface)
     );
@@ -2820,7 +2890,7 @@ async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_call
         Response::Error(_)
     ));
     assert!(matches!(
-        handler.handle_from(request(), Some(child.id())).await,
+        handler.handle_from(request(), Some(pid)).await,
         Response::Error(_)
     ));
 }
