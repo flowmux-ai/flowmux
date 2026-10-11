@@ -76,8 +76,15 @@ pub(crate) async fn check(parent: &impl IsA<gtk::Window>, root: &Path, volume: &
                 assert!(panel.status.text().starts_with("Paste failed:"));
             }
             assert_eq!(
-                panel.model.borrow().clipboard.as_ref().unwrap().paths,
-                [source.clone()]
+                panel
+                    .model
+                    .borrow()
+                    .clipboard
+                    .as_ref()
+                    .unwrap()
+                    .paths
+                    .as_slice(),
+                std::slice::from_ref(&source)
             );
         } else {
             assert!(!source.exists());
