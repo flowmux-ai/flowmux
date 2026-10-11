@@ -376,7 +376,7 @@ pub enum GtkCommand {
         pane: PaneId,
         path: PathBuf,
     },
-    /// Open a Ctrl-clicked terminal Markdown path in the Markdown viewer binary.
+    /// Open a Ctrl+Shift-clicked terminal Markdown path in the Markdown viewer binary.
     OpenMarkdownViewer {
         pane: PaneId,
         path: PathBuf,

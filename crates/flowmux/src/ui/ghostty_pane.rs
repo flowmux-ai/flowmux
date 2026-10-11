@@ -886,6 +886,7 @@ impl GhosttyPane {
             callbacks.on_open_url.clone(),
             callbacks.on_open_image.clone(),
             callbacks.on_open_markdown.clone(),
+            callbacks.on_open_editor.clone(),
             last_selection.clone(),
         );
         install_ibus_nav_workaround(&term, smart_page_enabled);
@@ -1344,19 +1345,14 @@ fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -
 /// A match may include trailing sentence punctuation, so trim it immediately
 /// before dispatch.
 const URL_REGEX_PATTERN: &str = r#"(?i)(?:https?|ftp|file)://[^\s<>"'`]+"#;
-// A leading parenthesis belongs to the filename only when its balanced group
-// ends before the extension. Otherwise start inside the surrounding delimiter.
+// Balanced parentheses belong to filenames when followed by more path text.
+// Otherwise start inside the surrounding delimiter.
 // The recursive group also preserves names such as `(draft(v2)).md`.
 // Possessive inner text avoids exhausting VTE's match limit on wrappers.
-const IMAGE_PATH_REGEX_PATTERN: &str = r#"(?ix)
+const FILE_PATH_REGEX_PATTERN: &str = r#"(?x)
     (?<![^\s<>"'`(])
-    (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))|[^\s<>"'`:(])
-    [^\s<>"'`:]*\.(?:gif|svg|png|jpe?g|webp?|lottie|json)
-"#;
-const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?ix)
-    (?<![^\s<>"'`(])
-    (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))|[^\s<>"'`:(])
-    [^\s<>"'`:]*\.(?:md|markdown|mdown|mkd|mkdn)
+    (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))(?=[^\s<>"'`:),;!?])
+        |[^\s<>"'`:()\[\]{},;!?])+
 "#;
 
 /// PCRE2 compile flags.
@@ -1394,14 +1390,13 @@ fn terminal_url_allowed(url: &str, is_ssh: bool) -> bool {
 #[derive(Debug, PartialEq, Eq)]
 enum TerminalClickTarget {
     Url(String),
-    Image(PathBuf),
-    Markdown(PathBuf),
+    File(PathBuf),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct PendingTerminalClick {
     target: TerminalClickTarget,
-    open_in_system_browser: bool,
+    shift_pressed: bool,
 }
 
 #[derive(Default)]
@@ -1410,10 +1405,10 @@ struct TerminalClickActivation {
 }
 
 impl TerminalClickActivation {
-    fn press(&mut self, target: TerminalClickTarget, open_in_system_browser: bool) {
+    fn press(&mut self, target: TerminalClickTarget, shift_pressed: bool) {
         self.pending = Some(PendingTerminalClick {
             target,
-            open_in_system_browser,
+            shift_pressed,
         });
     }
 
@@ -1430,50 +1425,41 @@ fn is_primary_button_release(event_type: gtk::gdk::EventType, button: Option<u32
     event_type == gtk::gdk::EventType::ButtonRelease && button == Some(gtk::gdk::BUTTON_PRIMARY)
 }
 
-fn terminal_image_path(raw: &str, cwd: Option<&std::path::Path>) -> Option<PathBuf> {
-    let trimmed = raw.trim_end_matches(|c: char| {
-        matches!(
-            c,
-            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '`'
-        )
-    });
+fn terminal_file_path(raw: &str, cwd: Option<&std::path::Path>) -> Option<PathBuf> {
+    let trimmed = raw.trim_end_matches(['.', ',']);
     let path = PathBuf::from(trimmed);
-    if !is_supported_image_path(&path) {
-        return None;
-    }
-
     if path.is_absolute() {
         return Some(path);
     }
-
     if let Some(rest) = trimmed.strip_prefix("~/") {
         return std::env::var_os("HOME").map(|home| PathBuf::from(home).join(rest));
     }
-
     cwd.map(|cwd| cwd.join(path))
 }
 
-fn terminal_markdown_path(raw: &str, cwd: Option<&std::path::Path>) -> Option<PathBuf> {
-    let trimmed = raw.trim_end_matches(|c: char| {
-        matches!(
-            c,
-            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '`'
-        )
-    });
-    let path = PathBuf::from(trimmed);
-    if !is_supported_markdown_path(&path) {
-        return None;
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalFileKind {
+    Image,
+    Markdown,
+    Editor,
+}
 
-    if path.is_absolute() {
-        return Some(path);
+fn terminal_file_kind(path: &std::path::Path) -> Option<TerminalFileKind> {
+    let viewer = if is_supported_image_path(path) {
+        Some(TerminalFileKind::Image)
+    } else if is_supported_markdown_path(path) {
+        Some(TerminalFileKind::Markdown)
+    } else {
+        None
+    };
+    if let Some(viewer) = viewer {
+        if !std::fs::metadata(path).ok()?.is_file() {
+            return None;
+        }
+        std::fs::File::open(path).ok()?;
+        return Some(viewer);
     }
-
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        return std::env::var_os("HOME").map(|home| PathBuf::from(home).join(rest));
-    }
-
-    cwd.map(|cwd| cwd.join(path))
+    flowmux_editor::is_probably_editable_text_file(path).then_some(TerminalFileKind::Editor)
 }
 
 fn is_supported_image_path(path: &std::path::Path) -> bool {
@@ -1482,7 +1468,7 @@ fn is_supported_image_path(path: &std::path::Path) -> bool {
         .is_some_and(|ext| {
             matches!(
                 ext.to_ascii_lowercase().as_str(),
-                "gif" | "svg" | "png" | "jpg" | "jpeg" | "web" | "webp" | "lottie" | "json"
+                "gif" | "svg" | "png" | "jpg" | "jpeg" | "web" | "webp" | "lottie"
             )
         })
 }
@@ -1577,6 +1563,214 @@ fn arm_title_coalesce_window(
     );
 }
 
+fn terminal_file_candidate(
+    term: &vte::Terminal,
+    regex: &vte::Regex,
+    x: f64,
+    y: f64,
+) -> Option<String> {
+    use glib::translate::{from_glib_full, ToGlibPtr};
+    let mut regex_ptr = regex.to_glib_none().0;
+    let mut matched = std::ptr::null_mut();
+    // vte4 0.8 casts &[&Regex] directly to VteRegex**; pass the actual C pointer instead.
+    // SAFETY: both borrowed objects outlive the call; VTE allocates the optional match.
+    let value: Option<glib::GString> = unsafe {
+        vte::ffi::vte_terminal_check_regex_simple_at(
+            term.to_glib_none().0,
+            x,
+            y,
+            &mut regex_ptr,
+            1,
+            0,
+            &mut matched,
+        );
+        from_glib_full(matched)
+    };
+    value
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty() && value.len() <= 4096)
+}
+
+fn reset_terminal_link_matches(term: &vte::Terminal) {
+    // VTE caches both matching and nonmatching spans until all matches are cleared.
+    term.match_remove_all();
+    let regex = vte::Regex::for_match(URL_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
+        .expect("static terminal URL regex");
+    let tag = term.match_add_regex(&regex, 0);
+    term.match_set_cursor_name(tag, "pointer");
+}
+
+fn refresh_terminal_link_hint(term: &vte::Terminal, position: Option<(f64, f64)>) {
+    // shortcut: use VTE’s named motion controller until a public hover refresh API is available.
+    for controller in term
+        .observe_controllers()
+        .iter::<glib::Object>()
+        .flatten()
+        .filter_map(|object| object.downcast::<gtk::EventController>().ok())
+    {
+        if controller.name().as_deref() == Some("vte-motion-controller") {
+            if let Some((x, y)) = position {
+                controller.emit_by_name::<()>("enter", &[&x, &y]);
+            } else {
+                controller.emit_by_name::<()>("leave", &[]);
+            }
+            break;
+        }
+    }
+}
+
+#[derive(Default)]
+struct FileLinkHover {
+    position: Option<(f64, f64)>,
+    key: Option<(String, Option<PathBuf>)>,
+    checked_at: Option<Instant>,
+    busy: bool,
+    tag: Option<i32>,
+    timer: Option<glib::SourceId>,
+}
+
+impl FileLinkHover {
+    fn clear_match(&mut self, term: &vte::Terminal) {
+        if self.tag.take().is_some() {
+            reset_terminal_link_matches(term);
+            refresh_terminal_link_hint(term, self.position);
+        }
+    }
+}
+
+fn refresh_file_link_hover(
+    term: &vte::Terminal,
+    regex: &vte::Regex,
+    pid: &Rc<Cell<Option<i32>>>,
+    state: &Rc<RefCell<FileLinkHover>>,
+) {
+    let Some((x, y)) = state.borrow().position else {
+        return;
+    };
+    let raw = terminal_file_candidate(term, regex, x, y);
+    let cwd = terminal_current_dir(term, pid);
+    let key = raw.map(|raw| (raw, cwd));
+    let mut hover = state.borrow_mut();
+    if hover.key != key {
+        hover.clear_match(term);
+        hover.key = key.clone();
+        hover.checked_at = None;
+    }
+    if hover.busy
+        || hover
+            .checked_at
+            .is_some_and(|time| time.elapsed() < Duration::from_millis(750))
+    {
+        return;
+    }
+    let Some((raw, cwd)) = key.clone() else {
+        return;
+    };
+    let Some(path) = terminal_file_path(&raw, cwd.as_deref()) else {
+        return;
+    };
+    hover.busy = true;
+    drop(hover);
+    let state = state.clone();
+    let weak = term.downgrade();
+    let candidate_regex = regex.clone();
+    let pid = pid.clone();
+    glib::spawn_future_local(async move {
+        let valid = gtk::gio::spawn_blocking(move || terminal_file_kind(&path).is_some())
+            .await
+            .unwrap_or(false);
+        let mut hover = state.borrow_mut();
+        hover.busy = false;
+        let Some(term) = weak.upgrade() else { return };
+        let current = hover.position.and_then(|(x, y)| {
+            terminal_file_candidate(&term, &candidate_regex, x, y)
+                .map(|raw| (raw, terminal_current_dir(&term, &pid)))
+        });
+        if current != key || hover.key != key {
+            return;
+        }
+        hover.checked_at = Some(Instant::now());
+        if !valid {
+            hover.clear_match(&term);
+        } else if hover.tag.is_none() {
+            // Register only the validated token, never a broad extension match.
+            let pattern = format!(
+                r#"(?<![^\s<>"'`(]){}(?![^\s<>"'`:),;!?])"#,
+                escape_pcre_literal(&raw)
+            );
+            if let Ok(regex) = vte::Regex::for_match(&pattern, URL_REGEX_COMPILE_FLAGS) {
+                reset_terminal_link_matches(&term);
+                let tag = term.match_add_regex(&regex, 0);
+                term.match_set_cursor_name(tag, "pointer");
+                hover.tag = Some(tag);
+                refresh_terminal_link_hint(&term, hover.position);
+            }
+        }
+    });
+}
+
+fn install_file_link_hover(term: &vte::Terminal, regex: vte::Regex, pid: Rc<Cell<Option<i32>>>) {
+    let state = Rc::new(RefCell::new(FileLinkHover::default()));
+    let motion = gtk::EventControllerMotion::new();
+    motion.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = term.downgrade();
+    let hover = state.clone();
+    let motion_regex = regex.clone();
+    motion.connect_motion(move |_, x, y| {
+        let mut hover = hover.borrow_mut();
+        hover.position = Some((x, y));
+        // Drop the previous hint before VTE handles motion onto another token.
+        if let Some(term) = weak.upgrade() {
+            if let Some((matched, _)) = hover.key.as_ref() {
+                let current = terminal_file_candidate(&term, &motion_regex, x, y);
+                if current.as_deref() != Some(matched) {
+                    hover.clear_match(&term);
+                    hover.key = None;
+                    hover.checked_at = None;
+                }
+            }
+        }
+    });
+    let weak = term.downgrade();
+    let hover = state.clone();
+    motion.connect_enter(move |_, x, y| {
+        hover.borrow_mut().position = Some((x, y));
+        if hover.borrow().timer.is_some() {
+            return;
+        }
+        let weak = weak.clone();
+        let state = hover.clone();
+        let regex = regex.clone();
+        let pid = pid.clone();
+        // Only the hovered terminal polls; one bounded read at a time, including negative results.
+        let timer = glib::timeout_add_local(Duration::from_millis(75), move || {
+            let Some(term) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if state.borrow().position.is_none() {
+                return glib::ControlFlow::Break;
+            }
+            refresh_file_link_hover(&term, &regex, &pid, &state);
+            glib::ControlFlow::Continue
+        });
+        hover.borrow_mut().timer = Some(timer);
+    });
+    let weak = term.downgrade();
+    motion.connect_leave(move |_| {
+        let mut hover = state.borrow_mut();
+        hover.position = None;
+        if let Some(timer) = hover.timer.take() {
+            timer.remove();
+        }
+        hover.key = None;
+        hover.checked_at = None;
+        if let Some(term) = weak.upgrade() {
+            hover.clear_match(&term);
+        }
+    });
+    term.add_controller(motion);
+}
+
 fn install_url_link_handling(
     term: &vte::Terminal,
     pane_id: PaneId,
@@ -1585,50 +1779,16 @@ fn install_url_link_handling(
     on_open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
     on_open_image: Rc<RefCell<dyn FnMut(PaneId, PathBuf)>>,
     on_open_markdown: Rc<RefCell<dyn FnMut(PaneId, PathBuf)>>,
+    on_open_editor: Rc<RefCell<dyn FnMut(PaneId, PathBuf)>>,
     last_selection: Rc<RefCell<Option<String>>>,
 ) {
-    // 1) Compile and register the regex. If this fails, usually due to a PCRE2
-    //    build issue, link recognition is disabled while the terminal itself
-    //    keeps working.
-    let regex = match vte::Regex::for_match(URL_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to compile URL regex; link clicking disabled");
-            return;
-        }
-    };
-    let url_tag = term.match_add_regex(&regex, 0);
-    // Show a pointer cursor on hover. The pointer appears even without Ctrl,
-    // but activation requires Ctrl, matching the gnome-terminal UX pattern:
-    // always show the hint, gate the action behind the modifier.
-    term.match_set_cursor_name(url_tag, "pointer");
-    tracing::debug!(%pane_id, tag = url_tag, "URL match registered on terminal");
+    reset_terminal_link_matches(term);
 
-    let image_regex = match vte::Regex::for_match(IMAGE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to compile image path regex; image clicking disabled");
-            return;
-        }
-    };
-    let image_tag = term.match_add_regex(&image_regex, 0);
-    term.match_set_cursor_name(image_tag, "pointer");
-    tracing::debug!(%pane_id, tag = image_tag, "image path match registered on terminal");
-
-    let markdown_regex = match vte::Regex::for_match(
-        MARKDOWN_PATH_REGEX_PATTERN,
-        URL_REGEX_COMPILE_FLAGS,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to compile markdown path regex; markdown clicking disabled");
-            return;
-        }
-    };
-    let markdown_tag = term.match_add_regex(&markdown_regex, 0);
-    term.match_set_cursor_name(markdown_tag, "pointer");
-    tracing::debug!(%pane_id, tag = markdown_tag, "markdown path match registered on terminal");
+    let file_regex = vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
+        .expect("static terminal file regex");
+    if !is_ssh {
+        install_file_link_hover(term, file_regex, pid.clone());
+    }
 
     // 2) Left-click gesture. Keep it out of capture phase so VTE's keyboard
     //    IMContext stays on the same path as a plain terminal widget.
@@ -1676,21 +1836,19 @@ fn install_url_link_handling(
             .check_hyperlink_at(x, y)
             .map(|g| TerminalClickTarget::Url(g.to_string()))
             .or_else(|| {
-                let (m, tag) = term_widget.check_match_at(x, y);
+                let (m, _) = term_widget.check_match_at(x, y);
                 let raw = m.map(|g| g.to_string())?;
-                if tag == image_tag && !is_ssh {
-                    let cwd = terminal_current_dir(&term_widget, &pid);
-                    terminal_image_path(&raw, cwd.as_deref()).map(TerminalClickTarget::Image)
-                } else if tag == markdown_tag && !is_ssh {
-                    let cwd = terminal_current_dir(&term_widget, &pid);
-                    terminal_markdown_path(&raw, cwd.as_deref()).map(TerminalClickTarget::Markdown)
-                } else if tag == url_tag {
+                if raw.contains("://") {
                     Some(TerminalClickTarget::Url(raw))
+                } else if !is_ssh {
+                    let cwd = terminal_current_dir(&term_widget, &pid);
+                    terminal_file_path(&raw, cwd.as_deref()).map(TerminalClickTarget::File)
                 } else {
                     None
                 }
             });
 
+        tracing::debug!(?link, x, y, "terminal Ctrl-click target");
         let Some(link) = link else {
             // Ctrl was held, but the click was not on a URL. Treat it as a
             // selection attempt and release the sequence so VTE features such
@@ -1721,6 +1879,7 @@ fn install_url_link_handling(
     let release = gtk::EventControllerLegacy::new();
     release.set_propagation_phase(gtk::PropagationPhase::Capture);
     let term_widget = term.downgrade();
+    let click_for_release = click.clone();
     release.connect_event(move |_, event| {
         let Some(term_widget) = term_widget.upgrade() else {
             return glib::Propagation::Proceed;
@@ -1734,17 +1893,29 @@ fn install_url_link_handling(
         let Some(pending) = activation.borrow_mut().release() else {
             return glib::Propagation::Proceed;
         };
+        // The capture handler consumes release, so the bubble gesture needs an explicit reset.
+        click_for_release.reset();
         match pending.target {
-            TerminalClickTarget::Image(path) => {
-                tracing::info!(%pane_id, path = %path.display(), "Ctrl+click on terminal image path");
-                (on_open_image.borrow_mut())(pane_id, path);
-            }
-            TerminalClickTarget::Markdown(path) => {
-                tracing::info!(%pane_id, path = %path.display(), "Ctrl+click on terminal markdown path");
-                (on_open_markdown.borrow_mut())(pane_id, path);
+            TerminalClickTarget::File(path) => {
+                let on_open_image = on_open_image.clone();
+                let on_open_markdown = on_open_markdown.clone();
+                let on_open_editor = on_open_editor.clone();
+                glib::spawn_future_local(async move {
+                    let checked = path.clone();
+                    let kind = gtk::gio::spawn_blocking(move || terminal_file_kind(&checked))
+                        .await.ok().flatten();
+                    tracing::debug!(?kind, path = %path.display(), "terminal file activation");
+                    let callback = match kind {
+                        Some(TerminalFileKind::Image) => on_open_image,
+                        Some(TerminalFileKind::Markdown) if pending.shift_pressed => on_open_markdown,
+                        Some(TerminalFileKind::Markdown | TerminalFileKind::Editor) => on_open_editor,
+                        None => return,
+                    };
+                    (callback.borrow_mut())(pane_id, path);
+                });
             }
             TerminalClickTarget::Url(url) => {
-                if pending.open_in_system_browser {
+                if pending.shift_pressed {
                     // Ctrl+Shift+click → open in the system default browser instead of
                     // an in-app browser tab.
                     tracing::info!(%pane_id, %url, "Ctrl+Shift+click on terminal URL → open in system browser");
@@ -3215,8 +3386,8 @@ mod tests {
     }
 
     #[test]
-    fn image_path_regex_compiles() {
-        vte::Regex::for_match(IMAGE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
+    fn file_path_regex_compiles() {
+        vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
             .expect("image path regex compiles");
     }
 
@@ -3224,15 +3395,15 @@ mod tests {
     fn terminal_click_activation_waits_for_release_and_runs_once() {
         let mut activation = TerminalClickActivation::default();
         activation.press(
-            TerminalClickTarget::Image(PathBuf::from("/tmp/render.png")),
+            TerminalClickTarget::File(PathBuf::from("/tmp/render.png")),
             false,
         );
 
         assert_eq!(
             activation.release(),
             Some(PendingTerminalClick {
-                target: TerminalClickTarget::Image(PathBuf::from("/tmp/render.png")),
-                open_in_system_browser: false,
+                target: TerminalClickTarget::File(PathBuf::from("/tmp/render.png")),
+                shift_pressed: false,
             })
         );
         assert_eq!(activation.release(), None);
@@ -3302,53 +3473,154 @@ mod tests {
     }
 
     #[test]
-    fn terminal_image_path_accepts_absolute_supported_paths() {
+    fn terminal_file_links_resolve_and_validate_text_without_extension_allowlist() {
+        let root = tempfile::tempdir().unwrap();
+        for name in [
+            "main.cc",
+            "main.c",
+            "main.cpp",
+            "main.dart",
+            "index.html",
+            "app.js",
+            "data.json",
+            "notes.txt",
+            "unknown.language",
+            "Dockerfile",
+            ".gitignore",
+            "한글.rs",
+        ] {
+            let path = root.path().join(name);
+            std::fs::write(&path, "hello\n").unwrap();
+            assert_eq!(
+                terminal_file_path(name, Some(root.path())),
+                Some(path.clone())
+            );
+            assert_eq!(
+                terminal_file_path(path.to_str().unwrap(), None),
+                Some(path.clone())
+            );
+            assert_eq!(terminal_file_kind(&path), Some(TerminalFileKind::Editor));
+        }
+        assert_eq!(terminal_file_path("main.rs", None), None);
+        assert_eq!(terminal_file_kind(&root.path().join("absent.rs")), None);
+        assert_eq!(terminal_file_kind(root.path()), None);
+        let binary = root.path().join("binary.txt");
+        std::fs::write(&binary, b"hello\0world").unwrap();
+        assert_eq!(terminal_file_kind(&binary), None);
+        let large = std::fs::File::create(root.path().join("huge.txt")).unwrap();
+        large
+            .set_len(flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES + 1)
+            .unwrap();
+        assert_eq!(terminal_file_kind(&root.path().join("huge.txt")), None);
+        std::fs::rename(root.path().join("huge.txt"), root.path().join("huge.md")).unwrap();
         assert_eq!(
-            terminal_image_path("/tmp/render.PNG,", None),
-            Some(PathBuf::from("/tmp/render.PNG"))
+            terminal_file_kind(&root.path().join("huge.md")),
+            Some(TerminalFileKind::Markdown)
         );
+        for (name, kind) in [
+            ("README.md", TerminalFileKind::Markdown),
+            ("render.png", TerminalFileKind::Image),
+            ("anim.lottie", TerminalFileKind::Image),
+        ] {
+            let path = root.path().join(name);
+            std::fs::write(&path, "fixture").unwrap();
+            assert_eq!(terminal_file_kind(&path), Some(kind));
+        }
+        std::os::unix::fs::symlink(root.path().join("missing"), root.path().join("broken.rs"))
+            .unwrap();
+        assert_eq!(terminal_file_kind(&root.path().join("broken.rs")), None);
+        std::os::unix::fs::symlink(root.path().join("main.cc"), root.path().join("linked.cc"))
+            .unwrap();
         assert_eq!(
-            terminal_image_path("/tmp/render.web", None),
-            Some(PathBuf::from("/tmp/render.web"))
+            terminal_file_kind(&root.path().join("linked.cc")),
+            Some(TerminalFileKind::Editor)
         );
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let relative = terminal_file_path("../main.cc", Some(&root.path().join("nested"))).unwrap();
         assert_eq!(
-            terminal_image_path("/tmp/vector.svg", None),
-            Some(PathBuf::from("/tmp/vector.svg"))
-        );
-        assert_eq!(
-            terminal_image_path("/home/user/anim.lottie)", None),
-            Some(PathBuf::from("/home/user/anim.lottie"))
-        );
-        assert_eq!(
-            terminal_image_path("/home/user/bodymovin.json", None),
-            Some(PathBuf::from("/home/user/bodymovin.json"))
+            terminal_file_kind(&relative),
+            Some(TerminalFileKind::Editor)
         );
     }
 
-    #[test]
-    fn terminal_image_path_rejects_relative_or_unsupported_paths() {
-        assert_eq!(terminal_image_path("render.png", None), None);
-        assert_eq!(terminal_image_path("/tmp/readme.txt", None), None);
-    }
-
-    #[test]
-    fn terminal_image_path_resolves_ls_relative_paths_against_cwd() {
-        let cwd = PathBuf::from("/home/user/images");
-
-        assert_eq!(
-            terminal_image_path("render.png", Some(&cwd)),
-            Some(PathBuf::from("/home/user/images/render.png"))
+    #[gtk::test]
+    async fn terminal_file_hover_registers_only_existing_files_and_expires_results() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("exists.cc"), "int main() {}\n").unwrap();
+        let term = vte::Terminal::new();
+        let window = gtk::Window::new();
+        window.set_default_size(900, 600);
+        window.set_child(Some(&term));
+        window.present();
+        term.feed(
+            format!(
+                "\x1b]7;file://{}\x07exists.cc missing.cc\r\n",
+                root.path().display()
+            )
+            .as_bytes(),
         );
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let regex =
+            vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS).unwrap();
+        let x = term.char_width() as f64 * 0.5;
+        let y = term.char_height() as f64 * 0.5;
+        let state = Rc::new(RefCell::new(FileLinkHover {
+            position: Some((x, y)),
+            ..Default::default()
+        }));
+        let pid = Rc::new(Cell::new(None));
+        assert!(term.check_match_at(x, y).0.is_none());
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(term.check_match_at(x, y).0.as_deref(), Some("exists.cc"));
+        let first_check = state.borrow().checked_at;
+        refresh_file_link_hover(&term, &regex, &pid, &state);
         assert_eq!(
-            terminal_image_path("icons/vector.svg", Some(&cwd)),
-            Some(PathBuf::from("/home/user/images/icons/vector.svg"))
+            state.borrow().checked_at,
+            first_check,
+            "reuse cached result"
         );
-    }
-
-    #[test]
-    fn markdown_path_regex_compiles() {
-        vte::Regex::for_match(MARKDOWN_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
-            .expect("markdown path regex compiles");
+        std::fs::remove_file(root.path().join("exists.cc")).unwrap();
+        state.borrow_mut().checked_at = None;
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(
+            term.check_match_at(x, y).0.is_none(),
+            "deleted file loses underline"
+        );
+        state.borrow_mut().position = Some((x + term.char_width() as f64 * 10.0, y));
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(
+            state.borrow().tag.is_none(),
+            "missing path never registered"
+        );
+        assert!(
+            state.borrow().checked_at.is_some(),
+            "negative results cached too"
+        );
+        std::fs::write(root.path().join("missing.cc"), "now exists").unwrap();
+        state.borrow_mut().checked_at = None;
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(state.borrow().tag.is_some(), "new files become clickable");
+        let elsewhere = tempfile::tempdir().unwrap();
+        term.feed(format!("\x1b]7;file://{}\x07", elsewhere.path().display()).as_bytes());
+        glib::timeout_future(Duration::from_millis(50)).await;
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(
+            state.borrow().tag.is_none(),
+            "cwd change invalidates relative paths"
+        );
+        // An in-flight result cannot restore a hint after the pointer has left.
+        state.borrow_mut().position = Some((x, y));
+        state.borrow_mut().checked_at = None;
+        refresh_file_link_hover(&term, &regex, &pid, &state);
+        state.borrow_mut().position = None;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(state.borrow().tag.is_none());
+        window.close();
     }
 
     #[gtk::test]
@@ -3375,18 +3647,10 @@ mod tests {
                 "/tmp/fm-gui-bup2n_kv/agents-working.md",
             ),
         ];
-        for (pattern, extension) in [
-            (MARKDOWN_PATH_REGEX_PATTERN, "md"),
-            (IMAGE_PATH_REGEX_PATTERN, "png"),
-            (IMAGE_PATH_REGEX_PATTERN, "SVG"),
-            (IMAGE_PATH_REGEX_PATTERN, "jpg"),
-            (IMAGE_PATH_REGEX_PATTERN, "jpeg"),
-            (IMAGE_PATH_REGEX_PATTERN, "gif"),
-            (IMAGE_PATH_REGEX_PATTERN, "webp"),
-            (IMAGE_PATH_REGEX_PATTERN, "web"),
-            (IMAGE_PATH_REGEX_PATTERN, "lottie"),
-            (IMAGE_PATH_REGEX_PATTERN, "json"),
+        for extension in [
+            "md", "png", "SVG", "jpg", "jpeg", "gif", "webp", "lottie", "json", "cc", "txt", "dart",
         ] {
+            let pattern = FILE_PATH_REGEX_PATTERN;
             let term = vte::Terminal::new();
             let regex = vte::Regex::for_match(pattern, URL_REGEX_COMPILE_FLAGS)
                 .expect("file path regex compiles");
@@ -3426,33 +3690,6 @@ mod tests {
             }
             window.close();
         }
-    }
-
-    #[test]
-    fn terminal_markdown_path_resolves_ls_relative_paths_against_cwd() {
-        let cwd = PathBuf::from("/home/user/docs");
-
-        assert_eq!(
-            terminal_markdown_path("README.md", Some(&cwd)),
-            Some(PathBuf::from("/home/user/docs/README.md"))
-        );
-        assert_eq!(
-            terminal_markdown_path("guides/install.markdown,", Some(&cwd)),
-            Some(PathBuf::from("/home/user/docs/guides/install.markdown"))
-        );
-        assert_eq!(
-            terminal_markdown_path("./notes.mkd", Some(&cwd)),
-            Some(PathBuf::from("/home/user/docs/./notes.mkd"))
-        );
-    }
-
-    #[test]
-    fn terminal_markdown_path_rejects_non_markdown_paths() {
-        let cwd = PathBuf::from("/home/user/docs");
-
-        assert_eq!(terminal_markdown_path("README.txt", Some(&cwd)), None);
-        assert_eq!(terminal_markdown_path("image.png", Some(&cwd)), None);
-        assert_eq!(terminal_markdown_path("README.md", None), None);
     }
 
     #[test]

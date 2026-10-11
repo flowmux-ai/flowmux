@@ -409,6 +409,18 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::OpenImageViewer { pane, path });
                 }))
             },
+            on_open_editor: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane, path| {
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::OpenFileInEditor {
+                            path,
+                            source_pane: Some(pane),
+                        },
+                    );
+                }))
+            },
             on_open_markdown: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, path| {

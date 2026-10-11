@@ -113,8 +113,12 @@ right away without a restart.
 ### Image and Markdown viewers
 
 Ctrl+click an image path to open it, or double-click it in the file browser.
-SVG stays sharp at any size and Lottie animations play right away. Markdown
-opens as a formatted preview that refreshes every time you save, so you can
+SVG stays sharp at any size and Lottie animations play right away. In the terminal,
+Ctrl+click a source or text file path (including Markdown and JSON) to open a new
+editor tab. Ctrl+Shift+click a Markdown path to open its formatted preview.
+Only existing, readable files show a hover underline; relative paths resolve
+against the terminal's current directory, and absolute paths work too.
+The Markdown preview refreshes every time you save, so you can
 write in the built-in editor and watch the result side by side. Images require
 [ThorVG](docs/setup.md#thorvg-image-viewer).
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Ctrl-click parenthesized image paths in an isolated Flowmux GUI (Linux).
+"""Exercise validated file links and Markdown click modifiers in an isolated Flowmux GUI (Linux).
 
 Requires Xvfb, python-xlib and Pillow.
 """
@@ -13,7 +13,7 @@ import sys
 import time
 import unicodedata
 
-from PIL import Image
+from PIL import Image, ImageChops
 from Xlib import X, XK, display, error, protocol
 from Xlib.ext import xtest
 
@@ -48,13 +48,22 @@ def main():
         created = h.rpc(socket, "workspace_create", name="Image links", root=str(h.root))
         workspace = h.workspace(socket, created["workspace_created"]["id"])
         pane = workspace["panes"][0]["id"]
+        terminal = workspace["panes"][0]["tabs"][0]["id"]
+        workspace_id = workspace["id"]
 
-        def windows():
+        def windows(include_markdown=False):
             result = []
             for window in connection.screen().root.query_tree().children:
                 try:
                     pid = window.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
-                    if (pid is not None and int(pid.value[0]) == process.pid
+                    owned = pid is not None and int(pid.value[0]) == process.pid
+                    if include_markdown and pid is not None and not owned:
+                        try:
+                            status = Path(f"/proc/{int(pid.value[0])}/status").read_text()
+                            owned = f"PPid:\t{process.pid}\n" in status
+                        except FileNotFoundError:
+                            pass
+                    if (owned
                             and window.get_attributes().map_state == X.IsViewable):
                         result.append(window)
                 except error.BadWindow:
@@ -80,15 +89,22 @@ def main():
                 assert width % 10 == 0, width
                 return left, top, width // 10, height
 
-        def click(prefix, geometry):
+        def click(prefix, geometry, shift=False):
             left, top, cell_width, cell_height = geometry
             column = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in prefix)
             main_window.set_input_focus(X.RevertToParent, X.CurrentTime)
             control = connection.keysym_to_keycode(XK.string_to_keysym("Control_L"))
+            shift_key = connection.keysym_to_keycode(XK.string_to_keysym("Shift_L"))
             xtest.fake_input(connection, X.MotionNotify, x=left + column * cell_width + cell_width // 2, y=top + cell_height + cell_height // 2)
+            connection.sync()
+            time.sleep(.25)  # Wait for the asynchronous path validation.
             xtest.fake_input(connection, X.KeyPress, control)
+            if shift:
+                xtest.fake_input(connection, X.KeyPress, shift_key)
             xtest.fake_input(connection, X.ButtonPress, 1)
             xtest.fake_input(connection, X.ButtonRelease, 1)
+            if shift:
+                xtest.fake_input(connection, X.KeyRelease, shift_key)
             xtest.fake_input(connection, X.KeyRelease, control)
             connection.sync()
 
@@ -127,6 +143,95 @@ def main():
                 data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
             connection.sync()
             gui.wait_for(lambda: len(windows()) == 1, "viewer closed")
+        def editor_tabs():
+            return [tab for p in h.workspace(socket, workspace_id)["panes"]
+                    for tab in p["tabs"] if tab["kind"] == "editor"]
+
+        def show_path(path_text):
+            h.rpc(socket, "surface_focus", pane=pane, surface=terminal)
+            xtest.fake_input(connection, X.MotionNotify, x=1, y=1)
+            connection.sync()
+            h.send(socket, pane, "printf '\\033[2J\\033[H\\033[48;2;255;0;255m          \\033[0m\\r\\n%s\\n' " + shlex.quote(path_text))
+            gui.wait_for(lambda: path_text in h.screen(socket, pane), "source path output")
+            return gui.wait_for(marker, "terminal cell marker")
+
+        def assert_hover(path_text, geometry, expected):
+            left, top, cw, ch = geometry
+            box = (left, top + ch, left + len(path_text) * cw, top + 2 * ch)
+            time.sleep(.15)
+            before = screenshot().crop(box)
+            xtest.fake_input(connection, X.MotionNotify, x=left + cw // 2, y=top + ch + ch // 2)
+            connection.sync()
+            time.sleep(1)
+            after = screenshot().crop(box)
+            difference = ImageChops.difference(before, after)
+            changed = max(sum(difference.getpixel((x, y)) != (0, 0, 0)
+                              for x in range(difference.width)) for y in range(ch))
+            screenshot().save(h.root / ("hover-valid.png" if expected else "hover-invalid.png"))
+            assert (changed > difference.width * .7) == expected, (path_text, changed, difference.width)
+
+        for name, absolute in [("main.cc", False), ("main.c", False), ("main.cpp", True),
+                               ("main.dart", False), ("index.html", False), ("app.js", False),
+                               ("settings.json", False), ("notes.txt", False), ("Dockerfile", False),
+                               ("readme.md", False), ("guide.MARKDOWN", True)]:
+            file_path = h.root / name
+            file_path.write_text("// terminal editor link fixture\n")
+            path_text = str(file_path) if absolute else name
+            geometry = show_path(path_text)
+            assert_hover(path_text, geometry, True)
+            previous = len(editor_tabs())
+            click(path_text[:len(path_text) // 2], geometry)
+            tabs = gui.wait_for(lambda: editor_tabs() if len(editor_tabs()) == previous + 1 else None,
+                                "Ctrl-click adds editor tab")
+            gui.wait_for(lambda: editor_tabs()[-1]["title"] == name, "editor file title")
+            if name == "settings.json":
+                time.sleep(3)
+                screenshot().save(h.root / "json-editor.png")
+                for key, modifiers in [("End", ["Control_L"]), ("x", []), ("s", ["Control_L"])]:
+                    codes = [connection.keysym_to_keycode(XK.string_to_keysym(k)) for k in modifiers + [key]]
+                    for code in codes:
+                        xtest.fake_input(connection, X.KeyPress, code)
+                    for code in reversed(codes):
+                        xtest.fake_input(connection, X.KeyRelease, code)
+                    connection.sync()
+                    time.sleep(.15)
+                gui.wait_for(lambda: file_path.read_text().endswith("x"), "clicked document is loaded and editable")
+            assert len(windows(include_markdown=True)) == 1, "source file opened a viewer"
+            h.pass_check(f"{path_text}: hover underline, Ctrl-click adds editor tab")
+
+            if file_path.suffix.lower() in (".md", ".markdown"):
+                geometry = show_path(path_text)
+                previous = len(editor_tabs())
+                click(path_text[:len(path_text) // 2], geometry, shift=True)
+                viewer = gui.wait_for(lambda: next((w for w in windows(include_markdown=True)
+                                                   if w.id != main_window.id), None),
+                                      "Ctrl+Shift-click opens Markdown viewer")
+                title = viewer.get_full_property(connection.intern_atom("_NET_WM_NAME"),
+                                                 connection.intern_atom("UTF8_STRING"))
+                assert title.value.decode() == name, title.value
+                assert len(editor_tabs()) == previous, "Markdown preview added an editor tab"
+                screenshot().save(h.root / f"markdown-viewer-{name}.png")
+                viewer.send_event(protocol.event.ClientMessage(
+                    window=viewer, client_type=connection.intern_atom("WM_PROTOCOLS"),
+                    data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
+                connection.sync()
+                gui.wait_for(lambda: len(windows(include_markdown=True)) == 1, "Markdown viewer closed")
+                h.pass_check(f"{path_text}: Ctrl+Shift-click opens Markdown viewer without adding a tab")
+
+        for name, content in [("missing.cc", None), ("missing.md", None), ("binary.txt", b"binary\x00data")]:
+            if content is not None:
+                (h.root / name).write_bytes(content)
+            geometry = show_path(name)
+            assert_hover(name, geometry, False)
+            previous = len(editor_tabs())
+            click(name[:len(name) // 2], geometry)
+            time.sleep(.3)
+            assert len(editor_tabs()) == previous, "invalid file opened editor"
+            if name.endswith(".md"):
+                click(name[:len(name) // 2], geometry, shift=True)
+                time.sleep(.3)
+                assert len(windows(include_markdown=True)) == 1, "missing Markdown opened a viewer"
+            h.pass_check(f"{name}: no underline or editor tab")
         h.close_window(process)
     finally:
         if connection:
