@@ -128,6 +128,39 @@ def main():
             Image.frombytes("RGB", (geometry.width, geometry.height), raw.data,
                             "raw", "BGRX").save(h.root / f"{name}.png")
 
+        def assert_hover_outline(actor, name):
+            title = room("Product studio").get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            pointer_click(title.x + title.width / 2, title.y + title.height / 2)
+            time.sleep(1)  # Let tooltip browse mode expire before measuring the border.
+            screenshot(f"{name}-before")
+            rect = actor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            point = connection.screen().root.translate_coords(native_window(), rect.x, rect.y)
+            before = Image.open(h.root / f"{name}-before.png")
+            xtest.fake_input(connection, X.MotionNotify,
+                             x=point.x + rect.width // 2, y=point.y + rect.height // 2)
+            connection.sync()
+            screenshot(name)
+            after = Image.open(h.root / f"{name}.png")
+            # AT-SPI reports unscaled button sizes; measure the painted vertical edges.
+            edges = {}
+            for x in range(point.x - rect.width, point.x + rect.width * 2):
+                rows = []
+                for y in range(point.y, point.y + rect.height * 2):
+                    old, new = before.getpixel((x, y)), after.getpixel((x, y))
+                    r, g, b = new
+                    if r > 140 and .7 * r < g < r and b < .85 * r and sum(abs(a - b) for a, b in zip(old, new)) > 30:
+                        rows.append(y)
+                if len(rows) > rect.height * .4:
+                    edges[x] = rows
+            assert len(edges) >= 2, "hover must paint both character outline edges"
+            left, right = min(edges), max(edges)
+            top = min(min(edges[left]), min(edges[right]))
+            bottom = max(max(edges[left]), max(edges[right]))
+            ratio = (bottom - top + 1) / (right - left + 1)
+            h.log("hover_outline", name=name, bounds=(left, top, right, bottom), ratio=ratio)
+            assert 1.4 < ratio < 1.6, f"outline must match the 24x36 sprite, not the 16x38 hit area: {ratio}"
+            h.pass_check(f"character hover outline encloses the sprite at {name}")
+
         def packed_floor(name):
             # Offices keep fixed 16:9 floor plans at one shared scale, so the map
             # letterboxes rather than stretching rooms; it must still use the window
@@ -247,6 +280,7 @@ def main():
                 return apart and min(a.width, b.width) > 0
             try:
                 gui.wait_for(desks_apart, "desks reflow without overlapping at each ratio")
+                assert_hover_outline(actors[0], f"hover-{width}x{height}")
             finally:
                 screenshot(f"desk-ratio-{width}x{height}")
                 h.log("desk_ratio", width=width, height=height,
@@ -488,6 +522,7 @@ def main():
         assert not any(n.get_name() == "Next office design" for n in office_nodes())
         screenshot("dense-office")
         click(find("Back to workspace"))
+        gui.wait_for(lambda: find("Back to workspace") is None, "office closes before reopening")
         click(gui.wait_for(lambda: find("AgentOffice"), "reopen saved office"))
         gui.wait_for(lambda: room("Product studio"), "saved office restored")
         assert json.loads(design_file.read_text()) == 0

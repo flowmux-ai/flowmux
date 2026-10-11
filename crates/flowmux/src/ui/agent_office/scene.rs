@@ -71,6 +71,15 @@ pub(super) struct Actor {
 }
 
 impl Actor {
+    pub fn sprite_bounds(&self) -> Rect {
+        Rect {
+            x: self.position.0.round() - f64::from(character::WIDTH) / 2.0,
+            y: self.position.1.round() - f64::from(character::HEIGHT - 1),
+            w: f64::from(character::WIDTH),
+            h: f64::from(character::HEIGHT),
+        }
+    }
+
     pub fn new(slot: usize, style: usize, status: AgentStatus, plan: Rc<Plan>) -> Self {
         Self {
             slot,
@@ -684,8 +693,8 @@ fn overlay(cr: &Context, item: &Item, design: usize, frame: u32, now: (u32, u32)
 fn draw_actor(cr: &Context, actor: &Actor, frame: u32, alpha: f64, scale: f64) {
     let (dir, flip, pose) = actor.appearance(frame);
     let surface = character::sprite(actor.style, dir, flip, pose, actor.blinking());
-    let (x, y) = (actor.position.0.round(), actor.position.1.round());
-    sprite::paint_scaled(cr, &surface, x - 12.0, y - 35.0, scale, alpha);
+    let bounds = actor.sprite_bounds();
+    sprite::paint_scaled(cr, &surface, bounds.x, bounds.y, scale, alpha);
 }
 
 /// Paints one office in art coordinates; `scale` is device pixels per art pixel.

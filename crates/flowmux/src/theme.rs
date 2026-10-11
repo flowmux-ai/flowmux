@@ -800,6 +800,7 @@ paned > separator {{
     min-width: 0;
     min-height: 0;
     box-shadow: none;
+    outline: none;
 }}
 .flowmux-office-nameplate {{
     background: alpha(#1d1530, 0.86);
@@ -808,11 +809,6 @@ paned > separator {{
     padding: 1px 6px;
     font-size: 12px;
     font-weight: 600;
-}}
-.flowmux-office-resident:hover,
-.flowmux-office-resident:focus-visible {{
-    border-color: #e3c38e;
-    background: alpha(#e3c38e, 0.12);
 }}
 .flowmux-workspace-overview-title {{
     padding: 0 0 8px 0;

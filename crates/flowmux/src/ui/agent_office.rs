@@ -405,6 +405,29 @@ impl AgentOffice {
                     pixel_scale,
                     background.as_ref(),
                 );
+                // Keep selection around the art without widening adjacent seats' hit areas.
+                for resident in room.members.iter().filter_map(|id| world.residents.get(id)) {
+                    if !resident
+                        .button
+                        .state_flags()
+                        .intersects(gtk::StateFlags::PRELIGHT | gtk::StateFlags::FOCUS_VISIBLE)
+                    {
+                        continue;
+                    }
+                    let bounds = resident.actor.sprite_bounds();
+                    cr.rectangle(bounds.x, bounds.y, bounds.w, bounds.h);
+                    cr.set_source_rgba(227.0 / 255.0, 195.0 / 255.0, 142.0 / 255.0, 0.12);
+                    let _ = cr.fill();
+                    cr.rectangle(
+                        bounds.x + 0.25,
+                        bounds.y + 0.25,
+                        bounds.w - 0.5,
+                        bounds.h - 0.5,
+                    );
+                    cr.set_source_rgb(227.0 / 255.0, 195.0 / 255.0, 142.0 / 255.0);
+                    cr.set_line_width(0.5);
+                    let _ = cr.stroke();
+                }
                 let _ = cr.restore();
             }
         });
@@ -607,6 +630,12 @@ impl AgentOffice {
                     .unwrap();
                 room.members.push(item.surface);
                 let mut resident = resident(item, slot, room.plan.clone(), &self.bridge);
+                let drawing = self.drawing.downgrade();
+                resident.button.connect_state_flags_changed(move |_, _| {
+                    if let Some(drawing) = drawing.upgrade() {
+                        drawing.queue_draw();
+                    }
+                });
                 if arrivals {
                     resident.actor.arrive();
                 }
