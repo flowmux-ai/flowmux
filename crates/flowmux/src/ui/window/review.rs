@@ -237,8 +237,15 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
             .text_range_format(vte::Format::Text, row, 0, row + 1, 0);
         let (marker, _) = terminal
             .widget
-            .text_range_format(vte::Format::Text, row - 1, 0, row, 0);
-        marker.as_deref().unwrap_or_default().trim() == format!("REVIEW_READY:{phase}")
+            .text_range_format(vte::Format::Text, 0, 0, row, 0);
+        // VTE joins soft-wrapped rows; the marker can span rows in a narrow split.
+        marker
+            .as_deref()
+            .unwrap_or_default()
+            .trim_end()
+            .lines()
+            .next_back()
+            == Some(format!("REVIEW_READY:{phase}").as_str())
             && empty_agent_prompt("codex", line.as_deref().unwrap_or_default(), column)
     }
 
@@ -273,8 +280,11 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         })
         .await
         .unwrap_or_else(|error| {
+            let (column, row) = terminal.widget.cursor_position();
+            let (before_cursor, _) = terminal.widget.text_range_format(vte::Format::Text, 0, 0, row, 0);
             panic!(
-                "receiver {phase} not ready: {error:?}; screen={:?}",
+                "receiver {phase} not ready: {error:?}; cursor=({column},{row}), columns={}, before_cursor={before_cursor:?}; screen={:?}",
+                terminal.widget.column_count(),
                 terminal.screen_text()
             )
         });
@@ -528,6 +538,20 @@ finally:
         format!("\x1b[200~{}\x1b[201~\r", prompt.replace('\n', "\r")).as_bytes()
     );
     println!("DIFF_REVIEW_DIRECT_PTY_RECEIPT_OK");
+    // Exercise the narrow-pane case even on a wide local desktop.
+    let wrapped_phase = "x".repeat(terminal.widget.column_count().max(1) as usize);
+    terminal
+        .widget
+        .feed(format!("\r\nREVIEW_READY:{wrapped_phase}\r\n› ").as_bytes());
+    glib::future_with_timeout(Duration::from_secs(2), async {
+        while !receiver_ready(&terminal, &wrapped_phase) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("soft-wrapped readiness marker must acknowledge the receiver");
+    assert!(!receiver_ready(&terminal, "previous-receiver"));
+    println!("DIFF_REVIEW_WRAPPED_RECEIVER_PROMPT_OK");
     #[cfg(target_os = "macos")]
     {
         // Follow the actual menu -> save -> bridge -> second pane -> PTY path.
