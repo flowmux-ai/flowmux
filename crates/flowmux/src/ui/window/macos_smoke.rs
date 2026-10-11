@@ -103,6 +103,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_TERMINAL_TEAROFF_SMOKE_ONLY").is_some() {
+        controller.check_terminal_tearoff(root).await;
+        controller.window.destroy();
+        return;
+    }
+
     if std::env::var_os("FLOWMUX_EDITOR_ACK_SMOKE_ONLY").is_some() {
         let (_, surface) = store
             .add_editor_surface_to_pane(terminal_pane, root.into())

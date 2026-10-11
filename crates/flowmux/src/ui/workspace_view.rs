@@ -216,6 +216,7 @@ pub struct TornOffSurface {
     pub content: gtk::Widget,
     pub focus: gtk::Widget,
     pub editor: Option<EditorPane>,
+    pub terminal: Option<PaneTerminal>,
 }
 
 impl PaneRegistry {
@@ -1087,7 +1088,8 @@ impl PaneRegistry {
         }
         stack.remove(&content);
 
-        let (focus, kind, editor) = if let Some(terminal) = self.terminals.remove(&surface) {
+        let terminal = self.terminals.remove(&surface);
+        let (focus, kind, editor) = if let Some(terminal) = &terminal {
             (
                 terminal.root_widget(),
                 SurfaceKind::Terminal {
@@ -1146,14 +1148,13 @@ impl PaneRegistry {
             content,
             focus,
             editor,
+            terminal,
         })
     }
 
     /// Detach a surface from `pane` for an **in-app move**, keeping the live
     /// backend handle (terminal PTY / browser WebView) intact so it can be
-    /// re-homed into another pane without restarting. Unlike
-    /// [`Self::take_surface_for_tearoff`], which drops the registry handle (a
-    /// torn-off window only needs the widget), this returns the handle inside
+    /// re-homed into another pane without restarting. Returns the handle inside
     /// [`MovingSurface`] so [`Self::attach_moved_surface`] can re-register it.
     /// Returns `None` if the surface is not rendered in `pane`.
     pub fn detach_surface_for_move(

@@ -621,6 +621,7 @@ impl WindowController {
         let pane_id = torn.pane;
         let surface_id = torn.surface;
         let editor = torn.editor.clone();
+        let terminal = torn.terminal.clone();
         let editor_for_focus = editor.clone();
         let pane = Self::build_torn_off_pane(torn, &title, window_ref.clone());
         stack.add_named(&pane, Some(&workspace_id.to_string()));
@@ -644,6 +645,22 @@ impl WindowController {
             .build();
         set_window_content(&window, &content_overlay);
         *window_ref.borrow_mut() = Some(window.downgrade());
+        if let Some(terminal) = terminal {
+            // The widget alone does not own the PTY; release it on either close path.
+            let terminal = Rc::new(RefCell::new(Some(terminal)));
+            let terminal_for_close = terminal.clone();
+            window.connect_close_request(move |_| {
+                if let Some(terminal) = terminal_for_close.borrow_mut().take() {
+                    terminal.close_pty();
+                }
+                glib::Propagation::Proceed
+            });
+            window.connect_destroy(move |_| {
+                if let Some(terminal) = terminal.borrow_mut().take() {
+                    terminal.close_pty();
+                }
+            });
+        }
         if let Some(editor) = editor {
             let approved = Rc::new(Cell::new(false));
             let prompting = Rc::new(Cell::new(false));
@@ -690,6 +707,123 @@ impl WindowController {
             "tore tab off into flowmux window"
         );
     }
+    /// Run on the native GTK main thread with an isolated controller and state.
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_terminal_tearoff(&self, root: &std::path::Path) {
+        use vte::prelude::*;
+
+        async fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+            glib::future_with_timeout(Duration::from_secs(10), async {
+                while !ready() {
+                    glib::timeout_future(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("terminal tear-off timed out: {description}"));
+        }
+
+        let app = self.window.application().unwrap();
+        for (tear_off, destroy) in [(true, false), (true, true), (false, false)] {
+            println!("A19 scenario tear_off={tear_off} destroy={destroy}");
+            let workspace = self
+                .store
+                .create_workspace(Some("Terminal tear-off smoke".into()), root.into())
+                .await;
+            let ws = self.store.get_workspace(workspace).await.unwrap();
+            let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
+            let surface = ws.surfaces[0].root_pane.active_surface_id(pane).unwrap();
+            self.render_workspace(&ws);
+            self.window.present();
+            // Retain only the VTE widget and PID cell, never a backend clone.
+            let (widget, pid_cell) = {
+                let registry = self.pane_registry.borrow();
+                let terminal = registry.terminals.get(&surface).unwrap();
+                (terminal.widget.clone(), terminal.pid.clone())
+            };
+            let pid = pid_cell.get().unwrap();
+            {
+                let mut registry = self.pane_registry.borrow_mut();
+                let moving = registry.detach_surface_for_move(pane, surface).unwrap();
+                assert!(moving.content.parent().is_none());
+                assert!(registry
+                    .attach_moved_surface(
+                        pane,
+                        workspace,
+                        moving,
+                        gtk::Button::new().upcast(),
+                        gtk::Label::new(Some("Terminal")),
+                    )
+                    .is_ok());
+                assert_eq!(
+                    registry.terminals.get(&surface).unwrap().pid.get(),
+                    Some(pid)
+                );
+            }
+            wait_for("source terminal mapped", || widget.is_mapped()).await;
+            println!("A19 source mapped pid={pid}");
+            widget.feed_child(b"printf 'A19_%s\\n' BEFORE\n");
+            wait_for("initial output", || {
+                widget
+                    .text_format(vte::Format::Text)
+                    .is_some_and(|text| text.contains("A19_BEFORE"))
+            })
+            .await;
+            println!("A19 initial output received");
+            if !tear_off {
+                let (_, extra) = self
+                    .store
+                    .add_terminal_surface_to_pane(pane, Some(root.into()))
+                    .await
+                    .unwrap();
+                self.attach_or_rerender_surface(workspace, pane, extra, None)
+                    .await
+                    .unwrap();
+                let (ack, result) = oneshot::channel();
+                self.dispatch(GtkCommand::CloseSurface { pane, surface, ack })
+                    .await;
+                result.await.unwrap().unwrap();
+                wait_for("ordinary tab close terminates child", || {
+                    !flowmux_procmon::pid_alive(pid as u32)
+                })
+                .await;
+                continue;
+            }
+            let previous_windows = app.windows();
+            self.tear_off_surface(pane, surface).await;
+            println!("A19 tear-off returned");
+            let window = app
+                .windows()
+                .into_iter()
+                .find(|window| !previous_windows.contains(window))
+                .expect("tear-off must present a new window");
+            wait_for("torn terminal mapped", || widget.is_mapped()).await;
+            assert!(!self.pane_registry.borrow().terminals.contains_key(&surface));
+            // Exceed the PTY reaper grace period; stale screen text is not liveness.
+            glib::timeout_future(Duration::from_secs(6)).await;
+            assert_eq!(pid_cell.get(), Some(pid), "tear-off killed the terminal");
+            assert!(flowmux_procmon::pid_alive(pid as u32));
+            widget.feed_child(b"printf 'A19_%s\\n' AFTER\n");
+            wait_for("new output after tear-off", || {
+                widget
+                    .text_format(vte::Format::Text)
+                    .is_some_and(|text| text.contains("A19_AFTER"))
+            })
+            .await;
+            if destroy {
+                window.destroy();
+            } else {
+                window.close();
+            }
+            drop(window);
+            wait_for("child terminated after window close", || {
+                !flowmux_procmon::pid_alive(pid as u32)
+            })
+            .await;
+            assert!(self.store.get_workspace(workspace).await.is_none());
+        }
+        println!("MACOS_NATIVE_TERMINAL_TEAROFF_OK");
+    }
+
     pub(super) async fn tear_off_surface(&self, pane: PaneId, surface: SurfaceId) {
         let Some(app) = self.window.application() else {
             tracing::warn!(%pane, %surface, "tab tear-off skipped: window has no application");
