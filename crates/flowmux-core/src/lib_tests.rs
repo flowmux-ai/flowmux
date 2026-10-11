@@ -4011,6 +4011,107 @@ fn take_surface_removes_middle_tab_and_keeps_leaf() {
 }
 
 #[test]
+fn close_and_take_preserve_tab_selection_and_split_boundaries() {
+    for count in [0, 1, 3] {
+        for active_index in 0..=count {
+            for remove_index in 0..=count {
+                for target_on_right in [false, true] {
+                    let target = PaneId::new();
+                    let surfaces: Vec<_> = (0..count)
+                        .map(|_| PaneSurface::terminal("tab", None))
+                        .collect();
+                    let ids: Vec<_> = surfaces.iter().map(|surface| surface.id).collect();
+                    let active = ids
+                        .get(active_index)
+                        .copied()
+                        .unwrap_or_else(SurfaceId::new);
+                    let removed = ids
+                        .get(remove_index)
+                        .copied()
+                        .unwrap_or_else(SurfaceId::new);
+                    let leaf = Pane::Leaf {
+                        id: target,
+                        content: PaneContent::Tabs { active, surfaces },
+                    };
+                    let (other, _) = leaf_with_tabs(PaneId::new(), &["untouched"]);
+                    let (first, second) = if target_on_right {
+                        (other, leaf)
+                    } else {
+                        (leaf, other)
+                    };
+                    let mut closed = Pane::Split {
+                        id: PaneId::new(),
+                        direction: SplitDirection::Horizontal,
+                        ratio: 0.4,
+                        first: Box::new(first),
+                        second: Box::new(second),
+                    };
+                    let mut taken = closed.clone();
+                    let expected = if remove_index == count {
+                        CloseSurfaceOutcome::NotFound
+                    } else if count == 1 {
+                        CloseSurfaceOutcome::LastSurfaceRemoved
+                    } else {
+                        CloseSurfaceOutcome::SurfaceRemoved
+                    };
+                    assert_eq!(closed.close_surface_in_leaf(target, removed), expected);
+                    let outcome = taken.take_surface_from_leaf(target, removed);
+                    assert_eq!(
+                        outcome
+                            .as_ref()
+                            .map(|(surface, empty)| (surface.id, *empty)),
+                        (remove_index < count).then_some((removed, count == 1))
+                    );
+                    assert_eq!(
+                        serde_json::to_value(&closed).unwrap(),
+                        serde_json::to_value(&taken).unwrap()
+                    );
+                    let PaneContent::Tabs {
+                        active: current,
+                        surfaces,
+                    } = closed.find_leaf_content(target).unwrap()
+                    else {
+                        panic!("tabs expected")
+                    };
+                    let mut remaining = ids.clone();
+                    if remove_index < count {
+                        remaining.remove(remove_index);
+                    }
+                    assert_eq!(
+                        surfaces
+                            .iter()
+                            .map(|surface| surface.id)
+                            .collect::<Vec<_>>(),
+                        remaining
+                    );
+                    let expected_active = if remove_index < count
+                        && !remaining.is_empty()
+                        && (active == removed || !ids.contains(&active))
+                    {
+                        remaining[remove_index.saturating_sub(1).min(remaining.len() - 1)]
+                    } else {
+                        active
+                    };
+                    assert_eq!(current, expected_active);
+                    let snapshot = serde_json::to_value(&closed).unwrap();
+                    let branch = match &closed {
+                        Pane::Split { id, .. } => *id,
+                        _ => unreachable!(),
+                    };
+                    for missing in [branch, PaneId::new()] {
+                        assert_eq!(
+                            closed.close_surface_in_leaf(missing, removed),
+                            CloseSurfaceOutcome::NotFound
+                        );
+                        assert_eq!(serde_json::to_value(&closed).unwrap(), snapshot);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn take_surface_reports_empty_when_last_tab_removed() {
     let pane = PaneId::new();
     let (mut p, ids) = leaf_with_tabs(pane, &["only"]);

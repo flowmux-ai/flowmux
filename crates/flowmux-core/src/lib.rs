@@ -1434,46 +1434,17 @@ impl Pane {
         target: PaneId,
         surface_id: SurfaceId,
     ) -> CloseSurfaceOutcome {
-        match self {
-            Pane::Leaf { id, content } if *id == target => match content {
-                PaneContent::Tabs { active, surfaces } => {
-                    let Some(idx) = surfaces.iter().position(|surface| surface.id == surface_id)
-                    else {
-                        return CloseSurfaceOutcome::NotFound;
-                    };
-                    surfaces.remove(idx);
-                    if surfaces.is_empty() {
-                        CloseSurfaceOutcome::LastSurfaceRemoved
-                    } else {
-                        if *active == surface_id
-                            || !surfaces.iter().any(|surface| surface.id == *active)
-                        {
-                            *active = surfaces[idx.saturating_sub(1).min(surfaces.len() - 1)].id;
-                        }
-                        CloseSurfaceOutcome::SurfaceRemoved
-                    }
-                }
-                PaneContent::Terminal { .. } | PaneContent::Browser { .. } => {
-                    CloseSurfaceOutcome::NotFound
-                }
-            },
-            Pane::Leaf { .. } => CloseSurfaceOutcome::NotFound,
-            Pane::Split { first, second, .. } => {
-                let first_outcome = first.close_surface_in_leaf(target, surface_id);
-                if matches!(first_outcome, CloseSurfaceOutcome::NotFound) {
-                    second.close_surface_in_leaf(target, surface_id)
-                } else {
-                    first_outcome
-                }
-            }
+        match self.take_surface_from_leaf(target, surface_id) {
+            Some((_, true)) => CloseSurfaceOutcome::LastSurfaceRemoved,
+            Some((_, false)) => CloseSurfaceOutcome::SurfaceRemoved,
+            None => CloseSurfaceOutcome::NotFound,
         }
     }
 
     /// Remove `surface_id` from leaf `target` and return the removed
     /// [`PaneSurface`] together with a flag that is `true` when the leaf has no
-    /// tabs left afterwards. Mirrors [`Self::close_surface_in_leaf`]'s
-    /// active-id fix-up but hands the surface back instead of dropping it — used
-    /// by the tab-move feature to relocate a tab while preserving its state.
+    /// tabs left afterwards. Shared by tab close and tab move, including the
+    /// active-id fix-up; returning the surface preserves its state during moves.
     /// Returns `None` if the pane or surface is not found.
     pub fn take_surface_from_leaf(
         &mut self,
