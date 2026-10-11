@@ -84,8 +84,10 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
             connection.sync()
 
     def screenshot(name):
-        time.sleep(.2)
         with closing(display.Display(h.env['DISPLAY'])) as connection:
+            xtest.fake_input(connection, X.MotionNotify, x=10, y=10)
+            connection.sync()
+            time.sleep(.2)
             root = connection.screen().root
             size = root.get_geometry()
             raw = root.get_image(0, 0, size.width, size.height, X.ZPixmap, 0xFFFFFFFF)
@@ -166,21 +168,40 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
            notify(titles[3], 'error', pane_b, tab_b),
            notify(titles[4], 'needs_input')]
     state(5, 5)
+    # An inset window exposes accidental clamping to the monitor instead of the app.
+    with closing(display.Display(h.env['DISPLAY'])) as connection:
+        atom = connection.intern_atom('_NET_WM_PID')
+        window = next(window for window in connection.screen().root.query_tree().children
+                      if (pid := window.get_full_property(atom, X.AnyPropertyType)) is not None
+                      and int(pid.value[0]) == process.pid and window.get_geometry().width > 100)
+        window.configure(x=180, y=100, width=1000, height=800)
+        connection.sync()
+    bell = find('Notifications (5 unread)', role=Atspi.Role.TOGGLE_BUTTON)
+    frame = ancestor(bell, Atspi.Role.FRAME)
     root = open_bell(5)
     counts(root, (5, 5, 2, 2, 1))
     # Measure mapped content rather than a requested size or CSS string.
     bounds = root.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     assert bounds.width >= 580, bounds
+    frame_bounds = frame.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+    bell_bounds = bell.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+    assert frame_bounds.x <= bounds.x and bounds.x + bounds.width <= frame_bounds.x + frame_bounds.width, bounds
+    assert bounds.x >= bell_bounds.x - 12, (bounds, bell_bounds)
     scroll = next(node for node in walk(root) if node.get_role() == Atspi.Role.SCROLL_PANE)
     scroll_bounds = scroll.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
-    assert 0 < scroll_bounds.height <= 524, scroll_bounds  # GTK border allowance.
+    assert 440 <= scroll_bounds.height <= 564, scroll_bounds  # GTK border allowance.
+    row_bounds = [node.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+                  for node in walk(scroll) if visible(node) and node.get_role() == Atspi.Role.LIST_ITEM]
+    assert len(row_bounds) == 5 and all(row.height <= 116 for row in row_bounds), row_bounds
+    assert sum(scroll_bounds.y <= row.y and row.y + row.height <= scroll_bounds.y + scroll_bounds.height
+               for row in row_bounds) >= 4, (scroll_bounds, row_bounds)
     state(5, 5)
     screenshot('notifications-open.png')
     key('Escape')
     fixture.wait_for(lambda: named('Notifications · 5 unread') is None, 'popover closed')
     root = open_bell(5)
     state(5, 5)
-    h.pass_check('Mapped popup is wide, scroll height bounded, and opening/reopening retains unread counts')
+    h.pass_check('Popup opens inward from the bell inside an inset window; width, scroll and unread counts are preserved')
 
     click(find('Input 2', root))
     rows(root, [titles[0], titles[4]])

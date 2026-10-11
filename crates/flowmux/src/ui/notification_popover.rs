@@ -57,6 +57,8 @@ impl NotificationPopover {
     pub fn new(store: NotificationStore, bridge: Bridge) -> Rc<Self> {
         let popover = gtk::Popover::new();
         popover.add_css_class("flowmux-notification-popover");
+        popover.set_position(gtk::PositionType::Bottom);
+        popover.set_halign(gtk::Align::Start);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
         root.set_margin_top(12);
         root.set_margin_bottom(12);
@@ -132,8 +134,8 @@ impl NotificationPopover {
         root.append(&workspace);
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
-        scroll.set_min_content_height(240);
-        scroll.set_max_content_height(520);
+        scroll.set_min_content_height(440);
+        scroll.set_max_content_height(560);
         scroll.set_propagate_natural_height(true);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::None);
@@ -332,8 +334,8 @@ fn notification_row(
     open.set_hexpand(true);
     open.set_tooltip_text(Some("Open source tab"));
     let body = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    body.set_margin_top(10);
-    body.set_margin_bottom(10);
+    body.set_margin_top(5);
+    body.set_margin_bottom(5);
     let agent = entry.agent.as_deref().unwrap_or("");
     let icon = super::agent_icon(agent);
     icon.set_pixel_size(28);
@@ -349,7 +351,7 @@ fn notification_row(
         agent
     }));
     body.append(&icon);
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 5);
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
     text.set_hexpand(true);
     let metadata = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let (kind, symbol, css) = match entry.level {
