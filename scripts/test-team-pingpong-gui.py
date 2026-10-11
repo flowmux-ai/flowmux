@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 
 from PIL import Image
@@ -30,7 +31,8 @@ PROVIDER = r'''
 import json, os, pathlib, re, socket, sys, time
 agent = pathlib.Path(sys.argv[0]).name
 prompt = sys.argv[-1]
-session = re.search(r'FLOWMUX_TEAM_JOB:(\S+)', prompt)[1]
+lead = sys.argv[1:2] == ['--lead-fixture']
+session = prompt if lead else re.search(r'FLOWMUX_TEAM_JOB:(\S+)', prompt)[1]
 profile = pathlib.Path(os.environ['CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'])
 transcript = profile / ('sessions/2026/10/10' if agent == 'codex' else 'projects/fixture') / (session + '.jsonl')
 transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +47,11 @@ def activity(value):
         stream.connect(os.environ['FLOWMUX_SOCKET_PATH'])
         stream.sendall((json.dumps(request) + '\n').encode())
         stream.makefile().readline()
+if lead:
+    activity('running')
+    print('LEAD_READY ' + session, flush=True)
+    sys.stdin.readline()
+    raise SystemExit
 if agent == 'codex':
     event(dict(type='session_meta', payload=dict(id=session)))
 while prompt:
@@ -195,10 +202,11 @@ def main():
                 h.pass_check(f'{agent}/{case}: same-session ping-pong and semantic checks in real GUI PTYs')
             if not args.real_agent:
                 # Resolve a lead session even when inherited context and focus point at another Team.
-                source = h.workspace(socket, workspace)['panes'][0]
                 session = str(uuid.uuid4())
-                h.rpc(socket, 'agent_activity_update', pane=pane, surface=source['tabs'][0]['id'],
-                      agent='codex', activity='running', session_id=session, source='flowmux:hook')
+                h.send(socket, pane, shlex.join([str(bin_dir / 'codex'), '--lead-fixture', session]))
+                fixture.wait_for(lambda: 'LEAD_READY ' + session in h.screen(socket, pane), 'live lead fixture')
+                # Cross the two-second process poll; a hook-only fake lead would be cleared.
+                time.sleep(3)
                 h.rpc(socket, 'workspace_focus', workspace=other_workspace)
                 env.update(CODEX_THREAD_ID=session, FLOWMUX_PANE_ID=other_before['panes'][0]['id'])
                 task = h.root / f'{agent}-approval.txt'
@@ -206,7 +214,9 @@ def main():
                 started = subprocess.run([sys.executable, str(helper), 'start', '--agent', agent,
                     '--complexity', 'simple', '--role', 'approval fixture', '--cwd', str(REPO),
                     '--task-file', str(task), '--cli', args.cli, '--timeout', '300', '--no-fallback'],
-                    env=env, capture_output=True, text=True, check=True, timeout=30)
+                    env=env, capture_output=True, text=True, timeout=30)
+                (h.root / f'{agent}-approval-start.log').write_text(started.stdout + started.stderr)
+                assert started.returncode == 0, started.stdout + started.stderr
                 worker = json.loads(started.stdout)
                 assert worker['source_pane'] == pane and worker['workspace'] == workspace, worker
                 waiting = subprocess.run([sys.executable, str(helper), 'wait', worker['job'], '--timeout', '30'],
