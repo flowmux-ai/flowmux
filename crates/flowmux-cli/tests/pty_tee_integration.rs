@@ -7,10 +7,11 @@
 //! matching `Request::TerminalOutput` and `Request::Notify` envelopes.
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,6 +20,127 @@ use flowmux_ipc::protocol::{Envelope, Payload, Response};
 
 fn flowmuxctl_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_flowmuxctl"))
+}
+
+struct DeadlineReader<R> {
+    reader: R,
+    deadline: Instant,
+    received: usize,
+}
+
+impl<R> DeadlineReader<R> {
+    fn new(reader: R, timeout: Duration) -> Self {
+        Self {
+            reader,
+            deadline: Instant::now() + timeout,
+            received: 0,
+        }
+    }
+}
+
+impl<R: Read + AsRawFd> Read for DeadlineReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            let remaining = self.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("output stalled after {} bytes", self.received),
+                ));
+            }
+            let mut fd = libc::pollfd {
+                fd: self.reader.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let ready = unsafe {
+                libc::poll(
+                    &mut fd,
+                    1,
+                    remaining.as_millis().clamp(1, i32::MAX as u128) as i32,
+                )
+            };
+            if ready < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if ready == 0 {
+                continue;
+            }
+            match self.reader.read(buffer) {
+                Ok(count) => {
+                    self.received += count;
+                    return Ok(count);
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+fn wait_for_child(child: &mut Child, timeout: Duration) -> std::io::Result<ExitStatus> {
+    let result = poll_child(child, timeout);
+    if result.is_err() {
+        let _ = child.kill();
+        eprintln!(
+            "child {} cleanup: {:?}",
+            child.id(),
+            poll_child(child, Duration::from_secs(2))
+        );
+    }
+    result
+}
+
+fn poll_child(child: &mut Child, timeout: Duration) -> std::io::Result<ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("child {} did not exit within {timeout:?}", child.id()),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn output_deadline_preserves_partial_bytes_and_accepts_eof() {
+    let (reader, writer) = nix::unistd::pipe().unwrap();
+    let mut writer = std::fs::File::from(writer);
+    writer.write_all(b"partial").unwrap();
+    let mut reader = DeadlineReader::new(std::fs::File::from(reader), Duration::from_millis(100));
+    let mut output = Vec::new();
+    let error = reader.read_to_end(&mut output).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert!(error.to_string().contains("7 bytes"));
+    assert_eq!(output, b"partial");
+    drop(writer);
+    let mut reader = DeadlineReader::new(reader.reader, Duration::from_secs(1));
+    assert_eq!(reader.read_to_end(&mut output).unwrap(), 0);
+}
+
+#[test]
+fn child_exit_deadline_kills_and_reaps_a_stalled_process() {
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let error = wait_for_child(&mut child, Duration::from_millis(100)).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert!(error.to_string().contains(&child.id().to_string()));
+    assert!(child.try_wait().unwrap().is_some());
 }
 
 /// Spin up a fake daemon on `socket` that:
@@ -127,7 +249,9 @@ fn claude_stop_completes_with_background_shells_or_scheduled_jobs() {
                 .unwrap()
                 .write_all(input.to_string().as_bytes())
                 .unwrap();
-            assert!(child.wait().unwrap().success());
+            assert!(wait_for_child(&mut child, Duration::from_secs(10))
+                .unwrap()
+                .success());
             let request: serde_json::Value =
                 serde_json::from_str(&rx.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
             assert_eq!(request["agent"], "claude");
@@ -200,11 +324,13 @@ fn run_tee_with_osc(osc_payloads: &[&str]) -> Vec<String> {
     let mut child = cmd.spawn().expect("spawn flowmuxctl pty-tee");
     let _stdin_keepalive = child.stdin.take();
 
-    let status = child.wait().expect("wait flowmuxctl pty-tee");
+    let status =
+        wait_for_child(&mut child, Duration::from_secs(10)).expect("wait flowmuxctl pty-tee");
     drop(_stdin_keepalive);
     if !status.success() {
         let mut stderr = String::new();
-        if let Some(mut e) = child.stderr.take() {
+        if let Some(e) = child.stderr.take() {
+            let mut e = DeadlineReader::new(e, Duration::from_secs(2));
             use std::io::Read as _;
             let _ = e.read_to_string(&mut stderr);
         }
@@ -263,7 +389,10 @@ fn run_tee_capture_stdout(script: &str, test_cwd: &Path) -> Vec<u8> {
 
     let mut child = cmd.spawn().expect("spawn flowmuxctl pty-tee");
     let stdin_keepalive = child.stdin.take();
-    let mut stdout = child.stdout.take().expect("pty-tee stdout");
+    let mut stdout = DeadlineReader::new(
+        child.stdout.take().expect("pty-tee stdout"),
+        Duration::from_secs(10),
+    );
     let stdout_thread = thread::spawn(move || {
         let mut output = Vec::new();
         stdout
@@ -272,12 +401,14 @@ fn run_tee_capture_stdout(script: &str, test_cwd: &Path) -> Vec<u8> {
         output
     });
 
-    let status = child.wait().expect("wait flowmuxctl pty-tee");
+    let status =
+        wait_for_child(&mut child, Duration::from_secs(10)).expect("wait flowmuxctl pty-tee");
     drop(stdin_keepalive);
     let output = stdout_thread.join().expect("join stdout reader");
     if !status.success() {
         let mut stderr = String::new();
-        if let Some(mut e) = child.stderr.take() {
+        if let Some(e) = child.stderr.take() {
+            let mut e = DeadlineReader::new(e, Duration::from_secs(2));
             let _ = e.read_to_string(&mut stderr);
         }
         panic!("pty-tee exited unsuccessfully: {status:?}\nstderr: {stderr}");
@@ -365,8 +496,14 @@ finally:
 
     let mut child = cmd.spawn().expect("spawn flowmuxctl pty-tee");
     let mut stdin = child.stdin.take().expect("pty-tee stdin");
-    let mut stdout = child.stdout.take().expect("pty-tee stdout");
-    let mut stderr = child.stderr.take().expect("pty-tee stderr");
+    let mut stdout = DeadlineReader::new(
+        child.stdout.take().expect("pty-tee stdout"),
+        Duration::from_secs(10),
+    );
+    let mut stderr = DeadlineReader::new(
+        child.stderr.take().expect("pty-tee stderr"),
+        Duration::from_secs(10),
+    );
 
     let mut seen = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -386,7 +523,7 @@ finally:
 
     let mut rest = Vec::new();
     stdout.read_to_end(&mut rest).expect("read pty output");
-    let status = child.wait().expect("wait pty-tee");
+    let status = wait_for_child(&mut child, Duration::from_secs(10)).expect("wait pty-tee");
     drop(stdin);
     let mut stderr_text = String::new();
     let _ = stderr.read_to_string(&mut stderr_text);
@@ -506,10 +643,12 @@ fn notify_stream_forwards_osc_payload_to_daemon_notify_request() {
         .write_all(b"\x1b]777;notify;Codex;needs approval\x07")
         .expect("write OSC payload");
 
-    let status = child.wait().expect("wait flowmuxctl notify-stream");
+    let status =
+        wait_for_child(&mut child, Duration::from_secs(10)).expect("wait flowmuxctl notify-stream");
     if !status.success() {
         let mut stderr = String::new();
-        if let Some(mut e) = child.stderr.take() {
+        if let Some(e) = child.stderr.take() {
+            let mut e = DeadlineReader::new(e, Duration::from_secs(2));
             let _ = e.read_to_string(&mut stderr);
         }
         panic!("notify-stream exited unsuccessfully: {status:?}\nstderr: {stderr}");
@@ -560,13 +699,22 @@ struct PtyTeeGuard {
 
 impl Drop for PtyTeeGuard {
     fn drop(&mut self) {
+        if thread::panicking() {
+            eprintln!(
+                "PTY fixture pid={} status={:?}",
+                self.child.id(),
+                self.child.try_wait()
+            );
+        }
         if let Some(pgid) = self.inner_pgid {
             unsafe {
                 libc::kill(-pgid, libc::SIGKILL);
             }
         }
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Err(error) = poll_child(&mut self.child, Duration::from_secs(2)) {
+            eprintln!("PTY fixture cleanup failed: {error}");
+        }
     }
 }
 
@@ -659,11 +807,7 @@ sys.exit(17)
     assert!(observed.contains("input\n"), "input stalled: {observed}");
     assert!(observed.contains("resize\n"), "resize stalled: {observed}");
     let mut output = Vec::new();
-    guard
-        .child
-        .stdout
-        .take()
-        .unwrap()
+    DeadlineReader::new(guard.child.stdout.take().unwrap(), Duration::from_secs(10))
         .read_to_end(&mut output)
         .unwrap();
     assert_eq!(
@@ -671,7 +815,12 @@ sys.exit(17)
         vec![b'x'; 128 * 8192],
         "queued output must remain lossless"
     );
-    assert_eq!(guard.child.wait().unwrap().code(), Some(17));
+    assert_eq!(
+        wait_for_child(&mut guard.child, Duration::from_secs(10))
+            .unwrap()
+            .code(),
+        Some(17)
+    );
     guard.inner_pgid = None;
 }
 
@@ -703,7 +852,9 @@ fn pty_tee_restores_shared_stdout_flags() {
             .spawn()
             .unwrap();
         let _stdin = child.stdin.take();
-        assert!(child.wait().unwrap().success());
+        assert!(wait_for_child(&mut child, Duration::from_secs(10))
+            .unwrap()
+            .success());
         assert_eq!(
             fcntl(writer.as_raw_fd(), FcntlArg::F_GETFL).unwrap(),
             flags.bits(),
@@ -787,7 +938,7 @@ while True: time.sleep(1)
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
+    let mut stdout = DeadlineReader::new(child.stdout.take().unwrap(), Duration::from_secs(10));
     let mut guard = PtyTeeGuard {
         child,
         inner_pgid: None,
@@ -849,7 +1000,10 @@ while True: time.sleep(1)
         .spawn()
         .expect("spawn pty-tee");
     let stdin = child.stdin.take().expect("piped stdin");
-    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stdout = DeadlineReader::new(
+        child.stdout.take().expect("piped stdout"),
+        Duration::from_secs(10),
+    );
     let mut guard = PtyTeeGuard {
         child,
         inner_pgid: None,
@@ -870,7 +1024,7 @@ while True: time.sleep(1)
         "shutdown output was truncated"
     );
     assert_eq!(output, expected);
-    let status = guard.child.wait().expect("wait pty-tee");
+    let status = wait_for_child(&mut guard.child, Duration::from_secs(10)).expect("wait pty-tee");
     assert!(status.success(), "pty-tee failed: {status}");
     guard.inner_pgid = None;
 }
@@ -888,7 +1042,7 @@ fn pty_tee_preserves_queued_output_after_stdin_eof_with_a_slow_reader() {
     let (reader, writer) = nix::unistd::pipe().unwrap();
     #[cfg(target_os = "linux")]
     assert!(unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETPIPE_SZ, 4096) } > 0);
-    let mut stdout = std::fs::File::from(reader);
+    let mut stdout = DeadlineReader::new(std::fs::File::from(reader), Duration::from_secs(10));
     let script = r#"
 import os, signal, sys, time
 signal.signal(signal.SIGHUP, lambda *args: os._exit(0))
@@ -930,7 +1084,9 @@ while True: time.sleep(1)
         "shutdown truncated queued output"
     );
     assert_eq!(received, output);
-    assert!(guard.child.wait().unwrap().success());
+    assert!(wait_for_child(&mut guard.child, Duration::from_secs(10))
+        .unwrap()
+        .success());
 }
 
 #[test]
