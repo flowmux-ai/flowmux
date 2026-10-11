@@ -885,23 +885,23 @@ impl EditorHostState {
         // an unbounded queue behind a stalled filesystem.
         for _ in 0..2 {
             let after_fs_event = self.poll_after_fs_event.replace(false);
-            let result = self
+            let (received, result) = self
                 .with_session(move |session| match session {
                     Ok(session) => {
-                        let result = if after_fs_event {
+                        let (messages, result) = if after_fs_event {
                             session.poll_external_changes_after_fs_event()
                         } else {
                             session.poll_external_changes()
                         };
-                        result.map_err(|error| error.to_string())
+                        (messages, result.map_err(|error| error.to_string()))
                     }
-                    Err(error) => Err(error.clone()),
+                    Err(error) => (Vec::new(), Err(error.clone())),
                 })
                 .await
-                .and_then(|result| result);
-            match result {
-                Ok(received) => messages.extend(received),
-                Err(error) => tracing::warn!(%error, "failed to inspect open editor documents"),
+                .unwrap_or_else(|error| (Vec::new(), Err(error)));
+            messages.extend(received);
+            if let Err(error) = result {
+                tracing::warn!(%error, "failed to inspect open editor documents");
             }
             if !self.poll_after_fs_event.get() {
                 break;
@@ -1325,6 +1325,36 @@ mod tests {
             Some(HostMessage::OpenDocument { .. })
         ));
         assert_eq!(host.session_state().active_file.as_ref(), Some(&path));
+    }
+
+    #[tokio::test]
+    async fn polling_delivers_reloads_before_a_later_document_error() {
+        for after_fs_event in [false, true] {
+            let workspace = tempfile::tempdir().unwrap();
+            let first = workspace.path().join("first.txt");
+            let second = workspace.path().join("second.txt");
+            fs::write(&first, "original").unwrap();
+            fs::write(&second, "second").unwrap();
+            let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+            host.initialize_messages().await;
+            host.open_document(&first).await.unwrap();
+            host.open_document(&second).await.unwrap();
+            fs::write(&first, "external change").unwrap();
+            fs::remove_file(&second).unwrap();
+            fs::create_dir(&second).unwrap();
+
+            let messages = if after_fs_event {
+                host.poll_external_changes_after_fs_event().await
+            } else {
+                host.poll_external_changes().await
+            };
+            assert!(matches!(
+                messages.as_slice(),
+                [HostMessage::ReplaceDocument { document }]
+                    if document.content == "external change" && document.version == 2
+            ));
+            assert!(!host.polling.get());
+        }
     }
 
     #[tokio::test]

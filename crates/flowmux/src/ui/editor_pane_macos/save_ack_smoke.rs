@@ -2,7 +2,7 @@
 //! Delay actual host save acknowledgements in the live WKWebView.
 use super::*;
 
-async fn javascript(pane: &EditorPane, source: &str) -> String {
+pub(super) async fn javascript(pane: &EditorPane, source: &str) -> String {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let tx = Rc::new(RefCell::new(Some(tx)));
     let block = block2::RcBlock::new(
@@ -33,7 +33,7 @@ async fn javascript(pane: &EditorPane, source: &str) -> String {
         .unwrap()
 }
 
-async fn wait_js(pane: &EditorPane, predicate: &str) {
+pub(super) async fn wait_js(pane: &EditorPane, predicate: &str) {
     glib::future_with_timeout(Duration::from_secs(15), async {
         while javascript(pane, &format!("String({predicate})")).await != "true" {
             glib::timeout_future(Duration::from_millis(20)).await;
@@ -43,7 +43,7 @@ async fn wait_js(pane: &EditorPane, predicate: &str) {
     .unwrap_or_else(|_| panic!("editor predicate timed out: {predicate}"));
 }
 
-async fn save_key(pane: &EditorPane) {
+pub(super) async fn save_key(pane: &EditorPane) {
     javascript(
         pane,
         r#"

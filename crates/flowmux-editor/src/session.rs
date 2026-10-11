@@ -336,33 +336,40 @@ impl EditorSession {
         Ok(messages)
     }
 
-    pub fn poll_external_changes(&mut self) -> Result<Vec<HostMessage>, EditorSessionError> {
+    pub fn poll_external_changes(&mut self) -> (Vec<HostMessage>, Result<(), EditorSessionError>) {
         self.poll_external_changes_inner(false)
     }
 
     pub fn poll_external_changes_after_fs_event(
         &mut self,
-    ) -> Result<Vec<HostMessage>, EditorSessionError> {
+    ) -> (Vec<HostMessage>, Result<(), EditorSessionError>) {
         self.poll_external_changes_inner(true)
     }
 
     fn poll_external_changes_inner(
         &mut self,
         after_fs_event: bool,
-    ) -> Result<Vec<HostMessage>, EditorSessionError> {
+    ) -> (Vec<HostMessage>, Result<(), EditorSessionError>) {
         let mut messages = Vec::new();
         for id in self.open_order.clone() {
             let status = if after_fs_event {
-                self.documents.disk_status_after_fs_event(id)?
+                self.documents.disk_status_after_fs_event(id)
             } else {
-                self.documents.disk_status(id)?
+                self.documents.disk_status(id)
+            };
+            let status = match status {
+                Ok(status) => status,
+                Err(error) => return (messages, Err(error.into())),
             };
             let previous = self
                 .reported_disk_status
                 .get(&id)
                 .copied()
                 .unwrap_or(DiskStatus::Unchanged);
-            let (version, dirty) = self.documents.version_and_dirty(id)?;
+            let (version, dirty) = match self.documents.version_and_dirty(id) {
+                Ok(state) => state,
+                Err(error) => return (messages, Err(error.into())),
+            };
             let dirty = dirty || self.pending_client_dirty.contains(&id);
 
             // A pending recovery proposal pins the document version; reloading
@@ -389,7 +396,7 @@ impl EditorSession {
                 });
             }
         }
-        Ok(messages)
+        (messages, Ok(()))
     }
 
     pub fn handle_editor_message(
@@ -883,6 +890,12 @@ mod tests {
         document.clone()
     }
 
+    fn checked_poll(session: &mut EditorSession) -> Vec<HostMessage> {
+        let (messages, result) = session.poll_external_changes();
+        result.unwrap();
+        messages
+    }
+
     fn apply_recovery_operations(session: &mut EditorSession, store: &RecoveryStore) {
         for operation in session.take_recovery_operations() {
             store.apply(&operation).unwrap();
@@ -999,7 +1012,7 @@ mod tests {
             .unwrap();
 
         fs::write(&path, "external\n").unwrap();
-        let messages = session.poll_external_changes().unwrap();
+        let messages = checked_poll(&mut session);
         assert!(messages
             .iter()
             .all(|message| !matches!(message, HostMessage::ReplaceDocument { .. })));
@@ -1500,6 +1513,105 @@ mod tests {
     }
 
     #[test]
+    fn poll_failure_preserves_earlier_reload_and_allows_subsequent_edits() {
+        for after_fs_event in [false, true] {
+            let workspace = tempdir().unwrap();
+            let first = workspace.path().join("first.txt");
+            let second = workspace.path().join("second.txt");
+            fs::write(&first, "first\n").unwrap();
+            fs::write(&second, "second\n").unwrap();
+            let mut session = EditorSession::new(workspace.path()).unwrap();
+            let document = open_payload(session.open_document(&first).unwrap());
+            session.open_document(&second).unwrap();
+            fs::write(&first, "external change\n").unwrap();
+            fs::remove_file(&second).unwrap();
+            fs::create_dir(&second).unwrap();
+
+            let (messages, result) = session.poll_external_changes_inner(after_fs_event);
+            assert!(
+                matches!(result, Err(EditorSessionError::Document(DocumentError::Io { path, .. })) if path == fs::canonicalize(&second).unwrap())
+            );
+            let [HostMessage::ReplaceDocument {
+                document: replacement,
+            }] = messages.as_slice()
+            else {
+                panic!("a later polling failure must not drop an earlier reload");
+            };
+            assert_eq!(replacement.id, document.id);
+            assert_eq!(replacement.content, "external change\n");
+            assert_eq!(replacement.version, document.version + 1);
+
+            fs::remove_dir(&second).unwrap();
+            fs::write(&second, "second\n").unwrap();
+            let (next_messages, result) = session.poll_external_changes_inner(after_fs_event);
+            result.unwrap();
+            assert!(next_messages.is_empty());
+            let messages = session
+                .handle_editor_message(EditorMessage::DocumentChanged {
+                    document_id: replacement.id.clone(),
+                    document_version: replacement.version,
+                    change_sequence: 1,
+                    content: "client edit\n".into(),
+                })
+                .unwrap();
+            assert!(matches!(
+                messages.as_slice(),
+                [HostMessage::DocumentChangeApplied { document_version, .. }]
+                    if *document_version == replacement.version + 1
+            ));
+            assert!(session.save_all_dirty().1.is_ok());
+            assert_eq!(fs::read_to_string(&first).unwrap(), "client edit\n");
+        }
+    }
+
+    #[test]
+    fn polling_keeps_pending_recovery_version_valid() {
+        for after_fs_event in [false, true] {
+            let workspace = tempdir().unwrap();
+            let state = tempdir().unwrap();
+            let path = workspace.path().join("recovery.txt");
+            fs::write(&path, "original\n").unwrap();
+            let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+            let mut session =
+                EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+            let document = open_payload(session.open_document(&path).unwrap());
+            session
+                .handle_editor_message(EditorMessage::DocumentChanged {
+                    document_id: document.id,
+                    document_version: document.version,
+                    change_sequence: 1,
+                    content: "recovered edit\n".into(),
+                })
+                .unwrap();
+            apply_recovery_operations(&mut session, &store);
+            let mut restarted =
+                EditorSession::with_recovery_store(workspace.path(), store).unwrap();
+            let opened = restarted.open_document(&path).unwrap();
+            let HostMessage::OpenDocument { document } = &opened[0] else {
+                panic!("expected opened document");
+            };
+            fs::write(&path, "external change\n").unwrap();
+
+            let (messages, result) = restarted.poll_external_changes_inner(after_fs_event);
+            result.unwrap();
+            assert!(matches!(messages.as_slice(),
+                [HostMessage::DocumentDiskStatus { document_version, status: DocumentDiskStatus::Modified, .. }]
+                    if *document_version == document.version));
+            let restored = restarted
+                .handle_editor_message(EditorMessage::RecoveryDecision {
+                    document_id: document.id.clone(),
+                    document_version: document.version,
+                    choice: RecoveryChoice::Restore,
+                })
+                .unwrap();
+            assert!(matches!(restored.as_slice(),
+                [HostMessage::ReplaceDocument { document }]
+                    if document.content == "recovered edit\n" && document.dirty));
+            assert_eq!(fs::read_to_string(path).unwrap(), "external change\n");
+        }
+    }
+
+    #[test]
     fn clean_external_change_is_reloaded_once() {
         let workspace = tempdir().unwrap();
         let path = workspace.path().join("자동-새로고침.txt");
@@ -1508,7 +1620,7 @@ mod tests {
         let document = open_payload(session.open_document(&path).unwrap());
         fs::write(&path, "외부 변경 日本語 🙂\n").unwrap();
 
-        let messages = session.poll_external_changes().unwrap();
+        let messages = checked_poll(&mut session);
         assert!(matches!(
             messages.as_slice(),
             [HostMessage::ReplaceDocument { document: replacement }]
@@ -1518,7 +1630,7 @@ mod tests {
                     && !replacement.dirty
                     && !replacement.external_change
         ));
-        assert!(session.poll_external_changes().unwrap().is_empty());
+        assert!(checked_poll(&mut session).is_empty());
     }
 
     #[test]
@@ -1538,7 +1650,7 @@ mod tests {
             .unwrap();
         fs::write(&path, "외부 변경\n").unwrap();
 
-        let messages = session.poll_external_changes().unwrap();
+        let messages = checked_poll(&mut session);
         assert!(matches!(
             messages.as_slice(),
             [HostMessage::DocumentDiskStatus {
@@ -1547,7 +1659,7 @@ mod tests {
                 status: DocumentDiskStatus::Modified,
             }] if document_id == &document.id
         ));
-        assert!(session.poll_external_changes().unwrap().is_empty());
+        assert!(checked_poll(&mut session).is_empty());
         let initialized = session.initialize_messages(100);
         assert!(matches!(
             initialized.as_slice(),
@@ -1566,7 +1678,7 @@ mod tests {
         let document = open_payload(session.open_document(&path).unwrap());
         fs::remove_file(path).unwrap();
 
-        let messages = session.poll_external_changes().unwrap();
+        let messages = checked_poll(&mut session);
         assert!(matches!(
             messages.as_slice(),
             [HostMessage::DocumentDiskStatus {
@@ -1575,7 +1687,7 @@ mod tests {
                 ..
             }] if document_id == &document.id
         ));
-        assert!(session.poll_external_changes().unwrap().is_empty());
+        assert!(checked_poll(&mut session).is_empty());
     }
 
     #[test]
@@ -1588,7 +1700,7 @@ mod tests {
         fs::write(&path, [0xff, 0xfe]).unwrap();
 
         assert!(matches!(
-            session.poll_external_changes().unwrap().as_slice(),
+            checked_poll(&mut session).as_slice(),
             [HostMessage::DocumentDiskStatus {
                 status: DocumentDiskStatus::Modified,
                 ..
@@ -1597,7 +1709,7 @@ mod tests {
 
         fs::write(&path, "복구됨 日本語 🙂\n").unwrap();
         assert!(matches!(
-            session.poll_external_changes().unwrap().as_slice(),
+            checked_poll(&mut session).as_slice(),
             [HostMessage::ReplaceDocument { document: replacement }]
                 if replacement.id == document.id && replacement.content == "복구됨 日本語 🙂\n"
         ));

@@ -129,7 +129,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         return;
     }
 
-    if std::env::var_os("FLOWMUX_EDITOR_ACK_SMOKE_ONLY").is_some() {
+    if std::env::var_os("FLOWMUX_EDITOR_ACK_SMOKE_ONLY").is_some()
+        || std::env::var_os("FLOWMUX_EDITOR_POLL_SMOKE_ONLY").is_some()
+    {
         let (_, surface) = store
             .add_editor_surface_to_pane(terminal_pane, root.into())
             .await
@@ -139,7 +141,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .await
             .unwrap();
         let editor = controller.pane_registry.borrow().editors[&surface].clone();
-        editor.check_save_ack(root).await;
+        if std::env::var_os("FLOWMUX_EDITOR_POLL_SMOKE_ONLY").is_some() {
+            editor.check_poll(root).await;
+        } else {
+            editor.check_save_ack(root).await;
+        }
         controller.window.destroy();
         return;
     }
