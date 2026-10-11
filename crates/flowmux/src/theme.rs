@@ -409,6 +409,9 @@ paned > separator {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
 }}
+.flowmux-notification-popover {{
+    font-size: 0.92em;
+}}
 .flowmux-sidebar-shell .heading,
 .flowmux-sidebar-shell .body {{
     font-size: {sidebar_body_font:.2}pt;

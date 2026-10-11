@@ -170,7 +170,7 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     counts(root, (5, 5, 2, 2, 1))
     # Measure mapped content rather than a requested size or CSS string.
     bounds = root.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
-    assert bounds.width >= 460, bounds
+    assert bounds.width >= 580, bounds
     scroll = next(node for node in walk(root) if node.get_role() == Atspi.Role.SCROLL_PANE)
     scroll_bounds = scroll.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     assert 0 < scroll_bounds.height <= 524, scroll_bounds  # GTK border allowance.

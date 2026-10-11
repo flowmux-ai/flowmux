@@ -56,12 +56,13 @@ struct NotificationRow {
 impl NotificationPopover {
     pub fn new(store: NotificationStore, bridge: Bridge) -> Rc<Self> {
         let popover = gtk::Popover::new();
+        popover.add_css_class("flowmux-notification-popover");
         let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
         root.set_margin_top(12);
         root.set_margin_bottom(12);
         root.set_margin_start(12);
         root.set_margin_end(12);
-        root.set_size_request(460, -1);
+        root.set_size_request(580, -1);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let heading = gtk::Label::new(Some("Notifications"));
         heading.add_css_class("title-3");
