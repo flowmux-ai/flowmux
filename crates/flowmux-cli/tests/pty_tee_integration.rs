@@ -120,10 +120,14 @@ fn poll_child(child: &mut Child, timeout: Duration) -> std::io::Result<ExitStatu
 
 #[test]
 fn output_deadline_preserves_partial_bytes_and_accepts_eof() {
-    let (reader, writer) = nix::unistd::pipe().unwrap();
-    let mut writer = std::fs::File::from(writer);
+    // Close-on-exec keeps concurrently spawned test processes from holding EOF open.
+    let (reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
     writer.write_all(b"partial").unwrap();
-    let mut reader = DeadlineReader::new(std::fs::File::from(reader), Duration::from_millis(100));
+    let _unrelated_child = PtyTeeGuard {
+        child: Command::new("/bin/sleep").arg("30").spawn().unwrap(),
+        inner_pgid: None,
+    };
+    let mut reader = DeadlineReader::new(reader, Duration::from_millis(100));
     let mut output = Vec::new();
     let error = reader.read_to_end(&mut output).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
