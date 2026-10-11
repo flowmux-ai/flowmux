@@ -166,4 +166,44 @@ async fn daemon_and_gui_preserve_each_others_workspaces() {
         assert_eq!(restored.workspaces.len(), 1);
         assert_eq!(format!("{:?}", restored.workspaces[0]), daemon_before);
     }
+
+    // A malformed state must remain recoverable while an ephemeral daemon works.
+    let dir = tempfile::Builder::new()
+        .prefix("fm-a02-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    for key in [
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "FLOWMUX_RUNTIME_DIR",
+    ] {
+        std::env::set_var(key, dir.path());
+    }
+    let path = flowmux_state::default_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = br#"{"schema_version":3,"workspaces":"recover these bytes"}"#;
+    std::fs::write(&path, original).unwrap();
+    let (daemon, client) = start_daemon(&dir.path().join("daemon.sock")).await;
+    let Response::WorkspaceCreated { id } = client
+        .call(Request::WorkspaceCreate {
+            team: false,
+            name: Some("ephemeral".into()),
+            root: dir.path().into(),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("ephemeral workspace creation failed")
+    };
+    assert!(
+        matches!(client.call(Request::WorkspaceList).await.unwrap(), Response::WorkspaceList { ids } if ids == vec![id])
+    );
+    // Exceed the persistence loop's maximum debounce before checking the original.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    drop(client);
+    drop(daemon);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    println!("A02 malformed bytes preserved after mutation and process exit");
 }

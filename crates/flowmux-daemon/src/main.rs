@@ -54,8 +54,8 @@ fn load_store() -> StateStore {
     let initial = match flowmux_state::claim_window(owner) {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to claim state, starting empty");
-            flowmux_state::State::default()
+            tracing::warn!(error = %e, "failed to claim state, starting without persistence");
+            return StateStore::new_lazy_ephemeral(flowmux_state::State::default());
         }
     };
     let store = StateStore::new_lazy_window(initial, owner);
@@ -67,9 +67,11 @@ fn load_store() -> StateStore {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn daemon_startup_and_saves_respect_live_gui_ownership() {
-        // This binary has one test and owns its environment.
+        let _env = ENV_LOCK.lock().await;
         let dir = tempfile::tempdir().unwrap();
         for key in ["XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
             std::env::set_var(key, dir.path());
@@ -117,5 +119,29 @@ mod tests {
             .workspaces
             .iter()
             .any(|workspace| workspace.id == daemon_id));
+    }
+
+    #[tokio::test]
+    async fn unreadable_state_starts_without_persistence() {
+        let _env = ENV_LOCK.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        for key in ["XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+            std::env::set_var(key, dir.path());
+        }
+        let path = flowmux_state::default_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = br#"{"schema_version":3,"workspaces":"recover these bytes"}"#;
+        std::fs::write(&path, original).unwrap();
+        let store = load_store();
+        assert!(!store.persist_enabled());
+        store
+            .create_workspace(Some("temporary".into()), dir.path().into())
+            .await;
+        store.save_now().await.unwrap();
+        tokio::task::spawn_blocking(move || store.save_now_blocking())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), original);
     }
 }
