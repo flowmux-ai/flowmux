@@ -128,6 +128,7 @@ fn local_paths_use_caller_directory_and_remote_paths_stay_remote() {
             .args(&args)
             .current_dir(&caller)
             .env_clear()
+            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|path| ("LLVM_PROFILE_FILE", path)))
             .env("PATH", "/usr/bin:/bin")
             .output()
             .unwrap();
