@@ -385,11 +385,11 @@ fn run_pty_pump(
 
         // Writable destinations participate in the same poll as input and
         // signals. A full terminal must not stall keystrokes or SIGWINCH.
-        let write_result = if fds[3].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
-        {
+        let write_result = if fds[3].revents & (libc::POLLERR | libc::POLLHUP) != 0 {
             Err(std::io::ErrorKind::BrokenPipe.into())
         } else {
-            (if fds[3].revents & libc::POLLOUT != 0 {
+            // macOS poll rejects /dev/null; let write distinguish it from EBADF.
+            (if fds[3].revents & (libc::POLLOUT | libc::POLLNVAL) != 0 {
                 write_pending(libc::STDOUT_FILENO, &mut to_outer)
             } else {
                 Ok(())
@@ -551,17 +551,46 @@ fn terminate_inner_group<F: FnMut(&str)>(
         termination_grace("FLOWMUX_PTY_TEE_SIGTERM_GRACE_MS", Duration::from_secs(2));
     let mut exit_code = None;
     let mut child_reaped = false;
+    let mut pump_output = || {
+        if write_pending(libc::STDOUT_FILENO, to_outer).is_err() {
+            TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
+        }
+        // A child can block flushing its farewell before exit. Keep draining
+        // during the grace period, with the same bounded queue as the main loop.
+        while to_outer.len() < PENDING_BYTES {
+            let mut buf = [0; 4096];
+            let ReadOutcome::Data(slice) = read_some(master_fd, &mut buf) else {
+                break;
+            };
+            observe_terminal_output(slice, input_modes, output_refresh);
+            extractor.feed(slice);
+            to_outer.extend(slice);
+        }
+    };
 
     signal_inner_group(child_pid, Signal::SIGHUP);
-    if !wait_for_group_exit(child_pid, &mut child_reaped, &mut exit_code, sighup_grace) {
+    if !wait_for_group_exit(
+        child_pid,
+        &mut child_reaped,
+        &mut exit_code,
+        sighup_grace,
+        &mut pump_output,
+    ) {
         signal_inner_group(child_pid, Signal::SIGTERM);
-        if !wait_for_group_exit(child_pid, &mut child_reaped, &mut exit_code, sigterm_grace) {
+        if !wait_for_group_exit(
+            child_pid,
+            &mut child_reaped,
+            &mut exit_code,
+            sigterm_grace,
+            &mut pump_output,
+        ) {
             signal_inner_group(child_pid, Signal::SIGKILL);
             let _ = wait_for_group_exit(
                 child_pid,
                 &mut child_reaped,
                 &mut exit_code,
                 Duration::from_secs(1),
+                &mut pump_output,
             );
         }
     }
@@ -596,9 +625,11 @@ fn wait_for_group_exit(
     child_reaped: &mut bool,
     exit_code: &mut Option<i32>,
     timeout: Duration,
+    pump_output: &mut impl FnMut(),
 ) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
+        pump_output();
         if !*child_reaped {
             match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::Exited(_, code)) => {
@@ -1127,7 +1158,8 @@ impl SavedTermios {
 
 impl Drop for SavedTermios {
     fn drop(&mut self) {
-        let _ = termios::tcsetattr(std::io::stdin(), SetArg::TCSAFLUSH, &self.termios);
+        // Draining can hang when the outer terminal's reader has stopped.
+        let _ = termios::tcsetattr(std::io::stdin(), SetArg::TCSANOW, &self.termios);
     }
 }
 

@@ -596,7 +596,8 @@ writer.start()
 events.write(str(os.getpid()) + '\n')
 assert os.read(0, 1) == b'q'
 events.write('input\n')
-writer.join()
+# Keep Python's main thread able to run signal handlers during backpressure.
+while writer.is_alive(): writer.join(.01)
 sys.exit(17)
 "#;
     let child = Command::new(flowmuxctl_path())
@@ -638,8 +639,16 @@ sys.exit(17)
         assert_eq!(libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &size), 0);
         libc::kill(guard.child.id() as i32, libc::SIGWINCH);
     }
-    thread::sleep(Duration::from_millis(500));
-    let observed = std::fs::read_to_string(&events).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let observed = loop {
+        let observed = std::fs::read_to_string(&events).unwrap();
+        if (observed.contains("input\n") && observed.contains("resize\n"))
+            || Instant::now() >= deadline
+        {
+            break observed;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(observed.contains("input\n"), "input stalled: {observed}");
     assert!(observed.contains("resize\n"), "resize stalled: {observed}");
     let mut output = Vec::new();
@@ -678,7 +687,7 @@ fn pty_tee_restores_shared_stdout_flags() {
         };
         fcntl(writer.as_raw_fd(), FcntlArg::F_SETFL(flags)).unwrap();
         let mut child = Command::new(flowmuxctl_path())
-            .args(["pty-tee", "--", "/bin/true"])
+            .args(["pty-tee", "--", "/bin/sh", "-c", "exit 0"])
             .env("FLOWMUX_SOCKET_PATH", &socket)
             .env("FLOWMUX_SSH_TERMINAL", "1")
             .stdin(Stdio::piped())
@@ -734,7 +743,8 @@ fn pty_tee_preserves_input_queued_before_startup() {
         }
         assert!(
             Instant::now() < deadline,
-            "pty-tee discarded input queued before startup"
+            "pty-tee did not exit; received input: {:?}",
+            std::fs::read_to_string(&output)
         );
         thread::sleep(Duration::from_millis(20));
     }
@@ -806,12 +816,21 @@ fn pty_tee_delivers_final_output_in_order_after_outer_eof() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let socket = tmp.path().join("flowmux.sock");
     let _rx = spawn_fake_daemon(socket.clone());
-    // The inner shell prints its farewell only while the proxy is already
-    // shutting down; it must still follow the earlier output on stdout.
-    let script = "trap 'printf bye; exit 0' HUP; printf hello; while :; do sleep 1; done";
+    // The farewell exceeds the PTY buffer and must drain while the proxy
+    // waits for the child to exit, after all previously queued output.
+    let script = r#"
+import os, signal, sys, time
+def hup(*args):
+    sys.stdout.write('x' * (128 * 1024) + 'bye')
+    sys.stdout.flush()
+    sys.exit(0)
+signal.signal(signal.SIGHUP, hup)
+os.write(1, b'hello')
+while True: time.sleep(1)
+"#;
 
     let mut child = Command::new(flowmuxctl_path())
-        .args(["pty-tee", "--", "sh", "-c", script])
+        .args(["pty-tee", "--", "python3", "-c", script])
         .env("FLOWMUX_SOCKET_PATH", &socket)
         .env("FLOWMUX_SSH_TERMINAL", "1")
         .stdin(Stdio::piped())
@@ -832,12 +851,17 @@ fn pty_tee_delivers_final_output_in_order_after_outer_eof() {
 
     drop(stdin);
     stdout.read_to_end(&mut output).expect("final output");
-    // The shell may report the interrupted `sleep` in between.
-    assert!(
-        output.starts_with(b"hello") && output.ends_with(b"bye"),
-        "output drained during shutdown was lost: {output:?}"
+    let mut expected = b"hello".to_vec();
+    expected.extend(vec![b'x'; 128 * 1024]);
+    expected.extend(b"bye");
+    assert_eq!(
+        output.len(),
+        expected.len(),
+        "shutdown output was truncated"
     );
-    assert!(guard.child.wait().expect("wait pty-tee").success());
+    assert_eq!(output, expected);
+    let status = guard.child.wait().expect("wait pty-tee");
+    assert!(status.success(), "pty-tee failed: {status}");
     guard.inner_pgid = None;
 }
 
