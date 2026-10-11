@@ -20,6 +20,7 @@ impl WindowController {
                     return;
                 }
                 let current = self.options.borrow().clone();
+                let previous_dialog = RefCell::new(current.clone());
                 let options_cell = self.options.clone();
                 let window = self.window.clone();
                 let controller = self.clone();
@@ -36,10 +37,18 @@ impl WindowController {
                     default_font_family,
                     default_font_size,
                     move |opts| {
-                        if let Err(e) = flowmux_config::options::save(&opts) {
-                            tracing::warn!(error = %e, "options save failed");
-                            return;
-                        }
+                        let saved = match flowmux_config::options::save_changes(
+                            &previous_dialog.borrow(),
+                            &opts,
+                        ) {
+                            Ok(saved) => saved,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "options save failed");
+                                return;
+                            }
+                        };
+                        *previous_dialog.borrow_mut() = opts;
+                        let opts = saved;
                         *options_cell.borrow_mut() = opts.clone();
                         controller.sidebar.set_agent_bar_mode(opts.agent_bar_mode);
                         controller.sidebar.set_agent_sort_mode(opts.agent_sort_mode);

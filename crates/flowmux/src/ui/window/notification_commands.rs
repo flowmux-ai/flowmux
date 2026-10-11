@@ -12,23 +12,32 @@ impl WindowController {
                 }
             }
             GtkCommand::SetUsageBarEnabled { enabled } => {
+                let before = self.options.borrow().clone();
                 self.options.borrow_mut().usage_bar_enabled = enabled;
-                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                if let Err(error) =
+                    flowmux_config::options::save_changes(&before, &self.options.borrow())
+                {
                     tracing::warn!(%error, "usage bar option save failed");
                 }
                 self.sidebar.usage.set_bar_enabled(enabled);
             }
             GtkCommand::SetAgentBarMode { enabled } => {
+                let before = self.options.borrow().clone();
                 self.options.borrow_mut().agent_bar_mode = enabled;
-                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                if let Err(error) =
+                    flowmux_config::options::save_changes(&before, &self.options.borrow())
+                {
                     tracing::warn!(%error, "agent display mode save failed");
                 }
                 self.sidebar.set_agent_bar_mode(enabled);
                 self.refresh_agent_displays().await;
             }
             GtkCommand::SetAgentSortMode { mode } => {
+                let before = self.options.borrow().clone();
                 self.options.borrow_mut().agent_sort_mode = mode;
-                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                if let Err(error) =
+                    flowmux_config::options::save_changes(&before, &self.options.borrow())
+                {
                     tracing::warn!(%error, "agent sort mode save failed");
                 }
                 self.sidebar.set_agent_sort_mode(mode);

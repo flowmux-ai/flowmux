@@ -7,6 +7,7 @@ use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
 mod notification_cleanup;
+mod options_merge;
 mod palette;
 mod pane_titles;
 mod process_args;
@@ -82,6 +83,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_OPTIONS_MERGE_SMOKE_ONLY").is_some() {
+        options_merge::check(app).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY").is_some() {
         notification_cleanup::check(app).await;
         return;

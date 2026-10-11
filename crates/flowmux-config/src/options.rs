@@ -5,7 +5,7 @@
 use crate::keybindings::KeybindingOverrides;
 use flowmux_core::AgentNotificationTarget;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const ZOOM_MIN: u16 = 50;
 pub const ZOOM_MAX: u16 = 200;
@@ -539,6 +539,10 @@ pub fn load() -> Options {
         Ok(o) => o,
         Err(_) => return Options::default(),
     };
+    normalize_options(opts)
+}
+
+fn normalize_options(opts: Options) -> Options {
     let focus_border_color = if is_valid_hex_color(&opts.focus_border_color) {
         opts.focus_border_color
     } else {
@@ -558,15 +562,101 @@ pub fn load() -> Options {
     }
 }
 
-/// Serialize options to `options.json`, creating the parent directory if needed.
+/// Replace the complete options file atomically. Interactive callers should
+/// use [`save_changes`] to preserve changes made by other windows.
 pub fn save(opts: &Options) -> std::io::Result<()> {
     let path = options_path().ok_or_else(|| std::io::Error::other("XDG config dir unavailable"))?;
+    let _lock = lock_options(&path)?;
+    write_options(&path, &serde_json::to_value(opts)?)
+}
+
+/// Apply only this window's changes to the latest file under its write lock.
+/// Invalid existing files are preserved and reported instead of reset.
+pub fn save_changes(before: &Options, after: &Options) -> std::io::Result<Options> {
+    if before == after {
+        return Ok(after.clone());
+    }
+    let path = options_path().ok_or_else(|| std::io::Error::other("XDG config dir unavailable"))?;
+    let _lock = lock_options(&path)?;
+    let mut current = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            serde_json::to_value(Options::default())?
+        }
+        Err(error) => return Err(error),
+    };
+    serde_json::from_value::<Options>(current.clone())?;
+    apply_option_changes(
+        &mut current,
+        &serde_json::to_value(before)?,
+        &serde_json::to_value(after)?,
+    );
+    let merged = serde_json::from_value(current.clone())?;
+    write_options(&path, &current)?;
+    Ok(normalize_options(merged))
+}
+
+fn apply_option_changes(
+    current: &mut serde_json::Value,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+) {
+    if before == after {
+        return;
+    }
+    if let (Some(current), Some(before), Some(after)) = (
+        current.as_object_mut(),
+        before.as_object(),
+        after.as_object(),
+    ) {
+        for key in before.keys() {
+            if !after.contains_key(key) {
+                current.remove(key);
+            }
+        }
+        for (key, value) in after {
+            if before.get(key) == Some(value) {
+                continue;
+            }
+            apply_option_changes(
+                current.entry(key).or_insert(serde_json::Value::Null),
+                before.get(key).unwrap_or(&serde_json::Value::Null),
+                value,
+            );
+        }
+    } else {
+        *current = after.clone();
+    }
+}
+
+fn lock_options(path: &Path) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let s = serde_json::to_string_pretty(opts)
-        .map_err(|e| std::io::Error::other(format!("serialize options: {e}")))?;
-    std::fs::write(path, s)
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path.with_extension("lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn write_options(path: &Path, value: &serde_json::Value) -> std::io::Result<()> {
+    use std::io::Write;
+    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::File::create(&temporary)?;
+        serde_json::to_writer_pretty(&mut file, value)?;
+        file.flush()?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -775,6 +865,135 @@ mod tests {
             save(&opts).unwrap();
             let back = load();
             assert_eq!(opts, back);
+        });
+    }
+
+    #[test]
+    fn stale_options_merge_preserves_other_windows_and_nested_fields() {
+        with_xdg(|_| {
+            let before = Options::default();
+            let mut first = before.clone().with_zoom_percent(175);
+            first.persist_browser_session = false;
+            first.theme_overrides.background = Some("#111111".into());
+            first.keybindings =
+                serde_json::from_value(serde_json::json!({"split-right": ["<Ctrl>r"]})).unwrap();
+            save_changes(&before, &first).unwrap();
+            let mut second = before.clone();
+            second.agent_sort_mode = AgentSortMode::RecentlyFinished;
+            second.theme_overrides.foreground = Some("#eeeeee".into());
+            second.keybindings =
+                serde_json::from_value(serde_json::json!({"split-down": []})).unwrap();
+            let saved = save_changes(&before, &second).unwrap();
+            assert_eq!(saved.zoom_percent, 175);
+            assert!(!saved.persist_browser_session);
+            assert_eq!(
+                saved.theme_overrides.background,
+                first.theme_overrides.background
+            );
+            assert_eq!(
+                saved.theme_overrides.foreground,
+                second.theme_overrides.foreground
+            );
+            let mut reset = first.clone();
+            reset.theme_overrides.background = None;
+            reset.keybindings = KeybindingOverrides::default();
+            save_changes(&first, &reset).unwrap();
+            let saved = load();
+            assert_eq!(saved.agent_sort_mode, second.agent_sort_mode);
+            assert_eq!(saved.theme_overrides.background, None);
+            assert_eq!(
+                saved.theme_overrides.foreground,
+                second.theme_overrides.foreground
+            );
+            assert_eq!(
+                serde_json::to_value(saved.keybindings).unwrap(),
+                serde_json::json!({"split-down": []})
+            );
+        });
+    }
+
+    #[test]
+    fn options_merge_preserves_partial_unknown_and_invalid_files() {
+        with_xdg(|_| {
+            let path = options_path().unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, br#"{"zoom_percent":500,"future":{"keep":1}}"#).unwrap();
+            let before = load();
+            let mut after = before.clone();
+            after.usage_bar_enabled = false;
+            let saved = save_changes(&before, &after).unwrap();
+            assert_eq!(saved.zoom_percent, ZOOM_MAX);
+            let raw: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(raw["future"], serde_json::json!({"keep":1}));
+            assert!(!saved.usage_bar_enabled);
+            for bytes in [b"{broken".as_slice(), br#"{"zoom_percent":"broken"}"#] {
+                std::fs::write(&path, bytes).unwrap();
+                assert!(save_changes(&before, &after).is_err());
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            }
+            save(&before).unwrap();
+            let original = std::fs::read(&path).unwrap();
+            let obstruction = path.with_extension(format!("tmp.{}", std::process::id()));
+            std::fs::create_dir(&obstruction).unwrap();
+            assert!(save_changes(&before, &after).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+        });
+    }
+
+    #[test]
+    fn concurrent_option_processes_merge_without_partial_reads() {
+        const WRITER: &str = "FLOWMUX_OPTIONS_TEST_WRITER";
+        if let Ok(writer) = std::env::var(WRITER) {
+            let before = Options::default();
+            let mut after = before.clone();
+            if writer == "zoom" {
+                after.zoom_percent = 150;
+            } else {
+                after.persist_browser_session = false;
+            }
+            for _ in 0..40 {
+                save_changes(&before, &after).unwrap();
+            }
+            return;
+        }
+        with_xdg(|_| {
+            save(&Options::default()).unwrap();
+            let mut writers = ["zoom", "persistence"].map(|writer| {
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "options::tests::concurrent_option_processes_merge_without_partial_reads",
+                    ])
+                    .env(WRITER, writer)
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap()
+            });
+            let path = options_path().unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                serde_json::from_slice::<Options>(&std::fs::read(&path).unwrap()).unwrap();
+                let statuses = writers
+                    .iter_mut()
+                    .map(|child| child.try_wait().unwrap())
+                    .collect::<Vec<_>>();
+                if statuses.iter().all(Option::is_some) {
+                    assert!(statuses.iter().all(|status| status.unwrap().success()));
+                    break;
+                }
+                if std::time::Instant::now() > deadline {
+                    for child in &mut writers {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    panic!("options writers did not finish");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let saved = load();
+            assert_eq!(saved.zoom_percent, 150);
+            assert!(!saved.persist_browser_session);
         });
     }
 
