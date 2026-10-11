@@ -139,7 +139,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         } => Request::WorkspaceCreate {
             team,
             name,
-            root: root.map(Ok).unwrap_or_else(std::env::current_dir)?,
+            root: std::path::absolute(root.unwrap_or_else(|| PathBuf::from(".")))?,
         },
         Cmd::Workspace {
             op: WorkspaceOp::Ls,
@@ -200,7 +200,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             role,
         } => Request::TeamSpawn {
             pane,
-            cwd,
+            cwd: std::path::absolute(cwd)?,
             shell,
             role,
         },
@@ -247,7 +247,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::ClaudeTeams { count, root, args } => Request::ClaudeTeams {
             count,
             args,
-            root: root.map(Ok).unwrap_or_else(std::env::current_dir)?,
+            root: std::path::absolute(root.unwrap_or_else(|| PathBuf::from(".")))?,
         },
         Cmd::BrowserSnapshot { pane } => Request::BrowserSnapshot { pane },
         Cmd::BrowserEval { pane, source } => Request::BrowserEval { pane, source },
@@ -327,6 +327,9 @@ fn ssh_op_to_request(op: SshOp) -> anyhow::Result<Request> {
             target.port = port;
             target.identity_file = identity_file;
             target.config_file = config_file;
+            target.validate().map_err(anyhow::Error::msg)?;
+            target.identity_file = target.identity_file.map(std::path::absolute).transpose()?;
+            target.config_file = target.config_file.map(std::path::absolute).transpose()?;
             let config = SshWorkspaceConfig {
                 target,
                 cwd,

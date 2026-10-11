@@ -1048,7 +1048,27 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         return run_agents(&client, json_mode).await;
     }
 
-    let req = build_request(cmd)?;
+    let mut req = build_request(cmd)?;
+    if let Request::SurfaceCreate {
+        workspace,
+        cwd: Some(cwd),
+        ..
+    } = &mut req
+    {
+        if cwd.is_relative() {
+            // SSH tab paths belong to the remote host, not this CLI process.
+            let Response::Tree { workspaces } = client.call(Request::WorkspaceTree).await? else {
+                anyhow::bail!("could not resolve workspace location for --cwd");
+            };
+            let target = workspaces
+                .iter()
+                .find(|entry| entry.id == *workspace)
+                .context("workspace not found")?;
+            if target.location.local_root().is_some() {
+                *cwd = std::path::absolute(&*cwd)?;
+            }
+        }
+    }
     let resp = client.call(req).await?;
     print_response(&resp, json_mode)?;
     Ok(())

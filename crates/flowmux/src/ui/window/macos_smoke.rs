@@ -6,6 +6,7 @@ use flowmux_state::{State, WindowOwner};
 use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
+mod cli_paths;
 mod notification_cleanup;
 mod options_merge;
 mod palette;
@@ -132,6 +133,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_CLI_PATHS_SMOKE_ONLY").is_some() {
+        cli_paths::check(&controller, &bridge, root).await;
+        controller.window.destroy();
+        return;
+    }
     if std::env::var_os("FLOWMUX_PALETTE_ORDER_SMOKE_ONLY").is_some() {
         palette::check(&controller, workspace, root).await;
         controller.window.destroy();
