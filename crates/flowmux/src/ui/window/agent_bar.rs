@@ -81,8 +81,14 @@ impl WindowController {
         pane: PaneId,
         surface: SurfaceId,
     ) {
-        self.activate_workspace_at(workspace, Some((pane, Some(surface))))
-            .await;
+        // Activity entries retain workspace navigation after their tab closes.
+        let target = {
+            let registry = self.pane_registry.borrow();
+            (registry.workspace_of_pane(pane) == Some(workspace)
+                && registry.pane_for_surface(surface) == Some(pane))
+            .then_some((pane, Some(surface)))
+        };
+        self.activate_workspace_at(workspace, target).await;
         self.window.present();
     }
 
