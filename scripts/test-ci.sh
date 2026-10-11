@@ -17,6 +17,12 @@ report_dir="$CARGO_TARGET_DIR/ci/$mode"
 mkdir -p "$report_dir"
 exec > >(tee "$report_dir/run.log") 2>&1
 
+run_phase() {
+    local phase=$1 budget=$2
+    shift 2
+    python3 scripts/ci-phase.py "$report_dir" "$phase" "$budget" "$@"
+}
+
 # Never inherit the invoking pane's socket, identity, or persistent state.
 for variable in ${!FLOWMUX_@}; do unset "$variable"; done
 test_root=$(mktemp -d /tmp/fm-ci.XXXXXX)
@@ -35,10 +41,10 @@ uname -a
 rustc -Vv
 cargo --version
 pkg-config --modversion gtk4 libadwaita-1
-python3 scripts/test-ci-runner.py
-python3 -B scripts/test-agent-unit-runner.py
-python3 scripts/test-agent-team.py
-cargo fmt --all -- --check
+run_phase ci-runner-tests 120 python3 scripts/test-ci-runner.py
+run_phase agent-runner-tests 120 python3 -B scripts/test-agent-unit-runner.py
+run_phase agent-team-tests 120 python3 scripts/test-agent-team.py
+run_phase format 180 cargo fmt --all -- --check
 
 if [[ $mode == linux ]]; then
     cargo llvm-cov --version
@@ -48,14 +54,14 @@ if [[ $mode == linux ]]; then
     # Keep a fixed virtual desktop. AppArmor is provisioned by the host/CI;
     # this runner does not disable the WebKit sandbox or change host policy.
     result=0
-    xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
+    run_phase coverage 1500 xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
         bash scripts/test-coverage.sh -- --nocapture || result=$?
     # Preserve failure evidence even when a test fails; never turn it green.
     mkdir -p "$CARGO_TARGET_DIR/llvm-cov"
-    cargo llvm-cov report --json --summary-only \
+    run_phase coverage-json 180 cargo llvm-cov report --json --summary-only \
         --output-path "$CARGO_TARGET_DIR/llvm-cov/summary.json" || result=1
-    cargo llvm-cov report --html || result=1
-    cargo llvm-cov report --fail-under-lines 79 --fail-under-regions 78 \
+    run_phase coverage-html 180 cargo llvm-cov report --html || result=1
+    run_phase coverage-thresholds 180 cargo llvm-cov report --fail-under-lines 79 --fail-under-regions 78 \
         --fail-under-functions 78 || result=1
     exit "$result"
 fi
@@ -65,24 +71,24 @@ fi
 export GSK_RENDERER=cairo
 printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
-cargo build --workspace --locked
-cargo test -p flowmux-cli --locked
+run_phase build 900 cargo build --workspace --locked
+run_phase cli 300 cargo test -p flowmux-cli --locked
 git rev-parse HEAD
 python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CARGO_TARGET_DIR/debug/flowmuxctl"
-python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"
-cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
-cargo test -p flowmux --bin flowmux --locked bridge::tests
+run_phase agent-unit 960 python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"
+run_phase ipc 300 cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
+run_phase bridge 180 cargo test -p flowmux --bin flowmux --locked bridge::tests
 export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
-cargo test -p flowmux --test macos_native --features native-smoke --locked \
+run_phase native 600 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/native-smoke.log"
 grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
 
 # Install skills through the mapped Options UI using a private agent home.
-FLOWMUX_SKILLS_SMOKE_ONLY=1 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+FLOWMUX_SKILLS_SMOKE_ONLY=1 run_phase skills 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/skills-smoke.log"
 grep -q '^MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK$' "$report_dir/skills-smoke.log"
 
 # The same CLI/PTY/VTE hook matrix used by the Linux SSH GUI gate.
-FLOWMUX_AGENT_SMOKE_ONLY=1 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+FLOWMUX_AGENT_SMOKE_ONLY=1 run_phase agent-hooks 300 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/agent-hooks.log"
 grep -q '^MACOS_NATIVE_AGENT_HOOKS_OK$' "$report_dir/agent-hooks.log"

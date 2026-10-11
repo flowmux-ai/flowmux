@@ -16,6 +16,8 @@ STUB = r'''
 import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
+if name == 'python3' and args and args[0] == 'scripts/ci-phase.py':
+    os.execv(sys.executable, [sys.executable, *args])
 with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps({'name': name, 'args': args,
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
@@ -43,6 +45,64 @@ if name == 'cargo' and 'macos_native' in args:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_phase_deadlines_exit_codes_and_descendant_cleanup(self):
+        job = """
+import os, pathlib, signal, subprocess, sys, time
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+if sys.argv[2] in ('passed', 'failed'):
+    sys.exit(0 if sys.argv[2] == 'passed' else 27)
+if sys.argv[2] == 'crashed':
+    os.kill(os.getpid(), signal.SIGKILL)
+time.sleep(60)
+"""
+        for mode, expected in [('passed', 0), ('failed', 27), ('timeout', 124),
+                               ('terminate', 143), ('interrupt', 130), ('crashed', 137)]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                info = root / 'child.pid'
+                process = subprocess.Popen([
+                    sys.executable, str(ROOT / 'scripts/ci-phase.py'), directory, mode,
+                    '0.5' if mode == 'timeout' else '10',
+                    sys.executable, '-c', job, str(info), mode,
+                ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                try:
+                    deadline = time.monotonic() + 10
+                    while not info.exists() or not info.read_text():
+                        self.assertIsNone(process.poll())
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(.01)
+                    if mode in ('terminate', 'interrupt'):
+                        process.send_signal(signal.SIGTERM if mode == 'terminate' else signal.SIGINT)
+                    output, _ = process.communicate(timeout=10)
+                    self.assertEqual(process.returncode, expected, output)
+                    receipt = json.loads((root / (mode + '.json')).read_text())
+                    self.assertEqual(receipt['exit_code'], expected)
+                    self.assertEqual(receipt['status'],
+                                     'interrupted' if mode in ('terminate', 'interrupt') else
+                                     'failed' if mode == 'crashed' else mode)
+                    self.assertLess(receipt['elapsed_seconds'], 5)
+                    self.assertIn('CI_PHASE_START=' + mode, output)
+                    self.assertIn('CI_PHASE_RESULT=', output)
+                    child = int(info.read_text())
+                    deadline = time.monotonic() + 2
+                    while True:
+                        try:
+                            os.kill(child, 0)
+                        except ProcessLookupError:
+                            break
+                        self.assertLess(time.monotonic(), deadline, 'phase descendant survived')
+                        time.sleep(.02)
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.communicate(timeout=10)
+                    if info.exists() and info.read_text():
+                        try:
+                            os.kill(int(info.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
     def run_script(self, script, *args, **extra):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
