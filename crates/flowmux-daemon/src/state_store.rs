@@ -959,15 +959,7 @@ impl StateStore {
 
     /// Return the workspace that owns leaf pane `target`, if any.
     pub async fn workspace_of_pane(&self, target: PaneId) -> Option<WorkspaceId> {
-        let s = self.inner.lock().await;
-        s.workspaces
-            .iter()
-            .find(|ws| {
-                ws.surfaces
-                    .iter()
-                    .any(|sf| sf.root_pane.find_leaf_content(target).is_some())
-            })
-            .map(|ws| ws.id)
+        self.workspace_for_pane(target).await
     }
 
     /// Relocate the tab `surface_id` out of leaf `src_pane` and into leaf
@@ -9070,6 +9062,54 @@ Do you want to continue?";
         }
         state.workspaces.clear();
         assert!(ordered_workspace_ids(&state).is_empty());
+    }
+
+    #[tokio::test]
+    async fn pane_owner_queries_use_first_workspace_and_leaf_ids_only() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let first = create_named_workspace(&store, "first").await;
+        let second = create_named_workspace(&store, "second").await;
+        let pane = store.get_workspace(first).await.unwrap().surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let (_, sibling) = store
+            .split_pane(pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let branch = {
+            let mut state = store.inner.lock().await;
+            let root = state
+                .workspaces
+                .iter()
+                .find(|ws| ws.id == first)
+                .unwrap()
+                .surfaces[0]
+                .root_pane
+                .clone();
+            let branch = match &root {
+                Pane::Split { id, .. } => *id,
+                _ => panic!("split expected"),
+            };
+            state
+                .workspaces
+                .iter_mut()
+                .find(|ws| ws.id == second)
+                .unwrap()
+                .surfaces[0]
+                .root_pane = root;
+            state.workspace_order = vec![second, first];
+            branch
+        };
+        for (target, expected) in [
+            (pane, Some(first)),
+            (sibling, Some(first)),
+            (branch, None),
+            (PaneId::new(), None),
+        ] {
+            assert_eq!(store.workspace_of_pane(target).await, expected);
+            assert_eq!(store.workspace_for_pane(target).await, expected);
+        }
     }
 
     #[tokio::test]
