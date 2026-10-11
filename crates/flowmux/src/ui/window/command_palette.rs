@@ -572,14 +572,20 @@ impl WindowController {
             }
             no_results_for_search.set_visible(!any_visible);
         });
-        let entries_for_activate = entries.clone();
+        let list_for_activate = list.downgrade();
         search.connect_activate(move |_| {
-            if let Some((_, _, button)) = entries_for_activate
-                .borrow()
-                .iter()
-                .find(|(_, _, button)| button.is_visible())
-            {
-                button.emit_clicked();
+            let Some(list) = list_for_activate.upgrade() else {
+                return;
+            };
+            let mut child = list.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                if widget.is_visible() {
+                    if let Ok(button) = widget.downcast::<gtk::Button>() {
+                        button.emit_clicked();
+                        break;
+                    }
+                }
             }
         });
         let dialog_for_stop = dialog.clone();

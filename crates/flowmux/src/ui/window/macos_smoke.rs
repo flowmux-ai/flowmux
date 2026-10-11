@@ -6,6 +6,7 @@ use flowmux_state::{State, WindowOwner};
 use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
+mod palette;
 mod pane_titles;
 mod restored_roots;
 
@@ -118,6 +119,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_PALETTE_ORDER_SMOKE_ONLY").is_some() {
+        palette::check(&controller, workspace, root).await;
+        controller.window.destroy();
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_LIVE_TAB_TITLE_SMOKE_ONLY").is_some() {
         pane_titles::check(&controller, workspace, terminal_pane, root).await;
