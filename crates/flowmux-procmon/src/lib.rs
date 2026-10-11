@@ -189,8 +189,8 @@ fn match_agent_comm(comm: &str) -> Option<&'static str> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_SCRIPT_INTERPRETERS: &[&str] = &["node", "bun", "deno", "python", "python3"];
 
-/// For a known interpreter, scan non-flag arguments for a basename matching an
-/// agent name after removing `.js`, `.mjs`, or `.cjs`. Native launchers can
+/// For a known interpreter, identify only its script or module entrypoint.
+/// Arguments to that program cannot establish agent identity. Native launchers can
 /// also identify themselves through argv[0] when `comm` is a version number.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
@@ -206,19 +206,83 @@ fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
     if !AGENT_SCRIPT_INTERPRETERS.contains(&interpreter.as_str()) {
         return None;
     }
-    argv.iter().skip(1).find_map(|arg| {
-        if arg.starts_with('-') {
+    let python = matches!(interpreter.as_str(), "python" | "python3");
+    let mut args = argv.iter().skip(1).map(String::as_str).peekable();
+    if matches!(interpreter.as_str(), "bun" | "deno") && args.peek() == Some(&"run") {
+        args.next();
+    }
+    let script = loop {
+        let arg = args.next()?;
+        if arg == "--" {
+            break args.next()?;
+        }
+        if arg == "-" {
             return None;
         }
-        let stem = std::path::Path::new(arg).file_name()?.to_str()?;
-        let stem = stem
-            .strip_suffix(".js")
-            .or_else(|| stem.strip_suffix(".mjs"))
-            .or_else(|| stem.strip_suffix(".cjs"))
-            .unwrap_or(stem)
-            .to_ascii_lowercase();
-        match_agent_comm(&stem)
-    })
+        if !arg.starts_with('-') {
+            break arg;
+        }
+        if python {
+            if let Some(module) = arg.strip_prefix("-m") {
+                return match_agent_comm(if module.is_empty() {
+                    args.next()?
+                } else {
+                    module
+                });
+            }
+            if matches!(arg, "-W" | "-X") {
+                args.next()?;
+            } else if arg.starts_with("-W")
+                || arg.starts_with("-X")
+                || arg[1..].chars().all(|c| "bBdEiIOPqRsSuvx".contains(c))
+            {
+                continue;
+            } else {
+                return None;
+            }
+        } else {
+            match arg.split('=').next()? {
+                "-e" | "--eval" | "-p" | "--print" | "--run" => return None,
+                _ if arg.starts_with("--") && arg.contains('=') => continue,
+                "-r"
+                | "--require"
+                | "--import"
+                | "--loader"
+                | "--experimental-loader"
+                | "--conditions"
+                | "-C"
+                | "--inspect-port"
+                | "--title"
+                | "--env-file"
+                | "--icu-data-dir"
+                | "--openssl-config"
+                | "--redirect-warnings" => {
+                    args.next()?;
+                }
+                "--enable-source-maps"
+                | "--no-warnings"
+                | "--trace-warnings"
+                | "--experimental-modules"
+                | "--preserve-symlinks"
+                | "--preserve-symlinks-main"
+                | "--inspect"
+                | "--inspect-brk"
+                | "--allow-all"
+                | "-A" => continue,
+                // shortcut: unknown operand syntax is not agent evidence;
+                // add a flag here when a supported launcher needs it.
+                _ => return None,
+            }
+        }
+    };
+    let stem = std::path::Path::new(script).file_name()?.to_str()?;
+    let stem = stem
+        .strip_suffix(".js")
+        .or_else(|| stem.strip_suffix(".mjs"))
+        .or_else(|| stem.strip_suffix(".cjs"))
+        .unwrap_or(stem)
+        .to_ascii_lowercase();
+    match_agent_comm(&stem)
 }
 
 /// The argv of a process from procfs or the native process API, or
@@ -812,6 +876,49 @@ mod tests {
         assert_eq!(agent_from_argv(&argv(&["bash", "cline"])), None);
         // An interpreter running an unrelated script matches nothing.
         assert_eq!(agent_from_argv(&argv(&["node", "/srv/server.js"])), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interpreter_arguments_do_not_impersonate_entrypoints() {
+        for args in [
+            vec!["node", "-e", "setInterval(()=>{},1000)", "--", "codex"],
+            vec!["node", "--eval=0", "codex"],
+            vec!["node", "-p", "'codex'", "claude"],
+            vec!["node", "app.js", "codex"],
+            vec!["node", "-r", "codex", "app.js"],
+            vec!["node", "--import", "codex", "app.js"],
+            vec!["node", "--unknown-option", "codex"],
+            vec!["node", "-", "codex"],
+            vec!["python3", "-c", "print(1)", "codex"],
+            vec!["python3", "-m", "server", "aider"],
+            vec!["python3", "script.py", "aider"],
+            vec!["python3", "-W", "aider", "script.py"],
+            vec!["bun", "run", "app.js", "codex"],
+            vec!["deno", "run", "app.js", "codex"],
+        ] {
+            let argv = args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+            assert_eq!(agent_from_argv(&argv), None, "{args:?}");
+        }
+        for (args, expected) in [
+            (vec!["node", "--", "/opt/codex.js", "claude"], "codex"),
+            (
+                vec!["node", "--require", "helper.js", "/opt/cline.cjs"],
+                "cline",
+            ),
+            (vec!["node", "--no-warnings", "/opt/gemini.mjs"], "gemini"),
+            (vec!["python3", "-m", "aider", "codex"], "aider"),
+            (vec!["python3", "-maider"], "aider"),
+            (
+                vec!["python3", "-X", "dev", "-Wignore", "/opt/aider"],
+                "aider",
+            ),
+            (vec!["bun", "run", "/opt/claude.js"], "claude"),
+            (vec!["deno", "run", "--allow-all", "/opt/cline.js"], "cline"),
+        ] {
+            let argv = args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+            assert_eq!(agent_from_argv(&argv), Some(expected), "{args:?}");
+        }
     }
 
     #[cfg(target_os = "macos")]

@@ -8,6 +8,7 @@ use std::io::{BufRead, Read, Write};
 mod agent_sessions;
 mod palette;
 mod pane_titles;
+mod process_args;
 mod restored_roots;
 
 pub(crate) fn run() {
@@ -122,6 +123,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
 
     if std::env::var_os("FLOWMUX_PALETTE_ORDER_SMOKE_ONLY").is_some() {
         palette::check(&controller, workspace, root).await;
+        controller.window.destroy();
+        return;
+    }
+    if std::env::var_os("FLOWMUX_AGENT_ENTRYPOINT_SMOKE_ONLY").is_some() {
+        process_args::check(&controller, terminal_pane, root).await;
         controller.window.destroy();
         return;
     }
