@@ -2168,6 +2168,20 @@ fn normalize_state(state: &mut State) -> bool {
     }
 
     for ws in &mut state.workspaces {
+        let legacy_roots: Vec<_> = ws
+            .surfaces
+            .iter()
+            .skip(1)
+            .map(|surface| {
+                matches!(
+                    &surface.root_pane,
+                    Pane::Leaf {
+                        content: PaneContent::Terminal { .. } | PaneContent::Browser { .. },
+                        ..
+                    }
+                )
+            })
+            .collect();
         for surface in &mut ws.surfaces {
             let fallback_cwd = match &surface.kind {
                 SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
@@ -2178,7 +2192,7 @@ fn normalize_state(state: &mut State) -> bool {
             changed |= surface.root_pane.normalize_leaf_tabs(fallback_cwd);
         }
         if ws.surfaces.len() > 1 {
-            changed |= migrate_top_level_surfaces_to_first_pane(ws);
+            changed |= migrate_top_level_surfaces_to_first_pane(ws, &legacy_roots);
         }
         for surface in &mut ws.surfaces {
             changed |= surface.root_pane.normalize_leaf_tabs(None);
@@ -2187,13 +2201,24 @@ fn normalize_state(state: &mut State) -> bool {
     changed
 }
 
-fn migrate_top_level_surfaces_to_first_pane(ws: &mut Workspace) -> bool {
+fn migrate_top_level_surfaces_to_first_pane(ws: &mut Workspace, legacy_roots: &[bool]) -> bool {
     let Some(target_pane) = ws.surfaces[0].root_pane.first_leaf_id() else {
         return false;
     };
-    let extra_surfaces = ws.surfaces.split_off(1);
-    let changed = !extra_surfaces.is_empty();
-    for surface in extra_surfaces {
+    let mut roots = std::mem::take(&mut ws.surfaces).into_iter();
+    let mut primary = roots.next().expect("workspace has its first root");
+    for (index, surface) in roots.enumerate() {
+        // Only legacy single-content roots are tabs. Existing trees retain all IDs and layout.
+        if !legacy_roots[index] {
+            primary.root_pane = Pane::Split {
+                id: PaneId::new(),
+                direction: SplitDirection::Horizontal,
+                ratio: 0.5,
+                first: Box::new(primary.root_pane),
+                second: Box::new(surface.root_pane),
+            };
+            continue;
+        }
         let Some(mut tab) = first_active_pane_surface(&surface.root_pane) else {
             continue;
         };
@@ -2201,11 +2226,10 @@ fn migrate_top_level_surfaces_to_first_pane(ws: &mut Workspace) -> bool {
         if !surface.title.is_empty() {
             tab.title = surface.title;
         }
-        ws.surfaces[0]
-            .root_pane
-            .add_surface_to_leaf(target_pane, tab);
+        primary.root_pane.add_surface_to_leaf(target_pane, tab);
     }
-    changed
+    ws.surfaces.push(primary);
+    true
 }
 
 fn first_active_pane_surface(pane: &Pane) -> Option<PaneSurface> {
@@ -7450,6 +7474,70 @@ Do you want to continue?";
         assert_eq!(*active, second_surface);
         assert!(surfaces.iter().any(|surface| surface.id == second_surface
             && matches!(&surface.kind, SurfaceKind::Browser { .. })));
+    }
+
+    #[tokio::test]
+    async fn additional_modern_roots_preserve_the_entire_tree_and_ids() {
+        for split in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let initial = StateStore::new_lazy_ephemeral(State::default());
+            let ws_id = initial.create_workspace(None, dir.path().into()).await;
+            let mut state = initial.snapshot().await;
+            let mut tabs = vec![
+                PaneSurface::terminal("task", Some(dir.path().into())),
+                PaneSurface::editor("editor", dir.path().into()),
+            ];
+            for tab in &mut tabs {
+                tab.title_locked = true;
+            }
+            let left = Pane::Leaf {
+                id: PaneId::new(),
+                content: PaneContent::Tabs {
+                    active: tabs[1].id,
+                    surfaces: tabs,
+                },
+            };
+            let extra = if split {
+                Pane::Split {
+                    id: PaneId::new(),
+                    direction: SplitDirection::Vertical,
+                    ratio: 0.27,
+                    first: Box::new(left),
+                    second: Box::new(Pane::Leaf {
+                        id: PaneId::new(),
+                        content: PaneContent::tabbed_browser("browser", "about:blank".into()),
+                    }),
+                }
+            } else {
+                left
+            };
+            let expected = format!("{extra:?}");
+            state.workspaces[0].surfaces.push(Surface {
+                id: SurfaceId::new(),
+                kind: SurfaceKind::Terminal {
+                    shell: None,
+                    cwd: Some(dir.path().into()),
+                },
+                title: "old root".into(),
+                root_pane: extra,
+            });
+            let path = dir.path().join("state.json");
+            flowmux_state::save_to(&path, &state).unwrap();
+            let restored = StateStore::new_lazy_ephemeral(flowmux_state::load_from(&path).unwrap());
+            let ws = restored.get_workspace(ws_id).await.unwrap();
+            assert_eq!(ws.surfaces.len(), 1);
+            let Pane::Split { second, .. } = &ws.surfaces[0].root_pane else {
+                panic!("additional root must remain a complete subtree")
+            };
+            assert_eq!(format!("{second:?}"), expected);
+            let snapshot = restored.snapshot().await;
+            flowmux_state::save_to(&path, &snapshot).unwrap();
+            let again = StateStore::new_lazy_ephemeral(flowmux_state::load_from(&path).unwrap());
+            assert_eq!(
+                format!("{:?}", again.get_workspace(ws_id).await.unwrap()),
+                format!("{ws:?}")
+            );
+        }
     }
 
     #[tokio::test]

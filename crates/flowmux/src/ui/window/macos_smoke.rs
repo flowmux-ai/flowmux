@@ -7,6 +7,7 @@ use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
 mod pane_titles;
+mod restored_roots;
 
 pub(crate) fn run() {
     let isolated = tempfile::Builder::new()
@@ -77,6 +78,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY").is_some() {
+        restored_roots::check(app, root).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_UPDATE_LIFETIME_SMOKE_ONLY").is_some() {
         crate::ui::update_banner::UpdateBanner::check_native_lifetime(app.upcast_ref()).await;
         return;
