@@ -6,6 +6,7 @@ use flowmux_state::{State, WindowOwner};
 use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
+mod pane_titles;
 
 pub(crate) fn run() {
     let isolated = tempfile::Builder::new()
@@ -112,6 +113,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_LIVE_TAB_TITLE_SMOKE_ONLY").is_some() {
+        pane_titles::check(&controller, workspace, terminal_pane, root).await;
+        controller.window.destroy();
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_AGENT_SESSION_IO_SMOKE_ONLY").is_some() {
         let surface = ws.surfaces[0]

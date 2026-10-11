@@ -5,6 +5,39 @@ use super::*;
 use std::str::FromStr;
 
 #[test]
+fn adding_live_tabs_preserves_existing_terminal_titles() {
+    for added in [
+        PaneSurface::terminal("new", None),
+        PaneSurface::browser("new", "about:blank".into()),
+        PaneSurface::editor("new", "/tmp".into()),
+    ] {
+        let pane = PaneId::new();
+        let existing = PaneSurface::terminal("running task", Some("/tmp/project".into()));
+        let existing_id = existing.id;
+        let mut tree = Pane::Leaf {
+            id: pane,
+            content: PaneContent::Tabs {
+                active: existing_id,
+                surfaces: vec![existing],
+            },
+        };
+        let added_id = added.id;
+        assert_eq!(tree.add_surface_to_leaf(pane, added), Some(added_id));
+        assert_eq!(
+            tree.find_surface_ref(pane, existing_id).unwrap().title,
+            "running task"
+        );
+        assert_eq!(tree.active_surface_id(pane), Some(added_id));
+        // Reload still removes stale automatic titles from a prior process.
+        assert!(tree.normalize_leaf_tabs(None));
+        assert_eq!(
+            tree.find_surface_ref(pane, existing_id).unwrap().title,
+            "project"
+        );
+    }
+}
+
+#[test]
 fn split_leaf_replaces_target_with_a_split() {
     let leaf_id = PaneId::new();
     let mut p = Pane::Leaf {

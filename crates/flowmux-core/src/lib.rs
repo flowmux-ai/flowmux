@@ -1770,7 +1770,9 @@ fn add_surface_to_leaf_descend(
 ) -> Option<SurfaceId> {
     match node {
         Pane::Leaf { id, content } if *id == target => {
-            content.normalize_to_tabs(None);
+            if !matches!(content, PaneContent::Tabs { .. }) {
+                content.normalize_to_tabs(None);
+            }
             match content {
                 PaneContent::Tabs { active, surfaces } => {
                     let s = surface
