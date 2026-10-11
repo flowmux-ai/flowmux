@@ -2168,6 +2168,11 @@ fn normalize_state(state: &mut State) -> bool {
     }
 
     for ws in &mut state.workspaces {
+        if let flowmux_core::WorkspaceLocation::Ssh { config } = &ws.location {
+            for surface in &mut ws.surfaces {
+                changed |= normalize_empty_ssh_tabs(&mut surface.root_pane, config);
+            }
+        }
         let legacy_roots: Vec<_> = ws
             .surfaces
             .iter()
@@ -2199,6 +2204,24 @@ fn normalize_state(state: &mut State) -> bool {
         }
     }
     changed
+}
+
+fn normalize_empty_ssh_tabs(pane: &mut Pane, config: &flowmux_core::SshWorkspaceConfig) -> bool {
+    match pane {
+        Pane::Leaf {
+            content: PaneContent::Tabs { active, surfaces },
+            ..
+        } if surfaces.is_empty() => {
+            let tab = config.terminal(None);
+            *active = tab.id;
+            surfaces.push(tab);
+            true
+        }
+        Pane::Split { first, second, .. } => {
+            normalize_empty_ssh_tabs(first, config) | normalize_empty_ssh_tabs(second, config)
+        }
+        Pane::Leaf { .. } => false,
+    }
 }
 
 fn migrate_top_level_surfaces_to_first_pane(ws: &mut Workspace, legacy_roots: &[bool]) -> bool {
@@ -2301,6 +2324,56 @@ mod tests {
         assert_eq!(surfaces[0].title, "Reviewer");
         assert!(
             matches!(&surfaces[0].kind, SurfaceKind::Terminal { shell: Some(shell), cwd: Some(cwd) } if shell == "/bin/sh" && cwd == &root)
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_ssh_split_leaves_restore_independent_remote_tabs() {
+        let seed = StateStore::new_lazy_ephemeral(State::default());
+        let (workspace, pane, _) = ssh_workspace(&seed).await;
+        let mut initial = seed.snapshot().await;
+        let other = PaneId::new();
+        let empty = |id| Pane::Leaf {
+            id,
+            content: PaneContent::Tabs {
+                active: SurfaceId::new(),
+                surfaces: vec![],
+            },
+        };
+        initial.workspaces[0].surfaces[0].root_pane = Pane::Split {
+            id: PaneId::new(),
+            direction: SplitDirection::Horizontal,
+            ratio: 0.4,
+            first: Box::new(empty(pane)),
+            second: Box::new(empty(other)),
+        };
+        let restored = StateStore::new_lazy_ephemeral(initial);
+        let ws = restored.get_workspace(workspace).await.unwrap();
+        let tabs: Vec<_> = [pane, other]
+            .into_iter()
+            .map(|id| {
+                ws.surfaces[0]
+                    .root_pane
+                    .find_leaf_content(id)
+                    .unwrap()
+                    .active_surface()
+                    .cloned()
+                    .unwrap()
+            })
+            .collect();
+        assert_ne!(tabs[0].id, tabs[1].id);
+        for tab in tabs {
+            assert!(
+                matches!(&tab.kind, SurfaceKind::SshTerminal { cwd, tmux_session } if cwd.as_deref() == Some("/srv/project") && tmux_session.as_deref() == Some(format!("flowmux-{}", tab.id.0.simple()).as_str()))
+            );
+        }
+        let snapshot = restored.snapshot().await;
+        let dir = tempfile::tempdir().unwrap();
+        flowmux_state::save_to(&dir.path().join("state.json"), &snapshot).unwrap();
+        let again = StateStore::new_lazy_ephemeral(snapshot);
+        assert_eq!(
+            format!("{:?}", again.get_workspace(workspace).await.unwrap()),
+            format!("{ws:?}")
         );
     }
 
