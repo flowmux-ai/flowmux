@@ -111,15 +111,19 @@ pub fn install_accels(app: &adw::Application, options: &Options) {
                     tracing::warn!(action = action.as_str(), "empty accel string — skipping");
                     return None;
                 }
-                if gtk::accelerator_parse(accel).is_none() {
+                let Some((key, modifiers)) = gtk::accelerator_parse(accel) else {
                     tracing::warn!(
                         action = action.as_str(),
                         accel = %accel,
                         "invalid accel — skipping"
                     );
                     return None;
-                }
-                if let Some(prev) = owner.get(accel) {
+                };
+                let canonical = gtk::accelerator_name(key, modifiers).to_string();
+                if let Some(prev) = owner
+                    .get(&canonical)
+                    .filter(|prev| **prev != action.as_str())
+                {
                     tracing::warn!(
                         accel = %accel,
                         first = %prev,
@@ -127,7 +131,7 @@ pub fn install_accels(app: &adw::Application, options: &Options) {
                         "accel bound to multiple actions — GTK will keep the last writer"
                     );
                 } else {
-                    owner.insert(accel.clone(), action.as_str());
+                    owner.insert(canonical, action.as_str());
                 }
                 Some(accel.clone())
             })

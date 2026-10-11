@@ -422,20 +422,69 @@ fn is_modifier_key(keyval: gtk::gdk::Key) -> bool {
     )
 }
 
-/// Conflict report: every accel string bound to two or more actions
+/// Conflict report: every GTK accelerator bound to two or more actions
 /// after applying the user's overrides.
 pub fn detect_conflicts(overrides: &KeybindingOverrides) -> Vec<(String, Vec<ActionId>)> {
     use std::collections::BTreeMap;
     let mut by_accel: BTreeMap<String, Vec<ActionId>> = BTreeMap::new();
     for (action, accels) in overrides.resolve() {
         for accel in accels {
-            by_accel.entry(accel).or_default().push(action);
+            let Some((key, modifiers)) = gtk::accelerator_parse(&accel) else {
+                continue;
+            };
+            let canonical = gtk::accelerator_name(key, modifiers).to_string();
+            let owners = by_accel.entry(canonical).or_default();
+            if !owners.contains(&action) {
+                owners.push(action);
+            }
         }
     }
     by_accel
         .into_iter()
         .filter(|(_, owners)| owners.len() > 1)
         .collect()
+}
+
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) fn check_native_aliases(app: &adw::Application) {
+    for (first, alias) in [
+        ("<Ctrl><Shift>F12", "<Shift><Control>F12"),
+        ("<Ctrl>F11", "<Control>F11"),
+    ] {
+        let mut overrides = KeybindingOverrides::new();
+        overrides.set(ActionId::SplitRight, vec![first.into(), alias.into()]);
+        assert!(
+            detect_conflicts(&overrides).is_empty(),
+            "one action is not a conflict"
+        );
+        overrides.set(ActionId::SplitRight, vec![first.into()]);
+        overrides.set(ActionId::CloseSurface, vec![alias.into()]);
+        let conflicts = detect_conflicts(&overrides);
+        assert_eq!(conflicts.len(), 1, "alias collision missed: {conflicts:?}");
+        assert_eq!(conflicts[0].1.len(), 2);
+        assert!(conflicts[0].1.contains(&ActionId::SplitRight));
+        assert!(conflicts[0].1.contains(&ActionId::CloseSurface));
+        let options = flowmux_config::options::Options {
+            keybindings: overrides,
+            ..Default::default()
+        };
+        crate::keybindings::install_accels(app, &options);
+        let first_actions = app.actions_for_accel(first);
+        assert_eq!(first_actions, app.actions_for_accel(alias));
+        assert!(first_actions
+            .iter()
+            .any(|action| action == "win.split-right"));
+        assert!(first_actions
+            .iter()
+            .any(|action| action == "win.close-surface"));
+    }
+    let mut overrides = KeybindingOverrides::new();
+    overrides.set(ActionId::SplitRight, vec!["invalid-key-name".into()]);
+    overrides.set(ActionId::CloseSurface, vec!["invalid-key-name".into()]);
+    assert!(detect_conflicts(&overrides).is_empty());
+    assert!(detect_conflicts(&KeybindingOverrides::new()).is_empty());
+    crate::keybindings::install_accels(app, &flowmux_config::options::Options::default());
+    println!("MACOS_KEYBINDING_ALIAS_OK");
 }
 
 #[cfg(test)]
@@ -479,7 +528,8 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     fn detect_conflicts_flags_duplicate_accel_across_actions() {
         let mut overrides = KeybindingOverrides::new();
         // Bind close-surface to split-right's default key (which differs per
@@ -490,7 +540,7 @@ mod tests {
         let conflicts = detect_conflicts(&overrides);
         assert!(
             conflicts.iter().any(|(accel, owners)| {
-                *accel == split_right_key
+                gtk::accelerator_parse(accel) == gtk::accelerator_parse(&split_right_key)
                     && owners.contains(&ActionId::CloseSurface)
                     && owners.contains(&ActionId::SplitRight)
             }),
@@ -499,7 +549,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     fn detect_conflicts_clean_when_overrides_are_empty() {
         let overrides = KeybindingOverrides::new();
         assert!(detect_conflicts(&overrides).is_empty());

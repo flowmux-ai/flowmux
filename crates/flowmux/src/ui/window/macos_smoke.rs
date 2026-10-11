@@ -84,6 +84,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_KEYBINDING_ALIAS_SMOKE_ONLY").is_some() {
+        crate::ui::keybindings_panel::check_native_aliases(app);
+        return;
+    }
     if std::env::var_os("FLOWMUX_OPTIONS_MERGE_SMOKE_ONLY").is_some() {
         options_merge::check(app).await;
         return;
