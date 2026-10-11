@@ -68,6 +68,10 @@ fn banner_props(
 
 #[derive(Clone)]
 pub struct UpdateBanner {
+    inner: Rc<UpdateBannerInner>,
+}
+
+struct UpdateBannerInner {
     root: gtk::Box,
     banner: adw::Banner,
     ignore_button: gtk::Button,
@@ -76,6 +80,17 @@ pub struct UpdateBanner {
     tx: async_channel::Sender<Event>,
     tokio_handle: Option<tokio::runtime::Handle>,
     origin: InstallOrigin,
+    check_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for UpdateBannerInner {
+    fn drop(&mut self) {
+        self.tx.close();
+        if let Some(task) = self.check_task.take() {
+            task.abort();
+        }
+        // Install tasks own only a sender and must finish even after the UI closes.
+    }
 }
 
 impl UpdateBanner {
@@ -114,40 +129,51 @@ impl UpdateBanner {
 
         let (tx, rx) = async_channel::unbounded::<Event>();
         let origin = update::origin::install_origin();
+        let check_task = tokio_handle
+            .as_ref()
+            .map(|handle| handle.spawn(update::install::check_loop(tx.clone())));
         let this = Self {
-            root,
-            banner: banner.clone(),
-            ignore_button: ignore_button.clone(),
-            progress,
-            state: Rc::new(RefCell::new(
-                update::ignored_version()
-                    .map(BannerState::Ignored)
-                    .unwrap_or(BannerState::Hidden),
-            )),
-            tx,
-            tokio_handle: tokio_handle.clone(),
-            origin,
+            inner: Rc::new(UpdateBannerInner {
+                root,
+                banner: banner.clone(),
+                ignore_button: ignore_button.clone(),
+                progress,
+                state: Rc::new(RefCell::new(
+                    update::ignored_version()
+                        .map(BannerState::Ignored)
+                        .unwrap_or(BannerState::Hidden),
+                )),
+                tx,
+                tokio_handle,
+                origin,
+                check_task,
+            }),
         };
 
-        if let Some(handle) = &tokio_handle {
-            handle.spawn(update::install::check_loop(this.tx.clone()));
-        }
-
-        let for_events = this.clone();
+        let for_events = Rc::downgrade(&this.inner);
         gtk::glib::MainContext::default().spawn_local(async move {
             while let Ok(event) = rx.recv().await {
-                for_events.dispatch(event);
+                let Some(inner) = for_events.upgrade() else {
+                    break;
+                };
+                Self { inner }.dispatch(event);
             }
         });
 
-        let for_click = this.clone();
+        let for_click = Rc::downgrade(&this.inner);
         banner.connect_button_clicked(move |banner| {
-            let actionable = for_click.state.borrow().actionable_version();
+            let Some(inner) = for_click.upgrade() else {
+                return;
+            };
+            let for_click = Self { inner };
+            let actionable = for_click.inner.state.borrow().actionable_version();
             match actionable {
                 Some(version) => {
-                    if update::origin::update_gate(for_click.origin) == UpdateGate::SourceBuild {
+                    if update::origin::update_gate(for_click.inner.origin)
+                        == UpdateGate::SourceBuild
+                    {
                         for_click.start_install(version);
-                    } else if let Err(error) = open_release_page(for_click.origin, version) {
+                    } else if let Err(error) = open_release_page(for_click.inner.origin, version) {
                         tracing::warn!(%error, %version, "could not open release page");
                     }
                 }
@@ -159,9 +185,13 @@ impl UpdateBanner {
             }
         });
 
-        let for_ignore = this.clone();
+        let for_ignore = Rc::downgrade(&this.inner);
         ignore_button.connect_clicked(move |_| {
-            let version = match *for_ignore.state.borrow() {
+            let Some(inner) = for_ignore.upgrade() else {
+                return;
+            };
+            let for_ignore = Self { inner };
+            let version = match *for_ignore.inner.state.borrow() {
                 BannerState::Available(version) => version,
                 _ => return,
             };
@@ -174,16 +204,107 @@ impl UpdateBanner {
         this
     }
 
+    /// Run on the native GTK main thread with isolated state; no network or installer.
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_native_lifetime(app: &gtk::Application) {
+        use crate::update::{check::Version, Stage};
+        use std::time::Duration;
+
+        async fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+            gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+                while !ready() {
+                    gtk::glib::timeout_future(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("update banner lifetime timed out: {description}"));
+        }
+
+        let survivor = Self::new(None);
+        let survivor_window = gtk::Window::builder()
+            .application(app)
+            .child(survivor.widget())
+            .build();
+        survivor_window.present();
+        wait_for("surviving window mapped", || survivor_window.is_mapped()).await;
+        for deliver_events in [false, true] {
+            let banner = Self::new(None);
+            let window = gtk::Window::builder()
+                .application(app)
+                .child(banner.widget())
+                .build();
+            window.present();
+            wait_for("closing window mapped", || window.is_mapped()).await;
+            let inner = Rc::downgrade(&banner.inner);
+            let state = Rc::downgrade(&banner.inner.state);
+            let root = banner.widget().downgrade();
+            let button = banner.inner.banner.downgrade();
+            let ignore = banner.inner.ignore_button.downgrade();
+            // A background install/check may retain a sender after the UI is gone.
+            let producer = banner.inner.tx.clone();
+            if deliver_events {
+                let version = Version(99, 0, 0);
+                producer.try_send(Event::Start(version)).unwrap();
+                producer
+                    .try_send(Event::Progress(Stage::Installing, 42))
+                    .unwrap();
+                wait_for("receiver renders progress", || {
+                    banner.state() == BannerState::Running(Stage::Installing, 42, version)
+                })
+                .await;
+                assert_eq!(banner.inner.progress.text().as_deref(), Some("42%"));
+            }
+            window.close();
+            window.set_child(gtk::Widget::NONE);
+            drop(window);
+            drop(banner);
+            wait_for("root, state and signal widgets released", || {
+                inner.upgrade().is_none()
+                    && state.upgrade().is_none()
+                    && root.upgrade().is_none()
+                    && button.upgrade().is_none()
+                    && ignore.upgrade().is_none()
+            })
+            .await;
+            wait_for("receiver future ended", || producer.receiver_count() == 0).await;
+            assert!(producer.is_closed());
+            assert!(producer.try_send(Event::Done(Version(99, 0, 0))).is_err());
+        }
+        let version = Version(99, 0, 1);
+        survivor.inner.tx.try_send(Event::Done(version)).unwrap();
+        wait_for("surviving banner handles events", || {
+            survivor.state() == BannerState::Done(version)
+        })
+        .await;
+        assert!(survivor.inner.banner.is_revealed());
+        survivor
+            .inner
+            .banner
+            .emit_by_name::<()>("button-clicked", &[]);
+        assert!(!survivor.inner.banner.is_revealed());
+        assert_eq!(survivor.state(), BannerState::Done(version));
+        let tx = survivor.inner.tx.clone();
+        survivor_window.close();
+        survivor_window.set_child(gtk::Widget::NONE);
+        drop(survivor_window);
+        drop(survivor);
+        wait_for("surviving receiver also ends on close", || {
+            tx.receiver_count() == 0
+        })
+        .await;
+        println!("MACOS_NATIVE_UPDATE_BANNER_LIFETIME_OK");
+    }
+
     pub fn widget(&self) -> &gtk::Box {
-        &self.root
+        &self.inner.root
     }
 
     pub(crate) fn state(&self) -> BannerState {
-        self.state.borrow().clone()
+        self.inner.state.borrow().clone()
     }
 
     pub(crate) fn install_origin(&self) -> InstallOrigin {
-        self.origin
+        self.inner.origin
     }
 
     /// Run a release check immediately and report the resulting shared state
@@ -193,7 +314,7 @@ impl UpdateBanner {
         &self,
         on_complete: Box<dyn FnOnce(Result<BannerState, String>)>,
     ) -> bool {
-        let Some(handle) = &self.tokio_handle else {
+        let Some(handle) = &self.inner.tokio_handle else {
             return false;
         };
         let (result_tx, result_rx) = async_channel::bounded(1);
@@ -204,9 +325,15 @@ impl UpdateBanner {
             let _ = result_tx.send(result).await;
         });
 
-        let this = self.clone();
+        let this = Rc::downgrade(&self.inner);
         gtk::glib::MainContext::default().spawn_local(async move {
-            let result = match result_rx.recv().await {
+            let result = result_rx.recv().await;
+            let Some(inner) = this.upgrade() else {
+                on_complete(Err("update banner closed".into()));
+                return;
+            };
+            let this = Self { inner };
+            let result = match result {
                 Ok(Ok(Some(version))) => {
                     this.dispatch(Event::Available(version));
                     Ok(this.state())
@@ -227,42 +354,42 @@ impl UpdateBanner {
     /// Returns `false` when no runtime is available or that release is already
     /// installing/installed, allowing other UI entry points to avoid duplicates.
     pub(crate) fn start_install(&self, version: update::check::Version) -> bool {
-        if update::origin::update_gate(self.origin) != UpdateGate::SourceBuild {
+        if update::origin::update_gate(self.inner.origin) != UpdateGate::SourceBuild {
             return false;
         }
-        let Some(handle) = &self.tokio_handle else {
+        let Some(handle) = &self.inner.tokio_handle else {
             return false;
         };
-        let next = self.state.borrow().clone().apply(Event::Start(version));
-        if next == *self.state.borrow() {
+        let next = self.state().apply(Event::Start(version));
+        if next == *self.inner.state.borrow() {
             return false;
         }
         self.render(next);
-        handle.spawn(update::install::run_install(version, self.tx.clone()));
+        handle.spawn(update::install::run_install(version, self.inner.tx.clone()));
         true
     }
 
     fn dispatch(&self, event: Event) {
-        let next = self.state.borrow().clone().apply(event);
+        let next = self.inner.state.borrow().clone().apply(event);
         self.render(next);
     }
 
     fn render(&self, next: BannerState) {
         let (title, button, revealed, progress_percent, ignore_visible) =
-            banner_props(&next, self.origin);
-        self.banner.set_title(&title);
-        self.banner.set_button_label(button);
-        self.banner.set_revealed(revealed);
-        self.ignore_button.set_visible(ignore_visible);
-        self.progress.set_visible(progress_percent.is_some());
+            banner_props(&next, self.inner.origin);
+        self.inner.banner.set_title(&title);
+        self.inner.banner.set_button_label(button);
+        self.inner.banner.set_revealed(revealed);
+        self.inner.ignore_button.set_visible(ignore_visible);
+        self.inner.progress.set_visible(progress_percent.is_some());
         if let Some(percent) = progress_percent {
-            self.progress.set_fraction(f64::from(percent) / 100.0);
-            self.progress.set_text(Some(&format!("{percent}%")));
+            self.inner.progress.set_fraction(f64::from(percent) / 100.0);
+            self.inner.progress.set_text(Some(&format!("{percent}%")));
         } else {
-            self.progress.set_fraction(0.0);
-            self.progress.set_text(None);
+            self.inner.progress.set_fraction(0.0);
+            self.inner.progress.set_text(None);
         }
-        *self.state.borrow_mut() = next;
+        *self.inner.state.borrow_mut() = next;
     }
 }
 
@@ -352,9 +479,9 @@ mod tests {
     fn running_renders_a_determinate_labeled_progress_bar() {
         let banner = UpdateBanner::new(None);
         banner.render(BannerState::Running(Stage::Fetching, 42, V));
-        assert!(banner.progress.is_visible());
-        assert!((banner.progress.fraction() - 0.42).abs() < f64::EPSILON);
-        assert_eq!(banner.progress.text().as_deref(), Some("42%"));
+        assert!(banner.inner.progress.is_visible());
+        assert!((banner.inner.progress.fraction() - 0.42).abs() < f64::EPSILON);
+        assert_eq!(banner.inner.progress.text().as_deref(), Some("42%"));
     }
 
     #[test]

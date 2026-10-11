@@ -76,6 +76,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_UPDATE_LIFETIME_SMOKE_ONLY").is_some() {
+        crate::ui::update_banner::UpdateBanner::check_native_lifetime(app.upcast_ref()).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_BROWSER_LIFETIME_SMOKE_ONLY").is_some() {
         BrowserPane::check_native_lifetime(app.upcast_ref()).await;
         return;
