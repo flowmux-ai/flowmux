@@ -81,7 +81,7 @@ impl NotificationStore {
 
     /// Append a fresh entry. When the buffer is full the oldest entry
     /// is dropped to keep memory bounded under chatty agent streams.
-    /// Returns the assigned id so the caller can later reference it,
+    /// Returns the assigned id and any evicted desktop id to withdraw,
     /// or `None` when the entry was suppressed as a near-duplicate of
     /// an entry pushed inside [`DUP_WINDOW`] (see the constant for
     /// why both the OSC sniffer and the lifecycle hook fire on the
@@ -94,7 +94,7 @@ impl NotificationStore {
         pane: Option<PaneId>,
         surface: Option<SurfaceId>,
         workspace: Option<WorkspaceId>,
-    ) -> Option<NotificationId> {
+    ) -> Option<(NotificationId, Option<String>)> {
         let now = chrono::Utc::now();
         let mut entries = self.inner.borrow_mut();
         // Same (pane, surface) inside DUP_WINDOW → drop unless the new
@@ -124,9 +124,14 @@ impl NotificationStore {
             }
         }
         let id = NotificationId::new();
-        if entries.len() >= MAX_RETAINED {
-            entries.pop_front();
-        }
+        let evicted_desktop_id = if entries.len() >= MAX_RETAINED {
+            entries
+                .pop_front()
+                .filter(|entry| !entry.read)
+                .and_then(|entry| entry.desktop_id)
+        } else {
+            None
+        };
         entries.push_back(NotificationEntry {
             id,
             title,
@@ -139,7 +144,7 @@ impl NotificationStore {
             workspace,
             desktop_id: None,
         });
-        Some(id)
+        Some((id, evicted_desktop_id))
     }
 
     /// Flip `read = true` for `id`. Returns `true` when the entry was
@@ -385,7 +390,7 @@ pub enum SetDesktopIdResult {
     /// Entry was already marked read by the time the desktop id
     /// arrived. Caller should immediately close the FDO toast.
     Stale,
-    /// Entry id was unknown (aged out under the cap). Safe to ignore.
+    /// Entry was deleted or evicted before its reply arrived. Close the toast.
     Unknown,
 }
 
@@ -409,7 +414,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let found = s.find(id).expect("entry should be findable by id");
         assert_eq!(found.title, "Claude");
         assert_eq!(found.body, "done");
@@ -428,7 +434,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         assert!(s.mark_read(id), "first mark_read should report a change");
         assert!(!s.mark_read(id), "second mark_read on same id is a no-op");
         assert!(s.find(id).unwrap().read);
@@ -453,7 +460,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -463,7 +471,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let c = s
             .push(
                 "c".into(),
@@ -473,7 +482,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let entries = s.entries();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].id, a);
@@ -502,7 +512,8 @@ mod tests {
                 Some(surface),
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let e = s.find(id).unwrap();
         assert_eq!(e.pane, Some(pane));
         assert_eq!(e.surface, Some(surface));
@@ -518,14 +529,17 @@ mod tests {
         // newest 5 must keep their order at the tail.
         let mut ids = Vec::new();
         for i in 0..(MAX_RETAINED + 5) {
-            ids.push(s.push(
-                format!("entry {i}"),
-                "".into(),
-                NotificationLevel::Info,
-                None,
-                None,
-                None,
-            ));
+            ids.push(
+                s.push(
+                    format!("entry {i}"),
+                    "".into(),
+                    NotificationLevel::Info,
+                    None,
+                    None,
+                    None,
+                )
+                .map(|(id, _)| id),
+            );
         }
         let entries = s.entries();
         assert_eq!(entries.len(), MAX_RETAINED);
@@ -554,7 +568,8 @@ mod tests {
                 None,
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "claude".into(),
@@ -564,9 +579,51 @@ mod tests {
                 None,
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         assert_ne!(a, b);
         assert_eq!(s.entries().len(), 2);
+    }
+
+    #[test]
+    fn eviction_returns_only_the_unread_desktop_id() {
+        for read in [false, true] {
+            let s = store();
+            let push = || {
+                s.push(
+                    "entry".into(),
+                    "".into(),
+                    NotificationLevel::Info,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap()
+            };
+            let (id, evicted) = push();
+            assert!(evicted.is_none());
+            assert_eq!(
+                s.set_desktop_id(id, "old-toast".into()),
+                SetDesktopIdResult::Stored
+            );
+            if read {
+                s.mark_read(id);
+            }
+            for _ in 1..MAX_RETAINED {
+                assert!(push().1.is_none());
+            }
+            let (_, evicted) = push();
+            assert_eq!(
+                evicted.as_deref(),
+                if read { None } else { Some("old-toast") }
+            );
+            assert!(s.find(id).is_none());
+            assert_eq!(s.entries().len(), MAX_RETAINED);
+            assert!(
+                push().1.is_none(),
+                "evicted desktop id must be handed off once"
+            );
+        }
     }
 
     #[test]
@@ -648,7 +705,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         assert_eq!(
             s.set_desktop_id(id, "did-42".into()),
             SetDesktopIdResult::Stored
@@ -657,10 +715,9 @@ mod tests {
     }
 
     #[test]
-    fn set_desktop_id_for_unknown_id_is_safe_noop() {
+    fn set_desktop_id_for_unknown_id_reports_cleanup_needed() {
         let s = store();
-        // No panic, no insert — just silently ignored. Mirrors the
-        // mark_read contract for entries that aged out under the cap.
+        // No insert: return the cleanup signal for the late desktop toast.
         assert_eq!(
             s.set_desktop_id(NotificationId::new(), "did-7".into()),
             SetDesktopIdResult::Unknown
@@ -685,7 +742,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         // Sweep first (no desktop_id yet → empty vec).
         assert!(s.mark_all_unread_read().is_empty());
         // Late-arriving desktop id should report Stale.
@@ -708,7 +766,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -718,7 +777,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let c = s
             .push(
                 "c".into(),
@@ -728,7 +788,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         // Entry `a` carries no desktop_id (e.g. toast was suppressed),
         // so it should be marked read but NOT show up in the close
         // list. `b` and `c` should both round-trip their ids.
@@ -761,7 +822,8 @@ mod tests {
                 None,
                 Some(ws_a),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let a2 = s
             .push(
                 "claude".into(),
@@ -771,7 +833,8 @@ mod tests {
                 None,
                 Some(ws_a),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b1 = s
             .push(
                 "codex".into(),
@@ -781,7 +844,8 @@ mod tests {
                 None,
                 Some(ws_b),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let global = s
             .push(
                 "ready".into(),
@@ -791,7 +855,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _ = s.set_desktop_id(a1, "did-11".into());
         let _ = s.set_desktop_id(a2, "did-12".into());
         let _ = s.set_desktop_id(b1, "did-21".into());
@@ -820,7 +885,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         // Activating a workspace must never collaterally clear global
         // notifications — only the bell popover sweep does that.
         assert!(s.mark_workspace_read(ws).is_empty());
@@ -844,7 +910,8 @@ mod tests {
                 Some(surface_a),
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "claude".into(),
@@ -854,7 +921,8 @@ mod tests {
                 Some(surface_b),
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _ = s.set_desktop_id(a, "did-a".into());
         let _ = s.set_desktop_id(b, "did-b".into());
 
@@ -888,7 +956,8 @@ mod tests {
                 Some(surface_a),
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _b = s
             .push(
                 "claude".into(),
@@ -898,7 +967,8 @@ mod tests {
                 Some(surface_b),
                 Some(ws),
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
 
         assert!(s.has_unread_workspace(ws));
         assert!(s.has_unread_surface(surface_a));
@@ -927,7 +997,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         assert_eq!(
             s.set_desktop_id(id, "did-99".into()),
             SetDesktopIdResult::Stored
@@ -948,7 +1019,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -958,7 +1030,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _ = s.set_desktop_id(b, "did-77".into());
 
         // Trash button on `b` (unread, has desktop_id) — must report
@@ -1004,7 +1077,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -1014,7 +1088,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         s.mark_read(a);
         let unread_before = s.unread_count();
 
@@ -1045,7 +1120,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         // Already-deleted / never-existed id must round-trip Unknown
         // so the dispatcher skips refresh work and FDO close calls.
         assert_eq!(s.remove(NotificationId::new()), RemoveOutcome::Unknown);
@@ -1067,7 +1143,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -1077,7 +1154,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let c = s
             .push(
                 "c".into(),
@@ -1087,7 +1165,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _ = s.remove(b);
         let ids: Vec<_> = s.entries().iter().map(|e| e.id).collect();
         assert_eq!(
@@ -1112,7 +1191,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let b = s
             .push(
                 "b".into(),
@@ -1122,7 +1202,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _c = s
             .push(
                 "c".into(),
@@ -1132,7 +1213,8 @@ mod tests {
                 None,
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let _ = s.set_desktop_id(a, "did-a".into());
         let _ = s.set_desktop_id(b, "did-b".into());
         assert!(s.mark_read(b));
@@ -1165,7 +1247,8 @@ mod tests {
                 Some(tab_a),
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         let id_b = s
             .push(
                 "Codex".into(),
@@ -1175,7 +1258,8 @@ mod tests {
                 Some(tab_b),
                 None,
             )
-            .expect("push must record an entry");
+            .expect("push must record an entry")
+            .0;
         assert_eq!(s.find(id_a).unwrap().surface, Some(tab_a));
         assert_eq!(s.find(id_b).unwrap().surface, Some(tab_b));
     }

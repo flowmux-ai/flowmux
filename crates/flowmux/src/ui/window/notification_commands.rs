@@ -88,7 +88,7 @@ impl WindowController {
                     let _ = ack.send(None);
                     return;
                 }
-                let Some(entry_id) = self
+                let Some((entry_id, evicted_desktop_id)) = self
                     .notifications
                     .push(title, body, level, pane, surface, workspace)
                 else {
@@ -106,6 +106,9 @@ impl WindowController {
                     let _ = ack.send(None);
                     return;
                 };
+                if let Some(desktop_id) = evicted_desktop_id {
+                    self.close_desktop_notifications(vec![desktop_id]);
+                }
                 self.sidebar.bump_notification_badge();
                 let mut marked_attention = false;
                 if matches!(level, flowmux_core::NotificationLevel::NeedsInput) {
@@ -154,11 +157,11 @@ impl WindowController {
                 // a one-off close so the FDO toast does not linger and
                 // the dock badge stays in sync.
                 match self.notifications.set_desktop_id(id, desktop_id.clone()) {
-                    SetDesktopIdResult::Stale => {
+                    SetDesktopIdResult::Stale | SetDesktopIdResult::Unknown => {
                         self.close_desktop_notifications(vec![desktop_id]);
                         self.refresh_launcher_badge();
                     }
-                    SetDesktopIdResult::Stored | SetDesktopIdResult::Unknown => {}
+                    SetDesktopIdResult::Stored => {}
                 }
             }
             GtkCommand::CloseDesktopNotifications { desktop_ids } => {
