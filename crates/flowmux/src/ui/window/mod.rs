@@ -2882,8 +2882,6 @@ impl WindowController {
             | GtkCommand::SetUsageBarEnabled { .. }
             | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
-            | GtkCommand::CloseDesktopNotifications { .. }
-            | GtkCommand::RefreshLauncherBadge
             | GtkCommand::OpenNotification { .. }
             | GtkCommand::ListNotifications { .. }
             | GtkCommand::OpenNotificationWithAck { .. }
@@ -2891,6 +2889,8 @@ impl WindowController {
             | GtkCommand::MarkNotificationRead { .. }
             | GtkCommand::ClearNotifications { .. }
             | GtkCommand::DeleteNotification { .. }
+            | GtkCommand::MarkAllNotificationsRead
+            | GtkCommand::DeleteReadNotifications
             | GtkCommand::ClearAllNotifications
             | GtkCommand::SetAgentStatus { .. }
             | GtkCommand::QueryAgentSurfaceVisible { .. }
@@ -3067,6 +3067,26 @@ impl WindowController {
     /// A new workspace (or one whose remembered panes were removed) falls
     /// back to its first leaf.
     async fn activate_workspace(&self, id: WorkspaceId) {
+        self.activate_workspace_at(id, None).await;
+    }
+
+    async fn activate_workspace_at(
+        &self,
+        id: WorkspaceId,
+        target: Option<(PaneId, Option<SurfaceId>)>,
+    ) {
+        // Retained notifications can outlive their tab or workspace.
+        if !self.surfaces.borrow().contains_key(&id) {
+            return;
+        }
+        if let Some((pane, surface)) = target {
+            let registry = self.pane_registry.borrow();
+            if registry.workspace_of_pane(pane) != Some(id)
+                || surface.is_some_and(|surface| registry.pane_for_surface(surface) != Some(pane))
+            {
+                return;
+            }
+        }
         // Capture MRU before mapping: GTK focus-enter signals can update it.
         let remembered_pane = {
             let registry = self.pane_registry.borrow();
@@ -3082,17 +3102,32 @@ impl WindowController {
             self.stack.set_visible_child_name(&id.to_string());
         }
         self.sidebar.select_workspace(id);
-        // Programmatic activation paths (notification click, Alt+
-        // number, focus shortcut) bypass the row-activated callback
-        // that would otherwise drop the attention tint, so we clear it
-        // here too.
-        self.acknowledge_workspace_notifications(id);
         self.store.set_active_workspace(Some(id)).await;
         self.sync_workspace_agent_status_from_store(id).await;
-        if let Some(pane) = remembered_pane {
+        let pane = match target.map(|(pane, _)| pane).or(remembered_pane) {
+            Some(pane) => Some(pane),
+            None => self
+                .store
+                .get_workspace_without_scrollback(id)
+                .await
+                .and_then(|ws| {
+                    ws.surfaces
+                        .first()
+                        .and_then(|s| s.root_pane.first_leaf_id())
+                }),
+        };
+        if let Some(pane) = pane {
+            // Select the notification's tab before acknowledging the visible source.
+            if let Some((_, Some(surface))) = target {
+                let needs_activation =
+                    self.pane_registry.borrow().active_surface(pane) != Some(surface);
+                if needs_activation && self.activate_surface_now(pane, surface).await.is_err() {
+                    return;
+                }
+            }
+            let surface = self.pane_registry.borrow().active_surface(pane);
+            self.acknowledge_source_notifications(Some(id), Some(pane), surface);
             self.focus_pane(pane);
-        } else if let Some(ws) = self.store.get_workspace_without_scrollback(id).await {
-            self.focus_first_leaf_of(&ws);
         }
     }
 
@@ -9504,7 +9539,7 @@ mod tests {
     // `unread_count()` at the value the launcher should publish next.
     // The tests below exercise the full dispatch loop (`AddNotification`,
     // `ActivateWorkspace`, `SetNotificationDesktopId`,
-    // `CloseDesktopNotifications`) for the scenarios that historically
+    // `close_desktop_notifications`) for the scenarios that historically
     // left the dock badge stuck on a stale value: rapid push + activate
     // sequences, multi-workspace isolation, repeat activation, global
     // notifications, and late desktop-id races.
@@ -10440,7 +10475,7 @@ mod tests {
     /// "badge stays on 2" symptom.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn workspace_activation_sweeps_all_unread_for_that_workspace() {
+    async fn workspace_activation_acknowledges_the_selected_pane() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.BadgeSweep").await;
         // Window is inactive in tests (no compositor focus), so
@@ -10477,6 +10512,167 @@ mod tests {
         assert!(
             controller.notifications.find(id_b).unwrap().read,
             "entry b should be marked read after workspace activation"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn notification_navigation_only_acknowledges_the_target_tab() {
+        let (controller, ws_id, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.NotificationTabScope").await;
+        let first = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        controller.dispatch(GtkCommand::NewSurface { pane }).await;
+        let second = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        assert_ne!(first, second);
+        let a = controller
+            .notifications
+            .push(
+                "Claude needs input".into(),
+                "First request".into(),
+                flowmux_core::NotificationLevel::NeedsInput,
+                Some(pane),
+                Some(first),
+                Some(ws_id),
+            )
+            .unwrap()
+            .0;
+        let b = controller
+            .notifications
+            .push(
+                "Codex needs input".into(),
+                "Second request".into(),
+                flowmux_core::NotificationLevel::NeedsInput,
+                Some(pane),
+                Some(second),
+                Some(ws_id),
+            )
+            .unwrap()
+            .0;
+        controller
+            .dispatch(GtkCommand::OpenNotification { id: a })
+            .await;
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane),
+            Some(first)
+        );
+        assert!(controller.notifications.find(a).unwrap().read);
+        assert!(
+            !controller.notifications.find(b).unwrap().read,
+            "opening one tab must not acknowledge the previously selected tab"
+        );
+        controller.activate_workspace(ws_id).await;
+        assert!(
+            !controller.notifications.find(b).unwrap().read,
+            "workspace activation must preserve hidden-tab requests"
+        );
+        controller
+            .dispatch(GtkCommand::DeleteReadNotifications)
+            .await;
+        assert!(controller.notifications.find(a).is_none());
+        assert!(controller.notifications.find(b).is_some());
+        controller
+            .dispatch(GtkCommand::MarkAllNotificationsRead)
+            .await;
+        assert_eq!(controller.notifications.unread_count(), 0);
+        assert!(
+            controller.notifications.find(b).is_some(),
+            "marking read must retain the transcript"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn notification_navigation_from_activity_and_closed_sources_preserves_other_tabs() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.NotificationNavigation")
+                .await;
+        let first = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        controller.dispatch(GtkCommand::NewSurface { pane }).await;
+        let second = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        for from_agent_bar in [false, true] {
+            controller.activate_surface_now(pane, second).await.unwrap();
+            let id = controller
+                .notifications
+                .push(
+                    format!("Request {from_agent_bar}"),
+                    String::new(),
+                    flowmux_core::NotificationLevel::NeedsInput,
+                    Some(pane),
+                    Some(second),
+                    Some(workspace),
+                )
+                .unwrap()
+                .0;
+            if from_agent_bar {
+                controller.open_agent_bar_item(workspace, pane, first).await;
+            } else {
+                controller
+                    .open_activity_target(workspace, pane, first)
+                    .await;
+            }
+            assert_eq!(
+                controller.pane_registry.borrow().active_surface(pane),
+                Some(first)
+            );
+            assert!(
+                !controller.notifications.find(id).unwrap().read,
+                "targeted navigation must preserve the previous tab's unread request"
+            );
+        }
+        let retained = controller
+            .notifications
+            .push(
+                "Closed source".into(),
+                String::new(),
+                flowmux_core::NotificationLevel::Error,
+                Some(pane),
+                Some(first),
+                Some(workspace),
+            )
+            .unwrap()
+            .0;
+        let (ack, result) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::CloseSurface {
+                pane,
+                surface: first,
+                ack,
+            })
+            .await;
+        result.await.unwrap().unwrap();
+        let other = controller
+            .notifications
+            .push(
+                "Surviving source".into(),
+                String::new(),
+                flowmux_core::NotificationLevel::NeedsInput,
+                Some(pane),
+                Some(second),
+                Some(workspace),
+            )
+            .unwrap()
+            .0;
+        controller.open_notification_id(retained).await;
+        assert!(controller.notifications.find(retained).unwrap().read);
+        assert!(
+            !controller.notifications.find(other).unwrap().read,
+            "a closed source must not acknowledge the surviving tab"
         );
     }
 
@@ -10605,9 +10801,9 @@ mod tests {
 
     /// Global notifications (`workspace = None`) must not be swept by a
     /// workspace activation. This is by design — they are only cleared
-    /// when the bell popover opens — so the test guards us against
+    /// when explicitly marked read — so the test guards us against
     /// accidentally widening the sweep and silencing global toasts.
-    /// `RefreshLauncherBadge` after the activation, however, must run so
+    /// `refresh_launcher_badge` after the activation, however, must run so
     /// the dock count reflects the still-unread global entry.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
@@ -10636,7 +10832,7 @@ mod tests {
         );
         assert!(
             !controller.notifications.find(global_id).unwrap().read,
-            "global entry must stay unread until the bell popover sweeps it",
+            "global entry must stay unread until the bell mark-all-read sweeps it",
         );
     }
 
@@ -10730,7 +10926,7 @@ mod tests {
     /// Notification with `pane = Some(...)` but `workspace = None` (the
     /// IPC handler couldn't resolve a workspace for the pane — e.g.
     /// pane closed between firing the toast and store lookup) must not
-    /// be swept by a workspace activation. The bell popover sweep is
+    /// be swept by a workspace activation. The bell mark-all-read sweep is
     /// still the only path that drains it. This guards against a
     /// regression where a pane-with-no-workspace entry would otherwise
     /// silently keep the dock badge inflated.
@@ -10741,7 +10937,7 @@ mod tests {
             build_single_workspace_controller("com.flowmux.App.UiTest.BadgeOrphanPane").await;
         // Orphan: pane is set but workspace was unresolved by the IPC
         // handler. mark_workspace_read keys off the workspace field, so
-        // this entry remains stuck until the bell popover sweep.
+        // this entry remains stuck until the bell mark-all-read sweep.
         let orphan = push_notification(&controller, Some(pane), None, "orphan")
             .await
             .expect("push must record an entry");
@@ -10895,15 +11091,15 @@ mod tests {
     // The Sidebar wires `bell_popover.connect_show` to:
     //
     //   1. `notifications.mark_all_unread_read()` — synchronous flip.
-    //   2. dispatch `CloseDesktopNotifications { ids }` if non-empty.
-    //   3. dispatch `RefreshLauncherBadge`.
+    //   2. dispatch `close_desktop_notifications { ids }` if non-empty.
+    //   3. dispatch `refresh_launcher_badge`.
     //
     // We exercise the same three-step sequence here so the dispatch arms
     // get covered without driving real GTK signals from a headless test.
 
     /// One NeedsInput notification arrives. The user opens the bell
-    /// popover. The popover-open sequence (mark_all_unread_read +
-    /// CloseDesktopNotifications + RefreshLauncherBadge) must drain
+    /// popover. The mark-all-read sequence (mark_all_unread_read +
+    /// close_desktop_notifications + refresh_launcher_badge) must drain
     /// `unread_count()` to 0 and surface the matching desktop_id so the
     /// dispatcher would close the FDO toast.
     ///
@@ -10914,7 +11110,7 @@ mod tests {
     /// `update_launcher_count` call would carry `count = 0`.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn popover_open_sequence_drains_single_notification_to_zero() {
+    async fn mark_all_read_sequence_drains_single_notification_to_zero() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.PopoverOpenSingle").await;
         let id = push_notification(&controller, Some(pane), Some(ws_id), "alarm")
@@ -10937,22 +11133,18 @@ mod tests {
         assert_eq!(
             to_close,
             vec!["did-9001".to_string()],
-            "the popover sweep must surface the desktop_id so the dispatcher \
+            "the mark-all-read sweep must surface the desktop_id so the dispatcher \
              can withdraw the desktop toast in lockstep with marking the entry read",
         );
         // Step (2): the dispatcher closes the toast on the FDO daemon.
-        controller
-            .dispatch(GtkCommand::CloseDesktopNotifications {
-                desktop_ids: to_close,
-            })
-            .await;
+        controller.close_desktop_notifications(to_close);
         // Step (3): refresh re-publishes the unread count to the dock.
-        controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+        controller.refresh_launcher_badge();
 
         assert_eq!(
             controller.notifications.unread_count(),
             0,
-            "after the popover open sequence, unread_count must be 0 — \
+            "after the mark-all-read sequence, unread_count must be 0 — \
              this is the value the next LauncherEntry signal carries to the dock",
         );
         assert!(
@@ -10965,8 +11157,8 @@ mod tests {
     /// User opens the bell popover before the daemon's `Notify` reply
     /// has carried the desktop_id back. `mark_all_unread_read` returns
     /// an empty vec (no FDO ids known yet), but the entry is still
-    /// flipped to read. Dispatching `RefreshLauncherBadge` alone must
-    /// be enough to drain the badge — no `CloseDesktopNotifications`
+    /// flipped to read. Dispatching `refresh_launcher_badge` alone must
+    /// be enough to drain the badge — no `close_desktop_notifications`
     /// roundtrip happens because there is no id to close.
     ///
     /// Then the late `SetNotificationDesktopId` arrives. The store
@@ -10974,7 +11166,7 @@ mod tests {
     /// its own. The ENTIRE story must end with `unread_count() = 0`.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn popover_open_then_late_desktop_id_still_drains_badge() {
+    async fn mark_all_read_then_late_desktop_id_still_drains_badge() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.PopoverLateRace").await;
         let id = push_notification(&controller, Some(pane), Some(ws_id), "alarm")
@@ -10988,9 +11180,9 @@ mod tests {
         assert!(
             to_close.is_empty(),
             "no desktop_id was attached yet; the sweep must return an empty list \
-             so the dispatcher does not send a CloseDesktopNotifications no-op",
+             so the dispatcher does not send a close_desktop_notifications no-op",
         );
-        controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+        controller.refresh_launcher_badge();
         assert_eq!(controller.notifications.unread_count(), 0);
 
         // Daemon's reply arrives. set_desktop_id reports Stale; the
@@ -11005,7 +11197,7 @@ mod tests {
             controller.notifications.unread_count(),
             0,
             "the late desktop_id must not re-inflate unread_count — \
-             the entry was already read by the popover sweep",
+             the entry was already read by the mark-all-read sweep",
         );
         assert_eq!(
             controller
@@ -11027,7 +11219,7 @@ mod tests {
     /// reaches the dispatcher later as `Stale`.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn popover_open_with_partial_desktop_ids_still_clears_badge() {
+    async fn mark_all_read_with_partial_desktop_ids_still_clears_badge() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.PopoverPartial").await;
         let a = push_notification(&controller, Some(pane), Some(ws_id), "a")
@@ -11060,12 +11252,8 @@ mod tests {
         // contents rather than the ordering.
         to_close.sort();
         assert_eq!(to_close, vec!["did-11".to_string(), "did-22".to_string()]);
-        controller
-            .dispatch(GtkCommand::CloseDesktopNotifications {
-                desktop_ids: to_close,
-            })
-            .await;
-        controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+        controller.close_desktop_notifications(to_close);
+        controller.refresh_launcher_badge();
         assert_eq!(controller.notifications.unread_count(), 0);
 
         // Late reply for c → Stale → dispatcher closes did-33 and refreshes.
@@ -11091,7 +11279,7 @@ mod tests {
     //   * `unread_count()` matches the manually-counted unread entries.
     //   * Every `read` entry is consistent with what the sweeps did.
     //   * No entry id is duplicated or lost.
-    //   * The dispatcher coalesces overlapping `RefreshLauncherBadge`
+    //   * The dispatcher coalesces overlapping `refresh_launcher_badge`
     //     bursts without panicking and the store ends in a sane state.
 
     /// Push 50 notifications (the MAX_RETAINED cap) interleaved with
@@ -11167,15 +11355,15 @@ mod tests {
         );
     }
 
-    /// Stress the popover-open path: push a batch, open the popover,
+    /// Stress the mark-all-read path: push a batch, open the popover,
     /// push another batch, open again, and so on. After every popover
     /// open the badge must be at 0 (because the sweep flipped every
     /// unread entry); pushes between opens must inflate it again. This
-    /// pins the symptom "the bell popover sweep does not drop the
+    /// pins the symptom "the bell mark-all-read sweep does not drop the
     /// badge" against batch arrival patterns.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn stress_popover_open_drains_badge_across_repeated_batches() {
+    async fn stress_mark_all_read_drains_badge_across_repeated_batches() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.StressPopoverBatches").await;
         const BATCHES: usize = 10;
@@ -11204,20 +11392,16 @@ mod tests {
             assert_eq!(
                 controller.notifications.unread_count(),
                 PER_BATCH,
-                "before the popover sweep at batch {batch}, every entry from this batch is unread",
+                "before the mark-all-read sweep at batch {batch}, every entry from this batch is unread",
             );
-            // Simulate the popover-open sequence end-to-end.
+            // Simulate the mark-all-read sequence end-to-end.
             let to_close = controller.notifications.mark_all_unread_read();
-            controller
-                .dispatch(GtkCommand::CloseDesktopNotifications {
-                    desktop_ids: to_close,
-                })
-                .await;
-            controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+            controller.close_desktop_notifications(to_close);
+            controller.refresh_launcher_badge();
             assert_eq!(
                 controller.notifications.unread_count(),
                 0,
-                "after the popover sweep at batch {batch}, the badge must drain to 0 — \
+                "after the mark-all-read sweep at batch {batch}, the badge must drain to 0 — \
                  even when half the entries had no desktop_id attached yet",
             );
         }
@@ -11225,14 +11409,14 @@ mod tests {
         let entries = controller.notifications.entries();
         assert!(
             entries.iter().all(|e| e.read),
-            "every push should have been swept by one of the popover opens",
+            "every push should have been swept by one of the mark-all-read actions",
         );
     }
 
     /// Adversarial scenario: mix every ack channel concurrently to
     /// surface any state drift between the in-store flip and the
     /// dispatcher's badge republish path. Pushes, workspace
-    /// activations, popover sweeps, late `SetNotificationDesktopId`s,
+    /// activations, mark-all-read sweeps, late `SetNotificationDesktopId`s,
     /// and trash-button deletes are all interleaved. The invariant
     /// after each step is that `unread_count()` equals the number of
     /// entries with `read == false` actually in the store — no entry
@@ -11301,11 +11485,9 @@ mod tests {
                 2 => {
                     // Popover open sweep mid-stream.
                     let ids = controller.notifications.mark_all_unread_read();
-                    controller
-                        .dispatch(GtkCommand::CloseDesktopNotifications { desktop_ids: ids })
-                        .await;
-                    controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
-                    assert_invariant(&format!("after popover sweep at i={i}"));
+                    controller.close_desktop_notifications(ids);
+                    controller.refresh_launcher_badge();
+                    assert_invariant(&format!("after mark-all-read sweep at i={i}"));
                 }
                 3 => {
                     // Trash an existing entry (the per-row delete).
@@ -11318,16 +11500,16 @@ mod tests {
                     }
                 }
                 _ => {
-                    // Bare RefreshLauncherBadge — just exercise the
+                    // Bare refresh_launcher_badge — just exercise the
                     // coalescing path with no state change.
-                    controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+                    controller.refresh_launcher_badge();
                     assert_invariant(&format!("after bare refresh at i={i}"));
                 }
             }
         }
 
         // Final converge: explicit ack of everything that's left, via
-        // the workspace sweep, then the popover sweep so global / orphan
+        // the workspace sweep, then the mark-all-read sweep so global / orphan
         // entries (none here, but the call must be a safe no-op) drain.
         controller
             .dispatch(GtkCommand::ActivateWorkspace {
@@ -11336,12 +11518,8 @@ mod tests {
             })
             .await;
         let leftover = controller.notifications.mark_all_unread_read();
-        controller
-            .dispatch(GtkCommand::CloseDesktopNotifications {
-                desktop_ids: leftover,
-            })
-            .await;
-        controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+        controller.close_desktop_notifications(leftover);
+        controller.refresh_launcher_badge();
         assert_eq!(
             controller.notifications.unread_count(),
             0,
@@ -11359,7 +11537,7 @@ mod tests {
             build_single_workspace_controller("com.flowmux.App.UiTest.StressRefreshBurst").await;
         push_notification(&controller, Some(pane), Some(ws_id), "x").await;
         for _ in 0..100 {
-            controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+            controller.refresh_launcher_badge();
         }
         assert_eq!(
             controller.notifications.unread_count(),
@@ -11373,7 +11551,7 @@ mod tests {
             })
             .await;
         for _ in 0..100 {
-            controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
+            controller.refresh_launcher_badge();
         }
         assert_eq!(controller.notifications.unread_count(), 0);
     }

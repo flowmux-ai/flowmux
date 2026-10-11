@@ -621,17 +621,6 @@ pub enum GtkCommand {
         id: NotificationId,
         desktop_id: String,
     },
-    /// Ask the daemon to withdraw the supplied `desktop_id`s through
-    /// `org.gtk.Notifications.RemoveNotification`. On GNOME this drops
-    /// the entry from the message tray (Super+V) **and** decrements
-    /// Ubuntu Dock's per-app notification counter, so the dock badge
-    /// shrinks in lockstep. The dispatcher coalesces this with the
-    /// store-level `mark_*_read` sweep that produced the ids.
-    CloseDesktopNotifications {
-        desktop_ids: Vec<String>,
-    },
-    /// Publish the current unread count to the desktop launcher badge.
-    RefreshLauncherBadge,
     /// User clicked a row in the bell popover. Mark the entry read,
     /// activate its workspace (if known), and grab focus on the source
     /// pane (if known). Mirrors cmux's `openNotification → focusTab`.
@@ -761,6 +750,8 @@ pub enum GtkCommand {
     /// withdraw their matching desktop toasts in one sweep. Fired by
     /// the "All Clear" button at the top of the bell popover.
     ClearAllNotifications,
+    MarkAllNotificationsRead,
+    DeleteReadNotifications,
     /// Refresh the workspace and Agent Bar from current agent presence.
     SetAgentStatus {
         workspace: WorkspaceId,

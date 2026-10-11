@@ -26,6 +26,9 @@ const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 pub struct NotificationEntry {
     pub id: NotificationId,
     pub title: String,
+    pub agent: Option<String>,
+    pub workspace_label: Option<String>,
+    pub surface_label: Option<String>,
     pub body: String,
     pub level: NotificationLevel,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -123,6 +126,9 @@ impl NotificationStore {
         entries.push_back(NotificationEntry {
             id,
             title,
+            agent: None,
+            workspace_label: None,
+            surface_label: None,
             body,
             level,
             created_at: now,
@@ -133,6 +139,26 @@ impl NotificationStore {
             desktop_id: None,
         });
         Some((id, evicted_desktop_id))
+    }
+
+    /// Snapshot source labels so old notifications retain their original agent and tab.
+    pub fn set_source_labels(
+        &self,
+        id: NotificationId,
+        agent: Option<String>,
+        workspace_label: Option<String>,
+        surface_label: Option<String>,
+    ) {
+        if let Some(entry) = self
+            .inner
+            .borrow_mut()
+            .iter_mut()
+            .find(|entry| entry.id == id)
+        {
+            entry.agent = agent;
+            entry.workspace_label = workspace_label;
+            entry.surface_label = surface_label;
+        }
     }
 
     /// Flip `read = true` for `id`. Returns `true` when the entry was
@@ -154,10 +180,9 @@ impl NotificationStore {
     /// when the user reads it inside flowmux.
     ///
     /// Returns [`SetDesktopIdResult`] so the caller can detect the IPC
-    /// race where the user already swept the entry to read (by opening
-    /// the bell popover or activating the source workspace) before the
-    /// daemon's `Notify` reply arrived. In that case
-    /// `mark_all_unread_read` / `mark_workspace_read` had no
+    /// race where the user acknowledged the entry explicitly or by focusing
+    /// its source tab before the daemon's `Notify` reply arrived. In that case
+    /// `mark_all_unread_read` / `mark_source_read` had no
     /// `desktop_id` to return, so the toast would otherwise stay alive
     /// in the message tray and the dock badge would not shrink.
     pub fn set_desktop_id(&self, id: NotificationId, desktop_id: String) -> SetDesktopIdResult {
@@ -197,29 +222,8 @@ impl NotificationStore {
         closed
     }
 
-    /// Mark every unread entry whose source `workspace` matches `ws` as
-    /// read and return their `desktop_id`s. Used by the side-panel row
-    /// activation path so that selecting a workspace also acknowledges
-    /// the notifications it produced — the dock badge then drops by
-    /// exactly the count of acknowledged entries instead of staying
-    /// pinned to the cumulative total.
-    ///
-    /// Entries with `workspace = None` (global notifications) are
-    /// untouched; only the bell popover sweep clears those.
-    pub fn mark_workspace_read(&self, ws: WorkspaceId) -> Vec<String> {
-        let mut entries = self.inner.borrow_mut();
-        let mut closed = Vec::new();
-        for e in entries.iter_mut() {
-            if !e.read && e.workspace == Some(ws) {
-                e.read = true;
-                if let Some(did) = e.desktop_id.take() {
-                    closed.push(did);
-                }
-            }
-        }
-        closed
-    }
-
+    /// Acknowledge the most specific known source and return desktop ids to withdraw.
+    /// Pane-only notifications match their focused pane; hidden tabs remain unread.
     pub fn mark_source_read(
         &self,
         workspace: Option<WorkspaceId>,
@@ -234,6 +238,10 @@ impl NotificationStore {
             }
             let matches = if let Some(surface) = surface {
                 e.surface == Some(surface)
+                    || (e.surface.is_none()
+                        && pane.is_some()
+                        && e.pane == pane
+                        && e.workspace == workspace)
             } else if let Some(pane) = pane {
                 e.pane == Some(pane)
             } else if let Some(workspace) = workspace {
@@ -249,22 +257,6 @@ impl NotificationStore {
             }
         }
         closed
-    }
-
-    pub fn unread_surfaces_for_workspace(&self, ws: WorkspaceId) -> Vec<SurfaceId> {
-        let mut surfaces = Vec::new();
-        for entry in self.inner.borrow().iter() {
-            if entry.read || entry.workspace != Some(ws) {
-                continue;
-            }
-            let Some(surface) = entry.surface else {
-                continue;
-            };
-            if !surfaces.contains(&surface) {
-                surfaces.push(surface);
-            }
-        }
-        surfaces
     }
 
     pub fn has_unread_workspace(&self, ws: WorkspaceId) -> bool {
@@ -291,7 +283,7 @@ impl NotificationStore {
     /// [`RemoveOutcome`] so the caller can decide whether to also
     /// withdraw the matching desktop toast: only entries that were
     /// unread (and carried a `desktop_id`) need a follow-up
-    /// `CloseDesktopNotifications`.
+    /// desktop withdrawal.
     pub fn remove(&self, id: NotificationId) -> RemoveOutcome {
         let mut entries = self.inner.borrow_mut();
         let Some(idx) = entries.iter().position(|e| e.id == id) else {
@@ -315,9 +307,8 @@ impl NotificationStore {
     /// `desktop_id`s that the FDO notifications daemon still has open
     /// (i.e. unread entries that had been handed a toast id), so the
     /// caller can withdraw the matching toasts in one batch via
-    /// `CloseDesktopNotifications`. Read entries had no live toast and
-    /// contribute nothing here. Used by the bell-popover "All Clear"
-    /// header button.
+    /// desktop withdrawal. Read entries had no live toast and
+    /// contribute nothing here. Used by "Delete all notifications".
     pub fn clear_all(&self) -> Vec<String> {
         let mut entries = self.inner.borrow_mut();
         let mut desktop_ids = Vec::new();
@@ -950,7 +941,7 @@ mod tests {
         let _ = s.set_desktop_id(a2, "did-12".into());
         let _ = s.set_desktop_id(b1, "did-21".into());
         // ws_a sweep: only a1 / a2 close, b1 + global stay unread.
-        let closed = s.mark_workspace_read(ws_a);
+        let closed = s.mark_source_read(Some(ws_a), None, None);
         assert_eq!(closed, vec!["did-11".to_string(), "did-12".to_string()]);
         assert!(s.find(a1).unwrap().read);
         assert!(s.find(a2).unwrap().read);
@@ -958,7 +949,7 @@ mod tests {
         assert!(!s.find(global).unwrap().read);
         assert_eq!(s.unread_count(), 2);
         // Repeat sweep is a no-op; nothing left to close for ws_a.
-        assert!(s.mark_workspace_read(ws_a).is_empty());
+        assert!(s.mark_source_read(Some(ws_a), None, None).is_empty());
     }
 
     #[test]
@@ -977,8 +968,8 @@ mod tests {
             .expect("push must record an entry")
             .0;
         // Activating a workspace must never collaterally clear global
-        // notifications — only the bell popover sweep does that.
-        assert!(s.mark_workspace_read(ws).is_empty());
+        // notifications — explicit acknowledgement does that.
+        assert!(s.mark_source_read(Some(ws), None, None).is_empty());
         assert_eq!(s.unread_count(), 1);
     }
 
@@ -1061,14 +1052,8 @@ mod tests {
 
         assert!(s.has_unread_workspace(ws));
         assert!(s.has_unread_surface(surface_a));
-        assert_eq!(
-            s.unread_surfaces_for_workspace(ws),
-            vec![surface_a, surface_b]
-        );
-
         s.mark_read(a);
         assert!(!s.has_unread_surface(surface_a));
-        assert_eq!(s.unread_surfaces_for_workspace(ws), vec![surface_b]);
     }
 
     #[test]
@@ -1124,7 +1109,7 @@ mod tests {
         let _ = s.set_desktop_id(b, "did-77".into());
 
         // Trash button on `b` (unread, has desktop_id) — must report
-        // the id so the dispatcher can call CloseDesktopNotifications.
+        // the id so the dispatcher can withdraw desktop notifications.
         assert_eq!(
             s.remove(b),
             RemoveOutcome::RemovedUnread {

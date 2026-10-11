@@ -81,20 +81,8 @@ impl WindowController {
         pane: PaneId,
         surface: SurfaceId,
     ) {
-        let Some(workspace_state) = self.store.get_workspace(workspace).await else {
-            return;
-        };
-        self.activate_workspace(workspace).await;
-        let tab_exists = workspace_state
-            .surfaces
-            .iter()
-            .any(|root| root.root_pane.find_surface_ref(pane, surface).is_some());
-        if tab_exists && self.pane_registry.borrow().has_pane(pane) {
-            if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
-                let _ = self.activate_surface_now(pane, surface).await;
-            }
-            self.focus_pane(pane);
-        }
+        self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+            .await;
         self.window.present();
     }
 
@@ -152,24 +140,6 @@ impl WindowController {
         if self.agent_bar.attentions.borrow_mut().remove(&surface) {
             self.agent_bar.bar.clear_attention(surface);
         }
-    }
-    pub(super) fn clear_agent_bar_attentions<I>(&self, surfaces: I)
-    where
-        I: IntoIterator<Item = SurfaceId>,
-    {
-        for surface in surfaces {
-            self.clear_agent_bar_attention(surface);
-        }
-    }
-    pub(super) fn acknowledge_workspace_notifications(&self, workspace: WorkspaceId) {
-        let surfaces = self.notifications.unread_surfaces_for_workspace(workspace);
-        let to_close = self.notifications.mark_workspace_read(workspace);
-        self.clear_agent_bar_attentions(surfaces);
-        self.sidebar.clear_attention(workspace);
-        if !to_close.is_empty() {
-            self.close_desktop_notifications(to_close);
-        }
-        self.refresh_launcher_badge();
     }
     pub(super) fn acknowledge_source_notifications(
         &self,
@@ -292,13 +262,7 @@ impl WindowController {
         pane: PaneId,
         surface: SurfaceId,
     ) {
-        self.activate_workspace(workspace).await;
-        if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
-            let _ = self.activate_surface_now(pane, surface).await;
-        }
-        self.acknowledge_source_notifications(Some(workspace), Some(pane), Some(surface));
-        self.window.present();
-        self.focus_pane(pane);
+        self.open_activity_target(workspace, pane, surface).await;
     }
     pub(super) async fn open_notification_id(&self, id: flowmux_core::NotificationId) -> bool {
         let Some(entry) = self.notifications.find(id) else {
@@ -317,10 +281,9 @@ impl WindowController {
         }
 
         if let Some(ws_id) = entry.workspace {
-            self.activate_workspace(ws_id).await;
-        }
-
-        if let Some(pane) = entry.pane {
+            self.activate_workspace_at(ws_id, entry.pane.map(|pane| (pane, entry.surface)))
+                .await;
+        } else if let Some(pane) = entry.pane {
             if let Some(source_surface) = entry.surface {
                 let active = self.pane_registry.borrow().active_surface(pane);
                 if active != Some(source_surface) {

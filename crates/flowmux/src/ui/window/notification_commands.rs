@@ -97,6 +97,34 @@ impl WindowController {
                     let _ = ack.send(None);
                     return;
                 }
+                let source = match workspace {
+                    Some(id) => self.store.get_workspace_without_scrollback(id).await,
+                    None => None,
+                };
+                let agent = source
+                    .as_ref()
+                    .and_then(|ws| {
+                        surface.and_then(|id| {
+                            ws.surfaces
+                                .iter()
+                                .find_map(|s| s.root_pane.agent_presence_for_surface(id))
+                        })
+                    })
+                    .map(|presence| presence.name)
+                    .or_else(|| {
+                        let name = title.split_whitespace().next()?;
+                        (crate::builtin_icons::agent_icon_name(name)
+                            != "applications-utilities-symbolic")
+                            .then(|| name.to_owned())
+                    });
+                let workspace_label = source.as_ref().map(|ws| ws.display_title().to_owned());
+                let surface_label = source.as_ref().and_then(|ws| {
+                    let (pane, surface) = (pane?, surface?);
+                    ws.surfaces
+                        .iter()
+                        .find_map(|s| s.root_pane.surface_title(pane, surface))
+                        .map(str::to_owned)
+                });
                 let Some((entry_id, evicted_desktop_id)) = self
                     .notifications
                     .push(title, body, level, pane, surface, workspace)
@@ -115,10 +143,16 @@ impl WindowController {
                     let _ = ack.send(None);
                     return;
                 };
+                self.notifications.set_source_labels(
+                    entry_id,
+                    agent,
+                    workspace_label,
+                    surface_label,
+                );
                 if let Some(desktop_id) = evicted_desktop_id {
                     self.close_desktop_notifications(vec![desktop_id]);
                 }
-                self.sidebar.bump_notification_badge();
+
                 let mut marked_attention = false;
                 if matches!(level, flowmux_core::NotificationLevel::NeedsInput) {
                     let flags = AgentNotificationVisualFlags::for_unread(
@@ -173,47 +207,8 @@ impl WindowController {
                     SetDesktopIdResult::Stored => {}
                 }
             }
-            GtkCommand::CloseDesktopNotifications { desktop_ids } => {
-                self.close_desktop_notifications(desktop_ids);
-                self.refresh_launcher_badge();
-            }
-            GtkCommand::RefreshLauncherBadge => {
-                self.refresh_launcher_badge();
-            }
             GtkCommand::OpenNotification { id } => {
-                let Some(entry) = self.notifications.find(id) else {
-                    tracing::debug!(%id, "open notification: id not found");
-                    return;
-                };
-                let did = entry.desktop_id.clone();
-                if self.notifications.mark_read(id) {
-                    if let Some(did) = did {
-                        self.close_desktop_notifications(vec![did]);
-                    }
-                    self.clear_notification_attention_for_entry(&entry);
-                    self.refresh_launcher_badge();
-                }
-                if let Some(ws_id) = entry.workspace {
-                    self.activate_workspace(ws_id).await;
-                }
-                if let Some(pane) = entry.pane {
-                    // Switch to the source tab first when the entry
-                    // points at a non-active surface inside its pane,
-                    // then grab focus. The activate-surface dispatch
-                    // is awaited so the focus_pane idle below sees the
-                    // newly-active terminal/browser widget.
-                    if let Some(source_surface) = entry.surface {
-                        let active = self.pane_registry.borrow().active_surface(pane);
-                        if active != Some(source_surface) {
-                            let _ = self.activate_surface_now(pane, source_surface).await;
-                        }
-                    }
-                    self.focus_pane(pane);
-                }
-                // Mirrors cmux's `bringToFront(window)` so the click on
-                // a desktop toast / popover row brings flowmux up even
-                // if it was minimized or behind another window.
-                self.window.present();
+                self.open_notification_id(id).await;
             }
             GtkCommand::ListNotifications { unread_only, ack } => {
                 let entries = self
@@ -303,6 +298,24 @@ impl WindowController {
                         self.sidebar.refresh_notification_popover();
                     }
                 }
+            }
+            GtkCommand::MarkAllNotificationsRead => {
+                let entries = self.notifications.entries();
+                let desktop_ids = self.notifications.mark_all_unread_read();
+                self.clear_all_notification_attention_for_entries(&entries);
+                self.close_desktop_notifications(desktop_ids);
+                self.refresh_launcher_badge();
+            }
+            GtkCommand::DeleteReadNotifications => {
+                for entry in self
+                    .notifications
+                    .entries()
+                    .into_iter()
+                    .filter(|entry| entry.read)
+                {
+                    let _ = self.notifications.remove(entry.id);
+                }
+                self.refresh_launcher_badge();
             }
             GtkCommand::ClearAllNotifications => {
                 let entries = self.notifications.entries();

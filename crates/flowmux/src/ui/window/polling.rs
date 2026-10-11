@@ -340,6 +340,7 @@ impl WindowController {
             .iter()
             .filter_map(|entry| entry.pane)
             .collect::<HashSet<_>>();
+        self.sidebar.refresh_notification_popover();
         self.sidebar.set_notification_workspaces(&workspaces);
         self.pane_registry.borrow().set_notification_panes(&panes);
         self.notifications.refresh_launcher_badge();

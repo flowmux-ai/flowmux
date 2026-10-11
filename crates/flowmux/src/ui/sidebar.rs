@@ -22,7 +22,8 @@
 
 use crate::activity::{ActivityNowEntry, ActivityStore};
 use crate::bridge::{Bridge, GtkCommand};
-use crate::notifications::{NotificationEntry, NotificationStore};
+use crate::notifications::NotificationStore;
+use crate::ui::notification_popover::NotificationPopover;
 use crate::ui::update_banner::UpdateBanner;
 use crate::ui::usage_popover::UsagePopover;
 use crate::ui::workspace_view::{
@@ -33,7 +34,7 @@ use crate::ui::{
 };
 use adw::prelude::*;
 use flowmux_config::options::AgentSortMode;
-use flowmux_core::{AgentStatus, NotificationLevel, PrState, SurfaceId, Workspace, WorkspaceId};
+use flowmux_core::{AgentStatus, PrState, SurfaceId, Workspace, WorkspaceId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -154,7 +155,7 @@ pub struct Sidebar {
     on_close: Rc<dyn Fn(WorkspaceId)>,
     on_new_ssh_workspace: Rc<dyn Fn()>,
     bell_button: gtk::MenuButton,
-    bell_popover: gtk::Popover,
+    notification_popover: Rc<NotificationPopover>,
     activity_panel: gtk::Box,
     activity_list: gtk::Box,
     activity_split: gtk::Paned,
@@ -282,47 +283,8 @@ impl Sidebar {
         let bell_button = gtk::MenuButton::new();
         bell_button.set_icon_name("notifications-symbolic");
         bell_button.set_tooltip_text(Some("Notifications"));
-        let bell_popover = gtk::Popover::new();
-        bell_popover.set_size_request(320, -1);
-        crate::ui::popover_pos::set_menu_popover(&bell_button, &bell_popover);
-
-        let store_for_show = notifications.clone();
-        let bridge_for_rows = bridge.clone();
-        let bridge_for_close = bridge.clone();
-        let popover_for_show = bell_popover.clone();
-        let bell_for_show = bell_button.clone();
-        bell_popover.connect_show(move |_| {
-            // Render BEFORE the ack sweep so unread entries still look
-            // unread (full opacity, accent on NeedsInput titles)
-            // the moment the popover appears. The previous order
-            // marked everything read first, so the user saw every row
-            // dimmed even on first open — the exact symptom this
-            // guards against. On the *next* open, those entries are
-            // legitimately read and dim correctly.
-            popover_for_show.set_child(Some(&render_notification_list(
-                &store_for_show,
-                bridge_for_rows.clone(),
-                popover_for_show.clone(),
-            )));
-            bell_for_show.remove_css_class("accent");
-
-            // Now ack: flip the store, withdraw the matching desktop
-            // toasts so the system tray / dock badge converge.
-            // `desktop_ids` may be empty when no toast had a desktop
-            // id yet (IPC race) — we still dispatch the refresh so
-            // any pending badge state catches up.
-            let desktop_ids = store_for_show.mark_all_unread_read();
-            let bridge = bridge_for_close.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                if !desktop_ids.is_empty() {
-                    let _ = bridge
-                        .tx
-                        .send(GtkCommand::CloseDesktopNotifications { desktop_ids })
-                        .await;
-                }
-                let _ = bridge.tx.send(GtkCommand::RefreshLauncherBadge).await;
-            });
-        });
+        let notification_popover = NotificationPopover::new(notifications.clone(), bridge.clone());
+        crate::ui::popover_pos::set_menu_popover(&bell_button, &notification_popover.popover);
         let header_title = gtk::Label::new(Some("Workspaces"));
         header_title.add_css_class("heading");
         let header = adw::HeaderBar::new();
@@ -610,7 +572,7 @@ impl Sidebar {
             on_close,
             on_new_ssh_workspace,
             bell_button,
-            bell_popover,
+            notification_popover,
             activity_panel,
             activity_list,
             activity_split,
@@ -920,30 +882,16 @@ impl Sidebar {
         self.subtitle_cache.borrow().get(&id).cloned()
     }
 
-    /// Indicate a fresh notification by tinting the bell button.
-    /// Cleared next time the popover opens (which marks all seen).
-    pub fn bump_notification_badge(&self) {
-        if !self.bell_button.has_css_class("accent") {
-            self.bell_button.add_css_class("accent");
-        }
-        // Refresh the popover content if it happens to be visible so
-        // the new entry shows immediately.
-        self.refresh_notification_popover();
-    }
-
-    /// Re-render the bell popover when it is currently shown. Called
-    /// after a per-row trash-button delete so the removed entry
-    /// disappears immediately instead of after the next open. No-op
-    /// when the popover is hidden — the next `connect_show` will pull
-    /// fresh entries from `NotificationStore` anyway.
     pub fn refresh_notification_popover(&self) {
-        if self.bell_popover.is_visible() {
-            self.bell_popover.set_child(Some(&render_notification_list(
-                &self.notifications,
-                self.bridge.clone(),
-                self.bell_popover.clone(),
-            )));
+        let unread = self.notifications.unread_count();
+        if unread > 0 {
+            self.bell_button.add_css_class("accent");
+        } else {
+            self.bell_button.remove_css_class("accent");
         }
+        self.bell_button
+            .set_tooltip_text(Some(&format!("Notifications ({unread} unread)")));
+        self.notification_popover.refresh();
     }
 
     pub fn refresh_activity_panel(
@@ -1270,198 +1218,6 @@ fn format_relative_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
             local.format("%m/%d").to_string()
         }
     }
-}
-
-fn render_notification_list(
-    store: &NotificationStore,
-    bridge: Bridge,
-    popover: gtk::Popover,
-) -> gtk::Widget {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    root.set_margin_top(6);
-    root.set_margin_bottom(6);
-    root.set_margin_start(6);
-    root.set_margin_end(6);
-
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
-    scroll.set_min_content_height(160);
-    scroll.set_max_content_height(420);
-    scroll.set_propagate_natural_height(true);
-
-    let entries = store.entries();
-    if entries.is_empty() {
-        let empty = gtk::Label::new(Some("No notifications yet."));
-        empty.set_margin_top(20);
-        empty.set_margin_bottom(20);
-        empty.add_css_class("dim-label");
-        scroll.set_child(Some(&empty));
-        root.append(&scroll);
-        return root.upcast();
-    }
-
-    // "All Clear" header: clears the in-process transcript and
-    // withdraws every still-open desktop toast in one sweep. Sits
-    // above the list so the user can drop the whole stack without
-    // tapping each row's trash button.
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    header.set_halign(gtk::Align::End);
-    let clear_btn = gtk::Button::with_label("All Clear");
-    clear_btn.add_css_class("flat");
-    clear_btn.set_tooltip_text(Some("Clear every notification"));
-    let bridge_for_clear = bridge.clone();
-    let popover_for_clear = popover.clone();
-    clear_btn.connect_clicked(move |_| {
-        popover_for_clear.popdown();
-        let bridge = bridge_for_clear.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            let _ = bridge.tx.send(GtkCommand::ClearAllNotifications).await;
-        });
-    });
-    header.append(&clear_btn);
-    root.append(&header);
-
-    let list = gtk::ListBox::new();
-    list.set_selection_mode(gtk::SelectionMode::None);
-    list.add_css_class("boxed-list");
-
-    // Newest at top.
-    for entry in entries.iter().rev() {
-        list.append(&notification_row(entry, bridge.clone(), popover.clone()));
-    }
-    scroll.set_child(Some(&list));
-    root.append(&scroll);
-    root.upcast()
-}
-
-fn notification_row(
-    entry: &NotificationEntry,
-    bridge: Bridge,
-    popover: gtk::Popover,
-) -> gtk::Widget {
-    let row = gtk::ListBoxRow::new();
-    row.set_activatable(true);
-    row.set_selectable(false);
-
-    // Horizontal split: text column on the left grows to fill, trash
-    // button pinned to the right. The button gets its own click handler
-    // so a "delete" tap can fire `DeleteNotification` without the row's
-    // gesture also dispatching `OpenNotification` for the same entry.
-    let h = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    h.set_margin_top(8);
-    h.set_margin_bottom(8);
-    h.set_margin_start(10);
-    h.set_margin_end(10);
-
-    let v = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    v.set_hexpand(true);
-
-    let title = gtk::Label::new(Some(&entry.title));
-    title.set_halign(gtk::Align::Start);
-    title.add_css_class("heading");
-    let body = gtk::Label::new(Some(&entry.body));
-    body.set_halign(gtk::Align::Start);
-    body.set_wrap(true);
-    body.set_max_width_chars(40);
-    let when = gtk::Label::new(Some(&format_time(&entry.created_at)));
-    when.set_halign(gtk::Align::Start);
-    when.add_css_class("caption");
-    when.add_css_class("dim-label");
-
-    if entry.read {
-        v.set_opacity(0.55);
-    }
-    if matches!(
-        entry.level,
-        NotificationLevel::NeedsInput | NotificationLevel::Error
-    ) {
-        title.add_css_class("accent");
-    }
-
-    v.append(&title);
-    v.append(&body);
-    v.append(&when);
-    h.append(&v);
-
-    let entry_id = entry.id;
-
-    let delete_btn = gtk::Button::from_icon_name("user-trash-symbolic");
-    delete_btn.set_tooltip_text(Some("Delete notification"));
-    delete_btn.add_css_class("flat");
-    // Center vertically next to the title row so the icon doesn't sit
-    // awkwardly aligned with the body wrap.
-    delete_btn.set_valign(gtk::Align::Center);
-    let bridge_for_delete = bridge.clone();
-    delete_btn.connect_clicked(move |_| {
-        tracing::debug!(%entry_id, "notification trash button clicked");
-        let bridge = bridge_for_delete.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            if let Err(e) = bridge
-                .tx
-                .send(GtkCommand::DeleteNotification { id: entry_id })
-                .await
-            {
-                tracing::warn!(error = %e, "DeleteNotification dispatch failed");
-            }
-        });
-    });
-    h.append(&delete_btn);
-
-    row.set_child(Some(&h));
-
-    // A GestureClick on the row's primary button is the only path that
-    // fires regardless of the ListBox's SelectionMode. With
-    // `SelectionMode::None` the ListBox's `row-activated` and the row's
-    // `activate` signals are suppressed, so a previous `connect_activate`
-    // handler never ran and clicks looked dead.
-    //
-    // The trash button consumes its own click before this gesture sees
-    // it (gtk::Button is its own widget with its own controller), so
-    // pressing the icon dispatches Delete without also firing Open.
-    let click = gtk::GestureClick::new();
-    click.set_button(gtk::gdk::BUTTON_PRIMARY);
-    let bridge_for_click = bridge.clone();
-    let popover_for_click = popover.clone();
-    click.connect_released(move |gesture, _n_press, _x, _y| {
-        tracing::debug!(%entry_id, "notification row clicked");
-        let bridge = bridge_for_click.clone();
-        let popover = popover_for_click.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            if let Err(e) = bridge
-                .tx
-                .send(GtkCommand::OpenNotification { id: entry_id })
-                .await
-            {
-                tracing::warn!(error = %e, "OpenNotification dispatch failed");
-            }
-        });
-        popover.popdown();
-        gesture.set_state(gtk::EventSequenceState::Claimed);
-    });
-    row.add_controller(click);
-
-    // Keyboard parity: Space/Enter on a focused row also routes.
-    let bridge_for_key = bridge.clone();
-    let popover_for_key = popover.clone();
-    row.connect_activate(move |_| {
-        tracing::debug!(%entry_id, "notification row activated by keyboard");
-        let bridge = bridge_for_key.clone();
-        let popover = popover_for_key.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            let _ = bridge
-                .tx
-                .send(GtkCommand::OpenNotification { id: entry_id })
-                .await;
-        });
-        popover.popdown();
-    });
-
-    row.upcast()
-}
-
-fn format_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
-    let local: chrono::DateTime<chrono::Local> = (*ts).into();
-    local.format("%H:%M:%S").to_string()
 }
 
 /// Attach drag-and-drop controllers to one side-panel workspace row.
