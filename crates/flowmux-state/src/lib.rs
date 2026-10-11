@@ -360,7 +360,9 @@ fn migrate_legacy_state(state: &mut State) {
     state.schema_version = SCHEMA_VERSION;
 }
 
-fn ordered_workspace_ids(state: &State) -> Vec<flowmux_core::WorkspaceId> {
+/// Live workspace IDs in saved order, followed by missing IDs in workspace order.
+/// Stale and duplicate IDs are omitted.
+pub fn ordered_workspace_ids(state: &State) -> Vec<flowmux_core::WorkspaceId> {
     let live = state
         .workspaces
         .iter()

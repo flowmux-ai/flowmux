@@ -14,7 +14,7 @@ use flowmux_core::{
     EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
     Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceId,
 };
-use flowmux_state::{State, WindowLayout, WindowOwner};
+use flowmux_state::{ordered_workspace_ids, State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -261,28 +261,6 @@ async fn save_store_blocking(store: StateStore) -> Result<(usize, u64), flowmux_
         })?
 }
 
-/// Return every live workspace id exactly once in sidebar order. Persisted
-/// states from older releases may have no `workspace_order`, while a damaged
-/// state can contain stale or duplicate ids; append any missing live ids in
-/// their stable `workspaces` order.
-fn workspace_ids_in_display_order(s: &State) -> Vec<WorkspaceId> {
-    let live: HashSet<WorkspaceId> = s.workspaces.iter().map(|ws| ws.id).collect();
-    let mut seen = HashSet::with_capacity(live.len());
-    let mut ordered = Vec::with_capacity(live.len());
-
-    for id in &s.workspace_order {
-        if live.contains(id) && seen.insert(*id) {
-            ordered.push(*id);
-        }
-    }
-    for ws in &s.workspaces {
-        if seen.insert(ws.id) {
-            ordered.push(ws.id);
-        }
-    }
-    ordered
-}
-
 fn collect_pane_surface_ids(pane: &Pane, target: Option<PaneId>, out: &mut Vec<SurfaceId>) {
     match pane {
         Pane::Leaf {
@@ -429,7 +407,7 @@ impl StateStore {
     /// scrollback never leaves the store through this path.
     pub async fn agent_bar_model(&self) -> AgentBarModel {
         let s = self.inner.lock().await;
-        let ordered_ids = workspace_ids_in_display_order(&s);
+        let ordered_ids = ordered_workspace_ids(&s);
         let workspaces = ordered_ids
             .iter()
             .filter_map(|id| s.workspaces.iter().find(|workspace| workspace.id == *id));
@@ -438,7 +416,7 @@ impl StateStore {
 
     pub async fn list_workspaces(&self) -> Vec<WorkspaceId> {
         let s = self.inner.lock().await;
-        workspace_ids_in_display_order(&s)
+        ordered_workspace_ids(&s)
     }
 
     /// Return the active workspace id without cloning the persisted state.
@@ -450,7 +428,7 @@ impl StateStore {
     /// shortcuts. Terminal history and workspace metadata stay in the store.
     pub async fn workspace_order_and_active(&self) -> (Vec<WorkspaceId>, Option<WorkspaceId>) {
         let s = self.inner.lock().await;
-        (workspace_ids_in_display_order(&s), s.active_workspace)
+        (ordered_workspace_ids(&s), s.active_workspace)
     }
 
     /// Clone workspace models in the same order shown in the sidebar, omitting
@@ -463,7 +441,7 @@ impl StateStore {
             .iter()
             .map(|workspace| (workspace.id, workspace))
             .collect::<HashMap<_, _>>();
-        workspace_ids_in_display_order(&s)
+        ordered_workspace_ids(&s)
             .into_iter()
             .filter_map(|id| {
                 by_id
@@ -2155,7 +2133,7 @@ fn update_editor_session_in_state(
 }
 
 fn normalize_state(state: &mut State) -> bool {
-    let normalized_order = workspace_ids_in_display_order(state);
+    let normalized_order = ordered_workspace_ids(state);
     let mut changed = normalized_order != state.workspace_order;
     state.workspace_order = normalized_order;
 
@@ -9070,6 +9048,28 @@ Do you want to continue?";
             .unwrap()
             .scrollback
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn workspace_order_contract_handles_missing_stale_and_duplicate_ids() {
+        let seed = StateStore::new_lazy_ephemeral(State::default());
+        let a = create_named_workspace(&seed, "a").await;
+        let b = create_named_workspace(&seed, "b").await;
+        let c = create_named_workspace(&seed, "c").await;
+        let stale = WorkspaceId::new();
+        let mut state = seed.snapshot().await;
+        state.workspaces.push(state.workspaces[0].clone());
+        for (order, expected) in [
+            (vec![], vec![a, b, c]),
+            (vec![b], vec![b, a, c]),
+            (vec![c, stale, c, b], vec![c, b, a]),
+            (vec![stale], vec![a, b, c]),
+        ] {
+            state.workspace_order = order;
+            assert_eq!(ordered_workspace_ids(&state), expected);
+        }
+        state.workspaces.clear();
+        assert!(ordered_workspace_ids(&state).is_empty());
     }
 
     #[tokio::test]
