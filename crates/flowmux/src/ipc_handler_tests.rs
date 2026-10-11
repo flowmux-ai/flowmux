@@ -2659,24 +2659,29 @@ async fn tmux_compat_external_swarm_drives_bridge_commands() {
     assert_eq!(out.code, 0);
 }
 
+// Use an interpreted agent fixture: copied system binaries can be killed by macOS code signing.
+async fn wait_for_codex_fixture(pid: u32) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while flowmux_procmon::agent_name_for_pid(pid) != Some("codex") {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fixture child must be recognized as codex");
+}
+
 #[tokio::test]
 async fn current_agent_source_reads_terminal_ownership_before_presence_exists() {
     let (handler, rx, pane, surface) = single_pane_handler().await;
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
-    std::fs::copy("/bin/sleep", &executable).unwrap();
-    #[cfg(target_os = "macos")]
-    assert!(std::process::Command::new("codesign")
-        .args(["--force", "--sign", "-"])
+    std::fs::write(&executable, "import time; time.sleep(10)\n").unwrap();
+    let mut child = std::process::Command::new("python3")
         .arg(&executable)
-        .status()
-        .unwrap()
-        .success());
-    let mut child = std::process::Command::new(&executable)
-        .arg("10")
         .spawn()
         .unwrap();
     let pid = child.id();
+    wait_for_codex_fixture(pid).await;
     for terminal_pid in [pid, std::process::id()] {
         let request = handler.handle_from(
             Request::AgentSurfaceCurrent {
@@ -2690,7 +2695,11 @@ async fn current_agent_source_reads_terminal_ownership_before_presence_exists() 
             };
             ack.send(vec![(surface, terminal_pid)]).unwrap();
         };
-        let (response, ()) = tokio::join!(request, gui);
+        let (response, ()) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            tokio::join!(request, gui)
+        })
+        .await
+        .expect("terminal ownership query must complete");
         if terminal_pid == pid {
             assert!(
                 matches!(response, Response::AgentSurface { pane: p, surface: s, .. }
@@ -2722,16 +2731,9 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
         .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
-    std::fs::copy("/bin/sleep", &executable).unwrap();
-    #[cfg(target_os = "macos")]
-    assert!(std::process::Command::new("codesign")
-        .args(["--force", "--sign", "-"])
-        .arg(&executable)
-        .status()
-        .unwrap()
-        .success());
+    std::fs::write(&executable, "import time; time.sleep(10)\n").unwrap();
     let mut terminal = std::process::Command::new("/bin/sh")
-        .args(["-c", "\"$1\" 10 & echo $!; wait", "fixture"])
+        .args(["-c", "python3 \"$1\" & echo $!; wait", "fixture"])
         .arg(executable)
         .stdout(std::process::Stdio::piped())
         .spawn()
@@ -2741,14 +2743,7 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
         .read_line(&mut line)
         .unwrap();
     let peer = line.trim().parse::<u32>().unwrap();
-    // The shell reports its background PID before that child necessarily execs.
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while flowmux_procmon::agent_name_for_pid(peer) != Some("codex") {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("fixture child must exec codex");
+    wait_for_codex_fixture(peer).await;
     handler
         .inner
         .store()
@@ -2774,7 +2769,11 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
         ack.send(vec![(stale_surface, peer), (live_surface, terminal.id())])
             .unwrap();
     };
-    let (response, ()) = tokio::join!(request, gui);
+    let (response, ()) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        tokio::join!(request, gui)
+    })
+    .await
+    .expect("terminal ownership query must complete");
     unsafe {
         libc::kill(peer as i32, libc::SIGTERM);
     }
