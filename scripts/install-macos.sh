@@ -70,7 +70,7 @@ EOF
     fi
 
     local missing_commands=()
-    for command in cargo pkg-config codesign iconutil install launchctl open plutil xattr xcrun; do
+    for command in cargo python3 pkg-config codesign iconutil install launchctl open plutil xattr xcrun; do
         if ! command -v "$command" >/dev/null 2>&1; then
             missing_commands+=("$command")
         fi
@@ -245,7 +245,6 @@ EOF
 }
 
 build_args=()
-target_subdir="$PROFILE"
 case "$PROFILE" in
     fast)
         build_args+=(--profile fast)
@@ -270,11 +269,29 @@ fi
 
 cd "$REPO_ROOT"
 echo "==> building flowmux ($PROFILE)"
+build_log=$(mktemp /tmp/flowmux-build.XXXXXX)
+trap 'rm -f "$build_log"' EXIT
 if [ "${#build_args[@]}" -gt 0 ]; then
-    cargo build "${build_args[@]}" -p flowmux -p flowmux-cli
+    cargo build "${build_args[@]}" -p flowmux -p flowmux-cli --message-format=json-render-diagnostics > "$build_log"
 else
-    cargo build -p flowmux -p flowmux-cli
+    cargo build -p flowmux -p flowmux-cli --message-format=json-render-diagnostics > "$build_log"
 fi
+
+# Cargo reports the executable path including target-dir and target-triple settings.
+built_executable() {
+    python3 - "$build_log" "$1" <<'PY'
+import json, sys
+with open(sys.argv[1]) as source:
+    paths = {entry["executable"] for line in source
+             if (entry := json.loads(line)).get("reason") == "compiler-artifact"
+             and entry["target"]["name"] == sys.argv[2] and entry.get("executable")}
+if len(paths) != 1:
+    sys.exit("Expected one built executable for " + sys.argv[2])
+print(paths.pop())
+PY
+}
+flowmux_binary=$(built_executable flowmux)
+cli_binary=$(built_executable flowmuxctl)
 
 version="$(workspace_version)"
 bundle_work="$REPO_ROOT/target/macos-bundle/Flowmux.app"
@@ -297,8 +314,8 @@ fi
 echo "==> creating $bundle_work"
 rm -rf "$bundle_work"
 mkdir -p "$macos" "$resources"
-install -m755 "$REPO_ROOT/target/$target_subdir/flowmux" "$macos/flowmux"
-install -m755 "$REPO_ROOT/target/$target_subdir/flowmuxctl" "$macos/flowmuxctl"
+install -m755 "$flowmux_binary" "$macos/flowmux"
+install -m755 "$cli_binary" "$macos/flowmuxctl"
 install -m644 \
     "$REPO_ROOT/LICENSE" \
     "$REPO_ROOT/NOTICE" \
@@ -327,8 +344,8 @@ else
     rm -rf "$bundle_dest" "$bundle_pending" "$bundle_backup"
     cp -R "$bundle_work" "$bundle_dest"
 fi
-install -m755 "$REPO_ROOT/target/$target_subdir/flowmux" "$BIN_DIR/flowmux"
-install -m755 "$REPO_ROOT/target/$target_subdir/flowmuxctl" "$BIN_DIR/flowmuxctl"
+install -m755 "$flowmux_binary" "$BIN_DIR/flowmux"
+install -m755 "$cli_binary" "$BIN_DIR/flowmuxctl"
 
 "$BIN_DIR/flowmuxctl" hooks refresh-shims
 echo "==> existing agent wrappers refreshed; provider settings and hooks unchanged"
