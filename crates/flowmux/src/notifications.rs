@@ -18,17 +18,9 @@ use std::rc::Rc;
 /// 9 stream) can otherwise grow this unbounded over a long session.
 const MAX_RETAINED: usize = 50;
 
-/// Deduplicate the same pane and surface within eight seconds unless attention
-/// priority increases. OSC notifications and lifecycle hooks can report the same turn.
+/// Deduplicate exact repeats and paired OSC Info / hook TurnCompleted reports
+/// on the same pane and surface within eight seconds.
 const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
-
-fn attention_priority(level: NotificationLevel) -> u8 {
-    match level {
-        NotificationLevel::Info | NotificationLevel::TurnCompleted => 0,
-        NotificationLevel::NeedsInput => 1,
-        NotificationLevel::Error => 2,
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct NotificationEntry {
@@ -79,8 +71,8 @@ impl NotificationStore {
         Self::default()
     }
 
-    /// Append a fresh entry. When the buffer is full the oldest entry
-    /// is dropped to keep memory bounded under chatty agent streams.
+    /// Append a fresh entry. When full, drop the oldest read entry first,
+    /// or the oldest unread entry if none are read, to keep memory bounded.
     /// Returns the assigned id and any evicted desktop id to withdraw,
     /// or `None` when the entry was suppressed as a near-duplicate of
     /// an entry pushed inside [`DUP_WINDOW`] (see the constant for
@@ -97,18 +89,6 @@ impl NotificationStore {
     ) -> Option<(NotificationId, Option<String>)> {
         let now = chrono::Utc::now();
         let mut entries = self.inner.borrow_mut();
-        // Same (pane, surface) inside DUP_WINDOW → drop unless the new
-        // notification needs more attention. Body and completion-vs-info
-        // level are intentionally NOT part of the key: the OSC path
-        // carries the raw agent message ("Codex finished — review
-        // the diff") at the heuristic-inferred level (Info when the
-        // text lacks "waiting"/"approval"/…), while the lifecycle
-        // hook path carries our formatted summary ("Codex ready /
-        // task complete") as TurnCompleted. Both fire
-        // for the same Stop event, so matching on pane+surface is
-        // the only key that catches the duplicate; including level
-        // re-introduced the 2× toast we are trying to suppress.
-        //
         // Without both pane and surface, unrelated callers cannot be deduplicated safely.
         if pane.is_some() && surface.is_some() {
             if let Some(last) = entries
@@ -117,7 +97,14 @@ impl NotificationStore {
                 .find(|e| e.pane == pane && e.surface == surface)
             {
                 if now.signed_duration_since(last.created_at) < DUP_WINDOW
-                    && attention_priority(level) <= attention_priority(last.level)
+                    && ((level == last.level && title == last.title && body == last.body)
+                        // shortcut: no completion identity in the protocol; revisit this
+                        // time-based OSC/hook pairing when callers provide one.
+                        || matches!(
+                            (last.level, level),
+                            (NotificationLevel::Info, NotificationLevel::TurnCompleted)
+                                | (NotificationLevel::TurnCompleted, NotificationLevel::Info)
+                        ))
                 {
                     return None;
                 }
@@ -125,8 +112,9 @@ impl NotificationStore {
         }
         let id = NotificationId::new();
         let evicted_desktop_id = if entries.len() >= MAX_RETAINED {
+            let index = entries.iter().position(|entry| entry.read).unwrap_or(0);
             entries
-                .pop_front()
+                .remove(index)
                 .filter(|entry| !entry.read)
                 .and_then(|entry| entry.desktop_id)
         } else {
@@ -658,39 +646,140 @@ mod tests {
     }
 
     #[test]
-    fn same_or_lower_attention_notification_remains_deduplicated() {
+    fn deduplication_preserves_distinct_content_and_important_kinds() {
+        let levels = [
+            NotificationLevel::Info,
+            NotificationLevel::TurnCompleted,
+            NotificationLevel::NeedsInput,
+            NotificationLevel::Error,
+        ];
+        for first in levels {
+            for second in levels {
+                for (title, body) in [("first", "first"), ("second", "first"), ("first", "second")]
+                {
+                    let s = store();
+                    let pane = Some(PaneId::new());
+                    let surface = Some(SurfaceId::new());
+                    s.push("first".into(), "first".into(), first, pane, surface, None)
+                        .unwrap();
+                    let suppressed = s
+                        .push(title.into(), body.into(), second, pane, surface, None)
+                        .is_none();
+                    let completion_pair = matches!(
+                        (first, second),
+                        (NotificationLevel::Info, NotificationLevel::TurnCompleted)
+                            | (NotificationLevel::TurnCompleted, NotificationLevel::Info)
+                    );
+                    assert_eq!(
+                        suppressed,
+                        completion_pair || (first == second && title == "first" && body == "first"),
+                        "{first:?} -> {second:?}, title={title}, body={body}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deduplication_expires_without_sleeping() {
         for (first, second) in [
-            (NotificationLevel::Info, NotificationLevel::TurnCompleted),
             (NotificationLevel::NeedsInput, NotificationLevel::NeedsInput),
-            (NotificationLevel::NeedsInput, NotificationLevel::Info),
-            (NotificationLevel::Error, NotificationLevel::NeedsInput),
+            (NotificationLevel::Info, NotificationLevel::TurnCompleted),
+            (NotificationLevel::TurnCompleted, NotificationLevel::Info),
         ] {
             let s = store();
-            let pane = PaneId::new();
-            let surface = SurfaceId::new();
-            s.push(
-                "first".into(),
-                "first".into(),
-                first,
-                Some(pane),
-                Some(surface),
-                None,
-            )
-            .expect("initial notification must be recorded");
+            let pane = Some(PaneId::new());
+            let surface = Some(SurfaceId::new());
+            s.push("same".into(), "same".into(), first, pane, surface, None)
+                .unwrap();
+            s.inner.borrow_mut()[0].created_at = chrono::Utc::now() - DUP_WINDOW;
+            assert!(s
+                .push("same".into(), "same".into(), second, pane, surface, None)
+                .is_some());
+        }
+    }
 
-            assert!(
+    #[test]
+    fn important_event_between_completion_reports_prevents_pairing() {
+        let s = store();
+        let pane = Some(PaneId::new());
+        let surface = Some(SurfaceId::new());
+        for level in [
+            NotificationLevel::Info,
+            NotificationLevel::NeedsInput,
+            NotificationLevel::TurnCompleted,
+        ] {
+            assert!(s
+                .push("agent".into(), "status".into(), level, pane, surface, None)
+                .is_some());
+        }
+        assert_eq!(s.unread_count(), 3);
+    }
+
+    #[test]
+    fn eviction_prefers_oldest_read_entry_and_preserves_unread_order() {
+        let s = store();
+        let ids: Vec<_> = (0..MAX_RETAINED)
+            .map(|i| {
                 s.push(
-                    "second".into(),
-                    "second".into(),
-                    second,
-                    Some(pane),
-                    Some(surface),
+                    i.to_string(),
+                    "".into(),
+                    NotificationLevel::Info,
+                    None,
+                    None,
                     None,
                 )
-                .is_none(),
-                "same or lower-attention notification should remain deduplicated"
-            );
+                .unwrap()
+                .0
+            })
+            .collect();
+        assert_eq!(
+            s.set_desktop_id(ids[0], "unread-toast".into()),
+            SetDesktopIdResult::Stored
+        );
+        s.mark_read(ids[10]);
+        s.mark_read(ids[20]);
+        for evicted in [ids[10], ids[20]] {
+            let (_, desktop_id) = s
+                .push(
+                    "new".into(),
+                    "".into(),
+                    NotificationLevel::Info,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(desktop_id.is_none());
+            assert!(s.find(evicted).is_none());
+            assert!(s.find(ids[0]).is_some());
+            assert_eq!(s.entries().len(), MAX_RETAINED);
         }
+        let surviving_ids: Vec<_> = s
+            .entries()
+            .iter()
+            .take(MAX_RETAINED - 2)
+            .map(|e| e.id)
+            .collect();
+        let expected: Vec<_> = ids
+            .iter()
+            .copied()
+            .filter(|id| *id != ids[10] && *id != ids[20])
+            .collect();
+        assert_eq!(surviving_ids, expected);
+        assert_eq!(s.unread_count(), MAX_RETAINED);
+        let (_, desktop_id) = s
+            .push(
+                "new".into(),
+                "".into(),
+                NotificationLevel::Info,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(desktop_id.as_deref(), Some("unread-toast"));
+        assert!(s.find(ids[0]).is_none());
     }
 
     #[test]
