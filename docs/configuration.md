@@ -61,6 +61,27 @@ new tabs. The resolved theme plus `font_family` and `font_size` overrides are
 applied live to both terminal and editor text; editor selection and cursor
 colors follow the same theme.
 
+## Notifications
+
+The side-panel bell opens a larger notification list with agent icons, source
+workspace/tab labels, and explicit Information, Completed, Input needed and Error
+labels. All, Unread, Input, Errors and Done filters combine with the workspace
+selector; their counts follow the selected workspace. Filter selections last for
+the current window. Input is an event category, not a claim that a request is
+still unresolved.
+
+Opening the list does not mark notifications read. Opening a source tab marks
+that source read; other tabs in its workspace remain unread. **Mark all read**
+acknowledges every workspace without deleting history. The actions menu separates
+**Delete read notifications** from **Delete all notifications**. Read entries keep
+normal text contrast and lose their unread dot and bold title.
+
+The in-memory history retains at most 50 entries, removing read entries first.
+It is not restored after restart. Identical same-tab messages within eight seconds
+are suppressed; OSC information and hook completion reports are also paired within
+that window. Distinct input requests and errors are retained.
+`system_notifications_enabled` controls OS delivery independently of this list.
+
 ## Theme file
 
 `$XDG_CONFIG_HOME/flowmux/theme` uses Ghostty's `key = value` format. It
