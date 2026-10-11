@@ -20,6 +20,60 @@ use std::{
     rc::Rc,
 };
 
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) async fn check_native_screen_cache(app: &adw::Application) {
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .default_width(360)
+        .default_height(180)
+        .build();
+    let area = gtk::DrawingArea::new();
+    let phase = Rc::new(Cell::new(false));
+    let rendered = Rc::new(RefCell::new(None));
+    area.set_draw_func({
+        let phase = phase.clone();
+        let rendered = rendered.clone();
+        move |_, cr, _, _| {
+            let _lease = sprite::CacheLease::new();
+            if phase.get() {
+                for frame in 0..8 {
+                    props::screen(0, frame);
+                }
+            }
+            let screen = props::screen(0, 8);
+            screen
+                .with_data(|data| *rendered.borrow_mut() = Some(data.to_vec()))
+                .unwrap();
+            cr.scale(10.0, 10.0);
+            sprite::paint(cr, &screen, 4.0, 4.0);
+        }
+    });
+    window.set_child(Some(&area));
+    window.present();
+    let mut cold = Vec::new();
+    for warm in [false, true] {
+        phase.set(warm);
+        *rendered.borrow_mut() = None;
+        area.queue_draw();
+        gtk::glib::future_with_timeout(std::time::Duration::from_secs(10), async {
+            while rendered.borrow().is_none() {
+                gtk::glib::timeout_future(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let pixels = rendered.borrow_mut().take().unwrap();
+        if warm {
+            assert!(pixels == cold, "mapped screen depends on cache history");
+        } else {
+            cold = pixels;
+        }
+    }
+    assert!(area.is_mapped());
+    window.destroy();
+    println!("MACOS_OFFICE_SCREEN_CACHE_OK");
+}
+
 struct Resident {
     button: gtk::Button,
     bubble: gtk::Label,

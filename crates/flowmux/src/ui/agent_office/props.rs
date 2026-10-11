@@ -951,8 +951,10 @@ pub(super) fn rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, color: u32) {
 
 /// Scrolling code on an active monitor; `frame` advances the lines.
 pub(super) fn screen(design: usize, frame: u32) -> ImageSurface {
+    // Line shapes repeat every 8 frames and colors every 5.
+    let frame = frame % 40;
     let accent = theme::theme(design).accent;
-    sprite::cached(("screen", design % theme::DESIGNS, frame % 8), || {
+    sprite::cached(("screen", design % theme::DESIGNS, frame), || {
         let mut c = Canvas::new(18, 9);
         c.rect(0, 0, 18, 9, 0x1b2a40);
         let colors = [0x7fd1b9, 0x9fb4ff, accent, 0xf2d27a, 0xd9e2f2];
@@ -1101,4 +1103,42 @@ pub(super) fn sparkle(phase: u8) -> ImageSurface {
 
 pub(super) fn confetti_color(i: usize) -> u32 {
     [0xff6f91, 0xffc53d, 0x5cc98a, 0x6fb7ff, 0xb48cff][i % 5]
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+
+    #[test]
+    fn screen_pixels_do_not_depend_on_cache_warmup() {
+        let pixels = |surface: ImageSurface| {
+            let mut bytes = Vec::new();
+            surface
+                .with_data(|data| bytes.extend_from_slice(data))
+                .unwrap();
+            bytes
+        };
+        for design in 0..theme::DESIGNS {
+            for frame in [8, 16, 39, 40, u32::MAX] {
+                let cold = {
+                    let _lease = sprite::CacheLease::new();
+                    pixels(screen(design, frame))
+                };
+                let _lease = sprite::CacheLease::new();
+                for earlier in 0..40 {
+                    screen(design, earlier);
+                }
+                assert_eq!(
+                    pixels(screen(design, frame)),
+                    cold,
+                    "design={design} frame={frame}"
+                );
+                assert_eq!(
+                    pixels(screen(design, frame % 40)),
+                    cold,
+                    "full animation period"
+                );
+            }
+        }
+    }
 }
