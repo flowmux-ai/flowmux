@@ -1475,6 +1475,111 @@ async fn claude_teams_uses_incremental_splits_after_initial_workspace_render() {
 }
 
 #[tokio::test]
+async fn claude_teams_rejects_failed_or_lost_workspace_ack() {
+    for lost in [false, true] {
+        let (handler, rx, _, _) = single_pane_handler().await;
+        let request = handler.handle(Request::ClaudeTeams {
+            count: 1,
+            args: vec![],
+            root: "/tmp".into(),
+        });
+        let gui = async {
+            let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+                panic!("workspace creation expected")
+            };
+            if lost {
+                drop(ack);
+            } else {
+                ack.send(Err("render failed".into())).unwrap();
+            }
+            // The old handler goes on to send input despite the failed render.
+            while let Ok(command) = rx.recv().await {
+                if let GtkCommand::PaneSendKeys { ack, .. } = command {
+                    let _ = ack.send(Ok(()));
+                }
+            }
+            id
+        };
+        let finish = async {
+            let response = request.await;
+            rx.close();
+            response
+        };
+        let (response, id) = tokio::join!(finish, gui);
+        assert!(matches!(response, Response::Error(_)), "{response:?}");
+        assert!(handler.inner.store().get_workspace(id).await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn claude_teams_reports_partial_workspace_on_input_failure() {
+    for lost in [false, true] {
+        let (handler, rx, _, _) = single_pane_handler().await;
+        let request = handler.handle(Request::ClaudeTeams {
+            count: 1,
+            args: vec![],
+            root: "/tmp".into(),
+        });
+        let gui = async {
+            let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+                panic!("workspace creation expected")
+            };
+            ack.send(Ok(())).unwrap();
+            let GtkCommand::PaneSendKeys { ack, .. } = rx.recv().await.unwrap() else {
+                panic!("input expected")
+            };
+            if lost {
+                drop(ack);
+            } else {
+                ack.send(Err("pane not found".into())).unwrap();
+            }
+            id
+        };
+        let (response, id) = tokio::join!(request, gui);
+        let Response::Error(RpcError::Internal(error)) = response else {
+            panic!("input failure reported as success: {response:?}")
+        };
+        assert!(
+            error.contains(&id.to_string()) && error.contains("partial"),
+            "{error}"
+        );
+        assert!(handler.inner.store().get_workspace(id).await.is_some());
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[tokio::test]
+async fn claude_teams_reports_partial_workspace_on_split_failure() {
+    let (handler, rx, _, _) = single_pane_handler().await;
+    let request = handler.handle(Request::ClaudeTeams {
+        count: 2,
+        args: vec![],
+        root: "/tmp".into(),
+    });
+    let gui = async {
+        let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+            panic!("workspace creation expected")
+        };
+        ack.send(Ok(())).unwrap();
+        let GtkCommand::SplitPane { ack, .. } = rx.recv().await.unwrap() else {
+            panic!("split expected")
+        };
+        ack.send(Err("split failed".into())).unwrap();
+        id
+    };
+    let (response, id) = tokio::join!(request, gui);
+    let Response::Error(RpcError::Internal(error)) = response else {
+        panic!("split failure reported as success: {response:?}")
+    };
+    assert!(
+        error.contains(&id.to_string()) && error.contains("partial"),
+        "{error}"
+    );
+    assert!(handler.inner.store().get_workspace(id).await.is_some());
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn pane_split_reports_not_found_without_dispatch_for_unknown_pane() {
     let (handler, rx, _pane, _tab) = single_pane_handler().await;
     assert!(matches!(

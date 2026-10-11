@@ -10,6 +10,7 @@ mod palette;
 mod pane_titles;
 mod process_args;
 mod restored_roots;
+mod teams_ack;
 
 pub(crate) fn run() {
     let isolated = tempfile::Builder::new()
@@ -128,6 +129,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     }
     if std::env::var_os("FLOWMUX_AGENT_ENTRYPOINT_SMOKE_ONLY").is_some() {
         process_args::check(&controller, terminal_pane, root).await;
+        controller.window.destroy();
+        return;
+    }
+    if std::env::var_os("FLOWMUX_TEAMS_ACK_SMOKE_ONLY").is_some() {
+        teams_ack::check(&controller, root).await;
         controller.window.destroy();
         return;
     }

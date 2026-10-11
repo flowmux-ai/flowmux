@@ -10,7 +10,7 @@
 use crate::activity::ActivityEntry;
 use crate::bridge::{Bridge, BrowserActionResult, BrowserOp, GtkCommand};
 use flowmux_core::{AgentStatusReport, SplitDirection};
-use flowmux_daemon::DaemonHandler;
+use flowmux_daemon::{tmux_compat::TmuxCompatUi, DaemonHandler};
 use flowmux_ipc::protocol::{Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
 use flowmux_state::session_history::{codex_session_cwd, codex_thread_names, SessionAgent};
@@ -842,13 +842,10 @@ impl GuiHandler {
                     .create_workspace(Some("claude-teams".into()), root)
                     .await;
 
-                let (tx, rx) = oneshot::channel();
-                let _ = self
-                    .bridge
-                    .tx
-                    .send(GtkCommand::WorkspaceCreated { id: ws_id, ack: tx })
-                    .await;
-                let _ = rx.await;
+                if let Err(error) = materialize_workspace(&self.bridge, ws_id).await {
+                    store.remove_workspace(ws_id).await;
+                    return Response::Error(RpcError::Internal(error));
+                }
 
                 // Split the root pane (count - 1) times to get `count` panes.
                 let ws = match store.get_workspace(ws_id).await {
@@ -882,7 +879,11 @@ impl GuiHandler {
                             all_panes.push(new_pane);
                             current = new_pane;
                         }
-                        Err(error) => return Response::Error(RpcError::Internal(error)),
+                        Err(error) => {
+                            return Response::Error(RpcError::Internal(format!(
+                                "workspace {ws_id} partially created; split failed: {error}; inspect the workspace before retrying"
+                            )))
+                        }
                     }
                 }
                 // Feed the `claude` invocation into each pane.
@@ -892,18 +893,15 @@ impl GuiHandler {
                     .collect::<Vec<_>>()
                     .join(" ");
                 let cmd_line = format!("{cmd_line}\n");
-                for pane in &all_panes {
-                    let (tx, rx) = oneshot::channel();
-                    let _ = self
-                        .bridge
-                        .tx
-                        .send(GtkCommand::PaneSendKeys {
-                            pane: *pane,
-                            keys: cmd_line.clone(),
-                            ack: tx,
-                        })
-                        .await;
-                    let _ = rx.await;
+                let ui = GuiTmuxUi {
+                    bridge: &self.bridge,
+                };
+                for (delivered, pane) in all_panes.iter().enumerate() {
+                    if let Err(error) = ui.send_keys(*pane, &cmd_line).await {
+                        return Response::Error(RpcError::Internal(format!(
+                            "workspace {ws_id} partially created; input failed for pane {pane} after {delivered} confirmed deliveries: {error}; inspect the workspace before retrying"
+                        )));
+                    }
                 }
                 Response::WorkspaceCreated { id: ws_id }
             }
