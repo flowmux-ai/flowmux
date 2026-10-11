@@ -648,9 +648,8 @@ impl BrowserPane {
         }
         {
             let native = native.clone();
-            let label = zoom_label.clone();
-            zoom_reset.connect_clicked(move |_| {
-                set_native_zoom(&native, &label, 1.0);
+            zoom_reset.connect_clicked(move |label| {
+                set_native_zoom(&native, label, 1.0);
             });
         }
         {
@@ -674,8 +673,7 @@ impl BrowserPane {
         }
         {
             let native = native.clone();
-            let entry = find_entry.clone();
-            find_entry.connect_stop_search(move |_| {
+            find_entry.connect_stop_search(move |entry| {
                 entry.set_visible(false);
                 focus_native_view(&native.web_view);
             });
@@ -685,8 +683,7 @@ impl BrowserPane {
         });
         {
             let native = native.clone();
-            let address = address.clone();
-            address.clone().connect_activate(move |_| {
+            address.connect_activate(move |address| {
                 let uri = normalize_uri(&address.text());
                 load_uri_native(&native.web_view, &uri);
             });
@@ -774,6 +771,163 @@ impl BrowserPane {
             refs,
             ref_scope,
         }
+    }
+
+    /// Call on the GTK main thread after isolating XDG state and registering the app.
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_native_lifetime(app: &gtk::Application) {
+        async fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+            glib::future_with_timeout(Duration::from_secs(30), async {
+                while !autoreleasepool(|_| ready()) {
+                    glib::timeout_future(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("browser lifetime timed out: {description}"));
+        }
+
+        async fn javascript(browser: &BrowserPane, script: &str) -> String {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            browser.evaluate_js(script, move |result| {
+                let _ = tx.send(result);
+            });
+            glib::future_with_timeout(Duration::from_secs(10), rx)
+                .await
+                .expect("browser lifetime JavaScript timed out")
+                .unwrap()
+                .unwrap()
+        }
+
+        let fixture = tempfile::Builder::new()
+            .prefix("fm-b01-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let page = fixture.path().join("page.html");
+        std::fs::write(
+            &page,
+            "<!doctype html><title>B01 loaded</title><body>find this text</body>",
+        )
+        .unwrap();
+        let url = format!("file://{}", page.display());
+        let callbacks = PaneCallbacks::noop_for_test();
+        // These callbacks are held only by the 50 ms and 250 ms timer closures.
+        let focus_timer = Rc::downgrade(&callbacks.on_focus);
+        let state_timer = Rc::downgrade(&callbacks.on_browser_title_changed);
+        let closed = autoreleasepool(|_| {
+            Self::new(
+                PaneId::new(),
+                SurfaceId::new(),
+                None,
+                callbacks,
+                BrowserEngine::Webkit,
+                false,
+            )
+        });
+        let updates = Rc::new(Cell::new(0));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let updates_for_callback = updates.clone();
+        callbacks.on_browser_title_changed = Rc::new(RefCell::new(move |_, _, _| {
+            updates_for_callback.set(updates_for_callback.get() + 1);
+        }));
+        let survivor = autoreleasepool(|_| {
+            Self::new(
+                PaneId::new(),
+                SurfaceId::new(),
+                Some(&url),
+                callbacks,
+                BrowserEngine::Webkit,
+                false,
+            )
+        });
+        let panes = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        panes.append(&closed.root);
+        panes.append(&survivor.root);
+        let window = gtk::Window::builder()
+            .application(app)
+            .default_width(1000)
+            .default_height(600)
+            .child(&panes)
+            .build();
+        window.present();
+        wait_for("both native browsers mapped", || {
+            closed.web_view.is_mapped()
+                && survivor.web_view.is_mapped()
+                && closed.native.web_view.as_super().window().is_some()
+                && survivor.native.web_view.as_super().window().is_some()
+        })
+        .await;
+        closed.address.set_text(&url);
+        closed.address.emit_activate();
+        wait_for("address activation loaded the page", || {
+            closed.current_title() == "B01 loaded"
+        })
+        .await;
+        closed.set_zoom_level(1.5);
+        closed.zoom_label.emit_clicked();
+        assert_eq!(closed.native.zoom.get(), 1.0);
+        assert_eq!(closed.zoom_label.label().as_deref(), Some("100%"));
+        assert_eq!(unsafe { closed.native.web_view.pageZoom() }, 1.0);
+        closed.show_search();
+        closed.find_entry.set_text("find this text");
+        closed.find_entry.emit_activate();
+        assert_eq!(
+            javascript(&closed, "window.getSelection().toString()").await,
+            "find this text"
+        );
+        closed.find_entry.emit_stop_search();
+        assert!(!closed.find_entry.is_visible());
+        wait_for("survivor state timer active", || updates.get() > 0).await;
+        assert!(focus_timer.upgrade().is_some());
+        assert!(state_timer.upgrade().is_some());
+
+        let widgets = [
+            closed.root.clone().upcast::<gtk::Widget>().downgrade(),
+            closed.web_view.downgrade(),
+            closed.address.clone().upcast::<gtk::Widget>().downgrade(),
+            closed
+                .zoom_label
+                .clone()
+                .upcast::<gtk::Widget>()
+                .downgrade(),
+            closed
+                .find_entry
+                .clone()
+                .upcast::<gtk::Widget>()
+                .downgrade(),
+        ];
+        let native = Rc::downgrade(&closed.native);
+        let web_view = objc2::rc::Weak::from_retained(&closed.native.web_view);
+        autoreleasepool(|_| {
+            closed.prepare_for_close();
+            panes.remove(&closed.root);
+            drop(closed);
+        });
+        wait_for("GTK widgets and native wrapper released", || {
+            widgets.iter().all(|widget| widget.upgrade().is_none()) && native.upgrade().is_none()
+        })
+        .await;
+        wait_for("WKWebView released", || web_view.load().is_none()).await;
+        wait_for("both timer closures released", || {
+            focus_timer.upgrade().is_none() && state_timer.upgrade().is_none()
+        })
+        .await;
+        let previous_updates = updates.get();
+        assert_eq!(
+            javascript(&survivor, "document.title = 'B01 survivor'; 6 * 7").await,
+            "42"
+        );
+        wait_for("survivor state timer still active", || {
+            updates.get() > previous_updates
+        })
+        .await;
+        assert_eq!(survivor.current_title(), "B01 survivor");
+        autoreleasepool(|_| {
+            survivor.prepare_for_close();
+            panes.remove(&survivor.root);
+            drop(survivor);
+        });
+        window.destroy();
+        println!("MACOS_NATIVE_BROWSER_LIFETIME_OK");
     }
 
     pub fn current_url(&self) -> String {
