@@ -3,7 +3,8 @@
 
 use crate::protocol::{Envelope, Payload, Request, Response, RpcError, SshRequest};
 use std::future::Future;
-use std::path::Path;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,16 +71,86 @@ pub trait Handler: Send + Sync + 'static {
     }
 }
 
+struct SocketOwner {
+    _lock: std::fs::File,
+    paths: Vec<(PathBuf, u64, u64)>,
+}
+
+impl SocketOwner {
+    fn acquire(socket: &Path) -> anyhow::Result<Self> {
+        let mut path = socket.as_os_str().to_os_string();
+        path.push(".lock");
+        // Keep the lock file: unlinking it would let later owners lock a
+        // different inode while an earlier process still owns this one.
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        lock.try_lock()?;
+        Ok(Self {
+            _lock: lock,
+            paths: Vec::new(),
+        })
+    }
+
+    fn bind(&mut self, path: &Path) -> std::io::Result<UnixListener> {
+        let listener = UnixListener::bind(path)?;
+        let metadata = std::fs::symlink_metadata(path)?;
+        self.paths
+            .push((path.to_owned(), metadata.dev(), metadata.ino()));
+        Ok(listener)
+    }
+}
+
+impl Drop for SocketOwner {
+    fn drop(&mut self) {
+        for (path, dev, ino) in &self.paths {
+            if std::fs::symlink_metadata(path)
+                .is_ok_and(|metadata| metadata.dev() == *dev && metadata.ino() == *ino)
+            {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+async fn remove_stale_socket(path: &Path) -> std::io::Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let in_use = || {
+        std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("IPC path is in use: {}", path.display()),
+        )
+    };
+    if !metadata.file_type().is_socket() {
+        return Err(in_use());
+    }
+    match timeout(Duration::from_millis(250), UnixStream::connect(path)).await {
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => {}
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Ok(Err(error)) => return Err(error),
+        _ => return Err(in_use()),
+    }
+    let current = std::fs::symlink_metadata(path)?;
+    if current.dev() != metadata.dev() || current.ino() != metadata.ino() {
+        return Err(in_use());
+    }
+    std::fs::remove_file(path)
+}
+
 pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<()> {
-    if socket.exists() {
-        std::fs::remove_file(socket)?;
-    }
+    let mut owner = SocketOwner::acquire(socket)?;
     let control_path = crate::control_socket_path(socket);
-    if control_path.exists() {
-        std::fs::remove_file(&control_path)?;
-    }
+    remove_stale_socket(socket).await?;
+    remove_stale_socket(&control_path).await?;
     // Bind control first so normal paths publish both endpoints together.
-    let control_listener = match UnixListener::bind(&control_path) {
+    let control_listener = match owner.bind(&control_path) {
         Ok(listener) => Some(listener),
         // The original socket can fit sun_path while its companion does not.
         // ponytail: overlong custom paths keep regular admission; shorten the
@@ -90,7 +161,7 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
         }
         Err(error) => return Err(error.into()),
     };
-    let listener = UnixListener::bind(socket)?;
+    let listener = owner.bind(socket)?;
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let control_connections = Arc::new(Semaphore::new(MAX_CONTROL_CONNECTIONS));
     let mutations = Arc::new(Semaphore::new(MAX_MUTATIONS));
@@ -323,6 +394,136 @@ async fn read_line_bounded<R: AsyncBufRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn duplicate_server_preserves_both_live_endpoints() {
+        let dir = tempfile::Builder::new()
+            .prefix("fm-owner-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = dir.path().join("ipc.sock");
+        let server_socket = socket.clone();
+        let first = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
+        let client = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(client) = crate::client::Client::connect(&socket).await {
+                    break client;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            client.call(Request::Ping).await.unwrap(),
+            Response::Pong
+        ));
+        let duplicate = timeout(Duration::from_secs(1), run(&socket, Arc::new(PingHandler))).await;
+        assert!(
+            matches!(duplicate, Ok(Err(_))),
+            "duplicate server must fail: {duplicate:?}"
+        );
+        for endpoint in [&socket, &crate::control_socket_path(&socket)] {
+            let client = crate::client::Client::connect(endpoint).await.unwrap();
+            assert!(matches!(
+                client.call(Request::Ping).await.unwrap(),
+                Response::Pong
+            ));
+        }
+        assert!(matches!(
+            client.call(Request::Ping).await.unwrap(),
+            Response::Pong
+        ));
+        first.abort();
+        let _ = first.await;
+    }
+
+    #[tokio::test]
+    async fn startup_preserves_foreign_endpoints_and_cleans_its_own() {
+        let dir = tempfile::Builder::new()
+            .prefix("fm-owner-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = dir.path().join("ipc.sock");
+        let control = crate::control_socket_path(&socket);
+        for occupied in [&socket, &control] {
+            let other = if occupied == &socket {
+                &control
+            } else {
+                &socket
+            };
+            let foreign = UnixListener::bind(occupied).unwrap();
+            let result = timeout(Duration::from_secs(1), run(&socket, Arc::new(PingHandler))).await;
+            assert!(matches!(result, Ok(Err(_))), "live endpoint was replaced");
+            assert!(UnixStream::connect(occupied).await.is_ok());
+            assert!(!other.exists());
+            drop(foreign);
+            std::fs::remove_file(occupied).unwrap();
+        }
+        std::fs::write(&socket, b"keep me").unwrap();
+        assert!(run(&socket, Arc::new(PingHandler)).await.is_err());
+        assert_eq!(std::fs::read(&socket).unwrap(), b"keep me");
+        assert!(!control.exists());
+        std::fs::remove_file(&socket).unwrap();
+        // Stale socket files left by a crashed process can be reclaimed.
+        drop(UnixListener::bind(&socket).unwrap());
+        drop(UnixListener::bind(&control).unwrap());
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(client) = crate::client::Client::connect(&socket).await {
+                    assert!(matches!(
+                        client.call(Request::Ping).await.unwrap(),
+                        Response::Pong
+                    ));
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        server.abort();
+        let _ = server.await;
+        assert!(!socket.exists());
+        assert!(!control.exists());
+    }
+
+    #[tokio::test]
+    async fn partial_bind_cleanup_preserves_replaced_paths() {
+        let dir = tempfile::Builder::new()
+            .prefix("fm-owner-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = dir.path().join("ipc.sock");
+        let control = crate::control_socket_path(&socket);
+        let mut owner = SocketOwner::acquire(&socket).unwrap();
+        let listener = owner.bind(&control).unwrap();
+        std::fs::write(&socket, b"occupied").unwrap();
+        assert!(owner.bind(&socket).is_err());
+        drop(listener);
+        drop(owner);
+        assert!(!control.exists());
+        assert_eq!(std::fs::read(&socket).unwrap(), b"occupied");
+        std::fs::remove_file(&socket).unwrap();
+
+        let mut owner = SocketOwner::acquire(&socket).unwrap();
+        let listener = owner.bind(&socket).unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        std::os::unix::fs::symlink("missing-target", &socket).unwrap();
+        drop(listener);
+        drop(owner);
+        assert_eq!(
+            std::fs::read_link(&socket).unwrap(),
+            Path::new("missing-target")
+        );
+        assert!(run(&socket, Arc::new(PingHandler)).await.is_err());
+        assert!(std::fs::symlink_metadata(&socket)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
     use crate::protocol::Event;
     use flowmux_core::{NotificationLevel, WorkspaceId};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

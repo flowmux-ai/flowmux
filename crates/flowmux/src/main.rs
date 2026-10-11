@@ -413,8 +413,6 @@ fn main() -> anyhow::Result<()> {
     // GUI-only flags must not reach GApplication's option parser.
     let exit_code = app.run_with_args::<&str>(&[]);
     drop(rt);
-    let _ = std::fs::remove_file(&socket);
-    let _ = std::fs::remove_file(flowmux_ipc::control_socket_path(&socket));
     drop(log_guard);
     std::process::exit(exit_code.into());
 }
@@ -927,7 +925,7 @@ mod tests {
 
         server.abort();
         let _ = server.await;
-        std::fs::remove_file(socket).unwrap();
+        assert!(!socket.exists());
     }
 
     #[test]
