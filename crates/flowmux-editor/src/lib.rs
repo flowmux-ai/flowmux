@@ -277,6 +277,94 @@ impl DocumentService {
         })
     }
 
+    fn open_deleted_recovery(
+        &mut self,
+        path: &Path,
+        store: &RecoveryStore,
+    ) -> Result<Option<(OpenDocument, RecoverySnapshot)>, DocumentError> {
+        let display_path = absolute_path(path)?;
+        let mut ancestor = display_path.as_path();
+        let mut missing = Vec::new();
+        let identity_path = loop {
+            match fs::symlink_metadata(ancestor) {
+                Ok(_) => {
+                    if missing.is_empty() {
+                        return Ok(None);
+                    }
+                    // Resolve existing links; never treat a dangling link as a missing directory.
+                    let mut identity = fs::canonicalize(ancestor).map_err(|source| {
+                        io_error("resolve document directory", ancestor, source)
+                    })?;
+                    self.ensure_within_workspace(&identity)?;
+                    for name in missing.iter().rev() {
+                        identity.push(name);
+                    }
+                    break identity;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let Some(name) = ancestor.file_name() else {
+                        return Ok(None);
+                    };
+                    missing.push(name);
+                    let Some(parent) = ancestor.parent() else {
+                        return Ok(None);
+                    };
+                    ancestor = parent;
+                }
+                Err(source) => return Err(io_error("inspect", ancestor, source)),
+            }
+        };
+        let Ok(Some((recovery, RecoveryDiskState::Deleted))) = store.read(&identity_path) else {
+            return Ok(None);
+        };
+        if recovery.content.len() as u64 > self.max_document_bytes {
+            return Err(DocumentError::TooLarge {
+                path: display_path,
+                limit: self.max_document_bytes,
+            });
+        }
+        if let Some(id) = self.identities.get(&identity_path).copied() {
+            return Ok(Some((
+                OpenDocument {
+                    document: self.snapshot(id)?,
+                    already_open: true,
+                },
+                recovery,
+            )));
+        }
+        let id = DocumentId(self.next_id);
+        self.next_id = self.next_id.saturating_add(1);
+        let snapshot = DocumentSnapshot {
+            id,
+            display_path,
+            identity_path: identity_path.clone(),
+            text: String::new(),
+            version: 1,
+            saved_version: 1,
+            encoding: recovery.encoding,
+            line_ending: recovery.line_ending,
+            read_only: false,
+        };
+        self.documents.insert(
+            id,
+            Document {
+                snapshot: snapshot.clone(),
+                base_bytes: Vec::new(),
+                base_missing: false,
+                permissions: recovery::private_file_permissions(),
+                base_disk: std::cell::Cell::new(None),
+            },
+        );
+        self.identities.insert(identity_path, id);
+        Ok(Some((
+            OpenDocument {
+                document: snapshot,
+                already_open: false,
+            },
+            recovery,
+        )))
+    }
+
     /// Version and dirty state without cloning the document text; used by the
     /// external-change poll, which runs for every open document.
     pub fn version_and_dirty(&self, id: DocumentId) -> Result<(u64, bool), DocumentError> {

@@ -294,7 +294,24 @@ impl EditorSession {
         path: impl AsRef<Path>,
         view: EditorViewState,
     ) -> Result<Vec<HostMessage>, DocumentError> {
-        let opened = self.documents.open(path)?;
+        let (opened, deleted_recovery) = match self.documents.open(path.as_ref()) {
+            Ok(opened) => (opened, None),
+            Err(error) => {
+                if !matches!(&error, DocumentError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+                {
+                    return Err(error);
+                }
+                let Some(store) = &self.recovery_store else {
+                    return Err(error);
+                };
+                let Some((opened, recovery)) =
+                    self.documents.open_deleted_recovery(path.as_ref(), store)?
+                else {
+                    return Err(error);
+                };
+                (opened, Some((recovery, RecoveryDiskState::Deleted)))
+            }
+        };
         let id = opened.document.id;
         let document_id = protocol_id(id);
         self.protocol_ids.insert(document_id.clone(), id);
@@ -318,8 +335,12 @@ impl EditorSession {
             document: self.payload(opened.document.clone()),
         }];
         if let Some(store) = &self.recovery_store {
-            if let Ok(Some((recovery, disk_state))) = store.read(&opened.document.identity_path) {
-                if recovery.content == opened.document.text {
+            if let Some((recovery, disk_state)) = deleted_recovery
+                .or_else(|| store.read(&opened.document.identity_path).ok().flatten())
+            {
+                if disk_state != RecoveryDiskState::Deleted
+                    && recovery.content == opened.document.text
+                {
                     self.recovery_operations.push(RecoveryOperation::Remove(
                         opened.document.identity_path.clone(),
                     ));
@@ -739,6 +760,9 @@ impl EditorSession {
         if choice == RecoveryChoice::Discard {
             self.recovery_operations
                 .push(RecoveryOperation::Remove(recovery.identity_path));
+            if disk_state == RecoveryDiskState::Deleted {
+                return self.close_document(document_id, document_version, true);
+            }
             return Ok(Vec::new());
         }
 
@@ -1993,6 +2017,300 @@ mod tests {
             "discarding changes must not forget the open tab"
         );
         assert_eq!(fs::read_to_string(&path).unwrap(), "disk\n");
+    }
+
+    #[test]
+    fn deleted_original_recovery_is_explicit_and_survives_restart_until_save_as() {
+        for remove_parents in [false, true] {
+            let workspace = tempdir().unwrap();
+            let state = tempdir().unwrap();
+            let directory = workspace.path().join("removed/nested");
+            fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("deleted.txt");
+            fs::write(&path, b"\xef\xbb\xbforiginal\r\n").unwrap();
+            let identity = fs::canonicalize(&path).unwrap();
+            let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+            let mut first =
+                EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+            let document = open_payload(first.open_document(&path).unwrap());
+            first
+                .handle_editor_message(EditorMessage::DocumentChanged {
+                    document_id: document.id,
+                    document_version: document.version,
+                    change_sequence: 1,
+                    content: "복구됨\n日本語 🙂\n".into(),
+                })
+                .unwrap();
+            apply_recovery_operations(&mut first, &store);
+            if remove_parents {
+                fs::remove_dir_all(workspace.path().join("removed")).unwrap();
+            } else {
+                fs::remove_file(&path).unwrap();
+            }
+
+            for _ in 0..2 {
+                let mut restarted =
+                    EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+                let messages = restarted
+                    .restore_document(&path, EditorViewState::default())
+                    .unwrap();
+                let [HostMessage::OpenDocument { document }, HostMessage::RecoveryAvailable {
+                    document_id,
+                    document_version,
+                    disk_state: RecoveryDiskState::Deleted,
+                }] = messages.as_slice()
+                else {
+                    panic!("expected explicit deleted-file recovery proposal")
+                };
+                assert!(document.content.is_empty());
+                assert!(!document.dirty);
+                assert!(!path.exists());
+                assert_eq!(directory.exists(), !remove_parents);
+                assert_eq!(restarted.pending_recovery_messages().len(), 1);
+                let restored = restarted
+                    .handle_editor_message(EditorMessage::RecoveryDecision {
+                        document_id: document_id.clone(),
+                        document_version: *document_version,
+                        choice: RecoveryChoice::Restore,
+                    })
+                    .unwrap();
+                let [HostMessage::ReplaceDocument { document }] = restored.as_slice() else {
+                    panic!("expected restored document")
+                };
+                assert_eq!(document.content, "복구됨\n日本語 🙂\n");
+                assert!(document.dirty && document.external_change);
+                assert_eq!(document.encoding, TextDocumentEncoding::Utf8Bom);
+                assert_eq!(document.eol, TextDocumentLineEnding::CrLf);
+                assert!(!path.exists());
+                assert_eq!(directory.exists(), !remove_parents);
+                assert!(restarted.save_all_dirty().1.is_err());
+                apply_recovery_operations(&mut restarted, &store);
+            }
+
+            let mut restarted =
+                EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+            let messages = restarted.open_document(&path).unwrap();
+            let HostMessage::OpenDocument { document } = &messages[0] else {
+                panic!("expected document")
+            };
+            restarted
+                .handle_editor_message(EditorMessage::RecoveryDecision {
+                    document_id: document.id.clone(),
+                    document_version: document.version,
+                    choice: RecoveryChoice::Restore,
+                })
+                .unwrap();
+            let saved = restarted
+                .handle_editor_message(EditorMessage::SaveAsRequested {
+                    document_id: document.id.clone(),
+                    document_version: document.version + 1,
+                    change_sequence: 0,
+                    content: "복구됨\n日本語 🙂\n".into(),
+                    path: "rescued.txt".into(),
+                    overwrite: false,
+                })
+                .unwrap();
+            assert!(
+                matches!(saved.as_slice(), [HostMessage::SaveAsCompleted { document, .. }] if !document.dirty)
+            );
+            assert_eq!(
+                fs::read(workspace.path().join("rescued.txt")).unwrap(),
+                "\u{feff}복구됨\r\n日本語 🙂\r\n".as_bytes()
+            );
+            assert!(!path.exists());
+            assert_eq!(directory.exists(), !remove_parents);
+            apply_recovery_operations(&mut restarted, &store);
+            assert!(store.read(&identity).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn discarding_deleted_original_recovery_closes_placeholder_without_creating_file() {
+        for content in ["", "unsaved edits\n"] {
+            let workspace = tempdir().unwrap();
+            let state = tempdir().unwrap();
+            let identity = fs::canonicalize(workspace.path())
+                .unwrap()
+                .join("removed/nested/deleted.txt");
+            let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+            let recovery = RecoverySnapshot::new(
+                store.workspace_id().into(),
+                identity.clone(),
+                b"original\n",
+                2,
+                content.into(),
+                TextEncoding::Utf8,
+                LineEnding::Lf,
+            );
+            store.write(&recovery).unwrap();
+            let mut session =
+                EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+            let messages = session.open_document(&identity).unwrap();
+            let [HostMessage::OpenDocument { .. }, HostMessage::RecoveryAvailable {
+                document_id,
+                document_version,
+                disk_state: RecoveryDiskState::Deleted,
+            }] = messages.as_slice()
+            else {
+                panic!("expected recovery proposal even for empty recovered text")
+            };
+            let closed = session
+                .handle_editor_message(EditorMessage::RecoveryDecision {
+                    document_id: document_id.clone(),
+                    document_version: *document_version,
+                    choice: RecoveryChoice::Discard,
+                })
+                .unwrap();
+            assert!(matches!(
+                closed.as_slice(),
+                [HostMessage::CloseDocument { .. }]
+            ));
+            assert!(session.session_snapshot().open_files.is_empty());
+            assert!(session.pending_recovery_messages().is_empty());
+            assert!(!identity.exists());
+            apply_recovery_operations(&mut session, &store);
+            assert!(store.read(&identity).unwrap().is_none());
+            assert!(session.open_document(&identity).is_err());
+        }
+    }
+
+    #[test]
+    fn missing_original_without_valid_recovery_stays_unopened() {
+        let workspace = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let identity = fs::canonicalize(workspace.path())
+            .unwrap()
+            .join("removed/nested/missing.txt");
+        let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+        let mut session =
+            EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+        assert!(session.open_document(&identity).is_err());
+        assert!(EditorSession::new(workspace.path())
+            .unwrap()
+            .open_document(&identity)
+            .is_err());
+        let mut recovery = RecoverySnapshot::new(
+            store.workspace_id().into(),
+            identity.clone(),
+            b"base",
+            2,
+            "edits".into(),
+            TextEncoding::Utf8,
+            LineEnding::Lf,
+        );
+        for invalid in [
+            "invalid json".to_string(),
+            {
+                recovery.identity_path = identity.with_file_name("different.txt");
+                serde_json::to_string(&recovery).unwrap()
+            },
+            {
+                recovery.identity_path = identity.clone();
+                recovery.workspace_id = "different workspace".into();
+                serde_json::to_string(&recovery).unwrap()
+            },
+        ] {
+            fs::write(store.snapshot_path(&identity), &invalid).unwrap();
+            assert!(session.open_document(&identity).is_err());
+            assert_eq!(
+                fs::read_to_string(store.snapshot_path(&identity)).unwrap(),
+                invalid
+            );
+            assert!(session.session_snapshot().open_files.is_empty());
+            assert!(session.pending_recovery_messages().is_empty());
+            assert!(!identity.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleted_original_recovery_does_not_follow_links_outside_workspace() {
+        use std::os::unix::fs::symlink;
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let identity = fs::canonicalize(outside.path())
+            .unwrap()
+            .join("removed/nested/missing.txt");
+        let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+        store
+            .write(&RecoverySnapshot::new(
+                store.workspace_id().into(),
+                identity.clone(),
+                b"base",
+                2,
+                "edits".into(),
+                TextEncoding::Utf8,
+                LineEnding::Lf,
+            ))
+            .unwrap();
+        symlink(outside.path(), workspace.path().join("directory-link")).unwrap();
+        symlink(&identity, workspace.path().join("file-link")).unwrap();
+        let mut session =
+            EditorSession::with_recovery_store(workspace.path(), store.clone()).unwrap();
+        for path in [
+            identity.clone(),
+            workspace
+                .path()
+                .join("directory-link/removed/nested/missing.txt"),
+            workspace.path().join("file-link"),
+        ] {
+            assert!(session.open_document(path).is_err());
+        }
+        assert!(session.session_snapshot().open_files.is_empty());
+        assert!(store.read(&identity).unwrap().is_some());
+        assert!(!identity.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn deleted_parent_recovery_resolves_existing_links_but_rejects_dangling_ancestors() {
+        use std::os::unix::fs::symlink;
+        let workspace = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let store = RecoveryStore::new(state.path(), &root).unwrap();
+        fs::create_dir(root.join("real")).unwrap();
+        symlink(root.join("real"), root.join("alias")).unwrap();
+        symlink(root.join("absent"), root.join("dangling")).unwrap();
+        let identity = root.join("real/removed/file.txt");
+        for path in [&identity, &root.join("dangling/removed/file.txt")] {
+            store
+                .write(&RecoverySnapshot::new(
+                    store.workspace_id().into(),
+                    path.clone(),
+                    b"base",
+                    2,
+                    "edits".into(),
+                    TextEncoding::Utf8,
+                    LineEnding::Lf,
+                ))
+                .unwrap();
+        }
+        let mut session = EditorSession::with_recovery_store(&root, store.clone()).unwrap();
+        assert!(session
+            .open_document(root.join("dangling/removed/file.txt"))
+            .is_err());
+        assert!(session
+            .open_document(root.join("removed/../real/removed/file.txt"))
+            .is_err());
+        assert!(session.session_snapshot().open_files.is_empty());
+
+        let opened = session
+            .open_document(root.join("alias/removed/file.txt"))
+            .unwrap();
+        let [HostMessage::OpenDocument { document }, HostMessage::RecoveryAvailable { .. }] =
+            opened.as_slice()
+        else {
+            panic!("expected recovery through the existing directory alias");
+        };
+        assert!(
+            matches!(session.open_document(&identity).unwrap().as_slice(),
+            [HostMessage::SetActiveDocument { document_id, .. }] if document_id == &document.id)
+        );
+        assert!(!root.join("real/removed").exists());
+        assert!(!root.join("absent").exists());
+        assert!(store.read(&identity).unwrap().is_some());
     }
 
     #[test]

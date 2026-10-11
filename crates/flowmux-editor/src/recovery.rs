@@ -343,13 +343,13 @@ fn private_directory_permissions() -> Permissions {
 }
 
 #[cfg(unix)]
-fn private_file_permissions() -> Permissions {
+pub(super) fn private_file_permissions() -> Permissions {
     use std::os::unix::fs::PermissionsExt;
     Permissions::from_mode(0o600)
 }
 
 #[cfg(not(unix))]
-fn private_file_permissions() -> Permissions {
+pub(super) fn private_file_permissions() -> Permissions {
     let mut permissions = fs::metadata(std::env::temp_dir())
         .expect("the temporary directory has permissions")
         .permissions();
