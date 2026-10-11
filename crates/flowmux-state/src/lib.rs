@@ -906,6 +906,42 @@ mod tests {
     }
 
     #[test]
+    fn owned_save_and_deletion_preserve_other_owner_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let gui = WindowOwner::current();
+        let daemon = WindowOwner::current();
+        let mut gui_state = state_with_owned_workspace(gui, None, SurfaceId::new());
+        gui_state.workspaces[0].name = "GUI bytes 한글 🫒".into();
+        save_window_to(&path, gui, &gui_state).unwrap();
+        let before = load_from(&path).unwrap();
+        let workspace_bytes = serde_json::to_vec(&before.workspaces[0]).unwrap();
+        let window_bytes = serde_json::to_vec(&before.windows[0]).unwrap();
+        let daemon_state = state_with_owned_workspace(daemon, None, SurfaceId::new());
+        for snapshot in [daemon_state, State::default()] {
+            save_window_to(&path, daemon, &snapshot).unwrap();
+            let disk = load_from(&path).unwrap();
+            let workspace = disk
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == gui_state.workspaces[0].id)
+                .unwrap();
+            let window = disk
+                .windows
+                .iter()
+                .find(|window| window.instance_id == gui.instance_id)
+                .unwrap();
+            assert_eq!(serde_json::to_vec(workspace).unwrap(), workspace_bytes);
+            assert_eq!(serde_json::to_vec(window).unwrap(), window_bytes);
+            assert_eq!(disk.workspace_owners[&workspace.id], gui.instance_id);
+        }
+        let disk = load_from(&path).unwrap();
+        assert_eq!(disk.workspaces.len(), 1);
+        assert_eq!(disk.workspace_order, gui_state.workspace_order);
+        assert_eq!(disk.workspace_owners.len(), 1);
+    }
+
+    #[test]
     fn window_and_sidebar_position_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
