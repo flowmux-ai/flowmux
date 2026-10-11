@@ -273,6 +273,34 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .get(),
         Some(pid)
     );
+    // Without WKUIDelegate panels, WebKit silently cancels confirm() and prompt().
+    javascript(
+        &browser,
+        "window.dialogs = []; setTimeout(() => dialogs.push(alert('Notice'), confirm('Proceed?'), prompt('Name?', 'preset')), 0); 'scheduled'",
+    )
+    .await;
+    for message in ["Notice", "Proceed?", "Name?"] {
+        wait_until("page dialog shown", || {
+            controller.window.visible_dialog().is_some_and(|dialog| {
+                dialog
+                    .downcast::<adw::AlertDialog>()
+                    .is_ok_and(|alert| alert.body() == message)
+            })
+        })
+        .await;
+        let dialog = controller
+            .window
+            .visible_dialog()
+            .unwrap()
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        dialog.emit_by_name::<()>("response", &[&"ok"]);
+        dialog.close();
+    }
+    assert_eq!(
+        javascript(&browser, "JSON.stringify(dialogs)").await,
+        "[null,true,\"preset\"]"
+    );
     println!("MACOS_NATIVE_BROWSER_OK");
 
     let file = root.join("unsaved.txt");

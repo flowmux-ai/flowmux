@@ -10,7 +10,7 @@ use flowmux_config::options::BrowserEngine;
 use flowmux_core::{PaneId, SurfaceId};
 use gtk::glib::{self, translate::ToGlibPtr};
 use objc2::rc::{autoreleasepool, Retained};
-use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
+use objc2::runtime::{AnyObject, Bool, NSObject, ProtocolObject};
 use objc2::{
     define_class, msg_send, AnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
     Message,
@@ -142,6 +142,74 @@ define_class!(
                 media_capture_name(capture_type),
                 site,
                 decision_handler.copy(),
+            );
+        }
+
+        // Without these panels WebKit silently cancels alert/confirm/prompt.
+        #[unsafe(method(webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:))]
+        #[allow(non_snake_case)]
+        fn webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler(
+            &self,
+            _web_view: &WKWebView,
+            message: &NSString,
+            frame: &WKFrameInfo,
+            completion_handler: &block2::DynBlock<dyn Fn()>,
+        ) {
+            let handler = completion_handler.copy();
+            present_page_dialog(
+                self.ivars(),
+                frame,
+                message,
+                PageDialog::Alert,
+                PageDialogReply(Some(Box::new(move |_| handler.call(())))),
+            );
+        }
+
+        #[unsafe(method(webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:))]
+        #[allow(non_snake_case)]
+        fn webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler(
+            &self,
+            _web_view: &WKWebView,
+            message: &NSString,
+            frame: &WKFrameInfo,
+            completion_handler: &block2::DynBlock<dyn Fn(Bool)>,
+        ) {
+            let handler = completion_handler.copy();
+            present_page_dialog(
+                self.ivars(),
+                frame,
+                message,
+                PageDialog::Confirm,
+                PageDialogReply(Some(Box::new(move |reply| {
+                    handler.call((Bool::new(reply.is_some()),))
+                }))),
+            );
+        }
+
+        #[unsafe(method(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:))]
+        #[allow(non_snake_case)]
+        fn webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler(
+            &self,
+            _web_view: &WKWebView,
+            prompt: &NSString,
+            default_text: Option<&NSString>,
+            frame: &WKFrameInfo,
+            completion_handler: &block2::DynBlock<dyn Fn(*mut NSString)>,
+        ) {
+            let handler = completion_handler.copy();
+            let default_text = default_text.map(NSString::to_string).unwrap_or_default();
+            present_page_dialog(
+                self.ivars(),
+                frame,
+                prompt,
+                PageDialog::Prompt(default_text),
+                PageDialogReply(Some(Box::new(move |reply| match reply {
+                    Some(text) => {
+                        let text = NSString::from_str(&text);
+                        handler.call((Retained::as_ptr(&text).cast_mut(),));
+                    }
+                    None => handler.call((std::ptr::null_mut(),)),
+                }))),
             );
         }
     }
@@ -1004,6 +1072,91 @@ fn present_web_permission_dialog(
         }
     });
     dialog.present(Some(parent));
+}
+
+enum PageDialog {
+    Alert,
+    Confirm,
+    Prompt(String),
+}
+
+/// One-shot answer to a page dialog: `Some` for OK (with prompt text), `None`
+/// for cancel. WebKit raises an exception when a panel completion handler is
+/// released uncalled, so dropping an unanswered reply cancels the dialog.
+struct PageDialogReply(Option<Box<dyn FnOnce(Option<String>)>>);
+
+impl PageDialogReply {
+    fn send(&mut self, reply: Option<String>) {
+        if let Some(send) = self.0.take() {
+            send(reply);
+        }
+    }
+}
+
+impl Drop for PageDialogReply {
+    fn drop(&mut self) {
+        self.send(None);
+    }
+}
+
+fn present_page_dialog(
+    ivars: &BrowserUIDelegateIvars,
+    frame: &WKFrameInfo,
+    message: &NSString,
+    kind: PageDialog,
+    reply: PageDialogReply,
+) {
+    let Some(parent) = ivars
+        .placeholder
+        .upgrade()
+        .and_then(|widget| widget.root())
+        .and_then(|root| root.downcast::<gtk::Window>().ok())
+    else {
+        return;
+    };
+    let site = unsafe { frame.securityOrigin().host().to_string() };
+    let heading = if site.is_empty() {
+        "This page says".to_string()
+    } else {
+        format!("{site} says")
+    };
+    let dialog = adw::AlertDialog::new(Some(&heading), Some(&message.to_string()));
+    if !matches!(kind, PageDialog::Alert) {
+        dialog.add_response("cancel", "Cancel");
+    }
+    dialog.add_response("ok", "OK");
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response(if matches!(kind, PageDialog::Alert) {
+        "ok"
+    } else {
+        "cancel"
+    });
+    let entry = match kind {
+        PageDialog::Prompt(default_text) => {
+            let entry = gtk::Entry::builder()
+                .text(default_text)
+                .activates_default(true)
+                .build();
+            dialog.set_extra_child(Some(&entry));
+            Some(entry)
+        }
+        _ => None,
+    };
+
+    let native_browser_suspend = suspend_native_browser_views_for_window(&parent);
+    let pending = Rc::new(RefCell::new(Some((reply, native_browser_suspend))));
+    dialog.connect_response(None, move |_dialog, response| {
+        if let Some((mut reply, native_browser_suspend)) = pending.borrow_mut().take() {
+            reply.send((response == "ok").then(|| {
+                entry
+                    .as_ref()
+                    .map(|entry| entry.text().to_string())
+                    .unwrap_or_default()
+            }));
+            drop(native_browser_suspend);
+        }
+    });
+    dialog.present(Some(&parent));
 }
 
 fn website_data_store(
