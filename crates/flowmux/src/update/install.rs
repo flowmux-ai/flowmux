@@ -308,7 +308,7 @@ async fn run_install_inner(
             });
     }
 
-    run_source_install(version, tx, &mut log).await
+    run_source_install(version, tx, &mut log, clone_dir().context("HOME is unset")?).await
 }
 
 async fn run_release_tarball(
@@ -608,8 +608,8 @@ async fn run_source_install(
     version: Version,
     tx: &async_channel::Sender<Event>,
     log: &mut std::fs::File,
+    dir: PathBuf,
 ) -> anyhow::Result<()> {
-    let dir = clone_dir().context("HOME is unset")?;
     let script = check::install_script(std::env::consts::OS);
     let manual_installer = dir.join(script);
     if let Some(parent) = dir.parent() {
@@ -641,15 +641,16 @@ async fn run_source_install(
     let fetching = Progress::new(Stage::Fetching, tx);
     let tag = version.tag();
     let clone_exists = dir.join(".git").is_dir();
-    if run_plan(
+    if let Err(error) = run_plan(
         check::git_plan(clone_exists, REPO_URL, &dir, &tag),
         &*log,
         fetching.clone(),
     )
     .await
-    .is_err()
-        && clone_exists
     {
+        if !clone_exists {
+            return Err(error);
+        }
         // A stale or corrupt managed clone must not block the update:
         // wipe it and retry once from a fresh shallow clone.
         std::fs::remove_dir_all(&dir).context("reset managed clone")?;
@@ -816,6 +817,127 @@ mod tests {
     use std::process::Command;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn source_install_requires_successful_checkout() {
+        const CASE: &str = "FLOWMUX_SOURCE_INSTALL_TEST_CASE";
+        let Ok(case) = std::env::var(CASE) else {
+            let tools = tempfile::tempdir().unwrap();
+            let git = tools.path().join("git");
+            std::fs::write(
+                &git,
+                r##"#!/bin/sh
+printf '%s\n' "$*" >> "$FLOWMUX_SOURCE_INSTALL_TEST_ROOT/git-calls"
+case "$FLOWMUX_SOURCE_INSTALL_TEST_CASE:$1" in
+    fresh-success:clone|retry-success:clone)
+        for destination do :; done
+        mkdir -p "$destination/scripts" "$destination/.git"
+        printf 'printf new > installed\n' > "$destination/install.sh"
+        cp "$destination/install.sh" "$destination/scripts/install-macos.sh"
+        exit 0 ;;
+esac
+echo 'injected git failure' >&2
+exit 17
+"##,
+            )
+            .unwrap();
+            std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let mut paths = vec![tools.path().to_path_buf()];
+            paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+            // Include the standard GUI tool paths so prerequisite lookup keeps
+            // the fixture first instead of prepending the host's package tools.
+            if let Some(home) = std::env::var_os("HOME") {
+                paths.push(std::path::PathBuf::from(home).join(".cargo/bin"));
+            }
+            paths.extend(
+                [
+                    "/opt/homebrew/bin",
+                    "/opt/homebrew/sbin",
+                    "/usr/local/bin",
+                    "/usr/local/sbin",
+                ]
+                .map(Into::into),
+            );
+            for tool in ["cargo", "rustc", "pkg-config"] {
+                let path = tools.path().join(tool);
+                std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            for case in [
+                "stale-failure",
+                "empty-failure",
+                "retry-failure",
+                "fresh-success",
+                "retry-success",
+            ] {
+                let root = tempfile::tempdir().unwrap();
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "update::install::tests::source_install_requires_successful_checkout",
+                        "--nocapture",
+                    ])
+                    .env(CASE, case)
+                    .env("FLOWMUX_SOURCE_INSTALL_TEST_ROOT", root.path())
+                    .env("PATH", std::env::join_paths(&paths).unwrap())
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{case}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                println!("SOURCE_INSTALL_CHECKOUT_OK {case}");
+            }
+            return;
+        };
+        let root =
+            std::path::PathBuf::from(std::env::var_os("FLOWMUX_SOURCE_INSTALL_TEST_ROOT").unwrap());
+        let dir = root.join("src");
+        if case.starts_with("stale") || case.starts_with("retry") {
+            let script = dir.join(super::check::install_script(std::env::consts::OS));
+            std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+            std::fs::write(script, "printf old > installed\n").unwrap();
+        }
+        if case.starts_with("retry") {
+            std::fs::create_dir_all(dir.join(".git")).unwrap();
+        }
+        let mut log = std::fs::File::create(root.join("update.log")).unwrap();
+        let (tx, rx) = async_channel::unbounded();
+        let outcome = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::run_source_install(
+                super::Version::parse("1.2.3").unwrap(),
+                &tx,
+                &mut log,
+                dir.clone(),
+            ));
+        let success = case.ends_with("success");
+        assert_eq!(outcome.is_ok(), success, "{outcome:?}");
+        let mut installing = false;
+        while let Ok(event) = rx.try_recv() {
+            installing |= matches!(event, crate::update::Event::Progress(Stage::Installing, _));
+        }
+        assert_eq!(installing, success);
+        if success {
+            assert_eq!(
+                std::fs::read_to_string(dir.join("installed")).unwrap(),
+                "new"
+            );
+        } else {
+            assert!(
+                !dir.join("installed").exists(),
+                "stale installer ran after git failed"
+            );
+            assert!(format!("{:#}", outcome.unwrap_err()).contains("17"));
+        }
+        let calls = std::fs::read_to_string(root.join("git-calls")).unwrap();
+        assert_eq!(
+            calls.lines().count(),
+            if case.starts_with("retry") { 2 } else { 1 }
+        );
+    }
 
     #[test]
     fn missing_prerequisite_message_names_tools_and_packages() {
