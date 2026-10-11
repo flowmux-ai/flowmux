@@ -148,7 +148,6 @@ struct EditorNavigationDelegateIvars {
     allowed_prefix: String,
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
-    workspace_root: PathBuf,
     appearance: Rc<RefCell<EditorAppearance>>,
 }
 
@@ -300,7 +299,6 @@ impl EditorPane {
             bridge.clone(),
             host.clone(),
             &allowed_prefix,
-            workspace_root.clone(),
             appearance.clone(),
             pane_id.clone(),
             on_focus_direction.clone(),
@@ -659,7 +657,6 @@ fn create_native_editor_view(
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
     allowed_prefix: &str,
-    workspace_root: PathBuf,
     appearance: Rc<RefCell<EditorAppearance>>,
     pane_id: Rc<Cell<PaneId>>,
     on_focus_direction: EditorFocusDirectionCallback,
@@ -701,7 +698,6 @@ fn create_native_editor_view(
             allowed_prefix: allowed_prefix.to_string(),
             bridge,
             host,
-            workspace_root,
             appearance,
         });
     let navigation_delegate: Retained<EditorNavigationDelegate> =

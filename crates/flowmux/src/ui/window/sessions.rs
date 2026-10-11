@@ -98,6 +98,7 @@ fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
         .min()
         .ok_or("The agent is no longer running in this tab")?;
     let mut environment = std::collections::BTreeMap::new();
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut arguments = Vec::new();
     #[cfg(target_os = "linux")]
     {

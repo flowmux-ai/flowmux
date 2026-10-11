@@ -2665,6 +2665,13 @@ async fn current_agent_source_reads_terminal_ownership_before_presence_exists() 
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
     std::fs::copy("/bin/sleep", &executable).unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(std::process::Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(&executable)
+        .status()
+        .unwrap()
+        .success());
     let mut child = std::process::Command::new(&executable)
         .arg("10")
         .spawn()
@@ -2716,6 +2723,13 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("codex");
     std::fs::copy("/bin/sleep", &executable).unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(std::process::Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(&executable)
+        .status()
+        .unwrap()
+        .success());
     let mut terminal = std::process::Command::new("/bin/sh")
         .args(["-c", "\"$1\" 10 & echo $!; wait", "fixture"])
         .arg(executable)

@@ -5,6 +5,8 @@
 //! tokio runtime, and wires GTK-affecting verbs to the GTK main loop
 //! through an [`async_channel`] bridge.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
+// macOS GTK tests and their helpers run in the separate main-thread harness.
+#![cfg_attr(all(test, target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod activity;
 mod bridge;

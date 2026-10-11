@@ -818,7 +818,6 @@ fn theme_widget<T: IsA<gtk::Widget> + glib::object::IsClass>(root: &gtk::Widget,
     find(root, name)
         .expect("theme widget exists")
         .downcast::<T>()
-        .ok()
         .expect("theme widget type")
 }
 

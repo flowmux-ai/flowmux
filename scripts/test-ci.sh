@@ -66,6 +66,7 @@ export GSK_RENDERER=cairo
 printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
 cargo build --workspace --locked
+cargo test -p flowmux-cli --locked
 git rev-parse HEAD
 python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CARGO_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"

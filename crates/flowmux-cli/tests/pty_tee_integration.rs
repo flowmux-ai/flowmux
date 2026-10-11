@@ -584,20 +584,27 @@ fn pty_tee_keeps_input_and_resize_live_under_output_backpressure() {
     let outer = nix::pty::openpty(None, None).unwrap();
     let mut master = std::fs::File::from(outer.master);
     let script = r#"
-import os, signal, sys, threading, tty
+import os, select, signal, sys, tty
 tty.setraw(0)
+os.set_blocking(1, False)
 events = open(sys.argv[1], 'w', buffering=1)
-signal.signal(signal.SIGWINCH, lambda *args: events.write('resize\n'))
-def flood():
-    for _ in range(128):
-        os.write(1, b'x' * 8192)
-writer = threading.Thread(target=flood)
-writer.start()
+resizes = []
+signal.signal(signal.SIGWINCH, lambda *args: resizes.append(True))
+output = b'x' * (128 * 8192)
+input_received = False
 events.write(str(os.getpid()) + '\n')
-assert os.read(0, 1) == b'q'
-events.write('input\n')
-# Keep Python's main thread able to run signal handlers during backpressure.
-while writer.is_alive(): writer.join(.01)
+while output or not input_received:
+    readable, writable, _ = select.select([] if input_received else [0], [1] if output else [], [], .01)
+    if readable:
+        assert os.read(0, 1) == b'q'
+        input_received = True
+        events.write('input\n')
+    if resizes:
+        events.write('resize\n')
+        resizes.clear()
+    if writable:
+        try: output = output[os.write(1, output[:8192]):]
+        except BlockingIOError: pass
 sys.exit(17)
 "#;
     let child = Command::new(flowmuxctl_path())
