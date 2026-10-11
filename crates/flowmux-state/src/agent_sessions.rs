@@ -141,7 +141,7 @@ impl AgentSessionStore {
         serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    fn write_atomic(path: &Path, payload: &[u8]) -> io::Result<()> {
+    fn write_temp(path: &Path, payload: &[u8]) -> io::Result<PathBuf> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -151,10 +151,16 @@ impl AgentSessionStore {
             f.write_all(payload)?;
             f.sync_all()?;
         }
-        std::fs::rename(&tmp, path)
+        Ok(tmp)
+    }
+
+    fn write_atomic(path: &Path, payload: &[u8]) -> io::Result<()> {
+        std::fs::rename(Self::write_temp(path, payload)?, path)
     }
 
     /// Record (or overwrite) the session id for `(agent, surface)`.
+    /// Prepare all files first and roll back published files on a rename error.
+    /// shortcut: not crash-atomic across files; use one storage unit if that is required.
     pub fn record(&self, agent: &str, surface: SurfaceId, session_id: &str) -> io::Result<()> {
         let agent = Self::normalize_agent(agent).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "unsupported resumable agent")
@@ -166,18 +172,71 @@ impl AgentSessionStore {
             ));
         }
         self.with_exclusive_lock(|| {
-            // A tab can run different agents over its lifetime. Keep exactly
-            // one binding so restore never starts two agents in the same shell.
-            for other in RESUMABLE_AGENTS {
-                if other != agent {
-                    self.forget_unlocked(other, surface)?;
+            let mut updates = Vec::new();
+            for candidate in std::iter::once(agent)
+                .chain(RESUMABLE_AGENTS.into_iter().filter(|other| *other != agent))
+            {
+                let mut map = self.load(candidate)?;
+                if candidate == agent {
+                    map.insert(surface.to_string(), session_id.to_string());
+                } else if map.remove(&surface.to_string()).is_none() {
+                    continue;
                 }
+                let path = self.agent_path(candidate);
+                let before = match std::fs::read(&path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(error),
+                };
+                let bytes = serde_json::to_vec_pretty(&map)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                updates.push((path, before, bytes));
             }
-            let mut map = self.load(agent)?;
-            map.insert(surface.to_string(), session_id.to_string());
-            let bytes = serde_json::to_vec_pretty(&map)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            Self::write_atomic(&self.agent_path(agent), &bytes)
+
+            // Prepare every file before publishing; a failed cleanup must not
+            // discard the old binding or leave a successful replacement ambiguous.
+            let mut staged = Vec::new();
+            let result = (|| {
+                for (path, _, bytes) in &updates {
+                    staged.push(Self::write_temp(path, bytes)?);
+                }
+                for (index, ((path, _, _), tmp)) in updates.iter().zip(&staged).enumerate() {
+                    #[cfg(test)]
+                    tests::BEFORE_RECORD_RENAME.with(|hook| {
+                        if let Some(hook) = hook.borrow_mut().as_mut() {
+                            hook(index);
+                        }
+                    });
+                    if let Err(error) = std::fs::rename(tmp, path) {
+                        let mut rollback_errors = Vec::new();
+                        for (path, before, _) in updates[..index].iter().rev() {
+                            let restored = match before {
+                                Some(bytes) => Self::write_atomic(path, bytes),
+                                None => std::fs::remove_file(path),
+                            };
+                            if let Err(rollback) = restored {
+                                rollback_errors.push(format!("{}: {rollback}", path.display()));
+                            }
+                        }
+                        return if rollback_errors.is_empty() {
+                            Err(error)
+                        } else {
+                            Err(io::Error::new(
+                                error.kind(),
+                                format!(
+                                    "{error}; session rollback failed: {}",
+                                    rollback_errors.join("; ")
+                                ),
+                            ))
+                        };
+                    }
+                }
+                Ok(())
+            })();
+            for tmp in staged {
+                let _ = std::fs::remove_file(tmp);
+            }
+            result
         })
     }
 
@@ -272,6 +331,12 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
+    // Inject real filesystem failures between renames without timing races.
+    type RecordRenameHook = Box<dyn FnMut(usize)>;
+    thread_local! {
+        pub(super) static BEFORE_RECORD_RENAME: std::cell::RefCell<Option<RecordRenameHook>> = const { std::cell::RefCell::new(None) };
+    }
+
     fn store() -> (AgentSessionStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let s = AgentSessionStore::new(dir.path().to_path_buf());
@@ -363,10 +428,19 @@ mod tests {
     fn recording_new_agent_replaces_prior_surface_binding() {
         let (s, _td) = store();
         let surface = SurfaceId::new();
+        let kept_claude = SurfaceId::new();
+        let kept_codex = SurfaceId::new();
+        s.record("claude", kept_claude, "keep-claude").unwrap();
+        s.record("codex", kept_codex, "keep-codex").unwrap();
         s.record("claude", surface, "claude-session").unwrap();
         s.record("codex", surface, "codex-session").unwrap();
 
         assert_eq!(s.lookup("claude", surface), None);
+        assert_eq!(
+            s.lookup("claude", kept_claude).as_deref(),
+            Some("keep-claude")
+        );
+        assert_eq!(s.lookup("codex", kept_codex).as_deref(), Some("keep-codex"));
         assert_eq!(
             s.lookup_surface(surface),
             Some(SavedAgentSession {
@@ -374,6 +448,196 @@ mod tests {
                 session_id: "codex-session".into(),
             })
         );
+    }
+
+    #[test]
+    fn failed_replacement_preserves_prior_binding_and_other_surfaces() {
+        for failure in [
+            "new_temp",
+            "new_payload",
+            "new_sync",
+            "cleanup_payload",
+            "cleanup_temp",
+        ] {
+            let (s, _td) = store();
+            let replaced = SurfaceId::new();
+            let kept_claude = SurfaceId::new();
+            let kept_codex = SurfaceId::new();
+            s.record("claude", replaced, "old-session").unwrap();
+            s.record("claude", kept_claude, "keep-claude").unwrap();
+            s.record("codex", kept_codex, "keep-codex").unwrap();
+            let before = std::fs::read(s.agent_path("claude")).unwrap();
+            let codex_before = std::fs::read(s.agent_path("codex")).unwrap();
+            let obstruction = match failure {
+                "new_payload" => s.agent_path("codex"),
+                "new_temp" | "new_sync" => s
+                    .agent_path("codex")
+                    .with_extension(format!("tmp.{}", std::process::id())),
+                "cleanup_payload" => s.agent_path("opencode"),
+                "cleanup_temp" => s
+                    .agent_path("claude")
+                    .with_extension(format!("tmp.{}", std::process::id())),
+                _ => unreachable!(),
+            };
+            if failure.ends_with("payload") {
+                std::fs::write(&obstruction, b"invalid JSON").unwrap();
+            } else if failure == "new_sync" {
+                std::os::unix::fs::symlink("/dev/null", &obstruction).unwrap();
+            } else {
+                std::fs::create_dir(&obstruction).unwrap();
+            }
+            assert!(
+                s.record("codex", replaced, "new-session").is_err(),
+                "{failure}"
+            );
+            assert_eq!(
+                std::fs::read(s.agent_path("claude")).unwrap(),
+                before,
+                "{failure}"
+            );
+            assert_eq!(
+                s.lookup("claude", replaced).as_deref(),
+                Some("old-session"),
+                "{failure}"
+            );
+            if failure != "new_payload" {
+                assert_eq!(
+                    std::fs::read(s.agent_path("codex")).unwrap(),
+                    codex_before,
+                    "{failure}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn failed_cleanup_rename_rolls_back_published_files() {
+        for existing_target in [false, true] {
+            let (s, _td) = store();
+            let surface = SurfaceId::new();
+            let kept = SurfaceId::new();
+            s.record("claude", surface, "old-session").unwrap();
+            if existing_target {
+                s.record("codex", kept, "other-surface").unwrap();
+            }
+            let before = std::fs::read(s.agent_path("claude")).unwrap();
+            let target_before = std::fs::read(s.agent_path("codex")).ok();
+            let cleanup = s
+                .agent_path("claude")
+                .with_extension(format!("tmp.{}", std::process::id()));
+            BEFORE_RECORD_RENAME.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move |index| {
+                    if index == 1 {
+                        std::fs::remove_file(&cleanup).unwrap();
+                    }
+                }));
+            });
+            let result = s.record("codex", surface, "new-session");
+            BEFORE_RECORD_RENAME.with(|hook| hook.borrow_mut().take());
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::NotFound);
+            assert_eq!(std::fs::read(s.agent_path("claude")).unwrap(), before);
+            assert_eq!(std::fs::read(s.agent_path("codex")).ok(), target_before);
+            assert_eq!(
+                s.take_surface(surface).unwrap().unwrap().session_id,
+                "old-session"
+            );
+            assert!(s.take_surface(surface).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn failed_cleanup_restores_earlier_cleanup_of_duplicate_bindings() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        s.record("claude", surface, "old-session").unwrap();
+        let before = std::fs::read(s.agent_path("claude")).unwrap();
+        // Older/interrupted writers can leave the same surface in two files.
+        std::fs::write(s.agent_path("codex"), &before).unwrap();
+        let cleanup = s
+            .agent_path("codex")
+            .with_extension(format!("tmp.{}", std::process::id()));
+        BEFORE_RECORD_RENAME.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |index| {
+                if index == 2 {
+                    std::fs::remove_file(&cleanup).unwrap();
+                }
+            }));
+        });
+        let result = s.record("opencode", surface, "new-session");
+        BEFORE_RECORD_RENAME.with(|hook| hook.borrow_mut().take());
+        assert!(result.is_err());
+        for agent in ["claude", "codex"] {
+            assert_eq!(std::fs::read(s.agent_path(agent)).unwrap(), before);
+        }
+        assert!(!s.agent_path("opencode").exists());
+        s.record("opencode", surface, "new-session").unwrap();
+        assert!(s.lookup("claude", surface).is_none());
+        assert!(s.lookup("codex", surface).is_none());
+        assert_eq!(
+            s.take_surface(surface).unwrap().unwrap().session_id,
+            "new-session"
+        );
+        assert!(s.take_surface(surface).unwrap().is_none());
+    }
+
+    #[test]
+    fn cleanup_and_rollback_failure_is_reported_and_can_be_retried() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        s.record("claude", surface, "old-session").unwrap();
+        let before = std::fs::read(s.agent_path("claude")).unwrap();
+        // An existing target forces rollback to restore bytes rather than unlink.
+        std::fs::write(s.agent_path("codex"), b"{}").unwrap();
+        let cleanup = s
+            .agent_path("claude")
+            .with_extension(format!("tmp.{}", std::process::id()));
+        let rollback = s
+            .agent_path("codex")
+            .with_extension(format!("tmp.{}", std::process::id()));
+        let obstruction = rollback.clone();
+        BEFORE_RECORD_RENAME.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |index| {
+                if index == 1 {
+                    std::fs::remove_file(&cleanup).unwrap();
+                    std::fs::create_dir(&obstruction).unwrap();
+                }
+            }));
+        });
+        let result = s.record("codex", surface, "new-session");
+        BEFORE_RECORD_RENAME.with(|hook| hook.borrow_mut().take());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("session rollback failed"));
+        assert_eq!(std::fs::read(s.agent_path("claude")).unwrap(), before);
+        std::fs::remove_dir(rollback).unwrap();
+        s.record("codex", surface, "new-session").unwrap();
+        assert!(s.lookup("claude", surface).is_none());
+        assert_eq!(
+            s.take_surface(surface).unwrap().unwrap().session_id,
+            "new-session"
+        );
+        assert!(s.take_surface(surface).unwrap().is_none());
+    }
+
+    #[test]
+    fn failed_take_surface_keeps_binding_for_retry() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        s.record("claude", surface, "resume-once").unwrap();
+        let before = std::fs::read(s.agent_path("claude")).unwrap();
+        let tmp = s
+            .agent_path("claude")
+            .with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(s.take_surface(surface).is_err());
+        assert_eq!(std::fs::read(s.agent_path("claude")).unwrap(), before);
+        std::fs::remove_dir(tmp).unwrap();
+        assert_eq!(
+            s.take_surface(surface).unwrap().unwrap().session_id,
+            "resume-once"
+        );
+        assert!(s.take_surface(surface).unwrap().is_none());
     }
 
     #[test]
@@ -394,6 +658,37 @@ mod tests {
         assert_eq!(s.lookup_surface(resumed), None);
         assert_eq!(s.lookup("codex", kept), Some("keep-me".into()));
         assert_eq!(s.take_surface(resumed).unwrap(), None);
+    }
+
+    #[test]
+    fn concurrent_agent_replacements_leave_one_consumable_binding() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        let threads: Vec<_> = (0..16)
+            .map(|index| {
+                let s = s.clone();
+                std::thread::spawn(move || {
+                    s.record(
+                        RESUMABLE_AGENTS[index % RESUMABLE_AGENTS.len()],
+                        surface,
+                        &format!("session-{index}"),
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            RESUMABLE_AGENTS
+                .into_iter()
+                .filter(|agent| s.lookup(agent, surface).is_some())
+                .count(),
+            1
+        );
+        assert!(s.take_surface(surface).unwrap().is_some());
+        assert!(s.take_surface(surface).unwrap().is_none());
     }
 
     #[test]

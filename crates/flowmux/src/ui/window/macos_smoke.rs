@@ -5,6 +5,8 @@ use crate::ui::browser_pane::BrowserPane;
 use flowmux_state::{State, WindowOwner};
 use std::io::{BufRead, Read, Write};
 
+mod agent_sessions;
+
 pub(crate) fn run() {
     let isolated = tempfile::Builder::new()
         .prefix("fm-native-")
@@ -106,6 +108,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_AGENT_SESSION_IO_SMOKE_ONLY").is_some() {
+        let surface = ws.surfaces[0]
+            .root_pane
+            .active_surface_id(terminal_pane)
+            .unwrap();
+        agent_sessions::check(&store, &bridge, surface).await;
+        controller.window.destroy();
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_TERMINAL_TEAROFF_SMOKE_ONLY").is_some() {
         controller.check_terminal_tearoff(root).await;
