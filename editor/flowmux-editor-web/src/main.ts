@@ -501,7 +501,7 @@ function handleHostMessage(message: HostMessage): void {
       break;
     case "save_completed": {
       const document = documents.get(message.documentId);
-      if (document !== undefined && document.changeSequence === message.changeSequence) {
+      if (document !== undefined && document.changeSequence === message.changeSequence && !document.pendingChanges) {
         document.payload.version = message.documentVersion;
         document.payload.dirty = false;
         document.payload.externalChange = false;
@@ -548,7 +548,7 @@ function handleHostMessage(message: HostMessage): void {
     case "save_as_completed": {
       const document = documents.get(message.document.id);
       if (document !== undefined) {
-        if (document.changeSequence === message.changeSequence) {
+        if (document.changeSequence === message.changeSequence && !document.pendingChanges) {
           addOrReplaceDocument(message.document);
         } else {
           document.payload = {

@@ -40,6 +40,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const MESSAGE_HANDLER_NAME: &str = "flowmuxEditor";
+#[cfg(all(test, feature = "native-smoke"))]
+#[path = "editor_pane_macos/save_ack_smoke.rs"]
+mod save_ack_smoke;
 type EditorFocusCallback = Rc<RefCell<Option<Box<dyn FnMut(PaneId)>>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -541,6 +544,11 @@ impl EditorPane {
             self.send(message).map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_save_ack(&self, root: &Path) {
+        save_ack_smoke::check(self, root).await;
     }
 
     #[cfg(all(test, feature = "native-smoke"))]

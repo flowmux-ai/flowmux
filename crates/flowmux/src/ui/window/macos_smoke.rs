@@ -103,6 +103,21 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_EDITOR_ACK_SMOKE_ONLY").is_some() {
+        let (_, surface) = store
+            .add_editor_surface_to_pane(terminal_pane, root.into())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, terminal_pane, surface, None)
+            .await
+            .unwrap();
+        let editor = controller.pane_registry.borrow().editors[&surface].clone();
+        editor.check_save_ack(root).await;
+        controller.window.destroy();
+        return;
+    }
+
     if let Some(volume) = std::env::var_os("FLOWMUX_FILE_MOVE_SMOKE_VOLUME") {
         crate::ui::file_browser::macos_smoke::check(
             &controller.window,
