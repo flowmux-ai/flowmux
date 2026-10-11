@@ -3793,7 +3793,7 @@ fn poll_browser_wait(
     });
 }
 
-fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
+pub(crate) fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
     let literal = |value: &str| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into());
     match condition {
         BrowserWaitCondition::Selector(selector) => {
@@ -3813,11 +3813,19 @@ fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
             r#"
 (() => {{
   const source = {};
+  // Only a syntax error selects the function-body form. A predicate that
+  // throws while the page is not ready yet means "not yet", not failure.
+  let predicate;
   try {{
-    const value = Function("return (" + source + ")")();
+    predicate = Function("return (" + source + ")");
+  }} catch (_) {{
+    predicate = Function(source);
+  }}
+  try {{
+    const value = predicate();
     return Boolean(typeof value === "function" ? value() : value);
   }} catch (_) {{
-    return Boolean(Function(source)());
+    return false;
   }}
 }})()
 "#,

@@ -16,9 +16,9 @@
 /// }
 /// ```
 ///
-/// `selector` is a CSS path (`#id` when present, otherwise
-/// `tag:nth-of-type(n)` chains up to 6 ancestors deep). The page is
-/// never modified.
+/// `selector` is a CSS path that matches only its element: `tag:nth-of-type(n)`
+/// steps, anchored at the nearest unique `#id` or as far up as needed. The page
+/// is never modified.
 pub const SNAPSHOT_JS: &str = r#"
 (function() {
   const INTERACTIVE_ROLES = new Set([
@@ -70,18 +70,17 @@ pub const SNAPSHOT_JS: &str = r#"
     );
   }
 
-  // Build a stable CSS selector for `el`. Prefer `#id` when the id is
-  // unique; otherwise walk up to 6 ancestors using
-  // `tag:nth-of-type(n)`. Bounded depth keeps the selector short and
-  // resilient to small DOM changes higher up the tree.
+  // Build a CSS selector that matches only `el`. Prefer `#id` when the id is
+  // unique; otherwise prepend `tag:nth-of-type(n)` steps until the path
+  // matches one element. Stopping early keeps the selector short; repeated
+  // markup without ids may need a path anchored at <html>.
   function cssPath(el) {
     if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) {
       return '#' + CSS.escape(el.id);
     }
     const parts = [];
     let node = el;
-    let depth = 0;
-    while (node && node.nodeType === 1 && depth < 6) {
+    while (node && node.nodeType === 1) {
       let tag = node.tagName.toLowerCase();
       if (node.id && document.querySelectorAll('#' + CSS.escape(node.id)).length === 1) {
         parts.unshift('#' + CSS.escape(node.id));
@@ -94,8 +93,10 @@ pub const SNAPSHOT_JS: &str = r#"
         sib = sib.previousElementSibling;
       }
       parts.unshift(tag + ':nth-of-type(' + nth + ')');
+      if (document.querySelectorAll(parts.join(' > ')).length === 1) {
+        return parts.join(' > ');
+      }
       node = node.parentElement;
-      depth += 1;
     }
     return parts.join(' > ');
   }
@@ -250,19 +251,25 @@ pub fn attr_of_selector(selector: &str, name: &str) -> String {
 }
 
 /// Dispatch synthetic key events to the active element. Inputs and textareas
-/// append to their value and receive input/change events; native editing
-/// behavior such as selection replacement is not simulated.
+/// append to their value through the native setter, so framework value
+/// trackers see the change, and receive input/change events. Contenteditable
+/// elements insert at the caret. Selection replacement in inputs is not
+/// simulated.
 pub fn type_keys(text: &str) -> String {
     format!(
         r#"(function() {{
             const el = document.activeElement;
             if (!el) return "error: no focus";
             const text = "{t}";
+            const field = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
+            const setter = field && Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set;
             for (const ch of text) {{
                 el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
-                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
-                    el.value += ch;
+                if (field) {{
+                    setter.call(el, el.value + ch);
                     el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }} else if (el.isContentEditable) {{
+                    if (!document.execCommand('insertText', false, ch)) return "error: text insertion failed";
                 }}
                 el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
             }}
@@ -330,7 +337,8 @@ pub fn blur_by_selector(selector: &str) -> String {
     )
 }
 
-/// Set a checkbox / radio's `checked` to true and dispatch `change`.
+/// Click an unchecked checkbox / radio so the page sees click, input and
+/// change events, as frameworks that track clicks require.
 pub fn check_by_selector(selector: &str) -> String {
     format!(
         r#"(function() {{
@@ -338,8 +346,8 @@ pub fn check_by_selector(selector: &str) -> String {
             if (!el) return "error: not found";
             if (el.type !== 'checkbox' && el.type !== 'radio') return "error: not checkable";
             if (!el.checked) {{
-                el.checked = true;
-                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                el.click();
+                if (!el.checked) return "error: check was prevented";
             }}
             return "ok";
         }})()"#,
@@ -347,7 +355,7 @@ pub fn check_by_selector(selector: &str) -> String {
     )
 }
 
-/// Set a checkbox's `checked` to false and dispatch `change`.
+/// Click a checked checkbox so the page sees click, input and change events.
 /// Returns `"error: not a checkbox"` for radios and other element types.
 pub fn uncheck_by_selector(selector: &str) -> String {
     format!(
@@ -356,8 +364,8 @@ pub fn uncheck_by_selector(selector: &str) -> String {
             if (!el) return "error: not found";
             if (el.type !== 'checkbox') return "error: not a checkbox";
             if (el.checked) {{
-                el.checked = false;
-                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                el.click();
+                if (el.checked) return "error: uncheck was prevented";
             }}
             return "ok";
         }})()"#,

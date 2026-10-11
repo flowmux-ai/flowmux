@@ -123,6 +123,107 @@ async fn snapshot_resolves_real_elements_without_mutating_the_document() {
 }
 
 #[gtk::test]
+async fn snapshot_selectors_stay_unique_in_deeply_repeated_markup() {
+    // Identical subtrees deeper than any fixed ancestor limit, with no ids.
+    let nested = "<div><div><div><div><div><div><div><span><button>Go</button></span></div></div></div></div></div></div></div>";
+    let page = Page::new(&format!(
+        "<section>{nested}</section><section>{nested}</section>"
+    ))
+    .await;
+    let snapshot: DomSnapshot = serde_json::from_str(&page.eval(SNAPSHOT_JS).await).unwrap();
+    let selectors: Vec<_> = snapshot.refs.values().map(|r| r.selector.clone()).collect();
+    assert_eq!(selectors.len(), 2);
+    for selector in &selectors {
+        assert_eq!(
+            page.eval(&count_selector(selector)).await,
+            "1",
+            "{selector}"
+        );
+    }
+    page.eval("window.clicked = -1; document.addEventListener('click', e => clicked = [...document.querySelectorAll('button')].indexOf(e.target))").await;
+    page.ok(click_by_selector(&selectors[1])).await;
+    assert_eq!(page.eval("clicked").await, "1");
+}
+
+#[gtk::test]
+async fn wait_js_predicate_keeps_polling_while_it_throws() {
+    use crate::ui::window::browser_wait_js;
+    use flowmux_ipc::protocol::BrowserWaitCondition::Js;
+    let page = Page::new("<main></main>").await;
+    let expression = browser_wait_js(&Js(
+        "(window.calls = (window.calls || 0) + 1, document.querySelector('.late').textContent === 'ready')".into(),
+    ));
+    let body = browser_wait_js(&Js(
+        "const el = document.querySelector('.late'); return el.textContent === 'ready'".into(),
+    ));
+    // A missing element throws; the poll must report "not yet", not fail.
+    assert_eq!(page.eval(&expression).await, "false");
+    assert_eq!(
+        page.eval("calls").await,
+        "1",
+        "predicate must run once per poll"
+    );
+    assert_eq!(page.eval(&body).await, "false");
+    page.eval("document.querySelector('main').innerHTML = \"<p class='late'>ready</p>\"")
+        .await;
+    assert_eq!(page.eval(&expression).await, "true");
+    assert_eq!(page.eval(&body).await, "true");
+}
+
+#[gtk::test]
+async fn type_and_check_reach_framework_state_and_rich_text() {
+    let page = Page::new(
+        r#"
+        <input id='react'><div id='editor' contenteditable></div><input id='box' type='checkbox'>
+        <script>
+          // Mimic React's value tracker: an own `value` property records
+          // programmatic writes; an input event is a change only when the
+          // DOM value differs from the tracked one.
+          const field = document.getElementById('react');
+          const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          let tracked = '';
+          Object.defineProperty(field, 'value', {
+            configurable: true,
+            get() { return native.get.call(this); },
+            set(v) { tracked = String(v); native.set.call(this, v); },
+          });
+          window.changes = [];
+          field.addEventListener('input', () => {
+            const v = native.get.call(field);
+            if (v !== tracked) { tracked = v; changes.push(v); }
+          });
+          // React derives checkbox onChange from click events.
+          window.clicks = [];
+          document.getElementById('box').addEventListener('click', e => clicks.push(e.target.checked));
+        </script>
+    "#,
+    )
+    .await;
+    page.ok(focus_by_selector("#react")).await;
+    page.ok(type_keys("ab")).await;
+    assert_eq!(page.eval(&value_of_selector("#react")).await, "ab");
+    assert_eq!(page.eval("JSON.stringify(changes)").await, r#"["a","ab"]"#);
+
+    page.ok(focus_by_selector("#editor")).await;
+    page.ok(type_keys("가b")).await;
+    assert_eq!(page.eval(&text_of_selector("#editor")).await, "가b");
+
+    for _ in 0..2 {
+        page.ok(check_by_selector("#box")).await;
+    }
+    page.ok(uncheck_by_selector("#box")).await;
+    assert_eq!(page.eval("JSON.stringify(clicks)").await, "[true,false]");
+
+    page.eval("document.getElementById('box').addEventListener('click', e => e.preventDefault())")
+        .await;
+    assert_eq!(
+        page.eval(&check_by_selector("#box")).await,
+        "error: check was prevented"
+    );
+    assert_eq!(page.eval(&is_checked_selector("#box")).await, "false");
+}
+
+#[gtk::test]
 async fn form_actions_preserve_text_and_deliver_events_to_page_listeners() {
     let page = Page::new(r#"
         <textarea id='text'></textarea><input id='input'>
@@ -193,14 +294,14 @@ async fn form_actions_preserve_text_and_deliver_events_to_page_listeners() {
         );
         assert_eq!(
             page.events().await,
-            ["check:change"],
+            ["check:input", "check:change"],
             "repeat action must be idempotent"
         );
     }
     page.ok(check_by_selector("#radio2")).await;
     assert_eq!(page.eval(&is_checked_selector("#radio1")).await, "false");
     assert_eq!(page.eval(&is_checked_selector("#radio2")).await, "true");
-    assert_eq!(page.events().await, ["radio2:change"]);
+    assert_eq!(page.events().await, ["radio2:input", "radio2:change"]);
     assert_eq!(
         page.eval(&uncheck_by_selector("#radio2")).await,
         "error: not a checkbox"
