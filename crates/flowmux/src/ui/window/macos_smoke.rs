@@ -103,6 +103,17 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if let Some(volume) = std::env::var_os("FLOWMUX_FILE_MOVE_SMOKE_VOLUME") {
+        crate::ui::file_browser::macos_smoke::check(
+            &controller.window,
+            root,
+            std::path::Path::new(&volume),
+        )
+        .await;
+        controller.window.destroy();
+        return;
+    }
+
     if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
         controller.options.borrow_mut().system_notifications_enabled = false;
         let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());

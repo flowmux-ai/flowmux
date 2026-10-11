@@ -24,6 +24,9 @@ type OpenFileHandler = Rc<RefCell<Box<dyn Fn(PathBuf)>>>;
 type KeyboardInputGuard = Rc<RefCell<Box<dyn Fn() -> bool>>>;
 const ROW_BATCH_SIZE: usize = 500;
 
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) mod macos_smoke;
+
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn file_browser_accepts_keyboard_input(editor_has_native_focus: bool) -> bool {
     !editor_has_native_focus
@@ -2147,11 +2150,10 @@ fn execute_paste_with_control(
             }
         };
         let result = match clipboard.operation {
-            ClipboardOperation::Copy => copy_path_with_control(source, &destination, control),
+            ClipboardOperation::Copy => copy_path_for_paste(source, &destination, control),
             ClipboardOperation::Cut => move_path_with_control(source, &destination, control),
         };
         if let Err(operation_error) = result {
-            let _ = permanently_delete_path(&destination);
             cancelled = operation_error.kind() == io::ErrorKind::Interrupted;
             error = Some(operation_error);
             remaining.extend_from_slice(&clipboard.paths[index..]);
@@ -2333,6 +2335,16 @@ fn unique_destination(target_dir: &Path, source: &Path) -> io::Result<PathBuf> {
     unreachable!("unbounded suffix search must return before exhausting usize")
 }
 
+fn copy_path_for_paste(
+    source: &Path,
+    destination: &Path,
+    control: &FileOperationControl,
+) -> io::Result<()> {
+    copy_path_with_control(source, destination, control).inspect_err(|_| {
+        let _ = permanently_delete_path(destination);
+    })
+}
+
 fn copy_path_with_control(
     source: &Path,
     destination: &Path,
@@ -2394,7 +2406,8 @@ fn move_path_with_control(
             if !is_cross_device_error(&rename_err) {
                 return Err(rename_err);
             }
-            copy_path_with_control(source, destination, control)?;
+            // Once copied, retain the destination even if source cleanup fails or is cancelled.
+            copy_path_for_paste(source, destination, control)?;
             control.check_cancelled()?;
             let remove_result = permanently_delete_path_with_control(source, control);
             remove_result.map_err(|remove_err| {
@@ -3348,6 +3361,31 @@ mod tests {
         assert!(snapshot.entries_by_dir.contains_key(&tmp.path));
         assert_eq!(snapshot.entries_by_dir[&expanded_dir].len(), 0);
         assert_eq!(snapshot.warnings[&expanded_dir], "denied");
+    }
+
+    #[test]
+    fn failed_recursive_copy_removes_partial_destination_and_preserves_source() {
+        let tmp = tempfile::tempdir_in("/tmp").unwrap();
+        let source = tmp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        let file = source.join("keep.txt");
+        fs::write(&file, b"keep").unwrap();
+        let _socket = std::os::unix::net::UnixListener::bind(source.join("socket")).unwrap();
+        let target = tmp.path().join("target");
+        fs::create_dir(&target).unwrap();
+
+        let outcome = execute_paste(PasteRequest {
+            clipboard: FileClipboard {
+                operation: ClipboardOperation::Copy,
+                paths: vec![source.clone()],
+            },
+            target_dir: target.clone(),
+        });
+
+        assert!(outcome.error.is_some());
+        assert!(file.exists());
+        assert!(source.join("socket").exists());
+        assert!(!target.join("source").exists());
     }
 
     #[test]
