@@ -242,7 +242,7 @@ def transcript_report(path, manifest):
                     or (event.get("type") == "event_msg" and payload.get("type") == "user_message"))
             if user and marker in json.dumps(payload, ensure_ascii=False):
                 matched = True
-            elif user and matched and offset:
+            elif user and matched:
                 raise ValueError("Another user prompt interrupted the tracked turn")
             elif (matched and event.get("type") == "event_msg"
                   and payload.get("type") in ("error", "task_complete")):
@@ -265,7 +265,7 @@ def transcript_report(path, manifest):
                 session = event.get("sessionId")
                 if manifest.get("session_id") and session != manifest["session_id"]:
                     raise ValueError("Follow-up transcript session changed")
-            elif matched and offset and event.get("type") == "user" and user_text:
+            elif matched and event.get("type") == "user" and user_text:
                 raise ValueError("Another user prompt interrupted the tracked turn")
             elif matched and event.get("type") == "assistant":
                 message = event.get("message", {})

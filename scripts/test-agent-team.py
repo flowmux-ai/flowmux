@@ -134,6 +134,29 @@ class TeamTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     team.task_report(answer)
 
+    def test_first_and_followup_turns_reject_intervening_user_prompts(self):
+        path = self.job / 'boundary.jsonl'
+        for agent in ('codex', 'claude'):
+            user = (lambda text: {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': text}}) if agent == 'codex' else (
+                lambda text: {'type': 'user', 'sessionId': 'session', 'message': {'content': text}})
+            answer = json.dumps({'task_status': 'completed', 'report': 'tracked task done'})
+            final = {'type': 'event_msg', 'payload': {'type': 'task_complete', 'last_agent_message': answer}} if agent == 'codex' else {
+                'type': 'assistant', 'message': {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': answer}]}}
+            for prefix in ('', json.dumps(user('an earlier task')) + '\n'):
+                manifest = {'agent': agent, 'token': 'tracked', 'transcript_offset': len(prefix.encode())}
+                for interrupted in (False, True):
+                    with self.subTest(agent=agent, offset=manifest['transcript_offset'], interrupted=interrupted):
+                        events = [user('FLOWMUX_TEAM_JOB:tracked')]
+                        if interrupted:
+                            events.append(user('unrelated manual task'))
+                        events.append(final)
+                        path.write_text(prefix + ''.join(json.dumps(event) + '\n' for event in events))
+                        if interrupted:
+                            with self.assertRaisesRegex(ValueError, 'interrupted'):
+                                team.transcript_report(path, manifest)
+                        else:
+                            self.assertEqual(team.transcript_report(path, manifest)[2], answer)
+
     def test_claude_thinking_is_not_completion_and_api_errors_are_blocked(self):
         path = self.job / 'claude.jsonl'
         manifest = {'agent': 'claude', 'token': 'mine'}
