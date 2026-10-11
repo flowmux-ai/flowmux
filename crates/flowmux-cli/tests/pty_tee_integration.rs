@@ -825,11 +825,14 @@ fn pty_tee_delivers_final_output_in_order_after_outer_eof() {
     let _rx = spawn_fake_daemon(socket.clone());
     // The farewell exceeds the PTY buffer and must drain while the proxy
     // waits for the child to exit, after all previously queued output.
+    // tcdrain reproduces small-chunk backpressure even on faster macOS hosts.
     let script = r#"
-import os, signal, sys, time
+import os, signal, sys, termios, time
 def hup(*args):
-    sys.stdout.write('x' * (128 * 1024) + 'bye')
-    sys.stdout.flush()
+    output = b'x' * (128 * 1024) + b'bye'
+    for offset in range(0, len(output), 256):
+        os.write(1, output[offset:offset + 256])
+        termios.tcdrain(1)
     sys.exit(0)
 signal.signal(signal.SIGHUP, hup)
 os.write(1, b'hello')

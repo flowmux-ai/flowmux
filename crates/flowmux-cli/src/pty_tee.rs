@@ -551,16 +551,47 @@ fn terminate_inner_group<F: FnMut(&str)>(
         termination_grace("FLOWMUX_PTY_TEE_SIGTERM_GRACE_MS", Duration::from_secs(2));
     let mut exit_code = None;
     let mut child_reaped = false;
+    let mut master_open = true;
+    let mut stdout_open = true;
     let mut pump_output = || {
-        if write_pending(libc::STDOUT_FILENO, to_outer).is_err() {
+        // Wake on output readiness; a fixed sleep throttles small PTY chunks
+        // enough to kill a child still flushing within its grace period.
+        let mut fds = [
+            libc::pollfd {
+                fd: if master_open && to_outer.len() < PENDING_BYTES {
+                    master_fd
+                } else {
+                    -1
+                },
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: if stdout_open && !to_outer.is_empty() {
+                    libc::STDOUT_FILENO
+                } else {
+                    -1
+                },
+                events: libc::POLLOUT,
+                revents: 0,
+            },
+        ];
+        unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 20) };
+        if stdout_open && write_pending(libc::STDOUT_FILENO, to_outer).is_err() {
+            stdout_open = false;
             TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
         }
         // A child can block flushing its farewell before exit. Keep draining
         // during the grace period, with the same bounded queue as the main loop.
-        while to_outer.len() < PENDING_BYTES {
+        while master_open && to_outer.len() < PENDING_BYTES {
             let mut buf = [0; 4096];
-            let ReadOutcome::Data(slice) = read_some(master_fd, &mut buf) else {
-                break;
+            let slice = match read_some(master_fd, &mut buf) {
+                ReadOutcome::Data(slice) => slice,
+                ReadOutcome::WouldBlock => break,
+                ReadOutcome::Eof | ReadOutcome::Err(_) => {
+                    master_open = false;
+                    break;
+                }
             };
             observe_terminal_output(slice, input_modes, output_refresh);
             extractor.feed(slice);
@@ -652,7 +683,6 @@ fn wait_for_group_exit(
         if Instant::now() >= deadline {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
