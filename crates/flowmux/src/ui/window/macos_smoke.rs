@@ -276,10 +276,18 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     // Without WKUIDelegate panels, WebKit silently cancels confirm() and prompt().
     javascript(
         &browser,
-        "window.dialogs = []; setTimeout(() => dialogs.push(alert('Notice'), confirm('Proceed?'), prompt('Name?', 'preset')), 0); 'scheduled'",
+        "window.dialogs = []; setTimeout(() => dialogs.push(alert('Notice'), confirm('Proceed?'), prompt('Name?', 'preset'), confirm('Cancel confirm'), prompt('Cancel prompt', 'preset'), confirm('Close confirm'), prompt('Close prompt', 'preset')), 0); 'scheduled'",
     )
     .await;
-    for message in ["Notice", "Proceed?", "Name?"] {
+    for (message, response) in [
+        ("Notice", Some("ok")),
+        ("Proceed?", Some("ok")),
+        ("Name?", Some("ok")),
+        ("Cancel confirm", Some("cancel")),
+        ("Cancel prompt", Some("cancel")),
+        ("Close confirm", None),
+        ("Close prompt", None),
+    ] {
         wait_until("page dialog shown", || {
             controller.window.visible_dialog().is_some_and(|dialog| {
                 dialog
@@ -294,13 +302,80 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .unwrap()
             .downcast::<adw::AlertDialog>()
             .unwrap();
-        dialog.emit_by_name::<()>("response", &[&"ok"]);
+        if message == "Name?" {
+            let entry = dialog
+                .extra_child()
+                .unwrap()
+                .downcast::<gtk::Entry>()
+                .unwrap();
+            assert_eq!(entry.text(), "preset");
+            entry.set_text("수정한 이름");
+        }
+        if let Some(response) = response {
+            dialog.emit_by_name::<()>("response", &[&response]);
+        }
         dialog.close();
     }
     assert_eq!(
         javascript(&browser, "JSON.stringify(dialogs)").await,
-        "[null,true,\"preset\"]"
+        "[null,true,\"수정한 이름\",false,null,false,null]"
     );
+    assert!(!crate::ui::browser_pane::native_browser_views_are_suspended());
+    let closing_page = root.join("closing-dialog.html");
+    std::fs::write(
+        &closing_page,
+        "<!doctype html><title>Closing dialog</title>",
+    )
+    .unwrap();
+    for (source, expected) in [
+        ("confirm('Close window')", "false"),
+        ("prompt('Close window', 'preset')", "null"),
+    ] {
+        let closing_browser = BrowserPane::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            Some(&format!("file://{}", closing_page.display())),
+            crate::ui::pane_terminal::PaneCallbacks::noop_for_test(),
+            flowmux_config::options::BrowserEngine::Webkit,
+            false,
+        );
+        let closing_window = adw::ApplicationWindow::builder()
+            .application(app)
+            .content(&closing_browser.root)
+            .default_width(640)
+            .default_height(480)
+            .build();
+        closing_window.present();
+        wait_until("closing browser mapped", || {
+            closing_browser.root.is_mapped() && closing_browser.current_title() == "Closing dialog"
+        })
+        .await;
+        javascript(
+            &closing_browser,
+            &format!("setTimeout(() => window.reply = {source}, 0); 'scheduled'"),
+        )
+        .await;
+        wait_until("page dialog before window close", || {
+            closing_window.visible_dialog().is_some()
+        })
+        .await;
+        closing_window.destroy();
+        println!("MACOS_NATIVE_BROWSER_WINDOW_CLOSED {source}");
+        let reply = glib::future_with_timeout(Duration::from_secs(10), async {
+            loop {
+                let reply = javascript(&closing_browser, "JSON.stringify(window.reply)").await;
+                if !reply.is_empty() {
+                    break reply;
+                }
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("window close must answer the pending page dialog");
+        assert_eq!(reply, expected);
+        assert!(!crate::ui::browser_pane::native_browser_views_are_suspended());
+    }
+    println!("MACOS_NATIVE_BROWSER_DIALOGS_OK");
     println!("MACOS_NATIVE_BROWSER_OK");
 
     let file = root.join("unsaved.txt");

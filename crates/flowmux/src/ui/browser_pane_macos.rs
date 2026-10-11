@@ -1145,6 +1145,11 @@ fn present_page_dialog(
 
     let native_browser_suspend = suspend_native_browser_views_for_window(&parent);
     let pending = Rc::new(RefCell::new(Some((reply, native_browser_suspend))));
+    let pending_on_unmap = pending.clone();
+    dialog.connect_unmap(move |_| {
+        // Window teardown can unmap a panel without sending a response.
+        pending_on_unmap.borrow_mut().take();
+    });
     dialog.connect_response(None, move |_dialog, response| {
         if let Some((mut reply, native_browser_suspend)) = pending.borrow_mut().take() {
             reply.send((response == "ok").then(|| {
@@ -1444,6 +1449,26 @@ fn uuid_for_profile_slug(slug: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_dialog_reply_cancels_on_drop_and_answers_only_once() {
+        let replies = Rc::new(RefCell::new(Vec::new()));
+        {
+            let replies = replies.clone();
+            let _reply = PageDialogReply(Some(Box::new(move |value| {
+                replies.borrow_mut().push(value);
+            })));
+        }
+        {
+            let replies = replies.clone();
+            let mut reply = PageDialogReply(Some(Box::new(move |value| {
+                replies.borrow_mut().push(value);
+            })));
+            reply.send(Some("edited".into()));
+            reply.send(None);
+        }
+        assert_eq!(*replies.borrow(), [None, Some("edited".into())]);
+    }
 
     #[test]
     fn navigation_delegate_class_registers_with_native_ivar_alignment() {
