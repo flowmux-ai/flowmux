@@ -95,7 +95,11 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 poll_ms,
             }
         }
-        BrowserOp::Screenshot { pane, path } => Request::BrowserScreenshot { pane, path },
+        // The GUI process writes the file; resolve against the caller's cwd.
+        BrowserOp::Screenshot { pane, path } => Request::BrowserScreenshot {
+            pane,
+            path: std::path::absolute(path)?,
+        },
         BrowserOp::Count { pane, selector } => Request::BrowserCount { pane, selector },
     };
     Ok(request)

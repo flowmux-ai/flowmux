@@ -359,6 +359,22 @@ fn browser_wait_and_screenshot_map_to_ipc_requests() {
         Request::BrowserScreenshot { pane: got, path }
             if got == pane && path.as_path() == std::path::Path::new("/tmp/flowmux-page.png")
     ));
+
+    // The GUI writes the file, so a relative path must resolve against the
+    // caller's working directory, not the GUI process's.
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "screenshot",
+        &pane_arg,
+        "shots/page.png",
+    ])
+    .expect("relative browser screenshot should parse");
+    let expected = std::env::current_dir().unwrap().join("shots/page.png");
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::BrowserScreenshot { path, .. } if path == expected
+    ));
 }
 
 #[test]
