@@ -715,15 +715,11 @@ impl PaneRegistry {
         tabs.insert(new_index, entry);
         let order: Vec<gtk::Widget> = tabs.iter().map(|(_, w)| w.clone()).collect();
         if let Some(container) = self.pane_tab_containers.get(&pane).cloned() {
-            // Reuse the existing tab widgets in the new order, preserving handlers and state.
-            let mut child = container.first_child();
-            while let Some(c) = child {
-                let next = c.next_sibling();
-                container.remove(&c);
-                child = next;
-            }
+            // Move only tabs; badges and other header children keep their parents.
+            let mut previous = None;
             for w in &order {
-                container.append(w);
+                container.reorder_child_after(w, previous);
+                previous = Some(w);
             }
         }
     }

@@ -14,6 +14,7 @@ mod pane_titles;
 mod process_args;
 mod restored_roots;
 mod teams_ack;
+mod zoom_reorder;
 
 pub(crate) fn run() {
     let isolated = tempfile::Builder::new()
@@ -137,6 +138,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_ZOOM_REORDER_SMOKE_ONLY").is_some() {
+        zoom_reorder::check(&controller, workspace, terminal_pane).await;
+        controller.window.destroy();
+        return;
+    }
     if std::env::var_os("FLOWMUX_CLI_PATHS_SMOKE_ONLY").is_some() {
         cli_paths::check(&controller, &bridge, root).await;
         controller.window.destroy();
