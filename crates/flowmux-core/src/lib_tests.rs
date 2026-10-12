@@ -3633,7 +3633,8 @@ fn gemini_cli_signals_detect_working_blocked_and_idle_states() {
 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n\
  workspace (/directory)       branch     sandbox       /model            quota\n\
  ~/dev/os/f-project/flutter-tizen  main   no sandbox    gemini-3.8-flash  3% used\n";
-    let workspace3_title = "✦  Working… (flutter-tizen)                                                     ";
+    let workspace3_title =
+        "✦  Working… (flutter-tizen)                                                     ";
 
     // 1. Status detection from live title + screen
     assert_eq!(

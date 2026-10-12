@@ -49,9 +49,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust
+      - name: Check Rust toolchain and formatting
         run: |
           rustup show active-toolchain
+          cargo fmt --all -- --check
           rustup component add llvm-tools-preview
 
       - name: Install coverage tool
@@ -90,7 +91,7 @@ jobs:
           fi
           sudo sh packaging/debian/postinst configure
 
-      - name: Run the shared Linux gate
+      - name: Run Linux tests and coverage (same script as local)
         timeout-minutes: 30
         run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
 
@@ -124,11 +125,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Install Rust
-        run: rustup show active-toolchain
+      - name: Check Rust toolchain and formatting
+        run: |
+          rustup show active-toolchain
+          cargo fmt --all -- --check
       - name: Install native dependencies
         run: brew install pkg-config gtk4 libadwaita vte3
-      - name: Run the shared macOS gate
+      - name: Run macOS tests and native smoke (same script as local)
         run: bash scripts/test-ci.sh macos
       - name: Upload native smoke evidence
         if: always()
