@@ -117,7 +117,9 @@ int main(int argc, char **argv) {
                     if (value and value["activity"] == activity
                             and value.get("session_id") == payload["session_id"]):
                         break
-                    assert time.monotonic() < deadline, (name, event, payload, activity, value)
+                    assert time.monotonic() < deadline, (
+                        name, event, payload, activity, value,
+                        rpc("pane_read_screen", pane=pane))
                     time.sleep(.05)
                 assert value["name"] == name and value["session_id"] == payload["session_id"], value
                 assert value["source"] == "flowmux:hook", value

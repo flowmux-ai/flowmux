@@ -234,10 +234,26 @@ pub struct CodexGraceSettlement {
     pub stop_seq: Option<u64>,
 }
 
-fn agent_screen_fingerprint(screen_text: Option<&str>, osc_title: Option<&str>) -> u64 {
+fn agent_screen_fingerprint(
+    screen_text: Option<&str>,
+    osc_title: Option<&str>,
+    completed: bool,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
-    screen_text.hash(&mut hasher);
-    osc_title.hash(&mut hasher);
+    if completed {
+        // Mapping a terminal can change padding/title without a new completion.
+        for line in screen_text
+            .unwrap_or_default()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            line.hash(&mut hasher);
+        }
+    } else {
+        screen_text.hash(&mut hasher);
+        osc_title.hash(&mut hasher);
+    }
     hasher.finish()
 }
 
@@ -2178,17 +2194,18 @@ impl StateStore {
             tracing::debug!(target: "flowmux_agent", reason = "process_absent", changed = false, "agent decision");
             return None;
         }
-        let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
+        let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
+        let completed_agent = (detected_status == Some(AgentStatus::Idle))
+            .then(|| detect_agent_completion(screen_text))
+            .flatten();
+        let fingerprint =
+            agent_screen_fingerprint(screen_text, osc_title, completed_agent.is_some());
         let previous_fingerprint = self
             .agents
             .last_agent_screen_fingerprints
             .lock()
             .await
             .insert(surface_id, fingerprint);
-        let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
-        let completed_agent = (detected_status == Some(AgentStatus::Idle))
-            .then(|| detect_agent_completion(screen_text))
-            .flatten();
         let status_text = match detected_status {
             Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
             Some(AgentStatus::Blocked) => detect_agent_usage_limit_text(screen_text),

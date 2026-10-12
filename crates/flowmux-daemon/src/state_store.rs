@@ -5984,6 +5984,29 @@ mod tests {
                     .status,
                 AgentStatus::Working
             );
+            // Mapping a hidden terminal can change its padding and title.
+            for (frame, title) in [
+                (screen.to_string(), "focused work"),
+                (format!("\n{screen}\n\n"), "focused work"),
+                (screen.replace('\n', "  \n  "), "focused work"),
+            ] {
+                store.report_agent_screen_signals_with_visibility(surface,
+                    Some(&frame), Some(title), true).await;
+                assert_eq!(
+                    store.located_agent_presence(surface).await.unwrap().presence.status,
+                    AgentStatus::Working,
+                    "old completion changed only its presentation: {frame:?}"
+                );
+            }
+            let next = screen.replace("11m", "12m").replace("6m 15s", "6m 16s").replace("16m", "17m");
+            assert_ne!(next, screen);
+            store.report_agent_screen_signals_with_visibility(surface,
+                Some(&next), Some("focused work"), false).await;
+            assert_eq!(
+                store.located_agent_presence(surface).await.unwrap().presence.public_status(),
+                AgentStatus::Done,
+                "a changed completion still settles a turn without a spinner"
+            );
         }
     }
 
