@@ -3453,6 +3453,37 @@ fn detector_reads_strong_osc_and_screen_signals() {
         detect_agent_status_from_signals(None, Some("working-notes")),
         None
     );
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some("✦  Working… (flutter-tizen)")),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some("✋  Action Required (flutter-tizen)")),
+        Some(AgentStatus::Blocked)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some("◇  Ready (flutter-tizen)")),
+        Some(AgentStatus::Idle)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some("◇  flutter-tizen")),
+        Some(AgentStatus::Idle)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(
+            Some(" ⠇ Thinking... (esc to cancel, 2m 22s)\n? for shortcuts"),
+            None
+        ),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(Some("*   Type your message or @path/to/file"), None),
+        Some(AgentStatus::Idle)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(Some("  Type your shell command"), None),
+        Some(AgentStatus::Idle)
+    );
 }
 
 #[test]
@@ -3564,6 +3595,121 @@ fn detector_reads_agent_name_from_osc_and_screen_signals() {
         detect_agent_name_from_signals(Some("OpenCode needs input"), None),
         Some("opencode")
     );
+    assert_eq!(
+        detect_agent_name_from_signals(None, Some("✦  Working… (flutter-tizen)")),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(None, Some("✋  Action Required")),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(None, Some("◇  Ready")),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(None, Some("Gemini CLI (flutter-tizen)")),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(None, Some("gemini")),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(Some("gemini working"), None),
+        Some("gemini")
+    );
+}
+
+#[test]
+fn gemini_cli_signals_detect_working_blocked_and_idle_states() {
+    let workspace3_screen = "\
+  ✓  ReadFile  lib/tizen_plugins.dart → Read lines 505-550 of 793\n\
+ ⠇ Thinking... (esc to cancel, 2m 22s)                                              ? for shortcuts\n\
+───────────────────────────────────────────────────────────────────────────────────────────────────\n\
+ YOLO Ctrl+Y                                                           1 GEMINI.md file · 22 skills\n\
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n\
+ *   Type your message or @path/to/file\n\
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n\
+ workspace (/directory)       branch     sandbox       /model            quota\n\
+ ~/dev/os/f-project/flutter-tizen  main   no sandbox    gemini-3.8-flash  3% used\n";
+    let workspace3_title = "✦  Working… (flutter-tizen)                                                     ";
+
+    // 1. Status detection from live title + screen
+    assert_eq!(
+        detect_agent_status_from_signals(Some(workspace3_screen), Some(workspace3_title)),
+        Some(AgentStatus::Working)
+    );
+    // 2. Status detection from screen alone (even if title is blank/missing)
+    assert_eq!(
+        detect_agent_status_from_signals(Some(workspace3_screen), None),
+        Some(AgentStatus::Working)
+    );
+    // 3. Status detection from title alone (e.g. while streaming / alternative screen)
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some(workspace3_title)),
+        Some(AgentStatus::Working)
+    );
+    // 4. Progress text extraction strips spinner prefix and shortcut hint
+    assert_eq!(
+        detect_agent_progress_text(Some(workspace3_screen)),
+        Some("Thinking... (esc to cancel, 2m 22s)")
+    );
+    // 5. Agent name detection from title and screen
+    assert_eq!(
+        detect_agent_name_from_signals(Some(workspace3_screen), Some(workspace3_title)),
+        Some("gemini")
+    );
+    assert_eq!(
+        detect_agent_idle_name_from_signals(Some(workspace3_screen), None),
+        Some("gemini")
+    );
+
+    // 6. Test state transition: proc-owned presence starts Idle, updates to Working on screen signal,
+    // and settles back to Idle after completion.
+    let mut surface = PaneSurface::terminal("gemini-term", None);
+    let surface_id = surface.id;
+    let mut presence = AgentPresence::new("gemini", AgentActivity::Idle, None);
+    presence.source = Some(AGENT_SOURCE_PROC.to_string());
+    surface.agent = Some(presence);
+    let mut pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: surface_id,
+            surfaces: vec![surface],
+        },
+    };
+
+    // Proc presence starts Idle
+    assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Idle));
+
+    // Screen scan detects Gemini is working
+    let applied = pane.report_surface_agent_signal(
+        surface_id,
+        AgentStatus::Working,
+        "flowmux:screen",
+        Some("gemini"),
+        Some("Thinking... (esc to cancel, 2m 22s)"),
+        true,
+    );
+    assert_eq!(applied, Some(true));
+    let current = pane.agent_presence_for_surface(surface_id).unwrap();
+    assert_eq!(current.status, AgentStatus::Working);
+    assert_eq!(current.name, "gemini");
+    assert_eq!(current.source.as_deref(), Some(AGENT_SOURCE_PROC));
+    assert_eq!(
+        current.custom_status.as_deref(),
+        Some("Thinking... (esc to cancel, 2m 22s)")
+    );
+    assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Working));
+
+    // When Gemini turn finishes, settle screen idle settles it back to Idle
+    assert_eq!(pane.settle_screen_idle(surface_id, true), Some(true));
+    let settled = pane.agent_presence_for_surface(surface_id).unwrap();
+    assert_eq!(settled.status, AgentStatus::Idle);
+    assert_eq!(settled.name, "gemini");
+    assert_eq!(settled.source.as_deref(), Some(AGENT_SOURCE_PROC));
+    assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Idle));
 }
 
 #[test]

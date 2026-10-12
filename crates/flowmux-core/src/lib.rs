@@ -2744,19 +2744,21 @@ pub fn detect_agent_status_from_signals(
 ) -> Option<AgentStatus> {
     let title = osc_title.unwrap_or_default().trim();
     let title_names_agent = detect_agent_name_from_surface_title(title).is_some();
-    if title_names_agent
-        && [
-            "action required",
-            "needs input",
-            "permission required",
-            "needs permission",
-        ]
-        .into_iter()
-        .any(|needle| contains_ascii_case_insensitive(title, needle))
+    if title.starts_with('✋')
+        || (title_names_agent
+            && [
+                "action required",
+                "needs input",
+                "permission required",
+                "needs permission",
+            ]
+            .into_iter()
+            .any(|needle| contains_ascii_case_insensitive(title, needle)))
     {
         return Some(AgentStatus::Blocked);
     }
     if title.chars().any(is_braille_spinner)
+        || title.starts_with(|c| matches!(c, '✦' | '⏲'))
         || (title_names_agent
             && ["working", "thinking", "running"]
                 .into_iter()
@@ -2764,7 +2766,12 @@ pub fn detect_agent_status_from_signals(
     {
         return Some(AgentStatus::Working);
     }
-    if title_names_agent && contains_ascii_case_insensitive(title, "idle") {
+    if title.starts_with('◇')
+        || (title_names_agent
+            && ["idle", "ready"]
+                .into_iter()
+                .any(|needle| contains_ascii_case_insensitive(title, needle)))
+    {
         return Some(AgentStatus::Idle);
     }
 
@@ -2836,10 +2843,12 @@ fn is_agent_working_status_line(line: &str) -> bool {
     // Match the live clock/control shape, not an ever-growing verb dictionary.
     if decorated
         && line.find('(').is_some_and(|offset| {
-            starts_with_elapsed_duration(&line[offset..])
+            let rest = &line[offset..];
+            (starts_with_elapsed_duration(rest)
                 && (contains_ascii_case_insensitive(line, "esc to interrupt")
                     || contains_ascii_case_insensitive(line, "ctrl+c to stop")
-                    || (line.contains("tokens") && (line.contains('↓') || line.contains('↑'))))
+                    || (line.contains("tokens") && (line.contains('↓') || line.contains('↑')))))
+                || contains_ascii_case_insensitive(rest, "esc to cancel")
         })
     {
         return true;
@@ -2857,6 +2866,7 @@ fn is_agent_working_status_line(line: &str) -> bool {
         strip_ascii_prefix_case_insensitive(line, status).is_some_and(|rest| {
             contains_ascii_case_insensitive(rest, "esc to interrupt")
                 || contains_ascii_case_insensitive(rest, "ctrl+c to stop")
+                || contains_ascii_case_insensitive(rest, "esc to cancel")
                 || starts_with_elapsed_duration(rest)
         })
     })
@@ -2882,7 +2892,16 @@ pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
         .rev()
         .filter(|line| !line.trim().is_empty())
         .take(12)
-        .find_map(|line| is_agent_working_status_line(line).then(|| trim_agent_status_prefix(line)))
+        .find_map(|line| {
+            is_agent_working_status_line(line).then(|| {
+                let trimmed = trim_agent_status_prefix(line);
+                trimmed
+                    .split("? for shortcuts")
+                    .next()
+                    .unwrap_or(trimmed)
+                    .trim()
+            })
+        })
 }
 
 pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> {
@@ -2906,7 +2925,12 @@ fn is_agent_usage_limit_status_line(line: &str) -> bool {
 
 fn trim_agent_status_prefix(line: &str) -> &str {
     line.trim()
-        .trim_start_matches(['•', '◦', '●', '◉', '·', '*', '✢', '✳', '✶', '✻', '✽'])
+        .trim_start_matches(|ch| {
+            matches!(
+                ch,
+                '•' | '◦' | '●' | '◉' | '·' | '*' | '✢' | '✳' | '✶' | '✻' | '✽' | '✦'
+            ) || is_braille_spinner(ch)
+        })
         .trim_start()
 }
 
@@ -2969,6 +2993,8 @@ fn agent_name_in_text(text: &str) -> Option<&'static str> {
         Some("codex")
     } else if contains_ascii_token(text, "cline") {
         Some("cline")
+    } else if contains_ascii_token(text, "gemini") {
+        Some("gemini")
     } else {
         None
     }
@@ -3090,7 +3116,9 @@ fn is_agent_idle_prompt_line(line: &str) -> bool {
             || contains_ascii_case_insensitive(line, "press / to")
             || contains_ascii_case_insensitive(line, "type /")
             || contains_ascii_case_insensitive(line, "ask anything")
-            || contains_ascii_case_insensitive(line, "ask me anything"))
+            || contains_ascii_case_insensitive(line, "ask me anything")
+            || contains_ascii_case_insensitive(line, "type your message")
+            || contains_ascii_case_insensitive(line, "type your shell command"))
 }
 
 /// Claude does not emit its `Stop` hook when the user interrupts a turn.
@@ -3135,9 +3163,18 @@ fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {
         Some("codex")
     } else if starts_with_agent_title_token(title, "cline") {
         Some("cline")
+    } else if starts_with_agent_title_token(title, "gemini")
+        || starts_with_agent_title_token(title, "gemini-cli")
+        || starts_with_gemini_dynamic_title(title)
+    {
+        Some("gemini")
     } else {
         None
     }
+}
+
+fn starts_with_gemini_dynamic_title(title: &str) -> bool {
+    title.starts_with(|c| matches!(c, '✦' | '✋' | '◇' | '⏲'))
 }
 
 fn starts_with_agent_title_token(title: &str, token: &str) -> bool {
