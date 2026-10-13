@@ -3018,6 +3018,13 @@ pub fn detect_agent_idle_name_from_signals(
             .then_some(title_agent_name)
             .flatten();
     }
+    // Codex's footer includes the user-named session, which can mention other agents.
+    if recent().any(|line| {
+        let line = line.trim();
+        line == "›" || line.starts_with("› ")
+    }) {
+        return Some("codex");
+    }
     // Nearest line to the composer wins. Scrollback above the prompt routinely
     // names other agents (`?? .claude/` in a git status inside a Codex pane),
     // and a wrong identity makes every later idle frame conflict with the

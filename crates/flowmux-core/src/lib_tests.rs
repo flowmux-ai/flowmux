@@ -3714,6 +3714,56 @@ fn gemini_cli_signals_detect_working_blocked_and_idle_states() {
 }
 
 #[test]
+fn codex_composer_identity_ignores_agent_names_in_session_title() {
+    let title = "갱신하기 flowmux의 모든 Claude·Codex 아이콘 | flowmux";
+    for prompt in [
+        "› Ask Codex to do anything",
+        "›",
+        "› Claude 아이콘도 바꿔줘",
+    ] {
+        let mut surface = PaneSurface::terminal(title, None);
+        let surface_id = surface.id;
+        let mut presence = AgentPresence::new("codex", AgentActivity::Idle, None);
+        presence.source = Some(AGENT_SOURCE_PROC.into());
+        surface.agent = Some(presence);
+        let mut pane = Pane::Leaf {
+            id: PaneId::new(),
+            content: PaneContent::Tabs {
+                active: surface_id,
+                surfaces: vec![surface],
+            },
+        };
+        for (progress, expected) in [
+            ("• Working (56s • esc to interrupt)", AgentStatus::Working),
+            ("Worked for 1m 15s • 4:30 PM", AgentStatus::Idle),
+        ] {
+            let screen = format!(
+                "{progress}\n\n{prompt}\n\n  GPT-6-Astra high fast · ~/work · {title}\n  ← for agents · ? for shortcuts"
+            );
+            let name = detect_agent_idle_name_from_signals(Some(&screen), Some(title));
+            assert_eq!(name, Some("codex"), "{screen}");
+            let status = detect_agent_status_from_signals(Some(&screen), Some(title)).unwrap();
+            assert_eq!(status, expected);
+            assert_eq!(
+                pane.report_surface_agent_signal(
+                    surface_id,
+                    status,
+                    "flowmux:screen",
+                    name,
+                    detect_agent_progress_text(Some(&screen)),
+                    true,
+                ),
+                Some(true),
+            );
+            let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+            assert_eq!(agent.status, expected);
+            assert_eq!(agent.name, "codex");
+            assert_eq!(agent.source.as_deref(), Some(AGENT_SOURCE_PROC));
+        }
+    }
+}
+
+#[test]
 fn detector_reads_idle_agent_prompt_without_trusting_stale_scrollback() {
     assert_eq!(
         detect_agent_idle_name_from_signals(
