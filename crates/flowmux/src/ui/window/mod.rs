@@ -787,6 +787,29 @@ fn build_split_window_shell(
         .position(sidebar_position)
         .build();
     split.add_css_class("flowmux-window-split");
+    // GTK expands the drag area beyond the handle that shows the resize cursor.
+    let controllers = split.observe_controllers();
+    for index in 0..controllers.n_items() {
+        let Some(drag) = controllers.item(index).and_downcast::<gtk::GestureDrag>() else {
+            continue;
+        };
+        if drag.is::<gtk::GesturePan>() {
+            continue;
+        }
+        drag.connect_drag_begin(|drag, x, y| {
+            let Some(widget) = drag.widget() else {
+                return;
+            };
+            let on_handle = widget
+                .pick(x, y, gtk::PickFlags::DEFAULT)
+                .is_some_and(|picked| {
+                    picked.parent().as_ref() == Some(&widget) && picked.css_name() == "separator"
+                });
+            if !on_handle {
+                drag.set_state(gtk::EventSequenceState::Denied);
+            }
+        });
+    }
     split
 }
 

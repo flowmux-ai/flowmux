@@ -4,12 +4,14 @@
 
 uv run --with python-xlib python scripts/test-terminal-rendering-gui.py
 Use --gui/--cli for a preserved build and --baseline to record old behavior.
-Requires Xvfb and dbus-daemon; reuses the SSH GUI harness's process protection.
+Requires Xvfb and dbus-daemon; the sidebar case also needs the Atspi GI binding.
+Reuses the SSH GUI harness's process protection.
 """
 
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -26,7 +28,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--gui", default=str(repo / "target/debug/flowmux"))
 parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
 parser.add_argument("--baseline", action="store_true")
-parser.add_argument("--case", choices=["geometry", "workspace", "scrollback"], default="geometry")
+parser.add_argument("--case", choices=["geometry", "workspace", "scrollback", "sidebar"], default="geometry")
 args = parser.parse_args()
 args.gui = str(Path(args.gui).resolve())
 args.cli = str(Path(args.cli).resolve())
@@ -40,6 +42,8 @@ for entry in Path("/proc").iterdir():
             pass
 h = fixture.Harness(args)
 h.env.update(GTK_USE_PORTAL="0", GTK_IM_MODULE="simple")
+if args.case == "sidebar":
+    h.env["GTK_A11Y"] = "atspi"
 shell = h.root / "clean-shell"
 shell.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")
 shell.chmod(0o755)
@@ -58,6 +62,12 @@ shell.chmod(0o755)
 
 try:
     h.start_display()
+    if args.case == "sidebar":
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
+        import gi
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+        Atspi.set_timeout(3000, 3000)
     process, sock = h.window("terminal-rendering")
     workspace = h.rpc(
         sock, "workspace_create", name="Terminal rendering test", root=str(h.root)
@@ -123,6 +133,80 @@ try:
         if not args.baseline:
             assert preserved_tab and preserved_focus, result
             h.pass_check("Workspace return preserves active tabs and last focused pane")
+    elif args.case == "sidebar":
+        from Xlib import X, display
+        from Xlib.ext import xtest
+
+        d = display.Display(h.env["DISPLAY"])
+        d.xfixes_query_version()
+
+        def pane_tab():
+            desktop = Atspi.get_desktop(0)
+            pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+            app = next((node for node in pending if node.get_process_id() == process.pid), None)
+            pending = [app] if app else []
+            while pending:
+                node = pending.pop()
+                if node.get_role() == Atspi.Role.PUSH_BUTTON and node.get_name() == h.root.name:
+                    return node
+                pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
+
+        tab = fixture.wait_for(pane_tab, "terminal tab")
+
+        def bounds():
+            return tab.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+
+        def move(x, y):
+            xtest.fake_input(d, X.MotionNotify, x=x, y=y)
+            d.sync()
+            time.sleep(.08)
+
+        def cursor(x, y):
+            move(x, y)
+            return tuple(d.xfixes_get_cursor_image(d.screen().root).cursor_image)
+
+        def drag(x, y, dx):
+            move(x, y)
+            xtest.fake_input(d, X.ButtonPress, 1)
+            d.sync()
+            for offset in range(0, dx + 1, 4):
+                move(x + offset, y)
+            xtest.fake_input(d, X.ButtonRelease, 1)
+            d.sync()
+            time.sleep(.3)
+
+        h.send(sock, pane, "printf '\\033[2J\\033[H'; printf 'SIDEBAR_SELECTION_CHECK %.0s' {1..200}")
+        fixture.wait_for(lambda: "SIDEBAR_SELECTION_CHECK" in h.screen(sock, pane), "selection text")
+        rect = bounds()
+        y = rect.y + 160
+        text_cursor = cursor(rect.x + 40, y)
+        # Scan from text toward the divider, using the actual cursor boundary.
+        edge = next(x for x in range(rect.x + 20, rect.x - 40, -1)
+                    if cursor(x, y) != text_cursor)
+        resize_cursor = cursor(edge, y)
+        assert resize_cursor != text_cursor
+        primary = d.intern_atom("PRIMARY")
+        assert not d.get_selection_owner(primary), "Test starts without selected text"
+        before = bounds().x
+        drag(edge + 1, y, 80)
+        outside_moved = bounds().x - before
+        selected = bool(d.get_selection_owner(primary))
+        result = {"outside_cursor_resize_delta": outside_moved, "text_selected": selected}
+        print(json.dumps(result), flush=True)
+        if not args.baseline:
+            assert outside_moved == 0, result
+            assert selected, "Dragging immediately outside the resize cursor must select text"
+            left = next(x for x in range(edge, edge - 30, -1)
+                        if cursor(x, y) != resize_cursor)
+            drag(left, y, 80)
+            assert bounds().x == before, "Sidebar side of the cursor boundary must not resize either"
+            # The resize cursor itself must still start a working divider drag.
+            assert cursor(edge, y) == resize_cursor
+            drag(edge, y, 80)
+            fixture.wait_for(lambda: bounds().x > before + 40, "sidebar resized from its cursor region")
+            h.pass_check("Sidebar only resizes inside its resize cursor; adjacent terminal text selects")
+        (h.root / "sidebar.json").write_text(json.dumps(result))
+        d.close()
     else:
         from Xlib import X, XK, display
         from Xlib.ext import xtest
