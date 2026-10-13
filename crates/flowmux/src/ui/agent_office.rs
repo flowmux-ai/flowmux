@@ -114,17 +114,23 @@ struct Room {
     origin: (f64, f64),
     background: RefCell<Option<scene::Background>>,
     event: Option<Event>,
-    event_clock: f64,
-    events_run: usize,
+    event_wait: f64,
 }
 
 /// A shared moment for resting teammates: a stand-up at the whiteboard or a pizza delivery.
 struct Event {
-    standup: bool,
     age: f64,
     courier: Option<scene::Actor>,
     pizza: Option<(f64, f64)>,
     delivered_at: Option<f64>,
+    visits: Vec<EventVisit>,
+}
+
+struct EventVisit {
+    surface: SurfaceId,
+    arrive_at: f64,
+    leave_at: f64,
+    errand: ((f64, f64), Activity),
 }
 
 #[derive(Default)]
@@ -246,16 +252,15 @@ impl World {
         for index in 0..self.rooms.len() {
             let room = &mut self.rooms[index];
             if room.event.is_none() {
-                room.event_clock += dt;
-                let period = 150.0 + (room.id.0.as_u128() % 90) as f64;
-                if room.event_clock < period {
+                room.event_wait -= dt;
+                if room.event_wait > 0.0 {
                     continue;
                 }
-                room.event_clock = 0.0;
+                room.event_wait = gtk::glib::random_double_range(120.0, 240.0);
             }
             let plan = room.plan.clone();
             let Some(event) = room.event.as_mut() else {
-                let resting: Vec<_> = room
+                let mut resting: Vec<_> = room
                     .members
                     .iter()
                     .copied()
@@ -274,14 +279,17 @@ impl World {
                 if busy || resting.is_empty() {
                     continue;
                 }
-                let standup = resting.len() >= 2 && room.events_run.is_multiple_of(2);
-                room.events_run += 1;
+                resting.sort_by_cached_key(|_| gtk::glib::random_int());
+                resting.truncate(
+                    gtk::glib::random_int_range(1, resting.len().min(3) as i32 + 1) as usize,
+                );
+                let standup = resting.len() >= 2 && gtk::glib::random_int_range(0, 2) == 0;
                 let mut event = Event {
-                    standup,
                     age: 0.0,
                     courier: None,
                     pizza: None,
                     delivered_at: None,
+                    visits: Vec::new(),
                 };
                 let spots: Vec<_> = if standup {
                     let (x, y) = plan.board;
@@ -310,10 +318,15 @@ impl World {
                         })
                         .collect()
                 };
-                for (id, errand) in resting.iter().zip(spots) {
-                    if let Some(resident) = self.residents.get_mut(id) {
-                        resident.actor.set_errand(Some(errand));
-                    }
+                let mut arrive_at = 0.0;
+                for (surface, errand) in resting.into_iter().zip(spots) {
+                    arrive_at += gtk::glib::random_double_range(1.0, 5.0);
+                    event.visits.push(EventVisit {
+                        surface,
+                        arrive_at,
+                        leave_at: arrive_at + gtk::glib::random_double_range(14.0, 24.0),
+                        errand,
+                    });
                 }
                 room.event = Some(event);
                 changed = true;
@@ -321,6 +334,18 @@ impl World {
             };
             event.age += dt;
             changed = true;
+            event.visits.retain(|visit| {
+                if let Some(resident) = self.residents.get_mut(&visit.surface) {
+                    if event.age >= visit.leave_at {
+                        if resident.actor.errand == Some(visit.errand) {
+                            resident.actor.set_errand(None);
+                        }
+                    } else if event.age >= visit.arrive_at && event.age - dt < visit.arrive_at {
+                        resident.actor.set_errand(Some(visit.errand));
+                    }
+                }
+                event.age < visit.leave_at
+            });
             if let Some(courier) = event.courier.as_mut() {
                 courier.advance(dt, true);
                 if courier.idle() && event.delivered_at.is_none() && courier.ended.is_none() {
@@ -334,8 +359,7 @@ impl World {
                     event.courier = None;
                 }
             }
-            let length = if event.standup { 20.0 } else { 32.0 };
-            if event.age > length && event.courier.is_none() {
+            if event.visits.is_empty() && event.courier.is_none() {
                 self.end_event(index);
             }
         }
@@ -874,8 +898,7 @@ impl AgentOffice {
             origin: (0.0, 0.0),
             background: RefCell::new(None),
             event: None,
-            event_clock: 0.0,
-            events_run: 0,
+            event_wait: gtk::glib::random_double_range(120.0, 240.0),
         }
     }
 
@@ -1082,6 +1105,79 @@ fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn shared_events_invite_a_few_resting_actors_at_separate_times() {
+        let (bridge, _receiver) = Bridge::new();
+        let office = AgentOffice::new(bridge);
+        let workspace = WorkspaceId::new();
+        let model = AgentBarModel {
+            visible: true,
+            items: (0..8)
+                .map(|_| AgentBarItem {
+                    workspace,
+                    pane: PaneId::new(),
+                    surface: SurfaceId::new(),
+                    surface_label: "Terminal".into(),
+                    agent_name: "codex".into(),
+                    status: AgentStatus::Idle,
+                    visual_status: flowmux_core::AgentBarVisualStatus::Waiting,
+                    seen: true,
+                    status_text: "idle".into(),
+                    color: "#ffffff".into(),
+                })
+                .collect(),
+        };
+        office.render(&[(workspace, "Office".into())], &model);
+        let mut world = office.world.borrow_mut();
+        let worker = model.items[0].surface;
+        world
+            .residents
+            .get_mut(&worker)
+            .unwrap()
+            .actor
+            .set_status(AgentStatus::Working);
+        world.rooms[0].event_wait = 0.0;
+        assert!(world.run_events(0.1));
+        assert!((120.0..240.0).contains(&world.rooms[0].event_wait));
+        let visits: Vec<_> = world.rooms[0]
+            .event
+            .as_ref()
+            .unwrap()
+            .visits
+            .iter()
+            .map(|visit| (visit.surface, visit.arrive_at, visit.leave_at, visit.errand))
+            .collect();
+        assert!((1..=3).contains(&visits.len()));
+        assert!(visits.iter().all(|visit| visit.0 != worker));
+        assert!(visits.windows(2).all(|pair| pair[1].1 - pair[0].1 >= 1.0));
+        assert!(world.residents.values().all(|r| r.actor.errand.is_none()));
+        // Starting work while an invitation is pending must cancel participation.
+        let interrupted = visits[0].0;
+        world
+            .residents
+            .get_mut(&interrupted)
+            .unwrap()
+            .actor
+            .set_status(AgentStatus::Working);
+        for step in 1..=400 {
+            world.run_events(0.1);
+            let age = step as f64 * 0.1;
+            for &(id, arrive_at, leave_at, errand) in &visits {
+                let expected =
+                    (id != interrupted && age >= arrive_at && age < leave_at).then_some(errand);
+                assert_eq!(world.residents[&id].actor.errand, expected);
+            }
+        }
+        world.end_event(0);
+        assert!(world.residents.values().all(|r| r.actor.errand.is_none()));
+        assert_eq!(world.residents[&worker].actor.status, AgentStatus::Working);
+        assert_eq!(
+            world.residents[&interrupted].actor.status,
+            AgentStatus::Working
+        );
+    }
+
     #[gtk::test]
     fn office_drawing_releases_cache_after_last_view_is_destroyed() {
         let (bridge, _receiver) = Bridge::new();

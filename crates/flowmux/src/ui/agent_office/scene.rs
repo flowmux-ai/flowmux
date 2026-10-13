@@ -57,8 +57,9 @@ pub(super) struct Actor {
     pub cheer: Option<f64>,
     /// A shared-event spot that overrides the rest cycle while resting.
     pub errand: Option<((f64, f64), Activity)>,
-    rest_phase: u8,
+    rest_phase: usize,
     rest_elapsed: f64,
+    rest_pause: f64,
     yielding: f64,
     speed: f64,
     stride: f64,
@@ -95,6 +96,7 @@ impl Actor {
             errand: None,
             rest_phase: 0,
             rest_elapsed: 0.0,
+            rest_pause: gtk::glib::random_double_range(12.0, 38.0),
             yielding: 0.0,
             speed: 0.0,
             stride: 0.0,
@@ -187,6 +189,7 @@ impl Actor {
         self.status_age = 0.0;
         self.rest_phase = 0;
         self.rest_elapsed = 0.0;
+        self.rest_pause = gtk::glib::random_double_range(12.0, 38.0);
         self.yielding = 0.0;
         self.errand = None;
         self.ended = None;
@@ -202,7 +205,9 @@ impl Actor {
             return;
         }
         self.errand = errand;
+        self.rest_phase = 0;
         self.rest_elapsed = 0.0;
+        self.rest_pause = gtk::glib::random_double_range(12.0, 38.0);
         self.path = self.plan.route(self.position, self.destination());
     }
 
@@ -325,14 +330,18 @@ impl Actor {
         }
         if self.path.is_empty() && self.resting() && self.errand.is_none() {
             self.rest_elapsed += dt;
-            let pause = if self.rest_phase == 0 {
-                12.0 + (self.slot % 7) as f64
-            } else {
-                6.0
-            };
-            if self.rest_elapsed >= pause {
+            if self.rest_elapsed >= self.rest_pause {
                 self.rest_elapsed = 0.0;
-                self.rest_phase = (self.rest_phase + 1) % 3;
+                self.rest_phase = if self.rest_phase == 0 && !self.plan.pois.is_empty() {
+                    gtk::glib::random_int_range(1, self.plan.pois.len() as i32 + 1) as usize
+                } else {
+                    0
+                };
+                self.rest_pause = if self.rest_phase == 0 {
+                    gtk::glib::random_double_range(12.0, 38.0)
+                } else {
+                    gtk::glib::random_double_range(5.0, 16.0)
+                };
                 self.path = self.plan.route(self.position, self.destination());
             }
         }
@@ -948,6 +957,53 @@ mod tests {
             "reduced motion disables ambient wandering"
         );
         assert_eq!(still.position, plan.seat(1));
+    }
+
+    #[test]
+    fn resting_actors_choose_independent_times_and_activities() {
+        let plan = Rc::new(Plan::fit(3, 0, 1.6));
+        // The same seat in different offices must not share a schedule.
+        let mut actors: Vec<_> = (0..24)
+            .map(|_| Actor::new(0, 0, AgentStatus::Idle, plan.clone()))
+            .collect();
+        let mut departures = HashSet::new();
+        let mut activities = HashSet::new();
+        let mut left = [false; 24];
+        for actor in &actors {
+            assert!((12.0..38.0).contains(&actor.rest_pause));
+        }
+        for step in 0..1500 {
+            for (index, actor) in actors.iter_mut().enumerate() {
+                actor.advance(0.1, true);
+                if actor.action() == Action::Walk && !left[index] {
+                    departures.insert(step);
+                    left[index] = true;
+                }
+                if let Action::Visit(activity) = actor.action() {
+                    activities.insert(activity);
+                    assert!((5.0..16.0).contains(&actor.rest_pause));
+                }
+            }
+        }
+        assert!(left.into_iter().all(|left| left));
+        assert!(
+            departures.len() > 1,
+            "resting actors must not leave together"
+        );
+        assert!(activities.len() > 1, "breaks must vary between activities");
+        for actor in &mut actors {
+            let pause = actor.rest_pause;
+            actor.set_status(AgentStatus::Idle);
+            actor.replan(0, plan.clone());
+            assert_eq!(
+                actor.rest_pause, pause,
+                "refresh must not reset the schedule"
+            );
+            actor.set_errand(Some((plan.board, Activity::Present)));
+            actor.set_errand(None);
+            assert_eq!(actor.rest_phase, 0);
+            assert!((12.0..38.0).contains(&actor.rest_pause));
+        }
     }
 
     #[test]

@@ -1320,11 +1320,11 @@ impl Plan {
     }
 
     /// A point of interest for a resting teammate; phase 0 is the lounge seat.
-    pub fn rest_stop(&self, slot: usize, phase: u8) -> ((f64, f64), Option<Activity>) {
+    pub fn rest_stop(&self, slot: usize, phase: usize) -> ((f64, f64), Option<Activity>) {
         if phase == 0 || self.pois.is_empty() {
             return (self.seat(slot), None);
         }
-        let poi = self.pois[(slot * 5 + phase as usize * 3) % self.pois.len()];
+        let poi = self.pois[(phase - 1) % self.pois.len()];
         let jitter = (slot % 3) as f64 * 10.0 - 10.0;
         let point = self.nearest_walkable((poi.point.0 + jitter, poi.point.1));
         (point, Some(poi.activity))
@@ -1541,7 +1541,7 @@ mod tests {
                         }
                         let route = plan.route(plan.desk(slot), plan.door());
                         assert_eq!(route.back(), Some(&plan.door()), "{context} exit");
-                        for phase in [1, 2] {
+                        for phase in 1..=plan.pois.len() {
                             let (stop, _) = plan.rest_stop(slot, phase);
                             let route = plan.route(plan.seat(slot), stop);
                             assert_eq!(route.back(), Some(&stop), "{context} rest {phase}");
