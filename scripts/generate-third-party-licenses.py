@@ -60,6 +60,7 @@ def main():
     ], cwd=root))
     credits = (root / "docs/legal/THIRD_PARTY_NOTICES.md").read_text()
     monaco = (root / "editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt").read_text()
+    mermaid = (root / "editor/flowmux-editor-web/dist/MERMAID_THIRD_PARTY_NOTICES.txt").read_text()
     output = (
         "<!-- SPDX-License-Identifier: GPL-3.0-or-later -->\n\n"
         "# Third-Party Licenses\n\n"
@@ -68,6 +69,7 @@ def main():
         "the credits above each text identify the components they cover.\n\n"
         + credits + "\n## Rust dependencies\n\n" + render(inventory["licenses"])
         + "\n\n## Monaco upstream component notices\n\n" + block(monaco) + "\n"
+        + "\n\n## Mermaid upstream component notices\n\n" + block(mermaid) + "\n"
     )
     destination = root / "docs/legal/THIRD_PARTY_LICENSES.md"
     destination.write_text("\n".join(line.rstrip() for line in output.splitlines()).rstrip() + "\n")

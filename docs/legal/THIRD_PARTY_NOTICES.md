@@ -81,3 +81,12 @@ Monaco includes DOMPurify 3.1.7, Copyright 2024 Dr.-Ing. Mario Heiderich,
 Cure53. DOMPurify offers Apache-2.0 OR MPL-2.0; flowmux distributes the bundled
 copy under Apache-2.0. Its license marker is retained in `main.js`, and the
 full Apache 2.0 text is included in `THIRD_PARTY_LICENSES.md`.
+
+## Mermaid Markdown diagrams
+
+The Markdown viewer bundles Mermaid 11.17.2 (MIT), from
+https://github.com/mermaid-js/mermaid, using the existing web asset build.
+Its production dependency license texts and copyright notices are generated in
+`editor/flowmux-editor-web/dist/MERMAID_THIRD_PARTY_NOTICES.txt` and included in
+`THIRD_PARTY_LICENSES.md`. DOMPurify is distributed under Apache-2.0.
+KaTeX is pinned to 0.18.2 to address GHSA-238p-pmpm-9mq7.

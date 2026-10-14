@@ -32,7 +32,7 @@ Runtime/UI fixes require the live verification described in [AGENTS.md](AGENTS.m
 Preserve active user sessions; reproduce in an isolated instance with separate
 state and a short runtime path under `/tmp`.
 
-The committed Monaco bundle supports Rust builds without Node.js. Frontend
+The committed Monaco and Mermaid bundles support Rust builds without Node.js. Frontend
 changes use `scripts/build-editor-assets.sh`; commit the rebuilt assets with
 the source changes. Preserve upstream license markers in generated bundles.
 

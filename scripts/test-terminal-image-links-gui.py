@@ -200,6 +200,7 @@ def main():
             h.pass_check(f"{path_text}: hover underline, Ctrl-click adds editor tab")
 
             if file_path.suffix.lower() in (".md", ".markdown"):
+                file_path.write_text("# Mermaid\n\n```mermaid\nflowchart LR\nA[시작] --> B[완료]\nstyle A fill:#12ab34\n```\n")
                 geometry = show_path(path_text)
                 previous = len(editor_tabs())
                 click(path_text[:len(path_text) // 2], geometry, shift=True)
@@ -210,13 +211,30 @@ def main():
                                                  connection.intern_atom("UTF8_STRING"))
                 assert title.value.decode() == name, title.value
                 assert len(editor_tabs()) == previous, "Markdown preview added an editor tab"
+
+                def diagram_pixels():
+                    size = viewer.get_geometry()
+                    raw = viewer.get_image(0, 0, size.width, size.height, X.ZPixmap, 0xffffffff)
+                    image = Image.frombytes("RGB", (size.width, size.height), raw.data, "raw", "BGRX")
+                    return sum(r < 40 and 150 < g < 190 and b < 80 for r, g, b in image.getdata())
+
+                gui.wait_for(lambda: diagram_pixels() > 500, "Mermaid diagram visible in Markdown viewer")
+                before_zoom = diagram_pixels()
+                viewer.set_input_focus(X.RevertToParent, X.CurrentTime)
+                codes = [connection.keysym_to_keycode(XK.string_to_keysym(k)) for k in ["Control_L", "equal"]]
+                for code in codes:
+                    xtest.fake_input(connection, X.KeyPress, code)
+                for code in reversed(codes):
+                    xtest.fake_input(connection, X.KeyRelease, code)
+                connection.sync()
+                gui.wait_for(lambda: diagram_pixels() > before_zoom * 1.2, "Mermaid diagram zooms in place")
                 screenshot().save(h.root / f"markdown-viewer-{name}.png")
                 viewer.send_event(protocol.event.ClientMessage(
                     window=viewer, client_type=connection.intern_atom("WM_PROTOCOLS"),
                     data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
                 connection.sync()
                 gui.wait_for(lambda: len(windows(include_markdown=True)) == 1, "Markdown viewer closed")
-                h.pass_check(f"{path_text}: Ctrl+Shift-click opens Markdown viewer without adding a tab")
+                h.pass_check(f"{path_text}: Ctrl+Shift-click displays Mermaid without adding a tab")
 
         for name, content in [("missing.cc", None), ("missing.md", None), ("binary.txt", b"binary\x00data")]:
             if content is not None:

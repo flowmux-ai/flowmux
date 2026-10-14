@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Rebuild the vendored Monaco bundle. Normal flowmux builds use the committed
+# Rebuild the vendored Monaco and Mermaid bundles. Normal flowmux builds use the committed
 # output and do not require Node.js.
 
 set -euo pipefail

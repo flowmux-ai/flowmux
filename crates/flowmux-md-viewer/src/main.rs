@@ -2,8 +2,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-#[cfg(target_os = "linux")]
-use std::time::Duration;
 #[cfg(any(test, target_os = "linux"))]
 use std::time::SystemTime;
 
@@ -28,8 +26,20 @@ use gtk::{gdk, glib};
 #[cfg(target_os = "linux")]
 use webkit6::prelude::*;
 
+#[cfg(all(test, target_os = "linux"))]
+mod mermaid_tests;
+
 #[cfg(target_os = "linux")]
 const APP_ID: &str = "com.flowmux.App.Markdown";
+#[cfg(target_os = "linux")]
+const MARKDOWN_SCRIPT_WORLD: &str = "flowmux-markdown";
+#[cfg(target_os = "linux")]
+const WAIT_FOR_DIAGRAMS: &str = "
+    if (!window.flowmuxMarkdownReady) throw new Error('Markdown renderer did not initialize');
+    await window.flowmuxMarkdownReady;
+    await document.fonts.ready;
+    return true;
+";
 const DEFAULT_WINDOW_HEIGHT: i32 = 700;
 #[cfg(any(test, target_os = "linux"))]
 const RENDER_TIMEOUT_SECS: u32 = 15;
@@ -225,24 +235,37 @@ fn render_png(input: &Path, output: &Path, options: &RenderOptions) -> ExitCode 
         let result_for_snapshot = Rc::clone(&result_for_load);
         let loop_for_snapshot = loop_for_load.clone();
         let output = output.clone();
-        glib::timeout_add_local_once(Duration::from_millis(300), move || {
-            web_view.snapshot(
-                webkit6::SnapshotRegion::FullDocument,
-                webkit6::SnapshotOptions::NONE,
-                Option::<&gio::Cancellable>::None,
-                move |snapshot| {
-                    let saved = snapshot
-                        .map_err(|err| format!("snapshot Markdown page: {err}"))
-                        .and_then(|texture| {
-                            texture
-                                .save_to_png(&output)
-                                .map_err(|err| format!("save {}: {err}", output.display()))
-                        });
-                    *result_for_snapshot.borrow_mut() = Some(saved);
+        web_view.clone().call_async_javascript_function(
+            WAIT_FOR_DIAGRAMS,
+            None,
+            Some(MARKDOWN_SCRIPT_WORLD),
+            None,
+            gio::Cancellable::NONE,
+            move |ready| {
+                if let Err(error) = ready {
+                    *result_for_snapshot.borrow_mut() =
+                        Some(Err(format!("render Markdown diagrams: {error}")));
                     loop_for_snapshot.quit();
-                },
-            );
-        });
+                    return;
+                }
+                web_view.snapshot(
+                    webkit6::SnapshotRegion::FullDocument,
+                    webkit6::SnapshotOptions::NONE,
+                    Option::<&gio::Cancellable>::None,
+                    move |snapshot| {
+                        let saved = snapshot
+                            .map_err(|err| format!("snapshot Markdown page: {err}"))
+                            .and_then(|texture| {
+                                texture
+                                    .save_to_png(&output)
+                                    .map_err(|err| format!("save {}: {err}", output.display()))
+                            });
+                        *result_for_snapshot.borrow_mut() = Some(saved);
+                        loop_for_snapshot.quit();
+                    },
+                );
+            },
+        );
     });
 
     let result_for_timeout = Rc::clone(&result);
@@ -328,10 +351,7 @@ struct ViewerState {
 #[cfg(target_os = "linux")]
 impl ViewerState {
     fn render(&mut self) {
-        self.zoom_label
-            .set_text(&format!("{:.0}%", self.options.normalized_zoom() * 100.0));
-        self.web_view
-            .set_zoom_level(self.options.normalized_zoom() as f64);
+        self.set_zoom(self.options.zoom);
         self.navigation.begin_markdown_load();
 
         match render_markdown_file(&self.path, &self.options) {
@@ -345,7 +365,10 @@ impl ViewerState {
 
     fn set_zoom(&mut self, zoom: f32) {
         self.options.zoom = zoom.clamp(0.25, 4.0);
-        self.render();
+        self.zoom_label
+            .set_text(&format!("{:.0}%", self.options.normalized_zoom() * 100.0));
+        self.web_view
+            .set_zoom_level(self.options.normalized_zoom() as f64);
     }
 }
 
@@ -467,10 +490,22 @@ fn build_window(app: &adw::Application, args: Args) {
 
 #[cfg(target_os = "linux")]
 fn markdown_web_view(options: &RenderOptions) -> webkit6::WebView {
-    let web_view = webkit6::WebView::new();
+    let manager = webkit6::UserContentManager::new();
+    manager.add_script(&webkit6::UserScript::for_world(
+        include_str!("../../../editor/flowmux-editor-web/dist/markdown.js"),
+        webkit6::UserContentInjectedFrames::TopFrame,
+        webkit6::UserScriptInjectionTime::End,
+        MARKDOWN_SCRIPT_WORLD,
+        &[],
+        &[],
+    ));
+    let web_view = webkit6::WebView::builder()
+        .user_content_manager(&manager)
+        .build();
     web_view.set_zoom_level(options.normalized_zoom() as f64);
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web_view) {
-        settings.set_enable_javascript(false);
+        // Execute our isolated renderer while keeping document scripts disabled.
+        settings.set_enable_javascript(true);
         settings.set_enable_javascript_markup(false);
         settings.set_enable_smooth_scrolling(false);
         settings.set_allow_file_access_from_file_urls(true);

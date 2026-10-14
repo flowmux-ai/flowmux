@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { markdownNotices } from "./markdown-notices.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = resolve(root, "dist");
@@ -32,6 +33,19 @@ await build({
   sourcemap: false,
   target: ["es2022", "safari15"],
 });
+
+await build({
+  absWorkingDir: root,
+  bundle: true,
+  entryPoints: ["src/markdown.ts"],
+  format: "iife",
+  legalComments: "eof",
+  minify: true,
+  outfile: resolve(output, "markdown.js"),
+  platform: "browser",
+  target: ["es2022", "safari15"],
+});
+await writeFile(resolve(output, "MERMAID_THIRD_PARTY_NOTICES.txt"), await markdownNotices(root));
 
 await cp(resolve(root, "index.html"), resolve(output, "index.html"));
 await cp(

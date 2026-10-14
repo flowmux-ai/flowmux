@@ -39,6 +39,7 @@ on:
       - editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt
       - 'editor/flowmux-editor-web/dist/*NOTICE*'
       - editor/flowmux-editor-web/dist/main.js
+      - editor/flowmux-editor-web/dist/markdown.js
       - 'editor/flowmux-editor-web/scripts/**'
   pull_request:
     paths: *license_paths

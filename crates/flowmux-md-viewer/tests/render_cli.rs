@@ -4,6 +4,30 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 #[test]
+fn cli_png_waits_for_mermaid_even_with_an_invalid_diagram() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("mermaid.md");
+    let output = dir.path().join("mermaid.png");
+    std::fs::write(&input, include_str!("fixtures/mermaid.md")).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_flowmux-md-viewer"))
+        .args(["--render-png"])
+        .arg(&output)
+        .arg(&input)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let rendered = image::open(output).unwrap().to_rgba8();
+    let green = rendered
+        .pixels()
+        .filter(|p| p.0[0] < 40 && p.0[1] > 150 && p.0[1] < 190 && p.0[2] < 80)
+        .count();
+    assert!(
+        green > 500,
+        "PNG must contain the rendered green Mermaid node, found {green} pixels"
+    );
+}
+
+#[test]
 fn cli_renders_png_for_markdown_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let input = dir.path().join("sample.md");

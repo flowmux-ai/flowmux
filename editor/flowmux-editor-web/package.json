@@ -11,10 +11,14 @@
     "verify": "node scripts/verify-dist.mjs"
   },
   "dependencies": {
+    "mermaid": "11.17.2",
     "monaco-editor": "0.53.0"
   },
   "devDependencies": {
     "esbuild": "0.28.1",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "katex": "0.18.2"
   }
 }

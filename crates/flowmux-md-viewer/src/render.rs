@@ -141,6 +141,7 @@ fn wrap_html_document(body: &str, options: &RenderOptions) -> String {
 <html>
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'; base-uri 'none'">
 <meta name="color-scheme" content="light">
 <style>
 :root {{
@@ -227,6 +228,15 @@ pre code {{
   padding: 0;
   background: transparent;
   white-space: pre;
+}}
+.mermaid-chart {{
+  overflow: auto;
+  margin-bottom: 1em;
+  text-align: center;
+}}
+.mermaid-error {{
+  color: #b42318;
+  white-space: pre-wrap;
 }}
 img {{
   border-style: none;

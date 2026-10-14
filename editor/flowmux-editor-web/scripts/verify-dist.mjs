@@ -3,12 +3,13 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { markdownNotices } from "./markdown-notices.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 const lock = JSON.parse(await readFile(resolve(root, "package-lock.json"), "utf8"));
 const dependencies = Object.keys(manifest.dependencies ?? {});
-if (dependencies.length !== 1 || dependencies[0] !== "monaco-editor") {
+if (dependencies.length !== 2 || !dependencies.includes("monaco-editor") || !dependencies.includes("mermaid")) {
   throw new Error("Review and document the editor production dependencies");
 }
 const monaco = lock.packages["node_modules/monaco-editor"];
@@ -16,6 +17,8 @@ if (monaco?.license !== "MIT") {
   throw new Error("The editor dependency license is not approved");
 }
 const requiredFiles = [
+  "markdown.js",
+  "MERMAID_THIRD_PARTY_NOTICES.txt",
   "MONACO_THIRD_PARTY_NOTICES.txt",
   "THIRD_PARTY_NOTICES.md",
   "index.html",
@@ -96,6 +99,10 @@ if (distributedMonacoNotice !== monacoNotice) {
   throw new Error("The distributed Monaco notice is out of date");
 }
 const words = (text) => text.replace(/\s+/g, " ").trim();
+const mermaidNotice = await readFile(resolve(root, "dist", "MERMAID_THIRD_PARTY_NOTICES.txt"), "utf8");
+if (mermaidNotice !== await markdownNotices(root) || !words(licenseInventory).includes(words(mermaidNotice))) {
+  throw new Error("The Mermaid dependency notices are out of date");
+}
 if (
   !words(licenseInventory).includes(words(notice)) ||
   !words(licenseInventory).includes(words(monacoNotice))
