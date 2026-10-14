@@ -1101,10 +1101,6 @@ pub(super) fn sparkle(phase: u8) -> ImageSurface {
     })
 }
 
-pub(super) fn confetti_color(i: usize) -> u32 {
-    [0xff6f91, 0xffc53d, 0x5cc98a, 0x6fb7ff, 0xb48cff][i % 5]
-}
-
 #[cfg(test)]
 mod screen_tests {
     use super::*;

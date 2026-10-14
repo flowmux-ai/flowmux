@@ -53,8 +53,6 @@ pub(super) struct Actor {
     pub status_age: f64,
     /// Seconds since walking in through the door, while the arrival sparkles.
     pub arrived: Option<f64>,
-    /// Seconds since finishing a task, while confetti falls.
-    pub cheer: Option<f64>,
     /// A shared-event spot that overrides the rest cycle while resting.
     pub errand: Option<((f64, f64), Activity)>,
     rest_phase: usize,
@@ -92,7 +90,6 @@ impl Actor {
             reading: false,
             status_age: 0.0,
             arrived: None,
-            cheer: None,
             errand: None,
             rest_phase: 0,
             rest_elapsed: 0.0,
@@ -181,9 +178,6 @@ impl Actor {
     pub fn set_status(&mut self, status: AgentStatus) {
         if self.status == status && self.ended.is_none() {
             return;
-        }
-        if status == AgentStatus::Done && self.status != AgentStatus::Done {
-            self.cheer = Some(0.0);
         }
         self.status = status;
         self.status_age = 0.0;
@@ -306,12 +300,10 @@ impl Actor {
         if let Some(age) = self.ended.as_mut() {
             *age += dt;
         }
-        for timer in [&mut self.arrived, &mut self.cheer] {
-            if let Some(age) = timer {
-                *age += dt;
-                if *age > 2.0 {
-                    *timer = None;
-                }
+        if let Some(age) = self.arrived.as_mut() {
+            *age += dt;
+            if *age > 2.0 {
+                self.arrived = None;
             }
         }
         if !animate {
@@ -319,7 +311,6 @@ impl Actor {
             self.position = self.destination();
             self.path.clear();
             self.arrived = None;
-            self.cheer = None;
             if self.at_exit() {
                 self.exit_age = 1.0;
             }
@@ -810,23 +801,6 @@ fn effects(cr: &Context, actors: &[&Actor], frame: u32, scale: f64) {
         if actor.at_exit() && actor.exit_age < 0.6 {
             let phase = (actor.exit_age * 8.0) as u8 % 4;
             sprite::paint_scaled(cr, &props::sparkle(phase), x - 3.0, y - 24.0, scale, 1.0);
-        }
-        if let Some(age) = actor.cheer {
-            for i in 0..14u32 {
-                let spread = (i as f64 * 2.39).sin() * 18.0;
-                let lift = 26.0 + (i % 4) as f64 * 4.0;
-                let t = age * 1.6;
-                let px = x + spread * t.min(1.0);
-                let py = y - 40.0 - lift * (1.0 - t).max(0.0) + t * t * 14.0;
-                props::rect(
-                    cr,
-                    px.round(),
-                    py.round(),
-                    if i % 3 == 0 { 2.0 } else { 1.0 },
-                    1.0,
-                    props::confetti_color(i as usize),
-                );
-            }
         }
         let Some(kind) = actor.emote(frame) else {
             continue;
