@@ -2763,7 +2763,10 @@ mod tests {
             .unwrap()
             .downcast::<gtk::Image>()
             .unwrap();
-        assert_eq!(icon.icon_name().as_deref(), Some("flowmux-agent-codex"));
+        assert_eq!(
+            icon.icon_name().as_deref(),
+            Some("flowmux-agent-codex-symbolic")
+        );
         assert_eq!(icon.pixel_size(), 14);
         assert_eq!(
             icon.next_sibling()
