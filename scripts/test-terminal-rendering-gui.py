@@ -28,7 +28,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--gui", default=str(repo / "target/debug/flowmux"))
 parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
 parser.add_argument("--baseline", action="store_true")
-parser.add_argument("--case", choices=["geometry", "workspace", "scrollback", "sidebar"], default="geometry")
+parser.add_argument("--case", choices=["geometry", "workspace", "scrollback", "sidebar", "panes", "panes-restored"], default="geometry")
 args = parser.parse_args()
 args.gui = str(Path(args.gui).resolve())
 args.cli = str(Path(args.cli).resolve())
@@ -42,7 +42,8 @@ for entry in Path("/proc").iterdir():
             pass
 h = fixture.Harness(args)
 h.env.update(GTK_USE_PORTAL="0", GTK_IM_MODULE="simple")
-if args.case == "sidebar":
+divider_case = args.case in ("sidebar", "panes", "panes-restored")
+if divider_case:
     h.env["GTK_A11Y"] = "atspi"
 shell = h.root / "clean-shell"
 shell.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")
@@ -62,7 +63,7 @@ shell.chmod(0o755)
 
 try:
     h.start_display()
-    if args.case == "sidebar":
+    if divider_case:
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
         import gi
         gi.require_version("Atspi", "2.0")
@@ -73,6 +74,12 @@ try:
         sock, "workspace_create", name="Terminal rendering test", root=str(h.root)
     )["workspace_created"]["id"]
     pane = h.workspace(sock, workspace)["panes"][0]["id"]
+    if args.case in ("panes", "panes-restored"):
+        pane = h.rpc(sock, "pane_split", pane=pane, direction="vertical")["pane_split_done"]["new_pane"]
+        if args.case == "panes-restored":
+            h.close_window(process)
+            process, sock = h.window("restored-panes")
+            fixture.wait_for(lambda: h.rpc(sock, "workspace_focus", workspace=workspace), "split workspace restored")
     if args.case == "geometry":
         probe = h.root / "geometry.py"
         result_path = h.root / "geometry.json"
@@ -133,7 +140,7 @@ try:
         if not args.baseline:
             assert preserved_tab and preserved_focus, result
             h.pass_check("Workspace return preserves active tabs and last focused pane")
-    elif args.case == "sidebar":
+    elif divider_case:
         from Xlib import X, display
         from Xlib.ext import xtest
 
@@ -145,11 +152,13 @@ try:
             pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
             app = next((node for node in pending if node.get_process_id() == process.pid), None)
             pending = [app] if app else []
+            matches = []
             while pending:
                 node = pending.pop()
                 if node.get_role() == Atspi.Role.PUSH_BUTTON and node.get_name() == h.root.name:
-                    return node
+                    matches.append(node)
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
+            return max(matches, key=lambda n: n.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x) if matches else None
 
         tab = fixture.wait_for(pane_tab, "terminal tab")
 
@@ -199,13 +208,13 @@ try:
             left = next(x for x in range(edge, edge - 30, -1)
                         if cursor(x, y) != resize_cursor)
             drag(left, y, 80)
-            assert bounds().x == before, "Sidebar side of the cursor boundary must not resize either"
+            assert bounds().x == before, "Left side of the cursor boundary must not resize either"
             # The resize cursor itself must still start a working divider drag.
             assert cursor(edge, y) == resize_cursor
             drag(edge, y, 80)
-            fixture.wait_for(lambda: bounds().x > before + 40, "sidebar resized from its cursor region")
-            h.pass_check("Sidebar only resizes inside its resize cursor; adjacent terminal text selects")
-        (h.root / "sidebar.json").write_text(json.dumps(result))
+            fixture.wait_for(lambda: bounds().x > before + 40, "divider resized from its cursor region")
+            h.pass_check(f"{args.case}: divider only resizes inside its resize cursor; adjacent terminal text selects")
+        (h.root / f"{args.case}.json").write_text(json.dumps(result))
         d.close()
     else:
         from Xlib import X, XK, display

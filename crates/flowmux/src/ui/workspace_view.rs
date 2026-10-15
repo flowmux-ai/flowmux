@@ -1287,6 +1287,32 @@ pub enum MovingHandle {
 
 /// Apply the saved split ratio once GTK reports a nonzero size. Retry on a
 /// bounded number of idle callbacks so unmapped workspaces cannot loop forever.
+pub(crate) fn restrict_paned_drag_to_handle(paned: &gtk::Paned) {
+    // GTK expands the drag area beyond the handle that shows the resize cursor.
+    let controllers = paned.observe_controllers();
+    for index in 0..controllers.n_items() {
+        let Some(drag) = controllers.item(index).and_downcast::<gtk::GestureDrag>() else {
+            continue;
+        };
+        if drag.is::<gtk::GesturePan>() {
+            continue;
+        }
+        drag.connect_drag_begin(|drag, x, y| {
+            let Some(widget) = drag.widget() else {
+                return;
+            };
+            let on_handle = widget
+                .pick(x, y, gtk::PickFlags::DEFAULT)
+                .is_some_and(|picked| {
+                    picked.parent().as_ref() == Some(&widget) && picked.css_name() == "separator"
+                });
+            if !on_handle {
+                drag.set_state(gtk::EventSequenceState::Denied);
+            }
+        });
+    }
+}
+
 fn apply_ratio_when_sized(paned: &gtk::Paned, ratio: f32) {
     let weak = paned.downgrade();
     let mut attempts: u32 = 0;
@@ -1460,6 +1486,7 @@ pub fn split_pane_incremental(
         SplitDirection::Vertical => gtk::Orientation::Horizontal,
     };
     let paned = gtk::Paned::new(orient);
+    restrict_paned_drag_to_handle(&paned);
     paned.set_hexpand(true);
     paned.set_vexpand(true);
     paned.set_start_child(Some(&target_frame));
@@ -1560,6 +1587,7 @@ fn build_pane(
                 SplitDirection::Vertical => gtk::Orientation::Horizontal,
             };
             let paned = gtk::Paned::new(orient);
+            restrict_paned_drag_to_handle(&paned);
             paned.set_hexpand(true);
             paned.set_vexpand(true);
             let left = build_pane(

@@ -19,8 +19,8 @@ use crate::ui::pane_terminal::PaneCallbacks;
 use crate::ui::sidebar::{Sidebar, WorkspaceRowAgentBlock, WorkspaceRowDetails};
 use crate::ui::workspace_view::{
     attach_surface_to_pane, build_surface, build_surface_tab_widget, can_split_pane_incrementally,
-    handoff_paned_focus_before_detach, solo_workspace_pane, split_pane_incremental,
-    IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
+    handoff_paned_focus_before_detach, restrict_paned_drag_to_handle, solo_workspace_pane,
+    split_pane_incremental, IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
 };
 use crate::ui::worktree_panel::WorktreePanel;
 use adw::prelude::*;
@@ -787,29 +787,7 @@ fn build_split_window_shell(
         .position(sidebar_position)
         .build();
     split.add_css_class("flowmux-window-split");
-    // GTK expands the drag area beyond the handle that shows the resize cursor.
-    let controllers = split.observe_controllers();
-    for index in 0..controllers.n_items() {
-        let Some(drag) = controllers.item(index).and_downcast::<gtk::GestureDrag>() else {
-            continue;
-        };
-        if drag.is::<gtk::GesturePan>() {
-            continue;
-        }
-        drag.connect_drag_begin(|drag, x, y| {
-            let Some(widget) = drag.widget() else {
-                return;
-            };
-            let on_handle = widget
-                .pick(x, y, gtk::PickFlags::DEFAULT)
-                .is_some_and(|picked| {
-                    picked.parent().as_ref() == Some(&widget) && picked.css_name() == "separator"
-                });
-            if !on_handle {
-                drag.set_state(gtk::EventSequenceState::Denied);
-            }
-        });
-    }
+    restrict_paned_drag_to_handle(&split);
     split
 }
 
