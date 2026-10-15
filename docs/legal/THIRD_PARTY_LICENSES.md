@@ -2472,7 +2472,7 @@ Used by: utf8parse 0.2.2
 Copyright (c) 2016 Joe Wilm
 ~~~~
 
-Used by: hyper-rustls 0.27.9, rustls 0.23.45, rustls-native-certs 0.8.3
+Used by: hyper-rustls 0.27.9, rustls 0.23.46, rustls-native-certs 0.8.3
 
 ~~~~text
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
