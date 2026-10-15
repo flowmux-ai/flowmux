@@ -927,7 +927,7 @@ impl GuiHandler {
                 let store = self.inner.store();
                 let mut tab = Ok(None);
                 if agent.eq_ignore_ascii_case("codex") {
-                    tab = store.codex_session_tab(&session_id, None, false).await;
+                    tab = store.codex_session_tab(&session_id, None).await;
                     if matches!(tab, Ok(None)) {
                         let id = session_id.clone();
                         // Only native SessionStart may use cwd before the first
@@ -944,7 +944,7 @@ impl GuiHandler {
                         });
                         if let Some((names, cwd)) = thread.await.ok().flatten() {
                             tab = store
-                                .codex_session_tab(&session_id, Some((&names, &cwd)), session_start)
+                                .codex_session_tab(&session_id, Some((&names, &cwd)))
                                 .await;
                         }
                     }

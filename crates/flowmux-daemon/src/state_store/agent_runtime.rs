@@ -481,7 +481,6 @@ impl StateStore {
         &self,
         session_id: &str,
         thread: Option<(&HashMap<String, String>, &Path)>,
-        session_start: bool,
     ) -> Result<Option<(PaneId, SurfaceId, Option<String>)>, bool> {
         fn for_each_tab(pane: &Pane, f: &mut impl FnMut(PaneId, &PaneSurface)) {
             match pane {
@@ -520,11 +519,6 @@ impl StateStore {
                 return;
             };
             if !flowmux_state::session_history::same_directory(tab_cwd, cwd) {
-                return;
-            }
-            // /new can report its ID before the TUI replaces the old title.
-            if session_start {
-                unnamed.push(found);
                 return;
             }
             let claimed = agent.session_id.as_ref();

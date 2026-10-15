@@ -5470,8 +5470,7 @@ mod tests {
             store
                 .codex_session_tab(
                     "session",
-                    Some((&names, std::path::Path::new("/tmp/same-root"))),
-                    false,
+                    Some((&names, std::path::Path::new("/tmp/same-root")))
                 )
                 .await,
             Err(false)
@@ -5486,7 +5485,6 @@ mod tests {
             store.codex_session_tab(
                 "session",
                 Some((&names, std::path::Path::new("/tmp/same-root"))),
-                false,
             )
         };
         assert_eq!(lookup().await, Err(false));
@@ -5494,8 +5492,7 @@ mod tests {
             store
                 .codex_session_tab(
                     "new-session",
-                    Some((&names, std::path::Path::new("/tmp/same-root"))),
-                    true,
+                    Some((&names, std::path::Path::new("/tmp/same-root")))
                 )
                 .await,
             Err(false)
@@ -5522,6 +5519,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_session_tab_start_preserves_title_attribution() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let cwd = std::path::Path::new("/tmp/same-root");
+        let names = HashMap::from([
+            ("s1".to_string(), "First task".to_string()),
+            ("s2".to_string(), "Second task".to_string()),
+        ]);
+        let mut targets = Vec::new();
+        for title in ["First task | project", "Second task | project"] {
+            let ws = store.create_workspace(None, cwd.into()).await;
+            let ws = store.get_workspace(ws).await.unwrap();
+            let pane = first_pane(&ws);
+            let surface = first_pane_active_surface(&ws);
+            store
+                .reconcile_process_agents(&[(surface, Some("codex"))])
+                .await;
+            store
+                .update_surface_auto_title(pane, surface, title.into())
+                .await;
+            targets.push((pane, surface));
+            if targets.len() == 1 {
+                let mut report = AgentStatusReport::from_activity(
+                    "codex",
+                    Some(flowmux_core::AgentActivity::Running),
+                    None,
+                );
+                report.source = Some("flowmux:hook".into());
+                report.session_id = Some("s1".into());
+                report.seq = Some(1);
+                store.report_agent_status(surface, report).await;
+                // A different session in the directory cannot displace this one.
+                assert_eq!(
+                    store.codex_session_tab("s2", Some((&names, cwd))).await,
+                    Ok(None)
+                );
+            }
+        }
+        // A resume with a matching title still resolves among same-cwd panes.
+        assert_eq!(
+            store.codex_session_tab("s2", Some((&names, cwd))).await,
+            Ok(Some((targets[1].0, targets[1].1, None))),
+        );
+    }
+
+    #[tokio::test]
     async fn codex_session_tab_uses_reported_session_then_title_and_directory() {
         use std::path::Path;
         let store = StateStore::new_lazy(State::default());
@@ -5536,9 +5578,8 @@ mod tests {
             ("s1".into(), "Fix bug".into()),
             ("s2".into(), "Other".into()),
         ]);
-        let find = |session, names, cwd| {
-            store.codex_session_tab(session, Some((names, Path::new(cwd))), false)
-        };
+        let find =
+            |session, names, cwd| store.codex_session_tab(session, Some((names, Path::new(cwd))));
 
         // A tab without a Codex process is never a match.
         assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), None);
@@ -5546,10 +5587,7 @@ mod tests {
             .reconcile_process_agents(&[(surface, Some("codex"))])
             .await;
         let tab = Some((pane, surface, None));
-        assert_eq!(
-            store.codex_session_tab("s1", None, false).await.unwrap(),
-            None
-        );
+        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), None);
 
         // The only Codex tab in the directory that names no thread yet.
         assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), tab);
@@ -5581,20 +5619,14 @@ mod tests {
         };
         store.report_agent_status(surface, report).await;
         let reported = Some((pane, surface, Some("s1".into())));
-        assert_eq!(
-            store.codex_session_tab("s1", None, false).await.unwrap(),
-            reported
-        );
-        assert_eq!(
-            store.codex_session_tab("s2", None, false).await.unwrap(),
-            None
-        );
+        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), reported);
+        assert_eq!(store.codex_session_tab("s2", None).await.unwrap(), None);
         assert_eq!(
             store
-                .codex_session_tab("fresh", Some((&unnamed, Path::new("/tmp/demo"))), true)
+                .codex_session_tab("fresh", Some((&unnamed, Path::new("/tmp/demo"))))
                 .await
                 .unwrap(),
-            reported,
+            None,
         );
 
         // Its title names the other thread now: that session takes the tab over.

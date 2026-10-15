@@ -49,9 +49,16 @@ def main():
         (config / "options.json").write_text(json.dumps({"default_shell": str(shell)}))
         source = h.root / "agent.c"
         source.write_text(r'''#include <stdio.h>
+#include <string.h>
 int main(void) {
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
+        if (line[0] == 't') {
+            line[strcspn(line, "\n")] = 0;
+            printf("\033]2;%s\007", line + 1);
+            fflush(stdout);
+            continue;
+        }
         printf("\033[2J\033[H");
         if (line[0] != 'i')
             printf("• Waiting for background terminal (%cs • esc to interrupt)\n", line[0]);
@@ -218,8 +225,13 @@ int main(void) {
                         "raw", "BGRX").save(h.root / "agents-working.png")
         h.pass_check("Agents visibly shows recovered Codex progress")
 
-        # A native root start may precede transcript persistence. It must
-        # replace the old binding; an unpersisted Stop must not do so.
+        # A native start from elsewhere in the same cwd must not replace a
+        # named live session, even before the incoming transcript is written.
+        index = Path(h.env["CODEX_HOME"]) / "session_index.jsonl"
+        index.write_text(json.dumps(dict(id=root_session, thread_name="Original task")) + "\n")
+        screen("tOriginal task | project")
+        gui.wait_for(lambda: h.workspace(socket, ws["id"])["panes"][0]["tabs"][0]["title"]
+                     == "Original task | project", "original session title")
         fresh_session = "44444444-4444-4444-8444-444444444444"
         hook(fresh_session, "stop", turn_id="ephemeral-title")
         assert observed().get("session_id") == root_session, observed()
@@ -227,11 +239,46 @@ int main(void) {
         assert observed().get("session_id") == root_session, observed()
         hook("22222222-2222-4222-8222-222222222222", "session-start", source="startup")
         assert observed().get("session_id") == root_session, observed()
+        for source_kind in ("startup", "resume", "clear"):
+            hook(fresh_session, "session-start", source=source_kind)
+            assert observed().get("session_id") == root_session, observed()
+            assert observed()["status"] == "working", observed()
+        gui.wait_for(progress_label, "foreign start preserves visible working status")
+        h.pass_check("Foreign native starts preserve the named live session and progress")
+
+        # A title reset after a named thread supplies evidence of /new.
+        screen("tcodex")
+        gui.wait_for(lambda: h.workspace(socket, ws["id"])["panes"][0]["tabs"][0]["title"]
+                     == "codex", "new session title reset")
         hook(fresh_session, "session-start", source="clear")
         gui.wait_for(lambda: observed().get("session_id") == fresh_session,
                      "new root session before transcript")
         assert not list(history.glob(f"*{fresh_session}.jsonl"))
-        h.pass_check("Unpersisted native root start replaces the old session binding")
+        h.pass_check("Unpersisted native start binds after the terminal title resets")
+
+        # Native starts must still use distinct titles to resolve same-cwd tabs.
+        resumed_session = "55555555-5555-4555-8555-555555555555"
+        with index.open("a") as stream:
+            for session, title in ((fresh_session, "First task"), (resumed_session, "Second task")):
+                stream.write(json.dumps(dict(id=session, thread_name=title)) + "\n")
+        (history / f"rollout-{resumed_session}.jsonl").write_text(json.dumps(dict(
+            type="session_meta", payload=dict(id=resumed_session, cwd=str(h.root), source="cli"))) + "\n")
+        screen("tFirst task | project")
+        second_ws = h.workspace(socket, away["workspace_created"]["id"])
+        second_pane = second_ws["panes"][0]["id"]
+        h.send(socket, second_pane, "exec " + shlex.quote(str(executable)))
+        h.rpc(socket, "pane_send_keys", pane=second_pane, keys="tSecond task | project\r")
+
+        def second_tab():
+            return h.workspace(socket, second_ws["id"])["panes"][0]["tabs"][0]
+
+        gui.wait_for(lambda: second_tab().get("agent") and second_tab()["title"]
+                     == "Second task | project", "second Codex title")
+        hook(resumed_session, "session-start", source="resume")
+        gui.wait_for(lambda: second_tab()["agent"].get("session_id") == resumed_session,
+                     "native resume follows its unique title")
+        assert observed().get("session_id") == fresh_session, observed()
+        h.pass_check("Native resume selects its title among same-directory Codex panes")
         h.close_window(process)
     finally:
         if connection:
