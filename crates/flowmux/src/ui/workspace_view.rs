@@ -1933,7 +1933,7 @@ pub(crate) fn build_surface_tab_widget(
         close.connect_clicked(move |_| (cb.borrow_mut())(pane_id, surface_id));
     }
     // Right-click on a tab opens a small context menu. Terminal tabs
-    // get "Show in folder" + "Copy path"; browser tabs get just
+    // get "Show in folder", "Copy path", and "Copy session ID"; browser tabs get just
     // "Copy URL". Browser tabs have no cwd so "Show in folder" is
     // intentionally absent rather than disabled.
     attach_tab_context_menu(&tab, pane_id, surface, callbacks);
@@ -1953,6 +1953,7 @@ fn attach_tab_context_menu(
     let tab_for_click = tab.downgrade();
     let on_show = callbacks.on_show_surface_folder.clone();
     let on_copy = callbacks.on_copy_surface_text.clone();
+    let on_copy_session_id = callbacks.on_copy_surface_session_id.clone();
     let list_workspaces = callbacks.list_workspaces.clone();
     let workspace_of_pane = callbacks.workspace_of_pane.clone();
     let on_move_to_workspace = callbacks.on_move_surface_to_workspace.clone();
@@ -2000,6 +2001,17 @@ fn attach_tab_context_menu(
                 (cb.borrow_mut())(pane_id, surface_id);
             });
             v.append(&copy_btn);
+
+            let copy_session = mk("Copy session ID");
+            let pop = popover.downgrade();
+            let cb = on_copy_session_id.clone();
+            copy_session.connect_clicked(move |_| {
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
+                (cb.borrow_mut())(pane_id, surface_id);
+            });
+            v.append(&copy_session);
         } else {
             let copy_btn = mk("Copy URL");
             let pop = popover.downgrade();

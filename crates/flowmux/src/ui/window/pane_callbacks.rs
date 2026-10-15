@@ -213,6 +213,12 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::CopySurfaceText { pane, surface });
                 }))
             },
+            on_copy_surface_session_id: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane, surface| {
+                    dispatch_detached(&bridge, GtkCommand::CopySurfaceSessionId { pane, surface });
+                }))
+            },
             on_tab_drag_to_new_window: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, surface| {

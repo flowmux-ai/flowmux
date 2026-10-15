@@ -2998,6 +2998,7 @@ impl WindowController {
             | GtkCommand::OpenMarkdownViewer { .. }
             | GtkCommand::ShowSurfaceFolder { .. }
             | GtkCommand::CopySurfaceText { .. }
+            | GtkCommand::CopySurfaceSessionId { .. }
             | GtkCommand::CopyFocusedPaneText { .. }
             | GtkCommand::ShowFocusedPaneFolder { .. }) => {
                 self.dispatch_window_chrome_command(command).await;
@@ -4912,6 +4913,78 @@ mod tests {
             .pane_frame(pane)
             .unwrap()
             .has_css_class("flowmux-pane-zoomed"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn copy_session_id_uses_only_the_clicked_surfaces_current_agent() {
+        let (controller, _, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.CopySessionId").await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let clipboard = controller.window.clipboard();
+        clipboard.set_text("keep clipboard");
+
+        for session_id in [None, Some(""), Some("  "), Some("session-to-copy")] {
+            let mut agent = flowmux_core::AgentPresence::new(
+                "codex",
+                flowmux_core::AgentActivity::Idle,
+                Some(std::process::id()),
+            );
+            agent.session_id = session_id.map(str::to_string);
+            controller
+                .store
+                .set_agent_activity(surface, Some(agent))
+                .await;
+            controller
+                .dispatch(GtkCommand::CopySurfaceSessionId { pane, surface })
+                .await;
+            let expected = if session_id == Some("session-to-copy") {
+                "Copied session ID: session-to-copy"
+            } else {
+                "No agent"
+            };
+            assert_eq!(controller.clipboard_toast.current_message(), expected);
+            assert!(controller.clipboard_toast.widget().reveals_child());
+            assert_eq!(
+                clipboard
+                    .read_text_future()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .as_str(),
+                if session_id == Some("session-to-copy") {
+                    "session-to-copy"
+                } else {
+                    "keep clipboard"
+                }
+            );
+        }
+
+        // Another tab/pane must never borrow this agent's session ID.
+        for (pane, surface) in [(pane, SurfaceId::new()), (PaneId::new(), surface)] {
+            controller
+                .dispatch(GtkCommand::CopySurfaceSessionId { pane, surface })
+                .await;
+            assert_eq!(controller.clipboard_toast.current_message(), "No agent");
+        }
+        controller.store.set_agent_activity(surface, None).await;
+        controller
+            .dispatch(GtkCommand::CopySurfaceSessionId { pane, surface })
+            .await;
+        assert_eq!(controller.clipboard_toast.current_message(), "No agent");
+        assert_eq!(
+            clipboard
+                .read_text_future()
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "session-to-copy"
+        );
     }
 
     fn workspace_with_tabbed_surface(

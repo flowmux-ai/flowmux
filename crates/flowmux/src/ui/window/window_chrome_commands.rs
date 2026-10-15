@@ -231,6 +231,23 @@ impl WindowController {
                     }
                 }
             }
+            GtkCommand::CopySurfaceSessionId { pane, surface } => {
+                let session_id = self
+                    .store
+                    .located_agent_presence(surface)
+                    .await
+                    .filter(|agent| agent.pane == pane)
+                    .and_then(|agent| agent.presence.session_id)
+                    .filter(|id| !id.trim().is_empty());
+                match session_id {
+                    Some(id) => {
+                        self.window.clipboard().set_text(&id);
+                        self.clipboard_toast
+                            .show_with_message(&format!("Copied session ID: {id}"));
+                    }
+                    None => self.clipboard_toast.show_with_message("No agent"),
+                }
+            }
             GtkCommand::CopyFocusedPaneText { workspace } => {
                 let ws = self.store.get_workspace(workspace).await;
                 let Some(ws) = ws else {

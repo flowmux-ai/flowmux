@@ -79,6 +79,8 @@ pub struct PaneCallbacks {
     /// the same callback is reused by both terminal and browser
     /// right-click menus.
     pub on_copy_surface_text: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
+    /// Terminal body/tab right-click "Copy session ID".
+    pub on_copy_surface_session_id: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
     /// A tab drag ended without landing on another tab drop target. The caller
     /// moves that live surface into a new top-level window and removes it from
     /// the source pane.
@@ -179,6 +181,7 @@ impl PaneCallbacks {
             on_rename_surface: Rc::new(RefCell::new(|_, _| {})),
             on_show_surface_folder: Rc::new(RefCell::new(|_, _| {})),
             on_copy_surface_text: Rc::new(RefCell::new(|_, _| {})),
+            on_copy_surface_session_id: Rc::new(RefCell::new(|_, _| {})),
             on_tab_drag_to_new_window: Rc::new(RefCell::new(|_, _| {})),
             on_move_surface_to_workspace: Rc::new(RefCell::new(|_, _, _| {})),
             on_split_surface_into_pane: Rc::new(RefCell::new(|_, _, _, _, _| {})),

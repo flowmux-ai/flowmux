@@ -928,6 +928,7 @@ impl GhosttyPane {
             let on_split_down = callbacks.on_split_down.clone();
             let on_close_pane = callbacks.on_close_pane.clone();
             let on_copy_text = callbacks.on_copy_surface_text.clone();
+            let on_copy_session_id = callbacks.on_copy_surface_session_id.clone();
             let surface_for_menu = surface;
             let pane_id = pane_id.clone();
             let term_widget = term.downgrade();
@@ -1036,6 +1037,17 @@ impl GhosttyPane {
                     (cb.borrow_mut())(id, surface_for_menu);
                 });
                 v.append(&copy_path);
+
+                let copy_session = mk("Copy session ID");
+                let pop = popover.downgrade();
+                let cb = on_copy_session_id.clone();
+                copy_session.connect_clicked(move |_| {
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
+                    (cb.borrow_mut())(id, surface_for_menu);
+                });
+                v.append(&copy_session);
 
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 

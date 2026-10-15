@@ -738,6 +738,11 @@ pub enum GtkCommand {
         pane: PaneId,
         surface: SurfaceId,
     },
+    /// Copy the clicked terminal surface's current agent session ID.
+    CopySurfaceSessionId {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Copy the workspace's currently-focused pane's text identifier
     /// (terminal cwd or browser URL) to the clipboard. Used by the
     /// sidebar workspace right-click "Copy path" item; uses the same
