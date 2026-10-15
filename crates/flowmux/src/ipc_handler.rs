@@ -13,7 +13,7 @@ use flowmux_core::{AgentStatusReport, SplitDirection};
 use flowmux_daemon::{tmux_compat::TmuxCompatUi, DaemonHandler};
 use flowmux_ipc::protocol::{Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
-use flowmux_state::session_history::{codex_session_cwd, codex_thread_names, SessionAgent};
+use flowmux_state::session_history::{codex_thread_names, SessionAgent};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -921,25 +921,30 @@ impl GuiHandler {
             Request::AgentSurfaceResolve {
                 agent,
                 session_id,
-                cwd: _,
+                cwd,
+                session_start,
             } => {
                 let store = self.inner.store();
                 let mut tab = Ok(None);
                 if agent.eq_ignore_ascii_case("codex") {
-                    tab = store.codex_session_tab(&session_id, None).await;
+                    tab = store.codex_session_tab(&session_id, None, false).await;
                     if matches!(tab, Ok(None)) {
                         let id = session_id.clone();
-                        // Shared-daemon title jobs also send Stop with a cwd.
-                        // Only persisted root sessions can claim an unbound tab.
+                        // Only native SessionStart may use cwd before the first
+                        // transcript write; title-job Stop must still prove a root session.
                         let thread = tokio::task::spawn_blocking(move || {
                             let home = SessionAgent::Codex.env_history_home()?;
-                            let cwd = codex_session_cwd(&home, &id)?;
+                            let cwd = flowmux_state::session_history::codex_session_start_cwd(
+                                &home,
+                                &id,
+                                cwd.filter(|_| session_start),
+                            )?;
                             let names = codex_thread_names(&home).into_iter().collect();
                             Some((names, cwd))
                         });
                         if let Some((names, cwd)) = thread.await.ok().flatten() {
                             tab = store
-                                .codex_session_tab(&session_id, Some((&names, &cwd)))
+                                .codex_session_tab(&session_id, Some((&names, &cwd)), session_start)
                                 .await;
                         }
                     }

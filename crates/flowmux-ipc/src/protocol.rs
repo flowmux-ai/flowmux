@@ -670,6 +670,9 @@ pub enum Request {
         session_id: String,
         #[serde(default)]
         cwd: Option<PathBuf>,
+        /// A native root SessionStart can precede Codex's first transcript write.
+        #[serde(default)]
+        session_start: bool,
     },
 
     /// Report a change in an AI agent's live activity inside a surface,

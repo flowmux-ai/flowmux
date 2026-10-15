@@ -974,8 +974,13 @@ pub(crate) async fn run_generic_agent_hook_event(
             tracing::debug!(target: "flowmux_agent", reason = "missing_session", "Codex route rejected");
             return Ok(());
         };
+        let session_start = matches!(event, AgentHookEvent::SessionStart { .. })
+            && matches!(
+                input.source.as_deref(),
+                Some("startup" | "resume" | "clear")
+            );
         let Some((client, pane, surface, other_session)) =
-            resolve_codex_tab(session_id, input.cwd.as_deref()).await
+            resolve_codex_tab(session_id, input.cwd.as_deref(), session_start).await
         else {
             tracing::debug!(target: "flowmux_agent", reason = "route_unavailable", "Codex route rejected");
             return Ok(());

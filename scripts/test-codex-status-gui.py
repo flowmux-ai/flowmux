@@ -217,6 +217,21 @@ int main(void) {
         Image.frombytes("RGB", (geometry.width, geometry.height), raw.data,
                         "raw", "BGRX").save(h.root / "agents-working.png")
         h.pass_check("Agents visibly shows recovered Codex progress")
+
+        # A native root start may precede transcript persistence. It must
+        # replace the old binding; an unpersisted Stop must not do so.
+        fresh_session = "44444444-4444-4444-8444-444444444444"
+        hook(fresh_session, "stop", turn_id="ephemeral-title")
+        assert observed().get("session_id") == root_session, observed()
+        hook(fresh_session, "session-start", source="subagent")
+        assert observed().get("session_id") == root_session, observed()
+        hook("22222222-2222-4222-8222-222222222222", "session-start", source="startup")
+        assert observed().get("session_id") == root_session, observed()
+        hook(fresh_session, "session-start", source="clear")
+        gui.wait_for(lambda: observed().get("session_id") == fresh_session,
+                     "new root session before transcript")
+        assert not list(history.glob(f"*{fresh_session}.jsonl"))
+        h.pass_check("Unpersisted native root start replaces the old session binding")
         h.close_window(process)
     finally:
         if connection:

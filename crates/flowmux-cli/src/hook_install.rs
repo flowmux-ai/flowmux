@@ -2821,6 +2821,7 @@ fn antigravity_command_entry(flowmux_bin: &str, subcommand: &str) -> Value {
 
 fn antigravity_hook_group(flowmux_bin: &str) -> Value {
     json!({
+        "SessionStart": [antigravity_command_entry(flowmux_bin, "session-start")],
         "PreInvocation": [antigravity_command_entry(flowmux_bin, "running")],
         "PostToolUse": [{
             "matcher": "*",
@@ -2854,7 +2855,7 @@ fn antigravity_command_matches(value: &Value, subcommand: &str) -> bool {
 }
 
 fn antigravity_group_matches(group: &Value) -> bool {
-    let Some(group) = group.as_object().filter(|group| group.len() == 3) else {
+    let Some(group) = group.as_object().filter(|group| group.len() == 4) else {
         return false;
     };
     let flat_event_matches = |name: &str, subcommand: &str| {
@@ -2878,7 +2879,8 @@ fn antigravity_group_matches(group: &Value) -> bool {
                     .filter(|hooks| hooks.len() == 1)
                     .is_some_and(|hooks| antigravity_command_matches(&hooks[0], "running"))
         });
-    flat_event_matches("PreInvocation", "running")
+    flat_event_matches("SessionStart", "session-start")
+        && flat_event_matches("PreInvocation", "running")
         && post_tool_use_matches
         && flat_event_matches("Stop", "stop")
 }
@@ -4605,7 +4607,11 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
 
         assert_eq!(antigravity_plugin_manifest(), json!({ "name": "flowmux" }));
         assert!(antigravity_group_matches(&group));
-        for (event, subcommand) in [("PreInvocation", "running"), ("Stop", "stop")] {
+        for (event, subcommand) in [
+            ("SessionStart", "session-start"),
+            ("PreInvocation", "running"),
+            ("Stop", "stop"),
+        ] {
             let hook = &group[event][0];
             assert!(antigravity_command_matches(hook, subcommand));
             assert_eq!(hook["timeout"], ANTIGRAVITY_HOOK_TIMEOUT_SECS);
@@ -4622,6 +4628,12 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         assert!(pre_invocation.contains("printf '%s' '{}'"));
         assert!(post_tool_use.contains("printf '%s' '{}'"));
         assert!(stop.contains(r#"printf '%s' '{"decision":""}'"#));
+        let mut missing_start = group;
+        missing_start
+            .as_object_mut()
+            .unwrap()
+            .remove("SessionStart");
+        assert!(!antigravity_group_matches(&missing_start));
     }
 
     #[test]

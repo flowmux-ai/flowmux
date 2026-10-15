@@ -50,6 +50,9 @@ pub struct ClaudeHookInput {
     /// Directory the session was started in.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Native SessionStart matcher (startup/resume/clear), not a turn completion.
+    #[serde(default)]
+    pub source: Option<String>,
     /// Set when `Notification` fires for permission/info popups.
     #[serde(default)]
     pub message: Option<String>,
@@ -570,13 +573,14 @@ pub fn started_by_codex_app_server() -> bool {
 pub async fn resolve_codex_tab(
     session_id: &str,
     cwd: Option<&str>,
+    session_start: bool,
 ) -> Option<(Client, PaneId, SurfaceId, bool)> {
     // Per-PID sockets share the directory and name of this probe path.
     let probe = flowmux_config::paths::runtime_socket_for_pid(0);
     let name = probe.file_name()?.to_string_lossy().into_owned();
     let mut sockets = pid_sockets_in(probe.parent()?, name.strip_suffix("0.sock")?);
     sockets.extend(scan_pid_sockets().unwrap_or_default());
-    resolve_codex_tab_at(sockets, session_id, cwd, false).await
+    resolve_codex_tab_at(sockets, session_id, cwd, false, session_start).await
 }
 
 /// Resolve an exact session binding for commands that create panes. Directory
@@ -626,7 +630,7 @@ pub async fn resolve_codex_source(
         }
         sockets.push(hint);
     }
-    Ok(resolve_codex_tab_at(sockets, session_id, None, true).await)
+    Ok(resolve_codex_tab_at(sockets, session_id, None, true, false).await)
 }
 
 async fn resolve_codex_tab_at(
@@ -634,6 +638,7 @@ async fn resolve_codex_tab_at(
     session_id: &str,
     cwd: Option<&str>,
     exact_only: bool,
+    session_start: bool,
 ) -> Option<(Client, PaneId, SurfaceId, bool)> {
     // Count endpoints, not aliases (including symlinked runtime directories).
     for socket in &mut sockets {
@@ -652,6 +657,7 @@ async fn resolve_codex_tab_at(
             agent: "codex".into(),
             session_id: session_id.into(),
             cwd: cwd.map(PathBuf::from),
+            session_start,
         };
         let reply = tokio::time::timeout(HOOK_NOTIFY_TIMEOUT, ask_window(&socket, request)).await;
         match reply {
@@ -840,14 +846,15 @@ mod tests {
                     }
                 }));
             }
-            let strict = resolve_codex_tab_at(sockets.clone(), "session", None, true).await;
+            let strict = resolve_codex_tab_at(sockets.clone(), "session", None, true, false).await;
             let strict_expected = expected.filter(|i| kinds.chars().nth(*i) == Some('e'));
             assert_eq!(
                 strict.map(|(_, _, surface, _)| surface),
                 strict_expected.map(|i| surfaces[i]),
                 "strict {kinds}"
             );
-            let chosen = resolve_codex_tab_at(sockets, "session", Some("/same"), false).await;
+            let chosen =
+                resolve_codex_tab_at(sockets, "session", Some("/same"), false, false).await;
             assert_eq!(
                 chosen.map(|(_, _, surface, _)| surface),
                 expected.map(|i| surfaces[i]),

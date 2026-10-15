@@ -534,12 +534,21 @@ pub fn codex_thread_names(home: &Path) -> Vec<(String, String)> {
 
 /// Directory a Codex session was started in.
 pub fn codex_session_cwd(home: &Path, id: &str) -> Option<PathBuf> {
+    codex_session_start_cwd(home, id, None)
+}
+
+/// A native root SessionStart can precede persistence. Existing child or invalid
+/// transcripts must never fall back to the hook's directory.
+pub fn codex_session_start_cwd(home: &Path, id: &str, cwd: Option<PathBuf>) -> Option<PathBuf> {
     let mut paths = Vec::new();
     collect(&home.join("sessions"), 3, &mut paths).ok()?;
     let suffix = format!("{id}.jsonl");
-    let path = paths
+    let Some(path) = paths
         .into_iter()
-        .find(|path| path.to_string_lossy().ends_with(&suffix))?;
+        .find(|path| path.to_string_lossy().ends_with(&suffix))
+    else {
+        return cwd.filter(|cwd| cwd.is_absolute());
+    };
     Some(session(path, SessionAgent::Codex).ok()??.cwd)
 }
 
@@ -623,6 +632,38 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(path, format!("{text}\n")).unwrap();
+    }
+
+    #[test]
+    fn codex_start_directory_fallback_never_accepts_existing_child_transcripts() {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = Some(PathBuf::from("/work/app"));
+        assert_eq!(codex_session_cwd(home.path(), ID), None);
+        assert_eq!(codex_session_start_cwd(home.path(), ID, cwd.clone()), cwd);
+        assert_eq!(
+            codex_session_start_cwd(home.path(), ID, Some("relative".into())),
+            None
+        );
+        let path = home
+            .path()
+            .join(format!("sessions/2026/10/15/rollout-{ID}.jsonl"));
+        write(
+            &path,
+            &[
+                json!({"type":"session_meta","payload":{"id":ID,"cwd":"/work/app","source":{"subagent":{}}}}),
+            ],
+        );
+        assert_eq!(codex_session_start_cwd(home.path(), ID, cwd.clone()), None);
+        write(
+            &path,
+            &[
+                json!({"type":"session_meta","payload":{"id":ID,"cwd":"/work/original","source":"cli"}}),
+            ],
+        );
+        assert_eq!(
+            codex_session_start_cwd(home.path(), ID, cwd),
+            Some("/work/original".into())
+        );
     }
 
     #[test]

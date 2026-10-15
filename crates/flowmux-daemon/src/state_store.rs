@@ -5470,7 +5470,8 @@ mod tests {
             store
                 .codex_session_tab(
                     "session",
-                    Some((&names, std::path::Path::new("/tmp/same-root")))
+                    Some((&names, std::path::Path::new("/tmp/same-root"))),
+                    false,
                 )
                 .await,
             Err(false)
@@ -5485,9 +5486,20 @@ mod tests {
             store.codex_session_tab(
                 "session",
                 Some((&names, std::path::Path::new("/tmp/same-root"))),
+                false,
             )
         };
         assert_eq!(lookup().await, Err(false));
+        assert_eq!(
+            store
+                .codex_session_tab(
+                    "new-session",
+                    Some((&names, std::path::Path::new("/tmp/same-root"))),
+                    true,
+                )
+                .await,
+            Err(false)
+        );
         for (index, (_, surface)) in targets.iter().enumerate() {
             let mut report = AgentStatusReport::from_activity(
                 "codex",
@@ -5524,8 +5536,9 @@ mod tests {
             ("s1".into(), "Fix bug".into()),
             ("s2".into(), "Other".into()),
         ]);
-        let find =
-            |session, names, cwd| store.codex_session_tab(session, Some((names, Path::new(cwd))));
+        let find = |session, names, cwd| {
+            store.codex_session_tab(session, Some((names, Path::new(cwd))), false)
+        };
 
         // A tab without a Codex process is never a match.
         assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), None);
@@ -5533,7 +5546,10 @@ mod tests {
             .reconcile_process_agents(&[(surface, Some("codex"))])
             .await;
         let tab = Some((pane, surface, None));
-        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), None);
+        assert_eq!(
+            store.codex_session_tab("s1", None, false).await.unwrap(),
+            None
+        );
 
         // The only Codex tab in the directory that names no thread yet.
         assert_eq!(find("s1", &unnamed, "/tmp/demo").await.unwrap(), tab);
@@ -5565,8 +5581,21 @@ mod tests {
         };
         store.report_agent_status(surface, report).await;
         let reported = Some((pane, surface, Some("s1".into())));
-        assert_eq!(store.codex_session_tab("s1", None).await.unwrap(), reported);
-        assert_eq!(store.codex_session_tab("s2", None).await.unwrap(), None);
+        assert_eq!(
+            store.codex_session_tab("s1", None, false).await.unwrap(),
+            reported
+        );
+        assert_eq!(
+            store.codex_session_tab("s2", None, false).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .codex_session_tab("fresh", Some((&unnamed, Path::new("/tmp/demo"))), true)
+                .await
+                .unwrap(),
+            reported,
+        );
 
         // Its title names the other thread now: that session takes the tab over.
         store
