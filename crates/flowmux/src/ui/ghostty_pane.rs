@@ -1479,10 +1479,18 @@ fn validated_terminal_file_candidate<'a>(
     cwd: Option<&std::path::Path>,
 ) -> Option<&'a str> {
     loop {
-        if terminal_file_path(raw, cwd).is_some_and(|path| terminal_file_kind(&path).is_some()) {
-            return Some(raw);
+        if let Some(path) = terminal_file_path(raw, cwd) {
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => return terminal_file_kind(&path).map(|_| raw),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidFilename
+                    ) => {}
+                Err(_) => return None,
+            }
         }
-        // Prefer real filenames; otherwise unwrap paths in prose such as `(README.md)를`.
+        // Only missing filenames may be paths wrapped in prose such as `(README.md)를`.
         let inner = raw.strip_prefix('(')?;
         let mut depth = 0;
         let end = inner.char_indices().find_map(|(index, ch)| {
@@ -3691,6 +3699,13 @@ mod tests {
             validated_terminal_file_candidate(&format!("({absolute})를"), None),
             Some(absolute.as_str())
         );
+        // Wrapping a valid filename can exceed the filesystem's component length limit.
+        let long_name = format!("{}.md", "a".repeat(250));
+        std::fs::write(root.path().join(&long_name), "# Long filename\n").unwrap();
+        assert_eq!(
+            validated_terminal_file_candidate(&format!("({long_name})를"), Some(root.path())),
+            Some(long_name.as_str())
+        );
     }
 
     #[gtk::test]
@@ -3751,15 +3766,19 @@ mod tests {
                 );
             }
         }
-        // An actual filename wins over prose, including when it appears or disappears mid-hover.
+        // Revalidate the original filename when its contents or existence change mid-hover.
         let literal = "(README.md)를";
         state.borrow_mut().position = Some((
             1.5 * term.char_width() as f64,
             0.5 * term.char_height() as f64,
         ));
-        for exists in [true, false] {
-            if exists {
-                std::fs::write(root.path().join(literal), "# Literal filename\n").unwrap();
+        for (content, expected) in [
+            (Some("# Literal filename\n"), Some(literal)),
+            (Some("binary\0data"), None),
+            (None, Some("README.md")),
+        ] {
+            if let Some(content) = content {
+                std::fs::write(root.path().join(literal), content).unwrap();
             } else {
                 std::fs::remove_file(root.path().join(literal)).unwrap();
             }
@@ -3767,12 +3786,68 @@ mod tests {
             refresh_file_link_hover(&term, &regex, &pid, &state);
             glib::timeout_future(Duration::from_millis(100)).await;
             let (x, y) = state.borrow().position.unwrap();
-            assert_eq!(
-                term.check_match_at(x, y).0.as_deref(),
-                Some(if exists { literal } else { "README.md" })
-            );
+            assert_eq!(term.check_match_at(x, y).0.as_deref(), expected);
         }
         window.close();
+    }
+
+    #[test]
+    fn terminal_file_candidate_does_not_replace_existing_paths() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().unwrap();
+        for case in ["binary", "directory", "unreadable", "large", "broken"] {
+            let inner = format!("{case}.md");
+            std::fs::write(root.path().join(&inner), "# Different document\n").unwrap();
+            let raw = format!("({inner})를");
+            let path = root.path().join(&raw);
+            match case {
+                "binary" => std::fs::write(&path, b"binary\0data").unwrap(),
+                "directory" => std::fs::create_dir(&path).unwrap(),
+                "unreadable" => {
+                    std::fs::write(&path, "# Private document\n").unwrap();
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+                        .unwrap();
+                    if std::fs::File::open(&path).is_ok() {
+                        eprintln!(
+                            "skipping unreadable fixture: process can bypass file permissions"
+                        );
+                        continue;
+                    }
+                }
+                "large" => std::fs::File::create(&path)
+                    .unwrap()
+                    .set_len(flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES + 1)
+                    .unwrap(),
+                "broken" => symlink("absent-target", &path).unwrap(),
+                _ => unreachable!(),
+            }
+            for candidate in [raw.clone(), format!("({raw})는")] {
+                assert_eq!(
+                    validated_terminal_file_candidate(&candidate, Some(root.path())),
+                    None,
+                    "must not replace {case}: {candidate}"
+                );
+            }
+        }
+        std::fs::create_dir(root.path().join("blocked")).unwrap();
+        std::fs::write(
+            root.path().join("blocked/README.md"),
+            "# Different document\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("(blocked"), "not a directory").unwrap();
+        let raw = "(blocked/README.md)를";
+        assert_eq!(
+            std::fs::symlink_metadata(root.path().join(raw))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotADirectory
+        );
+        assert_eq!(
+            validated_terminal_file_candidate(raw, Some(root.path())),
+            None
+        );
     }
 
     #[gtk::test]

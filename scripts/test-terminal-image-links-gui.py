@@ -263,6 +263,39 @@ def main():
                          "wrapped Markdown file title")
             h.pass_check(f"{line}: only the path is underlined and clickable")
 
+        for kind in ["binary", "directory", "unreadable", "large", "broken-symlink"]:
+            inner = f"unopenable-{kind}.md"
+            (h.root / inner).write_text("# Different document\n")
+            name = f"({inner})를"
+            path = h.root / name
+            if kind == "binary":
+                path.write_bytes(b"binary\x00data")
+            elif kind == "directory":
+                path.mkdir()
+            elif kind == "unreadable":
+                path.write_text("# Private document\n")
+                path.chmod(0)
+                try:
+                    with path.open("rb"):
+                        print("SKIP: process can bypass file permissions", flush=True)
+                        continue
+                except PermissionError:
+                    pass
+            elif kind == "large":
+                with path.open("wb") as fixture:
+                    fixture.truncate(16 * 1024 * 1024 + 1)
+            else:
+                path.symlink_to("absent-target")
+            geometry = show_path(name)
+            assert_hover(inner, geometry, False, prefix="(")
+            previous = len(editor_tabs())
+            for shift in [False, True]:
+                click("(" + inner[:len(inner) // 2], geometry, shift=shift)
+                time.sleep(.3)
+                assert len(editor_tabs()) == previous, f"{kind} opened a different file"
+                assert len(windows(include_markdown=True)) == 1, f"{kind} opened a viewer"
+            h.pass_check(f"{name}: existing {kind} never opens the inner document")
+
         for name, content in [("missing.cc", None), ("missing.md", None),
                               ("(readme.md).missing", None), ("binary.txt", b"binary\x00data")]:
             if content is not None:
