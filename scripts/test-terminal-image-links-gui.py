@@ -155,8 +155,10 @@ def main():
             gui.wait_for(lambda: path_text in h.screen(socket, pane), "source path output")
             return gui.wait_for(marker, "terminal cell marker")
 
-        def assert_hover(path_text, geometry, expected):
+        def assert_hover(path_text, geometry, expected, prefix=""):
             left, top, cw, ch = geometry
+            left += sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+                        for c in prefix) * cw
             box = (left, top + ch, left + len(path_text) * cw, top + 2 * ch)
             time.sleep(.15)
             before = screenshot().crop(box)
@@ -236,7 +238,33 @@ def main():
                 gui.wait_for(lambda: len(windows(include_markdown=True)) == 1, "Markdown viewer closed")
                 h.pass_check(f"{path_text}: Ctrl+Shift-click displays Mermaid without adding a tab")
 
-        for name, content in [("missing.cc", None), ("missing.md", None), ("binary.txt", b"binary\x00data")]:
+        for name, absolute in [("artifacts/tizen-modules/README.md", False),
+                               ("artifacts/tizen-modules/README.md", True),
+                               ("(draft(v2)).md", False)]:
+            file_path = h.root / name
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("# Wrapped Markdown link\n")
+            path_text = str(file_path) if absolute else name
+            prefix = "전체 API 파일 링크와 품질 검토 결과 ("
+            line = f"{prefix}{path_text})를 정리했습니다."
+            geometry = show_path(line)
+            assert_hover(path_text, geometry, True, prefix=prefix)
+            previous = len(editor_tabs())
+            click(prefix[:-1], geometry)
+            time.sleep(.3)
+            assert len(editor_tabs()) == previous, "wrapper opened an editor"
+            click(prefix + path_text + ")", geometry)
+            time.sleep(.3)
+            assert len(editor_tabs()) == previous, "prose suffix opened an editor"
+            click(prefix + path_text[:len(path_text) // 2], geometry)
+            gui.wait_for(lambda: len(editor_tabs()) == previous + 1,
+                         "wrapped Markdown path adds editor tab")
+            gui.wait_for(lambda: editor_tabs()[-1]["title"] == file_path.name,
+                         "wrapped Markdown file title")
+            h.pass_check(f"{line}: only the path is underlined and clickable")
+
+        for name, content in [("missing.cc", None), ("missing.md", None),
+                              ("(readme.md).missing", None), ("binary.txt", b"binary\x00data")]:
             if content is not None:
                 (h.root / name).write_bytes(content)
             geometry = show_path(name)

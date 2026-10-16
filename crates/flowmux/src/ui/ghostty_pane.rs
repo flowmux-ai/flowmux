@@ -1474,6 +1474,34 @@ fn terminal_file_kind(path: &std::path::Path) -> Option<TerminalFileKind> {
     flowmux_editor::is_probably_editable_text_file(path).then_some(TerminalFileKind::Editor)
 }
 
+fn validated_terminal_file_candidate<'a>(
+    mut raw: &'a str,
+    cwd: Option<&std::path::Path>,
+) -> Option<&'a str> {
+    loop {
+        if terminal_file_path(raw, cwd).is_some_and(|path| terminal_file_kind(&path).is_some()) {
+            return Some(raw);
+        }
+        // Prefer real filenames; otherwise unwrap paths in prose such as `(README.md)를`.
+        let inner = raw.strip_prefix('(')?;
+        let mut depth = 0;
+        let end = inner.char_indices().find_map(|(index, ch)| {
+            match ch {
+                '(' => depth += 1,
+                ')' if depth == 0 => return Some(index),
+                ')' => depth -= 1,
+                _ => {}
+            }
+            None
+        })?;
+        // A filename extension or child path is not a prose suffix.
+        if inner[end + 1..].trim_end_matches('.').contains(['.', '/']) {
+            return None;
+        }
+        raw = &inner[..end];
+    }
+}
+
 fn is_supported_image_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -1637,13 +1665,13 @@ struct FileLinkHover {
     key: Option<(String, Option<PathBuf>)>,
     checked_at: Option<Instant>,
     busy: bool,
-    tag: Option<i32>,
+    matched: Option<String>,
     timer: Option<glib::SourceId>,
 }
 
 impl FileLinkHover {
     fn clear_match(&mut self, term: &vte::Terminal) {
-        if self.tag.take().is_some() {
+        if self.matched.take().is_some() {
             reset_terminal_link_matches(term);
             refresh_terminal_link_hint(term, self.position);
         }
@@ -1678,9 +1706,6 @@ fn refresh_file_link_hover(
     let Some((raw, cwd)) = key.clone() else {
         return;
     };
-    let Some(path) = terminal_file_path(&raw, cwd.as_deref()) else {
-        return;
-    };
     hover.busy = true;
     drop(hover);
     let state = state.clone();
@@ -1688,9 +1713,12 @@ fn refresh_file_link_hover(
     let candidate_regex = regex.clone();
     let pid = pid.clone();
     glib::spawn_future_local(async move {
-        let valid = gtk::gio::spawn_blocking(move || terminal_file_kind(&path).is_some())
-            .await
-            .unwrap_or(false);
+        let matched = gtk::gio::spawn_blocking(move || {
+            validated_terminal_file_candidate(&raw, cwd.as_deref()).map(str::to_owned)
+        })
+        .await
+        .ok()
+        .flatten();
         let mut hover = state.borrow_mut();
         hover.busy = false;
         let Some(term) = weak.upgrade() else { return };
@@ -1702,9 +1730,10 @@ fn refresh_file_link_hover(
             return;
         }
         hover.checked_at = Some(Instant::now());
-        if !valid {
+        if hover.matched != matched {
             hover.clear_match(&term);
-        } else if hover.tag.is_none() {
+        }
+        if let Some(raw) = matched.filter(|_| hover.matched.is_none()) {
             // Register only the validated token, never a broad extension match.
             let pattern = format!(
                 r#"(?<![^\s<>"'`(]){}(?![^\s<>"'`:),;!?])"#,
@@ -1714,7 +1743,7 @@ fn refresh_file_link_hover(
                 reset_terminal_link_matches(&term);
                 let tag = term.match_add_regex(&regex, 0);
                 term.match_set_cursor_name(tag, "pointer");
-                hover.tag = Some(tag);
+                hover.matched = Some(raw);
                 refresh_terminal_link_hint(&term, hover.position);
             }
         }
@@ -3604,7 +3633,7 @@ mod tests {
         refresh_file_link_hover(&term, &regex, &pid, &state);
         glib::timeout_future(Duration::from_millis(100)).await;
         assert!(
-            state.borrow().tag.is_none(),
+            state.borrow().matched.is_none(),
             "missing path never registered"
         );
         assert!(
@@ -3615,14 +3644,17 @@ mod tests {
         state.borrow_mut().checked_at = None;
         refresh_file_link_hover(&term, &regex, &pid, &state);
         glib::timeout_future(Duration::from_millis(100)).await;
-        assert!(state.borrow().tag.is_some(), "new files become clickable");
+        assert!(
+            state.borrow().matched.is_some(),
+            "new files become clickable"
+        );
         let elsewhere = tempfile::tempdir().unwrap();
         term.feed(format!("\x1b]7;file://{}\x07", elsewhere.path().display()).as_bytes());
         glib::timeout_future(Duration::from_millis(50)).await;
         refresh_file_link_hover(&term, &regex, &pid, &state);
         glib::timeout_future(Duration::from_millis(100)).await;
         assert!(
-            state.borrow().tag.is_none(),
+            state.borrow().matched.is_none(),
             "cwd change invalidates relative paths"
         );
         // An in-flight result cannot restore a hint after the pointer has left.
@@ -3631,7 +3663,115 @@ mod tests {
         refresh_file_link_hover(&term, &regex, &pid, &state);
         state.borrow_mut().position = None;
         glib::timeout_future(Duration::from_millis(100)).await;
-        assert!(state.borrow().tag.is_none());
+        assert!(state.borrow().matched.is_none());
+        window.close();
+    }
+
+    #[test]
+    fn terminal_file_candidate_does_not_unwrap_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("README.md"), "# Fixture\n").unwrap();
+        for raw in [
+            "(README.md).bak",
+            "(README.md)/missing.md",
+            "(missing.md)를",
+        ] {
+            assert_eq!(
+                validated_terminal_file_candidate(raw, Some(root.path())),
+                None,
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            validated_terminal_file_candidate("((README.md))를.", Some(root.path())),
+            Some("README.md")
+        );
+        let absolute = root.path().join("README.md").display().to_string();
+        assert_eq!(
+            validated_terminal_file_candidate(&format!("({absolute})를"), None),
+            Some(absolute.as_str())
+        );
+    }
+
+    #[gtk::test]
+    async fn terminal_file_hover_excludes_wrappers_before_prose() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["README.md", "docs(v2)/file(draft).md", "(draft(v2)).md"] {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "# Fixture\n").unwrap();
+        }
+        let absolute = root.path().join("README.md").display().to_string();
+        let cases = [
+            (
+                "(README.md)를 정리했습니다.".to_string(),
+                "README.md".to_string(),
+            ),
+            ("((README.md))에서".to_string(), "README.md".to_string()),
+            (
+                "(docs(v2)/file(draft).md)를".to_string(),
+                "docs(v2)/file(draft).md".to_string(),
+            ),
+            (
+                "((draft(v2)).md)는".to_string(),
+                "(draft(v2)).md".to_string(),
+            ),
+            (format!("({absolute})를"), absolute),
+        ];
+        let term = vte::Terminal::new();
+        let window = gtk::Window::new();
+        window.set_default_size(900, 600);
+        window.set_child(Some(&term));
+        window.present();
+        term.feed(format!("\x1b]7;file://{}\x07", root.path().display()).as_bytes());
+        for (line, _) in &cases {
+            term.feed(format!("{line}\r\n").as_bytes());
+        }
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let regex =
+            vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS).unwrap();
+        let state = Rc::new(RefCell::new(FileLinkHover::default()));
+        let pid = Rc::new(Cell::new(None));
+        for (row, (line, expected)) in cases.iter().enumerate() {
+            let start = line.find(expected).unwrap();
+            let x = (start as f64 + 0.5) * term.char_width() as f64;
+            let y = (row as f64 + 0.5) * term.char_height() as f64;
+            state.borrow_mut().position = Some((x, y));
+            refresh_file_link_hover(&term, &regex, &pid, &state);
+            glib::timeout_future(Duration::from_millis(100)).await;
+            // All path characters here are ASCII; also probe the wrapper and Korean suffix.
+            for column in 0..start + expected.len() + 2 {
+                let (matched, _) =
+                    term.check_match_at((column as f64 + 0.5) * term.char_width() as f64, y);
+                let in_path = (start..start + expected.len()).contains(&column);
+                assert_eq!(
+                    matched.as_deref(),
+                    in_path.then_some(expected.as_str()),
+                    "{line}: column {column}"
+                );
+            }
+        }
+        // An actual filename wins over prose, including when it appears or disappears mid-hover.
+        let literal = "(README.md)를";
+        state.borrow_mut().position = Some((
+            1.5 * term.char_width() as f64,
+            0.5 * term.char_height() as f64,
+        ));
+        for exists in [true, false] {
+            if exists {
+                std::fs::write(root.path().join(literal), "# Literal filename\n").unwrap();
+            } else {
+                std::fs::remove_file(root.path().join(literal)).unwrap();
+            }
+            state.borrow_mut().checked_at = None;
+            refresh_file_link_hover(&term, &regex, &pid, &state);
+            glib::timeout_future(Duration::from_millis(100)).await;
+            let (x, y) = state.borrow().position.unwrap();
+            assert_eq!(
+                term.check_match_at(x, y).0.as_deref(),
+                Some(if exists { literal } else { "README.md" })
+            );
+        }
         window.close();
     }
 
