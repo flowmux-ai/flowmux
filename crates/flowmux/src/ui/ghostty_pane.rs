@@ -1402,7 +1402,11 @@ fn terminal_url_allowed(url: &str, is_ssh: bool) -> bool {
 #[derive(Debug, PartialEq, Eq)]
 enum TerminalClickTarget {
     Url(String),
-    File(PathBuf),
+    File {
+        candidate: String,
+        matched: String,
+        cwd: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1438,12 +1442,11 @@ fn is_primary_button_release(event_type: gtk::gdk::EventType, button: Option<u32
 }
 
 fn terminal_file_path(raw: &str, cwd: Option<&std::path::Path>) -> Option<PathBuf> {
-    let trimmed = raw.trim_end_matches(['.', ',']);
-    let path = PathBuf::from(trimmed);
+    let path = PathBuf::from(raw);
     if path.is_absolute() {
         return Some(path);
     }
-    if let Some(rest) = trimmed.strip_prefix("~/") {
+    if let Some(rest) = raw.strip_prefix("~/") {
         return std::env::var_os("HOME").map(|home| PathBuf::from(home).join(rest));
     }
     cwd.map(|cwd| cwd.join(path))
@@ -1490,6 +1493,12 @@ fn validated_terminal_file_candidate<'a>(
                 Err(_) => return None,
             }
         }
+        // Punctuation can belong to a filename; strip it only after the literal is missing.
+        let trimmed = raw.trim_end_matches(['.', ',']);
+        if trimmed != raw {
+            raw = trimmed;
+            continue;
+        }
         // Only missing filenames may be paths wrapped in prose such as `(README.md)를`.
         let inner = raw.strip_prefix('(')?;
         let mut depth = 0;
@@ -1508,6 +1517,20 @@ fn validated_terminal_file_candidate<'a>(
         }
         raw = &inner[..end];
     }
+}
+
+fn validated_terminal_file_click(
+    candidate: &str,
+    matched: &str,
+    cwd: Option<&std::path::Path>,
+) -> Option<(PathBuf, TerminalFileKind)> {
+    // Recheck the original token so a stale hover cannot redirect the click.
+    if validated_terminal_file_candidate(candidate, cwd) != Some(matched) {
+        return None;
+    }
+    let path = terminal_file_path(matched, cwd)?;
+    let kind = terminal_file_kind(&path)?;
+    Some((path, kind))
 }
 
 fn is_supported_image_path(path: &std::path::Path) -> bool {
@@ -1744,7 +1767,7 @@ fn refresh_file_link_hover(
         if let Some(raw) = matched.filter(|_| hover.matched.is_none()) {
             // Register only the validated token, never a broad extension match.
             let pattern = format!(
-                r#"(?<![^\s<>"'`(]){}(?![^\s<>"'`:),;!?])"#,
+                r#"(?<![^\s<>"'`(]){}(?=\.*(?:[\s<>"'`:),;!?]|$))"#,
                 escape_pcre_literal(&raw)
             );
             if let Ok(regex) = vte::Regex::for_match(&pattern, URL_REGEX_COMPILE_FLAGS) {
@@ -1836,7 +1859,7 @@ fn install_url_link_handling(
     let file_regex = vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
         .expect("static terminal file regex");
     if !is_ssh {
-        install_file_link_hover(term, file_regex, pid.clone());
+        install_file_link_hover(term, file_regex.clone(), pid.clone());
     }
 
     // 2) Left-click gesture. Keep it out of capture phase so VTE's keyboard
@@ -1890,8 +1913,11 @@ fn install_url_link_handling(
                 if raw.contains("://") {
                     Some(TerminalClickTarget::Url(raw))
                 } else if !is_ssh {
-                    let cwd = terminal_current_dir(&term_widget, &pid);
-                    terminal_file_path(&raw, cwd.as_deref()).map(TerminalClickTarget::File)
+                    Some(TerminalClickTarget::File {
+                        candidate: terminal_file_candidate(&term_widget, &file_regex, x, y)?,
+                        matched: raw,
+                        cwd: terminal_current_dir(&term_widget, &pid),
+                    })
                 } else {
                     None
                 }
@@ -1942,26 +1968,27 @@ fn install_url_link_handling(
         let Some(pending) = activation.borrow_mut().release() else {
             return glib::Propagation::Proceed;
         };
-        // The capture handler consumes release, so the bubble gesture needs an explicit reset.
+        // URL handling can consume release before the bubble gesture sees it.
         click_for_release.reset();
         match pending.target {
-            TerminalClickTarget::File(path) => {
+            TerminalClickTarget::File { candidate, matched, cwd } => {
                 let on_open_image = on_open_image.clone();
                 let on_open_markdown = on_open_markdown.clone();
                 let on_open_editor = on_open_editor.clone();
                 glib::spawn_future_local(async move {
-                    let checked = path.clone();
-                    let kind = gtk::gio::spawn_blocking(move || terminal_file_kind(&checked))
-                        .await.ok().flatten();
+                    let Some((path, kind)) = gtk::gio::spawn_blocking(move || {
+                        validated_terminal_file_click(&candidate, &matched, cwd.as_deref())
+                    }).await.ok().flatten() else { return };
                     tracing::debug!(?kind, path = %path.display(), "terminal file activation");
                     let callback = match kind {
-                        Some(TerminalFileKind::Image) => on_open_image,
-                        Some(TerminalFileKind::Markdown) if pending.shift_pressed => on_open_markdown,
-                        Some(TerminalFileKind::Markdown | TerminalFileKind::Editor) => on_open_editor,
-                        None => return,
+                        TerminalFileKind::Image => on_open_image,
+                        TerminalFileKind::Markdown if pending.shift_pressed => on_open_markdown,
+                        TerminalFileKind::Markdown | TerminalFileKind::Editor => on_open_editor,
                     };
                     (callback.borrow_mut())(pane_id, path);
                 });
+                // Opening is asynchronous; let VTE finish the mouse sequence even if it is cancelled.
+                return glib::Propagation::Proceed;
             }
             TerminalClickTarget::Url(url) => {
                 if pending.shift_pressed {
@@ -1985,9 +2012,7 @@ fn install_url_link_handling(
                 }
             }
         }
-        // Consume the physical release before VTE can return focus to the
-        // terminal window. The open callbacks dispatch asynchronously after
-        // this handler returns, so the viewer is presented after mouse-up.
+        // Consume URL releases before they can return focus to the terminal window.
         glib::Propagation::Stop
     });
     term.add_controller(click);
@@ -3444,14 +3469,22 @@ mod tests {
     fn terminal_click_activation_waits_for_release_and_runs_once() {
         let mut activation = TerminalClickActivation::default();
         activation.press(
-            TerminalClickTarget::File(PathBuf::from("/tmp/render.png")),
+            TerminalClickTarget::File {
+                candidate: "(/tmp/render.png)를".into(),
+                matched: "/tmp/render.png".into(),
+                cwd: None,
+            },
             false,
         );
 
         assert_eq!(
             activation.release(),
             Some(PendingTerminalClick {
-                target: TerminalClickTarget::File(PathBuf::from("/tmp/render.png")),
+                target: TerminalClickTarget::File {
+                    candidate: "(/tmp/render.png)를".into(),
+                    matched: "/tmp/render.png".into(),
+                    cwd: None,
+                },
                 shift_pressed: false,
             })
         );
@@ -3676,6 +3709,60 @@ mod tests {
     }
 
     #[test]
+    fn terminal_file_click_revalidates_the_original_candidate() {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = Some(root.path());
+        let inner = "README.md";
+        let raw = "(README.md)를";
+        std::fs::write(root.path().join(inner), "# Inner document\n").unwrap();
+        assert_eq!(
+            validated_terminal_file_click(raw, inner, cwd),
+            Some((root.path().join(inner), TerminalFileKind::Markdown))
+        );
+        let literal = root.path().join(raw);
+        std::fs::write(&literal, "# Literal filename\n").unwrap();
+        assert_eq!(validated_terminal_file_click(raw, inner, cwd), None);
+        assert_eq!(
+            validated_terminal_file_click(raw, raw, cwd),
+            Some((literal.clone(), TerminalFileKind::Editor))
+        );
+        std::fs::write(&literal, b"binary\0data").unwrap();
+        assert_eq!(validated_terminal_file_click(raw, inner, cwd), None);
+        assert_eq!(validated_terminal_file_click(raw, raw, cwd), None);
+        std::fs::remove_file(literal).unwrap();
+        assert_eq!(validated_terminal_file_click(raw, raw, cwd), None);
+        assert_eq!(
+            validated_terminal_file_click(raw, inner, cwd),
+            Some((root.path().join(inner), TerminalFileKind::Markdown))
+        );
+    }
+
+    #[test]
+    fn terminal_file_candidate_preserves_literal_trailing_dots() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("README.md"), "# Different document\n").unwrap();
+        for raw in ["README.md.", "(README.md)를."] {
+            let path = root.path().join(raw);
+            std::fs::write(&path, b"binary\0data").unwrap();
+            assert_eq!(
+                validated_terminal_file_candidate(raw, Some(root.path())),
+                None,
+                "must not replace the existing binary {raw}"
+            );
+            std::fs::write(&path, "# Literal filename\n").unwrap();
+            assert_eq!(
+                validated_terminal_file_candidate(raw, Some(root.path())),
+                Some(raw)
+            );
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(
+                validated_terminal_file_candidate(raw, Some(root.path())),
+                Some("README.md")
+            );
+        }
+    }
+
+    #[test]
     fn terminal_file_candidate_does_not_unwrap_missing_paths() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("README.md"), "# Fixture\n").unwrap();
@@ -3711,7 +3798,12 @@ mod tests {
     #[gtk::test]
     async fn terminal_file_hover_excludes_wrappers_before_prose() {
         let root = tempfile::tempdir().unwrap();
-        for name in ["README.md", "docs(v2)/file(draft).md", "(draft(v2)).md"] {
+        for name in [
+            "README.md",
+            "docs(v2)/file(draft).md",
+            "(draft(v2)).md",
+            "literal.txt.",
+        ] {
             let path = root.path().join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, "# Fixture\n").unwrap();
@@ -3732,6 +3824,9 @@ mod tests {
                 "(draft(v2)).md".to_string(),
             ),
             (format!("({absolute})를"), absolute),
+            ("README.md.".to_string(), "README.md".to_string()),
+            ("README.md...".to_string(), "README.md".to_string()),
+            ("literal.txt.".to_string(), "literal.txt.".to_string()),
         ];
         let term = vte::Terminal::new();
         let window = gtk::Window::new();

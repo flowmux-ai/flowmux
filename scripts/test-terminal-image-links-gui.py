@@ -89,7 +89,7 @@ def main():
                 assert width % 10 == 0, width
                 return left, top, width // 10, height
 
-        def click(prefix, geometry, shift=False):
+        def click(prefix, geometry, shift=False, before_release=None):
             left, top, cell_width, cell_height = geometry
             column = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in prefix)
             main_window.set_input_focus(X.RevertToParent, X.CurrentTime)
@@ -102,6 +102,10 @@ def main():
             if shift:
                 xtest.fake_input(connection, X.KeyPress, shift_key)
             xtest.fake_input(connection, X.ButtonPress, 1)
+            if before_release:
+                connection.sync()
+                time.sleep(.1)  # Let the GUI capture the pressed target before the file changes.
+                before_release()
             xtest.fake_input(connection, X.ButtonRelease, 1)
             if shift:
                 xtest.fake_input(connection, X.KeyRelease, shift_key)
@@ -262,6 +266,50 @@ def main():
             gui.wait_for(lambda: editor_tabs()[-1]["title"] == file_path.name,
                          "wrapped Markdown file title")
             h.pass_check(f"{line}: only the path is underlined and clickable")
+
+        for shift in [False, True]:
+            inner = f"cached-target-{shift}.md"
+            (h.root / inner).write_text("# Different document\n")
+            name = f"({inner})를"
+            literal = h.root / name
+            geometry = show_path(name)
+            assert_hover(inner, geometry, True, prefix="(")
+            previous = len(editor_tabs())
+            click("(" + inner[:len(inner) // 2], geometry, shift=shift,
+                  before_release=lambda: literal.write_bytes(b"new binary\x00data"))
+            time.sleep(.5)
+            assert len(editor_tabs()) == previous, "stale hover opened a different editor"
+            assert len(windows(include_markdown=True)) == 1, "stale hover opened a viewer"
+            literal.unlink()
+        h.pass_check("file created after button press cancels the stale editor/preview target")
+
+        inner = "trailing-dot.md"
+        (h.root / inner).write_text("# Different document\n")
+        name = f"({inner})를."
+        literal = h.root / name
+        literal.write_bytes(b"literal binary\x00data")
+        geometry = show_path(name)
+        assert_hover(inner, geometry, False, prefix="(")
+        previous = len(editor_tabs())
+        for shift in [False, True]:
+            click("(" + inner[:len(inner) // 2], geometry, shift=shift)
+            time.sleep(.3)
+            assert len(editor_tabs()) == previous, "trailing-dot binary opened a different editor"
+            assert len(windows(include_markdown=True)) == 1, "trailing-dot binary opened a viewer"
+        literal.write_text("# Literal filename\n")
+        geometry = show_path(name)
+        assert_hover(name, geometry, True)
+        click("(" + inner[:len(inner) // 2], geometry)
+        gui.wait_for(lambda: len(editor_tabs()) == previous + 1, "literal trailing-dot editor")
+        gui.wait_for(lambda: editor_tabs()[-1]["title"] == name, "literal trailing-dot title")
+        literal.unlink()
+        geometry = show_path(inner + ".")
+        assert_hover(inner, geometry, True)
+        previous = len(editor_tabs())
+        click(inner[:len(inner) // 2], geometry)
+        gui.wait_for(lambda: len(editor_tabs()) == previous + 1, "sentence-final path opens")
+        gui.wait_for(lambda: editor_tabs()[-1]["title"] == inner, "sentence-final path title")
+        h.pass_check("literal trailing dots are preserved; missing sentence punctuation is stripped")
 
         for kind in ["binary", "directory", "unreadable", "large", "broken-symlink"]:
             inner = f"unopenable-{kind}.md"
