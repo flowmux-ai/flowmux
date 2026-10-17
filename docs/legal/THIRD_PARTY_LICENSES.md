@@ -2923,14 +2923,6 @@ MIT License
 Copyright (c) 2018 The typed-arena developers
 ~~~~
 
-Used by: arbitrary 1.4.2, derive_arbitrary 1.4.2
-
-~~~~text
-MIT License
-
-Copyright (c) 2019 Manish Goregaokar
-~~~~
-
 Used by: tokio-macros 2.7.0
 
 ~~~~text
@@ -3013,7 +3005,7 @@ Used by: fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
 MIT License
 ~~~~
 
-Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-recursion 1.1.1, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.89, atomic-waker 1.1.2, blocking 1.6.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, futures-lite 2.6.1, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, xdg-home 1.3.0, zbus_names 3.0.0, zmij 1.0.21, zvariant_utils 2.1.0
+Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-recursion 1.1.1, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.89, atomic-waker 1.1.2, blocking 1.6.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, futures-lite 2.6.1, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, xdg-home 1.3.0, zbus_names 3.0.0, zmij 1.0.21, zvariant_utils 2.1.0
 
 Used by: android_system_properties 0.1.5
 
@@ -3031,7 +3023,7 @@ The MIT License (MIT)
 Copyright (c) 2013-2017, The Gtk-rs Project Developers.
 ~~~~
 
-Used by: tracing-core 0.1.36
+Used by: tracing-core 0.1.36, zip 9.0.4
 
 ~~~~text
 The MIT License (MIT)
@@ -3071,7 +3063,7 @@ The MIT License (MIT)
 Copyright (c) 2015 Andrew Gallant
 ~~~~
 
-Used by: nix 0.29.0
+Used by: nix 0.29.0, nix 0.31.3
 
 ~~~~text
 The MIT License (MIT)
@@ -3226,39 +3218,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice (including the next paragraph) shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-~~~~
-
-### MIT License
-
-Used by: zip 2.4.2
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2014 Mathijs van de Nes
-~~~~
-
-~~~~text
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-Some files in the "tests/data" subdirectory of this repository are under other
-licences; see files named LICENSE.*.txt for details.
 ~~~~
 
 ### MIT License
@@ -4185,7 +4144,7 @@ Except as contained in this notice, the name of a copyright holder shall not be 
 
 ### zlib License
 
-Used by: zlib-rs 0.5.5
+Used by: zlib-rs 0.5.5, zlib-rs 0.6.8
 
 ~~~~text
 (C) 2024 Trifecta Tech Foundation

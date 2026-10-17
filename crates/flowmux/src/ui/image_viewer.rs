@@ -688,7 +688,9 @@ fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
         let entry = archive
             .by_index(index)
             .map_err(|err| format!("read .lottie entry failed: {err}"))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|err| format!("read .lottie entry name failed: {err}"))?;
         if !name.ends_with(".json") || name.ends_with("manifest.json") {
             continue;
         }
