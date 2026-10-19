@@ -169,14 +169,15 @@ panel → **New SSH Workspace**, or run `flowmux ssh connect user@host`.
 
 ## Build from source
 
-From a repository checkout:
+From a repository checkout on macOS or Ubuntu 24.04+:
 
 ```sh
 ./install.sh
 ```
 
-See the [setup guide](docs/setup.md#build-from-source) for prerequisites,
-development commands, and macOS development builds.
+The script detects the OS and runs the matching source installer. See the
+[setup guide](docs/setup.md#build-from-source) for prerequisites and platform
+options.
 
 ## Verify & repair
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Build flowmux (fast profile: release optimization without LTO, for quicker
-# local installs) and install the binaries, the .desktop entry and the app
-# icons to the host, so flowmux shows up in the app launcher / dock.
+# Build and install Flowmux on macOS or apt-based Linux (Ubuntu 24.04+).
+# macOS delegates to scripts/install-macos.sh with all arguments unchanged.
+# Linux installs the binaries, .desktop entries and app icons below.
 #
-# flowmux uses the system GTK4/libadwaita/WebKitGTK/VTE libraries. The image
+# Linux uses the system GTK4/libadwaita/WebKitGTK/VTE libraries. The image
 # viewer discovers ThorVG at runtime with libloading, so the core app builds
 # without it and enables image rendering when the shared library is present.
 #
@@ -14,6 +14,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
+
+case "$(uname -s)" in
+    Darwin) exec bash "$REPO_ROOT/scripts/install-macos.sh" "$@" ;;
+    Linux) ;;
+    *) echo "error: unsupported OS; use macOS or apt-based Linux." >&2; exit 1 ;;
+esac
 
 # Prefer rustup over an older distro Rust when both are installed.
 if [ -d "$HOME/.cargo/bin" ]; then
@@ -63,11 +69,6 @@ confirm() {
         *) echo "==> installation cancelled"; exit 1 ;;
     esac
 }
-
-if [ "$(uname -s)" != "Linux" ]; then
-    echo "error: install.sh is for Linux. On macOS, use scripts/install-macos.sh." >&2
-    exit 1
-fi
 
 if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
     echo "error: automatic dependency installation currently supports apt-based Linux." >&2

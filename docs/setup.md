@@ -15,17 +15,36 @@ sudo apt install build-essential pkg-config git curl ca-certificates \
   libssl-dev libdbus-1-dev libsecret-1-dev
 ```
 
-Install to the host (builds with the `fast` profile, then installs
-`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` and also
-to `~/.cargo/bin` when that directory exists, plus the desktop entry and icons):
+The same entry point works on Ubuntu and macOS:
 
 ```bash
 ./install.sh
+./install.sh --check  # Check prerequisites without installing
 ```
 
-`install.sh` offers to install missing apt packages and the Rust toolchain.
-It leaves agent settings unchanged; run `flowmux fix` to enable hooks.
-Restart any running flowmux GUI to pick up the new binary.
+On Ubuntu, it builds with the `fast` profile, then installs
+`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` and also
+to `~/.cargo/bin` when that directory exists, plus the desktop entry and icons.
+It offers to install missing apt packages and the Rust toolchain; use `--yes`
+to accept these prompts non-interactively on Linux.
+
+On macOS, install Rust and the Xcode command-line tools, then the native
+dependencies before running the same entry point:
+
+```bash
+brew install pkg-config gtk4 libadwaita vte3
+./install.sh
+./install.sh --release --launch  # Optional macOS release build and launch
+```
+
+The macOS path delegates to `scripts/install-macos.sh`, forwarding options such
+as `--app-dir`, `--bin-dir`, and `--bundle-only`. It installs `Flowmux.app` to
+`~/Applications` and `flowmux` / `flowmuxctl` to `~/.local/bin` by default.
+If the app is running, its bundle is staged for replacement after it exits.
+Missing macOS prerequisites are reported; they are not installed automatically.
+
+Both installers leave agent settings unchanged; run `flowmux fix` to enable
+hooks. Restart any running Flowmux GUI to pick up the new binary.
 
 For development:
 
@@ -52,7 +71,11 @@ updated `dist` directory and `package-lock.json` together.
 
 ### Platform scope
 
-Release packaging targets Linux. CI also builds the workspace on macOS 15
+Release packaging provides Linux packages and an Apple Silicon macOS preview
+ZIP with a SHA-256 sidecar. The macOS archive requires Homebrew runtime libraries
+and is ad-hoc signed, not notarized; see the
+[macOS package README](../packaging/macos/README.md) for installation and update
+limitations. CI builds the workspace on macOS 15
 with Homebrew `pkg-config`, `gtk4`, `libadwaita`, and `vte3`, and runs an
 isolated main-thread GTK/WKWebView smoke test. It checks browser state,
 native focus, dirty-editor close cancellation, and persistence failure/retry.
@@ -82,7 +105,12 @@ same coverage floors as CI.
 The smoke executable owns temporary state/configuration and its own window;
 it does not restart an installed Flowmux. A logged-in macOS desktop is
 required. [`install-macos.sh`](../scripts/install-macos.sh) builds a local
-application bundle. There is no native Windows build or installer in this tree.
+application bundle. Use `./install.sh --release --bundle-only` on macOS to
+build `target/macos-bundle/Flowmux.app` with the locked dependencies without
+installing, launching, or refreshing agent wrappers. The Release workflow
+archives this bundle only after the macOS gate passes and publishes the release
+only after both Linux and macOS builds succeed.
+There is no native Windows build or installer in this tree.
 
 ## Optional runtime dependencies
 

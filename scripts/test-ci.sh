@@ -42,6 +42,7 @@ rustc -Vv
 cargo --version
 pkg-config --modversion gtk4 libadwaita-1
 run_phase ci-runner-tests 120 python3 scripts/test-ci-runner.py
+run_phase installer-routing 60 python3 scripts/test-install.py
 run_phase agent-runner-tests 120 python3 -B scripts/test-agent-unit-runner.py
 run_phase agent-team-tests 120 python3 scripts/test-agent-team.py
 run_phase format 180 cargo fmt --all -- --check
@@ -71,6 +72,7 @@ fi
 export GSK_RENDERER=cairo
 printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
+run_phase macos-installer 180 python3 scripts/test-install-macos.py
 run_phase build 900 cargo build --workspace --locked
 run_phase cli 300 cargo test -p flowmux-cli --locked
 git rev-parse HEAD

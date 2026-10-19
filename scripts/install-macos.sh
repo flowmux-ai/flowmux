@@ -5,7 +5,7 @@
 #
 # Usage:
 #   scripts/install-macos.sh [--check] [--fast|--debug|--release] [--launch]
-#                            [--app-dir DIR] [--bin-dir DIR]
+#                            [--app-dir DIR] [--bin-dir DIR] [--bundle-only]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,6 +13,7 @@ APP_DIR="${FLOWMUX_MACOS_APP_DIR:-$HOME/Applications}"
 BIN_DIR="${FLOWMUX_MACOS_BIN_DIR:-$HOME/.local/bin}"
 PROFILE="${FLOWMUX_MACOS_PROFILE:-fast}"
 CHECK_ONLY=false
+BUNDLE_ONLY=false
 LAUNCH=false
 
 usage() {
@@ -41,6 +42,10 @@ while [ "$#" -gt 0 ]; do
             LAUNCH=true
             shift
             ;;
+        --bundle-only)
+            BUNDLE_ONLY=true
+            shift
+            ;;
         --app-dir)
             APP_DIR="${2:?--app-dir requires a directory}"
             shift 2
@@ -59,6 +64,11 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$BUNDLE_ONLY" = true ] && [ "$LAUNCH" = true ]; then
+    echo "error: --bundle-only cannot be combined with --launch" >&2
+    exit 2
+fi
 
 preflight_macos() {
     if [ "$(uname -s)" != "Darwin" ]; then
@@ -87,7 +97,7 @@ EOF
 
     local missing_modules=()
     if command -v pkg-config >/dev/null 2>&1; then
-        for module in gtk4 libadwaita-1; do
+        for module in gtk4 libadwaita-1 vte-2.91-gtk4; do
             if ! pkg-config --exists "$module"; then
                 missing_modules+=("$module")
             fi
@@ -106,7 +116,7 @@ EOF
         fi
         cat >&2 <<'EOF'
 Install the macOS native prerequisites:
-  brew install pkg-config gtk4 libadwaita
+  brew install pkg-config gtk4 libadwaita vte3
 
 Flowmux uses Homebrew GTK/libadwaita and Apple WebKit.framework for the
 browser pane; do not install WebKitGTK.
@@ -259,6 +269,9 @@ case "$PROFILE" in
         exit 2
         ;;
 esac
+if [ "$BUNDLE_ONLY" = true ]; then
+    build_args+=(--locked)
+fi
 
 configure_macos_path
 preflight_macos
@@ -327,6 +340,11 @@ plutil -lint "$contents/Info.plist" >/dev/null
 xattr -cr "$bundle_work" "$macos/flowmux" "$macos/flowmuxctl"
 codesign --force --sign - "$macos/flowmux" "$macos/flowmuxctl" >/dev/null
 codesign --force --deep --sign - "$bundle_work" >/dev/null
+
+if [ "$BUNDLE_ONLY" = true ]; then
+    echo "==> built bundle: $bundle_work"
+    exit 0
+fi
 
 mkdir -p "$APP_DIR" "$BIN_DIR"
 running_pid="$(running_flowmux_pid "$bundle_dest/Contents/MacOS/flowmux" || true)"

@@ -124,9 +124,103 @@ jobs:
             dist/*.deb.sha256
           if-no-files-found: error
 
+  build-macos:
+    name: Build macos-aarch64
+    needs: license-audit
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      TARGET_TRIPLE: aarch64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Check toolchain and release version
+        id: ver
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$TARGET_TRIPLE"
+          python3 <<'PY'
+          import os, tomllib
+          with open("Cargo.toml", "rb") as source:
+              version = tomllib.load(source)["workspace"]["package"]["version"]
+          if os.environ["RELEASE_TAG"] != f"v{version}":
+              raise SystemExit("Release tag must match the workspace version")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PY
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-release-macos-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-release-macos-${{ runner.arch }}-
+
+      - name: Install native dependencies
+        run: brew install pkg-config gtk4 libadwaita vte3
+
+      - name: Run macOS tests and native smoke
+        run: bash scripts/test-ci.sh macos
+
+      - name: Build release app bundle without installing
+        run: bash install.sh --release --bundle-only
+
+      # shortcut: runtime libraries stay in Homebrew; bundle them for standalone distribution.
+      - name: Package and verify macOS archive
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/flowmux-macos"
+          mkdir -p "$stage" dist
+          ditto target/macos-bundle/Flowmux.app "$stage/Flowmux.app"
+          cp packaging/macos/README.md "$stage/README.md"
+          archive="flowmux-${VERSION}-${TARGET_TRIPLE}.zip"
+          ditto -c -k --sequesterRsrc "$stage" "dist/$archive"
+          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+          (cd dist && shasum -a 256 -c "$archive.sha256")
+          extracted="$RUNNER_TEMP/flowmux-macos-extracted"
+          ditto -x -k "dist/$archive" "$extracted"
+          app="$extracted/Flowmux.app"
+          codesign --verify --deep --strict "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          for binary in flowmux flowmuxctl; do
+            test "$(lipo -archs "$app/Contents/MacOS/$binary")" = arm64
+            test "$("$app/Contents/MacOS/$binary" --version)" = "flowmux $VERSION"
+          done
+          test -s "$app/Contents/Resources/THIRD_PARTY_LICENSES.md"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: flowmux-macos-aarch64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload native smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-release-test-evidence
+          path: target/ci/macos
+          if-no-files-found: warn
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-macos]
     runs-on: ubuntu-latest
     steps:
       # Full history + tags are required so the release-notes step can diff
@@ -145,6 +239,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: flowmux-*
           merge-multiple: true
 
       - name: Resolve tag
@@ -255,6 +350,17 @@ jobs:
               f"https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz"
           )
 
+          out.append("")
+          out.append("## macOS preview")
+          out.append("")
+          out.append(
+              "The Apple Silicon ZIP requires Homebrew `gtk4`, `libadwaita`, "
+              "and `vte3` under `/opt/homebrew`; it is not a standalone app. "
+              "It is ad-hoc signed, not Developer ID signed or notarized, "
+              "so Gatekeeper may block it. See the README inside the ZIP "
+              "for installation and update limitations."
+          )
+
           print("\n".join(out).rstrip() + "\n")
           PY
 
@@ -276,3 +382,5 @@ jobs:
             dist/*.tar.gz.sha256
             dist/*.deb
             dist/*.deb.sha256
+            dist/*.zip
+            dist/*.zip.sha256

@@ -22,6 +22,7 @@ def main():
         root = Path(temporary).resolve()
         source = root / "source"
         (source / "scripts").mkdir(parents=True)
+        shutil.copy2(REPO / "install.sh", source / "install.sh")
         shutil.copy2(REPO / "scripts/install-macos.sh", source / "scripts/install-macos.sh")
         for relative in ("LICENSE", "NOTICE", "docs/legal/THIRD_PARTY_LICENSES.md"):
             dest = source / relative
@@ -69,7 +70,7 @@ path = "src/main.rs"
             if custom is not None:
                 case_env["CARGO_TARGET_DIR"] = custom
             apps, bins = root / f"apps-{name}", root / f"bin-{name}"
-            run("bash", str(source / "scripts/install-macos.sh"), f"--{profile}", "--app-dir", str(apps), "--bin-dir", str(bins), cwd=root, env=case_env)
+            run("bash", str(source / "install.sh"), f"--{profile}", "--app-dir", str(apps), "--bin-dir", str(bins), cwd=root, env=case_env)
             bundle = apps / "Flowmux.app"
             run("codesign", "--verify", "--deep", str(bundle))
             for directory in [bins, bundle / "Contents/MacOS"]:
@@ -80,6 +81,41 @@ path = "src/main.rs"
         # Failed builds must leave the previously installed bundle and CLIs intact.
         installed = [directory / binary for directory in [bins, bundle / "Contents/MacOS"] for binary in ["flowmux", "flowmuxctl"]]
         before = [path.read_bytes() for path in installed]
+        # Packaging must not install, launch, or execute the CLI's hook refresh.
+        marker = root / "cli-was-executed"
+        (source / "flowmux-cli/src/main.rs").write_text('''fn main() {
+    if let Ok(path) = std::env::var("FM_TEST_CLI_MARKER") {
+        std::fs::write(path, "executed").unwrap();
+    }
+    println!("FRESH");
+}
+''')
+        package_env = dict(env, FM_TEST_CLI_MARKER=str(marker))
+        command = ["bash", str(source / "scripts/install-macos.sh"), "--release", "--bundle-only",
+                   "--app-dir", str(apps), "--bin-dir", str(bins)]
+        run(*command, cwd=root, env=package_env)
+        assert not marker.exists(), "bundle-only executed the CLI"
+        assert [path.read_bytes() for path in installed] == before
+        packaged = source / "target/macos-bundle/Flowmux.app"
+        archive = root / "flowmux.zip"
+        run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(packaged), str(archive))
+        extracted = root / "extracted"
+        run("ditto", "-x", "-k", str(archive), str(extracted))
+        run("codesign", "--verify", "--deep", "--strict", str(extracted / "Flowmux.app"))
+        for binary in ["flowmux", "flowmuxctl"]:
+            assert run(str(extracted / "Flowmux.app/Contents/MacOS" / binary)).strip() == "FRESH"
+        rejected = subprocess.run(command + ["--launch"], cwd=root, env=package_env,
+                                  capture_output=True, timeout=120)
+        assert rejected.returncode != 0, "bundle-only must reject --launch"
+        assert not marker.exists()
+        print("BUNDLE_ONLY_ARCHIVE_OK", flush=True)
+        # Release packaging must not silently regenerate an out-of-date lockfile.
+        manifest = source / "flowmux-cli/Cargo.toml"
+        manifest.write_text(manifest.read_text().replace('version = "0.0.0"', 'version = "0.0.1"'))
+        locked = subprocess.run(command, cwd=root, env=package_env, capture_output=True, timeout=120)
+        assert locked.returncode != 0 and b"--locked" in locked.stderr, locked.stderr
+        assert [path.read_bytes() for path in installed] == before
+        print("BUNDLE_ONLY_LOCKFILE_ENFORCED_OK", flush=True)
         (source / "flowmux/src/main.rs").write_text("invalid Rust\n")
         failed = subprocess.run(["bash", str(source / "scripts/install-macos.sh"), "--fast", "--app-dir", str(apps), "--bin-dir", str(bins)], cwd=root, env=env, capture_output=True, timeout=120)
         assert failed.returncode != 0
