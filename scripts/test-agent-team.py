@@ -192,6 +192,30 @@ class TeamTests(unittest.TestCase):
             self.assertEqual(team.inspect(self.job, .01), 124)
         self.assertEqual(self.state(), 'pending')
 
+    def test_unbound_worker_reports_observation_gap_until_session_is_bound(self):
+        self.fixture('pass')
+        manifest = json.loads((self.job / 'job.json').read_text())
+        team.write_json(self.job / 'job.json', {**manifest, 'cli': 'flowmux'})
+        with patch.object(team, 'worker_tab', return_value={'agent': {'activity': 'idle'}}) as observe:
+            for state in ('pending', 'running'):
+                team.write_json(self.job / 'status.json', {'state': state})
+                for timeout, expected_exit in ((0, 0), (.01, 124)):
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(team.inspect(self.job, timeout), expected_exit)
+                    report = json.loads(out.getvalue())
+                    self.assertEqual(report['state'], state)
+                    self.assertIn('No worker session is bound yet', report['observation_error'])
+                    self.assertNotIn('input_required', report)
+                    self.assertNotIn('task_status', report)
+                    self.assertEqual(json.loads((self.job / 'status.json').read_text()), {'state': state})
+            observe.assert_not_called()
+            self.assertFalse((self.job / 'input-required.json').exists())
+            team.write_json(self.job / 'status.json', {'state': 'running', 'session_id': 'session'})
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(team.inspect(self.job), 0)
+            self.assertNotIn('observation_error', json.loads(out.getvalue()))
+            observe.assert_called_once()
+
     def test_launch_uses_new_pane_and_executable_launcher(self):
         self.fixture('pass')
         alias = self.job / 'selected.sock'

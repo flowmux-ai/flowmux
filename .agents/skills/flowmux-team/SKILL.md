@@ -92,6 +92,9 @@ acceptance checks. Workers do not inherit this conversation. Read-only workers
 may share a checkout; editing workers need separate worktrees or disjoint files.
 Use `--allow-edits` only for an authorized editing assignment. Workers should
 not delegate again, commit, push or send unrelated external messages.
+Permissions are fixed at `start`; `followup` cannot add editing access. For an
+authorized inspect-then-edit assignment, start with `--allow-edits` and limit the
+first phase by prompt (not tool enforcement), or use a separate editing worker.
 
 ```bash
 python3 /path/to/flowmux-team/scripts/team.py start \
@@ -106,6 +109,9 @@ or a text-only imitation of their interface. The session stays open after its
 answer for the user to inspect and continue. Codex workers use a dedicated local
 TUI (`--no-daemon`) and a read-only sandbox by default; Claude workers have only
 Read/Glob/Grep, adding Edit/Write for an editing task.
+Claude workers cannot run shell tests; the lead runs those checks, including
+after quota fallback. Keeping the same permission scope does not give providers
+identical tools.
 
 Jobs retain provider paths and profiles for collection and restoration;
 credentials are not copied. Restoration resumes the conversation, not the task.
@@ -186,14 +192,21 @@ Inspect `input_required` for its pane and message; `input-required.json` preserv
 the handoff. Ask the user to act in that provider's UI, then call `wait` again.
 This is a live observation, not a task-level `blocked` report. Never approve
 on the user's behalf. An `observation_error` means live state could not be verified.
+Before a session is bound, it reports that input waits cannot yet be observed;
+inspect the recorded pane for setup or input UI. This does not mark the job blocked.
 Without native session hooks, `session_verified: false` permits UI inspection
 only; follow-up input still requires an exact live session binding.
 
 `pending`/`running` are incomplete. `wait` exits 124 if its wait deadline expires;
 it does not cancel work. A completed report exits 0; blocked/failed/timed-out
-reports exit 1. `--timeout` bounds **report collection per attempt**, not the interactive
-session. A timeout leaves the pane available for diagnosis and user input.
+reports exit 1. `start --timeout` (default 300 seconds) bounds **report collection
+per attempt**, not the interactive session. Its `timed_out` result is terminal:
+the helper cannot collect a late report or send `followup` for that job. Follow-up
+turns have no collection deadline; `wait --timeout` only bounds the current wait.
+A timeout leaves the pane available for diagnosis and user input.
 Do not automatically retry an uncertain launch or a timed-out task.
+Inspect its pane, transcript and any partial edits before assigning remaining work
+with a new `start`; that creates a new worker and does not resume the old job.
 For new jobs, `status`/`wait` or launcher reentry marks an unfinished job
 `failed` with `blocker_kind: interrupted` once its supervisor has exited.
 Inspect retained artifacts before assigning replacement work; a child may

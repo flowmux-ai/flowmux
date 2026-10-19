@@ -596,6 +596,8 @@ def inspect(job, timeout=0):
                         "action": "Inspect the worker pane and use the provider's normal approval/input UI."}}
             except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
                 observation = {"observation_error": str(error)}
+        elif state["state"] not in TERMINAL and not state.get("session_id"):
+            observation = {"observation_error": "No worker session is bound yet; live input waits cannot be observed. Inspect the recorded worker pane."}
         if state["state"] in TERMINAL or "input_required" in observation or time.monotonic() >= deadline:
             break
         time.sleep(min(0.25, max(0, deadline - time.monotonic())))

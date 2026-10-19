@@ -227,6 +227,8 @@ waiting_input의 사유와 worker pane·surface, 원래 리드 위치를 알려�
 `session_verified: false`는 pane의 UI 대기는 관찰했지만 native hook으로 세션을
 확인하지 못했다는 뜻입니다. UI 확인까지만 가능하며, 후속 입력에는 정확한 세션 식별이
 필요합니다. `observation_error`가 있으면 먼저 기록된 pane과 세션을 진단하세요.
+세션이 아직 연결되지 않았다는 오류는 입력 대기를 관찰할 수 없다는 뜻입니다.
+초기 설정이나 입력 화면은 해당 pane에서 확인하며, 이 오류만으로 `blocked`로 판단하지 않습니다.
 side panel의 `blocked` 표시는 최종 `task_status: blocked` 보고서의 증거가 아닙니다.
 
 ## 자동으로 같은 흐름 재현하기
@@ -322,6 +324,8 @@ terminal screens, workspace trees and logs and closes only its test-owned GUI.
 Default provider fixtures validate deterministic transport and state handling in
 real panes, not model quality or account access. The `--real-agent` runs validate
 native CLI conversations and content checks; report those results separately.
+Treat these live-account runs as optional manual checks, recording the provider
+and version, case, artifacts, and whether it passed or was blocked by the environment.
 `--expect-input` requires a real provider input/approval wait and verifies only that
 handoff. It never approves the request and fails if the task completes without one.
 Linux requires the Xvfb/python3-xlib dependencies of the existing GUI harness.
