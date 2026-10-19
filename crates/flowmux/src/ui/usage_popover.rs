@@ -5,17 +5,78 @@ use crate::usage::{
     UsageError, UsageErrorKind, UsagePanelState, UsageWindow,
 };
 use chrono::{DateTime, Local, Utc};
+use flowmux_config::options::UsageBarPins;
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[cfg(all(test, feature = "native-smoke", target_os = "macos"))]
+pub(crate) mod native_tests;
+
 #[derive(Clone)]
 pub(crate) struct UsagePopover {
     button: gtk::MenuButton,
     show_bar: gtk::ToggleButton,
     pub(crate) bar: Rc<super::usage_bar::UsageBar>,
+    pins: Rc<PinControls>,
+    cards: gtk::Box,
+    refresh_button: gtk::Button,
+    spinner: gtk::Spinner,
+}
+
+type PinsChanged = Box<dyn Fn(UsageBarPins)>;
+
+struct PinControls {
+    state: Rc<RefCell<UsagePanelState>>,
+    bar: Rc<super::usage_bar::UsageBar>,
+    show_bar: gtk::glib::WeakRef<gtk::ToggleButton>,
+    changed: RefCell<Option<PinsChanged>>,
+}
+
+impl PinControls {
+    fn button(self: &Rc<Self>, state: &ProviderState, window: &UsageWindow) -> gtk::ToggleButton {
+        let button = gtk::ToggleButton::new();
+        button.set_icon_name("flowmux-pin-symbolic");
+        button.add_css_class("flat");
+        button.set_widget_name("flowmux-usage-pin");
+        button.set_active(self.bar.is_pinned(state, window));
+        button.set_tooltip_text(Some("Pin to usage bar"));
+        let description = format!(
+            "Pin {} {}{} to usage bar",
+            provider_name(state.provider),
+            window
+                .scope
+                .as_ref()
+                .map(|scope| format!("{scope} "))
+                .unwrap_or_default(),
+            window.label
+        );
+        button.update_property(&[gtk::accessible::Property::Label(&description)]);
+        let controls = self.clone();
+        let provider = state.provider;
+        let window = window.clone();
+        button.connect_toggled(move |button| {
+            {
+                let state = controls.state.borrow();
+                let provider_state = match provider {
+                    Provider::Claude => &state.claude,
+                    Provider::Codex => &state.codex,
+                };
+                controls
+                    .bar
+                    .toggle_pin(provider_state, &window, button.is_active());
+                if let Some(toggle) = controls.show_bar.upgrade() {
+                    controls.bar.render(&state, toggle.is_active());
+                }
+            }
+            if let Some(changed) = controls.changed.borrow().as_ref() {
+                changed(controls.bar.pins());
+            }
+        });
+        button
+    }
 }
 
 impl UsagePopover {
@@ -61,6 +122,12 @@ impl UsagePopover {
         show_bar.set_tooltip_text(Some("Show bar"));
         show_bar.update_property(&[gtk::accessible::Property::Label("Show bar")]);
         header.append(&show_bar);
+        let pins = Rc::new(PinControls {
+            state: state.clone(),
+            bar: bar.clone(),
+            show_bar: show_bar.downgrade(),
+            changed: RefCell::new(None),
+        });
 
         let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh_button.add_css_class("flat");
@@ -84,7 +151,14 @@ impl UsagePopover {
         scroll.set_child(Some(&cards));
         root.append(&scroll);
         popover.set_child(Some(&root));
-        render_usage(&cards, &refresh_button, &spinner, &state.borrow(), false);
+        render_usage(
+            &cards,
+            &refresh_button,
+            &spinner,
+            &state.borrow(),
+            false,
+            &pins,
+        );
 
         let (result_tx, result_rx) = async_channel::bounded(1);
         let bar_weak = Rc::downgrade(&bar);
@@ -97,6 +171,7 @@ impl UsagePopover {
         let spinner_weak = spinner.downgrade();
         let handle_for_retry = tokio_handle.clone();
         let tx_for_retry = result_tx.clone();
+        let pins_for_results = Rc::downgrade(&pins);
         gtk::glib::MainContext::default().spawn_local(async move {
             let mut attempt = 0;
             while let Ok(refreshes) = result_rx.recv().await {
@@ -131,10 +206,11 @@ impl UsagePopover {
                     break;
                 };
                 if popover.is_visible() {
-                    let (Some(cards), Some(refresh), Some(spinner)) = (
+                    let (Some(cards), Some(refresh), Some(spinner), Some(pins)) = (
                         cards_weak.upgrade(),
                         refresh_weak.upgrade(),
                         spinner_weak.upgrade(),
+                        pins_for_results.upgrade(),
                     ) else {
                         break;
                     };
@@ -144,6 +220,7 @@ impl UsagePopover {
                         &spinner,
                         &state_for_results.borrow(),
                         animate,
+                        &pins,
                     );
                 }
             }
@@ -155,6 +232,7 @@ impl UsagePopover {
         let cards_for_show = cards.clone();
         let refresh_for_show = refresh_button.clone();
         let spinner_for_show = spinner.clone();
+        let pins_for_show = pins.clone();
         popover.connect_show(move |_| {
             request_refresh(
                 &state_for_show,
@@ -168,6 +246,7 @@ impl UsagePopover {
                 &spinner_for_show,
                 &state_for_show.borrow(),
                 true,
+                &pins_for_show,
             );
         });
 
@@ -177,6 +256,7 @@ impl UsagePopover {
         let handle_for_refresh = tokio_handle.clone();
         let cards_for_refresh = cards.clone();
         let spinner_for_refresh = spinner.clone();
+        let pins_for_refresh = pins.clone();
         refresh_button.connect_clicked(move |button| {
             manual_for_refresh.set(true);
             request_refresh(
@@ -191,6 +271,7 @@ impl UsagePopover {
                 &spinner_for_refresh,
                 &state_for_refresh.borrow(),
                 false,
+                &pins_for_refresh,
             );
         });
 
@@ -228,6 +309,10 @@ impl UsagePopover {
             button,
             show_bar,
             bar,
+            pins,
+            cards,
+            refresh_button,
+            spinner,
         }
     }
 
@@ -238,6 +323,33 @@ impl UsagePopover {
     pub(crate) fn connect_bar_clicked(&self, callback: impl Fn(bool) + 'static) {
         self.show_bar
             .connect_clicked(move |toggle| callback(toggle.is_active()));
+    }
+
+    pub(crate) fn set_pins(&self, pins: UsageBarPins) {
+        if self.bar.pins() == pins {
+            return;
+        }
+        self.bar.set_pins(pins);
+        let state = self.pins.state.borrow();
+        self.bar.render(&state, self.show_bar.is_active());
+        if self
+            .button
+            .popover()
+            .is_some_and(|popover| popover.is_visible())
+        {
+            render_usage(
+                &self.cards,
+                &self.refresh_button,
+                &self.spinner,
+                &state,
+                false,
+                &self.pins,
+            );
+        }
+    }
+
+    pub(crate) fn connect_pins_changed(&self, callback: impl Fn(UsageBarPins) + 'static) {
+        *self.pins.changed.borrow_mut() = Some(Box::new(callback));
     }
 
     pub(crate) fn button(&self) -> &gtk::MenuButton {
@@ -353,13 +465,24 @@ fn render_usage(
     spinner: &gtk::Spinner,
     state: &UsagePanelState,
     animate: bool,
+    pins: &Rc<PinControls>,
 ) {
     set_refresh_controls(refresh_button, spinner, state.refreshing);
     while let Some(child) = cards.first_child() {
         cards.remove(&child);
     }
-    cards.append(&provider_card(&state.claude, state.refreshing, animate));
-    cards.append(&provider_card(&state.codex, state.refreshing, animate));
+    cards.append(&provider_card(
+        &state.claude,
+        state.refreshing,
+        animate,
+        pins,
+    ));
+    cards.append(&provider_card(
+        &state.codex,
+        state.refreshing,
+        animate,
+        pins,
+    ));
 }
 
 fn set_refresh_controls(refresh_button: &gtk::Button, spinner: &gtk::Spinner, refreshing: bool) {
@@ -372,7 +495,12 @@ fn set_refresh_controls(refresh_button: &gtk::Button, spinner: &gtk::Spinner, re
     }
 }
 
-fn provider_card(state: &ProviderState, refreshing: bool, animate: bool) -> gtk::Widget {
+fn provider_card(
+    state: &ProviderState,
+    refreshing: bool,
+    animate: bool,
+    pins: &Rc<PinControls>,
+) -> gtk::Widget {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     list.add_css_class("boxed-list");
@@ -429,7 +557,7 @@ fn provider_card(state: &ProviderState, refreshing: bool, animate: bool) -> gtk:
             content.append(&empty);
         } else {
             for window in &limits.value {
-                content.append(&limit_row(window, animate));
+                content.append(&limit_row(window, animate, &pins.button(state, window)));
             }
         }
     }
@@ -450,7 +578,7 @@ fn provider_card(state: &ProviderState, refreshing: bool, animate: bool) -> gtk:
     list.upcast()
 }
 
-fn limit_row(window: &UsageWindow, animate: bool) -> gtk::Widget {
+fn limit_row(window: &UsageWindow, animate: bool, pin: &gtk::ToggleButton) -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 3);
     root.set_margin_top(2);
 
@@ -467,6 +595,7 @@ fn limit_row(window: &UsageWindow, animate: bool) -> gtk::Widget {
     let percent = gtk::Label::new(Some(&percent_label(window.used_percent)));
     percent.add_css_class("numeric");
     header.append(&percent);
+    header.append(pin);
     root.append(&header);
 
     let progress = gtk::ProgressBar::new();
@@ -606,7 +735,7 @@ fn percent_label(percent: f64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::usage::{
         Provider, ProviderState, Timestamped, TokenTotals, UsageError, UsageErrorKind,
@@ -692,9 +821,8 @@ mod tests {
             .any(|row| row.starts_with("Rate limits last updated ")));
     }
 
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn menu_button_owns_a_wide_upward_popover() {
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn menu_button_owns_a_wide_upward_popover() {
         let usage = UsagePopover::new(None);
         let popover = usage
             .button()
@@ -762,10 +890,10 @@ mod tests {
         assert!(spinner.is_spinning());
     }
 
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn dropping_usage_popover_releases_refresh_widgets() {
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn dropping_usage_popover_releases_refresh_widgets() {
         let usage = UsagePopover::new(None);
+        let bar_weak = usage.bar.root.downgrade();
         let refresh_weak = {
             let popover = usage.button().popover().unwrap();
             let root = popover.child().unwrap();
@@ -775,18 +903,24 @@ mod tests {
         };
 
         drop(usage);
-        let context = gtk::glib::MainContext::default();
-        while context.pending() {
-            context.iteration(false);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let context = gtk::glib::MainContext::default();
+            while context.pending() {
+                context.iteration(false);
+            }
         }
 
         assert!(
             refresh_weak.upgrade().is_none(),
             "the refresh receiver must not retain the widget graph"
         );
+        assert!(
+            bar_weak.upgrade().is_none(),
+            "pin callbacks must not retain the usage bar"
+        );
     }
 
-    #[cfg(not(target_os = "macos"))]
     fn find_named_widget(root: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
         if root.widget_name() == name {
             return Some(root.clone());

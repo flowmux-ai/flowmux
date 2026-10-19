@@ -133,6 +133,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     spawn_dispatch_loop(rx, controller.clone());
     controller.window.present();
     wait_until("window mapped", || controller.window.is_mapped()).await;
+    if std::env::var_os("FLOWMUX_USAGE_PINS_SMOKE_ONLY").is_some() {
+        crate::ui::usage_popover::native_tests::check(&controller.sidebar.usage).await;
+        controller.window.destroy();
+        options_merge::check(app).await;
+        return;
+    }
     crate::ui::macos_ime::check_native_surface_access(&controller.window);
     let terminal = controller
         .pane_registry

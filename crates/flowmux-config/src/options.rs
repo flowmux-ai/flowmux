@@ -55,6 +55,22 @@ pub const CURSOR_BLINK_INTERVAL_MIN: u32 = 100;
 pub const CURSOR_BLINK_INTERVAL_MAX: u32 = 2000;
 pub const CURSOR_BLINK_INTERVAL_DEFAULT: u32 = 530;
 
+/// Stable identity of a usage window; changing values and reset times are not keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageBarPin {
+    pub label: String,
+    pub scope: Option<String>,
+    pub duration_minutes: Option<u64>,
+}
+
+/// None preserves the automatic footer; an empty list explicitly hides that provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UsageBarPins {
+    pub claude: Option<Vec<UsageBarPin>>,
+    pub codex: Option<Vec<UsageBarPin>>,
+}
+
 /// Profile selection for new browser tabs. Every variant uses the platform
 /// WebKit backend; Chrome/Firefox labels do not launch external engines.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +195,8 @@ pub struct Options {
     /// Show the compact AI usage footer. Enabled by default.
     #[serde(default = "default_usage_bar_enabled")]
     pub usage_bar_enabled: bool,
+    #[serde(default)]
+    pub usage_bar_pins: UsageBarPins,
     /// When true, the terminal cursor blinks. Default:
     /// [`CURSOR_BLINK_DEFAULT`] (`true`).
     #[serde(default = "default_cursor_blink")]
@@ -307,6 +325,7 @@ impl Default for Options {
             agent_bar_mode: default_agent_bar_mode(),
             agent_sort_mode: AgentSortMode::default(),
             usage_bar_enabled: default_usage_bar_enabled(),
+            usage_bar_pins: UsageBarPins::default(),
             cursor_blink: default_cursor_blink(),
             editor_minimap_enabled: default_editor_minimap_enabled(),
             cursor_blink_interval_ms: default_cursor_blink_interval(),
@@ -674,6 +693,35 @@ mod tests {
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
         result
+    }
+
+    #[test]
+    fn usage_bar_pins_preserve_legacy_defaults_empty_selection_and_stale_edits() {
+        let before = Options::default();
+        let mut legacy = serde_json::to_value(&before).unwrap();
+        legacy.as_object_mut().unwrap().remove("usage_bar_pins");
+        assert_eq!(
+            serde_json::from_value::<Options>(legacy)
+                .unwrap()
+                .usage_bar_pins,
+            UsageBarPins::default()
+        );
+        with_xdg(|_| {
+            let mut pinned = before.clone();
+            pinned.usage_bar_pins.claude = Some(vec![UsageBarPin {
+                label: "Weekly".into(),
+                scope: Some("Sonnet".into()),
+                duration_minutes: Some(10_080),
+            }]);
+            save_changes(&before, &pinned).unwrap();
+            let mut other = before.clone();
+            other.usage_bar_pins.codex = Some(vec![]);
+            save_changes(&before, &other).unwrap();
+            let saved = save_changes(&before, &before.clone().with_zoom_percent(125)).unwrap();
+            assert_eq!(saved.usage_bar_pins.claude, pinned.usage_bar_pins.claude);
+            assert_eq!(saved.usage_bar_pins.codex, Some(vec![]));
+            assert_eq!(load(), saved);
+        });
     }
 
     #[test]

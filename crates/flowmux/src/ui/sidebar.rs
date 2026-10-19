@@ -355,6 +355,12 @@ impl Sidebar {
                 .tx
                 .try_send(GtkCommand::SetUsageBarEnabled { enabled });
         });
+        let usage_bridge = bridge.clone();
+        usage.connect_pins_changed(move |pins| {
+            let _ = usage_bridge
+                .tx
+                .try_send(GtkCommand::SetUsageBarPins { pins });
+        });
         usage
             .button()
             .set_tooltip_text(Some("AI usage (Ctrl+Alt+U)"));

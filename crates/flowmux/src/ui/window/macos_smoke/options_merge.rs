@@ -51,8 +51,17 @@ pub(super) async fn check(app: &adw::Application) {
     };
     let first = make_window();
     let second = make_window();
+    let mut pins = options::load().usage_bar_pins;
+    pins.claude = Some(vec![]);
+    first
+        .dispatch(GtkCommand::SetUsageBarPins { pins: pins.clone() })
+        .await;
     let first_dialog = dialog(&first).await;
     let second_dialog = dialog(&second).await;
+    pins.codex = Some(vec![]);
+    second
+        .dispatch(GtkCommand::SetUsageBarPins { pins: pins.clone() })
+        .await;
     control(&first_dialog, "Keep browser session data")
         .downcast::<gtk::CheckButton>()
         .unwrap()
@@ -93,6 +102,10 @@ pub(super) async fn check(app: &adw::Application) {
     })
     .await;
     let saved = options::load();
+    assert_eq!(
+        saved.usage_bar_pins, pins,
+        "stale options dialogs must preserve pin selections"
+    );
     assert_eq!(saved.zoom_percent, 200);
     assert!(!saved.persist_browser_session);
     assert_eq!(saved.agent_sort_mode, AgentSortMode::RecentlyFinished);

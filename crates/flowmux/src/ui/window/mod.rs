@@ -1671,6 +1671,9 @@ impl WindowController {
         sidebar
             .usage
             .set_bar_enabled(initial_options.usage_bar_enabled);
+        sidebar
+            .usage
+            .set_pins(initial_options.usage_bar_pins.clone());
         sidebar.set_agent_sort_mode(initial_options.agent_sort_mode);
         sidebar
             .usage
@@ -2881,6 +2884,7 @@ impl WindowController {
             | GtkCommand::SetAgentBarMode { .. }
             | GtkCommand::SetAgentSortMode { .. }
             | GtkCommand::SetUsageBarEnabled { .. }
+            | GtkCommand::SetUsageBarPins { .. }
             | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::OpenNotification { .. }

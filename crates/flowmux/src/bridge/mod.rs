@@ -602,6 +602,9 @@ pub enum GtkCommand {
     SetUsageBarEnabled {
         enabled: bool,
     },
+    SetUsageBarPins {
+        pins: flowmux_config::options::UsageBarPins,
+    },
     SetAgentBarMode {
         enabled: bool,
     },

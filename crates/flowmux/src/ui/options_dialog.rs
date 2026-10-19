@@ -197,6 +197,7 @@ fn build_dialog(
         let system_notify_switch = system_notify_switch.clone();
         let agent_bar_switch = agent_bar_switch.clone();
         let usage_bar_switch = usage_bar_switch.clone();
+        let usage_bar_pins = current.usage_bar_pins.clone();
         let editor_minimap_switch = editor_minimap_switch.clone();
         let cursor_blink_switch = cursor_blink_switch.clone();
         let blink_interval_spin = blink_interval_spin.clone();
@@ -234,6 +235,7 @@ fn build_dialog(
                 &system_notify_switch,
                 &agent_bar_switch,
                 &usage_bar_switch,
+                &usage_bar_pins,
                 &editor_minimap_switch,
                 &cursor_blink_switch,
                 &blink_interval_spin,
@@ -1001,6 +1003,7 @@ fn collect_options(
     system_notify_switch: &gtk::Switch,
     agent_bar_switch: &gtk::Switch,
     usage_bar_switch: &gtk::Switch,
+    usage_bar_pins: &flowmux_config::options::UsageBarPins,
     editor_minimap_switch: &gtk::Switch,
     cursor_blink_switch: &gtk::Switch,
     blink_interval_spin: &gtk::SpinButton,
@@ -1056,6 +1059,7 @@ fn collect_options(
         system_notifications_enabled: system_notify_switch.is_active(),
         agent_bar_mode: agent_bar_switch.is_active(),
         usage_bar_enabled: usage_bar_switch.is_active(),
+        usage_bar_pins: usage_bar_pins.clone(),
         editor_minimap_enabled: editor_minimap_switch.is_active(),
         cursor_blink: cursor_blink_switch.is_active(),
         cursor_blink_interval_ms: Options::clamp_cursor_blink_interval(
@@ -1706,6 +1710,7 @@ mod tests {
             &notify_on,
             &agent_bar_on,
             &build_toggle_switch(true),
+            &Default::default(),
             &minimap_on,
             &blink_on,
             &blink_interval,
@@ -1776,6 +1781,7 @@ mod tests {
             &notify_off,
             &agent_bar_off,
             &build_toggle_switch(false),
+            &Default::default(),
             &minimap_off,
             &blink_off,
             &blink_interval,

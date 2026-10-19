@@ -21,6 +21,16 @@ impl WindowController {
                 }
                 self.sidebar.usage.set_bar_enabled(enabled);
             }
+            GtkCommand::SetUsageBarPins { pins } => {
+                let before = self.options.borrow().clone();
+                self.options.borrow_mut().usage_bar_pins = pins.clone();
+                if let Err(error) =
+                    flowmux_config::options::save_changes(&before, &self.options.borrow())
+                {
+                    tracing::warn!(%error, "usage pins save failed");
+                }
+                self.sidebar.usage.set_pins(pins);
+            }
             GtkCommand::SetAgentBarMode { enabled } => {
                 let before = self.options.borrow().clone();
                 self.options.borrow_mut().agent_bar_mode = enabled;

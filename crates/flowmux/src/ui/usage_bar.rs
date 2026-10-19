@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::usage::{ProviderState, UsagePanelState, UsageWindow};
+use crate::usage::{Provider, ProviderState, UsagePanelState, UsageWindow};
+use flowmux_config::options::{UsageBarPin, UsageBarPins};
 use gtk::prelude::*;
+use std::cell::RefCell;
 
 /// Persistent widgets: refreshing changes values without rebuilding the footer.
 pub(crate) struct UsageBar {
@@ -9,13 +11,35 @@ pub(crate) struct UsageBar {
     icons: [gtk::Image; 2],
     separator: gtk::Box,
     providers: [gtk::Box; 2],
-    meters: [[Meter; 2]; 2],
+    meters: [RefCell<Vec<Meter>>; 2],
+    pins: RefCell<UsageBarPins>,
 }
 
 struct Meter {
     root: gtk::Box,
     progress: gtk::ProgressBar,
     percent: gtk::Label,
+}
+
+impl Meter {
+    fn new(provider: usize, period: usize) -> Self {
+        let meter = Self {
+            root: gtk::Box::new(gtk::Orientation::Horizontal, 4),
+            progress: gtk::ProgressBar::new(),
+            percent: gtk::Label::new(None),
+        };
+        meter.progress.add_css_class(["claude", "codex"][provider]);
+        meter.progress.set_valign(gtk::Align::Center);
+        meter.progress.set_width_request(95);
+        meter.percent.add_css_class("numeric");
+        meter
+            .percent
+            .set_width_chars(if provider == 0 && period == 0 { 8 } else { 9 });
+        meter.percent.set_xalign(0.0);
+        meter.root.append(&meter.progress);
+        meter.root.append(&meter.percent);
+        meter
+    }
 }
 
 impl UsageBar {
@@ -33,29 +57,15 @@ impl UsageBar {
             }
             root.append(&providers[provider]);
             providers[provider].append(&icons[provider]);
-            std::array::from_fn(|period| {
-                let meter = Meter {
-                    root: gtk::Box::new(gtk::Orientation::Horizontal, 4),
-                    progress: gtk::ProgressBar::new(),
-                    percent: gtk::Label::new(None),
-                };
-                // The tooltip and accessible label name the window each meter
-                // ends up showing, so `render` sets them: a credit-based plan
-                // puts its balance in the first slot instead of the 5h window.
-                meter.progress.add_css_class(["claude", "codex"][provider]);
-                meter.progress.set_valign(gtk::Align::Center);
-                meter.progress.set_width_request(95);
-                meter.percent.add_css_class("numeric");
-                // Keep the two Claude meters closer without changing provider spacing.
-                meter
-                    .percent
-                    .set_width_chars(if provider == 0 && period == 0 { 8 } else { 9 });
-                meter.percent.set_xalign(0.0);
-                meter.root.append(&meter.progress);
-                meter.root.append(&meter.percent);
-                providers[provider].append(&meter.root);
-                meter
-            })
+            RefCell::new(
+                (0..2)
+                    .map(|period| {
+                        let meter = Meter::new(provider, period);
+                        providers[provider].append(&meter.root);
+                        meter
+                    })
+                    .collect(),
+            )
         });
         Self {
             root,
@@ -63,6 +73,7 @@ impl UsageBar {
             separator,
             providers,
             meters,
+            pins: RefCell::new(UsageBarPins::default()),
         }
     }
 
@@ -81,8 +92,36 @@ impl UsageBar {
         separator_layout.set_font_description(Some(&font));
         self.separator
             .set_width_request(separator_layout.pixel_size().0);
-        for meter in self.meters.iter().flatten() {
-            meter.percent.set_attributes(Some(&attributes));
+        for meters in &self.meters {
+            for meter in meters.borrow().iter() {
+                meter.percent.set_attributes(Some(&attributes));
+            }
+        }
+    }
+
+    pub(crate) fn pins(&self) -> UsageBarPins {
+        self.pins.borrow().clone()
+    }
+
+    pub(crate) fn set_pins(&self, pins: UsageBarPins) {
+        *self.pins.borrow_mut() = pins;
+    }
+
+    pub(crate) fn is_pinned(&self, state: &ProviderState, window: &UsageWindow) -> bool {
+        effective_pins(state, &self.pins.borrow()).contains(&window_pin(window))
+    }
+
+    pub(crate) fn toggle_pin(&self, state: &ProviderState, window: &UsageWindow, pinned: bool) {
+        let mut pins = self.pins.borrow_mut();
+        let mut selected = effective_pins(state, &pins);
+        let key = window_pin(window);
+        selected.retain(|entry| entry != &key);
+        if pinned {
+            selected.push(key);
+        }
+        match state.provider {
+            Provider::Claude => pins.claude = Some(selected),
+            Provider::Codex => pins.codex = Some(selected),
         }
     }
 
@@ -108,8 +147,51 @@ impl UsageBar {
                     })
                     .or_else(|| any_limit(state).map(|(name, value)| ("Limit", name, value)));
             }
-            for (period, slot) in slots.into_iter().enumerate() {
-                let meter = &self.meters[provider][period];
+            let pins = self.pins.borrow();
+            let slots: Vec<_> = match provider_pins(state.provider, &pins) {
+                None => slots.into_iter().collect(),
+                Some(selected) => state
+                    .limits
+                    .iter()
+                    .flat_map(|limits| &limits.value)
+                    .filter(|window| {
+                        valid_percent(window) && selected.contains(&window_pin(window))
+                    })
+                    .map(|window| {
+                        let label = match window.duration_minutes {
+                            Some(300) => "5h",
+                            Some(10_080) => "1W",
+                            _ if window.scope.as_deref() == Some(CREDIT_SCOPES[provider]) => {
+                                CREDIT_LABELS[provider]
+                            }
+                            _ => "Limit",
+                        };
+                        let name = match &window.scope {
+                            Some(scope) if label == "5h" || label == "1W" => {
+                                format!("{scope} {label}")
+                            }
+                            Some(scope) if label == "Limit" => match window.duration_minutes {
+                                Some(_) => format!("{scope} {}", window.label),
+                                None => scope.clone(),
+                            },
+                            _ if label == "Limit" => window.label.clone(),
+                            _ => label.to_owned(),
+                        };
+                        Some((label, name, window.used_percent))
+                    })
+                    .collect(),
+            };
+            let mut meters = self.meters[provider].borrow_mut();
+            while meters.len() < slots.len() {
+                let meter = Meter::new(provider, meters.len());
+                meter
+                    .percent
+                    .set_attributes(meters[0].percent.attributes().as_ref());
+                self.providers[provider].append(&meter.root);
+                meters.push(meter);
+            }
+            for (period, meter) in meters.iter().enumerate() {
+                let slot = slots.get(period).and_then(Option::as_ref);
                 if let Some((label, long_label, value)) = &slot {
                     let (label, value) = (*label, *value);
                     let name = ["Claude", "Codex"][provider];
@@ -137,6 +219,58 @@ impl UsageBar {
         self.root
             .set_visible(enabled && visible.into_iter().any(|value| value));
     }
+}
+
+fn window_pin(window: &UsageWindow) -> UsageBarPin {
+    UsageBarPin {
+        label: window.label.clone(),
+        scope: window.scope.clone(),
+        duration_minutes: window.duration_minutes,
+    }
+}
+
+fn provider_pins(provider: Provider, pins: &UsageBarPins) -> Option<&Vec<UsageBarPin>> {
+    match provider {
+        Provider::Claude => pins.claude.as_ref(),
+        Provider::Codex => pins.codex.as_ref(),
+    }
+}
+
+fn valid_percent(window: &UsageWindow) -> bool {
+    window.used_percent.is_finite() && window.used_percent >= 0.0
+}
+
+fn effective_pins(state: &ProviderState, pins: &UsageBarPins) -> Vec<UsageBarPin> {
+    if let Some(selected) = provider_pins(state.provider, pins) {
+        return selected.clone();
+    }
+    let Some(limits) = &state.limits else {
+        return Vec::new();
+    };
+    let highest = |matches: &dyn Fn(&UsageWindow) -> bool| {
+        let value = max_percent(state, matches)?;
+        limits
+            .value
+            .iter()
+            .find(|window| matches(window) && window.used_percent == value)
+    };
+    let mut selected: Vec<_> = [300, 10_080]
+        .into_iter()
+        .filter_map(|duration| highest(&|window| window.duration_minutes == Some(duration)))
+        .map(window_pin)
+        .collect();
+    if selected.is_empty() {
+        let scope = match state.provider {
+            Provider::Claude => CREDIT_SCOPES[0],
+            Provider::Codex => CREDIT_SCOPES[1],
+        };
+        if let Some(window) =
+            highest(&|window| window.scope.as_deref() == Some(scope)).or_else(|| highest(&|_| true))
+        {
+            selected.push(window_pin(window));
+        }
+    }
+    selected
 }
 
 /// The only limit a credit-based plan reports, per provider, and the short
@@ -190,7 +324,7 @@ fn max_percent(state: &ProviderState, matches: impl Fn(&UsageWindow) -> bool) ->
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::usage::{FieldRefresh, Provider, ProviderRefresh, UsageError, UsageWindow};
     use chrono::Utc;
@@ -231,6 +365,102 @@ mod tests {
     }
 
     #[test]
+    fn automatic_pins_follow_existing_period_and_credit_fallbacks() {
+        let mut state = UsagePanelState::default();
+        let pins = UsageBarPins::default();
+        assert!(effective_pins(&state.claude, &pins).is_empty());
+        state.apply(refresh(
+            Provider::Claude,
+            &[(300, 20.0), (300, 80.0), (10_080, 30.0), (60, 99.0)],
+        ));
+        state.claude.limits.as_mut().unwrap().value[1].scope = Some("Team".into());
+        let selected = effective_pins(&state.claude, &pins);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].scope.as_deref(), Some("Team"));
+        assert_eq!(selected[1].duration_minutes, Some(10_080));
+        state.apply(credit_refresh(Provider::Claude, "Extra usage", 42.0));
+        assert_eq!(
+            effective_pins(&state.claude, &pins)[0].scope.as_deref(),
+            Some("Extra usage")
+        );
+        state.apply(credit_refresh(Provider::Codex, "Team pool", 90.0));
+        assert_eq!(
+            effective_pins(&state.codex, &pins)[0].scope.as_deref(),
+            Some("Team pool")
+        );
+    }
+
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn pins_preserve_scopes_values_fonts_and_survive_missing_data() {
+        let bar = UsageBar::new();
+        bar.set_font(&gtk::pango::FontDescription::from_string("Monospace 18"));
+        let mut state = UsagePanelState::default();
+        state.apply(refresh(
+            Provider::Claude,
+            &[(300, 22.0), (10_080, 35.0), (10_080, 15.0)],
+        ));
+        state.claude.limits.as_mut().unwrap().value[2].scope = Some("Sonnet".into());
+        state.apply(refresh(Provider::Codex, &[(300, 44.0), (10_080, 65.0)]));
+        let windows = state.claude.limits.as_ref().unwrap().value.clone();
+        bar.render(&state, true);
+        let first = bar.meters[0].borrow()[0].root.clone();
+        assert!(!bar.is_pinned(&state.claude, &windows[2]));
+        bar.toggle_pin(&state.claude, &windows[2], true);
+        let saved = bar.pins();
+        assert!(
+            saved.codex.is_none(),
+            "untouched providers keep automatic selection"
+        );
+        bar.render(&state, true);
+        {
+            let meters = bar.meters[0].borrow();
+            assert_eq!(meters.len(), 3);
+            assert_eq!(meters[0].root, first);
+            assert_eq!(meters[0].percent.text(), "22%(5h)");
+            assert_eq!(meters[1].percent.text(), "35%(1W)");
+            assert_eq!(meters[2].percent.text(), "15%(1W)");
+            assert_eq!(
+                meters[2].percent.attributes(),
+                meters[0].percent.attributes()
+            );
+        }
+        assert_eq!(bar.meters[1].borrow()[1].percent.text(), "65%(1W)");
+        let updated = &mut state.claude.limits.as_mut().unwrap().value[2];
+        updated.used_percent = 46.0;
+        updated.resets_at = Some(Utc::now());
+        state.claude.limits_error = Some(UsageError::network());
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0].borrow()[2].percent.text(), "46%(1W)");
+        assert_eq!(
+            bar.meters[0].borrow()[2].root.tooltip_text().as_deref(),
+            Some("Claude Sonnet 1W usage (last known)")
+        );
+        state.claude.limits = None;
+        bar.render(&state, true);
+        assert!(!bar.providers[0].is_visible());
+        assert!(bar.providers[1].is_visible());
+        assert_eq!(bar.pins(), saved);
+        state.apply(refresh(Provider::Claude, &[(300, 0.0), (10_080, 120.0)]));
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "0%(5h)");
+        assert_eq!(bar.meters[0].borrow()[1].percent.text(), "120%(1W)");
+        assert_eq!(bar.meters[0].borrow()[1].progress.fraction(), 1.0);
+        assert!(!bar.meters[0].borrow()[2].root.is_visible());
+        for window in &windows {
+            bar.toggle_pin(&state.claude, window, false);
+        }
+        bar.render(&state, true);
+        assert_eq!(bar.pins().claude, Some(vec![]));
+        assert!(!bar.providers[0].is_visible());
+        assert!(!bar.separator.is_visible());
+        bar.set_pins(saved);
+        bar.render(&state, false);
+        assert!(!bar.root.is_visible());
+        bar.render(&state, true);
+        assert!(bar.root.is_visible());
+    }
+
+    #[test]
     fn periods_use_maximum_valid_usage_and_reject_unavailable_limits() {
         let mut state = UsagePanelState::default();
         assert_eq!(window_percent(&state.claude, 300), None);
@@ -261,9 +491,8 @@ mod tests {
         assert_eq!(window_percent(&state.claude, 300), None);
     }
 
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn footer_updates_in_place_and_hides_only_unavailable_periods() {
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn footer_updates_in_place_and_hides_only_unavailable_periods() {
         let bar = UsageBar::new();
         let mut state = UsagePanelState::default();
         bar.render(&state, true);
@@ -277,10 +506,13 @@ mod tests {
             bar.separator.first_child().is_none(),
             "provider spacing contains no text"
         );
-        assert!(bar.meters[0][0].percent.width_chars() < bar.meters[1][0].percent.width_chars());
-        assert!(bar.meters[0][0].progress.has_css_class("claude"));
-        assert!(bar.meters[1][0].progress.has_css_class("codex"));
-        assert_eq!(bar.meters[1][1].percent.text(), "65%(1W)");
+        assert!(
+            bar.meters[0].borrow()[0].percent.width_chars()
+                < bar.meters[1].borrow()[0].percent.width_chars()
+        );
+        assert!(bar.meters[0].borrow()[0].progress.has_css_class("claude"));
+        assert!(bar.meters[1].borrow()[0].progress.has_css_class("codex"));
+        assert_eq!(bar.meters[1].borrow()[1].percent.text(), "65%(1W)");
         assert_eq!(
             bar.root.first_child().as_ref(),
             Some(bar.providers[0].upcast_ref())
@@ -296,17 +528,17 @@ mod tests {
             );
             assert_eq!(
                 bar.icons[provider].next_sibling().as_ref(),
-                Some(bar.meters[provider][0].root.upcast_ref())
+                Some(bar.meters[provider].borrow()[0].root.upcast_ref())
             );
         }
-        let first = bar.meters[0][0].root.clone();
+        let first = bar.meters[0].borrow()[0].root.clone();
         let visibility_changes = std::rc::Rc::new(std::cell::Cell::new(0));
         let changes = visibility_changes.clone();
         bar.root
             .connect_visible_notify(move |_| changes.set(changes.get() + 1));
         state.begin_forced_refresh();
         bar.render(&state, true);
-        assert_eq!(bar.meters[0][0].progress.fraction(), 0.22);
+        assert_eq!(bar.meters[0].borrow()[0].progress.fraction(), 0.22);
         state.apply(refresh(Provider::Claude, &[(300, 51.0), (10_080, 35.0)]));
         state.finish_refresh(Utc::now());
         bar.render(&state, true);
@@ -314,7 +546,7 @@ mod tests {
             bar.icons[0].next_sibling().as_ref(),
             Some(first.upcast_ref())
         );
-        assert_eq!(bar.meters[0][0].progress.fraction(), 0.51);
+        assert_eq!(bar.meters[0].borrow()[0].progress.fraction(), 0.51);
         assert_eq!(
             visibility_changes.get(),
             0,
@@ -325,23 +557,23 @@ mod tests {
         state.claude.limits_error = Some(UsageError::network());
         bar.render(&state, true);
         assert!(bar.providers[0].is_visible());
-        assert_eq!(bar.meters[0][0].percent.text(), "51%(5h)");
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "51%(5h)");
         assert_eq!(
-            bar.meters[0][0].root.tooltip_text().as_deref(),
+            bar.meters[0].borrow()[0].root.tooltip_text().as_deref(),
             Some("Claude 5h usage (last known)")
         );
         assert!(bar.providers[1].is_visible());
         assert!(bar.separator.is_visible());
         state.apply(refresh(Provider::Codex, &[(300, 0.0), (10_080, 65.0)]));
         bar.render(&state, true);
-        assert!(bar.meters[1][0].root.is_visible());
-        assert_eq!(bar.meters[1][0].progress.fraction(), 0.0);
-        assert_eq!(bar.meters[1][0].percent.text(), "0%(5h)");
+        assert!(bar.meters[1].borrow()[0].root.is_visible());
+        assert_eq!(bar.meters[1].borrow()[0].progress.fraction(), 0.0);
+        assert_eq!(bar.meters[1].borrow()[0].percent.text(), "0%(5h)");
         assert_eq!(
-            bar.meters[1][0].root.tooltip_text().as_deref(),
+            bar.meters[1].borrow()[0].root.tooltip_text().as_deref(),
             Some("Codex 5h usage")
         );
-        assert!(bar.meters[1][1].root.is_visible());
+        assert!(bar.meters[1].borrow()[1].root.is_visible());
         assert!(bar.icons[1].is_visible());
         bar.render(&state, false);
         assert!(!bar.root.is_visible());
@@ -354,13 +586,12 @@ mod tests {
         state.apply(refresh(Provider::Claude, &[(300, 120.0)]));
         bar.render(&state, true);
         assert!(bar.root.is_visible());
-        assert_eq!(bar.meters[0][0].progress.fraction(), 1.0);
-        assert_eq!(bar.meters[0][0].percent.text(), "120%(5h)");
+        assert_eq!(bar.meters[0].borrow()[0].progress.fraction(), 1.0);
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "120%(5h)");
     }
 
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn credit_based_plans_show_their_single_balance_in_the_first_slot() {
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn credit_based_plans_show_their_single_balance_in_the_first_slot() {
         let bar = UsageBar::new();
         let mut state = UsagePanelState::default();
         state.apply(credit_refresh(Provider::Claude, "Extra usage", 42.0));
@@ -368,43 +599,42 @@ mod tests {
         bar.render(&state, true);
         assert!(bar.root.is_visible());
         assert!(bar.separator.is_visible());
-        assert_eq!(bar.meters[0][0].percent.text(), "42%(Extra)");
-        assert_eq!(bar.meters[0][0].progress.fraction(), 0.42);
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "42%(Extra)");
+        assert_eq!(bar.meters[0].borrow()[0].progress.fraction(), 0.42);
         assert_eq!(
-            bar.meters[0][0].root.tooltip_text().as_deref(),
+            bar.meters[0].borrow()[0].root.tooltip_text().as_deref(),
             Some("Claude Extra usage")
         );
-        assert_eq!(bar.meters[1][0].percent.text(), "7%(Individual)");
+        assert_eq!(bar.meters[1].borrow()[0].percent.text(), "7%(Individual)");
         for provider in 0..2 {
             assert!(bar.providers[provider].is_visible());
-            assert!(bar.meters[provider][0].root.is_visible());
+            assert!(bar.meters[provider].borrow()[0].root.is_visible());
             assert!(
-                !bar.meters[provider][1].root.is_visible(),
+                !bar.meters[provider].borrow()[1].root.is_visible(),
                 "a credit plan has no second window"
             );
         }
         // A plan that reports real periods keeps them; the balance is a fallback.
         state.apply(refresh(Provider::Claude, &[(300, 22.0)]));
         bar.render(&state, true);
-        assert_eq!(bar.meters[0][0].percent.text(), "22%(5h)");
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "22%(5h)");
         // Any other limit still shows, under a generic label, when a plan
         // reports neither periods nor a known credit balance.
         state.apply(credit_refresh(Provider::Codex, "Team pool", 90.0));
         bar.render(&state, true);
         assert!(bar.providers[1].is_visible());
-        assert_eq!(bar.meters[1][0].percent.text(), "90%(Limit)");
+        assert_eq!(bar.meters[1].borrow()[0].percent.text(), "90%(Limit)");
         assert_eq!(
-            bar.meters[1][0].root.tooltip_text().as_deref(),
+            bar.meters[1].borrow()[0].root.tooltip_text().as_deref(),
             Some("Codex Team pool usage")
         );
         state.apply(credit_refresh(Provider::Claude, "Cinder cove", 100.0));
         bar.render(&state, true);
-        assert_eq!(bar.meters[0][0].percent.text(), "100%(Limit)");
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "100%(Limit)");
     }
 
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn footer_font_tracks_global_terminal_font() {
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn footer_font_tracks_global_terminal_font() {
         let bar = UsageBar::new();
         bar.set_font(&gtk::pango::FontDescription::from_string("Monospace 12"));
         let small_icon = bar.icons[0].pixel_size();
@@ -420,10 +650,18 @@ mod tests {
             (original_height * 0.8).round() as i32
         );
         assert_eq!(
-            bar.meters[0][0].percent.attributes().unwrap().to_string(),
-            bar.meters[1][1].percent.attributes().unwrap().to_string()
+            bar.meters[0].borrow()[0]
+                .percent
+                .attributes()
+                .unwrap()
+                .to_string(),
+            bar.meters[1].borrow()[1]
+                .percent
+                .attributes()
+                .unwrap()
+                .to_string()
         );
-        let rendered_font = bar.meters[0][0]
+        let rendered_font = bar.meters[0].borrow()[0]
             .percent
             .attributes()
             .unwrap()

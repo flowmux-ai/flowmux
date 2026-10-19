@@ -56,6 +56,10 @@ impl WindowController {
                             .sidebar
                             .usage
                             .set_bar_enabled(opts.usage_bar_enabled);
+                        controller
+                            .sidebar
+                            .usage
+                            .set_pins(opts.usage_bar_pins.clone());
                         // Re-resolves the theme (preset + overrides), repaints
                         // every terminal, reapplies the effective font, and
                         // reloads the CSS provider.
