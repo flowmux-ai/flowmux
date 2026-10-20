@@ -63,7 +63,7 @@ git("commit", "-m", "remote history entry")
 (root / "staged.txt").write_text("REMOTE_STAGED\\n")
 git("add", "staged.txt")
 (root / "new ' $(touch injected).txt").write_text("REMOTE_UNTRACKED\\n")
-(root / "link.txt").symlink_to("app.py")
+os.symlink(b"app.py\\n\\xff\\n", b"link.txt")
 print(git("rev-parse", "HEAD").strip())
 print(git("status", "--porcelain=v1"))
 '''
@@ -163,10 +163,11 @@ print(git("status", "--porcelain=v1"))
         shot("working-tree.png")
         for label, value in [("M  staged.txt", "REMOTE_STAGED"),
                              ("?  new ' $(touch injected).txt", "REMOTE_UNTRACKED"),
-                             ("?  link.txt", "New symbolic link:")]:
+                             ("?  link.txt", "New symbolic link: link.txt → app.py\\n�\\n")]:
             click(find(label, Atspi.Role.LABEL))
             patch_contains(value)
-        h.pass_check("SSH menu opens remote working, staged, untracked and symlink diffs; quoted paths remain literal")
+        shot("symlink-path.png")
+        h.pass_check("SSH diffs preserve quoted paths and escape symlink targets with control/non-UTF-8 bytes")
 
         untracked = args.remote_cwd + "/new ' $(touch injected).txt"
         h.remote("python3 -c " + shlex.quote("with open(" + repr(untracked) + ", 'wb') as f: f.truncate(8388609)"))

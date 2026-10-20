@@ -116,11 +116,8 @@ impl Repository {
             let path = Path::new(".").join(&file.path);
             let mut script = b"p=".to_vec();
             script.extend(quote(path.as_os_str()));
-            script.extend_from_slice(b"; if [ -L \"$p\" ]; then printf '%s' ");
-            script.extend(quote(OsStr::new(&format!(
-                "New symbolic link: {} → ",
-                file.label()
-            ))));
+            // A NUL distinguishes raw link targets from Git's textual diff.
+            script.extend_from_slice(b"; if [ -L \"$p\" ]; then printf '\\0'");
             script.extend_from_slice(
                 br#"; readlink "$p" || exit 2
 elif [ ! -f "$p" ]; then
@@ -134,17 +131,24 @@ else
             );
             script.extend(shell_words(&command));
             script.extend_from_slice(b"; fi");
-            return run(&mut self.remote_command(&script)?, true);
+            let bytes = run(&mut self.remote_command(&script)?, true)?;
+            return Ok(match bytes.strip_prefix(b"\0") {
+                Some(target) => symlink_patch(
+                    file,
+                    Path::new(OsStr::from_bytes(
+                        target.strip_suffix(b"\n").unwrap_or(target),
+                    )),
+                ),
+                None => bytes,
+            });
         }
         let path = self.root.join(&file.path);
         let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
         if meta.file_type().is_symlink() {
-            return Ok(format!(
-                "New symbolic link: {} → {}\n",
-                file.label(),
-                display_path(&std::fs::read_link(path).map_err(|e| e.to_string())?)
-            )
-            .into_bytes());
+            return Ok(symlink_patch(
+                file,
+                &std::fs::read_link(path).map_err(|e| e.to_string())?,
+            ));
         }
         if !meta.is_file() {
             return Err("This untracked path is not a regular file.".into());
@@ -154,6 +158,15 @@ else
         }
         run(&mut self.command(&command)?, true)
     }
+}
+
+fn symlink_patch(file: &File, target: &Path) -> Vec<u8> {
+    format!(
+        "New symbolic link: {} → {}\n",
+        file.label(),
+        display_path(target)
+    )
+    .into_bytes()
 }
 
 fn quote(value: &OsStr) -> Vec<u8> {
