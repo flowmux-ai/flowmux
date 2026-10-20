@@ -165,7 +165,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .unwrap();
         let editor = controller.pane_registry.borrow().editors[&surface].clone();
         wait_until("editor mapped", || editor.root.is_mapped()).await;
-        glib::timeout_future(Duration::from_millis(100)).await;
+        editor.flush_pending_changes().await.unwrap();
         editor.check_terminal_focus(&terminal).await;
         editor.grab_focus();
         controller.focus_pane(terminal_pane);
