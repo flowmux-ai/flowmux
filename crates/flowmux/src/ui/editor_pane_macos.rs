@@ -572,6 +572,11 @@ impl EditorPane {
     }
 
     #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) fn focus_native_only_for_test(&self) {
+        focus_native_view(&self.native.web_view);
+    }
+
+    #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_terminal_focus(
         &self,
         terminal: &crate::ui::pane_terminal::PaneTerminal,

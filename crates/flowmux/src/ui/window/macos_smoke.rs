@@ -7,6 +7,7 @@ use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
 mod cli_paths;
+mod keyboard_focus;
 mod notification_cleanup;
 mod options_merge;
 mod palette;
@@ -147,6 +148,44 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY").is_some() {
+        crate::keybindings::install_actions(
+            &controller.window,
+            bridge.clone(),
+            controller.focused_pane.clone(),
+            controller.pane_registry(),
+            controller.clipboard_toast(),
+            controller.usage_button(),
+        );
+        let pane = controller
+            .split_pane(terminal_pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let (_, surface) = store
+            .add_editor_surface_to_pane(pane, root.into())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, surface, None)
+            .await
+            .unwrap();
+        let editor = controller.pane_registry.borrow().editors[&surface].clone();
+        wait_until("editor mapped", || editor.root.is_mapped()).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        editor.check_terminal_focus(&terminal).await;
+        editor.grab_focus();
+        controller.focus_pane(terminal_pane);
+        assert!(
+            terminal.widget.is_focus() && !editor.has_native_focus(),
+            "mapped pane handoff must finish before the next key event"
+        );
+        controller.focus_pane(pane);
+        assert!(editor.has_native_focus());
+        keyboard_focus::check(&controller, workspace, terminal_pane, pane, root).await;
+        controller.window.destroy();
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_ZOOM_REORDER_SMOKE_ONLY").is_some() {
         zoom_reorder::check(&controller, workspace, terminal_pane).await;
@@ -525,6 +564,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     wait_until("editor dirty", || !editor.dirty_document_paths().is_empty()).await;
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "original\n");
     controller.focus_pane(terminal_pane);
+    assert!(
+        terminal.widget.is_focus() && !editor.has_native_focus(),
+        "mapped pane handoff must finish before the next key event"
+    );
     wait_until("terminal focused", || !editor.has_native_focus()).await;
     controller.focus_pane(pane);
     wait_until("editor refocused", || editor.has_native_focus()).await;

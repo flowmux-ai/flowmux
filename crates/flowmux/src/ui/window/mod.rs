@@ -709,7 +709,19 @@ fn refresh_pane_after_zoom(frame: &gtk::Widget) {
 }
 
 fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId) {
-    glib::idle_add_local_once(move || {
+    let mapped = {
+        let registry = registry.borrow();
+        if let Some(term) = registry.active_terminal(pane) {
+            term.widget.is_mapped()
+        } else if let Some(browser) = registry.active_browser(pane) {
+            browser.focus_widget().is_mapped()
+        } else if let Some(editor) = registry.active_editor(pane) {
+            editor.focus_widget().is_mapped()
+        } else {
+            false
+        }
+    };
+    let grab_focus = move || {
         let registry = registry.borrow();
         if let Some(term) = registry.active_terminal(pane) {
             term.grab_focus();
@@ -720,7 +732,13 @@ fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId)
         } else {
             tracing::debug!(%pane, "focus_pane: no surface registered for pane");
         }
-    });
+    };
+    if cfg!(target_os = "macos") && mapped {
+        // An idle callback can run after the next key, leaving input in the old pane.
+        grab_focus();
+    } else {
+        glib::idle_add_local_once(grab_focus);
+    }
 }
 
 fn set_window_move_widget_rect(
@@ -2714,10 +2732,9 @@ impl WindowController {
         )
     }
 
-    /// Grab keyboard focus on `pane`. Deferred to the next idle so that
-    /// any in-flight workspace activation has finished swapping the
-    /// stack child before we ask GTK to focus a specific terminal /
-    /// browser leaf. No-op when `pane` is unknown to the registry —
+    /// On macOS, focus mapped panes immediately to keep AppKit and GTK in sync.
+    /// Otherwise defer until workspace activation has swapped the stack child.
+    /// No-op when `pane` is unknown to the registry —
     /// e.g. when the source workspace was closed between the
     /// notification firing and the user clicking it.
     fn focus_pane(&self, pane: PaneId) {
