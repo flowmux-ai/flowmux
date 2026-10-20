@@ -7,7 +7,7 @@
 
 use flowmux_core::{Notification, NotificationLevel};
 use std::collections::HashMap;
-use zbus::{proxy, zvariant::Value, Connection};
+use zbus::{proxy, Connection, Variant};
 
 /// Application action invoked when the user clicks a desktop notification.
 /// The action target is `<flowmux-pid>:<notification-id>` so the process that
@@ -44,7 +44,7 @@ trait GtkNotifications {
         &self,
         app_id: &str,
         id: &str,
-        notification: HashMap<&str, Value<'_>>,
+        notification: HashMap<&str, Variant<'_>>,
     ) -> zbus::Result<()>;
 
     fn remove_notification(&self, app_id: &str, id: &str) -> zbus::Result<()>;
@@ -101,13 +101,13 @@ impl DesktopNotifier {
     /// associate the badge with our launcher icon.
     pub async fn update_launcher_count(&self, app_uri: &str, count: i64) -> zbus::Result<()> {
         let visible = count > 0;
-        let mut props: HashMap<&str, Value<'_>> = HashMap::new();
-        props.insert("count", Value::I64(count.max(0)));
-        props.insert("count-visible", Value::Bool(visible));
+        let mut props: HashMap<&str, Variant<'_>> = HashMap::new();
+        props.insert("count", Variant::I64(count.max(0)));
+        props.insert("count-visible", Variant::Bool(visible));
         // `urgent = true` makes some docks bounce / glow the icon. We
         // mirror visibility so the icon goes back to neutral once the
         // count hits zero.
-        props.insert("urgent", Value::Bool(visible));
+        props.insert("urgent", Variant::Bool(visible));
         self.conn
             .emit_signal(
                 None::<&str>,
@@ -123,16 +123,16 @@ impl DesktopNotifier {
 fn notification_payload<'a>(
     n: &'a Notification,
     action_target: &'a str,
-) -> HashMap<&'static str, Value<'a>> {
+) -> HashMap<&'static str, Variant<'a>> {
     let mut notif = HashMap::new();
-    notif.insert("title", Value::Str(n.title.as_str().into()));
-    notif.insert("body", Value::Str(n.body.as_str().into()));
-    notif.insert("priority", Value::Str(priority_for(n.level).into()));
+    notif.insert("title", Variant::Str(n.title.as_str().into()));
+    notif.insert("body", Variant::Str(n.body.as_str().into()));
+    notif.insert("priority", Variant::Str(priority_for(n.level).into()));
     notif.insert(
         "default-action",
-        Value::Str(OPEN_NOTIFICATION_DETAILED_ACTION.into()),
+        Variant::Str(OPEN_NOTIFICATION_DETAILED_ACTION.into()),
     );
-    notif.insert("default-action-target", Value::Str(action_target.into()));
+    notif.insert("default-action-target", Variant::Str(action_target.into()));
     notif
 }
 

@@ -12,7 +12,7 @@ impl DesktopFixture {
         &self,
         app_id: &str,
         id: &str,
-        notification: HashMap<String, zbus::zvariant::OwnedValue>,
+        notification: HashMap<String, zbus::OwnedVariant>,
     ) {
         assert_eq!(app_id, flowmux_notify::DESKTOP_FILE_BASENAME);
         assert!(notification.contains_key("title"));
@@ -59,11 +59,8 @@ async fn desktop(notifier: &flowmux_notify::DesktopNotifier, id: NotificationId)
 pub(super) async fn check(app: &adw::Application) {
     let open = Arc::new(Mutex::new(HashSet::new()));
     let _service = zbus::connection::Builder::session()
-        .unwrap()
         .name("org.gtk.Notifications")
-        .unwrap()
         .serve_at("/org/gtk/Notifications", DesktopFixture(open.clone()))
-        .unwrap()
         .build()
         .await
         .unwrap();

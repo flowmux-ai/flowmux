@@ -61,7 +61,7 @@ dirs = "5"
 fs2 = "0.4"
 
 # Notifications / D-Bus
-zbus = { version = "4", default-features = false, features = ["tokio"] }
+zbus = { version = "6", default-features = false, features = ["tokio", "proxy", "service"] }
 
 # Low-level PTY / signals (used by `flowmuxctl pty-tee` to forkpty the
 # user's shell on an inner PTY and snoop OSC notifications on the way

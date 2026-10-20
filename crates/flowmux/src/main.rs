@@ -295,7 +295,7 @@ fn main() -> anyhow::Result<()> {
     let rx_for_activate = rx.clone();
     let bridge_for_activate = bridge.clone();
     // The GTK main thread is not a Tokio worker, but every D-Bus path
-    // dispatched from there (FDO toast close, dock launcher badge
+    // dispatched from there (desktop notification close, dock launcher badge
     // republish) goes through `zbus` with the `tokio` feature, which
     // needs an active runtime context for every `await`. Hand the
     // controller a clone of the runtime handle so it can `enter()` it
@@ -493,8 +493,8 @@ impl NotificationActionRouter {
     async fn activate_action(
         &self,
         action_name: &str,
-        parameters: Vec<zbus::zvariant::OwnedValue>,
-        _platform_data: HashMap<String, zbus::zvariant::OwnedValue>,
+        parameters: Vec<zbus::OwnedVariant>,
+        _platform_data: HashMap<String, zbus::OwnedVariant>,
     ) {
         if action_name != flowmux_notify::OPEN_NOTIFICATION_ACTION {
             return;
@@ -532,12 +532,13 @@ impl NotificationActionRouter {
 }
 
 async fn register_notification_action_router(app_id: &str) -> zbus::Result<zbus::Connection> {
-    let connection = zbus::connection::Builder::session()?
-        .serve_at(APP_OBJECT_PATH, NotificationActionRouter)?
+    let connection = zbus::connection::Builder::session()
+        .serve_at(APP_OBJECT_PATH, NotificationActionRouter)
         .build()
         .await?;
+    // Queue behind the current window without replacing its notification router.
     let reply = connection
-        .request_name_with_flags(app_id, Default::default())
+        .request_name_with_flags(app_id, zbus::fdo::RequestNameFlags::empty())
         .await?;
     tracing::debug!(?reply, "desktop notification action router registered");
     Ok(connection)
@@ -790,16 +791,14 @@ mod tests {
             "org.freedesktop.Application",
         )
         .await?;
-        let parameters = vec![zbus::zvariant::OwnedValue::from(zbus::zvariant::Str::from(
-            target,
-        ))];
+        let parameters = vec![zbus::OwnedVariant::from(zbus::Str::from(target))];
         let _: () = proxy
             .call(
                 "ActivateAction",
                 &(
                     flowmux_notify::OPEN_NOTIFICATION_ACTION,
                     parameters,
-                    HashMap::<String, zbus::zvariant::OwnedValue>::new(),
+                    HashMap::<String, zbus::OwnedVariant>::new(),
                 ),
             )
             .await?;

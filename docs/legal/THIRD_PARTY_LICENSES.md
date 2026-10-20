@@ -2320,7 +2320,7 @@ DBUS_END_DECLS
 
 ### MIT License
 
-Used by: atomic-waker 1.1.2, futures-lite 2.6.1
+Used by: atomic-waker 1.1.2
 
 ~~~~text
 ===============================================================================
@@ -2385,7 +2385,7 @@ Used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
 Copyright (c) 2013-2025 The rust-url developers
 ~~~~
 
-Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, openssl-probe 0.2.1, pkg-config 0.3.33, socket2 0.6.3, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
+Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, openssl-probe 0.2.1, pkg-config 0.3.33, socket2 0.6.5, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
 
 ~~~~text
 Copyright (c) 2014 Alex Crichton
@@ -2409,7 +2409,7 @@ Used by: errno 0.3.14
 Copyright (c) 2014 Chris Wong
 ~~~~
 
-Used by: bitflags 2.11.1, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
+Used by: bitflags 2.13.2, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
 
 ~~~~text
 Copyright (c) 2014 The Rust Project Developers
@@ -2507,7 +2507,7 @@ Used by: httparse 1.10.1
 Copyright (c) 2015-2025 Sean McArthur
 ~~~~
 
-Used by: futures-channel 0.3.32, futures-core 0.3.32, futures-executor 0.3.32, futures-io 0.3.32, futures-macro 0.3.32, futures-sink 0.3.32, futures-task 0.3.32, futures-util 0.3.32
+Used by: futures-channel 0.3.32, futures-core 0.3.34, futures-executor 0.3.32, futures-io 0.3.34, futures-macro 0.3.32, futures-task 0.3.32, futures-util 0.3.32
 
 ~~~~text
 Copyright (c) 2016 Alex Crichton
@@ -2628,12 +2628,6 @@ Used by: heapless 0.8.0
 Copyright (c) 2017 Jorge Aparicio
 ~~~~
 
-Used by: enumflags2_derive 0.7.12
-
-~~~~text
-Copyright (c) 2017 Maik Klein
-~~~~
-
 Used by: redox_syscall 0.5.18
 
 ~~~~text
@@ -2684,12 +2678,6 @@ Used by: signal-hook-registry 1.4.8
 
 ~~~~text
 Copyright (c) 2017 tokio-jsonrpc developers
-~~~~
-
-Used by: enumflags2 0.7.12
-
-~~~~text
-Copyright (c) 2017-2023 Maik Klein, Maja Kądziołka
 ~~~~
 
 Used by: aes 0.8.4
@@ -2804,12 +2792,6 @@ Used by: bumpalo 3.20.2
 Copyright (c) 2019 Nick Fitzgerald
 ~~~~
 
-Used by: ppv-lite86 0.2.21
-
-~~~~text
-Copyright (c) 2019 The CryptoCorrosion Contributors
-~~~~
-
 Used by: tracing 0.1.44, tracing-appender 0.2.5, tracing-attributes 0.1.31, tracing-core 0.1.36, tracing-log 0.2.0, tracing-subscriber 0.3.23
 
 ~~~~text
@@ -2914,10 +2896,16 @@ Used by: sha1-checked 0.10.0
 Copyright (c) 2024 The RustCrypto Project Developers
 ~~~~
 
-Used by: zbus 4.4.0, zbus_macros 4.4.0, zvariant 4.2.0, zvariant_derive 4.2.0
+Used by: zbus 6.0.0, zbus_macros 6.0.0, zbus_utils 6.0.0
 
 ~~~~text
 Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
+~~~~
+
+Used by: zcheapstr 1.1.0
+
+~~~~text
+Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors
 ~~~~
 
 Used by: anstream 1.0.0, anstyle 1.0.14, anstyle-parse 1.0.0, anstyle-query 1.1.5, anstyle-wincon 3.0.11, clap 4.6.1, clap_builder 4.6.0, clap_derive 4.6.1, clap_lex 1.1.0, colorchoice 1.0.5, is_terminal_polyfill 1.70.2, once_cell_polyfill 1.70.2, serde_spanned 1.1.1, toml 1.1.2+spec-1.1.0, toml_datetime 0.6.11, toml_datetime 1.1.1+spec-1.1.0, toml_edit 0.22.27, toml_edit 0.25.11+spec-1.1.0, toml_parser 1.1.2+spec-1.1.0, toml_write 0.1.2
@@ -2968,13 +2956,6 @@ Used by: ipnet 2.12.0
 Copyright 2017 Juniper Networks, Inc.
 ~~~~
 
-Used by: rand 0.8.6, rand_chacha 0.3.1, rand_core 0.6.4
-
-~~~~text
-Copyright 2018 Developers of the Rand project
-Copyright (c) 2014 The Rust Project Developers
-~~~~
-
 Used by: zerocopy 0.8.48
 
 ~~~~text
@@ -2993,14 +2974,6 @@ Used by: field-offset 0.3.6
 MIT License
 
 Copyright (c) 2016-2021 Diggory Blake, and other contributors.
-~~~~
-
-Used by: static_assertions 1.1.0
-
-~~~~text
-MIT License
-
-Copyright (c) 2017 Nikolai Vazquez
 ~~~~
 
 Used by: faster-hex 0.10.1
@@ -3068,7 +3041,7 @@ MIT License
 Copyright (c) <year> <copyright holders>
 ~~~~
 
-Used by: tokio 1.52.3
+Used by: tokio 1.54.0
 
 ~~~~text
 MIT License
@@ -3109,7 +3082,7 @@ Used by: fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
 MIT License
 ~~~~
 
-Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-recursion 1.1.1, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.89, atomic-waker 1.1.2, blocking 1.6.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, futures-lite 2.6.1, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, xdg-home 1.3.0, zbus_names 3.0.0, zmij 1.0.21, zvariant_utils 2.1.0
+Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.89, atomic-waker 1.1.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, syn 3.0.9, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, zmij 1.0.21
 
 Used by: android_system_properties 0.1.5
 
@@ -3233,14 +3206,6 @@ The MIT License (MIT)
 Copyright (c) 2019 The Crossbeam Project Developers
 ~~~~
 
-Used by: async-broadcast 0.7.2
-
-~~~~text
-The MIT License (MIT)
-
-Copyright (c) 2020 Yoshua Wuyts
-~~~~
-
 Used by: version_check 0.9.5
 
 ~~~~text
@@ -3304,6 +3269,46 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+~~~~
+
+### MIT License
+
+Used by: zruntime 0.2.0
+
+~~~~text
+Copyright (c) 2026 Zeeshan Ali Khan & zruntime contributors
+~~~~
+
+~~~~text
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+The broadcast channel (`src/broadcast.rs`), its tests (`src/tests/broadcast.rs`) and its
+benchmark (`benches/broadcast.rs`) come from the async-broadcast crate
+(https://github.com/smol-rs/async-broadcast), under the license above and this notice:
+
+Copyright (c) 2020 Yoshua Wuyts, Stjepan Glavina & Zeeshan Ali Khan
 ~~~~
 
 ### MIT License
