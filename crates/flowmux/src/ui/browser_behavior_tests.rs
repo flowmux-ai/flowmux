@@ -412,6 +412,14 @@ async fn navigation_tracks_history_reload_and_invalidates_snapshot_refs() {
     page.wait("document.title === 'second' && document.readyState === 'complete'")
         .await;
     assert!(page.pane.refs.borrow().is_empty(page.pane.ref_scope));
+    // WebKit's native title notification can follow the DOM-ready reply.
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while page.pane.current_title() != "second" {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("native title did not follow the loaded document");
     assert_eq!(page.pane.current_title(), "second");
     assert!(!page.pane.go_forward());
     assert!(page.pane.go_back());
