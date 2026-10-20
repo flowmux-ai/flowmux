@@ -178,6 +178,9 @@ That command runs once; reconnect does not replay it. `--tmux` requires remote
 tmux; without persistence, disconnection can end remote processes.
 `ssh preview` is Linux-only. Remote Files/editor/worktrees/project commands and
 remote hook installation are not supported.
+Code Review supports remote working changes and commit history through the
+connected workspace's SSH session. Open it from the pane menu or `Ctrl+Alt+E`;
+the remote host needs Git, and review comments are stored locally per SSH target.
 
 ## Agents and notifications
 

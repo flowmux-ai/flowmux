@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 pub mod history;
 pub mod notes;
+mod repository;
+pub use repository::Repository;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
@@ -46,6 +48,7 @@ impl File {
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub root: PathBuf,
+    repository: Repository,
     pub scope: Scope,
     /// Resolved OID, so a moving branch cannot silently change the comparison.
     pub base: Option<String>,
@@ -80,20 +83,27 @@ pub fn display_path(path: &Path) -> String {
         .collect()
 }
 
-fn git(root: &Path, args: &[OsString], allow_difference: bool) -> Result<Vec<u8>, String> {
-    let mut child = Command::new("git")
-        .args([
-            "--no-pager",
-            "--literal-pathspecs",
-            "-c",
-            "color.ui=false",
-            // The line parser needs the context prefix, including on blank lines.
-            "-c",
-            "diff.suppressBlankEmpty=false",
-        ])
-        .args(args)
-        .current_dir(root)
-        .env("GIT_OPTIONAL_LOCKS", "0")
+fn git_args() -> Vec<OsString> {
+    args(&[
+        "git",
+        "--no-pager",
+        "--literal-pathspecs",
+        "-c",
+        "color.ui=false",
+        // The line parser needs the context prefix, including on blank lines.
+        "-c",
+        "diff.suppressBlankEmpty=false",
+    ])
+}
+
+fn git(root: &Repository, args: &[OsString], allow_difference: bool) -> Result<Vec<u8>, String> {
+    let mut command = git_args();
+    command.extend_from_slice(args);
+    run(&mut root.command(&command)?, allow_difference)
+}
+
+fn run(command: &mut Command, allow_difference: bool) -> Result<Vec<u8>, String> {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -165,16 +175,24 @@ fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
 }
 
-fn revision(root: &Path, name: &str) -> Result<String, String> {
+fn revision(root: &Repository, name: &str) -> Result<String, String> {
     let bytes = git(
         root,
         &args(&["rev-parse", "--verify", "--end-of-options", name]),
         false,
     )?;
-    Ok(String::from_utf8_lossy(&bytes).trim().into())
+    parse_oid(&bytes)
 }
 
-fn empty_tree(root: &Path) -> Result<String, String> {
+fn parse_oid(bytes: &[u8]) -> Result<String, String> {
+    let oid = bytes.trim_ascii();
+    if !matches!(oid.len(), 40 | 64) || !oid.iter().all(u8::is_ascii_hexdigit) {
+        return Err("Invalid Git object ID. Check the remote shell for unexpected output.".into());
+    }
+    Ok(String::from_utf8(oid.to_vec()).expect("hexadecimal is UTF-8"))
+}
+
+fn empty_tree(root: &Repository) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&git(
         root,
         &args(&["hash-object", "-t", "tree", "--stdin"]),
@@ -185,15 +203,15 @@ fn empty_tree(root: &Path) -> Result<String, String> {
 }
 
 pub fn repository_root(start: &Path) -> Result<PathBuf, String> {
-    let bytes = git(start, &args(&["rev-parse", "--show-toplevel"]), false)?;
-    let root = PathBuf::from(OsString::from_vec(
-        bytes.strip_suffix(b"\n").unwrap_or(&bytes).to_vec(),
-    ));
-    Ok(std::fs::canonicalize(&root).unwrap_or(root))
+    Ok(Repository::local(start).discover()?.root)
 }
 
 pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
-    let root = repository_root(start)?;
+    Repository::local(start).load(scope)
+}
+
+fn load_repository(start: &Repository, scope: Scope) -> Result<Snapshot, String> {
+    let root = start.discover()?;
     let scope = match scope {
         Scope::AllChanges(reference) if reference.trim().is_empty() => {
             Scope::AllChanges(default_base(&root))
@@ -250,7 +268,8 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
         _ => None,
     };
     let mut snapshot = Snapshot {
-        root,
+        root: root.root.clone(),
+        repository: root,
         scope,
         base,
         tip,
@@ -259,13 +278,13 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
     };
     let mut command = snapshot.diff_args();
     command.extend(args(&["--name-status", "-z", "--"]));
-    snapshot.files = parse_files(&git(&snapshot.root, &command, false)?)?;
+    snapshot.files = parse_files(&git(&snapshot.repository, &command, false)?)?;
     if matches!(
         snapshot.scope,
         Scope::AllChanges(_) | Scope::WorkingTree | Scope::Unstaged
     ) {
         let untracked = git(
-            &snapshot.root,
+            &snapshot.repository,
             &args(&["ls-files", "--others", "--exclude-standard", "-z"]),
             false,
         )?;
@@ -297,7 +316,7 @@ pub fn load(start: &Path, scope: Scope) -> Result<Snapshot, String> {
     Ok(snapshot)
 }
 
-fn default_base(root: &Path) -> String {
+fn default_base(root: &Repository) -> String {
     if let Ok(bytes) = git(
         root,
         &args(&["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
@@ -348,35 +367,7 @@ impl Snapshot {
 
     fn patch_with_context(&self, file: &File, context: u32) -> Result<Patch, String> {
         let mut bytes = if file.untracked {
-            let path = self.root.join(&file.path);
-            let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-            if meta.file_type().is_symlink() {
-                format!(
-                    "New symbolic link: {} → {}\n",
-                    file.label(),
-                    display_path(&std::fs::read_link(path).map_err(|e| e.to_string())?)
-                )
-                .into_bytes()
-            } else {
-                if !meta.is_file() {
-                    return Err("This untracked path is not a regular file.".into());
-                }
-                if meta.len() > OUTPUT_LIMIT as u64 {
-                    return Err("This untracked file exceeds the 8 MiB display limit.".into());
-                }
-                let mut command = args(&[
-                    "diff",
-                    "--no-index",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--no-color",
-                    "--full-index",
-                    "--",
-                    "/dev/null",
-                ]);
-                command.push(file.path.as_os_str().into());
-                git(&self.root, &command, true)?
-            }
+            self.repository.untracked_patch(file)?
         } else {
             Vec::new()
         };
@@ -387,7 +378,7 @@ impl Snapshot {
                 command.push(old.as_os_str().into());
             }
             command.push(file.path.as_os_str().into());
-            let mut tracked = git(&self.root, &command, false)?;
+            let mut tracked = git(&self.repository, &command, false)?;
             tracked.append(&mut bytes);
             bytes = tracked;
         }

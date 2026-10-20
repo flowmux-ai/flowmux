@@ -2,7 +2,7 @@
 //! Native, file-at-a-time diff review on both GTK backends.
 
 use adw::prelude::*;
-use flowmux_vcs::review::{self, Patch, Scope, Snapshot};
+use flowmux_vcs::review::{self, Patch, Repository, Scope, Snapshot};
 use gtk::{glib, pango};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -19,6 +19,7 @@ pub(crate) struct ReviewWindow {
     host: RefCell<gtk::Stack>,
     return_to: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     pub root: PathBuf,
+    pub repository: RefCell<Repository>,
     pub workspace: Cell<Option<flowmux_core::WorkspaceId>>,
     pub pane: flowmux_core::PaneId,
     refresh: gtk::Button,
@@ -47,12 +48,23 @@ pub(crate) struct ReviewWindow {
 }
 
 impl ReviewWindow {
+    #[cfg(test)]
     pub fn new(
         parent: &adw::ApplicationWindow,
         host: &gtk::Stack,
         pane: flowmux_core::PaneId,
         root: PathBuf,
     ) -> Rc<Self> {
+        Self::with_repository(parent, host, pane, Repository::local(root))
+    }
+
+    pub fn with_repository(
+        parent: &adw::ApplicationWindow,
+        host: &gtk::Stack,
+        pane: flowmux_core::PaneId,
+        repository: Repository,
+    ) -> Rc<Self> {
+        let root = repository.root.clone();
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_widget_name("flowmux-diff-review");
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -223,6 +235,7 @@ impl ReviewWindow {
             host: RefCell::new(host.clone()),
             return_to: RefCell::new(None),
             root,
+            repository: RefCell::new(repository),
             workspace: Cell::new(None),
             pane,
             refresh,
@@ -389,11 +402,11 @@ impl ReviewWindow {
         self.diff.buffer().set_text("");
         self.status.set_text("Loading changes…");
         self.refresh.set_sensitive(false);
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
-            let result = gtk::gio::spawn_blocking(move || review::load(&root, scope)).await;
+            let result = gtk::gio::spawn_blocking(move || repository.load(scope)).await;
             let Some(this) = weak.upgrade() else {
                 return;
             };
@@ -408,7 +421,7 @@ impl ReviewWindow {
                         this.commit_details.set_visible(true);
                     }
                     this.comparison
-                        .set_text(&review::display_path(&snapshot.root));
+                        .set_text(&this.repository.borrow().display());
                     this.comparison.set_tooltip_text(Some(match snapshot.scope {
                         Scope::Commit(_) => "Selected commit compared with its first parent (empty tree for a root commit)",
                         _ => "Current checkout changes since HEAD, including staged edits and new files",
@@ -561,6 +574,30 @@ impl ReviewWindow {
 
     pub fn is_presented(&self) -> bool {
         self.host.borrow().visible_child().as_ref() == Some(self.root_widget.upcast_ref())
+    }
+
+    pub fn reconnect(self: &Rc<Self>, repository: Repository) {
+        if *self.repository.borrow() == repository {
+            return;
+        }
+        debug_assert_eq!(
+            self.repository.borrow().storage_key(),
+            repository.storage_key()
+        );
+        *self.repository.borrow_mut() = repository;
+        // A new SSH generation must not reuse a snapshot's expired channel.
+        self.generation.set(self.generation.get().wrapping_add(1));
+        self.patch_generation
+            .set(self.patch_generation.get().wrapping_add(1));
+        self.history
+            .generation
+            .set(self.history.generation.get().wrapping_add(1));
+        self.history.loading.set(false);
+        self.snapshot.borrow_mut().take();
+        self.refresh.set_sensitive(true);
+        if !self.has_unsaved_review() {
+            self.reload();
+        }
     }
 
     pub fn focus(&self) {

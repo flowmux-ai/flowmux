@@ -3801,7 +3801,6 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
     let review = gtk::Button::with_label("Code Review");
     review.add_css_class("flat");
     review.set_halign(gtk::Align::Fill);
-    review.set_sensitive(!(callbacks.is_ssh_pane)(pane_id));
     if let Some(label) = review.child().and_downcast::<gtk::Label>() {
         label.set_xalign(0.0);
     }

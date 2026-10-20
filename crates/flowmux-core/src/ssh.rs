@@ -193,6 +193,43 @@ impl SshTarget {
         ])
     }
 
+    /// Run a shell command through the existing master, without a PTY or a
+    /// fallback connection. The caller must quote all interpolated arguments.
+    pub fn command_argv(
+        &self,
+        socket: &Path,
+        command: &std::ffi::OsStr,
+    ) -> Result<Vec<std::ffi::OsString>, String> {
+        self.validate()?;
+        if command.as_encoded_bytes().contains(&0) {
+            return Err("SSH command contains a NUL byte".into());
+        }
+        let mut argv: Vec<std::ffi::OsString> = [
+            "ssh",
+            "-F",
+            "/dev/null",
+            "-S",
+            &socket_text(socket)?,
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ProxyCommand=/bin/false",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ForwardAgent=no",
+            "-o",
+            "ForwardX11=no",
+            "-T",
+            &self.host,
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        argv.push(command.into());
+        Ok(argv)
+    }
+
     pub fn terminal_argv(
         &self,
         socket: &Path,

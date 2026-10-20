@@ -3,6 +3,41 @@ use super::*;
 use vte::prelude::TerminalExt;
 
 impl WindowController {
+    async fn review_repository_for_pane(
+        &self,
+        pane: PaneId,
+    ) -> Result<flowmux_vcs::review::Repository, String> {
+        let ssh = {
+            let registry = self.pane_registry.borrow();
+            registry.workspace_of_pane(pane).and_then(|workspace| {
+                registry
+                    .ssh
+                    .get(&workspace)
+                    .map(|runtime| (workspace, registry.active_surface(pane), runtime.clone()))
+            })
+        };
+        if let Some((workspace, surface, runtime)) = ssh {
+            let ws = self
+                .store
+                .get_workspace_without_scrollback(workspace)
+                .await
+                .ok_or("SSH workspace is no longer available")?;
+            let cwd = surface.and_then(|surface| {
+                ws.surfaces.iter().find_map(|root| {
+                    match root.root_pane.find_surface(pane, surface)?.kind {
+                        SurfaceKind::SshTerminal { cwd, .. } => cwd,
+                        _ => None,
+                    }
+                })
+            });
+            return runtime.borrow().review_repository(cwd.as_deref());
+        }
+        self.file_browser_root_for_pane(pane)
+            .await
+            .map(flowmux_vcs::review::Repository::local)
+            .ok_or_else(|| "Cannot locate the Git checkout.".into())
+    }
+
     pub(super) async fn open_diff_review(&self, pane: Option<PaneId>) {
         let Some(pane) = pane.or(self.focused_pane.get()) else {
             return;
@@ -18,30 +53,27 @@ impl WindowController {
                 return;
             }
         }
-        if self.pane_registry.borrow().is_ssh_pane(pane) {
-            self.clipboard_toast.show_with_message("Code Review requires a local checkout. Open the remote checkout locally to review it.");
-            return;
-        }
-        let Some(root) = self.file_browser_root_for_pane(pane).await else {
-            return;
+        let repository = match self.review_repository_for_pane(pane).await {
+            Ok(repository) => repository,
+            Err(error) => {
+                self.clipboard_toast.show_with_message(&error);
+                return;
+            }
         };
-        let root =
-            match gtk::gio::spawn_blocking(move || flowmux_vcs::review::repository_root(&root))
-                .await
-            {
-                Ok(Ok(root)) => root,
-                Ok(Err(error)) => {
-                    self.clipboard_toast.show_with_message(&error);
-                    return;
-                }
-                Err(_) => {
-                    self.clipboard_toast
-                        .show_with_message("Cannot locate the Git checkout.");
-                    return;
-                }
-            };
+        let repository = match gtk::gio::spawn_blocking(move || repository.discover()).await {
+            Ok(Ok(root)) => root,
+            Ok(Err(error)) => {
+                self.clipboard_toast.show_with_message(&error);
+                return;
+            }
+            Err(_) => {
+                self.clipboard_toast
+                    .show_with_message("Cannot locate the Git checkout.");
+                return;
+            }
+        };
         if let Some(previous) = &previous {
-            if previous.root != root {
+            if previous.repository.borrow().storage_key() != repository.storage_key() {
                 if previous.has_unsaved_review() {
                     previous.attach(&host);
                     previous.present();
@@ -52,6 +84,8 @@ impl WindowController {
                 }
                 previous.detach();
                 self.reviews.borrow_mut().remove(&pane);
+            } else {
+                previous.reconnect(repository.clone());
             }
         }
         let review = self
@@ -59,8 +93,12 @@ impl WindowController {
             .borrow_mut()
             .entry(pane)
             .or_insert_with(|| {
-                let review =
-                    crate::ui::review_window::ReviewWindow::new(&self.window, &host, pane, root);
+                let review = crate::ui::review_window::ReviewWindow::with_repository(
+                    &self.window,
+                    &host,
+                    pane,
+                    repository,
+                );
                 review.connect_targets(self.bridge.clone());
                 let focus = gtk::EventControllerFocus::new();
                 let on_focus = self.callbacks.on_focus.clone();

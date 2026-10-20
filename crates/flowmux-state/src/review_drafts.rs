@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Review drafts are independent of terminal/agent sessions and repository files.
-use flowmux_vcs::review::notes::Note;
+use flowmux_vcs::review::{notes::Note, Repository};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -41,11 +40,14 @@ impl DraftStore {
         Ok(connection)
     }
     pub fn load(&self, root: &Path) -> Result<Draft, String> {
+        self.load_repository(&Repository::local(root))
+    }
+    pub fn load_repository(&self, repository: &Repository) -> Result<Draft, String> {
         let connection = self.connection()?;
         let row: Option<(u64, String)> = connection
             .query_row(
                 "SELECT revision, data FROM review_drafts WHERE root = ?1",
-                [root.as_os_str().as_bytes()],
+                [repository.storage_key()],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
@@ -72,6 +74,15 @@ impl DraftStore {
         draft: &Draft,
         scope: &flowmux_vcs::review::Scope,
     ) -> Result<Draft, String> {
+        self.refresh_repository(&Repository::local(root), draft, scope)
+    }
+
+    pub fn refresh_repository(
+        &self,
+        repository: &Repository,
+        draft: &Draft,
+        scope: &flowmux_vcs::review::Scope,
+    ) -> Result<Draft, String> {
         let mut current = draft.clone();
         for note in &mut current.notes {
             if !matches!(note.scope, flowmux_vcs::review::Scope::Commit(_)) {
@@ -85,7 +96,7 @@ impl DraftStore {
             .filter(|n| &n.scope == scope)
             .cloned()
             .collect();
-        let (notes, stale) = flowmux_vcs::review::notes::refresh(root, &selected)?;
+        let (notes, stale) = flowmux_vcs::review::notes::refresh_repository(repository, &selected)?;
         for note in &mut current.notes {
             if let Some(updated) = notes.iter().find(|updated| updated.id == note.id) {
                 *note = updated.clone();
@@ -93,9 +104,9 @@ impl DraftStore {
         }
         current.notes.retain(|note| !stale.contains(&note.id));
         if current != *draft {
-            self.save(root, &current)
+            self.save_repository(repository, &current)
         } else {
-            if self.load(root)?.revision != draft.revision {
+            if self.load_repository(repository)?.revision != draft.revision {
                 return Err(
                     "This review changed in another window. Reload saved comments before editing."
                         .into(),
@@ -106,6 +117,9 @@ impl DraftStore {
     }
     /// Optimistic revision checking preserves reviews edited in another window.
     pub fn save(&self, root: &Path, draft: &Draft) -> Result<Draft, String> {
+        self.save_repository(&Repository::local(root), draft)
+    }
+    pub fn save_repository(&self, repository: &Repository, draft: &Draft) -> Result<Draft, String> {
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -113,7 +127,7 @@ impl DraftStore {
         let revision: Option<u64> = transaction
             .query_row(
                 "SELECT revision FROM review_drafts WHERE root = ?1",
-                [root.as_os_str().as_bytes()],
+                [repository.storage_key()],
                 |r| r.get(0),
             )
             .optional()
@@ -127,7 +141,7 @@ impl DraftStore {
         let mut saved = draft.clone();
         saved.revision += 1;
         let data = serde_json::to_string(&saved.notes).map_err(|e| e.to_string())?;
-        transaction.execute("INSERT INTO review_drafts(root, revision, data) VALUES (?1, ?2, ?3) ON CONFLICT(root) DO UPDATE SET revision=excluded.revision, data=excluded.data", params![root.as_os_str().as_bytes(), saved.revision, data]).map_err(|e| e.to_string())?;
+        transaction.execute("INSERT INTO review_drafts(root, revision, data) VALUES (?1, ?2, ?3) ON CONFLICT(root) DO UPDATE SET revision=excluded.revision, data=excluded.data", params![repository.storage_key(), saved.revision, data]).map_err(|e| e.to_string())?;
         transaction.commit().map_err(|e| e.to_string())?;
         Ok(saved)
     }
@@ -136,6 +150,41 @@ impl DraftStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ssh_drafts_are_separate_from_local_and_other_hosts_and_survive_reconnect() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DraftStore::new(dir.path().join("reviews.sqlite3"));
+        let remote = |host: &str, socket: &str| {
+            Repository::ssh(
+                flowmux_core::SshTarget::parse(host).unwrap(),
+                dir.path().join(socket),
+                Some("/work/repo"),
+            )
+            .unwrap()
+        };
+        let first = remote("alice@first", "one");
+        let saved = store.save_repository(&first, &Draft::default()).unwrap();
+        assert_eq!(
+            store
+                .load_repository(&remote("alice@first", "two"))
+                .unwrap(),
+            saved
+        );
+        assert_eq!(
+            store
+                .load_repository(&remote("alice@second", "one"))
+                .unwrap(),
+            Draft::default()
+        );
+        assert_eq!(
+            store.load_repository(&remote("bob@first", "one")).unwrap(),
+            Draft::default()
+        );
+        assert_eq!(
+            store.load(Path::new("/work/repo")).unwrap(),
+            Draft::default()
+        );
+    }
     #[test]
     fn refresh_removes_obsolete_notes_but_preserves_moved_code_and_failed_reads() {
         use flowmux_vcs::review::{self, Scope};

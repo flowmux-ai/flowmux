@@ -10,9 +10,9 @@ pub(super) struct History {
     status: gtk::Button,
     commits: RefCell<Vec<history::Commit>>,
     tip: RefCell<Option<String>>,
-    loading: Cell<bool>,
+    pub(super) loading: Cell<bool>,
     has_more: Cell<bool>,
-    generation: Cell<u64>,
+    pub(super) generation: Cell<u64>,
 }
 
 impl History {
@@ -225,14 +225,13 @@ impl ReviewWindow {
         self.history.status.set_label("Loading commits…");
         self.history.status.set_sensitive(false);
         let generation = self.history.generation.get();
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let tip = self.history.tip.borrow().clone();
         let offset = self.history.commits.borrow().len();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result =
-                gtk::gio::spawn_blocking(move || history::load(&root, tip.as_deref(), offset))
-                    .await;
+                gtk::gio::spawn_blocking(move || repository.history(tip.as_deref(), offset)).await;
             let Some(this) = weak.upgrade() else {
                 return;
             };

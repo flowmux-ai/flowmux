@@ -294,11 +294,13 @@ impl ReviewWindow {
         }
         self.comments.syncing.set(true);
         let revision = self.comments.draft.borrow().revision;
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
-            let result =
-                gtk::gio::spawn_blocking(move || DraftStore::default_store()?.load(&root)).await;
+            let result = gtk::gio::spawn_blocking(move || {
+                DraftStore::default_store()?.load_repository(&repository)
+            })
+            .await;
             let Some(this) = weak.upgrade() else {
                 return;
             };
@@ -360,13 +362,13 @@ impl ReviewWindow {
             return;
         }
         self.update_delivery_controls();
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || {
                 let store = DraftStore::default_store()?;
-                store.refresh_scope(&root, &store.load(&root)?, &scope)
+                store.refresh_repository(&repository, &store.load_repository(&repository)?, &scope)
             })
             .await;
             let Some(this) = weak.upgrade() else {
@@ -553,12 +555,13 @@ impl ReviewWindow {
             return;
         }
         self.update_delivery_controls();
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
-            let result =
-                gtk::gio::spawn_blocking(move || DraftStore::default_store()?.save(&root, &draft))
-                    .await;
+            let result = gtk::gio::spawn_blocking(move || {
+                DraftStore::default_store()?.save_repository(&repository, &draft)
+            })
+            .await;
             let Some(this) = weak.upgrade() else {
                 return;
             };
@@ -855,13 +858,14 @@ impl ReviewWindow {
         }
         self.update_delivery_controls();
         self.targets.menu.popdown();
-        let root = self.root.clone();
+        let repository = self.repository.borrow().clone();
         let draft = self.comments.draft.borrow().clone();
         let scope = self.history.scope.borrow().clone();
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
             let result = gtk::gio::spawn_blocking(move || {
-                let draft = DraftStore::default_store()?.refresh_scope(&root, &draft, &scope)?;
+                let draft =
+                    DraftStore::default_store()?.refresh_repository(&repository, &draft, &scope)?;
                 let selected: Vec<_> = draft
                     .notes
                     .iter()
@@ -871,7 +875,7 @@ impl ReviewWindow {
                 let prompt = if selected.is_empty() {
                     Ok(None)
                 } else {
-                    notes::prompt(&root, &selected).map(Some)
+                    notes::prompt(&repository.root, &selected).map(Some)
                 };
                 Ok::<_, String>((draft, prompt))
             })

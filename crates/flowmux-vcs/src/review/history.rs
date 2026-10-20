@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded history pages pinned to the first page's HEAD.
-use super::{args, git, repository_root, revision};
+use super::{args, git, parse_oid, revision, Repository};
 use std::path::Path;
 
 pub const PAGE_SIZE: usize = 50;
@@ -19,7 +19,15 @@ pub struct Page {
 }
 
 pub fn load(start: &Path, tip: Option<&str>, offset: usize) -> Result<Page, String> {
-    let root = repository_root(start)?;
+    Repository::local(start).history(tip, offset)
+}
+
+pub(super) fn load_repository(
+    start: &Repository,
+    tip: Option<&str>,
+    offset: usize,
+) -> Result<Page, String> {
+    let root = start.discover()?;
     let tip = match tip {
         Some(tip) => revision(&root, &format!("{tip}^{{commit}}"))?,
         None => {
@@ -57,7 +65,7 @@ pub fn load(start: &Path, tip: Option<&str>, offset: usize) -> Result<Page, Stri
     while let Some(oid) = fields.next().filter(|oid| !oid.is_empty()) {
         let subject = fields.next().ok_or("Incomplete Git history")?;
         commits.push(Commit {
-            oid: String::from_utf8(oid.to_vec()).map_err(|_| "Invalid commit ID")?,
+            oid: parse_oid(oid)?,
             subject: String::from_utf8_lossy(subject)
                 .chars()
                 .map(|c| if c.is_control() { ' ' } else { c })

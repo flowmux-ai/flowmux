@@ -30,6 +30,20 @@ pub(crate) struct SshRuntime {
 }
 
 impl SshRuntime {
+    pub(super) fn review_repository(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<flowmux_vcs::review::Repository, String> {
+        if self.state != "connected" {
+            return Err("Connect this SSH workspace before opening Code Review.".into());
+        }
+        flowmux_vcs::review::Repository::ssh(
+            self.config.target.clone(),
+            self.socket.clone(),
+            cwd.or(self.config.cwd.as_deref()),
+        )
+    }
+
     pub(super) fn agent_signals_active(&self, surface: SurfaceId) -> bool {
         self.state == "connected"
             && self
@@ -1135,6 +1149,22 @@ impl WindowController {
         }
         if runtime.borrow().generation != generation {
             return;
+        }
+        {
+            let state = runtime.borrow();
+            if state.state == "connected" {
+                for review in self
+                    .reviews
+                    .borrow()
+                    .values()
+                    .filter(|r| r.workspace.get() == Some(workspace))
+                {
+                    if let Ok(mut repository) = state.review_repository(None) {
+                        repository.root = review.root.clone();
+                        review.reconnect(repository);
+                    }
+                }
+            }
         }
         if let Some(ws) = self.store.get_workspace(workspace).await {
             self.rerender_workspace(&ws);

@@ -58,9 +58,23 @@ Preview is supported on Linux and expires when the forward or connection
 ends. Workspace configuration survives restart, but connections restore in
 the disconnected state and require explicit reconnection.
 
+## Code Review
+
+Open **Code Review** from the pane menu or press **Ctrl+Alt+E** in a connected
+SSH workspace. Flowmux reads the remote checkout's working changes (including
+staged and untracked files), commit history, and selected commit diffs through
+the existing SSH connection. Git must be available on the remote host; no
+remote Flowmux installation or local clone is needed.
+
+The review follows the terminal tab's reported remote directory, falling back
+to the workspace directory. Review comments are saved locally, separately for
+each SSH target and checkout. Git reads do not modify the remote checkout or
+staging area. After a disconnection, reconnect the workspace and reopen or
+refresh the review. Reads never start a separate authentication session.
+
 ## Scope
 
-Terminal tabs, splits, connection controls, and explicit port forwarding are
+Terminal tabs, splits, Code Review, connection controls, and explicit port forwarding are
 available. Files, Worktrees, editor file I/O, and project commands do not
 operate on the remote filesystem. Remote agent hooks and session discovery
 are not installed through SSH; visible terminal output is fallback evidence

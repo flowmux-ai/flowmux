@@ -231,6 +231,10 @@ LogLevel VERBOSE
                                 "--gui", args.gui, "--cli", args.cli,
                                 "--ssh-config", str(client_config), "--remote-cwd", str(remote),
                                 "--http-port", str(httpd.server_port)], env=env, check=True)
+                subprocess.run([sys.executable, str(Path(__file__).with_name("test-ssh-review-gui.py")),
+                                "--gui", args.gui, "--cli", args.cli,
+                                "--ssh-config", str(client_config), "--remote-cwd", str(remote)],
+                               env=env, check=True)
             if args.keep:
                 print(json.dumps({"root": str(root), "fixture_pid": os.getpid(), "sshd_pid": sshd.pid,
                                   "host": host, "port": port, "identity_file": str(root / "client"),

@@ -241,6 +241,13 @@ fn anchor_code_survives(note: &Note, patch: &Patch) -> bool {
 }
 
 pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), String> {
+    refresh_repository(&super::Repository::local(root), notes)
+}
+
+pub fn refresh_repository(
+    repository: &super::Repository,
+    notes: &[Note],
+) -> Result<(Vec<Note>, Vec<String>), String> {
     let mut snapshots: Vec<Snapshot> = Vec::new();
     let mut patches: Vec<(Scope, Vec<u8>, Option<Patch>)> = Vec::new();
     let mut full_patches: Vec<(Scope, Vec<u8>, Patch)> = Vec::new();
@@ -248,7 +255,7 @@ pub fn refresh(root: &Path, notes: &[Note]) -> Result<(Vec<Note>, Vec<String>), 
     let mut stale = Vec::new();
     for note in updated.iter_mut().filter(|n| !n.resolved) {
         if !snapshots.iter().any(|s| s.scope == note.scope) {
-            snapshots.push(load(root, note.scope.clone())?);
+            snapshots.push(repository.load(note.scope.clone())?);
         }
         let snapshot = snapshots.iter().find(|s| s.scope == note.scope).unwrap();
         if !patches
