@@ -78,7 +78,7 @@ def remote_python(program):
 
 def frame(label, mode='idle'):
     value = json.dumps({'title': 'Codex ' + label, 'mode': mode})
-    remote_python('from pathlib import Path; Path(' + repr(args.remote_cwd + '/' + label + '.json') + ').write_text(' + repr(value) + ')')
+    remote_python('from pathlib import Path; path=Path(' + repr(args.remote_cwd + '/' + label + '.json') + '); temporary=path.with_name(path.name + ".tmp"); temporary.write_text(' + repr(value) + '); temporary.replace(path)')
 
 def receipt(label):
     return bytes.fromhex(remote_python('from pathlib import Path; p=Path(' + repr(args.remote_cwd + '/' + label + '.bin') + '); print(p.read_bytes().hex() if p.exists() else "")').strip())
