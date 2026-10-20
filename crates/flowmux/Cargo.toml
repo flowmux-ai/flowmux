@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "GTK4 + libadwaita main application."
+description = "Terminal workspace for AI coding agents on Linux and macOS."
 
 # Inline cargo-deb metadata so `cargo deb -p flowmux` produces a
 # correctly-described .deb without an external manifest.
@@ -15,8 +15,8 @@ maintainer = "The flowmux Authors <noreply@flowmux.invalid>"
 copyright = "2026 The flowmux Authors"
 license-file = ["../../LICENSE", "0"]
 extended-description = """
-A Linux/GTK4 terminal with vertical tabs and notifications for AI
-coding agents. Independent reimplementation of cmux for Linux desktops,
+A terminal for Linux and macOS with vertical tabs and notifications for AI
+coding agents. Independent reimplementation of cmux,
 released under GPL-3.0-or-later.
 """
 section = "utils"

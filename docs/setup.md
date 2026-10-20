@@ -2,20 +2,25 @@
 
 # Setup and troubleshooting
 
-For the Ubuntu release installer, see [Install](../README.md#install).
+Flowmux supports Linux and macOS. See [Install](../README.md#install) for
+Ubuntu packages and the [macOS guide](../packaging/macos/README.md) for the
+Apple Silicon DMG, runtime dependencies, and updates.
 Run source build commands and helper scripts from the repository root.
 
 ## Build from source
 
-Prerequisites on Ubuntu 24.04+ (Rust from `rust-toolchain.toml`, MSRV 1.93):
+Both platforms use [Rust via rustup](https://rustup.rs/); the repository pins
+the toolchain in `rust-toolchain.toml` (MSRV 1.93).
+
+### Ubuntu 24.04+
+
+Native dependencies:
 
 ```bash
 sudo apt install build-essential pkg-config git curl ca-certificates \
   libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libwebkitgtk-6.0-dev \
   libssl-dev libdbus-1-dev libsecret-1-dev
 ```
-
-The same entry point works on Ubuntu and macOS:
 
 ```bash
 ./install.sh
@@ -28,14 +33,23 @@ to `~/.cargo/bin` when that directory exists, plus the desktop entry and icons.
 It offers to install missing apt packages and the Rust toolchain; use `--yes`
 to accept these prompts non-interactively on Linux.
 
-On macOS, install Rust and the Xcode command-line tools, then the native
-dependencies before running the same entry point:
+### macOS
+
+Use Apple Silicon; CI validates macOS 15. Install
+[Homebrew](https://brew.sh/) and Rust via rustup, then install Apple's build
+tools and the native dependencies:
 
 ```bash
+xcode-select --install  # Skip if the command-line tools are already installed
 brew install pkg-config gtk4 libadwaita vte3
+./install.sh --check
 ./install.sh
 ./install.sh --release --launch  # Optional macOS release build and launch
 ```
+
+Wait for the Xcode tools installation to finish before running the next command.
+The build also needs `python3`. The browser uses Apple's WebKit framework,
+so macOS does not need WebKitGTK or GStreamer.
 
 The macOS path delegates to `scripts/install-macos.sh`, forwarding options such
 as `--app-dir`, `--bin-dir`, and `--bundle-only`. It installs `Flowmux.app` to
@@ -46,9 +60,9 @@ Missing macOS prerequisites are reported; they are not installed automatically.
 Both installers leave agent settings unchanged; run `flowmux fix` to enable
 hooks. Restart any running Flowmux GUI to pick up the new binary.
 
-For development:
+### Development checks
 
-The display-backed tests also need `xvfb` and a D-Bus session runner.
+On Linux, the display-backed tests also need `xvfb` and a D-Bus session runner.
 Install `dbus-x11`, `openssh-server`, `tmux`, and `python3-xlib` to run the
 SSH and GUI integration checks used by CI. The SSH autofill check also uses
 `gnome-keyring`, `python3-gi`, `gir1.2-atspi-2.0`, `at-spi2-core`, and
@@ -74,7 +88,7 @@ updated `dist` directory and `package-lock.json` together.
 ### Platform scope
 
 Release packaging provides Linux packages and an Apple Silicon macOS preview
-ZIP with a SHA-256 sidecar. The macOS archive requires Homebrew runtime libraries
+DMG with a SHA-256 sidecar. The macOS app requires Homebrew runtime libraries
 and is ad-hoc signed, not notarized; see the
 [macOS package README](../packaging/macos/README.md) for installation and update
 limitations. CI builds the workspace on macOS 15
@@ -135,7 +149,7 @@ PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 Restart flowmux afterwards. Other builds must expose the compatible ThorVG
 C API and loaders; a package name alone does not establish compatibility.
 
-### GStreamer (browser media)
+### GStreamer (Linux browser media)
 
 WebKitGTK plays media through GStreamer. Without these plugins pages still
 load, but video sites may stall or miss subtitles:

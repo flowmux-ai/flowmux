@@ -18,7 +18,7 @@
 </div>
 
 Run AI coding agents side by side, with terminals, browser tabs, and task
-notifications in one window.
+notifications in one window. Available on **Linux and macOS**.
 
 ## Install
 
@@ -29,11 +29,30 @@ curl -fsSL https://flowmux.org/install.sh | sh
 flowmux fix
 ```
 
-Open flowmux and launch your agents in terminal tabs. `flowmux fix` sets up
-agent hooks; run it again after upgrades and restart running agent sessions.
-Codex users must approve changed hooks in `/hooks`.
-
 Uninstall: `sudo apt remove flowmux`.
+
+**macOS · Apple Silicon (preview, tested on macOS 15)**
+
+Install [Homebrew](https://brew.sh/) at its default `/opt/homebrew` location,
+then install the runtime libraries:
+
+```sh
+brew install gtk4 libadwaita vte3
+```
+
+Download the macOS `.dmg` from a
+[release](https://github.com/flowmux-ai/flowmux/releases), open it, and drag
+**Flowmux.app → Applications**. Eject the DMG and open Flowmux.
+If the release has no DMG yet, [build from source](docs/setup.md#macos).
+
+The preview is not notarized, so macOS may block it. Intel Macs and older macOS
+versions are not validated. See the [macOS guide](packaging/macos/README.md)
+for agent setup, updates, and limitations.
+
+Open Flowmux and launch your agents in terminal tabs. `flowmux fix` sets up
+agent hooks; run it again after upgrades and restart running agent sessions.
+For a DMG install, use the full CLI path shown in the macOS guide.
+Codex users must approve changed hooks in `/hooks`.
 
 On first launch, Flowmux shows a six-page welcome tour with screenshots of
 notifications, pane splitting, session history, search, Files and the editor,

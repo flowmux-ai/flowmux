@@ -3,6 +3,7 @@
 # Documentation
 
 - [Setup and troubleshooting](setup.md)
+- [macOS: DMG installation, dependencies, and updates](../packaging/macos/README.md)
 - [Configuration](configuration.md)
 - [Keyboard shortcuts](keybindings.md)
 - [SSH workspaces](ssh-workspaces.md)

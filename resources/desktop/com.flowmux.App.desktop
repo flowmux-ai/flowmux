@@ -3,7 +3,7 @@
 Type=Application
 Name=flowmux
 GenericName=Terminal
-Comment=Linux/GTK4 terminal with vertical tabs and notifications for AI coding agents
+Comment=Terminal with vertical tabs and notifications for AI coding agents
 Exec=flowmux
 Icon=com.flowmux.App
 Terminal=false
