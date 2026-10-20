@@ -708,7 +708,11 @@ fn refresh_pane_after_zoom(frame: &gtk::Widget) {
     frame.queue_draw();
 }
 
-fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId) {
+fn grab_registered_pane_focus(
+    registry: Rc<RefCell<PaneRegistry>>,
+    focused: FocusedPane,
+    pane: PaneId,
+) {
     let mapped = {
         let registry = registry.borrow();
         if let Some(term) = registry.active_terminal(pane) {
@@ -722,6 +726,9 @@ fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId)
         }
     };
     let grab_focus = move || {
+        if cfg!(target_os = "macos") && focused.get() != Some(pane) {
+            return;
+        }
         let registry = registry.borrow();
         if let Some(term) = registry.active_terminal(pane) {
             term.grab_focus();
@@ -1448,6 +1455,7 @@ impl WindowController {
             let frame_for_finish = frame.clone();
             let stack = self.stack.clone();
             let registry = self.pane_registry.clone();
+            let focused = self.focused_pane.clone();
             // The zoom badge increases the tab bar's minimum width. Remove
             // it before shrinking so it cannot hold the animation open.
             registry.borrow_mut().set_pane_zoomed(pane, false);
@@ -1467,7 +1475,7 @@ impl WindowController {
                     set_visible_stack_child_immediately(&stack, &workspace.to_string());
                 }
                 if completed {
-                    grab_registered_pane_focus(registry, pane);
+                    grab_registered_pane_focus(registry, focused, pane);
                 }
             });
             self.focus_pane(pane);
@@ -1534,6 +1542,7 @@ impl WindowController {
         let frame_for_finish = frame.clone();
         let stack = self.stack.clone();
         let registry = self.pane_registry.clone();
+        let focused = self.focused_pane.clone();
         self.start_pane_zoom_transition(pending, &frame, destination, move |completed| {
             if frame_for_finish.parent().is_none() {
                 stack.add_named(&frame_for_finish, Some(PANE_ZOOM_PAGE));
@@ -1541,7 +1550,7 @@ impl WindowController {
             set_visible_stack_child_immediately(&stack, PANE_ZOOM_PAGE);
             registry.borrow_mut().set_pane_zoomed(pane, true);
             if completed {
-                grab_registered_pane_focus(registry, pane);
+                grab_registered_pane_focus(registry, focused, pane);
             }
         });
         self.focus_pane(pane);
@@ -2773,7 +2782,7 @@ impl WindowController {
         {
             review.focus();
         } else {
-            grab_registered_pane_focus(registry, pane);
+            grab_registered_pane_focus(registry, self.focused_pane.clone(), pane);
         }
     }
 

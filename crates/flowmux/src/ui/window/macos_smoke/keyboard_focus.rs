@@ -88,6 +88,15 @@ pub(super) async fn check(
         Some(editor_a),
         "a queued notification restored the previous pane"
     );
+    editors[0].focus_widget().set_visible(false);
+    controller.focus_pane(editor_a);
+    controller.focus_pane(terminal_a);
+    editors[0].focus_widget().set_visible(true);
+    glib::timeout_future(Duration::from_millis(100)).await;
+    assert!(
+        terminals[0].widget.is_focus() && !editors[0].has_native_focus(),
+        "a deferred focus request replaced the newer pane selection"
+    );
 
     let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
     app.activate();
