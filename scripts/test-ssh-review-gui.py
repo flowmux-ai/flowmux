@@ -88,6 +88,7 @@ print(git("status", "--porcelain=v1"))
         d = display.Display(h.env["DISPLAY"])
 
         def walk(node):
+            node.clear_cache()
             yield node
             for i in range(node.get_child_count()):
                 child = node.get_child_at_index(i)
@@ -111,6 +112,11 @@ print(git("status", "--porcelain=v1"))
 
         def click(node):
             assert node.get_state_set().contains(Atspi.StateType.SENSITIVE), node.get_name()
+            if node.get_role() == Atspi.Role.LABEL:
+                row = node.get_parent()
+                if row.get_role() == Atspi.Role.LIST_ITEM and row.get_parent().get_name() == "Changed files":
+                    assert Atspi.Selection.select_child(row.get_parent(), row.get_index_in_parent())
+                    return
             action = node.get_action_iface()
             if node.get_role() not in (Atspi.Role.LABEL, Atspi.Role.LIST_ITEM) and action and action.get_n_actions():
                 assert action.do_action(0), node.get_name()
@@ -152,7 +158,7 @@ print(git("status", "--porcelain=v1"))
                            and int(pid.value[0]) == proc.pid and w.get_geometry().width > 100)
         main_window.set_input_focus(X.RevertToParent, X.CurrentTime)
         d.sync()
-        click(find("Pane actions", Atspi.Role.TOGGLE_BUTTON))
+        click(find("Pane actions"))
         menu_review = gui.wait_for(lambda: next((n for n in walk(Atspi.get_desktop(0))
             if n.get_name() == "Code Review" and not n.get_description()
             and n.get_role() == Atspi.Role.PUSH_BUTTON
@@ -249,6 +255,7 @@ print(git("status", "--porcelain=v1"))
             (h.root / "accessibility.txt").write_text("\n".join(
                 f"{n.get_role_name()} showing={n.get_state_set().contains(Atspi.StateType.SHOWING)} name={n.get_name()!r} desc={n.get_description()!r}"
                 for n in walk(Atspi.get_desktop(0))))
+            print((h.root / "accessibility.txt").read_text(), flush=True)
         raise
     finally:
         if d:
