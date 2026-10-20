@@ -2273,6 +2273,53 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 ### MIT License
 
+Used by: libdbus-sys 0.2.7
+
+~~~~text
+/* dbus-server-launchd.h Server methods for interacting with launchd.
+* Copyright (C) 2008, Benjamin Reed <rangerrick@befunk.com>
+*
+*
+~~~~
+
+~~~~text
+Permission is hereby granted, free of charge, to any person
+* obtaining a copy of this software and associated documentation
+* files (the "Software"), to deal in the Software without
+* restriction, including without limitation the rights to use, copy,
+* modify, merge, publish, distribute, sublicense, and/or sell copies
+* of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be
+* included in all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+* HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+* WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+* DEALINGS IN THE SOFTWARE.
+*/
+
+#ifndef DBUS_SERVER_LAUNCHD_H
+#define DBUS_SERVER_LAUNCHD_H
+
+#include <dbus/dbus-internals.h>
+#include <dbus/dbus-server-protected.h>
+
+DBUS_BEGIN_DECLS
+
+DBusServer * _dbus_server_new_for_launchd (const char *launchd_env_var, DBusError * error);
+
+DBUS_END_DECLS
+#endif /* DBUS_SERVER_LAUNCHD_H */
+~~~~
+
+### MIT License
+
 Used by: atomic-waker 1.1.2, futures-lite 2.6.1
 
 ~~~~text
@@ -2313,7 +2360,7 @@ Used by: lazy_static 1.5.0
 Copyright (c) 2010 The Rust Project Developers
 ~~~~
 
-Used by: core-foundation 0.10.1, core-foundation-sys 0.8.7
+Used by: core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7
 
 ~~~~text
 Copyright (c) 2012-2013 Mozilla Foundation
@@ -2362,7 +2409,7 @@ Used by: errno 0.3.14
 Copyright (c) 2014 Chris Wong
 ~~~~
 
-Used by: bitflags 2.11.1, log 0.4.29, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
+Used by: bitflags 2.11.1, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
 
 ~~~~text
 Copyright (c) 2014 The Rust Project Developers
@@ -2373,6 +2420,12 @@ Used by: uuid 1.23.1
 ~~~~text
 Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
+~~~~
+
+Used by: dbus 0.9.12, libdbus-sys 0.2.7
+
+~~~~text
+Copyright (c) 2014-2018 David Henningsson <diwic@ubuntu.com> and other contributors
 ~~~~
 
 Used by: libsqlite3-sys 0.30.1, rusqlite 0.32.1
@@ -2441,6 +2494,13 @@ Used by: winapi 0.3.9
 Copyright (c) 2015-2018 The winapi-rs Developers
 ~~~~
 
+Used by: hkdf 0.12.4
+
+~~~~text
+Copyright (c) 2015-2018 Vlad Filippov
+Copyright (c) 2018-2021 RustCrypto Developers
+~~~~
+
 Used by: httparse 1.10.1
 
 ~~~~text
@@ -2502,6 +2562,18 @@ Used by: shell-words 1.1.1
 Copyright (c) 2016 Tomasz Miąsko
 ~~~~
 
+Used by: keyring 3.6.3
+
+~~~~text
+Copyright (c) 2016 keyring Developers
+~~~~
+
+Used by: dbus-secret-service 4.1.0
+
+~~~~text
+Copyright (c) 2016 secret-service Developers
+~~~~
+
 Used by: indexmap 2.14.0
 
 ~~~~text
@@ -2520,13 +2592,19 @@ Used by: scopeguard 1.2.0
 Copyright (c) 2016-2019 Ulrik Sverdrup "bluss" and scopeguard developers
 ~~~~
 
+Used by: cipher 0.4.4
+
+~~~~text
+Copyright (c) 2016-2020 RustCrypto Developers
+~~~~
+
 Used by: reqwest 0.12.28
 
 ~~~~text
 Copyright (c) 2016-2025 Sean McArthur
 ~~~~
 
-Used by: digest 0.10.7
+Used by: digest 0.10.7, hmac 0.12.1
 
 ~~~~text
 Copyright (c) 2017 Artyom Pavlov
@@ -2614,6 +2692,12 @@ Used by: enumflags2 0.7.12
 Copyright (c) 2017-2023 Maik Klein, Maja Kądziołka
 ~~~~
 
+Used by: aes 0.8.4
+
+~~~~text
+Copyright (c) 2018 Artyom Pavlov
+~~~~
+
 Used by: bytes 1.11.1
 
 ~~~~text
@@ -2650,7 +2734,7 @@ Used by: want 0.3.1
 Copyright (c) 2018-2019 Sean McArthur
 ~~~~
 
-Used by: block-buffer 0.10.4
+Used by: block-buffer 0.10.4, block-padding 0.3.3
 
 ~~~~text
 Copyright (c) 2018-2019 The RustCrypto Project Developers
@@ -2660,6 +2744,13 @@ Used by: dirs 5.0.1, dirs-sys 0.4.1
 
 ~~~~text
 Copyright (c) 2018-2019 dirs-rs contributors
+~~~~
+
+Used by: cbc 0.1.2
+
+~~~~text
+Copyright (c) 2018-2022 RustCrypto Developers
+Copyright (c) 2018 Artyom Pavlov
 ~~~~
 
 Used by: try-lock 0.2.5
@@ -2743,6 +2834,12 @@ Used by: http-body 1.1.0, http-body-util 0.1.4
 Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors
 ~~~~
 
+Used by: zeroize_derive 1.5.0
+
+~~~~text
+Copyright (c) 2019-2026 The RustCrypto Project Developers
+~~~~
+
 Used by: iana-time-zone 0.1.65, iana-time-zone-haiku 0.1.2
 
 ~~~~text
@@ -2778,6 +2875,13 @@ Used by: crypto-common 0.1.7
 
 ~~~~text
 Copyright (c) 2021 RustCrypto Developers
+~~~~
+
+Used by: inout 0.1.4
+
+~~~~text
+Copyright (c) 2022 The RustCrypto Project Developers
+Copyright (c) 2022 Artyom Pavlov
 ~~~~
 
 Used by: rustls-pki-types 1.15.0
@@ -3089,7 +3193,7 @@ The MIT License (MIT)
 Copyright (c) 2015 Nicholas Allegra (comex).
 ~~~~
 
-Used by: security-framework 3.7.0, security-framework-sys 2.17.0
+Used by: security-framework 2.11.1, security-framework 3.7.0, security-framework-sys 2.17.0
 
 ~~~~text
 The MIT License (MIT)

@@ -99,8 +99,10 @@ libloading = "0.8"
 zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit6 = "0.4"
+keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", features = ["apple-native"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSBitmapImageRep", "NSGraphics", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSView", "NSWindow"] }

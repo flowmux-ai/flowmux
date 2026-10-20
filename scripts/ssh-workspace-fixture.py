@@ -235,6 +235,10 @@ LogLevel VERBOSE
                                 "--gui", args.gui, "--cli", args.cli,
                                 "--ssh-config", str(client_config), "--remote-cwd", str(remote)],
                                env=env, check=True)
+                subprocess.run([sys.executable, str(Path(__file__).with_name("test-ssh-history-gui.py")),
+                                "--gui", args.gui, "--cli", args.cli,
+                                "--ssh-config", str(client_config), "--remote-cwd", str(remote)],
+                               env=env, check=True)
                 for tmux_flags in ([], ["--tmux"]):
                     subprocess.run([sys.executable, str(Path(__file__).with_name("test-ssh-review-send-gui.py")),
                                     "--gui", args.gui, "--cli", args.cli,

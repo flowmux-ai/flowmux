@@ -50,7 +50,9 @@ For development:
 
 The display-backed tests also need `xvfb` and a D-Bus session runner.
 Install `dbus-x11`, `openssh-server`, `tmux`, and `python3-xlib` to run the
-SSH and GUI integration checks used by CI.
+SSH and GUI integration checks used by CI. The SSH autofill check also uses
+`gnome-keyring`, `python3-gi`, `gir1.2-atspi-2.0`, `at-spi2-core`, and
+`python3-pil`; it starts a password-protected keyring on a private D-Bus session.
 
 ```bash
 cargo build --release --workspace   # binaries under target/release/

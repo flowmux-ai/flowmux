@@ -8,8 +8,11 @@ use flowmux_ipc::protocol::SshRequest;
 use gtk::gio;
 use std::os::unix::fs::DirBuilderExt;
 
+mod history;
+
 pub(crate) struct SshRuntime {
     config: SshWorkspaceConfig,
+    history_name: Option<String>,
     generation: u64,
     state: &'static str,
     error: Option<String>,
@@ -397,6 +400,7 @@ impl WindowController {
                 .build();
             let caption = gtk::Label::new(Some(label));
             caption.set_xalign(0.0);
+            entry.update_property(&[gtk::accessible::Property::Label(label)]);
             form.append(&caption);
             form.append(&entry);
             entry
@@ -412,6 +416,71 @@ impl WindowController {
         let hint = gtk::Label::new(Some("Authentication and host key confirmation use OpenSSH.\nRemote host requires a POSIX-compatible login shell."));
         hint.set_wrap(true);
         form.append(&hint);
+        let history_status = gtk::Label::new(Some("Loading last successful connection…"));
+        history_status.set_wrap(true);
+        form.append(&history_status);
+        let edited = Rc::new(Cell::new(false));
+        for entry in [&host, &cwd, &name, &port, &identity, &config] {
+            let edited = edited.clone();
+            entry.connect_changed(move |_| edited.set(true));
+        }
+        let changed = edited.clone();
+        tmux.connect_toggled(move |_| changed.set(true));
+        {
+            let fields = [
+                host.clone(),
+                cwd.clone(),
+                name.clone(),
+                port.clone(),
+                identity.clone(),
+                config.clone(),
+            ];
+            let tmux = tmux.clone();
+            let window = dialog.downgrade();
+            glib::MainContext::default().spawn_local(async move {
+                let result = history::load().await;
+                let Some(window) = window.upgrade().filter(|window| window.is_visible()) else {
+                    return;
+                };
+                match result {
+                    Ok(Some(saved)) if !edited.get() => {
+                        let values = [
+                            saved.config.target.destination(),
+                            saved.config.cwd.unwrap_or_default(),
+                            saved.name.unwrap_or_default(),
+                            saved
+                                .config
+                                .target
+                                .port
+                                .map(|p| p.to_string())
+                                .unwrap_or_default(),
+                            saved
+                                .config
+                                .target
+                                .identity_file
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                            saved
+                                .config
+                                .target
+                                .config_file
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                        ];
+                        for (field, value) in fields.iter().zip(values) {
+                            field.set_text(&value);
+                        }
+                        tmux.set_active(saved.config.tmux);
+                        history_status
+                            .set_text("Last successful connection loaded from system keyring.");
+                    }
+                    Ok(_) => history_status
+                        .set_text("Successful connections are remembered in your system keyring."),
+                    Err(message) => history_status.set_text(message),
+                }
+                drop(window);
+            });
+        }
         let error = gtk::Label::new(None);
         error.set_wrap(true);
         error.add_css_class("error");
@@ -675,6 +744,7 @@ impl WindowController {
             ws.id,
             Rc::new(RefCell::new(SshRuntime {
                 config,
+                history_name: Some(ws.name.clone()),
                 generation: 0,
                 state: "disconnected",
                 error: None,
@@ -796,7 +866,10 @@ impl WindowController {
             if let Some(workspace) = existing {
                 return Ok(serde_json::json!({"workspace": workspace}));
             }
-            let workspace = self.store.create_ssh_workspace(name, config).await?;
+            let workspace = self
+                .store
+                .create_ssh_workspace(name.clone(), config)
+                .await?;
             let ws = self
                 .store
                 .get_workspace(workspace)
@@ -807,6 +880,7 @@ impl WindowController {
             {
                 let mut state = runtime.borrow_mut();
                 state.launched.clear();
+                state.history_name = name;
                 state.request_id = Some(request_id);
                 if let Some(surface) = ws.surfaces.first().and_then(|s| {
                     s.root_pane
@@ -1025,6 +1099,7 @@ impl WindowController {
         }
         let weak = Rc::downgrade(&runtime);
         let bridge = self.bridge.clone();
+        let toast = self.clipboard_toast.clone();
         glib::MainContext::default().spawn_local(async move {
             loop {
                 glib::timeout_future(Duration::from_millis(700)).await;
@@ -1051,6 +1126,19 @@ impl WindowController {
                 }
                 if checked.is_ok() && before == "connecting" {
                     state.state = "connected";
+                    let saved = history::Connection {
+                        name: state.history_name.clone(),
+                        config: state.config.clone(),
+                    };
+                    let toast = toast.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        if let Err(message) = history::save(saved).await {
+                            toast.show_with_message_for(
+                                &format!("Connected, but settings were not remembered. {message}"),
+                                Duration::from_secs(6),
+                            );
+                        }
+                    });
                     if let Some(window) = &state.authentication {
                         window.set_visible(false);
                     }

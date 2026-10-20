@@ -22,6 +22,26 @@ Host aliases use your OpenSSH configuration. Optional flags include `--port`,
 prompts. A successful create response means the workspace exists; inspect
 its status to establish that the SSH connection succeeded.
 
+**New SSH Workspace** prefills the last successful connection's host/user,
+port, remote directory, workspace name, identity-file path, SSH-config path,
+and tmux choice. Only a successful OpenSSH control connection updates these
+defaults; failed or cancelled attempts do not. Port forwards and one-shot
+commands are not copied. Loading defaults never overwrites edits already
+made in the dialog.
+
+The defaults persist in the OS credential store: Secret Service on Linux
+(for example GNOME Keyring or KWallet), and Keychain on macOS. Use a
+password-protected persistent keyring for encryption at rest; Flowmux also
+encrypts Secret Service transport. Different Flowmux state directories use
+separate entries. Connection details are stored in the secret payload, not
+searchable keyring attributes. No passwords, private-key contents, or MFA
+answers are collected. If the keyring is unavailable, Flowmux reports that
+history could not be loaded/saved and does not create a plaintext fallback.
+
+This protects the **autofill history**. Existing workspace restoration data
+in `state.json` still includes SSH configuration and remote paths in plaintext;
+this feature does not encrypt workspace state, review drafts, or terminal logs.
+
 `--tmux` requires tmux on the remote host and keeps each remote tab in a
 separate tmux session. Reconnection attaches to those sessions. Without tmux,
 disconnecting can terminate remote terminal processes.
