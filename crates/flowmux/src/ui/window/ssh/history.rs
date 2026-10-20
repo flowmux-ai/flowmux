@@ -4,8 +4,7 @@ use flowmux_core::SshWorkspaceConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-// Serialize reads and writes before entering the blocking pool so an older
-// connection's delayed save cannot replace a newer successful connection.
+// Keep this window's saves ordered before dispatching them to the blocking pool.
 static ACCESS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const UNAVAILABLE: &str =
     "SSH history unavailable. Unlock or enable your system keyring and try again.";

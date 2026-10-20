@@ -11,8 +11,10 @@ returns without stopping its process. Toggling preserves unfinished comments.
 
 ## Choose changes to review
 
-The review uses the selected pane's current local Git checkout (or its active
-editor's project path). Its path is shown above the files. It compares the
+The review uses the selected pane's current Git checkout (or its active
+editor's project path). In an SSH workspace, it reads the remote checkout
+through the existing connection; Git must be installed on that host.
+The path (and SSH host) is shown above the files. It compares the
 working tree with **HEAD**, including staged edits, unstaged edits, and new
 untracked files in one list. The default **Unstaged + Staged** selection shows
 this combined comparison. A file with both staged and unstaged edits appears
@@ -64,6 +66,8 @@ comments for the selected comparison and closes its current composer after a suc
 Comments are saved locally in `reviews.sqlite3`. They do not modify repository
 files or Git's index. Open Code Review panes and windows using the same checkout and
 local storage automatically pick up saved changes within about half a second.
+SSH drafts are separated by connection target and checkout path and survive
+reconnection; a local checkout with the same path has separate drafts.
 Updates wait while a Comments or Send menu is open to preserve its focused rows.
 Unfinished text stays local. If another pane changes the same comment being
 edited, the local text is preserved and saving is blocked until that edit is
@@ -77,7 +81,11 @@ A forced process termination can lose unfinished text.
 
 Open **Send** and select an agent in the same workspace. Flowmux checks
 comments against the selected comparison's code, verifies the live session, and sends the
-batch as a bracketed paste followed by Enter. An agent must be idle or done and
+batch as a bracketed paste followed by Enter. SSH targets are checked against
+their current terminal channel and visible prompt; Flowmux cannot verify a
+remote agent's PID or detect every restart within that channel. See
+[SSH workspaces](ssh-workspaces.md#code-review) for the connection requirements.
+An agent must be idle or done and
 show an empty recognized prompt (`›`, `❯`, or `>`), or Codex's known empty-input placeholder with the cursor at its start. Existing input, working
 agents, approval waits, exited sessions, and unrecognized prompts are left
 untouched. Feedback remains saved so it can be retried. **Copy feedback** is
@@ -100,7 +108,7 @@ the list is cleared and no feedback is copied or sent.
 
 ## Limits
 
-Only local checkouts are supported. Git reads run outside the GUI thread with
+Local and connected SSH checkouts are supported. Git reads run outside the GUI thread with
 a 30-second command timeout and an explicit 8 MiB output limit. Non-UTF-8 patch
 content reports an error. Git paths retain their original bytes; control
 characters are escaped for display. Untracked symlinks are never followed.

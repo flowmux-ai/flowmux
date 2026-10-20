@@ -268,7 +268,7 @@ impl ReviewWindow {
         self.update_delivery_controls();
     }
 
-    pub(super) fn init_comments(self: &Rc<Self>, _root: PathBuf) {
+    pub(super) fn init_comments(self: &Rc<Self>) {
         self.load_comments();
         if !self.comments.initialized.replace(true) {
             let weak = Rc::downgrade(self);
@@ -1005,7 +1005,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     super::targets::smoke(review).await;
     println!("DIFF_REVIEW_CANCEL_AND_MENU_DISMISS_OK");
     // Code above the comment shifts; feedback must follow rather than block.
-    let file = review.root.join("large.rs");
+    let file = review.repository.borrow().root.join("large.rs");
     let contents = std::fs::read_to_string(&file).unwrap();
     let last = contents.lines().last().unwrap();
     let shifted = contents.strip_suffix(&format!("{last}\n")).unwrap();
@@ -1039,7 +1039,12 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     .unwrap();
     assert_eq!(
         review.selected_path.borrow().as_ref(),
-        Some(&file.strip_prefix(&review.root).unwrap().to_path_buf())
+        Some(
+            &file
+                .strip_prefix(&review.repository.borrow().root)
+                .unwrap()
+                .to_path_buf()
+        )
     );
     // Persistence round-trip remains independent of window visibility.
     review.load_comments();
@@ -1059,7 +1064,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
         .collect();
     DraftStore::default_store()
         .unwrap()
-        .save(&review.root, &legacy)
+        .save(&review.repository.borrow().root, &legacy)
         .unwrap();
     review.load_comments();
     ready(review).await;
@@ -1223,7 +1228,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
     restored.notes = original;
     DraftStore::default_store()
         .unwrap()
-        .save(&review.root, &restored)
+        .save(&review.repository.borrow().root, &restored)
         .unwrap();
     review.load_comments();
     ready(review).await;
@@ -1394,7 +1399,7 @@ async fn sync_smoke(parent: &adw::ApplicationWindow) {
     assert!(!right.comments.busy.get());
     assert!(DraftStore::default_store()
         .unwrap()
-        .load(&left.root)
+        .load(&left.repository.borrow().root)
         .unwrap()
         .notes
         .is_empty());
@@ -1460,7 +1465,11 @@ async fn event_smoke(review: &Rc<ReviewWindow>, missing: &Note) {
         None
     }
     for name in ["alpha.txt", "beta.txt"] {
-        std::fs::write(review.root.join(name), "one\ntwo\nthree\n").unwrap();
+        std::fs::write(
+            review.repository.borrow().root.join(name),
+            "one\ntwo\nthree\n",
+        )
+        .unwrap();
     }
     review.reload();
     settled(review).await;
@@ -1505,7 +1514,10 @@ async fn event_smoke(review: &Rc<ReviewWindow>, missing: &Note) {
     // Force a real storage revision conflict; failure must retain the text.
     DraftStore::default_store()
         .unwrap()
-        .save(&review.root, &review.comments.draft.borrow())
+        .save(
+            &review.repository.borrow().root,
+            &review.comments.draft.borrow(),
+        )
         .unwrap();
     review.save_comment();
     settled(review).await;
@@ -1648,7 +1660,7 @@ async fn event_smoke(review: &Rc<ReviewWindow>, missing: &Note) {
         &review.parent,
         &review.host.borrow(),
         flowmux_core::PaneId::new(),
-        review.root.clone(),
+        review.repository.borrow().root.clone(),
     );
     settled(&failed).await;
     assert!(!failed.comments.ready.get());

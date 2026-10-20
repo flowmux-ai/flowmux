@@ -55,7 +55,7 @@ fn assert_saved_at(view: &ReviewWindow, id: &str, line: u32) {
     assert_eq!(
         DraftStore::default_store()
             .unwrap()
-            .load(&view.root)
+            .load(&view.repository.borrow().root)
             .unwrap(),
         *draft
     );

@@ -471,7 +471,7 @@ pub(super) async fn smoke(parent: &adw::ApplicationWindow) {
     review.smoke_wait_for_comments().await;
     let stored = DraftStore::default_store()
         .unwrap()
-        .load(&review.root)
+        .load(&review.repository.borrow().root)
         .unwrap();
     assert_eq!(stored.notes.len(), 2);
     assert!(stored

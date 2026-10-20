@@ -18,7 +18,6 @@ pub(crate) struct ReviewWindow {
     parent: adw::ApplicationWindow,
     host: RefCell<gtk::Stack>,
     return_to: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
-    pub root: PathBuf,
     pub repository: RefCell<Repository>,
     pub workspace: Cell<Option<flowmux_core::WorkspaceId>>,
     pub pane: flowmux_core::PaneId,
@@ -64,7 +63,6 @@ impl ReviewWindow {
         pane: flowmux_core::PaneId,
         repository: Repository,
     ) -> Rc<Self> {
-        let root = repository.root.clone();
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_widget_name("flowmux-diff-review");
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -234,7 +232,6 @@ impl ReviewWindow {
             parent: parent.clone(),
             host: RefCell::new(host.clone()),
             return_to: RefCell::new(None),
-            root,
             repository: RefCell::new(repository),
             workspace: Cell::new(None),
             pane,
@@ -433,7 +430,7 @@ impl ReviewWindow {
                         format!("{} changed files", snapshot.files.len())
                     });
                     *this.snapshot.borrow_mut() = Some(snapshot);
-                    this.init_comments(this.root.clone());
+                    this.init_comments();
                     this.filter_files();
                 }
                 Ok(Err(error)) => this.status.set_text(&error),

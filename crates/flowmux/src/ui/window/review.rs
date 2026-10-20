@@ -967,7 +967,7 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
     controller.open_diff_review(Some(right)).await;
     let right_review = controller.reviews.borrow()[&right].clone();
     assert_eq!(
-        right_review.root,
+        right_review.repository.borrow().root,
         std::fs::canonicalize(right_dir.path()).unwrap()
     );
     assert_eq!(controller.stack.visible_child(), workspace_view);
@@ -1052,7 +1052,10 @@ pub(super) async fn pane_scope_smoke(controller: &WindowController) {
     right_review.hide();
     controller.open_diff_review(Some(right)).await;
     let rebound = controller.reviews.borrow()[&right].clone();
-    assert_eq!(rebound.root, left_review.root);
+    assert_eq!(
+        rebound.repository.borrow().root,
+        left_review.repository.borrow().root
+    );
     assert!(!Rc::ptr_eq(&rebound, &left_review));
     rebound.smoke_wait_for_files(&["left-only.txt"]).await;
     assert!(right_review.root_widget.parent().is_none());

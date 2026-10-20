@@ -1254,7 +1254,7 @@ impl WindowController {
                     .filter(|r| r.workspace.get() == Some(workspace))
                 {
                     if let Ok(mut repository) = state.review_repository(None) {
-                        repository.root = review.root.clone();
+                        repository.root = review.repository.borrow().root.clone();
                         review.reconnect(repository);
                     }
                 }
