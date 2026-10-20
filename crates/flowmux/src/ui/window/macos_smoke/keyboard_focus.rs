@@ -150,7 +150,15 @@ pub(super) async fn check(
             loop {
                 if is_editor {
                     editors[index].flush_pending_changes().await.unwrap();
-                    editors[index].save_all_dirty().await.unwrap();
+                    if let Err(error) = editors[index].save_all_dirty().await {
+                        assert_eq!(
+                            error,
+                            flowmux_editor::EditorSessionError::PendingClientChanges.to_string(),
+                            "unexpected native keyboard save failure"
+                        );
+                        glib::timeout_future(Duration::from_millis(20)).await;
+                        continue;
+                    }
                 }
                 if std::fs::read_to_string(&file).is_ok_and(|text| text == "1 2\n4\n") {
                     break;
