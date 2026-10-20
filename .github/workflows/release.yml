@@ -177,22 +177,19 @@ jobs:
         run: bash install.sh --release --bundle-only
 
       # shortcut: runtime libraries stay in Homebrew; bundle them for standalone distribution.
-      - name: Package and verify macOS archive
+      - name: Package and verify macOS disk image
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          stage="$RUNNER_TEMP/flowmux-macos"
-          mkdir -p "$stage" dist
-          ditto target/macos-bundle/Flowmux.app "$stage/Flowmux.app"
-          cp packaging/macos/README.md "$stage/README.md"
-          archive="flowmux-${VERSION}-${TARGET_TRIPLE}.zip"
-          ditto -c -k --sequesterRsrc "$stage" "dist/$archive"
-          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
-          (cd dist && shasum -a 256 -c "$archive.sha256")
-          extracted="$RUNNER_TEMP/flowmux-macos-extracted"
-          ditto -x -k "dist/$archive" "$extracted"
-          app="$extracted/Flowmux.app"
+          image="dist/flowmux-${VERSION}-${TARGET_TRIPLE}.dmg"
+          bash scripts/package-macos.sh target/macos-bundle/Flowmux.app "$image"
+          mount="$RUNNER_TEMP/flowmux-macos-mounted"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          test "$(readlink "$mount/Applications")" = /Applications
+          app="$RUNNER_TEMP/flowmux-macos-installed/Flowmux.app"
+          ditto "$mount/Flowmux.app" "$app"
           codesign --verify --deep --strict "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
           for binary in flowmux flowmuxctl; do
@@ -206,8 +203,8 @@ jobs:
         with:
           name: flowmux-macos-aarch64
           path: |
-            dist/*.zip
-            dist/*.zip.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256
           if-no-files-found: error
 
       - name: Upload native smoke evidence
@@ -354,10 +351,11 @@ jobs:
           out.append("## macOS preview")
           out.append("")
           out.append(
-              "The Apple Silicon ZIP requires Homebrew `gtk4`, `libadwaita`, "
+              "Open the Apple Silicon DMG and drag Flowmux.app to Applications. "
+              "The app requires Homebrew `gtk4`, `libadwaita`, "
               "and `vte3` under `/opt/homebrew`; it is not a standalone app. "
               "It is ad-hoc signed, not Developer ID signed or notarized, "
-              "so Gatekeeper may block it. See the README inside the ZIP "
+              "so Gatekeeper may block it. See the README inside the DMG "
               "for installation and update limitations."
           )
 
@@ -382,5 +380,5 @@ jobs:
             dist/*.tar.gz.sha256
             dist/*.deb
             dist/*.deb.sha256
-            dist/*.zip
-            dist/*.zip.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256

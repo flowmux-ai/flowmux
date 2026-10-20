@@ -2,7 +2,7 @@
 
 # Flowmux macOS preview
 
-This archive contains `Flowmux.app` for Apple Silicon (arm64), built and
+This disk image contains `Flowmux.app` for Apple Silicon (arm64), built and
 tested on macOS 15. Intel Macs and older macOS releases are not validated.
 
 This is an initial binary distribution, not a standalone or notarized app.
@@ -21,17 +21,19 @@ is not included.
 Verify the download with its adjacent checksum file:
 
 ```sh
-shasum -a 256 -c flowmux-VERSION-aarch64-apple-darwin.zip.sha256
+shasum -a 256 -c flowmux-VERSION-aarch64-apple-darwin.dmg.sha256
 ```
 
 Quit an existing Flowmux instance before manually replacing its app bundle.
-Copy `Flowmux.app` to your Applications folder. Both commands are included in
+Open the `.dmg` and drag `Flowmux.app` onto the `Applications` shortcut.
+Eject the disk image, then open Flowmux from Applications.
+Both commands are included in
 `Flowmux.app/Contents/MacOS`: `flowmux` and `flowmuxctl`. They are not
 automatically added to your shell's PATH.
 
 For this preview, update by downloading a later release and replacing the app
 after quitting. The in-app updater currently uses the source installer and
-requires Rust and build tools; it does not install this ZIP. Homebrew Cask
+requires Rust and build tools; it does not install this DMG. Homebrew Cask
 installation and updates are not yet available.
 
 License texts and third-party notices are in `Flowmux.app/Contents/Resources`.

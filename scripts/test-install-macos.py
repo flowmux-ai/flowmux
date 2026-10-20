@@ -97,18 +97,27 @@ path = "src/main.rs"
         assert not marker.exists(), "bundle-only executed the CLI"
         assert [path.read_bytes() for path in installed] == before
         packaged = source / "target/macos-bundle/Flowmux.app"
-        archive = root / "flowmux.zip"
-        run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(packaged), str(archive))
-        extracted = root / "extracted"
-        run("ditto", "-x", "-k", str(archive), str(extracted))
-        run("codesign", "--verify", "--deep", "--strict", str(extracted / "Flowmux.app"))
+        image = root / "disk images/flowmux.dmg"
+        run("bash", str(REPO / "scripts/package-macos.sh"), str(packaged), str(image))
+        run("shasum", "-a", "256", "-c", image.name + ".sha256", cwd=image.parent)
+        mount = root / "mounted"
+        run("hdiutil", "attach", str(image), "-readonly", "-nobrowse", "-mountpoint", str(mount))
+        copied = root / "Applications/Flowmux.app"
+        try:
+            assert (mount / "Applications").is_symlink()
+            assert os.readlink(mount / "Applications") == "/Applications"
+            assert (mount / "README.md").read_bytes() == (REPO / "packaging/macos/README.md").read_bytes()
+            run("ditto", str(mount / "Flowmux.app"), str(copied))
+        finally:
+            run("hdiutil", "detach", str(mount))
+        run("codesign", "--verify", "--deep", "--strict", str(copied))
         for binary in ["flowmux", "flowmuxctl"]:
-            assert run(str(extracted / "Flowmux.app/Contents/MacOS" / binary)).strip() == "FRESH"
+            assert run(str(copied / "Contents/MacOS" / binary)).strip() == "FRESH"
         rejected = subprocess.run(command + ["--launch"], cwd=root, env=package_env,
                                   capture_output=True, timeout=120)
         assert rejected.returncode != 0, "bundle-only must reject --launch"
         assert not marker.exists()
-        print("BUNDLE_ONLY_ARCHIVE_OK", flush=True)
+        print("BUNDLE_ONLY_DMG_INSTALL_OK", flush=True)
         # Release packaging must not silently regenerate an out-of-date lockfile.
         manifest = source / "flowmux-cli/Cargo.toml"
         manifest.write_text(manifest.read_text().replace('version = "0.0.0"', 'version = "0.0.1"'))

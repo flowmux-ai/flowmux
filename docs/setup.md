@@ -109,8 +109,12 @@ it does not restart an installed Flowmux. A logged-in macOS desktop is
 required. [`install-macos.sh`](../scripts/install-macos.sh) builds a local
 application bundle. Use `./install.sh --release --bundle-only` on macOS to
 build `target/macos-bundle/Flowmux.app` with the locked dependencies without
-installing, launching, or refreshing agent wrappers. The Release workflow
-archives this bundle only after the macOS gate passes and publishes the release
+installing, launching, or refreshing agent wrappers. Package the bundle with
+`bash scripts/package-macos.sh target/macos-bundle/Flowmux.app dist/Flowmux.dmg`.
+The disk image contains the app and an Applications shortcut for drag-and-drop
+installation; see the [macOS distribution notes](../packaging/macos/README.md)
+for runtime prerequisites. The Release workflow creates this DMG only after
+the macOS gate passes and publishes the release
 only after both Linux and macOS builds succeed.
 There is no native Windows build or installer in this tree.
 
