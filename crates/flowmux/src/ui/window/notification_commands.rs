@@ -150,6 +150,8 @@ impl WindowController {
                         ?level,
                         "AddNotification: deduplicated against recent entry — skipping both in-app and desktop"
                     );
+                    // Deduplication can upgrade an OSC row to the hook's completion kind.
+                    self.refresh_launcher_badge();
                     let _ = ack.send(None);
                     return;
                 };

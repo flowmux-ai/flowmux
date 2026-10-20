@@ -431,6 +431,10 @@ impl GhosttyPane {
         Ok(())
     }
 
+    pub fn scroll_to_bottom(&self) {
+        scroll_terminal_to_bottom(&self.widget);
+    }
+
     /// Replay persisted terminal history into VTE's display only. Styled HTML
     /// snapshots are converted to SGR first; nothing is written into the child
     /// PTY, so old prompts and agent output cannot be executed.

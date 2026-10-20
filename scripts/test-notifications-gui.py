@@ -59,28 +59,44 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
             screenshot('notifications-failure.png')
             raise
 
-    def click(node):
+    def click(node, pointer=False):
         assert node.get_state_set().contains(Atspi.StateType.SENSITIVE), node.get_name()
         action = node.get_action_iface()
-        if action and action.get_n_actions():
+        if not pointer and action and action.get_n_actions():
             assert action.do_action(0), node.get_name()
         else:
+            time.sleep(.3)
             bounds = node.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
             assert bounds.width > 0 and bounds.height > 0, node.get_name()
             with closing(display.Display(h.env['DISPLAY'])) as connection:
+                click_x, click_y = bounds.x + bounds.width // 2, bounds.y + bounds.height // 2
+                # GTK's AT-SPI screen origin can be unavailable on Xvfb.
+                if pointer and bounds.x == bounds.y == 0:
+                    bounds = node.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                    atom = connection.intern_atom('_NET_WM_PID')
+                    native = next(window for window in connection.screen().root.query_tree().children
+                                  if not window.get_attributes().override_redirect
+                                  and (pid := window.get_full_property(atom, X.AnyPropertyType)) is not None
+                                  and int(pid.value[0]) == process.pid and window.get_geometry().width > 100)
+                    origin = native.get_geometry()
+                    click_x = origin.x + bounds.x + bounds.width // 2
+                    click_y = origin.y + bounds.y + bounds.height // 2
+                h.log('pointer-click', name=node.get_name(), x=click_x, y=click_y)
                 xtest.fake_input(connection, X.MotionNotify,
-                                 x=bounds.x + bounds.width // 2, y=bounds.y + bounds.height // 2)
+                                 x=click_x, y=click_y)
                 xtest.fake_input(connection, X.ButtonPress, 1)
                 xtest.fake_input(connection, X.ButtonRelease, 1)
                 connection.sync()
 
-    def key(name):
+    def key(*names):
         from Xlib import XK
         with closing(display.Display(h.env['DISPLAY'])) as connection:
-            code = connection.keysym_to_keycode(XK.string_to_keysym(name))
-            assert code, name
-            xtest.fake_input(connection, X.KeyPress, code)
-            xtest.fake_input(connection, X.KeyRelease, code)
+            codes = [connection.keysym_to_keycode(XK.string_to_keysym(name)) for name in names]
+            assert all(codes), names
+            for code in codes:
+                xtest.fake_input(connection, X.KeyPress, code)
+            for code in reversed(codes):
+                xtest.fake_input(connection, X.KeyRelease, code)
             connection.sync()
 
     def screenshot(name):
@@ -109,7 +125,7 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
         return popup(unread)
 
     def counts(root, values):
-        for label, count in zip(('All', 'Unread', 'Input', 'Errors', 'Done'), values):
+        for label, count in zip(('All', 'Unread'), values):
             find(f'{label} {count}', root)
 
     def rows(root, expected):
@@ -119,8 +135,8 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
             return titles == set(expected)
         fixture.wait_for(observed, 'filtered rows: ' + ', '.join(expected))
 
-    def select_workspace(name):
-        dropdown = find('Filter by workspace', role=Atspi.Role.COMBO_BOX)
+    def select_filter(label, name):
+        dropdown = find(label, role=Atspi.Role.COMBO_BOX)
         toggle = next(node for node in walk(dropdown) if node.get_role() == Atspi.Role.TOGGLE_BUTTON)
         click(toggle)
         label = find(name, dropdown, role=Atspi.Role.LABEL)
@@ -129,7 +145,13 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
         for _ in range(item.get_index_in_parent()):
             key('Down')
         key('Return')
-        fixture.wait_for(lambda: dropdown.get_name() == name, 'workspace selected: ' + name)
+        fixture.wait_for(lambda: dropdown.get_name() == name, 'filter selected: ' + name)
+
+    def select_workspace(name):
+        select_filter('Filter by workspace', name)
+
+    def select_kind(name):
+        select_filter('Filter by notification type', name)
 
     def current():
         return rpc('workspace_current')['workspace_current']['id']
@@ -153,6 +175,28 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     a = rpc('workspace_create', name='Review A', root=str(root_a))['workspace_created']['id']
     pane_a = h.workspace(socket, a)['panes'][0]['id']
     source_tab = h.workspace(socket, a)['panes'][0]['tabs'][0]
+    h.send(socket, pane_a, 'git init -q')
+    history = h.root / 'history.py'
+    history.write_text("for i in range(500): print('NOTIFICATION_HISTORY_%04d' % i)\n")
+    h.send(socket, pane_a, f'/usr/bin/python3 {history}')
+    fixture.wait_for(lambda: 'NOTIFICATION_HISTORY_0499' in h.screen(socket, pane_a), 'source output generated')
+    from Xlib import XK
+    with closing(display.Display(h.env['DISPLAY'])) as connection:
+        atom = connection.intern_atom('_NET_WM_PID')
+        window = next(window for window in connection.screen().root.query_tree().children
+                      if (pid := window.get_full_property(atom, X.AnyPropertyType)) is not None
+                      and int(pid.value[0]) == process.pid and window.get_geometry().width > 100)
+        window.set_input_focus(X.RevertToParent, X.CurrentTime)
+        connection.sync()
+        for _ in range(4):
+            codes = [connection.keysym_to_keycode(XK.string_to_keysym(k)) for k in ('Shift_L', 'Page_Up')]
+            for code in codes:
+                xtest.fake_input(connection, X.KeyPress, code)
+            for code in reversed(codes):
+                xtest.fake_input(connection, X.KeyRelease, code)
+            connection.sync()
+            time.sleep(.1)
+    assert 'NOTIFICATION_HISTORY_0499' not in h.screen(socket, pane_a), 'Fixture must be scrolled away from the prompt'
     rpc('surface_create', workspace=a, cwd=str(root_a))
     b = rpc('workspace_create', name='Review B', root=str(root_b))['workspace_created']['id']
     pane_b = h.workspace(socket, b)['panes'][0]['id']
@@ -179,13 +223,14 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     bell = find('Notifications (5 unread)', role=Atspi.Role.TOGGLE_BUTTON)
     frame = ancestor(bell, Atspi.Role.FRAME)
     root = open_bell(5)
-    counts(root, (5, 5, 2, 2, 1))
+    counts(root, (5, 5))
     # Measure mapped content rather than a requested size or CSS string.
     bounds = root.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     assert bounds.width >= 580, bounds
     frame_bounds = frame.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     bell_bounds = bell.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     assert frame_bounds.x <= bounds.x and bounds.x + bounds.width <= frame_bounds.x + frame_bounds.width, bounds
+    assert frame_bounds.y <= bounds.y and bounds.y + bounds.height <= frame_bounds.y + frame_bounds.height, bounds
     assert bounds.x >= bell_bounds.x - 12, (bounds, bell_bounds)
     scroll = next(node for node in walk(root) if node.get_role() == Atspi.Role.SCROLL_PANE)
     scroll_bounds = scroll.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
@@ -203,18 +248,19 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     state(5, 5)
     h.pass_check('Popup opens inward from the bell inside an inset window; width, scroll and unread counts are preserved')
 
-    click(find('Input 2', root))
+    select_kind('Input requests')
     rows(root, [titles[0], titles[4]])
-    click(find('Errors 2', root))
+    counts(root, (2, 2))
+    select_kind('Errors')
     rows(root, [titles[1], titles[3]])
-    click(find('Done 1', root))
+    select_kind('Completed')
     rows(root, [titles[2]])
-    click(find('All 5', root))
+    select_kind('All types')
     select_workspace('Review A')
     root = popup(5)
-    counts(root, (3, 3, 1, 1, 1))
+    counts(root, (3, 3))
     # Restrict to a kind before inspecting rows so offscreen rows are irrelevant.
-    click(find('Input 1', root))
+    select_kind('Input requests')
     rows(root, [titles[0]])
     row = ancestor(find(titles[0], root), Atspi.Role.LIST_ITEM)
     source = f"Review A / {source_tab['title']} / Codex"
@@ -225,14 +271,15 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     icon_bounds = icon.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
     assert icon_bounds.width >= 28 and icon_bounds.height >= 28, icon_bounds
     screenshot('notifications-workspace-input.png')
-    click(find('Errors 1', root))
+    select_kind('Errors')
     rows(root, [titles[1]])
-    click(find('Done 1', root))
+    select_kind('Completed')
     rows(root, [titles[2]])
     select_workspace('Review B')
     root = popup(5)
-    counts(root, (1, 1, 0, 1, 0))
-    click(find('Errors 1', root))
+    counts(root, (0, 0))
+    select_kind('Errors')
+    counts(root, (1, 1))
     rows(root, [titles[3]])
     h.pass_check('Kind filters and counts scope to the selected workspace; source, body and agent icon are exposed')
 
@@ -245,7 +292,7 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
 
     select_workspace('Review A')
     root = popup(4)
-    click(find('Input 1', root))
+    select_kind('Input requests')
     row = ancestor(find(titles[0], root), Atspi.Role.LIST_ITEM)
     open_button = find('Open source tab', row, Atspi.Role.PUSH_BUTTON)
     assert not any(tab['id'] == source_tab['id'] and tab['active']
@@ -264,18 +311,35 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
                      'keyboard activation routes to original source tab')
     fixture.wait_for(lambda: next(e for e in snapshot()['entries'] if e['id'] == ids[0])['read'],
                      'keyboard activation acknowledges source notification')
-    h.pass_check('Actual Return key on the row button routes to its original workspace/tab and acknowledges it')
+    fixture.wait_for(lambda: 'NOTIFICATION_HISTORY_0499' in h.screen(socket, pane_a),
+                     'notification reveals the live prompt after source was scrolled back')
+    screenshot('notifications-source-prompt.png')
+    h.pass_check('Actual Return on the row opens its original workspace/tab, reveals the live prompt and acknowledges it')
+
+    key('Control_L', 'Alt_L', 'e')
+    find('Back to previous tab')
+    root = open_bell(snapshot()['unread_count'])
+    click(find('Open source tab', ancestor(find(titles[0], root), Atspi.Role.LIST_ITEM),
+               Atspi.Role.PUSH_BUTTON), pointer=True)
+    screenshot('notifications-review-click.png')
+    fixture.wait_for(lambda: named('Back to previous tab') is None, 'notification leaves Code Review')
+    fixture.wait_for(lambda: 'NOTIFICATION_HISTORY_0499' in h.screen(socket, pane_a), 'source prompt restored from review')
+    key('z')
+    fixture.wait_for(lambda: h.screen(socket, pane_a).rstrip().endswith('z'), 'keyboard focus returns to source prompt')
+    key('BackSpace')
+    h.pass_check('Mouse click on a notification exits Code Review and returns to the source terminal')
 
     rpc('workspace_focus', workspace=observer)
     unread = snapshot()['unread_count']
     root = open_bell(unread)
     select_workspace('All workspaces')
+    select_kind('All types')
     root = popup(unread)
     click(find('All 4', root))
     click(find('Mark all read', root, Atspi.Role.PUSH_BUTTON))
     state(4, 0)
     root = popup(0)
-    counts(root, (4, 0, 2, 1, 1))
+    counts(root, (4, 0))
     assert not find('Mark all read', root).get_state_set().contains(Atspi.StateType.SENSITIVE)
     click(find('Unread 0', root))
     find('No notifications match these filters.', root)
@@ -285,19 +349,28 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     fresh = notify('Fresh global error', 'error')
     state(5, 1)
     root = popup(1)
+    select_kind('Errors')
+    counts(root, (2, 1))
+    find('Fresh global error', root)
+    assert named(titles[1], root) is None, 'Unread errors must exclude read errors'
+    click(find('All 2', root))
+    find(titles[1], root)
+    click(find('Unread 1', root))
+    select_kind('All types')
+    h.pass_check('Read-state tabs combine with kind filters: unread errors exclude read errors')
     click(find('Notification actions', root, Atspi.Role.TOGGLE_BUTTON))
     click(find('Delete read notifications', role=Atspi.Role.PUSH_BUTTON))
     value = state(1, 1)
     assert value['entries'][0]['id'] == fresh, value
     root = popup(1)
-    counts(root, (1, 1, 0, 1, 0))
+    counts(root, (1, 1))
     find('Fresh global error', root)
     screenshot('notifications-delete-read.png')
     click(find('Notification actions', root, Atspi.Role.TOGGLE_BUTTON))
     click(find('Delete all notifications', role=Atspi.Role.PUSH_BUTTON))
     state(0, 0)
     root = popup(0)
-    counts(root, (0, 0, 0, 0, 0))
+    counts(root, (0, 0))
     find('No notifications yet.', root)
     screenshot('notifications-empty.png')
     h.pass_check('Delete read preserves fresh unread entries; Delete all clears the transcript and counts')
@@ -312,7 +385,7 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     root = open_bell(2)
     click(find('All 2', root))
     click(find('Open source tab', ancestor(find('Target request', root), Atspi.Role.LIST_ITEM),
-               Atspi.Role.PUSH_BUTTON))
+               Atspi.Role.PUSH_BUTTON), pointer=True)
     state(2, 1)
     assert not next(e for e in snapshot()['entries'] if e['id'] == other)['read']
     assert next(e for e in snapshot()['entries'] if e['id'] == target)['read']
@@ -324,10 +397,27 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     root = open_bell(unread)
     click(find('Open source tab', ancestor(find('Target request', root), Atspi.Role.LIST_ITEM),
                Atspi.Role.PUSH_BUTTON))
-    time.sleep(.3)
+    find('The source tab is no longer open.')
     assert current() == observer, 'Closed source must not switch to a fallback workspace'
     assert not next(e for e in snapshot()['entries'] if e['id'] == other)['read']
-    h.pass_check('Target navigation preserves other tabs; opening a retained closed source does not acknowledge a fallback')
+    h.pass_check('Actual mouse click opens the source and preserves other tabs; closed sources explain why they cannot open')
+    # OSC first, completion hook second: refresh the existing row and its kind.
+    info = notify('Terminal update', 'info', pane_b, tab_b)
+    root = open_bell(snapshot()['unread_count'])
+    select_kind('Information')
+    counts(root, (1, 1))
+    find('Terminal update', root)
+    rpc('notify', title='Codex completed update', body='Ready for review',
+        level='turn_completed', pane=pane_b, surface=tab_b)
+    fixture.wait_for(lambda: next(e for e in snapshot()['entries'] if e['id'] == info)['level'] == 'turn_completed',
+                     'existing notification promoted to completion')
+    counts(root, (0, 0))
+    select_kind('Completed')
+    counts(root, (1, 1))
+    find('Codex completed update', root)
+    find('Ready for review', root)
+    screenshot('notifications-promoted-completion.png')
+    h.pass_check('Completion hook upgrades the earlier OSC row and refreshes its kind, title, body and filter counts')
     (h.root / 'final-notifications.json').write_text(json.dumps(snapshot(), indent=2))
     h.close_window(process)
 

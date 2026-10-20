@@ -95,7 +95,7 @@ impl NotificationStore {
         // Without both pane and surface, unrelated callers cannot be deduplicated safely.
         if pane.is_some() && surface.is_some() {
             if let Some(last) = entries
-                .iter()
+                .iter_mut()
                 .rev()
                 .find(|e| e.pane == pane && e.surface == surface)
             {
@@ -109,6 +109,14 @@ impl NotificationStore {
                                 | (NotificationLevel::TurnCompleted, NotificationLevel::Info)
                         ))
                 {
+                    // Keep the hook's completion kind when its OSC notification arrived first.
+                    if last.level == NotificationLevel::Info
+                        && level == NotificationLevel::TurnCompleted
+                    {
+                        last.level = level;
+                        last.title = title;
+                        last.body = body;
+                    }
                     return None;
                 }
             }
@@ -667,6 +675,58 @@ mod tests {
                         "{first:?} -> {second:?}, title={title}, body={body}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn completion_pair_keeps_hook_details_and_existing_read_state() {
+        for read in [false, true] {
+            for hook_first in [false, true] {
+                let s = store();
+                let pane = Some(PaneId::new());
+                let surface = Some(SurfaceId::new());
+                let info = ("Terminal", "Finished", NotificationLevel::Info);
+                let hook = (
+                    "Codex ready",
+                    "Changes checked",
+                    NotificationLevel::TurnCompleted,
+                );
+                let (first, second) = if hook_first {
+                    (hook, info)
+                } else {
+                    (info, hook)
+                };
+                let id = s
+                    .push(first.0.into(), first.1.into(), first.2, pane, surface, None)
+                    .unwrap()
+                    .0;
+                assert!(matches!(
+                    s.set_desktop_id(id, "existing-toast".into()),
+                    SetDesktopIdResult::Stored
+                ));
+                if read {
+                    s.mark_read(id);
+                }
+                let before = s.find(id).unwrap();
+                assert!(s
+                    .push(
+                        second.0.into(),
+                        second.1.into(),
+                        second.2,
+                        pane,
+                        surface,
+                        None
+                    )
+                    .is_none());
+                let after = s.find(id).unwrap();
+                assert_eq!(s.entries().len(), 1);
+                assert_eq!(after.level, NotificationLevel::TurnCompleted);
+                assert_eq!(after.title, hook.0);
+                assert_eq!(after.body, hook.1);
+                assert_eq!(after.read, read);
+                assert_eq!(after.created_at, before.created_at);
+                assert_eq!(after.desktop_id, before.desktop_id);
             }
         }
     }

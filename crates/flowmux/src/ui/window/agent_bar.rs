@@ -276,6 +276,48 @@ impl WindowController {
             return false;
         };
 
+        // A tab can move to another pane/workspace after its notification was recorded.
+        let target = {
+            let registry = self.pane_registry.borrow();
+            let pane = match entry.surface {
+                Some(surface) => registry.pane_for_surface(surface),
+                None => entry.pane,
+            };
+            pane.and_then(|pane| {
+                let workspace = registry.workspace_of_pane(pane)?;
+                let surface = entry.surface.or_else(|| registry.active_surface(pane))?;
+                Some((workspace, pane, surface))
+            })
+        };
+        let Some((workspace, pane, surface)) = target else {
+            self.window.present();
+            self.clipboard_toast.show_with_message(
+                if entry.surface.is_some() || entry.pane.is_some() || entry.workspace.is_some() {
+                    "The source tab is no longer open."
+                } else {
+                    "This notification has no source tab."
+                },
+            );
+            return false;
+        };
+
+        if !self
+            .activate_workspace_at(workspace, Some((pane, Some(surface))))
+            .await
+        {
+            self.clipboard_toast
+                .show_with_message("Could not open the source tab.");
+            return false;
+        }
+        let review = self.reviews.borrow().get(&pane).cloned();
+        if let Some(review) = review {
+            review.hide();
+            self.focus_pane(pane);
+        }
+        if let Some(terminal) = self.pane_registry.borrow().terminals.get(&surface) {
+            terminal.scroll_to_bottom();
+        }
+
         let desktop_id = entry.desktop_id.clone();
         let changed = self.notifications.mark_read(id);
         if changed {
@@ -284,20 +326,6 @@ impl WindowController {
             }
             self.clear_notification_attention_for_entry(&entry);
             self.refresh_launcher_badge();
-        }
-
-        if let Some(ws_id) = entry.workspace {
-            self.activate_workspace_at(ws_id, entry.pane.map(|pane| (pane, entry.surface)))
-                .await;
-        } else if let Some(pane) = entry.pane {
-            if let Some(source_surface) = entry.surface {
-                let active = self.pane_registry.borrow().active_surface(pane);
-                if active != Some(source_surface) {
-                    let _ = self.activate_surface_now(pane, source_surface).await;
-                }
-            }
-
-            self.focus_pane(pane);
         }
 
         self.window.present();

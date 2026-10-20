@@ -3080,17 +3080,17 @@ impl WindowController {
         &self,
         id: WorkspaceId,
         target: Option<(PaneId, Option<SurfaceId>)>,
-    ) {
+    ) -> bool {
         // Retained notifications can outlive their tab or workspace.
         if !self.surfaces.borrow().contains_key(&id) {
-            return;
+            return false;
         }
         if let Some((pane, surface)) = target {
             let registry = self.pane_registry.borrow();
             if registry.workspace_of_pane(pane) != Some(id)
                 || surface.is_some_and(|surface| registry.pane_for_surface(surface) != Some(pane))
             {
-                return;
+                return false;
             }
         }
         // Capture MRU before mapping: GTK focus-enter signals can update it.
@@ -3128,13 +3128,14 @@ impl WindowController {
                 let needs_activation =
                     self.pane_registry.borrow().active_surface(pane) != Some(surface);
                 if needs_activation && self.activate_surface_now(pane, surface).await.is_err() {
-                    return;
+                    return false;
                 }
             }
             let surface = self.pane_registry.borrow().active_surface(pane);
             self.acknowledge_source_notifications(Some(id), Some(pane), surface);
             self.focus_pane(pane);
         }
+        true
     }
 
     pub async fn restore_from_store(&self) {
@@ -10746,11 +10747,107 @@ mod tests {
             )
             .unwrap()
             .0;
-        controller.open_notification_id(retained).await;
-        assert!(controller.notifications.find(retained).unwrap().read);
+        assert!(!controller.open_notification_id(retained).await);
+        assert!(!controller.notifications.find(retained).unwrap().read);
+        assert_eq!(
+            controller.clipboard_toast.current_message(),
+            "The source tab is no longer open."
+        );
         assert!(
             !controller.notifications.find(other).unwrap().read,
             "a closed source must not acknowledge the surviving tab"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn notification_navigation_follows_a_tab_moved_to_another_workspace() {
+        let (controller, source_ws, source_pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.NotificationMoved").await;
+        let source_tab = controller
+            .pane_registry
+            .borrow()
+            .active_surface(source_pane)
+            .unwrap();
+        controller
+            .dispatch(GtkCommand::NewSurface { pane: source_pane })
+            .await;
+        let id = controller
+            .notifications
+            .push(
+                "Moved request".into(),
+                String::new(),
+                flowmux_core::NotificationLevel::NeedsInput,
+                Some(source_pane),
+                Some(source_tab),
+                Some(source_ws),
+            )
+            .unwrap()
+            .0;
+        let destination = controller
+            .store
+            .create_workspace(Some("Destination".into()), std::env::temp_dir())
+            .await;
+        let destination_model = controller.store.get_workspace(destination).await.unwrap();
+        let destination_pane = destination_model.surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        controller.render_workspace(&destination_model);
+        let (ack, result) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::MoveSurfaceToWorkspace {
+                src_pane: source_pane,
+                surface: source_tab,
+                dst_workspace: destination,
+                ack,
+            })
+            .await;
+        result.await.unwrap().unwrap();
+        controller.activate_workspace(source_ws).await;
+
+        assert!(controller.open_notification_id(id).await);
+        assert_eq!(
+            controller.store.snapshot().await.active_workspace,
+            Some(destination)
+        );
+        assert_eq!(controller.focused_pane.get(), Some(destination_pane));
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .active_surface(destination_pane),
+            Some(source_tab)
+        );
+        assert!(controller.notifications.find(id).unwrap().read);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn notification_without_source_reports_why_it_cannot_navigate() {
+        let (controller, workspace, _) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.NotificationNoSource").await;
+        let id = controller
+            .notifications
+            .push(
+                "Global".into(),
+                String::new(),
+                flowmux_core::NotificationLevel::Info,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .0;
+        assert!(!controller.open_notification_id(id).await);
+        assert!(!controller.notifications.find(id).unwrap().read);
+        assert_eq!(
+            controller.store.snapshot().await.active_workspace,
+            Some(workspace)
+        );
+        assert_eq!(
+            controller.clipboard_toast.current_message(),
+            "This notification has no source tab."
         );
     }
 

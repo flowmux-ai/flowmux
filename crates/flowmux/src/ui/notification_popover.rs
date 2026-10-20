@@ -13,9 +13,6 @@ use std::rc::Rc;
 enum Filter {
     All,
     Unread,
-    Input,
-    Errors,
-    Completed,
 }
 
 impl Filter {
@@ -23,11 +20,25 @@ impl Filter {
         match self {
             Self::All => true,
             Self::Unread => !entry.read,
-            Self::Input => entry.level == NotificationLevel::NeedsInput,
-            Self::Errors => entry.level == NotificationLevel::Error,
-            Self::Completed => entry.level == NotificationLevel::TurnCompleted,
         }
     }
+}
+
+const KINDS: [Option<NotificationLevel>; 5] = [
+    None,
+    Some(NotificationLevel::Info),
+    Some(NotificationLevel::NeedsInput),
+    Some(NotificationLevel::Error),
+    Some(NotificationLevel::TurnCompleted),
+];
+
+fn matches_scope(
+    entry: &NotificationEntry,
+    kind: Option<NotificationLevel>,
+    workspace: Option<WorkspaceId>,
+) -> bool {
+    kind.is_none_or(|level| entry.level == level)
+        && workspace.is_none_or(|id| entry.workspace == Some(id))
 }
 
 pub(super) struct NotificationPopover {
@@ -41,6 +52,7 @@ pub(super) struct NotificationPopover {
     mark_read: gtk::Button,
     filters: Vec<(Filter, &'static str, gtk::ToggleButton)>,
     filter: Cell<Filter>,
+    kind: gtk::DropDown,
     workspace: gtk::DropDown,
     workspaces: RefCell<Vec<(Option<WorkspaceId>, String)>>,
     updating: Cell<bool>,
@@ -49,8 +61,48 @@ pub(super) struct NotificationPopover {
 
 struct NotificationRow {
     row: gtk::ListBoxRow,
+    open: gtk::Button,
+    kind_icon: gtk::Image,
+    kind: gtk::Label,
     title: gtk::Label,
+    body: gtk::Label,
     unread: gtk::Label,
+}
+
+impl NotificationRow {
+    fn refresh(&self, entry: &NotificationEntry) {
+        let (kind, symbol, css) = match entry.level {
+            NotificationLevel::Info => ("Information", "dialog-information-symbolic", "dim-label"),
+            NotificationLevel::TurnCompleted => ("Completed", "emblem-ok-symbolic", "success"),
+            NotificationLevel::NeedsInput => {
+                ("Input needed", "dialog-question-symbolic", "warning")
+            }
+            NotificationLevel::Error => ("Error", "dialog-error-symbolic", "error"),
+        };
+        self.kind_icon.set_icon_name(Some(symbol));
+        self.kind.set_label(kind);
+        for class in ["dim-label", "success", "warning", "error"] {
+            self.kind_icon.remove_css_class(class);
+            self.kind.remove_css_class(class);
+        }
+        self.kind_icon.add_css_class(css);
+        self.kind.add_css_class(css);
+        self.title.set_label(&entry.title);
+        self.body.set_label(&entry.body);
+        self.body.set_tooltip_text(Some(&entry.body));
+        self.body.set_visible(!entry.body.is_empty());
+        self.open
+            .update_property(&[gtk::accessible::Property::Label(&format!(
+                "Open notification: {}",
+                entry.title
+            ))]);
+        self.unread.set_visible(!entry.read);
+        if entry.read {
+            self.title.remove_css_class("heading");
+        } else {
+            self.title.add_css_class("heading");
+        }
+    }
 }
 
 impl NotificationPopover {
@@ -111,13 +163,7 @@ impl NotificationPopover {
         let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         tabs.add_css_class("linked");
         let mut filters = Vec::new();
-        for (filter, label) in [
-            (Filter::All, "All"),
-            (Filter::Unread, "Unread"),
-            (Filter::Input, "Input"),
-            (Filter::Errors, "Errors"),
-            (Filter::Completed, "Done"),
-        ] {
+        for (filter, label) in [(Filter::All, "All"), (Filter::Unread, "Unread")] {
             let button = gtk::ToggleButton::with_label(label);
             button.set_hexpand(true);
             if let Some((_, _, first)) = filters.first() {
@@ -128,10 +174,26 @@ impl NotificationPopover {
         }
         filters[0].2.set_active(true);
         root.append(&tabs);
+        let selectors = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let kind = gtk::DropDown::from_strings(&[
+            "All types",
+            "Information",
+            "Input requests",
+            "Errors",
+            "Completed",
+        ]);
+        kind.update_property(&[gtk::accessible::Property::Label(
+            "Filter by notification type",
+        )]);
+        kind.set_tooltip_text(Some("Filter by notification type"));
+        kind.set_hexpand(true);
+        selectors.append(&kind);
         let workspace = gtk::DropDown::from_strings(&["All workspaces"]);
         workspace.update_property(&[gtk::accessible::Property::Label("Filter by workspace")]);
         workspace.set_tooltip_text(Some("Filter by workspace"));
-        root.append(&workspace);
+        workspace.set_hexpand(true);
+        selectors.append(&workspace);
+        root.append(&selectors);
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
         scroll.set_min_content_height(440);
@@ -159,6 +221,7 @@ impl NotificationPopover {
             mark_read,
             filters,
             filter: Cell::new(Filter::All),
+            kind,
             workspace,
             workspaces: RefCell::new(vec![(None, "All workspaces".into())]),
             updating: Cell::new(false),
@@ -189,15 +252,17 @@ impl NotificationPopover {
                 }
             });
         }
-        let weak = Rc::downgrade(&this);
-        this.workspace.connect_selected_notify(move |_| {
-            if let Some(this) = weak.upgrade() {
-                if !this.updating.get() {
-                    this.refresh();
-                    this.scroll.vadjustment().set_value(0.0);
+        for dropdown in [&this.kind, &this.workspace] {
+            let weak = Rc::downgrade(&this);
+            dropdown.connect_selected_notify(move |_| {
+                if let Some(this) = weak.upgrade() {
+                    if !this.updating.get() {
+                        this.refresh();
+                        this.scroll.vadjustment().set_value(0.0);
+                    }
                 }
-            }
-        });
+            });
+        }
         this
     }
 
@@ -241,12 +306,11 @@ impl NotificationPopover {
             self.workspace.set_selected(index as u32);
         }
         let selected = self.workspaces.borrow()[self.workspace.selected() as usize].0;
+        let kind = KINDS.get(self.kind.selected() as usize).copied().flatten();
         for (filter, label, button) in &self.filters {
             let count = entries
                 .iter()
-                .filter(|entry| {
-                    selected.is_none_or(|id| entry.workspace == Some(id)) && filter.matches(entry)
-                })
+                .filter(|entry| matches_scope(entry, kind, selected) && filter.matches(entry))
                 .count();
             button.set_label(&format!("{label} {count}"));
         }
@@ -283,15 +347,9 @@ impl NotificationPopover {
                 self.list.insert(&row.row, index as i32);
                 row
             });
-            row.unread.set_visible(!entry.read);
-            if entry.read {
-                row.title.remove_css_class("heading");
-            } else {
-                row.title.add_css_class("heading");
-            }
+            row.refresh(entry);
             row.row.set_visible(
-                selected.is_none_or(|id| entry.workspace == Some(id))
-                    && self.filter.get().matches(entry),
+                matches_scope(entry, kind, selected) && self.filter.get().matches(entry),
             );
         }
         if changed {
@@ -354,19 +412,11 @@ fn notification_row(
     let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
     text.set_hexpand(true);
     let metadata = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let (kind, symbol, css) = match entry.level {
-        NotificationLevel::Info => ("Information", "dialog-information-symbolic", "dim-label"),
-        NotificationLevel::TurnCompleted => ("Completed", "emblem-ok-symbolic", "success"),
-        NotificationLevel::NeedsInput => ("Input needed", "dialog-question-symbolic", "warning"),
-        NotificationLevel::Error => ("Error", "dialog-error-symbolic", "error"),
-    };
-    let kind_icon = gtk::Image::from_icon_name(symbol);
-    kind_icon.add_css_class(css);
+    let kind_icon = gtk::Image::new();
     metadata.append(&kind_icon);
-    let label = gtk::Label::new(Some(kind));
-    label.add_css_class(css);
-    label.add_css_class("caption");
-    metadata.append(&label);
+    let kind = gtk::Label::new(None);
+    kind.add_css_class("caption");
+    metadata.append(&kind);
     let unread = gtk::Label::new(Some("●"));
     unread.add_css_class("accent");
     unread.set_tooltip_text(Some("Unread"));
@@ -409,11 +459,8 @@ fn notification_row(
         label.set_tooltip_text(Some(&source));
         text.append(&label);
     }
-    if !entry.body.is_empty() {
-        let label = wrapped_label(&entry.body, 3);
-        label.set_tooltip_text(Some(&entry.body));
-        text.append(&label);
-    }
+    let body_label = wrapped_label(&entry.body, 3);
+    text.append(&body_label);
     body.append(&text);
     open.set_child(Some(&body));
     open.update_property(&[
@@ -438,7 +485,17 @@ fn notification_row(
     delete.connect_clicked(move |_| send(&bridge, GtkCommand::DeleteNotification { id }));
     content.append(&delete);
     row.set_child(Some(&content));
-    NotificationRow { row, title, unread }
+    let row = NotificationRow {
+        row,
+        open,
+        kind_icon,
+        kind,
+        title,
+        body: body_label,
+        unread,
+    };
+    row.refresh(entry);
+    row
 }
 
 fn wrapped_label(value: &str, lines: i32) -> gtk::Label {
@@ -509,18 +566,13 @@ mod tests {
                 let entry = store.find(id).unwrap();
                 assert!(Filter::All.matches(&entry));
                 assert_eq!(Filter::Unread.matches(&entry), !read);
-                assert_eq!(
-                    Filter::Input.matches(&entry),
-                    level == NotificationLevel::NeedsInput
-                );
-                assert_eq!(
-                    Filter::Errors.matches(&entry),
-                    level == NotificationLevel::Error
-                );
-                assert_eq!(
-                    Filter::Completed.matches(&entry),
-                    level == NotificationLevel::TurnCompleted
-                );
+                for kind in KINDS {
+                    assert_eq!(
+                        matches_scope(&entry, kind, None),
+                        kind.is_none_or(|k| k == level)
+                    );
+                    assert!(!matches_scope(&entry, kind, Some(WorkspaceId::new())));
+                }
             }
         }
     }
@@ -533,6 +585,9 @@ mod tests {
         let second = WorkspaceId::new();
         let input = push(&store, NotificationLevel::NeedsInput, first, "Claude");
         let error = push(&store, NotificationLevel::Error, second, "Codex");
+        let read_error = push(&store, NotificationLevel::Error, second, "Claude");
+        store.mark_read(read_error);
+        let other_error = push(&store, NotificationLevel::Error, first, "Codex");
         let (bridge, _) = Bridge::new();
         let panel = NotificationPopover::new(store.clone(), bridge);
         let window = mount(&panel);
@@ -541,18 +596,24 @@ mod tests {
         panel.popover.popup();
         assert_eq!(
             store.unread_count(),
-            2,
+            3,
             "opening must not acknowledge unseen rows"
         );
         let original = panel.rows.borrow()[&input].row.clone();
-        panel.filters[2].2.set_active(true);
+        assert_eq!(panel.filters.len(), 2);
+        panel.kind.set_selected(2);
         assert!(original.is_visible());
         assert!(!panel.rows.borrow()[&error].row.is_visible());
         panel.workspace.set_selected(2);
         assert!(!original.is_visible());
-        assert_eq!(panel.filters[0].2.label().as_deref(), Some("All 1"));
-        panel.workspace.set_selected(0);
+        assert_eq!(panel.filters[0].2.label().as_deref(), Some("All 0"));
+        panel.kind.set_selected(3);
         panel.filters[1].2.set_active(true);
+        assert_eq!(panel.filters[0].2.label().as_deref(), Some("All 2"));
+        assert_eq!(panel.filters[1].2.label().as_deref(), Some("Unread 1"));
+        assert!(panel.rows.borrow()[&error].row.is_visible());
+        assert!(!panel.rows.borrow()[&read_error].row.is_visible());
+        assert!(!panel.rows.borrow()[&other_error].row.is_visible());
         store.mark_read(input);
         panel.refresh();
         assert!(!original.is_visible());
@@ -560,17 +621,90 @@ mod tests {
         assert_eq!(panel.rows.borrow()[&input].row, original);
         panel.popover.popdown();
         panel.popover.popup();
+        store.set_source_labels(
+            error,
+            Some("Codex".into()),
+            Some("Renamed project".into()),
+            None,
+        );
+        panel.refresh();
         assert_eq!(panel.filter.get(), Filter::Unread);
-        assert_eq!(store.unread_count(), 1);
+        assert_eq!(panel.kind.selected(), 3);
+        assert_eq!(panel.workspace.selected(), 2);
+        assert_eq!(store.unread_count(), 2);
         let _ = store.remove(error);
         panel.refresh();
-        assert_eq!(panel.rows.borrow().len(), 1);
+        assert_eq!(panel.rows.borrow().len(), 3);
         assert_eq!(panel.filters[1].2.label().as_deref(), Some("Unread 0"));
         assert_eq!(panel.empty.label(), "No notifications match these filters.");
         store.clear_all();
         panel.refresh();
         assert_eq!(panel.empty.label(), "No notifications yet.");
         assert!(!panel.mark_read.is_sensitive());
+        window.close();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn kind_promotion_refreshes_metadata_without_replacing_row() {
+        let store = NotificationStore::new();
+        let pane = flowmux_core::PaneId::new();
+        let surface = flowmux_core::SurfaceId::new();
+        let id = store
+            .push(
+                "Working".into(),
+                "".into(),
+                NotificationLevel::Info,
+                Some(pane),
+                Some(surface),
+                Some(WorkspaceId::new()),
+            )
+            .unwrap()
+            .0;
+        store.mark_read(id);
+        let (bridge, _) = Bridge::new();
+        let panel = NotificationPopover::new(store.clone(), bridge);
+        let window = mount(&panel);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        panel.popover.popup();
+        panel.refresh();
+        let original = panel.rows.borrow()[&id].row.clone();
+        assert_eq!(panel.rows.borrow()[&id].kind.label(), "Information");
+        assert!(!panel.rows.borrow()[&id].body.is_visible());
+        panel.kind.set_selected(4);
+        assert!(!original.is_visible());
+        store.push(
+            "Finished".into(),
+            "Changes are ready".into(),
+            NotificationLevel::TurnCompleted,
+            Some(pane),
+            Some(surface),
+            store.find(id).unwrap().workspace,
+        );
+        assert_eq!(
+            store.find(id).unwrap().level,
+            NotificationLevel::TurnCompleted
+        );
+        panel.refresh();
+        assert_eq!(panel.kind.selected(), 4);
+        let rows = panel.rows.borrow();
+        let row = &rows[&id];
+        assert_eq!(row.row, original);
+        assert!(row.row.is_visible());
+        assert_eq!(row.kind.label(), "Completed");
+        assert_eq!(
+            row.kind_icon.icon_name().as_deref(),
+            Some("emblem-ok-symbolic")
+        );
+        assert!(row.kind.has_css_class("success"));
+        assert!(!row.kind.has_css_class("dim-label"));
+        assert_eq!(row.title.label(), "Finished");
+        assert_eq!(row.body.label(), "Changes are ready");
+        assert!(row.body.is_visible());
+        assert!(!row.unread.is_visible());
+        assert!(store.find(id).unwrap().read);
+        assert_eq!(panel.filters[0].2.label().as_deref(), Some("All 1"));
+        assert_eq!(panel.filters[1].2.label().as_deref(), Some("Unread 0"));
         window.close();
     }
 
