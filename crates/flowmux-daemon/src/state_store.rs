@@ -2531,6 +2531,11 @@ mod tests {
         assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
         assert_eq!(agent.pid, None);
         assert_eq!(agent.session_id, None);
+        let located = store.located_agent_presence(tab).await.unwrap();
+        assert_eq!(located.workspace, ws);
+        assert_eq!(located.pane, pane);
+        assert_eq!(located.surface, tab);
+        assert_eq!(located.presence, agent);
         let tree = flowmux_ipc::protocol::describe_workspaces(&[workspace]);
         assert_eq!(
             tree[0].panes[0].tabs[0].agent.as_ref().unwrap().name,
@@ -2550,6 +2555,7 @@ mod tests {
             .root_pane
             .agent_presence_for_surface(tab)
             .is_none());
+        assert!(store.located_agent_presence(tab).await.is_none());
         let forward = flowmux_core::SshForwardSpec {
             id: SurfaceId::new().0,
             remote_port: 3000,

@@ -9,6 +9,7 @@ pub(crate) struct ReviewTarget {
     pub name: String,
     pub pid: Option<u32>,
     pub session: Option<String>,
+    pub ssh_instance: Option<uuid::Uuid>,
     pub label: String,
 }
 impl ReviewTarget {
@@ -144,6 +145,7 @@ pub(super) async fn smoke(review: &Rc<ReviewWindow>) {
         name: "fixture".into(),
         pid: None,
         session: Some("popup-test".into()),
+        ssh_instance: None,
         label: "fixture · Working (1s)".into(),
     };
     review.set_targets(vec![target.clone()]);

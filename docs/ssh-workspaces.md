@@ -72,6 +72,15 @@ each SSH target and checkout. Git reads do not modify the remote checkout or
 staging area. After a disconnection, reconnect the workspace and reopen or
 refresh the review. Reads never start a separate authentication session.
 
+To send comments, run Codex (or another supported agent) in a terminal in the
+same SSH workspace, save the comments, and select the agent under **Send**.
+The agent must be idle with an empty prompt. Flowmux sends the feedback through
+that terminal's existing SSH channel; remote Flowmux hooks are not required.
+Disconnecting or replacing the channel invalidates an open Send selection.
+Remote agent detection uses terminal screen/title evidence, so it cannot verify
+the agent's exact process or session identity. If detection is unavailable,
+use **Copy feedback** and paste into the intended agent yourself.
+
 ## Scope
 
 Terminal tabs, splits, Code Review, connection controls, and explicit port forwarding are

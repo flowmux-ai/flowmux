@@ -128,6 +128,16 @@ impl WindowController {
             if !self.surfaces.borrow().contains_key(&located.workspace) {
                 continue;
             }
+            let ssh_instance = {
+                let registry = self.pane_registry.borrow();
+                match registry.ssh.get(&located.workspace) {
+                    Some(runtime) => match runtime.borrow().review_agent_instance(item.surface) {
+                        Some(instance) => Some(instance),
+                        None => continue,
+                    },
+                    None => None,
+                }
+            };
             if located
                 .presence
                 .pid
@@ -142,6 +152,7 @@ impl WindowController {
                     name: located.presence.name.clone(),
                     pid: located.presence.pid,
                     session: located.presence.session_id.clone(),
+                    ssh_instance,
                     label: format!(
                         "{} · {} / {} · {}",
                         located.presence.name,
@@ -202,6 +213,24 @@ impl WindowController {
             review.delivery_message(
                 "This agent is busy or waiting for approval. Send again when it is ready.",
             );
+            return;
+        }
+        // A screen-only agent has no PID/session identity. Bind a menu choice
+        // to its SSH channel so it cannot survive disconnect or replacement.
+        let same_connection = {
+            let registry = self.pane_registry.borrow();
+            match registry.ssh.get(&located.workspace) {
+                Some(runtime) => target.ssh_instance.is_some_and(|instance| {
+                    runtime.borrow().review_agent_instance(target.surface) == Some(instance)
+                }),
+                None => target.ssh_instance.is_none(),
+            }
+        };
+        if !same_connection {
+            review.delivery_message(
+                "This SSH terminal disconnected or reconnected. Select its current agent and try again.",
+            );
+            self.refresh_review_targets().await;
             return;
         }
         let terminal = self
@@ -436,6 +465,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
                 name: name.into(),
                 pid: presence.pid,
                 session: presence.session_id.clone(),
+                ssh_instance: None,
                 label: name.into(),
             };
             controller
@@ -461,6 +491,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
         name: "custom-agent".into(),
         pid: Some(std::process::id()),
         session: Some("old-session".into()),
+        ssh_instance: None,
         label: "stale".into(),
     };
     controller.window.clipboard().set_text("keep clipboard");
@@ -500,6 +531,7 @@ pub(super) async fn handoff_smoke(controller: &WindowController) {
                 name: "dead-agent".into(),
                 pid: Some(9_999_999),
                 session: Some("dead".into()),
+                ssh_instance: None,
                 label: "dead".into(),
             },
             "dead".into(),
@@ -554,12 +586,23 @@ finally:
         name: ready.name.clone(),
         pid: ready.pid,
         session: ready.session_id.clone(),
+        ssh_instance: None,
         label: "Fixture".into(),
     };
     controller
         .store
         .set_agent_activity(surface, Some(ready))
         .await;
+    let mut stale_connection = target.clone();
+    stale_connection.ssh_instance = Some(uuid::Uuid::new_v4());
+    controller
+        .focus_review_target(pane, stale_connection, "stale SSH channel".into())
+        .await;
+    assert!(review.status.text().contains("disconnected or reconnected"));
+    assert!(
+        !source_receipt.exists(),
+        "an SSH target must not fall back to a local terminal"
+    );
     controller
         .focus_review_target(pane, target, prompt.into())
         .await;

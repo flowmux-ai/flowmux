@@ -52,6 +52,12 @@ impl SshRuntime {
                 .is_some_and(|status| status == "running")
     }
 
+    pub(super) fn review_agent_instance(&self, surface: SurfaceId) -> Option<uuid::Uuid> {
+        self.agent_signals_active(surface)
+            .then(|| self.instances.get(&surface).copied())
+            .flatten()
+    }
+
     pub(crate) fn preview_url(&self, binding: &str) -> Option<String> {
         // Only WebKitGTK currently blocks all navigation after binding expiry.
         if !cfg!(target_os = "linux") || self.state != "connected" {

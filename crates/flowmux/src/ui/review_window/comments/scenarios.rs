@@ -141,6 +141,7 @@ pub(super) async fn run(parent: &adw::ApplicationWindow) {
         name: "codex".into(),
         pid: Some(123),
         session: Some("scenario".into()),
+        ssh_instance: None,
         label: "test receiver".into(),
     };
     let current = std::fs::read_to_string(&file).unwrap();

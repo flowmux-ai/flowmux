@@ -733,27 +733,26 @@ impl StateStore {
         surface_id: SurfaceId,
     ) -> Option<LocatedAgentPresence> {
         let s = self.inner.lock().await;
-        s.workspaces
-            .iter()
-            .filter(|ws| ws.local_root().is_some())
-            .find_map(|workspace| {
-                workspace.surfaces.iter().find_map(|surface| {
-                    located_agent_in_pane(&surface.root_pane, surface_id).map(
-                        |(pane, surface_label, presence)| LocatedAgentPresence {
-                            workspace: workspace.id,
-                            pane,
-                            surface: surface_id,
-                            workspace_label: workspace.display_title().to_string(),
-                            surface_label,
-                            color: workspace
-                                .color
-                                .clone()
-                                .unwrap_or_else(|| agent_bar_color_for_surface(surface_id)),
-                            presence,
-                        },
-                    )
-                })
+        // Read-only lookup includes SSH screen evidence; local hook/PID writes
+        // remain guarded by is_local_agent_surface and the local-only scans.
+        s.workspaces.iter().find_map(|workspace| {
+            workspace.surfaces.iter().find_map(|surface| {
+                located_agent_in_pane(&surface.root_pane, surface_id).map(
+                    |(pane, surface_label, presence)| LocatedAgentPresence {
+                        workspace: workspace.id,
+                        pane,
+                        surface: surface_id,
+                        workspace_label: workspace.display_title().to_string(),
+                        surface_label,
+                        color: workspace
+                            .color
+                            .clone()
+                            .unwrap_or_else(|| agent_bar_color_for_surface(surface_id)),
+                        presence,
+                    },
+                )
             })
+        })
     }
 
     /// Remove a hook-owned presence only when the teardown still belongs to
