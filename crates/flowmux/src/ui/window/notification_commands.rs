@@ -148,7 +148,7 @@ impl WindowController {
                         ?pane,
                         ?surface,
                         ?level,
-                        "AddNotification: deduplicated against recent entry — skipping both in-app and desktop"
+                        "AddNotification: reusing recent in-app entry; skipping desktop toast"
                     );
                     // Deduplication can upgrade an OSC row to the hook's completion kind.
                     self.refresh_launcher_badge();

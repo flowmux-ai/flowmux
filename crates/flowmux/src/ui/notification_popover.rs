@@ -485,7 +485,7 @@ fn notification_row(
     delete.connect_clicked(move |_| send(&bridge, GtkCommand::DeleteNotification { id }));
     content.append(&delete);
     row.set_child(Some(&content));
-    let row = NotificationRow {
+    NotificationRow {
         row,
         open,
         kind_icon,
@@ -493,9 +493,7 @@ fn notification_row(
         title,
         body: body_label,
         unread,
-    };
-    row.refresh(entry);
-    row
+    }
 }
 
 fn wrapped_label(value: &str, lines: i32) -> gtk::Label {
