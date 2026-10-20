@@ -40,6 +40,7 @@ def main():
     args.remote_cwd += "/review 한글 ' $(touch injected) " + uuid.uuid4().hex
     h = gui.Harness(args)
     h.env.update(GTK_A11Y="atspi", GTK_USE_PORTAL="0")
+    h.env.pop("AT_SPI_BUS_ADDRESS", None)
     d = None
     try:
         setup = '''import os, pathlib, subprocess
@@ -79,7 +80,9 @@ print(git("status", "--porcelain=v1"))
             "system_notifications_enabled": False,
         }))
         h.start_display()
+        os.environ["DISPLAY"] = h.env["DISPLAY"]
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
+        os.environ.pop("AT_SPI_BUS_ADDRESS", None)
         import gi
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi

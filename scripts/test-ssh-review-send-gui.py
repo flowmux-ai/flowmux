@@ -33,6 +33,7 @@ for key in ('gui', 'cli', 'ssh_config'):
 args.remote_cwd += '/review-send-' + uuid.uuid4().hex
 h = gui.Harness(args)
 h.env.update(GTK_A11Y='atspi', GTK_USE_PORTAL='0')
+h.env.pop('AT_SPI_BUS_ADDRESS', None)
 d = None
 receiver = r'''import json, os, pathlib, select, sys, termios, time, tty
 control, receipt = map(pathlib.Path, sys.argv[1:3])
@@ -103,7 +104,9 @@ print(git('rev-parse','HEAD'))
     config = h.root / 'config/flowmux'; config.mkdir()
     (config / 'options.json').write_text(json.dumps({'default_shell': str(clean), 'terminal_minimap_enabled': False, 'system_notifications_enabled': False}))
     h.start_display()
+    os.environ['DISPLAY'] = h.env['DISPLAY']
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = h.env['DBUS_SESSION_BUS_ADDRESS']
+    os.environ.pop('AT_SPI_BUS_ADDRESS', None)
     import gi
     gi.require_version('Atspi', '2.0')
     from gi.repository import Atspi, GLib
