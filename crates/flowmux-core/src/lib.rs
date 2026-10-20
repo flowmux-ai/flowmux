@@ -2758,7 +2758,7 @@ pub fn detect_agent_status_from_signals(
         return Some(AgentStatus::Blocked);
     }
     if title.chars().any(is_braille_spinner)
-        || title.starts_with(|c| matches!(c, '✦' | '⏲'))
+        || title.starts_with(['✦', '⏲'])
         || (title_names_agent
             && ["working", "thinking", "running"]
                 .into_iter()
@@ -3181,7 +3181,7 @@ fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {
 }
 
 fn starts_with_gemini_dynamic_title(title: &str) -> bool {
-    title.starts_with(|c| matches!(c, '✦' | '✋' | '◇' | '⏲'))
+    title.starts_with(['✦', '✋', '◇', '⏲'])
 }
 
 fn starts_with_agent_title_token(title: &str, token: &str) -> bool {
