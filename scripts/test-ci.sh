@@ -85,6 +85,10 @@ run_phase native 600 cargo test -p flowmux --test macos_native --features native
     2>&1 | tee "$report_dir/native-smoke.log"
 grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
 
+FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY=1 run_phase editor-keyboard 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/editor-keyboard-smoke.log"
+grep -q '^MACOS_FOUR_PANE_EDITING_KEYS_OK$' "$report_dir/editor-keyboard-smoke.log"
+
 # Install skills through the mapped Options UI using a private agent home.
 FLOWMUX_SKILLS_SMOKE_ONLY=1 run_phase skills 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/skills-smoke.log"
