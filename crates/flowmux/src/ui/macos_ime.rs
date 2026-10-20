@@ -23,13 +23,56 @@
 //! Everything here is private GTK API by nature; if the class or method is not
 //! found, nothing is installed and behaviour is exactly upstream GTK.
 
+use std::cell::Cell;
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::OnceLock;
 
+use gtk::prelude::*;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
 use objc2::{msg_send, sel};
+use objc2_app_kit::{NSApplication, NSEvent};
 use objc2_foundation::{NSRange, NSString};
+
+type KeyDownImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &NSEvent);
+static ORIGINAL_KEY_DOWN: OnceLock<KeyDownImp> = OnceLock::new();
+thread_local! {
+    static FORWARD_NATIVE_KEY: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Let Quartz recover the original NSEvent, including its IME metadata.
+// shortcut: uses GTK's private Quartz bridge until GDK exposes native key events.
+pub fn forward_native_key(context: &gtk::IMMulticontext, event: &gtk::gdk::Event) -> bool {
+    if ORIGINAL_KEY_DOWN.get().is_none() {
+        let Some(method) = AnyClass::get(c"GdkMacosBaseView")
+            .and_then(|class| class.instance_method(sel!(keyDown:)))
+        else {
+            return false;
+        };
+        // SAFETY: both implementations have the native keyDown: signature.
+        unsafe {
+            let original = std::mem::transmute::<Imp, KeyDownImp>(method.implementation());
+            if ORIGINAL_KEY_DOWN.set(original).is_ok() {
+                method.set_implementation(std::mem::transmute::<KeyDownImp, Imp>(
+                    key_down_forwarding,
+                ));
+            }
+        }
+    }
+    FORWARD_NATIVE_KEY.with(|forward| {
+        let previous = forward.replace(true);
+        context.filter_keypress(event);
+        !forward.replace(previous)
+    })
+}
+
+unsafe extern "C-unwind" fn key_down_forwarding(this: &AnyObject, cmd: Sel, event: &NSEvent) {
+    if FORWARD_NATIVE_KEY.with(|forward| forward.replace(false)) {
+        NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap()).sendEvent(event);
+    } else {
+        ORIGINAL_KEY_DOWN.get().unwrap()(this, cmd, event);
+    }
+}
 
 /// `-[GdkMacosBaseView insertText:replacementRange:]`
 type InsertTextImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject, NSRange);

@@ -626,23 +626,50 @@ fn install_macos_editor_key_capture(
 ) {
     let controller = gtk::EventControllerKey::new();
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let context = gtk::IMMulticontext::new();
     let window_for_key = window.clone();
-    controller.connect_key_pressed(move |_, keyval, _, state| {
-        let Some(action) = macos_editor_key_action(keyval, state) else {
+    controller.connect_key_pressed(move |controller, keyval, _, state| {
+        let editor = {
+            let registry = registry.borrow();
+            registry
+                .editors
+                .values()
+                .find(|editor| editor.has_native_focus())
+                .or_else(|| focused.get().and_then(|pane| registry.active_editor(pane)))
+                .cloned()
+        };
+        let Some(editor) = editor else {
             return glib::Propagation::Proceed;
         };
-        let Some(pane) = focused.get() else {
-            return glib::Propagation::Proceed;
-        };
-        let registry = registry.borrow();
-        let Some(editor) = registry.active_editor(pane) else {
-            return glib::Propagation::Proceed;
-        };
-        if !window_focus_is_widget(&window_for_key, &editor.root.clone().upcast())
-            && !editor.has_native_focus()
+        let native_focus = editor.has_native_focus();
+        if !native_focus && !window_focus_is_widget(&window_for_key, &editor.root.clone().upcast())
         {
             return glib::Propagation::Proceed;
         }
+        let handoff = native_focus && !editor.focus_widget().is_focus();
+        if handoff {
+            // A native click can precede the focus poll and leave GTK targeting a terminal.
+            editor.grab_focus();
+            focused.set(Some(editor.pane_id()));
+        }
+        let action = macos_editor_key_action(keyval, state);
+        let plain_key = state & accelerator_mod_mask() & !gtk::gdk::ModifierType::SHIFT_MASK
+            == gtk::gdk::ModifierType::empty();
+        if native_focus
+            && (macos_editor_needs_native_key(keyval, state)
+                || (handoff && plain_key && action.is_none()))
+        {
+            context.set_client_widget(Some(&window_for_key));
+            if controller
+                .current_event()
+                .is_some_and(|event| crate::ui::macos_ime::forward_native_key(&context, &event))
+            {
+                return glib::Propagation::Stop;
+            }
+        }
+        let Some(action) = action else {
+            return glib::Propagation::Proceed;
+        };
         match action {
             MacEditorKeyAction::Navigate {
                 key,
@@ -657,6 +684,24 @@ fn install_macos_editor_key_capture(
         glib::Propagation::Stop
     });
     window.add_controller(controller);
+}
+
+#[cfg(target_os = "macos")]
+fn macos_editor_needs_native_key(key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+    !state.intersects(
+        ModifierType::CONTROL_MASK
+            | ModifierType::ALT_MASK
+            | ModifierType::SUPER_MASK
+            | ModifierType::META_MASK,
+    ) && matches!(
+        key,
+        gtk::gdk::Key::Return
+            | gtk::gdk::Key::KP_Enter
+            | gtk::gdk::Key::space
+            | gtk::gdk::Key::Tab
+            | gtk::gdk::Key::ISO_Left_Tab
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -1206,6 +1251,38 @@ fn make_paste_action(
 mod tests {
     use super::*;
     use flowmux_config::keybindings::default_accels;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_editing_keys_preserve_application_shortcuts() {
+        use gtk::gdk::{Key, ModifierType};
+        for key in [
+            Key::Return,
+            Key::KP_Enter,
+            Key::space,
+            Key::Tab,
+            Key::ISO_Left_Tab,
+        ] {
+            assert!(macos_editor_needs_native_key(key, ModifierType::empty()));
+            assert!(macos_editor_needs_native_key(key, ModifierType::SHIFT_MASK));
+            for modifier in [
+                ModifierType::CONTROL_MASK,
+                ModifierType::ALT_MASK,
+                ModifierType::SUPER_MASK,
+                ModifierType::META_MASK,
+            ] {
+                assert!(!macos_editor_needs_native_key(key, modifier));
+            }
+        }
+        assert!(!macos_editor_needs_native_key(
+            Key::a,
+            ModifierType::empty()
+        ));
+        assert!(!macos_editor_needs_native_key(
+            Key::Left,
+            ModifierType::empty()
+        ));
+    }
 
     #[test]
     fn tooltip_with_accels_appends_shortcuts_in_parentheses() {

@@ -537,29 +537,7 @@ impl GhosttyPane {
 
     pub fn grab_focus(&self) {
         #[cfg(target_os = "macos")]
-        {
-            use glib::translate::ToGlibPtr;
-            use objc2::ClassType;
-            use objc2_app_kit::NSWindow;
-            extern "C" {
-                fn gdk_macos_surface_get_native_window(
-                    surface: *mut gtk::gdk::ffi::GdkSurface,
-                ) -> *mut std::ffi::c_void;
-            }
-            if let Some(surface) = self.widget.native().and_then(|native| native.surface()) {
-                let window = unsafe {
-                    gdk_macos_surface_get_native_window(surface.to_glib_none().0)
-                        .cast::<NSWindow>()
-                        .as_ref()
-                };
-                if let Some(window) = window {
-                    if let Some(view) = window.contentView() {
-                        // GTK focus alone leaves an embedded WKWebView as AppKit's responder.
-                        window.makeFirstResponder(Some(view.as_super()));
-                    }
-                }
-            }
-        }
+        focus_native_terminal(&self.widget);
         self.widget.grab_focus();
     }
 
@@ -592,6 +570,31 @@ impl GhosttyPane {
     pub fn paste_clipboard(&self) {
         scroll_terminal_to_bottom(&self.widget);
         self.widget.paste_clipboard();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn focus_native_terminal(widget: &vte::Terminal) {
+    use glib::translate::ToGlibPtr;
+    use objc2::ClassType;
+    use objc2_app_kit::NSWindow;
+    extern "C" {
+        fn gdk_macos_surface_get_native_window(
+            surface: *mut gtk::gdk::ffi::GdkSurface,
+        ) -> *mut std::ffi::c_void;
+    }
+    if let Some(surface) = widget.native().and_then(|native| native.surface()) {
+        let window = unsafe {
+            gdk_macos_surface_get_native_window(surface.to_glib_none().0)
+                .cast::<NSWindow>()
+                .as_ref()
+        };
+        if let Some(window) = window {
+            if let Some(view) = window.contentView() {
+                // GTK focus alone leaves an embedded WKWebView as AppKit's responder.
+                window.makeFirstResponder(Some(view.as_super()));
+            }
+        }
     }
 }
 
@@ -912,8 +915,12 @@ impl GhosttyPane {
             let cb = callbacks.on_focus.clone();
             let pane_id = pane_id.clone();
             let focus_ctrl = gtk::EventControllerFocus::new();
-            focus_ctrl.connect_enter(move |_| {
+            focus_ctrl.connect_enter(move |_controller| {
                 if !PREEDIT_FOCUS_CYCLE.get() {
+                    #[cfg(target_os = "macos")]
+                    if let Some(term) = _controller.widget().and_downcast::<vte::Terminal>() {
+                        focus_native_terminal(&term);
+                    }
                     (cb.borrow_mut())(pane_id.get());
                 }
             });
@@ -1887,6 +1894,8 @@ fn install_url_link_handling(
         let Some(term_widget) = term_widget.upgrade() else {
             return;
         };
+        #[cfg(target_os = "macos")]
+        focus_native_terminal(&term_widget);
         activation_for_press.borrow_mut().clear();
         // A new primary press starts a fresh interaction: drop the stale
         // selection snapshot so Copy never resurrects text from a selection the

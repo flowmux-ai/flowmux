@@ -528,6 +528,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     wait_until("terminal focused", || !editor.has_native_focus()).await;
     controller.focus_pane(pane);
     wait_until("editor refocused", || editor.has_native_focus()).await;
+    editor.check_terminal_focus(&terminal).await;
+    editor.grab_focus();
     println!("MACOS_NATIVE_FOCUS_OK");
 
     // A hook-owned presence needs a real agent in this terminal's process tree.

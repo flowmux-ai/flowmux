@@ -357,6 +357,10 @@ impl EditorPane {
                 }
                 sync_native_view_frame(&native, &web_widget);
                 let focused = native_view_has_focus(&native.web_view);
+                if focused && !web_widget.is_focus() {
+                    // Native clicks bypass GTK, which can otherwise keep feeding the old terminal.
+                    web_widget.grab_focus();
+                }
                 if native_focus_entered(&native_focused, focused) {
                     if let Some(callback) = on_focus.borrow_mut().as_mut() {
                         callback(pane_id.get());
@@ -565,6 +569,44 @@ impl EditorPane {
     #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_recovery(&self, root: &Path) {
         recovery_smoke::check(self, root).await;
+    }
+
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_terminal_focus(
+        &self,
+        terminal: &crate::ui::pane_terminal::PaneTerminal,
+    ) {
+        self.grab_focus();
+        assert!(self.has_native_focus());
+        // VTE's click path focuses the GTK widget without calling PaneTerminal::grab_focus.
+        terminal.widget.grab_focus();
+        assert!(terminal.widget.is_focus());
+        assert!(
+            !self.has_native_focus(),
+            "terminal GTK focus left the editor as AppKit's key responder"
+        );
+
+        for _ in 0..2 {
+            // A click inside WKWebView changes AppKit focus without a GTK focus event.
+            focus_native_view(&self.native.web_view);
+            glib::future_with_timeout(Duration::from_secs(2), async {
+                while !self.web_widget.is_focus() {
+                    glib::timeout_future(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("native editor focus did not release GTK terminal focus");
+            assert!(self.has_native_focus());
+            terminal.widget.grab_focus();
+            assert!(!self.has_native_focus());
+            glib::timeout_future(Duration::from_millis(100)).await;
+            assert!(
+                terminal.widget.is_focus(),
+                "editor timer stole terminal focus"
+            );
+            assert!(!self.has_native_focus());
+        }
+        println!("MACOS_EDITOR_TERMINAL_FOCUS_OK");
     }
 
     #[cfg(all(test, feature = "native-smoke"))]
