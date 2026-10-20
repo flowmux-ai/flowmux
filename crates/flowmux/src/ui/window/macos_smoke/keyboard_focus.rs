@@ -142,6 +142,29 @@ pub(super) async fn check(
             key(&app, window, "\t", 48, true).await;
         }
         key(&app, window, "\r", 36, false).await;
+        let index = usize::from(pane == editor_b || pane == terminal_b);
+        let kind = if is_editor { "editor" } else { "terminal" };
+        let file = root.join(format!("keyboard-{kind}-{index}.txt"));
+        // Posting an NSEvent does not acknowledge its WebKit/PTY processing.
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            loop {
+                if is_editor {
+                    editors[index].flush_pending_changes().await.unwrap();
+                    editors[index].save_all_dirty().await.unwrap();
+                }
+                if std::fs::read_to_string(&file).is_ok_and(|text| text == "1 2\n4\n") {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "{kind} {index}: native input did not settle: {:?}",
+                std::fs::read_to_string(&file)
+            )
+        });
     }
     for editor in &editors {
         editor.flush_pending_changes().await.unwrap();
