@@ -72,6 +72,15 @@ pub(super) async fn check(
         }
     }
     println!("MACOS_FOUR_PANE_IMMEDIATE_FOCUS_OK transitions=160");
+    controller.focus_pane(editor_a);
+    controller
+        .dispatch(GtkCommand::PaneFocused { pane: terminal_b })
+        .await;
+    assert_eq!(
+        controller.focused_pane.get(),
+        Some(editor_a),
+        "a queued notification restored the previous pane"
+    );
 
     let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
     app.activate();

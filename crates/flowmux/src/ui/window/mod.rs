@@ -2470,6 +2470,11 @@ impl WindowController {
         let Some(ws_id) = self.store.workspace_for_pane(pane).await else {
             return;
         };
+        // macOS already updates focus synchronously; queued notifications can be stale.
+        #[cfg(target_os = "macos")]
+        if self.focused_pane.get() != Some(pane) {
+            return;
+        }
         self.focused_pane.set(Some(pane));
         self.pane_registry.borrow().mark_focused_pane(pane);
         {
