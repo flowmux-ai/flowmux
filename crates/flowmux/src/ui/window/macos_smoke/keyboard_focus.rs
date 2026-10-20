@@ -72,6 +72,13 @@ pub(super) async fn check(
         }
     }
     println!("MACOS_FOUR_PANE_IMMEDIATE_FOCUS_OK transitions=160");
+    controller.focus_pane(terminal_a);
+    gtk::prelude::WidgetExt::activate_action(&controller.window, "win.focus-right", None).unwrap();
+    assert_eq!(
+        controller.focused_pane.get(),
+        Some(editor_a),
+        "a focus shortcut must finish before the following key is dispatched"
+    );
     controller.focus_pane(editor_a);
     controller
         .dispatch(GtkCommand::PaneFocused { pane: terminal_b })

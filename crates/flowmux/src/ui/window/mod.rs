@@ -2407,12 +2407,19 @@ impl WindowController {
     }
 
     async fn focus_direction_from_command(&self, from: Option<PaneId>, dir: FocusDir) {
+        if !self.focus_direction_now(from, dir) {
+            self.focus_first_leaf_of_active_workspace().await;
+        }
+    }
+
+    pub(crate) fn focus_direction_now(&self, from: Option<PaneId>, dir: FocusDir) -> bool {
+        self.clear_pane_zoom();
         if self.file_browser.active.get()
             && self.file_browser.source_pane.get().is_some()
             && (from.is_none() || from == self.file_browser.source_pane.get())
         {
             self.focus_out_of_file_browser(dir);
-            return;
+            return true;
         }
 
         if self.worktrees.active.get()
@@ -2420,13 +2427,12 @@ impl WindowController {
             && (from.is_none() || from == self.worktrees.source_pane.get())
         {
             self.focus_out_of_worktree_panel(dir);
-            return;
+            return true;
         }
 
-        match from {
-            Some(pane) => self.focus_direction_or_right_tools(pane, dir),
-            None => self.focus_first_leaf_of_active_workspace().await,
-        }
+        let Some(pane) = from else { return false };
+        self.focus_direction_or_right_tools(pane, dir);
+        true
     }
 
     async fn sync_workspace_label(&self, ws_id: WorkspaceId) {

@@ -380,14 +380,7 @@ fn main() -> anyhow::Result<()> {
         if let Some(error) = session_save_error.as_deref() {
             controller.show_session_save_error(error);
         }
-        keybindings::install_actions(
-            &controller.window,
-            bridge_for_activate.clone(),
-            controller.focused_pane.clone(),
-            controller.pane_registry(),
-            controller.clipboard_toast(),
-            controller.usage_button(),
-        );
+        keybindings::install_actions(&controller, bridge_for_activate.clone());
         spawn_dispatch_loop(rx_for_activate.clone(), controller.clone());
         let controller_for_init = controller.clone();
         gtk::glib::MainContext::default().spawn_local(async move {

@@ -150,14 +150,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
     if std::env::var_os("FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY").is_some() {
-        crate::keybindings::install_actions(
-            &controller.window,
-            bridge.clone(),
-            controller.focused_pane.clone(),
-            controller.pane_registry(),
-            controller.clipboard_toast(),
-            controller.usage_button(),
-        );
+        crate::keybindings::install_actions(&controller, bridge.clone());
         let pane = controller
             .split_pane(terminal_pane, SplitDirection::Vertical)
             .await

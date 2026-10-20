@@ -193,14 +193,12 @@ pub fn resolved_accels(overrides: &KeybindingOverrides, action: ActionId) -> Vec
 pub type TerminalRegistry = Rc<std::cell::RefCell<crate::ui::workspace_view::PaneRegistry>>;
 
 /// Register the action handlers on a window.
-pub fn install_actions(
-    window: &adw::ApplicationWindow,
-    bridge: Bridge,
-    focused: FocusedPane,
-    registry: TerminalRegistry,
-    clipboard_toast: ClipboardToast,
-    usage_button: gtk::MenuButton,
-) {
+pub fn install_actions(controller: &crate::ui::window::WindowController, bridge: Bridge) {
+    let window = &controller.window;
+    let focused = controller.focused_pane.clone();
+    let registry = controller.pane_registry();
+    let clipboard_toast = controller.clipboard_toast();
+    let usage_button = controller.usage_button();
     #[cfg(target_os = "linux")]
     install_linux_editor_key_capture(window, focused.clone(), registry.clone());
     #[cfg(target_os = "macos")]
@@ -218,21 +216,21 @@ pub fn install_actions(
     );
     let focus_left = make_focus_direction_action(
         "focus-left",
-        focused.clone(),
+        controller.clone(),
         bridge.clone(),
         FocusDir::Left,
     );
     let focus_right = make_focus_direction_action(
         "focus-right",
-        focused.clone(),
+        controller.clone(),
         bridge.clone(),
         FocusDir::Right,
     );
     let focus_up =
-        make_focus_direction_action("focus-up", focused.clone(), bridge.clone(), FocusDir::Up);
+        make_focus_direction_action("focus-up", controller.clone(), bridge.clone(), FocusDir::Up);
     let focus_down = make_focus_direction_action(
         "focus-down",
-        focused.clone(),
+        controller.clone(),
         bridge.clone(),
         FocusDir::Down,
     );
@@ -994,14 +992,18 @@ fn move_split(bridge: Bridge, direction: SplitDirection) -> PaneAction {
 /// workspace click.
 fn make_focus_direction_action(
     name: &'static str,
-    focused: FocusedPane,
+    controller: crate::ui::window::WindowController,
     bridge: Bridge,
     dir: FocusDir,
 ) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder(name)
         .activate(move |_, _, _| {
-            let from = focused.get();
+            let from = controller.focused_pane.get();
             tracing::debug!(action = name, ?from, ?dir, "focus direction action fired");
+            #[cfg(target_os = "macos")]
+            if controller.focus_direction_now(from, dir) {
+                return;
+            }
             let bridge = bridge.clone();
             glib::MainContext::default().spawn_local(async move {
                 let _ = bridge
