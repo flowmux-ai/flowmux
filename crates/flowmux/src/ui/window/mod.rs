@@ -3222,6 +3222,7 @@ impl WindowController {
 /// name. gnome-shell keys entries by `(sender, app_id)`, so swapping
 /// connections mid-flight is exactly what leaves the dock badge
 /// pinned after the user acks.
+#[cfg(not(target_os = "macos"))]
 async fn ensure_desktop_notifier(
     cell: &Arc<tokio::sync::Mutex<Option<flowmux_notify::DesktopNotifier>>>,
 ) -> Option<flowmux_notify::DesktopNotifier> {
@@ -3239,6 +3240,14 @@ async fn ensure_desktop_notifier(
             None
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+async fn ensure_desktop_notifier(
+    _cell: &Arc<tokio::sync::Mutex<Option<flowmux_notify::DesktopNotifier>>>,
+) -> Option<flowmux_notify::DesktopNotifier> {
+    // The native center is a process singleton; permission prompts must not block Dock updates.
+    flowmux_notify::DesktopNotifier::connect().await.ok()
 }
 
 /// Return the active surface title for `focused_pane` at original length for

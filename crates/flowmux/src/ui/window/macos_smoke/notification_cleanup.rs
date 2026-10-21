@@ -27,7 +27,7 @@ async fn push(controller: &WindowController) -> NotificationId {
 
 pub(super) async fn check(app: &adw::Application) {
     let (bridge, _rx) = Bridge::new();
-    let controller = WindowController::new(
+    let mut controller = WindowController::new(
         app,
         StateStore::new_lazy_ephemeral(State::default()),
         Arc::new(ResolvedTheme::load()),
@@ -35,6 +35,14 @@ pub(super) async fn check(app: &adw::Application) {
         gtk::CssProvider::new(),
         Some(tokio::runtime::Handle::current()),
     );
+    let notifier = Arc::new(tokio::sync::Mutex::new(Some(
+        flowmux_notify::DesktopNotifier::connect().await.unwrap(),
+    )));
+    controller
+        .notifications
+        .use_shared_notifier(notifier.clone());
+    // Desktop delivery holds this lock while macOS waits for notification permission.
+    let pending_permission = notifier.lock().await;
     controller.window.present();
     wait_until("notification window mapped", || {
         controller.window.is_mapped()
@@ -50,6 +58,7 @@ pub(super) async fn check(app: &adw::Application) {
         .await;
     wait_until("cleared Dock badge", || badge().is_none()).await;
     assert_eq!(controller.notifications.unread_count(), 0);
+    drop(pending_permission);
 
     let id = push(&controller).await;
     let desktop_id = format!("cleanup-{id}");
