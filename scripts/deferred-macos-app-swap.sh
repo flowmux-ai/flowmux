@@ -37,8 +37,12 @@ if ! valid_staged_name "$staged_bundle" ".flowmux.app.pending" || \
     exit 0
 fi
 
-while kill -0 "$host_pid" 2>/dev/null; do
-    sleep 0.2
+# A bundle can host more than one Flowmux process.
+for pid in $host_pid; do
+    case "$pid" in ""|*[!0-9]*) echo "invalid host PID" >&2; exit 0 ;; esac
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 0.2
+    done
 done
 
 if [ ! -d "$staged_bundle" ]; then

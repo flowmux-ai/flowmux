@@ -11,8 +11,9 @@ curl -fsSL https://flowmux.org/install.sh | sh
 ```
 
 The installer downloads the release DMG and asks to install missing Homebrew
-and runtime libraries. Quit Flowmux before updating. The app is installed in
-`~/Applications`, with CLI commands in `~/.local/bin`.
+and runtime libraries. If Flowmux is running, the update is applied after you
+quit it. The app is installed in `~/Applications`, with CLI commands in
+`~/.local/bin`.
 
 For manual installation, install the runtime libraries with
 `brew install gtk4 libadwaita vte3`, then drag **Flowmux.app → Applications**
