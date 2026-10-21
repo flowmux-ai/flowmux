@@ -63,8 +63,8 @@ ninja -C "$src_dir/build"
 echo "==> installing to $PREFIX"
 $SUDO ninja -C "$src_dir/build" install
 
-case "$PREFIX" in
-    /usr|/usr/local)
+case "$(uname -s):$PREFIX" in
+    Linux:/usr|Linux:/usr/local)
         need ldconfig
         if [ "$(id -u)" -eq 0 ]; then
             ldconfig
@@ -91,7 +91,11 @@ printf '%s\n' '#include <thorvg_capi.h>' \
     '  return tvg_engine_term() == TVG_RESULT_SUCCESS ? 0 : 1;' \
     '}' | c++ -x c++ - -o "$src_dir/verify-thorvg" \
         $(PKG_CONFIG_PATH="$THORVG_PKG_CONFIG_PATH" pkg-config --cflags --libs thorvg-1)
-LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}" "$src_dir/verify-thorvg"
+if [ "$(uname -s)" = Darwin ]; then
+    DYLD_LIBRARY_PATH="$PREFIX/lib:${DYLD_LIBRARY_PATH:-}" "$src_dir/verify-thorvg"
+else
+    LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}" "$src_dir/verify-thorvg"
+fi
 
 ver="$(PKG_CONFIG_PATH="$THORVG_PKG_CONFIG_PATH" pkg-config --modversion thorvg-1)"
 echo "==> done. thorvg-1 $ver with C API installed under $PREFIX"

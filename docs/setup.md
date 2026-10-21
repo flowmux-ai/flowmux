@@ -118,6 +118,11 @@ PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 Restart flowmux afterwards. Other builds must expose the compatible ThorVG
 C API and loaders; a package name alone does not establish compatibility.
 
+On macOS, the installer checks compatibility and offers to build ThorVG with a
+`Y/n` prompt. Accept to enable images and Lottie (`.json`/`.lottie`); decline to
+install Flowmux without the viewer. The library goes in `~/.local/lib`.
+Ordinary JSON files still open in the editor.
+
 ### GStreamer (Linux browser media)
 
 WebKitGTK plays media through GStreamer. Without these plugins pages still

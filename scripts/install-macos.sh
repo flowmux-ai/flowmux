@@ -332,6 +332,9 @@ if [ "$CHECK_ONLY" = true ]; then
     echo "==> macOS native preflight checks passed"
     exit 0
 fi
+if [ "$BUNDLE_ONLY" = false ]; then
+    bash "$REPO_ROOT/scripts/install-thorvg-macos.sh"
+fi
 
 cd "$REPO_ROOT"
 echo "==> building flowmux ($PROFILE)"

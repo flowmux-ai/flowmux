@@ -88,6 +88,11 @@ class MacosDependencyTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        scripts = self.root / "source/scripts"
+        scripts.mkdir(parents=True)
+        self.script = scripts / "install-macos.sh"
+        shutil.copy2(REPO / "scripts/install-macos.sh", self.script)
+        (scripts / "install-thorvg-macos.sh").write_text('echo "thorvg-check" >> "$TEST_ROOT/calls"\n')
         sdk = self.root / "sdk/System/Library/Frameworks/WebKit.framework"
         sdk.mkdir(parents=True)
         for name in ["uname", "xcrun", "pkg-config", "brew", "cargo", "xcode-select",
@@ -111,7 +116,7 @@ elif name == "cargo": sys.exit(23)  # Stop before any real build or app mutation
                         PATH=f"{self.bin}:{Path.home() / '.cargo/bin'}:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin")
 
     def run_installer(self, *args, answer=None, **env):
-        command = ["/bin/bash", str(REPO / "scripts/install-macos.sh"), *args]
+        command = ["/bin/bash", str(self.script), *args]
         environment = dict(self.env, **env)
         if answer is None:
             return subprocess.run(command, env=environment, text=True, capture_output=True,
@@ -165,6 +170,7 @@ elif name == "cargo": sys.exit(23)  # Stop before any real build or app mutation
         result = self.run_installer()
         self.assertEqual(result.returncode, 23, result.stderr)
         self.assertNotIn("brew install", self.calls())
+        self.assertIn("thorvg-check", self.calls())
 
     def test_missing_dependencies_require_confirmation(self):
         result = self.run_installer()

@@ -11,7 +11,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def run(*args, **kwargs):
-    result = subprocess.run(args, text=True, capture_output=True, timeout=120, **kwargs)
+    result = subprocess.run(args, text=True, capture_output=True, timeout=120, start_new_session=True, **kwargs)
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout
 
@@ -24,6 +24,8 @@ def main():
         (source / "scripts").mkdir(parents=True)
         shutil.copy2(REPO / "install.sh", source / "install.sh")
         shutil.copy2(REPO / "scripts/install-macos.sh", source / "scripts/install-macos.sh")
+        for name in ("install-thorvg-macos.sh", "install-thorvg.sh", "check-thorvg.py"):
+            shutil.copy2(REPO / "scripts" / name, source / "scripts" / name)
         for relative in ("LICENSE", "NOTICE", "docs/legal/THIRD_PARTY_LICENSES.md"):
             dest = source / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
