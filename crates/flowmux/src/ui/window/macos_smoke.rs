@@ -7,6 +7,7 @@ use std::io::{BufRead, Read, Write};
 
 mod agent_sessions;
 mod cli_paths;
+mod cwd_poll;
 mod keyboard_focus;
 mod notification_cleanup;
 mod options_merge;
@@ -86,6 +87,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_CWD_POLL_SMOKE_ONLY").is_some() {
+        cwd_poll::check(app, root).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_OFFICE_CACHE_SMOKE_ONLY").is_some() {
         crate::ui::agent_office::check_native_screen_cache(app).await;
         return;
@@ -852,6 +857,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .iter()
         .any(|window| window.instance_id == owner.instance_id));
     println!("MACOS_NATIVE_SAVE_RETRY_OK");
+    cwd_poll::check(app, root).await;
 }
 
 async fn check_sidebar_footer(controller: &WindowController) {

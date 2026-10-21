@@ -13,6 +13,22 @@ use std::io;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "macos")]
+pub use macos::process_cwd;
+
+#[cfg(target_os = "linux")]
+pub fn process_cwd(pid: u32) -> Option<PathBuf> {
+    fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn process_cwd(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProcError {
     #[error("io: {0}")]

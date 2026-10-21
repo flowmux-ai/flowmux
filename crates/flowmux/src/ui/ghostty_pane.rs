@@ -502,8 +502,7 @@ impl GhosttyPane {
     ///   1. VTE's `current-directory-uri` (OSC 7) — set by zsh / bash
     ///      / fish when the shell announces its cwd. Always reflects
     ///      `cd` exactly.
-    ///   2. `/proc/<pid>/cwd` symlink target — works for any spawned
-    ///      shell on Linux even without OSC 7 support.
+    ///   2. Native process cwd — works without OSC 7 on Linux and macOS.
     pub fn current_dir(&self) -> Option<PathBuf> {
         if self.is_ssh {
             return None;
@@ -512,7 +511,7 @@ impl GhosttyPane {
             return Some(path);
         }
         if let Some(pid) = self.pid.get() {
-            if let Ok(p) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
+            if let Some(p) = flowmux_procmon::process_cwd(pid as u32) {
                 return Some(p);
             }
         }
@@ -1577,7 +1576,7 @@ fn terminal_current_dir(term: &vte::Terminal, pid: &Rc<Cell<Option<i32>>>) -> Op
     }
 
     pid.get()
-        .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/cwd")).ok())
+        .and_then(|pid| flowmux_procmon::process_cwd(pid as u32))
 }
 
 /// AI-agent TUIs animate the OSC 0 title with a spinner. Repainting the tab,

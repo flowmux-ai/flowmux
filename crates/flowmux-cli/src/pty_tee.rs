@@ -58,8 +58,6 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-#[cfg(target_os = "macos")]
-use std::os::unix::ffi::OsStringExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1067,47 +1065,8 @@ fn is_file_uri_path_byte(byte: u8) -> bool {
     )
 }
 
-#[cfg(target_os = "linux")]
 fn child_cwd(pid: Pid) -> Option<PathBuf> {
-    std::fs::read_link(format!("/proc/{}/cwd", pid.as_raw())).ok()
-}
-
-#[cfg(target_os = "macos")]
-fn child_cwd(pid: Pid) -> Option<PathBuf> {
-    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
-    let rc = unsafe {
-        libc::proc_pidinfo(
-            pid.as_raw(),
-            libc::PROC_PIDVNODEPATHINFO,
-            0,
-            &mut info as *mut _ as *mut libc::c_void,
-            std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int,
-        )
-    };
-    if rc <= 0 {
-        return None;
-    }
-
-    let bytes = unsafe {
-        std::slice::from_raw_parts(
-            info.pvi_cdir.vip_path.as_ptr() as *const u8,
-            std::mem::size_of_val(&info.pvi_cdir.vip_path),
-        )
-    };
-    let len = bytes
-        .iter()
-        .position(|&byte| byte == 0)
-        .unwrap_or(bytes.len());
-    if len == 0 {
-        return None;
-    }
-
-    Some(PathBuf::from(OsString::from_vec(bytes[..len].to_vec())))
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn child_cwd(_pid: Pid) -> Option<PathBuf> {
-    None
+    flowmux_procmon::process_cwd(pid.as_raw() as u32)
 }
 
 fn set_nonblocking(fd: RawFd) -> anyhow::Result<()> {

@@ -256,9 +256,8 @@ impl WindowController {
             inputs
                 .into_iter()
                 .map(|(pane, surface, announced, pid)| {
-                    let cwd = announced.or_else(|| {
-                        pid.and_then(|pid| std::fs::read_link(format!("/proc/{pid}/cwd")).ok())
-                    });
+                    let cwd = announced
+                        .or_else(|| pid.and_then(|pid| flowmux_procmon::process_cwd(pid as u32)));
                     (pane, surface, cwd)
                 })
                 .collect::<Vec<_>>()

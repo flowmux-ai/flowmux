@@ -465,12 +465,12 @@ impl PaneRegistry {
     pub fn terminal_cwd_poll_inputs(
         &self,
     ) -> Vec<(PaneId, SurfaceId, Option<std::path::PathBuf>, Option<i32>)> {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             Vec::new()
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             self.terminals
                 .iter()
