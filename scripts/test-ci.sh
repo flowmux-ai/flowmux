@@ -115,3 +115,9 @@ FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY=1 run_phase notification-cleanup 120 car
     2>&1 | tee "$report_dir/notification-cleanup.log"
 grep -q '^MACOS_NOTIFICATION_CLEANUP_OK$' "$report_dir/notification-cleanup.log"
 run_phase notification-routing 120 cargo test -p flowmux --bin flowmux --locked native_notification_target_opens_the_source_pid_socket
+
+run_phase webdriver-address 120 cargo test -p flowmux --bin flowmux --locked macos_webdriver::tests
+run_phase webdriver-native 180 cargo test -p flowmux --test macos_webdriver --features native-smoke --locked
+run_phase webdriver 180 python3 scripts/test-macos-webdriver.py "$CARGO_TARGET_DIR/debug/flowmux" \
+    2>&1 | tee "$report_dir/webdriver.log"
+grep -q '^MACOS_WEBDRIVER_OK$' "$report_dir/webdriver.log"

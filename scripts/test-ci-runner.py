@@ -42,6 +42,10 @@ if name == 'cargo' and args[:3] == ['test', '-p', 'flowmux-notify']:
     if os.environ.get('NOTIFICATIONS_MARKER', '1') == '1':
         print('MACOS_NATIVE_DOCK_BADGE_OK')
     sys.exit(int(os.environ.get('NOTIFICATIONS_EXIT', '0')))
+if name == 'python3' and args and args[0] == 'scripts/test-macos-webdriver.py':
+    if os.environ.get('WEBDRIVER_MARKER', '1') == '1':
+        print('MACOS_WEBDRIVER_OK')
+    sys.exit(int(os.environ.get('WEBDRIVER_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
     if os.environ.get('FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY'):
         if os.environ.get('CLEANUP_MARKER', '1') == '1':
@@ -209,6 +213,16 @@ time.sleep(60)
                 markdown = [c for c in calls if 'flowmux-md-viewer' in c['args']]
                 self.assertEqual(len(markdown), 1)
                 self.assertIsNone(markdown[0]['socket'])
+
+    def test_macos_webdriver_gate_requires_success_and_marker(self):
+        for exit_code, marker, expected in [(0, '1', 0), (43, '1', 43), (0, '0', 1)]:
+            with self.subTest(exit_code=exit_code, marker=marker):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    WEBDRIVER_EXIT=str(exit_code), WEBDRIVER_MARKER=marker)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                driver = [c for c in calls if 'scripts/test-macos-webdriver.py' in c['args']]
+                self.assertEqual(len(driver), 1)
+                self.assertIsNone(driver[0]['socket'])
 
     def test_macos_notification_gates_require_success_and_markers(self):
         for phase in ('NOTIFICATIONS', 'CLEANUP'):
