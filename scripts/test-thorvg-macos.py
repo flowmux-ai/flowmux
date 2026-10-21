@@ -8,6 +8,10 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 import re
+import os
+import sys
+import subprocess
+import tempfile
 
 spec = importlib.util.spec_from_file_location("installer", Path(__file__).with_name("test-install.py"))
 installer = importlib.util.module_from_spec(spec)
@@ -15,6 +19,41 @@ spec.loader.exec_module(installer)
 spec = importlib.util.spec_from_file_location("probe", Path(__file__).with_name("check-thorvg.py"))
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
+
+
+class BuildOptionsTests(unittest.TestCase):
+    def test_macos_omits_openmp_without_changing_linux_build_options(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("uname", "git", "meson", "ninja", "pkg-config", "c++", "ldconfig", "sudo", "id", "mkdir"):
+                path = root / name
+                path.write_text(f"#!{sys.executable}\n" + '''import os, pathlib, sys
+name = pathlib.Path(sys.argv[0]).name
+with open(os.environ["BUILD_CALLS"], "a") as log: log.write(name + " " + " ".join(sys.argv[1:]) + "\\n")
+if name == "uname": print(os.environ["BUILD_OS"])
+elif name == "id": print(0)
+elif name == "sudo": os.execvp(sys.argv[1], sys.argv[1:])
+elif name == "c++":
+    sys.stdin.read()
+    output = pathlib.Path(sys.argv[sys.argv.index("-o") + 1])
+    output.write_text("#!/bin/sh\\nexit 0\\n")
+    output.chmod(0o755)
+elif name == "pkg-config" and "--modversion" in sys.argv: print("1.0.6")
+''')
+                path.chmod(0o755)
+            for system in ("Darwin", "Linux"):
+                calls = root / "calls"
+                calls.write_text("")
+                env = dict(os.environ, PATH=f"{root}:/usr/bin:/bin", PREFIX="/usr/local",
+                           BUILD_CALLS=str(calls), BUILD_OS=system)
+                result = subprocess.run(["/bin/bash", str(installer.REPO / "scripts/install-thorvg.sh")],
+                                        env=env, text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                commands = calls.read_text()
+                self.assertEqual("-Dextra=lottie_exp" in commands, system == "Darwin")
+                self.assertEqual("ldconfig " in commands, system == "Linux")
+                self.assertIn("-Dloaders=all", commands)
+                self.assertIn("-Dbindings=capi", commands)
 
 
 class ProbeTests(unittest.TestCase):

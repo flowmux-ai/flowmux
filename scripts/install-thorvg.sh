@@ -46,10 +46,15 @@ echo "==> cloning ThorVG $THORVG_VERSION"
 git clone --depth 1 --branch "$THORVG_VERSION" https://github.com/thorvg/thorvg.git "$src_dir"
 
 echo "==> configuring (all loaders, C API, CPU/software engine)"
+build_options=(--buildtype=release)
+if [ "$(uname -s)" = Darwin ]; then
+    # Apple Clang does not ship OpenMP headers; keep Lottie expressions enabled.
+    build_options+=(-Dextra=lottie_exp)
+fi
 meson setup "$src_dir/build" "$src_dir" \
     --prefix="$PREFIX" \
     --libdir=lib \
-    --buildtype=release \
+    "${build_options[@]}" \
     -Dloaders=all \
     -Dsavers=all \
     -Dbindings=capi \
