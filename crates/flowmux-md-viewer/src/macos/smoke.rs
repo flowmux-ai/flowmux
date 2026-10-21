@@ -88,6 +88,21 @@ fn wait(viewer: &Viewer, predicate: &str) {
     }
 }
 
+fn wait_window(viewer: &Viewer, ready: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready() {
+        assert!(
+            Instant::now() < deadline,
+            "native window transition timed out"
+        );
+        assert!(
+            viewer.is_open(),
+            "window transition must not exit the viewer"
+        );
+        viewer.tick();
+    }
+}
+
 pub(crate) fn run() {
     let fixture = tempfile::tempdir().unwrap();
     let config = fixture.path().join("config/flowmux");
@@ -104,6 +119,16 @@ pub(crate) fn run() {
     let viewer = Viewer::new(args, true);
     viewer.ready().unwrap();
     assert!(viewer.window.isVisible());
+    viewer.window.miniaturize(None);
+    wait_window(&viewer, || viewer.window.isMiniaturized());
+    assert!(viewer.is_open(), "minimizing must not exit the viewer");
+    viewer.window.deminiaturize(None);
+    wait_window(&viewer, || viewer.window.isVisible());
+    viewer.app.hide(None);
+    wait_window(&viewer, || viewer.app.isHidden());
+    assert!(viewer.is_open(), "hiding the app must not exit the viewer");
+    viewer.app.unhide(None);
+    wait_window(&viewer, || viewer.window.isVisible());
     check_theme(&viewer, [18, 52, 86], "NSAppearanceNameDarkAqua");
     wait(&viewer, "document.querySelectorAll('.mermaid-chart > svg').length === 4 && document.querySelectorAll('.mermaid-error').length === 1");
     wait(
@@ -257,5 +282,6 @@ pub(crate) fn run() {
         .expect("native application menu")
         .performKeyEquivalent(&close));
     assert!(!viewer.window.isVisible());
+    assert!(!viewer.is_open(), "closing must exit the viewer");
     println!("MACOS_MARKDOWN_NATIVE_OK");
 }

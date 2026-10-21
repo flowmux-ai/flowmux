@@ -107,6 +107,10 @@ struct Viewer {
 }
 
 impl Viewer {
+    fn is_open(&self) -> bool {
+        self.window.isVisible() || self.window.isMiniaturized() || self.app.isHidden()
+    }
+
     fn new(args: Args, visible: bool) -> Self {
         let mtm = MainThreadMarker::new().expect("Markdown viewer must run on the main thread");
         let app = NSApplication::sharedApplication(mtm);
@@ -401,7 +405,7 @@ unsafe fn save_image(image: &NSImage, path: &Path) -> Result<(), String> {
 pub(super) fn run_app(args: Args) {
     let viewer = Viewer::new(args, true);
     let mut polled = Instant::now();
-    while viewer.window.isVisible() {
+    while viewer.is_open() {
         viewer.tick();
         if polled.elapsed() >= Duration::from_millis(250) {
             viewer.poll();
