@@ -18,6 +18,12 @@ spec.loader.exec_module(probe)
 
 
 class ProbeTests(unittest.TestCase):
+    def test_first_c_api_library_must_have_loaders_even_if_a_later_one_does(self):
+        with patch.object(probe, "candidates", return_value=["cpp-only", "no-loaders", "ready"]):
+            with patch.object(probe, "check", side_effect=[None, False, True]) as check:
+                self.assertFalse(probe.ready())
+                self.assertEqual(check.call_count, 2)
+
     def test_checks_the_same_c_api_as_the_viewer(self):
         source = (installer.REPO / "crates/flowmux/src/ui/thorvg.rs").read_text()
         self.assertEqual(set(probe.SYMBOLS), set(re.findall(r'sym!\(b"(tvg_\w+)\\0"\)', source)))

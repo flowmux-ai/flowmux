@@ -21,7 +21,7 @@ def check(path):
         for name in SYMBOLS:
             getattr(lib, name)
     except (OSError, AttributeError):
-        return False
+        return None
     lib.tvg_engine_init.argtypes = [c.c_uint]
     lib.tvg_picture_new.restype = c.c_void_p
     lib.tvg_picture_load_data.argtypes = [c.c_void_p, c.c_char_p, c.c_uint,
@@ -57,5 +57,14 @@ def candidates():
     yield "libthorvg.dylib"
 
 
+def ready():
+    for path in candidates():
+        result = check(path)
+        # The viewer selects the first complete C API, even without its loaders.
+        if result is not None:
+            return result
+    return False
+
+
 if __name__ == "__main__":
-    sys.exit(0 if any(check(path) for path in candidates()) else 1)
+    sys.exit(0 if ready() else 1)
