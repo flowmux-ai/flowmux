@@ -119,10 +119,24 @@ pub(super) async fn check(
             .unwrap();
     }
     glib::timeout_future(Duration::from_millis(200)).await;
+    // Reproduce a focus update after GTK chose the old terminal as the key target.
+    let focus_poll = gtk::EventControllerKey::new();
+    focus_poll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let poll_pending = Rc::new(Cell::new(false));
+    let pending = poll_pending.clone();
+    let editor_for_poll = editors[0].clone();
+    focus_poll.connect_key_pressed(move |_, _, _, _| {
+        if pending.replace(false) {
+            editor_for_poll.focus_widget().grab_focus();
+        }
+        glib::Propagation::Proceed
+    });
+    controller.window.add_controller(focus_poll.clone());
     controller.focus_pane(terminal_b);
     for pane in [editor_a, terminal_a, editor_b, terminal_b] {
         if pane == editor_a {
             editors[0].focus_native_only_for_test();
+            poll_pending.set(true);
         } else if pane == editor_b {
             editors[1].focus_native_only_for_test();
         } else {
@@ -188,6 +202,7 @@ pub(super) async fn check(
             );
         }
     }
+    controller.window.remove_controller(&focus_poll);
     println!("MACOS_FOUR_PANE_EDITING_KEYS_OK");
 }
 

@@ -687,19 +687,21 @@ fn install_macos_editor_key_capture(
 #[cfg(target_os = "macos")]
 fn macos_editor_needs_native_key(key: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
     use gtk::gdk::ModifierType;
+    // A queued key can still target the old terminal after GTK focus has caught up.
     !state.intersects(
         ModifierType::CONTROL_MASK
             | ModifierType::ALT_MASK
             | ModifierType::SUPER_MASK
             | ModifierType::META_MASK,
-    ) && matches!(
-        key,
-        gtk::gdk::Key::Return
-            | gtk::gdk::Key::KP_Enter
-            | gtk::gdk::Key::space
-            | gtk::gdk::Key::Tab
-            | gtk::gdk::Key::ISO_Left_Tab
-    )
+    ) && (key.to_unicode().is_some_and(|text| !text.is_control())
+        || matches!(
+            key,
+            gtk::gdk::Key::Return
+                | gtk::gdk::Key::KP_Enter
+                | gtk::gdk::Key::space
+                | gtk::gdk::Key::Tab
+                | gtk::gdk::Key::ISO_Left_Tab
+        ))
 }
 
 #[cfg(target_os = "macos")]
@@ -1276,10 +1278,14 @@ mod tests {
                 assert!(!macos_editor_needs_native_key(key, modifier));
             }
         }
-        assert!(!macos_editor_needs_native_key(
-            Key::a,
-            ModifierType::empty()
-        ));
+        for key in [Key::a, Key::_1, Key::Hangul_Kiyeog] {
+            assert!(macos_editor_needs_native_key(key, ModifierType::empty()));
+            assert!(macos_editor_needs_native_key(key, ModifierType::SHIFT_MASK));
+            assert!(!macos_editor_needs_native_key(
+                key,
+                ModifierType::CONTROL_MASK
+            ));
+        }
         assert!(!macos_editor_needs_native_key(
             Key::Left,
             ModifierType::empty()
