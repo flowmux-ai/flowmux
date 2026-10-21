@@ -15,6 +15,7 @@ mod palette;
 mod pane_titles;
 mod process_args;
 mod restored_roots;
+mod session_paths;
 mod teams_ack;
 mod zoom_reorder;
 
@@ -153,6 +154,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap()
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
+
+    if std::env::var_os("FLOWMUX_SESSION_PATHS_SMOKE_ONLY").is_some() {
+        session_paths::check(&controller, terminal_pane, root).await;
+        controller.window.destroy();
+        return;
+    }
 
     if std::env::var_os("FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY").is_some() {
         crate::keybindings::install_actions(&controller, bridge.clone());

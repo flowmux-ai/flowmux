@@ -17,7 +17,7 @@ use std::path::PathBuf;
 mod macos;
 
 #[cfg(target_os = "macos")]
-pub use macos::process_cwd;
+pub use macos::{process_cwd, process_environment};
 
 #[cfg(target_os = "linux")]
 pub fn process_cwd(pid: u32) -> Option<PathBuf> {
@@ -317,74 +317,20 @@ pub fn cmdline_of(pid: u32) -> Vec<String> {
 
 #[cfg(target_os = "macos")]
 pub fn cmdline_of(pid: u32) -> Vec<String> {
-    let mut argmax_mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
-    let mut argmax = 0_i32;
-    let mut argmax_size = std::mem::size_of_val(&argmax);
-    let rc = unsafe {
-        libc::sysctl(
-            argmax_mib.as_mut_ptr(),
-            argmax_mib.len() as libc::c_uint,
-            (&mut argmax as *mut i32).cast(),
-            &mut argmax_size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if rc != 0 || argmax <= 0 {
-        return Vec::new();
-    }
-
-    let mut raw = vec![0_u8; argmax as usize];
-    let mut raw_size = raw.len();
-    let mut procargs_mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
-    let rc = unsafe {
-        libc::sysctl(
-            procargs_mib.as_mut_ptr(),
-            procargs_mib.len() as libc::c_uint,
-            raw.as_mut_ptr().cast(),
-            &mut raw_size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if rc != 0 {
-        return Vec::new();
-    }
-    raw.truncate(raw_size);
-    parse_macos_procargs(&raw)
+    macos::procargs(pid)
+        .map(|raw| parse_macos_procargs(&raw))
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "macos")]
 fn parse_macos_procargs(raw: &[u8]) -> Vec<String> {
-    let Some(argc_bytes) = raw.get(..std::mem::size_of::<i32>()) else {
-        return Vec::new();
-    };
-    let argc = i32::from_ne_bytes(argc_bytes.try_into().expect("argc is four bytes"));
-    if argc <= 0 {
-        return Vec::new();
-    }
-
-    let mut cursor = std::mem::size_of::<i32>();
-    while cursor < raw.len() && raw[cursor] != 0 {
-        cursor += 1;
-    }
-    while cursor < raw.len() && raw[cursor] == 0 {
-        cursor += 1;
-    }
-
-    let mut argv = Vec::with_capacity(argc as usize);
-    for _ in 0..argc {
-        let start = cursor;
-        while cursor < raw.len() && raw[cursor] != 0 {
-            cursor += 1;
-        }
-        if cursor == raw.len() {
-            return Vec::new();
-        }
-        argv.push(String::from_utf8_lossy(&raw[start..cursor]).into_owned());
-        cursor += 1;
-    }
-    argv
+    macos::procargs_slices(raw)
+        .map(|(argv, _)| {
+            argv.into_iter()
+                .map(|arg| String::from_utf8_lossy(arg).into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Canonical agent name for a single PID: the kernel `comm` first (covers

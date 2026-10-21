@@ -202,6 +202,9 @@ pub struct PaneRegistry {
     /// re-adopted by the rebuilt tree (see `detach_workspace_editors`).
     pending_editor_reuse: HashMap<SurfaceId, EditorPane>,
     pending_terminal_reuse: HashMap<SurfaceId, PaneTerminal>,
+    // macOS canonical PTYs truncate long resume commands typed after spawn.
+    #[cfg(target_os = "macos")]
+    pub(crate) pending_terminal_commands: HashMap<SurfaceId, String>,
     pending_browser_reuse: HashMap<SurfaceId, BrowserPane>,
     /// Focus controller per surface, so re-adoption can swap in a
     /// controller bound to the new pane frame.
@@ -4107,6 +4110,12 @@ fn build_panel(
                     opts.auto_resume_agent_sessions,
                     flowmux_state::default_agent_session_store(),
                 );
+                #[cfg(target_os = "macos")]
+                let resume_command = registry
+                    .borrow_mut()
+                    .pending_terminal_commands
+                    .remove(&surface.id)
+                    .or(resume_command);
                 let is_resuming_agent = resume_command.is_some();
                 let mut resume_input = None;
                 if let Some(command) = resume_command {

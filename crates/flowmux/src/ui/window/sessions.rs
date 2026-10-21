@@ -5,6 +5,9 @@ use super::*;
 use crate::ui::session_panel::{SessionPanel, SessionPanelAction};
 use flowmux_state::session_history::{list_sessions, HistorySession, SessionAgent};
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 struct SessionHome {
     path: PathBuf,
     environment: std::collections::BTreeMap<String, String>,
@@ -98,7 +101,7 @@ fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
         .min()
         .ok_or("The agent is no longer running in this tab")?;
     let mut environment = std::collections::BTreeMap::new();
-    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(unused_mut))]
     let mut arguments = Vec::new();
     #[cfg(target_os = "linux")]
     {
@@ -128,36 +131,18 @@ fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
                 .split(|b| *b == 0)
                 .filter_map(|v| std::str::from_utf8(v).ok())
                 .collect();
-            for (flag, variable) in [("--config", "CLINE_DIR"), ("--data-dir", "CLINE_DATA_DIR")] {
-                if let Some(value) = argv.iter().enumerate().find_map(|(i, arg)| {
-                    arg.strip_prefix(&format!("{flag}="))
-                        .or_else(|| (*arg == flag).then(|| argv.get(i + 1).copied()).flatten())
-                }) {
-                    let path = PathBuf::from(value);
-                    let path = if path.is_absolute() {
-                        path
-                    } else {
-                        std::fs::read_link(format!("/proc/{pid}/cwd"))
-                            .map_err(|e| e.to_string())?
-                            .join(path)
-                    };
-                    let value = path
-                        .to_str()
-                        .ok_or("Agent directory is not UTF-8")?
-                        .to_string();
-                    environment.insert(variable.into(), value.clone());
-                    if flag == "--data-dir" {
-                        environment.insert(
-                            "CLINE_DB_DATA_DIR".into(),
-                            path.join("db").to_string_lossy().into_owned(),
-                        );
-                    }
-                    arguments.extend([flag.to_string(), value]);
-                }
-            }
+            arguments = cline_arguments(&mut environment, &argv, || {
+                std::fs::read_link(format!("/proc/{pid}/cwd")).map_err(|e| e.to_string())
+            })?;
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        let (native_environment, native_arguments) = macos::read(pid, target.agent)?;
+        environment.extend(native_environment);
+        arguments.extend(native_arguments);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = pid;
         for key in target.agent.home_variables() {
@@ -177,6 +162,40 @@ fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
         environment,
         arguments,
     })
+}
+
+fn cline_arguments(
+    environment: &mut std::collections::BTreeMap<String, String>,
+    argv: &[&str],
+    cwd: impl Fn() -> Result<PathBuf, String>,
+) -> Result<Vec<String>, String> {
+    let mut arguments = Vec::new();
+    for (flag, variable) in [("--config", "CLINE_DIR"), ("--data-dir", "CLINE_DATA_DIR")] {
+        if let Some(value) = argv.iter().enumerate().find_map(|(i, arg)| {
+            arg.strip_prefix(&format!("{flag}="))
+                .or_else(|| (*arg == flag).then(|| argv.get(i + 1).copied()).flatten())
+        }) {
+            let path = PathBuf::from(value);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                cwd()?.join(path)
+            };
+            let value = path
+                .to_str()
+                .ok_or("Agent directory is not UTF-8")?
+                .to_string();
+            environment.insert(variable.into(), value.clone());
+            if flag == "--data-dir" {
+                environment.insert(
+                    "CLINE_DB_DATA_DIR".into(),
+                    path.join("db").to_string_lossy().into_owned(),
+                );
+            }
+            arguments.extend([flag.to_string(), value]);
+        }
+    }
+    Ok(arguments)
 }
 
 impl WindowController {
@@ -393,17 +412,34 @@ impl WindowController {
                 .set_text("Cannot create a terminal tab for this session.");
             return;
         };
+        #[cfg(target_os = "macos")]
+        self.pane_registry
+            .borrow_mut()
+            .pending_terminal_commands
+            .insert(surface, line.clone());
         if let Err(error) = self
             .attach_or_rerender_surface(workspace, target.pane, surface, None)
             .await
         {
+            #[cfg(target_os = "macos")]
+            self.pane_registry
+                .borrow_mut()
+                .pending_terminal_commands
+                .remove(&surface);
             self.store.close_surface(target.pane, surface).await;
             self.clipboard_toast.show_with_message(&error);
             return;
         }
         let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
         if let Some(terminal) = terminal {
-            match terminal.write_input(format!("{line}\r").as_bytes()) {
+            #[cfg(not(target_os = "macos"))]
+            let started = terminal.write_input(format!("{line}\r").as_bytes());
+            #[cfg(target_os = "macos")]
+            let started: std::io::Result<()> = {
+                let _ = terminal;
+                Ok(())
+            };
+            match started {
                 Ok(()) => {
                     panel.resume.set_sensitive(false);
                     panel.status.set_text(&format!(
@@ -423,6 +459,38 @@ impl WindowController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cline_options_preserve_absolute_paths_and_override_environment() {
+        let mut environment = [("CLINE_DATA_DIR".into(), "/old".into())].into();
+        let arguments = cline_arguments(
+            &mut environment,
+            &["cline", "--data-dir=/custom data", "--config", "/config"],
+            || panic!("absolute options do not require a running process"),
+        )
+        .unwrap();
+        assert_eq!(
+            arguments,
+            ["--config", "/config", "--data-dir", "/custom data"]
+        );
+        assert_eq!(environment["CLINE_DATA_DIR"], "/custom data");
+        assert_eq!(environment["CLINE_DB_DATA_DIR"], "/custom data/db");
+        let previous = environment.clone();
+        assert!(
+            cline_arguments(&mut environment, &["cline", "--config"], || Err(
+                "unavailable".into()
+            ))
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(environment, previous);
+        assert!(
+            cline_arguments(&mut environment, &["cline", "--config=relative"], || Err(
+                "unavailable".into()
+            ))
+            .is_err()
+        );
+    }
 
     #[test]
     fn native_resume_uses_selected_project_and_config_without_shell_expansion() {

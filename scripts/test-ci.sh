@@ -80,6 +80,7 @@ python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(p
 run_phase agent-unit 960 python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"
 run_phase ipc 300 cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
 run_phase bridge 180 cargo test -p flowmux --bin flowmux --locked bridge::tests
+run_phase session-path-unit 180 cargo test -p flowmux --bin flowmux --locked ui::window::sessions::
 export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_phase native 600 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/native-smoke.log"
@@ -98,3 +99,7 @@ grep -q '^MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK$' "$report_dir/skills-smoke.log"
 FLOWMUX_AGENT_SMOKE_ONLY=1 run_phase agent-hooks 300 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/agent-hooks.log"
 grep -q '^MACOS_NATIVE_AGENT_HOOKS_OK$' "$report_dir/agent-hooks.log"
+
+FLOWMUX_SESSION_PATHS_SMOKE_ONLY=1 run_phase session-paths 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/session-paths.log"
+grep -q '^MACOS_SESSION_PATHS_OK$' "$report_dir/session-paths.log"

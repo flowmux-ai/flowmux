@@ -26,6 +26,7 @@ with open(os.environ['CALLS'], 'a') as log:
         'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
         'keyboard': os.environ.get('FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY'),
         'agents': os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY'),
+        'session_paths': os.environ.get('FLOWMUX_SESSION_PATHS_SMOKE_ONLY'),
         'renderer': os.environ.get('GSK_RENDERER')}) + '\n')
 if name == 'uname': print(os.environ.get('TEST_OS', 'Linux'))
 if name == 'xvfb-run': sys.exit(int(os.environ.get('TEST_EXIT', '0')))
@@ -34,6 +35,10 @@ if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
 if name == 'python3' and args == ['scripts/test-agent-unit.py']:
     sys.exit(int(os.environ.get('AGENT_UNIT_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
+    if os.environ.get('FLOWMUX_SESSION_PATHS_SMOKE_ONLY'):
+        if os.environ.get('SESSION_PATHS_MARKER', '1') == '1':
+            print('MACOS_SESSION_PATHS_OK')
+        sys.exit(int(os.environ.get('SESSION_PATHS_EXIT', '0')))
     if os.environ.get('FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY'):
         if os.environ.get('KEYBOARD_MARKER', '1') == '1':
             print('MACOS_FOUR_PANE_EDITING_KEYS_OK')
@@ -147,7 +152,7 @@ time.sleep(60)
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 4 if exit_code == 0 else 3)
+                self.assertEqual(len(native), 5 if exit_code == 0 else 3)
                 self.assertIsNone(native[0]['skills'])
                 self.assertEqual(native[2]['skills'], '1')
 
@@ -159,7 +164,7 @@ time.sleep(60)
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 4 if expected == 0 else 2)
+                self.assertEqual(len(native), 5 if expected == 0 else 2)
                 self.assertEqual(native[1]['keyboard'], '1')
                 self.assertIsNone(native[1]['socket'])
 
@@ -170,8 +175,18 @@ time.sleep(60)
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 4)
+                self.assertEqual(len(native), 5)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
+
+    def test_macos_session_paths_gate_requires_success_and_marker(self):
+        for exit_code, marker, expected in [(0, '1', 0), (31, '1', 31), (0, '0', 1)]:
+            with self.subTest(exit_code=exit_code, marker=marker):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    SESSION_PATHS_EXIT=str(exit_code), SESSION_PATHS_MARKER=marker)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                native = [c for c in calls if c['session_paths'] == '1']
+                self.assertEqual(len(native), 1)
+                self.assertIsNone(native[0]['socket'])
 
     def test_macos_agent_gates_run_and_propagate_failure(self):
         for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):
