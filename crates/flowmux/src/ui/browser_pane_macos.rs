@@ -28,7 +28,7 @@ use objc2_web_kit::{
     WKWebsiteDataStore, WKWindowFeatures,
 };
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -47,6 +47,16 @@ mod ssh_preview_smoke;
 
 thread_local! {
     static NATIVE_BROWSER_VIEW_SUSPEND_COUNT: Cell<u32> = const { Cell::new(0) };
+    static NATIVE_VIEW_STILLS: RefCell<Vec<NativeViewStill>> = const { RefCell::new(Vec::new()) };
+    // Suspended views stay visible until their placeholder shows a still.
+    static NATIVE_VIEW_STILLS_PENDING: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+}
+
+/// GTK placeholder that paints a snapshot of its WKWebView while suspended.
+struct NativeViewStill {
+    placeholder: glib::WeakRef<gtk::DrawingArea>,
+    web_view: objc2::rc::Weak<WKWebView>,
+    image: Rc<RefCell<Option<gtk::cairo::ImageSurface>>>,
 }
 
 unsafe extern "C" {
@@ -447,10 +457,113 @@ pub fn suspend_native_browser_views_for_window(window: &gtk::Window) -> NativeBr
 
     let mut views = Vec::new();
     collect_web_views(&content_view, &mut views);
+    freeze_visible_native_views(window);
     for view in &views {
-        view.setHidden(true);
+        if !native_view_still_pending(view) {
+            view.setHidden(true);
+        }
     }
     NativeBrowserViewsSuspend { _views: views }
+}
+
+/// Let suspension replace `web_view` with a still in `placeholder` instead of
+/// blanking the pane while a dialog fades in over it.
+pub(crate) fn install_native_view_still(placeholder: &gtk::DrawingArea, web_view: &WKWebView) {
+    let image = Rc::new(RefCell::new(None::<gtk::cairo::ImageSurface>));
+    let image_for_draw = image.clone();
+    placeholder.set_draw_func(move |_, cr, width, height| {
+        if !native_browser_views_are_suspended() {
+            image_for_draw.borrow_mut().take();
+            return;
+        }
+        let image = image_for_draw.borrow();
+        let Some(image) = image.as_ref() else {
+            return;
+        };
+        cr.scale(
+            f64::from(width) / f64::from(image.width().max(1)),
+            f64::from(height) / f64::from(image.height().max(1)),
+        );
+        if cr.set_source_surface(image, 0.0, 0.0).is_ok() {
+            let _ = cr.paint();
+        }
+    });
+    NATIVE_VIEW_STILLS.with_borrow_mut(|stills| {
+        stills.retain(|still| still.placeholder.upgrade().is_some());
+        stills.push(NativeViewStill {
+            placeholder: placeholder.downgrade(),
+            web_view: objc2::rc::Weak::new(web_view),
+            image,
+        });
+    });
+}
+
+fn freeze_visible_native_views(window: &gtk::Window) {
+    let targets = NATIVE_VIEW_STILLS.with_borrow(|stills| {
+        stills
+            .iter()
+            .filter_map(|still| {
+                let placeholder = still.placeholder.upgrade()?;
+                let web_view = still.web_view.load()?;
+                let visible = placeholder.is_mapped()
+                    && placeholder.root().as_ref() == Some(window.upcast_ref::<gtk::Root>())
+                    && !web_view.as_super().isHidden();
+                visible.then(|| (placeholder, web_view, still.image.clone()))
+            })
+            .collect::<Vec<_>>()
+    });
+    for (placeholder, web_view, image) in targets {
+        let key = native_view_key(web_view.as_super());
+        NATIVE_VIEW_STILLS_PENDING.with_borrow_mut(|pending| pending.insert(key));
+        let view = web_view.clone();
+        let block = block2::RcBlock::new(
+            move |snapshot: *mut objc2_app_kit::NSImage, _error: *mut NSError| {
+                NATIVE_VIEW_STILLS_PENDING.with_borrow_mut(|pending| pending.remove(&key));
+                if !native_browser_views_are_suspended() {
+                    return;
+                }
+                if let Some(snapshot) = unsafe { snapshot.as_ref() } {
+                    image.replace(cairo_surface_from_nsimage(snapshot));
+                    placeholder.queue_draw();
+                }
+                view.as_super().setHidden(true);
+            },
+        );
+        unsafe {
+            web_view.takeSnapshotWithConfiguration_completionHandler(
+                Option::<&WKSnapshotConfiguration>::None,
+                &block,
+            );
+        }
+    }
+}
+
+fn cairo_surface_from_nsimage(image: &objc2_app_kit::NSImage) -> Option<gtk::cairo::ImageSurface> {
+    let tiff = image.TIFFRepresentation()?;
+    let texture = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_owned(tiff.to_vec())).ok()?;
+    let mut surface = gtk::cairo::ImageSurface::create(
+        gtk::cairo::Format::ARgb32,
+        texture.width(),
+        texture.height(),
+    )
+    .ok()?;
+    let stride = surface.stride() as usize;
+    // GDK's default download format matches Cairo's premultiplied ARGB32.
+    texture.download(&mut surface.data().ok()?, stride);
+    Some(surface)
+}
+
+fn native_view_key(view: &NSView) -> usize {
+    view as *const NSView as usize
+}
+
+fn native_view_still_pending(view: &NSView) -> bool {
+    NATIVE_VIEW_STILLS_PENDING.with_borrow(|pending| pending.contains(&native_view_key(view)))
+}
+
+/// A suspended view is hidden once its still is ready, or at once without one.
+pub(crate) fn native_view_is_suspended(view: &NSView) -> bool {
+    native_browser_views_are_suspended() && !native_view_still_pending(view)
 }
 
 fn push_native_browser_view_suspend() {
@@ -593,6 +706,7 @@ impl BrowserPane {
         viewport.set_hexpand(true);
         viewport.set_vexpand(true);
         viewport.set_focusable(true);
+        install_native_view_still(&viewport, &web_view);
         let web_widget = viewport.clone().upcast::<gtk::Widget>();
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -1453,7 +1567,7 @@ fn sync_native_view_frame(web_view: &WKWebView, placeholder: &gtk::Widget) {
                 | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable,
         );
     }
-    if native_browser_views_are_suspended() {
+    if native_view_is_suspended(view) {
         view.setHidden(true);
         return;
     }

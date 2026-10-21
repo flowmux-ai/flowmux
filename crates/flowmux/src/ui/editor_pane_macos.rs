@@ -317,6 +317,7 @@ impl EditorPane {
         viewport.set_hexpand(true);
         viewport.set_vexpand(true);
         viewport.set_focusable(true);
+        crate::ui::browser_pane::install_native_view_still(&viewport, &native.web_view);
         let web_widget = viewport.clone().upcast::<gtk::Widget>();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
@@ -868,7 +869,7 @@ fn sync_native_view_frame(native: &NativeEditorView, placeholder: &gtk::Widget) 
     }
     // GTK can reorder native siblings while restoring the pane tree.
     content_view.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
-    if crate::ui::browser_pane::native_browser_views_are_suspended() {
+    if crate::ui::browser_pane::native_view_is_suspended(view) {
         view.setHidden(true);
         return;
     }
