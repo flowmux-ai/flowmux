@@ -45,6 +45,10 @@ mod inspector_smoke;
 #[path = "browser_pane_macos/ssh_preview_smoke.rs"]
 mod ssh_preview_smoke;
 
+#[cfg(all(test, feature = "native-smoke"))]
+#[path = "browser_pane_macos/stills_smoke.rs"]
+pub(crate) mod stills_smoke;
+
 thread_local! {
     static NATIVE_BROWSER_VIEW_SUSPEND_COUNT: Cell<u32> = const { Cell::new(0) };
     static NATIVE_VIEW_STILLS: RefCell<Vec<NativeViewStill>> = const { RefCell::new(Vec::new()) };
@@ -450,6 +454,13 @@ impl Drop for NativeBrowserViewsSuspend {
 }
 
 pub fn suspend_native_browser_views_for_window(window: &gtk::Window) -> NativeBrowserViewsSuspend {
+    suspend_native_browser_views(window, true)
+}
+
+fn suspend_native_browser_views(
+    window: &gtk::Window,
+    capture_stills: bool,
+) -> NativeBrowserViewsSuspend {
     push_native_browser_view_suspend();
     let Some(content_view) = native_content_view(window) else {
         return NativeBrowserViewsSuspend { _views: Vec::new() };
@@ -457,9 +468,15 @@ pub fn suspend_native_browser_views_for_window(window: &gtk::Window) -> NativeBr
 
     let mut views = Vec::new();
     collect_web_views(&content_view, &mut views);
-    freeze_visible_native_views(window);
+    if capture_stills {
+        freeze_visible_native_views(window);
+    }
     for view in &views {
-        if !native_view_still_pending(view) {
+        if !capture_stills {
+            NATIVE_VIEW_STILLS_PENDING
+                .with_borrow_mut(|pending| pending.remove(&native_view_key(view)));
+        }
+        if !capture_stills || !native_view_still_pending(view) {
             view.setHidden(true);
         }
     }
@@ -576,6 +593,16 @@ fn pop_native_browser_view_suspend() {
     NATIVE_BROWSER_VIEW_SUSPEND_COUNT.with(|count| {
         let next = count.get().saturating_sub(1);
         count.set(next);
+        if next == 0 {
+            NATIVE_VIEW_STILLS.with_borrow(|stills| {
+                for still in stills {
+                    still.image.borrow_mut().take();
+                    if let Some(placeholder) = still.placeholder.upgrade() {
+                        placeholder.queue_draw();
+                    }
+                }
+            });
+        }
     })
 }
 
@@ -1399,7 +1426,8 @@ fn present_web_permission_dialog(
     dialog.set_close_response("deny");
     dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
 
-    let native_browser_suspend = suspend_native_browser_views_for_window(parent);
+    // Do not wait for WebKit to paint while it awaits a native permission reply.
+    let native_browser_suspend = suspend_native_browser_views(parent, false);
     let pending = Rc::new(RefCell::new(Some((
         decision_handler,
         native_browser_suspend,
@@ -1487,7 +1515,8 @@ fn present_page_dialog(
         _ => None,
     };
 
-    let native_browser_suspend = suspend_native_browser_views_for_window(&parent);
+    // A pending JavaScript dialog blocks WebKit's snapshot completion.
+    let native_browser_suspend = suspend_native_browser_views(&parent, false);
     let pending = Rc::new(RefCell::new(Some((reply, native_browser_suspend))));
     let pending_on_unmap = pending.clone();
     dialog.connect_unmap(move |_| {

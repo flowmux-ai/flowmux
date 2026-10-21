@@ -491,6 +491,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .unwrap()
             .downcast::<adw::AlertDialog>()
             .unwrap();
+        crate::ui::browser_pane::stills_smoke::check(controller.window.upcast_ref(), true, false)
+            .await;
         if message == "Name?" {
             let entry = dialog
                 .extra_child()
@@ -510,6 +512,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         "[null,true,\"수정한 이름\",false,null,false,null]"
     );
     assert!(!crate::ui::browser_pane::native_browser_views_are_suspended());
+    crate::ui::browser_pane::stills_smoke::check(controller.window.upcast_ref(), false, false)
+        .await;
     let closing_page = root.join("closing-dialog.html");
     std::fs::write(
         &closing_page,
@@ -652,6 +656,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         dialog.heading().as_deref(),
         Some("Save changes before closing?")
     );
+    crate::ui::browser_pane::stills_smoke::check(controller.window.upcast_ref(), true, true).await;
     // Exercise the real socket handler and GTK dispatcher while CloseWindow
     // waits for the dirty-editor decision. Saturating the ordinary endpoint
     // must not hide hook telemetry or prevent state queries.
@@ -829,6 +834,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     assert!(!editor.dirty_document_paths().is_empty());
     assert_eq!(terminal.pid.get(), Some(pid));
     println!("MACOS_NATIVE_CLOSE_CANCEL_OK");
+    crate::ui::browser_pane::stills_smoke::check(controller.window.upcast_ref(), false, false)
+        .await;
+    println!("MACOS_NATIVE_DIALOG_STILLS_OK");
 
     editor.save_all_dirty().await.unwrap();
     wait_until("editor saved", || editor.dirty_document_paths().is_empty()).await;
