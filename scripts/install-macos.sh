@@ -70,6 +70,66 @@ if [ "$BUNDLE_ONLY" = true ] && [ "$LAUNCH" = true ]; then
     exit 2
 fi
 
+confirm() {
+    local answer
+    if ! ( : </dev/tty ) 2>/dev/null; then
+        echo "error: dependency installation needs a terminal; rerun ./install.sh in a terminal" >&2
+        exit 1
+    fi
+    printf '%s [Y/n] ' "$1" >/dev/tty
+    read -r answer </dev/tty || exit 1
+    case "$answer" in
+        ""|y|Y|yes|YES) ;;
+        *) echo "==> installation cancelled"; exit 1 ;;
+    esac
+}
+
+install_prerequisites() {
+    local sdk_path missing_formulas=() module formula
+    sdk_path="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+    if [ ! -d "$sdk_path/System/Library/Frameworks/WebKit.framework" ]; then
+        confirm "Install Apple's command-line build tools?"
+        xcode-select --install
+        echo "Finish the Apple installer, then rerun ./install.sh." >&2
+        exit 1
+    fi
+    command -v python3 >/dev/null 2>&1 || missing_formulas+=(python)
+    if ! command -v pkg-config >/dev/null 2>&1; then
+        missing_formulas+=(pkg-config gtk4 libadwaita vte3)
+    else
+        for module in gtk4 libadwaita-1 vte-2.91-gtk4; do
+            case "$module" in
+                gtk4) formula=gtk4 ;;
+                libadwaita-1) formula=libadwaita ;;
+                vte-2.91-gtk4) formula=vte3 ;;
+            esac
+            pkg-config --exists "$module" || missing_formulas+=("$formula")
+        done
+    fi
+    if [ "${#missing_formulas[@]}" -gt 0 ]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            confirm "Homebrew is required for the native libraries. Install it?"
+            local bootstrap
+            bootstrap=$(mktemp /tmp/flowmux-homebrew.XXXXXX)
+            if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$bootstrap" \
+                || ! /bin/bash "$bootstrap" </dev/tty; then
+                rm -f "$bootstrap"
+                return 1
+            fi
+            rm -f "$bootstrap"
+            configure_macos_path
+        fi
+        confirm "Install required Homebrew packages: ${missing_formulas[*]}?"
+        brew install "${missing_formulas[@]}"
+    fi
+    if ! command -v cargo >/dev/null 2>&1; then
+        confirm "Install Rust with rustup?"
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+        configure_macos_path
+    fi
+}
+
 preflight_macos() {
     if [ "$(uname -s)" != "Darwin" ]; then
         cat >&2 <<'EOF'
@@ -114,16 +174,6 @@ EOF
         if [ "${#missing_modules[@]}" -gt 0 ]; then
             echo "error: missing pkg-config modules: ${missing_modules[*]}" >&2
         fi
-        cat >&2 <<'EOF'
-Install the macOS native prerequisites:
-  brew install pkg-config gtk4 libadwaita vte3
-
-Flowmux uses Homebrew GTK/libadwaita and Apple WebKit.framework for the
-browser pane; do not install WebKitGTK.
-
-Install Rust with rustup if `cargo` is missing:
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-EOF
         exit 1
     fi
 }
@@ -274,6 +324,9 @@ if [ "$BUNDLE_ONLY" = true ]; then
 fi
 
 configure_macos_path
+if [ "$CHECK_ONLY" = false ] && [ "$(uname -s)" = Darwin ]; then
+    install_prerequisites
+fi
 preflight_macos
 if [ "$CHECK_ONLY" = true ]; then
     echo "==> macOS native preflight checks passed"
