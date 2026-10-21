@@ -23,6 +23,9 @@ def check(path):
     except (OSError, AttributeError):
         return None
     lib.tvg_engine_init.argtypes = [c.c_uint]
+    lib.tvg_swcanvas_create.argtypes = [c.c_int]
+    lib.tvg_swcanvas_create.restype = c.c_void_p
+    lib.tvg_canvas_destroy.argtypes = [c.c_void_p]
     lib.tvg_picture_new.restype = c.c_void_p
     lib.tvg_picture_load_data.argtypes = [c.c_void_p, c.c_char_p, c.c_uint,
                                          c.c_char_p, c.c_char_p, c.c_bool]
@@ -30,6 +33,11 @@ def check(path):
     if lib.tvg_engine_init(0) != 0:
         return False
     try:
+        canvas = lib.tvg_swcanvas_create(0)
+        if not canvas:
+            return False
+        if lib.tvg_canvas_destroy(canvas) != 0:
+            return False
         for kind, data in [
             (b"svg", b'<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>'),
             (b"lottie", b'{"v":"5.7.4","fr":30,"ip":0,"op":30,"w":2,"h":2,"layers":[]}'),

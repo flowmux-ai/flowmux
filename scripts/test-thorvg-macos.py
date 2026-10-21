@@ -73,19 +73,21 @@ class ProbeTests(unittest.TestCase):
         with patch.object(probe.c, "CDLL", return_value=SimpleNamespace()):
             self.assertFalse(probe.check("cpp-only"))
 
-    def test_every_loader_is_required_and_resources_are_released(self):
-        for failing in [None, b"svg", b"lottie", b"png"]:
+    def test_cpu_engine_and_loaders_are_required_and_resources_are_released(self):
+        for failing in [None, b"cpu", b"svg", b"lottie", b"png"]:
             with self.subTest(failing=failing):
                 calls = []
                 lib = SimpleNamespace(**{name: (lambda *args: 0) for name in probe.SYMBOLS})
                 lib.tvg_picture_new = lambda: 1
+                lib.tvg_swcanvas_create = lambda option: 0 if failing == b"cpu" else 1
                 lib.tvg_picture_load_data = lambda p, data, size, kind, *args: int(kind == failing)
                 lib.tvg_paint_rel = lambda p: calls.append("release")
                 lib.tvg_engine_term = lambda: calls.append("term")
                 with patch.object(probe.c, "CDLL", return_value=lib):
                     self.assertEqual(probe.check("fixture"), failing is None)
                 self.assertEqual(calls[-1], "term")
-                self.assertIn("release", calls)
+                if failing != b"cpu":
+                    self.assertIn("release", calls)
 
 
 class ThorvgPromptTests(unittest.TestCase):

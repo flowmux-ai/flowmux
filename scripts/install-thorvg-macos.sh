@@ -13,7 +13,7 @@ if ! ( : </dev/tty ) 2>/dev/null; then
     echo '==> Image/Lottie viewer unavailable; rerun the installer in a terminal to install ThorVG.' >&2
     exit 0
 fi
-printf 'Install ThorVG v1.0.6 and its build tools into ~/.local for the image viewer? [Y/n] ' >/dev/tty
+printf 'Install ThorVG v1.0.6 into ~/.local and any missing Homebrew build tools for the image viewer? [Y/n] ' >/dev/tty
 read -r answer </dev/tty || exit 1
 case "$answer" in
     ''|y|Y|yes|YES) ;;
