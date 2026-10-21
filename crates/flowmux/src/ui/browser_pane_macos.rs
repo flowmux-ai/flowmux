@@ -34,6 +34,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
+#[path = "browser_pane_macos/inspector.rs"]
+mod inspector;
+
+#[cfg(all(test, feature = "native-smoke"))]
+#[path = "browser_pane_macos/inspector_smoke.rs"]
+mod inspector_smoke;
+
 thread_local! {
     static NATIVE_BROWSER_VIEW_SUSPEND_COUNT: Cell<u32> = const { Cell::new(0) };
 }
@@ -397,6 +404,7 @@ impl BrowserNavigationDelegate {
 
 impl Drop for NativeBrowserView {
     fn drop(&mut self) {
+        inspector::close(&self.web_view);
         let view = self.web_view.as_super();
         view.removeFromSuperview();
     }
@@ -502,10 +510,9 @@ impl BrowserPane {
         address.set_hexpand(true);
         address.set_placeholder_text(Some("Enter URL — e.g. http://localhost:3000"));
         let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
+        inspector.set_widget_name("flowmux-web-inspector");
         inspector.add_css_class("flat");
-        inspector.set_tooltip_text(Some(
-            "Web Inspector is available from Safari's Develop menu",
-        ));
+        inspector.set_tooltip_text(Some("Open Web Inspector"));
         let downloads = DownloadManager::new();
         let bookmarks = BookmarkMenu::new(
             &profile,
@@ -678,9 +685,16 @@ impl BrowserPane {
                 focus_native_view(&native.web_view);
             });
         }
-        inspector.connect_clicked(|_| {
-            tracing::info!("macOS WKWebView inspector is exposed through Safari's Develop menu");
-        });
+        {
+            let native = native.clone();
+            inspector.connect_clicked(move |button| {
+                if let Err(message) = inspector::show(&native.web_view) {
+                    let dialog = adw::AlertDialog::new(Some("Web Inspector"), Some(message));
+                    dialog.add_response("close", "Close");
+                    dialog.present(Some(button));
+                }
+            });
+        }
         {
             let native = native.clone();
             address.connect_activate(move |address| {
@@ -977,6 +991,7 @@ impl BrowserPane {
     }
 
     pub fn prepare_for_close(&self) {
+        inspector::close(&self.native.web_view);
         self.stop_loading();
     }
 
@@ -1085,6 +1100,7 @@ fn create_web_view(
 ) -> Retained<WKWebView> {
     let config = unsafe { WKWebViewConfiguration::new(mtm) };
     let preferences = unsafe { WKPreferences::new(mtm) };
+    inspector::configure(&preferences);
     unsafe {
         preferences.setJavaScriptCanOpenWindowsAutomatically(true);
         preferences.setElementFullscreenEnabled(true);
@@ -1097,6 +1113,7 @@ fn create_web_view(
     let web_view =
         unsafe { WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config) };
     unsafe {
+        web_view.setInspectable(true);
         web_view.setAllowsBackForwardNavigationGestures(true);
         web_view.setPageZoom(1.0);
     }

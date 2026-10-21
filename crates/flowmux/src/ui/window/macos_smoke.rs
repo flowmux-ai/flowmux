@@ -88,6 +88,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_BROWSER_INSPECTOR_SMOKE_ONLY").is_some() {
+        BrowserPane::check_native_inspector(app.upcast_ref()).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_CWD_POLL_SMOKE_ONLY").is_some() {
         cwd_poll::check(app, root).await;
         return;
@@ -865,6 +869,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .any(|window| window.instance_id == owner.instance_id));
     println!("MACOS_NATIVE_SAVE_RETRY_OK");
     cwd_poll::check(app, root).await;
+    BrowserPane::check_native_inspector(app.upcast_ref()).await;
 }
 
 async fn check_sidebar_footer(controller: &WindowController) {
