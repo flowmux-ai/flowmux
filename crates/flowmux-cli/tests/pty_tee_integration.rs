@@ -733,7 +733,13 @@ fn pty_tee_keeps_input_and_resize_live_under_output_backpressure() {
     let socket = tmp.path().join("flowmux.sock");
     let _rx = spawn_fake_daemon(socket.clone());
     let events = tmp.path().join("events");
-    let outer = nix::pty::openpty(None, None).unwrap();
+    let initial_size = libc::winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let outer = nix::pty::openpty(Some(&initial_size), None).unwrap();
     let mut master = std::fs::File::from(outer.master);
     let script = r#"
 import os, select, signal, sys, tty
@@ -745,6 +751,7 @@ signal.signal(signal.SIGWINCH, lambda *args: resizes.append(True))
 output = b'x' * (128 * 8192)
 input_received = False
 events.write(str(os.getpid()) + '\n')
+events.write('initial %d %d\n' % os.get_terminal_size(0))
 while output or not input_received:
     readable, writable, _ = select.select([] if input_received else [0], [1] if output else [], [], .01)
     if readable:
@@ -752,7 +759,7 @@ while output or not input_received:
         input_received = True
         events.write('input\n')
     if resizes:
-        events.write('resize\n')
+        events.write('resize %d %d\n' % os.get_terminal_size(0))
         resizes.clear()
     if writable:
         try: output = output[os.write(1, output[:8192]):]
@@ -801,7 +808,7 @@ sys.exit(17)
     let deadline = Instant::now() + Duration::from_secs(5);
     let observed = loop {
         let observed = std::fs::read_to_string(&events).unwrap();
-        if (observed.contains("input\n") && observed.contains("resize\n"))
+        if (observed.contains("input\n") && observed.contains("resize 95 31\n"))
             || Instant::now() >= deadline
         {
             break observed;
@@ -809,7 +816,14 @@ sys.exit(17)
         thread::sleep(Duration::from_millis(10));
     };
     assert!(observed.contains("input\n"), "input stalled: {observed}");
-    assert!(observed.contains("resize\n"), "resize stalled: {observed}");
+    assert!(
+        observed.contains("initial 80 24\n"),
+        "initial size lost: {observed}"
+    );
+    assert!(
+        observed.contains("resize 95 31\n"),
+        "resize stalled: {observed}"
+    );
     let mut output = Vec::new();
     DeadlineReader::new(guard.child.stdout.take().unwrap(), Duration::from_secs(10))
         .read_to_end(&mut output)
