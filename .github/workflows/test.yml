@@ -130,7 +130,9 @@ jobs:
           rustup show active-toolchain
           cargo fmt --all -- --check
       - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3
+        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja
+      - name: Install compatible ThorVG for native image and Lottie checks
+        run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
       - name: Run macOS tests and native smoke (same script as local)
         run: bash scripts/test-ci.sh macos
       - name: Upload native smoke evidence

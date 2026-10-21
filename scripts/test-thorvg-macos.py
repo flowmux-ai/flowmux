@@ -93,6 +93,17 @@ class ThorvgPromptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / "ready").exists())
 
+    def test_missing_build_tools_are_installed_after_consent(self):
+        result = self.run_installer(answer=b"y\n", PATH=f"{self.bin}:/usr/bin:/bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("brew install meson ninja", self.calls())
+        self.assertLess(self.calls().index("brew install"), self.calls().index("build "))
+
+    def test_build_tool_install_failure_does_not_build(self):
+        result = self.run_installer(answer=b"y\n", PATH=f"{self.bin}:/usr/bin:/bin", BREW_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("build ", self.calls())
+
 
 if __name__ == "__main__":
     unittest.main()

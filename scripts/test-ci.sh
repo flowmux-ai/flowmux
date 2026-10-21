@@ -43,6 +43,7 @@ cargo --version
 pkg-config --modversion gtk4 libadwaita-1
 run_phase ci-runner-tests 180 python3 scripts/test-ci-runner.py
 run_phase installer-routing 60 python3 scripts/test-install.py
+run_phase thorvg-installer 60 python3 -B scripts/test-thorvg-macos.py
 run_phase agent-runner-tests 120 python3 -B scripts/test-agent-unit-runner.py
 run_phase agent-team-tests 120 python3 scripts/test-agent-team.py
 run_phase format 180 cargo fmt --all -- --check
@@ -121,6 +122,13 @@ grep -q '^MACOS_SESSION_PATHS_OK$' "$report_dir/session-paths.log"
 run_phase markdown 180 cargo test -p flowmux-md-viewer --locked -- --test-threads=1 \
     2>&1 | tee "$report_dir/markdown.log"
 grep -q '^MACOS_MARKDOWN_NATIVE_OK$' "$report_dir/markdown.log"
+
+run_phase thorvg-runtime 60 python3 scripts/check-thorvg.py
+run_phase image-unit 180 cargo test -p flowmux --bin flowmux --locked ui::image_viewer::tests -- --test-threads=1
+run_phase image-routing 180 cargo test -p flowmux --bin flowmux --locked macos_terminal_routes_lottie_json_to_the_viewer
+FLOWMUX_IMAGE_VIEWER_SMOKE_ONLY=1 run_phase image-viewer 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/image-viewer.log"
+grep -q '^MACOS_IMAGE_LOTTIE_VIEWER_OK$' "$report_dir/image-viewer.log"
 
 run_phase notifications 120 cargo test -p flowmux-notify --features native-smoke --locked \
     2>&1 | tee "$report_dir/notifications.log"
