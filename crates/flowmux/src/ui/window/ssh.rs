@@ -10,6 +10,9 @@ use std::os::unix::fs::DirBuilderExt;
 
 mod history;
 
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+mod macos_preview_smoke;
+
 pub(crate) struct SshRuntime {
     config: SshWorkspaceConfig,
     history_name: Option<String>,
@@ -62,8 +65,7 @@ impl SshRuntime {
     }
 
     pub(crate) fn preview_url(&self, binding: &str) -> Option<String> {
-        // Only WebKitGTK currently blocks all navigation after binding expiry.
-        if !cfg!(target_os = "linux") || self.state != "connected" {
+        if !cfg!(any(target_os = "linux", target_os = "macos")) || self.state != "connected" {
             return None;
         }
         let id = binding
@@ -96,9 +98,9 @@ impl SshRuntime {
             if forward.is_some_and(|forward| forward != *id) {
                 return true;
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             pane.expire_ssh_preview();
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             {
                 pane.stop_loading();
                 pane.load_uri("about:blank");
@@ -666,8 +668,8 @@ impl WindowController {
         workspace: WorkspaceId,
         id: uuid::Uuid,
     ) -> Result<serde_json::Value, String> {
-        if !cfg!(target_os = "linux") {
-            return Err("SSH preview is currently supported only on Linux".into());
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
+            return Err("SSH preview requires Linux or macOS".into());
         }
         let runtime = self.pane_registry.borrow().ssh[&workspace].clone();
         let (port, https) = {
@@ -726,8 +728,12 @@ impl WindowController {
         let Some(config) = ws.ssh_config().cloned() else {
             return;
         };
-        let directory =
-            std::env::temp_dir().join(format!("fm-ssh-{}", uuid::Uuid::new_v4().simple()));
+        // OpenSSH appends a temporary suffix; macOS's default TMPDIR exceeds sun_path.
+        #[cfg(target_os = "macos")]
+        let temporary = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let temporary = std::env::temp_dir();
+        let directory = temporary.join(format!("fm-ssh-{}", uuid::Uuid::new_v4().simple()));
         let mut launched = HashSet::new();
         for root in &ws.surfaces {
             root.root_pane.for_each_leaf(|pane| {

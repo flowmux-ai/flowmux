@@ -74,7 +74,7 @@ flowmux ssh forward remove FORWARD_UUID --workspace WORKSPACE_UUID
 
 Forwards bind to local loopback and target remote loopback. Omit
 `--local-port` to allocate a free port; `--https` selects HTTPS for preview.
-Preview is supported on Linux and expires when the forward or connection
+Preview is supported on Linux and macOS and expires when the forward or connection
 ends. Workspace configuration survives restart, but connections restore in
 the disconnected state and require explicit reconnection.
 

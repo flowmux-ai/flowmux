@@ -41,6 +41,10 @@ mod inspector;
 #[path = "browser_pane_macos/inspector_smoke.rs"]
 mod inspector_smoke;
 
+#[cfg(all(test, feature = "native-smoke"))]
+#[path = "browser_pane_macos/ssh_preview_smoke.rs"]
+mod ssh_preview_smoke;
+
 thread_local! {
     static NATIVE_BROWSER_VIEW_SUSPEND_COUNT: Cell<u32> = const { Cell::new(0) };
 }
@@ -63,6 +67,7 @@ pub struct BrowserPane {
 }
 
 struct NativeBrowserView {
+    navigation_enabled: Rc<Cell<bool>>,
     web_view: Retained<WKWebView>,
     _ui_delegate: Retained<BrowserUIDelegate>,
     _navigation_delegate: Retained<BrowserNavigationDelegate>,
@@ -77,6 +82,7 @@ struct DownloadUi {
 }
 
 struct BrowserNavigationDelegateIvars {
+    navigation_enabled: Rc<Cell<bool>>,
     refs: Rc<RefCell<RefStore>>,
     ref_scope: RefScope,
     download_manager: DownloadManager,
@@ -85,6 +91,7 @@ struct BrowserNavigationDelegateIvars {
 }
 
 struct BrowserUIDelegateIvars {
+    navigation_enabled: Rc<Cell<bool>>,
     pane_id: Rc<Cell<PaneId>>,
     open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
     placeholder: glib::WeakRef<gtk::Widget>,
@@ -115,7 +122,7 @@ define_class!(
                 .URL()
                 .and_then(|url| url.absoluteString())
                 .map(|url| url.to_string());
-            if let Some(url) = url {
+            if let Some(url) = url.filter(|_| self.ivars().navigation_enabled.get()) {
                 let ivars = self.ivars();
                 (ivars.open_url.borrow_mut())(ivars.pane_id.get(), url);
             }
@@ -253,7 +260,11 @@ define_class!(
             navigation_action: &WKNavigationAction,
             decision_handler: &block2::DynBlock<dyn Fn(WKNavigationActionPolicy)>,
         ) {
-            let policy = if unsafe { navigation_action.shouldPerformDownload() } {
+            let url = unsafe { navigation_action.request() }.URL()
+                .and_then(|url| url.absoluteString()).map(|url| url.to_string());
+            let policy = if !self.ivars().navigation_enabled.get() && url.as_deref() != Some("about:blank") {
+                WKNavigationActionPolicy::Cancel
+            } else if unsafe { navigation_action.shouldPerformDownload() } {
                 WKNavigationActionPolicy::Download
             } else {
                 WKNavigationActionPolicy::Allow
@@ -269,7 +280,11 @@ define_class!(
             navigation_response: &WKNavigationResponse,
             decision_handler: &block2::DynBlock<dyn Fn(WKNavigationResponsePolicy)>,
         ) {
-            let policy = if unsafe { navigation_response.canShowMIMEType() } {
+            let url = unsafe { navigation_response.response() }.URL()
+                .and_then(|url| url.absoluteString()).map(|url| url.to_string());
+            let policy = if !self.ivars().navigation_enabled.get() && url.as_deref() != Some("about:blank") {
+                WKNavigationResponsePolicy::Cancel
+            } else if unsafe { navigation_response.canShowMIMEType() } {
                 WKNavigationResponsePolicy::Allow
             } else {
                 WKNavigationResponsePolicy::Download
@@ -589,7 +604,9 @@ impl BrowserPane {
 
         let refs = Rc::new(RefCell::new(RefStore::new()));
         let ref_scope = ref_scope_for_surface(surface_id);
+        let navigation_enabled = Rc::new(Cell::new(true));
         let native = Rc::new(NativeBrowserView {
+            navigation_enabled: navigation_enabled.clone(),
             web_view: web_view.clone(),
             _ui_delegate: install_ui_delegate(
                 mtm,
@@ -597,6 +614,7 @@ impl BrowserPane {
                 pane_id.clone(),
                 callbacks.on_open_url.clone(),
                 web_widget.downgrade(),
+                navigation_enabled.clone(),
             ),
             _navigation_delegate: install_navigation_delegate(
                 mtm,
@@ -604,6 +622,7 @@ impl BrowserPane {
                 downloads,
                 refs.clone(),
                 ref_scope,
+                navigation_enabled,
             ),
             last_url: RefCell::new(String::new()),
             last_title: RefCell::new(String::new()),
@@ -953,13 +972,17 @@ impl BrowserPane {
     }
 
     pub fn load_uri(&self, url: &str) {
+        if !self.native.navigation_enabled.get() {
+            return;
+        }
         let normalized = normalize_uri(url);
         self.address.set_text(&normalized);
         load_uri_native(&self.native.web_view, &normalized);
     }
 
     pub fn go_back(&self) -> bool {
-        let moved = unsafe { self.native.web_view.canGoBack() };
+        let moved =
+            self.native.navigation_enabled.get() && unsafe { self.native.web_view.canGoBack() };
         if moved {
             unsafe {
                 self.native.web_view.goBack();
@@ -969,7 +992,8 @@ impl BrowserPane {
     }
 
     pub fn go_forward(&self) -> bool {
-        let moved = unsafe { self.native.web_view.canGoForward() };
+        let moved =
+            self.native.navigation_enabled.get() && unsafe { self.native.web_view.canGoForward() };
         if moved {
             unsafe {
                 self.native.web_view.goForward();
@@ -979,6 +1003,9 @@ impl BrowserPane {
     }
 
     pub fn reload(&self) {
+        if !self.native.navigation_enabled.get() {
+            return;
+        }
         unsafe {
             self.native.web_view.reload();
         }
@@ -988,6 +1015,25 @@ impl BrowserPane {
         unsafe {
             self.native.web_view.stopLoading();
         }
+    }
+
+    pub fn expire_ssh_preview(&self) {
+        if !self.native.navigation_enabled.replace(false) {
+            return;
+        }
+        self.stop_loading();
+        self.refs.borrow_mut().clear(self.ref_scope);
+        // Disable scripts in the retiring document before releasing its forward.
+        #[allow(deprecated)]
+        unsafe {
+            self.native
+                .web_view
+                .configuration()
+                .preferences()
+                .setJavaScriptEnabled(false);
+        }
+        load_uri_native(&self.native.web_view, "about:blank");
+        self.root.set_sensitive(false);
     }
 
     pub fn prepare_for_close(&self) {
@@ -1060,10 +1106,19 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
+        if !self.native.navigation_enabled.get() {
+            on_done(Err(
+                "SSH preview expired; open a new preview after reconnecting".into(),
+            ));
+            return;
+        }
         let script = NSString::from_str(source);
+        let navigation_enabled = self.native.navigation_enabled.clone();
         let callback = Rc::new(RefCell::new(Some(on_done)));
         let block = block2::RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
-            let result = if !error.is_null() {
+            let result = if !navigation_enabled.get() {
+                Err("SSH preview expired; open a new preview after reconnecting".into())
+            } else if !error.is_null() {
                 Err(error_description(error))
             } else {
                 Ok(object_description(value))
@@ -1126,8 +1181,10 @@ fn install_ui_delegate(
     pane_id: Rc<Cell<PaneId>>,
     open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
     placeholder: glib::WeakRef<gtk::Widget>,
+    navigation_enabled: Rc<Cell<bool>>,
 ) -> Retained<BrowserUIDelegate> {
     let delegate = BrowserUIDelegate::alloc(mtm).set_ivars(BrowserUIDelegateIvars {
+        navigation_enabled,
         pane_id,
         open_url,
         placeholder,
@@ -1145,9 +1202,11 @@ fn install_navigation_delegate(
     download_manager: DownloadManager,
     refs: Rc<RefCell<RefStore>>,
     ref_scope: RefScope,
+    navigation_enabled: Rc<Cell<bool>>,
 ) -> Retained<BrowserNavigationDelegate> {
     let delegate =
         BrowserNavigationDelegate::alloc(mtm).set_ivars(Box::new(BrowserNavigationDelegateIvars {
+            navigation_enabled,
             refs,
             ref_scope,
             download_manager,

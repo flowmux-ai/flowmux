@@ -91,6 +91,10 @@ FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY=1 run_phase boot-restore 180 cargo test -p flo
     2>&1 | tee "$report_dir/boot-restore.log"
 grep -q '^MACOS_BOOT_RESTORE_POLICY_OK$' "$report_dir/boot-restore.log"
 
+FLOWMUX_SSH_PREVIEW_SMOKE_ONLY=1 run_phase ssh-preview 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/ssh-preview.log"
+grep -q '^MACOS_SSH_PREVIEW_EXPIRY_OK$' "$report_dir/ssh-preview.log"
+
 FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY=1 run_phase editor-keyboard 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/editor-keyboard-smoke.log"
 grep -q '^MACOS_FOUR_PANE_EDITING_KEYS_OK$' "$report_dir/editor-keyboard-smoke.log"
