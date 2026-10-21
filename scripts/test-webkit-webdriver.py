@@ -106,7 +106,8 @@ def exercise(driver, fixture_url, screenshot):
     driver.click("#input")
     driver.call("POST", f"/element/{driver.element('#input')}/value", {"text": "한글 café"})
     driver.key("\ue003")  # Backspace: engine editing, not a JS value assignment.
-    assert driver.evaluate("return document.querySelector('#input').value") == "한글 caf"
+    edited = driver.evaluate("return document.querySelector('#input').value")
+    assert edited == "한글 caf", edited
     driver.key("\ue007")  # Enter must perform the browser's default form submission.
     assert driver.evaluate("return submissions") == 1
     driver.key("\ue004")  # Tab must move native focus.

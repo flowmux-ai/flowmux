@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# WebKitWebDriver automation (Linux)
+# Browser automation (Linux and macOS)
 
 Flowmux can expose **new, ephemeral WebKit browser windows** to a standard
 WebDriver client such as Selenium. WebKit performs mouse and keyboard input
 inside its engine, including native editing, Tab focus and Enter submission.
-This uses the same WebKitGTK renderer as Flowmux's normal browser.
+This uses WebKitGTK on Linux and WKWebView on macOS, like the normal browser.
 
-This is an opt-in, Linux-only connection. It does not attach to existing pane
+This is an opt-in connection. It does not attach to existing pane
 tabs or change the JavaScript-based `flowmux browser click/type/press` commands.
 WebDriver owns separate windows labelled **Flowmux · WebDriver**; they are not
 CLI pane targets and are not restored with workspaces. Both `window` and `tab`
@@ -15,7 +15,43 @@ requests create separate windows. Popups remain in the same automation session.
 Ending the session closes its windows and discards its cookies/site data.
 Normal browser profiles and terminal sessions remain separate.
 
-## Runtime requirements
+## macOS
+
+Start a separate automation process in a logged-in macOS desktop session:
+
+```sh
+FLOWMUX_WEBDRIVER_SERVER=127.0.0.1:4444 flowmux
+```
+
+For a manual DMG install, use
+`/Applications/Flowmux.app/Contents/MacOS/flowmux` instead of `flowmux`.
+Connect Selenium to `http://127.0.0.1:4444` with `browserName: Flowmux` using
+[the example below](#selenium). No SafariDriver or WebKitWebDriver executable
+is needed. Stop this process with Ctrl-C when finished.
+
+The macOS endpoint supports navigation, CSS/XPath/link/tag locators, element
+inspection, native click/clear/text input, one keyboard action source, script
+execution (including returned promises), windows/popups, cookie reading and
+viewport PNG screenshots. Input activates the automation window. Each session
+uses an isolated, nonpersistent WebKit store; normal Flowmux windows stay separate.
+
+This is a **WebDriver subset**, not the WebKitGTK automation API. Frames,
+shadow-root commands, asynchronous callback scripts, alerts, file uploads,
+cookie writes/deletes, window sizing, pointer/wheel action sequences and
+multi-source actions return `unsupported operation`. Timeouts must be finite
+and at most 300000 ms. URLs support HTTP, HTTPS, `about:` and `data:`.
+The listener accepts numeric loopback addresses only and rejects browser origins.
+It has no authentication; local processes can control its ephemeral windows.
+
+From a checkout, run the isolated native and protocol regression suite:
+
+```sh
+cargo test -p flowmux --test macos_webdriver --features native-smoke
+cargo build -p flowmux
+python3 scripts/test-macos-webdriver.py
+```
+
+## Linux runtime requirements
 
 - WebKitGTK **6.0 API, version 2.46+**, built with WebDriver mouse and keyboard
   interactions enabled (normally `-DENABLE_WEBDRIVER=ON`).
@@ -39,7 +75,7 @@ without a sandbox`. The portal needs access to the same Flatpak installation as
 the test application; a private D-Bus session can inherit its `XDG_DATA_HOME`.
 Keep any additional portal permission confined to the test application.
 
-## Connect
+## Linux connection
 
 Start a new Flowmux instance with automation explicitly enabled. Do not restart
 an active agent window merely to enable automation. Choose two free ports:
@@ -62,13 +98,15 @@ inspector independently. A disabled automation flag does not disable inspection.
 Both endpoints provide browser control without authentication; keep the driver
 on loopback too. One driver session may be active at a time.
 
+## Selenium
+
 With Selenium installed in your Python environment:
 
 ```python
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.webkitgtk.options import Options
+from selenium.webdriver.common.options import ArgOptions as Options
 
 options = Options()
 options.set_capability("browserName", "Flowmux")
@@ -112,9 +150,7 @@ the standard Ubuntu CI library cannot provide the native-input checks.
   patched WebKit is a different browser distribution.
 - This does not add device emulation, network mocking, or screencasting to
   Flowmux's CLI. Window sizing through WebDriver is not device emulation.
-- macOS WKWebView does not expose WebKitGTK's automation-session API.
-  SafariDriver controls Safari, not an embedded WKWebView. Native macOS input
-  and direct automation of existing pane tabs require separate work.
+- Automation cannot attach to existing pane tabs on either platform.
 
 References: [WebKit automation API](https://webkitgtk.org/reference/webkitgtk/stable/class.AutomationSession.html),
 [automation-controlled views](https://webkitgtk.org/reference/webkitgtk/stable/property.WebView.is-controlled-by-automation.html),

@@ -28,6 +28,9 @@ Allow notifications when macOS asks. Notification Center opens the originating
 pane, and the Dock badge follows the unread count. Desktop notifications require
 the installed app; permission can be changed in System Settings → Notifications.
 
+For Selenium automation, start `FLOWMUX_WEBDRIVER_SERVER=127.0.0.1:4444 flowmux`.
+See [browser automation](../../docs/webkit-automation.md#macos) for supported commands.
+
 ## Agent setup
 
 Run this in a Flowmux terminal tab, then restart your agents:

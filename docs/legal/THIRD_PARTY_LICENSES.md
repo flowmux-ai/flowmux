@@ -2385,7 +2385,7 @@ Used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
 Copyright (c) 2013-2025 The rust-url developers
 ~~~~
 
-Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, openssl-probe 0.2.1, pkg-config 0.3.33, socket2 0.6.5, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
+Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, openssl-probe 0.2.1, pkg-config 0.3.33, scoped-tls 1.0.1, socket2 0.6.5, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
 
 ~~~~text
 Copyright (c) 2014 Alex Crichton
@@ -2407,6 +2407,12 @@ Used by: errno 0.3.14
 
 ~~~~text
 Copyright (c) 2014 Chris Wong
+~~~~
+
+Used by: mime 0.3.17
+
+~~~~text
+Copyright (c) 2014 Sean McArthur
 ~~~~
 
 Used by: bitflags 2.13.2, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
@@ -2434,13 +2440,25 @@ Used by: libsqlite3-sys 0.30.1, rusqlite 0.32.1
 Copyright (c) 2014-2021 The rusqlite developers
 ~~~~
 
+Used by: headers-core 0.3.0
+
+~~~~text
+Copyright (c) 2014-2023 Sean McArthur
+~~~~
+
+Used by: headers 0.4.2
+
+~~~~text
+Copyright (c) 2014-2025 Sean McArthur
+~~~~
+
 Used by: flate2 1.1.9
 
 ~~~~text
 Copyright (c) 2014-2026 Alex Crichton
 ~~~~
 
-Used by: hyper 1.10.1
+Used by: hyper 1.10.1, unicase 2.10.0
 
 ~~~~text
 Copyright (c) 2014-2026 Sean McArthur
@@ -2507,7 +2525,7 @@ Used by: httparse 1.10.1
 Copyright (c) 2015-2025 Sean McArthur
 ~~~~
 
-Used by: futures-channel 0.3.32, futures-core 0.3.34, futures-executor 0.3.32, futures-io 0.3.34, futures-macro 0.3.32, futures-task 0.3.32, futures-util 0.3.32
+Used by: futures-channel 0.3.32, futures-core 0.3.34, futures-executor 0.3.32, futures-io 0.3.34, futures-macro 0.3.32, futures-sink 0.3.32, futures-task 0.3.32, futures-util 0.3.32
 
 ~~~~text
 Copyright (c) 2016 Alex Crichton
@@ -2542,6 +2560,12 @@ Used by: entities 1.0.1
 
 ~~~~text
 Copyright (c) 2016 Philip Jackson
+~~~~
+
+Used by: httpdate 1.0.3
+
+~~~~text
+Copyright (c) 2016 Pyfisch
 ~~~~
 
 Used by: lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12, rustc_version 0.4.1, thread_local 1.1.9
@@ -2610,6 +2634,12 @@ Used by: digest 0.10.7, hmac 0.12.1
 Copyright (c) 2017 Artyom Pavlov
 ~~~~
 
+Used by: fnv 1.0.7
+
+~~~~text
+Copyright (c) 2017 Contributors
+~~~~
+
 Used by: memoffset 0.9.1
 
 ~~~~text
@@ -2642,6 +2672,13 @@ Used by: stable_deref_trait 1.2.1
 Copyright (c) 2017 Robert Grosse
 ~~~~
 
+Used by: cookie 0.16.2
+
+~~~~text
+Copyright (c) 2017 Sergio Benitez
+Copyright (c) 2014 Alex Crichton
+~~~~
+
 Used by: caseless 0.2.2
 
 ~~~~text
@@ -2660,6 +2697,12 @@ Used by: arc-swap 1.9.1
 
 ~~~~text
 Copyright (c) 2017 arc-swap developers
+~~~~
+
+Used by: h2 0.4.20
+
+~~~~text
+Copyright (c) 2017 h2 authors
 ~~~~
 
 Used by: http 1.4.2
@@ -2753,6 +2796,12 @@ Used by: getrandom 0.2.17
 ~~~~text
 Copyright (c) 2018-2024 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
+~~~~
+
+Used by: warp 0.4.3
+
+~~~~text
+Copyright (c) 2018-2025 Sean McArthur
 ~~~~
 
 Used by: zeroize 1.9.0
@@ -2920,7 +2969,7 @@ Used by: num-conv 0.2.2
 Copyright (c) Jacob Pratt
 ~~~~
 
-Used by: time 0.3.52, time-core 0.1.9
+Used by: time 0.3.47, time-core 0.1.8, time-macros 0.2.27
 
 ~~~~text
 Copyright (c) Jacob Pratt et al.
@@ -3033,7 +3082,15 @@ MIT License
 Copyright (c) 2023 4lDO2
 ~~~~
 
-Used by: block2 0.6.2, chrono 0.4.44, dispatch2 0.3.1, javascriptcore6 0.4.0, javascriptcore6-sys 0.4.0, objc2 0.6.4, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, r-efi 6.0.0, siphasher 1.0.3, wasip3 0.4.0+wasi-0.3.0-rc-2026-01-06, webkit6 0.4.0, webkit6-sys 0.4.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-core 0.62.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.48.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.61.2, windows-targets 0.48.5, windows-targets 0.52.6, windows_aarch64_gnullvm 0.48.5, windows_aarch64_gnullvm 0.52.6, windows_aarch64_msvc 0.48.5, windows_aarch64_msvc 0.52.6, windows_i686_gnu 0.48.5, windows_i686_gnu 0.52.6, windows_i686_gnullvm 0.52.6, windows_i686_msvc 0.48.5, windows_i686_msvc 0.52.6, windows_x86_64_gnu 0.48.5, windows_x86_64_gnu 0.52.6, windows_x86_64_gnullvm 0.48.5, windows_x86_64_gnullvm 0.52.6, windows_x86_64_msvc 0.48.5, windows_x86_64_msvc 0.52.6
+Used by: core_maths 0.1.1
+
+~~~~text
+MIT License
+
+Copyright (c) 2024 Robert Bastian
+~~~~
+
+Used by: block2 0.6.2, chrono 0.4.44, dispatch2 0.3.1, javascriptcore6 0.4.0, javascriptcore6-sys 0.4.0, libm 0.2.16, objc2 0.6.4, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, r-efi 6.0.0, siphasher 1.0.3, wasip3 0.4.0+wasi-0.3.0-rc-2026-01-06, webkit6 0.4.0, webkit6-sys 0.4.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-core 0.62.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.48.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.61.2, windows-targets 0.48.5, windows-targets 0.52.6, windows_aarch64_gnullvm 0.48.5, windows_aarch64_gnullvm 0.52.6, windows_aarch64_msvc 0.48.5, windows_aarch64_msvc 0.52.6, windows_i686_gnu 0.48.5, windows_i686_gnu 0.52.6, windows_i686_gnullvm 0.52.6, windows_i686_msvc 0.48.5, windows_i686_msvc 0.52.6, windows_x86_64_gnu 0.48.5, windows_x86_64_gnu 0.52.6, windows_x86_64_gnullvm 0.48.5, windows_x86_64_gnullvm 0.52.6, windows_x86_64_msvc 0.48.5, windows_x86_64_msvc 0.52.6
 
 ~~~~text
 MIT License
@@ -3041,7 +3098,7 @@ MIT License
 Copyright (c) <year> <copyright holders>
 ~~~~
 
-Used by: tokio 1.54.0
+Used by: tokio 1.54.0, tokio-util 0.7.20
 
 ~~~~text
 MIT License
@@ -3082,7 +3139,7 @@ Used by: fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
 MIT License
 ~~~~
 
-Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.89, atomic-waker 1.1.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project-lite 0.2.17, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, syn 3.0.9, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, zmij 1.0.21
+Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.89, atomic-waker 1.1.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project 1.1.13, pin-project-internal 1.1.13, pin-project-lite 0.2.17, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, syn 3.0.9, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, zmij 1.0.21
 
 Used by: android_system_properties 0.1.5
 
@@ -3220,6 +3277,14 @@ The MIT License (MIT)
 
 Copyright (c) 2014 Benjamin Sago
 Copyright (c) 2021-2022 The Nushell Project Developers
+~~~~
+
+Used by: mime_guess 2.0.5
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2015 Austin Bonander
 ~~~~
 
 Used by: generic-array 0.14.7
@@ -3745,7 +3810,7 @@ defined by the Mozilla Public License, v. 2.0.
 
 ### Mozilla Public License 2.0
 
-Used by: option-ext 0.2.0
+Used by: option-ext 0.2.0, webdriver 0.54.0
 
 ~~~~text
 Mozilla Public License Version 2.0
@@ -4171,7 +4236,7 @@ authorization of the copyright holder.
 
 ### Unicode License v3
 
-Used by: icu_collections 2.2.0, icu_locale_core 2.2.0, icu_normalizer 2.2.0, icu_normalizer_data 2.2.0, icu_properties 2.2.0, icu_properties_data 2.2.0, icu_provider 2.2.0, litemap 0.8.2, potential_utf 0.1.5, tinystr 0.8.3, writeable 0.6.3, yoke 0.8.2, yoke-derive 0.8.2, zerofrom 0.1.8, zerofrom-derive 0.1.7, zerotrie 0.2.4, zerovec 0.11.6, zerovec-derive 0.11.3
+Used by: icu_collections 2.2.0, icu_locale 2.2.0, icu_locale_core 2.2.0, icu_locale_data 2.2.0, icu_normalizer 2.2.0, icu_normalizer_data 2.2.0, icu_properties 2.2.0, icu_properties_data 2.2.0, icu_provider 2.2.0, icu_segmenter 2.2.0, icu_segmenter_data 2.2.0, litemap 0.8.2, potential_utf 0.1.5, tinystr 0.8.3, writeable 0.6.3, yoke 0.8.2, yoke-derive 0.8.2, zerofrom 0.1.8, zerofrom-derive 0.1.7, zerotrie 0.2.4, zerovec 0.11.6, zerovec-derive 0.11.3
 
 ~~~~text
 UNICODE LICENSE V3

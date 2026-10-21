@@ -60,6 +60,12 @@ path = "tests/macos_native.rs"
 harness = false
 required-features = ["native-smoke"]
 
+[[test]]
+name = "macos_webdriver"
+path = "tests/macos_webdriver.rs"
+harness = false
+required-features = ["native-smoke"]
+
 [dependencies]
 uuid = { workspace = true }
 flowmux-core = { workspace = true }
@@ -102,12 +108,16 @@ webkit6 = "0.4"
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+webdriver = "0.54.0"
+# cookie 0.16 (webdriver) is incompatible with time 0.3.52.
+time = "=0.3.47"
+base64 = "0.22"
 keyring = { version = "3.6.3", features = ["apple-native"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSBitmapImageRep", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSObject", "NSString", "NSURL", "NSURLRequest", "NSUUID"] }
-objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKDownload", "WKDownloadDelegate", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin", "WKSnapshotConfiguration", "WKUIDelegate", "WKUserContentController", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWindowFeatures", "block2", "objc2-app-kit", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSHTTPCookie", "NSDictionary", "NSError", "NSGeometry", "NSObject", "NSString", "NSURL", "NSURLRequest", "NSUUID"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKHTTPCookieStore", "WKDownload", "WKDownloadDelegate", "WKFrameInfo", "WKNavigation", "WKNavigationAction", "WKNavigationDelegate", "WKNavigationResponse", "WKPreferences", "WKScriptMessage", "WKScriptMessageHandler", "WKSecurityOrigin", "WKSnapshotConfiguration", "WKUIDelegate", "WKUserContentController", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWindowFeatures", "block2", "objc2-app-kit", "objc2-core-foundation"] }
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }

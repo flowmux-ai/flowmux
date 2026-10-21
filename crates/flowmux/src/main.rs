@@ -62,7 +62,14 @@ const _: () = {
     }
 };
 
+#[cfg(target_os = "macos")]
+mod macos_webdriver;
+
 fn main() -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(address) = std::env::var_os("FLOWMUX_WEBDRIVER_SERVER") {
+        return macos_webdriver::run(&address.to_string_lossy());
+    }
     // ponytail: two glibc arenas cap long-lived per-thread fragmentation;
     // raise the limit only if allocator contention shows up in profiles.
     #[cfg(target_env = "gnu")]

@@ -79,7 +79,8 @@ sources. Neither exposes CDP. Browser engine labels select profiles; they do
 not switch to Chrome or Firefox. Host-cookie extraction is separate from
 WebView insertion, which is not implemented.
 
-Opt-in Linux WebKitWebDriver sessions use separate ephemeral browser windows;
+Opt-in Linux WebKitWebDriver and macOS native WebDriver sessions use separate
+ephemeral browser windows;
 see [WebKit automation](docs/webkit-automation.md) for runtime requirements and
 the native-input smoke test. Regular pane CLI input remains JavaScript-based.
 

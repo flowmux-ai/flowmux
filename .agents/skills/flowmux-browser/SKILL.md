@@ -148,12 +148,12 @@ When a task requires those, explain the need for external tooling and keep the
 user-visible URL/results in Flowmux. Cookie import currently extracts/counts
 cookies; it does not insert them into the WebView.
 
-Linux builds also offer opt-in WebKitWebDriver sessions in separate ephemeral
-Flowmux browser windows. They require a WebKitGTK runtime built with WebDriver
-input enabled. These are WebDriver targets, not CLI pane targets; existing pane
+Linux and macOS offer opt-in WebDriver sessions in separate ephemeral
+Flowmux browser windows. Linux requires a WebKitGTK runtime built with WebDriver
+input enabled; macOS starts with `FLOWMUX_WEBDRIVER_SERVER=127.0.0.1:4444 flowmux`. These are WebDriver targets, not CLI pane targets; existing pane
 tabs and CLI input commands are unchanged. See `docs/webkit-automation.md` in the
 Flowmux repository for setup and the native-input smoke test. There is no CDP
-attachment or equivalent WKWebView integration on macOS.
+attachment. The macOS endpoint supports a documented subset of WebDriver.
 
 ## SSH
 
