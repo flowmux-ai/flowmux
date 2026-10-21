@@ -250,6 +250,11 @@ fn run_pty_pump(
     }
 
     let master_fd = master.as_raw_fd();
+    // A resize after the pre-fork mirror but before the handlers above sent
+    // an uncaught SIGWINCH. Re-read so the inner PTY cannot stay stale.
+    if let Some(ws) = winsize_from_fd(libc::STDIN_FILENO) {
+        let _ = set_winsize(master_fd, &ws);
+    }
     set_nonblocking(master_fd)?;
     let _stdin_flags = SavedFdFlags::nonblocking(libc::STDIN_FILENO)?;
     let _stdout_flags = SavedFdFlags::nonblocking(libc::STDOUT_FILENO)?;
