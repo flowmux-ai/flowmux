@@ -218,6 +218,12 @@ time.sleep(60)
                 native = [c for c in calls if 'macos_native' in c['args']]
                 self.assertEqual(len(native), 8)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
+                preview = next(c for c in native if c['ssh_preview'] == '1')
+                self.assertTrue(preview['tmp'].endswith('/macos-native-long-temporary-directory'))
+                self.assertFalse(Path(preview['tmp']).exists())
+                build = next(i for i, c in enumerate(calls) if c['name'] == 'cargo' and c['args'][0] == 'build')
+                tests = next(i for i, c in enumerate(calls) if c['name'] == 'cargo' and c['args'][0] == 'test')
+                self.assertLess(build, tests, 'cold compilation has its own build budget')
 
     def test_macos_session_paths_gate_requires_success_and_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (31, '1', 31), (0, '0', 1)]:

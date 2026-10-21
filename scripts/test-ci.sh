@@ -73,11 +73,11 @@ export GSK_RENDERER=cairo
 printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
 run_phase macos-installer 180 python3 scripts/test-install-macos.py
+run_phase build 900 cargo build --workspace --locked
 run_phase macos-update-unit 180 cargo test -p flowmux --bin flowmux --locked update::
 run_phase macos-update-options 180 cargo test -p flowmux --bin flowmux --locked dmg_update_tab
 run_phase macos-dmg-update 300 python3 scripts/test-update-macos-dmg.py
 run_phase native-state 180 cargo test -p flowmux-state -p flowmux-procmon --locked
-run_phase build 900 cargo build --workspace --locked
 run_phase cli 300 cargo test -p flowmux-cli --locked
 git rev-parse HEAD
 python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$CARGO_TARGET_DIR/debug/flowmuxctl"
@@ -94,7 +94,9 @@ FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY=1 run_phase boot-restore 180 cargo test -p flo
     2>&1 | tee "$report_dir/boot-restore.log"
 grep -q '^MACOS_BOOT_RESTORE_POLICY_OK$' "$report_dir/boot-restore.log"
 
-FLOWMUX_SSH_PREVIEW_SMOKE_ONLY=1 run_phase ssh-preview 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+ssh_tmp="$test_root/macos-native-long-temporary-directory"
+mkdir -p "$ssh_tmp"
+TMPDIR="$ssh_tmp" FLOWMUX_SSH_PREVIEW_SMOKE_ONLY=1 run_phase ssh-preview 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/ssh-preview.log"
 grep -q '^MACOS_SSH_PREVIEW_EXPIRY_OK$' "$report_dir/ssh-preview.log"
 
