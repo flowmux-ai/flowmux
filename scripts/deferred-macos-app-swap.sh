@@ -45,6 +45,24 @@ for pid in $host_pid; do
     done
 done
 
+# Include instances opened after staging, including the standalone viewer.
+while :; do
+    processes=$(ps -ww -axo pid=,comm=) || { echo "cannot inspect running apps" >&2; exit 0; }
+    running=false
+    while read -r pid command; do
+        for binary in flowmux flowmuxctl flowmux-md-viewer; do
+            if [ "$command" -ef "$destination_bundle/Contents/MacOS/$binary" ]; then
+                running=true
+                break
+            fi
+        done
+    done <<EOF
+$processes
+EOF
+    [ "$running" = true ] || break
+    sleep 0.2
+done
+
 if [ ! -d "$staged_bundle" ]; then
     echo "deferred app swap missing staged bundle: $staged_bundle" >&2
     exit 0

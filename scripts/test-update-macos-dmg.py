@@ -86,12 +86,19 @@ class DmgUpdateTests(unittest.TestCase):
         self.assertEqual(version(self.dest), "1.0.0")
         self.assertTrue(all(host.poll() is None for host in self.hosts))
         self.assertNotEqual(self.install().returncode, 0, "do not overwrite a pending update")
+        # A new window can start after the updater captured the original PIDs.
+        self.hosts.append(subprocess.Popen([str(self.dest / "Contents/MacOS/flowmux")]))
         self.hosts[0].terminate()
         self.hosts[0].wait()
         time.sleep(0.4)
         self.assertEqual(version(self.dest), "1.0.0")
         self.hosts[1].terminate()
         self.hosts[1].wait()
+        time.sleep(0.6)
+        self.assertEqual(version(self.dest), "1.0.0", "a later instance still uses this bundle")
+        self.assertIsNone(self.hosts[2].poll())
+        self.hosts[2].terminate()
+        self.hosts[2].wait()
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             if self.dest.exists() and version(self.dest) == "9.8.7":
