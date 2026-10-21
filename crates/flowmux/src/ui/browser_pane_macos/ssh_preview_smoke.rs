@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::*;
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
@@ -10,7 +11,28 @@ impl BrowserPane {
     pub(crate) async fn check_native_ssh_preview(app: &gtk::Application) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        let address = listener.local_addr().unwrap();
+        let base = format!("http://{address}");
+        // WebKit can reset a speculative connection before the server accepts it.
+        let preconnect = std::net::TcpStream::connect(address).unwrap();
+        let reset = libc::linger {
+            l_onoff: 1,
+            l_linger: 0,
+        };
+        assert_eq!(
+            unsafe {
+                libc::setsockopt(
+                    preconnect.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_LINGER,
+                    std::ptr::from_ref(&reset).cast(),
+                    std::mem::size_of_val(&reset) as _,
+                )
+            },
+            0
+        );
+        drop(preconnect);
+        glib::timeout_future(Duration::from_millis(10)).await;
         let requests = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let server = {
@@ -20,9 +42,14 @@ impl BrowserPane {
                 let deadline = std::time::Instant::now() + Duration::from_secs(60);
                 while !stop.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
                     if let Ok((mut stream, _)) = listener.accept() {
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(1)))
-                            .unwrap();
+                        // macOS rejects socket options after a preconnection is reset.
+                        if stream
+                            .set_nonblocking(false)
+                            .and_then(|_| stream.set_read_timeout(Some(Duration::from_secs(1))))
+                            .is_err()
+                        {
+                            continue;
+                        }
                         let mut bytes = [0; 4096];
                         let count = stream.read(&mut bytes).unwrap_or(0);
                         // WebKit can preconnect without sending an HTTP request.
