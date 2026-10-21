@@ -1544,6 +1544,10 @@ fn validated_terminal_file_click(
 }
 
 fn is_supported_image_path(path: &std::path::Path) -> bool {
+    #[cfg(target_os = "macos")]
+    if crate::ui::image_viewer::supports_path(path) {
+        return true;
+    }
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| {
@@ -3635,6 +3639,21 @@ mod tests {
             terminal_file_kind(&relative),
             Some(TerminalFileKind::Editor)
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_terminal_routes_lottie_json_to_the_viewer() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("animation.json");
+        std::fs::write(
+            &path,
+            r#"{"v":"5.7.4","fr":30,"ip":0,"op":30,"w":10,"h":10,"layers":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(terminal_file_kind(&path), Some(TerminalFileKind::Image));
+        std::fs::write(&path, r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(terminal_file_kind(&path), Some(TerminalFileKind::Editor));
     }
 
     #[gtk::test]

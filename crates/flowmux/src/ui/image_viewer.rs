@@ -17,6 +17,9 @@ use zip::ZipArchive;
 
 use super::thorvg as tvg;
 
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
+
 const MAX_VIEW_WIDTH: u32 = 1200;
 const MAX_VIEW_HEIGHT: u32 = 900;
 const DEFAULT_LOTTIE_WIDTH: u32 = 640;
@@ -143,6 +146,10 @@ enum ImageKind {
 }
 
 pub(crate) fn supports_path(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    if macos::is_lottie_json(path) {
+        return true;
+    }
     matches!(
         path.extension()
             .and_then(|extension| extension.to_str())
@@ -841,6 +848,28 @@ mod tests {
         for path in ["settings.json", "manual.pdf", "movie.mp4", "archive.zip"] {
             assert!(!supports_path(Path::new(path)), "{path}");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_routes_lottie_json_without_claiming_other_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("animation.JSON");
+        for content in ["{}", "not json", r#"{"layers":[],"w":10,"h":10}"#] {
+            std::fs::write(&path, content).unwrap();
+            assert!(!supports_path(&path));
+        }
+        std::fs::write(
+            &path,
+            r#"{"v":"5.7.4","fr":30,"ip":0,"op":30,"w":10,"h":10,"layers":[]}"#,
+        )
+        .unwrap();
+        assert!(supports_path(&path));
+        File::create(&path)
+            .unwrap()
+            .set_len(MAX_LOTTIE_BYTES + 1)
+            .unwrap();
+        assert!(!supports_path(&path));
     }
 
     #[test]
