@@ -29,7 +29,7 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
     std::fs::write(
         &fake,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$CODEX_HOME\" \"$PWD\" \"$@\" > {}\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$CODEX_HOME\" \"$PWD\" \"$@\" > {0}.tmp && mv {0}.tmp {0}\n",
             shell_quote(marker.to_str().unwrap())
         ),
     )
