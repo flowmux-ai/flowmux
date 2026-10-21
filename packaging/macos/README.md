@@ -1,52 +1,38 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Flowmux macOS preview
+# Flowmux on macOS
 
-For Apple Silicon (arm64), tested on macOS 15. Intel Macs and older macOS
-releases are not validated.
+Apple Silicon preview, tested on macOS 15.
 
-## Install
+## Install or update
 
-1. Install [Homebrew](https://brew.sh/) at `/opt/homebrew`, then run:
+```sh
+curl -fsSL https://flowmux.org/install.sh | sh
+```
 
-   ```sh
-   brew install gtk4 libadwaita vte3
-   ```
+The installer downloads the release DMG and asks to install missing Homebrew
+and runtime libraries. Quit Flowmux before updating. The app is installed in
+`~/Applications`, with CLI commands in `~/.local/bin`.
 
-2. Quit any running Flowmux instance. Open the `.dmg` and drag
-   **Flowmux.app → Applications**.
-3. Eject the DMG and open Flowmux from Applications.
-
-The DMG needs the Homebrew libraries above; you do not need to build Flowmux
-or install Rust. This preview has no Apple Developer ID signing or
-notarization, so macOS may block it.
+For manual installation, install the runtime libraries with
+`brew install gtk4 libadwaita vte3`, then drag **Flowmux.app → Applications**
+from the DMG. [Build from source](../../docs/setup.md#build-from-source) if a
+macOS release is not yet available.
 
 ## Agent setup
 
-The DMG does not add commands to your shell's PATH. Enable agent hooks with:
+Run this in a Flowmux terminal tab, then restart your agents:
 
 ```sh
-"/Applications/Flowmux.app/Contents/MacOS/flowmuxctl" fix
+flowmux fix
 ```
 
-Restart agent sessions after setup. Codex users must approve changed hooks in
-`/hooks`. Both `flowmux` and `flowmuxctl` are in the app's `Contents/MacOS` folder.
+For a manual DMG install, use
+`/Applications/Flowmux.app/Contents/MacOS/flowmuxctl fix`.
+Codex users approve changed hooks in `/hooks`.
 
-## Update or remove
+To remove Flowmux, quit it and move the app to Trash; remove the
+`~/.local/bin/flowmux` and `~/.local/bin/flowmuxctl` links if installed.
 
-- **Update:** quit Flowmux, download the newer DMG, and replace the app in
-  Applications. The in-app updater currently builds from source and needs Rust
-  and build tools. Homebrew Cask updates are not available.
-- **Remove:** quit Flowmux and move the app from Applications to Trash.
-
-Homebrew library upgrades may require a newer Flowmux build. The optional
-ThorVG image backend is not included.
-
-To verify a download, place the DMG and its `.sha256` file together and run
-(replace `VERSION` with the release version):
-
-```sh
-shasum -a 256 -c flowmux-VERSION-aarch64-apple-darwin.dmg.sha256
-```
-
-License texts and third-party notices are in `Flowmux.app/Contents/Resources`.
+The preview is not notarized. Intel Macs and older macOS releases are not
+validated. The optional ThorVG image backend is not included.

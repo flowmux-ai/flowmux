@@ -9,56 +9,25 @@ Run source build commands and helper scripts from the repository root.
 
 ## Build from source
 
-Both platforms use [Rust via rustup](https://rustup.rs/); the repository pins
-the toolchain in `rust-toolchain.toml` (MSRV 1.93).
+On Ubuntu 24.04+ or macOS (Apple Silicon), run from the repository root:
 
-### Ubuntu 24.04+
-
-Native dependencies:
-
-```bash
-sudo apt install build-essential pkg-config git curl ca-certificates \
-  libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libwebkitgtk-6.0-dev \
-  libssl-dev libdbus-1-dev libsecret-1-dev
-```
-
-```bash
+```sh
 ./install.sh
-./install.sh --check  # Check prerequisites without installing
 ```
 
-On Ubuntu, it builds with the `fast` profile, then installs
-`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` and also
-to `~/.cargo/bin` when that directory exists, plus the desktop entry and icons.
-It offers to install missing apt packages and the Rust toolchain; use `--yes`
-to accept these prompts non-interactively on Linux.
+The installer checks dependencies and asks to install missing packages and
+Rust. On macOS, it also offers Homebrew and Apple's command-line tools;
+if the Apple installer opens, finish it and rerun `./install.sh`.
+Press Enter at `[Y/n]` to install, or type `n` to cancel.
+Use `--check` to check dependencies without installing.
 
-### macOS
+Ubuntu installs binaries to `~/.local/bin` (and `~/.cargo/bin` when present),
+plus desktop entries and icons. macOS installs `~/Applications/Flowmux.app`
+and CLI commands in `~/.local/bin`; a running app is updated after it exits.
+Use `./install.sh --release --launch` for a macOS release build.
 
-Use Apple Silicon; CI validates macOS 15. Install
-[Homebrew](https://brew.sh/) and Rust via rustup, then install Apple's build
-tools and the native dependencies:
-
-```bash
-xcode-select --install  # Skip if the command-line tools are already installed
-brew install pkg-config gtk4 libadwaita vte3
-./install.sh --check
-./install.sh
-./install.sh --release --launch  # Optional macOS release build and launch
-```
-
-Wait for the Xcode tools installation to finish before running the next command.
-The build also needs `python3`. The browser uses Apple's WebKit framework,
-so macOS does not need WebKitGTK or GStreamer.
-
-The macOS path delegates to `scripts/install-macos.sh`, forwarding options such
-as `--app-dir`, `--bin-dir`, and `--bundle-only`. It installs `Flowmux.app` to
-`~/Applications` and `flowmux` / `flowmuxctl` to `~/.local/bin` by default.
-If the app is running, its bundle is staged for replacement after it exits.
-Missing macOS prerequisites are reported; they are not installed automatically.
-
-Both installers leave agent settings unchanged; run `flowmux fix` to enable
-hooks. Restart any running Flowmux GUI to pick up the new binary.
+To enable agent hooks, run `flowmux fix` and restart agent sessions.
+Codex users approve changed hooks in `/hooks`.
 
 ### Development checks
 

@@ -22,48 +22,17 @@ notifications in one window. Available on **Linux and macOS**.
 
 ## Install
 
-**Ubuntu 24.04+ · amd64**
+**Ubuntu 24.04+ (amd64) · macOS (Apple Silicon preview)**
 
 ```sh
 curl -fsSL https://flowmux.org/install.sh | sh
-flowmux fix
 ```
 
-Uninstall: `sudo apt remove flowmux`.
+The installer asks before installing missing dependencies. Open Flowmux and
+launch your agents in terminal tabs.
 
-**macOS · Apple Silicon (preview, tested on macOS 15)**
-
-Install [Homebrew](https://brew.sh/) at its default `/opt/homebrew` location,
-then install the runtime libraries:
-
-```sh
-brew install gtk4 libadwaita vte3
-```
-
-Download the macOS `.dmg` from a
-[release](https://github.com/flowmux-ai/flowmux/releases), open it, and drag
-**Flowmux.app → Applications**. Eject the DMG and open Flowmux.
-If the release has no DMG yet, [build from source](docs/setup.md#macos).
-
-The preview is not notarized, so macOS may block it. Intel Macs and older macOS
-versions are not validated. See the [macOS guide](packaging/macos/README.md)
-for agent setup, updates, and limitations.
-
-Open Flowmux and launch your agents in terminal tabs. `flowmux fix` sets up
-agent hooks; run it again after upgrades and restart running agent sessions.
-For a DMG install, use the full CLI path shown in the macOS guide.
-Codex users must approve changed hooks in `/hooks`.
-
-On first launch, Flowmux shows a six-page welcome tour with screenshots of
-notifications, pane splitting, session history, search, Files and the editor,
-and workspace overview. Use `flowmux --first-screen` to show it again.
-
-For read-only integration diagnostics, open **Options → Update → Integration
-status → Run diagnostics**, or run `flowmux doctor` (`flowmux --json doctor`
-for scripts). Both check agent skills and hooks, IPC connectivity, browser data,
-and desktop installation. Rows tagged `fix` can be repaired with `flowmux fix`;
-errors include details for manual investigation. The CLI exits with status 1
-for `fix` or `error` rows; warnings alone do not change its exit status.
+[Build from source](docs/setup.md#build-from-source) ·
+[macOS guide](packaging/macos/README.md)
 
 ## Features
 
