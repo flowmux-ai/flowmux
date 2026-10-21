@@ -26,6 +26,8 @@ fn banner_props(
             format!("flowmux {v} is available"),
             Some(match update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => "Update",
+                #[cfg(target_os = "macos")]
+                UpdateGate::MacosDmg => "Update",
                 UpdateGate::ReleasePage => "Open release page (.deb)",
             }),
             true,
@@ -46,6 +48,14 @@ fn banner_props(
             Some(*percent),
             false,
         ),
+        #[cfg(target_os = "macos")]
+        BannerState::Done(v) if origin == InstallOrigin::MacosBundle => (
+            format!("Flowmux {v} is ready. Quit all Flowmux instances, then open Flowmux again."),
+            Some("Dismiss"),
+            true,
+            None,
+            false,
+        ),
         BannerState::Done(v) => (
             format!("flowmux {v} is installed. Restart flowmux to use it."),
             Some("Dismiss"),
@@ -57,6 +67,8 @@ fn banner_props(
             format!("Update to {v} failed: {message} (see ~/.cache/flowmux/update.log)"),
             Some(match update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => "Retry",
+                #[cfg(target_os = "macos")]
+                UpdateGate::MacosDmg => "Retry",
                 UpdateGate::ReleasePage => "Open release page (.deb)",
             }),
             true,
@@ -94,6 +106,36 @@ impl Drop for UpdateBannerInner {
 }
 
 impl UpdateBanner {
+    #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+    pub(crate) async fn check_native_dmg_update(app: &gtk::Application) {
+        let banner = Self::new(None);
+        assert_eq!(banner.inner.origin, InstallOrigin::MacosBundle);
+        let window = gtk::Window::builder()
+            .application(app)
+            .child(banner.widget())
+            .build();
+        window.present();
+        let version = update::check::Version(9, 8, 7);
+        banner.dispatch(Event::Available(version));
+        assert_eq!(
+            banner.inner.banner.button_label().as_deref(),
+            Some("Update")
+        );
+        banner.dispatch(Event::Start(version));
+        banner.dispatch(Event::Progress(update::Stage::Installing, 75));
+        assert_eq!(banner.inner.progress.text().as_deref(), Some("75%"));
+        banner.dispatch(Event::Done(version));
+        assert!(banner
+            .inner
+            .banner
+            .title()
+            .contains("Quit all Flowmux instances"));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+        assert!(window.is_mapped());
+        window.destroy();
+        println!("MACOS_DMG_UPDATE_UI_OK");
+    }
+
     /// Build the (hidden) banner and start the release check on
     /// `tokio_handle`. Without a handle — tests, degraded startup —
     /// the banner stays permanently hidden.
@@ -170,7 +212,7 @@ impl UpdateBanner {
             match actionable {
                 Some(version) => {
                     if update::origin::update_gate(for_click.inner.origin)
-                        == UpdateGate::SourceBuild
+                        != UpdateGate::ReleasePage
                     {
                         for_click.start_install(version);
                     } else if let Err(error) = open_release_page(for_click.inner.origin, version) {
@@ -354,7 +396,7 @@ impl UpdateBanner {
     /// Returns `false` when no runtime is available or that release is already
     /// installing/installed, allowing other UI entry points to avoid duplicates.
     pub(crate) fn start_install(&self, version: update::check::Version) -> bool {
-        if update::origin::update_gate(self.inner.origin) != UpdateGate::SourceBuild {
+        if update::origin::update_gate(self.inner.origin) == UpdateGate::ReleasePage {
             return false;
         }
         let Some(handle) = &self.inner.tokio_handle else {

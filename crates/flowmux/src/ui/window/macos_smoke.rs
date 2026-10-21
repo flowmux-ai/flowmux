@@ -88,6 +88,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_DMG_UPDATE_SMOKE_ONLY").is_some() {
+        crate::ui::update_banner::UpdateBanner::check_native_dmg_update(app.upcast_ref()).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_SSH_PREVIEW_SMOKE_ONLY").is_some() {
         WindowController::check_native_ssh_preview_route(app).await;
         BrowserPane::check_native_ssh_preview(app.upcast_ref()).await;

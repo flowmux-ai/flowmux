@@ -18,6 +18,10 @@ use std::sync::{
 };
 use tokio::io::AsyncWriteExt;
 
+#[cfg(target_os = "macos")]
+#[path = "macos_dmg.rs"]
+mod macos_dmg;
+
 const REPO_URL: &str = "https://github.com/flowmux-ai/flowmux.git";
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/flowmux-ai/flowmux/releases/latest";
 const RELEASE_DOWNLOAD_URL: &str = "https://github.com/flowmux-ai/flowmux/releases/download";
@@ -291,6 +295,10 @@ async fn run_install_inner(
         "install_origin={origin:?} update_action={action} version={version}"
     )
     .context("write update decision")?;
+    #[cfg(target_os = "macos")]
+    if gate == UpdateGate::MacosDmg {
+        return macos_dmg::install(version, tx, &mut log).await;
+    }
     if gate != UpdateGate::SourceBuild {
         anyhow::bail!(
             "source self-update is disabled for {origin:?} installs; use the release page"

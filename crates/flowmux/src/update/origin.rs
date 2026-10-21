@@ -6,6 +6,8 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallOrigin {
+    #[cfg(target_os = "macos")]
+    MacosBundle,
     Deb,
     Source,
     Unknown,
@@ -13,6 +15,8 @@ pub enum InstallOrigin {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateGate {
+    #[cfg(target_os = "macos")]
+    MacosDmg,
     SourceBuild,
     ReleasePage,
 }
@@ -34,15 +38,15 @@ pub fn classify_install_origin(
     }) {
         return InstallOrigin::Source;
     }
-    // The macOS app bundle is only ever produced by scripts/install-macos.sh
-    // (there is no packaged macOS release), so a bundle-resident executable
-    // is a source build regardless of which app directory it landed in.
     if executable.components().any(|component| {
         component
             .as_os_str()
             .to_string_lossy()
             .eq_ignore_ascii_case("Flowmux.app")
     }) {
+        #[cfg(target_os = "macos")]
+        return InstallOrigin::MacosBundle;
+        #[cfg(not(target_os = "macos"))]
         return InstallOrigin::Source;
     }
     InstallOrigin::Unknown
@@ -52,6 +56,9 @@ pub fn install_origin() -> InstallOrigin {
     let Ok(executable) = std::env::current_exe() else {
         return InstallOrigin::Unknown;
     };
+    // The installer exposes the bundle through ~/.local/bin symlinks.
+    #[cfg(target_os = "macos")]
+    let executable = executable.canonicalize().unwrap_or(executable);
     let dpkg_owns_executable = cfg!(target_os = "linux")
         && std::process::Command::new("dpkg")
             .arg("-S")
@@ -67,6 +74,8 @@ pub fn install_origin() -> InstallOrigin {
 
 pub fn update_gate(origin: InstallOrigin) -> UpdateGate {
     match origin {
+        #[cfg(target_os = "macos")]
+        InstallOrigin::MacosBundle => UpdateGate::MacosDmg,
         InstallOrigin::Source => UpdateGate::SourceBuild,
         InstallOrigin::Deb | InstallOrigin::Unknown => UpdateGate::ReleasePage,
     }
@@ -82,6 +91,18 @@ pub fn release_page_url(version: Version) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn app_bundles_use_dmg_updates_without_a_source_checkout() {
+        for executable in [
+            "/Applications/Flowmux.app/Contents/MacOS/flowmux",
+            "/Users/alice/Applications/Flowmux.app/Contents/MacOS/flowmux",
+        ] {
+            let origin = classify_install_origin(Path::new(executable), None, false);
+            assert_eq!(update_gate(origin), UpdateGate::MacosDmg);
+        }
+    }
 
     #[test]
     fn install_origin_classifies_deb_source_and_unknown_paths() {
@@ -102,6 +123,7 @@ mod tests {
             classify_install_origin(Path::new("/opt/flowmux/bin/flowmux"), Some(home), false),
             InstallOrigin::Unknown
         );
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(
             classify_install_origin(
                 Path::new("/Users/alice/Applications/Flowmux.app/Contents/MacOS/flowmux"),
@@ -122,10 +144,16 @@ mod tests {
             let executable = Path::new("/Applications")
                 .join(name)
                 .join("Contents/MacOS/flowmux");
-            assert_eq!(
-                classify_install_origin(&executable, None, false),
-                InstallOrigin::Source
-            );
+            assert_eq!(classify_install_origin(&executable, None, false), {
+                #[cfg(target_os = "macos")]
+                {
+                    InstallOrigin::MacosBundle
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    InstallOrigin::Source
+                }
+            });
         }
         assert_eq!(
             classify_install_origin(

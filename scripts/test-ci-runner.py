@@ -24,6 +24,8 @@ with open(os.environ['CALLS'], 'a') as log:
         'tmp': os.environ.get('TMPDIR'),
         'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
         'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
+        'boot_restore': os.environ.get('FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY'),
+        'ssh_preview': os.environ.get('FLOWMUX_SSH_PREVIEW_SMOKE_ONLY'),
         'keyboard': os.environ.get('FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY'),
         'agents': os.environ.get('FLOWMUX_AGENT_SMOKE_ONLY'),
         'session_paths': os.environ.get('FLOWMUX_SESSION_PATHS_SMOKE_ONLY'),
@@ -46,7 +48,17 @@ if name == 'python3' and args and args[0] == 'scripts/test-macos-webdriver.py':
     if os.environ.get('WEBDRIVER_MARKER', '1') == '1':
         print('MACOS_WEBDRIVER_OK')
     sys.exit(int(os.environ.get('WEBDRIVER_EXIT', '0')))
+if name == 'python3' and args == ['scripts/test-update-macos-dmg.py']:
+    sys.exit(int(os.environ.get('DMG_UPDATE_EXIT', '0')))
+if name == 'cargo' and 'flowmux-state' in args and 'flowmux-procmon' in args:
+    sys.exit(int(os.environ.get('NATIVE_STATE_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
+    for flag, prefix, marker in [('FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY', 'BOOT_RESTORE', 'MACOS_BOOT_RESTORE_POLICY_OK'),
+                                  ('FLOWMUX_SSH_PREVIEW_SMOKE_ONLY', 'SSH_PREVIEW', 'MACOS_SSH_PREVIEW_EXPIRY_OK')]:
+        if os.environ.get(flag):
+            if os.environ.get(prefix + '_MARKER', '1') == '1':
+                print(marker)
+            sys.exit(int(os.environ.get(prefix + '_EXIT', '0')))
     if os.environ.get('FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY'):
         if os.environ.get('CLEANUP_MARKER', '1') == '1':
             print('MACOS_NOTIFICATION_CLEANUP_OK')
@@ -161,6 +173,19 @@ time.sleep(60)
         self.assertEqual(result.returncode, 19, result.stdout + result.stderr)
         self.assertEqual(sum('macos_native' in c['args'] for c in calls), 1)
 
+    def test_macos_parity_gates_preserve_failures_and_require_native_markers(self):
+        for phase in ('BOOT_RESTORE', 'SSH_PREVIEW'):
+            for exit_code, marker, expected in [(41, '1', 41), (0, '0', 1)]:
+                with self.subTest(phase=phase, marker=marker):
+                    result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                        **{phase + '_EXIT': str(exit_code), phase + '_MARKER': marker})
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        for phase in ('NATIVE_STATE', 'DMG_UPDATE'):
+            with self.subTest(phase=phase):
+                result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    **{phase + '_EXIT': '41'})
+                self.assertEqual(result.returncode, 41, result.stdout + result.stderr)
+
     def test_macos_skill_gate_runs_and_propagates_failure(self):
         for exit_code in (0, 21):
             with self.subTest(exit_code=exit_code):
@@ -168,9 +193,9 @@ time.sleep(60)
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 6 if exit_code == 0 else 3)
+                self.assertEqual(len(native), 8 if exit_code == 0 else 5)
                 self.assertIsNone(native[0]['skills'])
-                self.assertEqual(native[2]['skills'], '1')
+                self.assertEqual(native[4]['skills'], '1')
 
     def test_macos_keyboard_gate_requires_success_and_completion_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (29, '1', 29), (0, '0', 1)]:
@@ -180,9 +205,9 @@ time.sleep(60)
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 6 if expected == 0 else 2)
-                self.assertEqual(native[1]['keyboard'], '1')
-                self.assertIsNone(native[1]['socket'])
+                self.assertEqual(len(native), 8 if expected == 0 else 4)
+                self.assertEqual(native[3]['keyboard'], '1')
+                self.assertIsNone(native[3]['socket'])
 
     def test_macos_gate_uses_cairo_despite_inherited_renderer(self):
         for renderer in ('', 'gl'):
@@ -191,7 +216,7 @@ time.sleep(60)
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 6)
+                self.assertEqual(len(native), 8)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
 
     def test_macos_session_paths_gate_requires_success_and_marker(self):

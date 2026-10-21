@@ -470,6 +470,8 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             update_version: Some(*version),
             update_label: Some(match crate::update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => format!("Update to v{version}"),
+                #[cfg(target_os = "macos")]
+                UpdateGate::MacosDmg => format!("Update to v{version}"),
                 UpdateGate::ReleasePage => "Open release page (.deb)".into(),
             }),
             check_sensitive: true,
@@ -486,6 +488,15 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             update_label: None,
             check_sensitive: false,
         },
+        #[cfg(target_os = "macos")]
+        BannerState::Done(version) if origin == InstallOrigin::MacosBundle => UpdateTabProps {
+            status: format!(
+                "Flowmux v{version} is ready. Quit all Flowmux instances, then open Flowmux again."
+            ),
+            update_version: None,
+            update_label: None,
+            check_sensitive: true,
+        },
         BannerState::Done(version) => UpdateTabProps {
             status: format!("flowmux v{version} is installed. Restart flowmux to use it."),
             update_version: None,
@@ -497,6 +508,8 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             update_version: Some(*version),
             update_label: Some(match crate::update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => "Retry update".into(),
+                #[cfg(target_os = "macos")]
+                UpdateGate::MacosDmg => "Retry update".into(),
                 UpdateGate::ReleasePage => "Open release page (.deb)".into(),
             }),
             check_sensitive: true,
@@ -1566,6 +1579,22 @@ mod tests {
             "<a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>"
         ));
         assert!(body.ends_with("Version: v9.8.7-6"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn dmg_update_tab_offers_install_and_reports_a_deferred_swap() {
+        let available = update_tab_props(
+            &BannerState::Available(Version(9, 8, 7)),
+            InstallOrigin::MacosBundle,
+        );
+        assert_eq!(available.update_label.as_deref(), Some("Update to v9.8.7"));
+        let done = update_tab_props(
+            &BannerState::Done(Version(9, 8, 7)),
+            InstallOrigin::MacosBundle,
+        );
+        assert!(done.status.contains("Quit all Flowmux instances"));
+        assert_eq!(done.update_version, None);
     }
 
     #[test]
