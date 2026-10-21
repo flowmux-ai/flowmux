@@ -383,11 +383,11 @@ pub fn ordered_workspace_ids(state: &State) -> Vec<flowmux_core::WorkspaceId> {
     order
 }
 
-/// Kernel boot id of the running system. `None` on non-Linux platforms
-/// or when `/proc` is unavailable, which disables reboot detection and
-/// keeps the always-restore behavior.
-// ponytail: Linux-only via /proc; add a sysctl(kern.boottime) branch if
-// macOS ever needs reboot detection.
+#[cfg(target_os = "macos")]
+use flowmux_procmon::boot_session_id as current_boot_id;
+
+/// Unavailable boot IDs preserve legacy restoration behavior.
+#[cfg(not(target_os = "macos"))]
 fn current_boot_id() -> Option<String> {
     std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .ok()
@@ -788,6 +788,30 @@ mod tests {
                 }
             );
             assert_eq!(disk.windows.last().unwrap().owner_start_time, Some(current));
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn native_boot_id_drives_restore_and_reboot_expiry() {
+        let boot = current_boot_id().expect("macOS must expose a boot session ID");
+        assert_eq!(current_boot_id().as_deref(), Some(boot.as_str()));
+        assert!(Uuid::parse_str(&boot).is_ok());
+        for saved in [Some(boot.as_str()), Some("previous-boot"), None] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("state.json");
+            let tab = SurfaceId::new();
+            // Even a reused, live PID cannot keep a previous boot's workspace alive.
+            let owner = WindowOwner::current();
+            let mut state = state_with_owned_workspace(owner, saved, tab);
+            state.windows[0].owner_start_time = Some(0);
+            save_to(&path, &state).unwrap();
+            let claimed = claim_window_from(&path, WindowOwner::current()).unwrap();
+            let expected = usize::from(saved != Some("previous-boot"));
+            assert_eq!(claimed.workspaces.len(), expected, "saved={saved:?}");
+            let disk = load_from(&path).unwrap();
+            assert_eq!(disk.workspaces.len(), expected);
+            assert_eq!(disk.windows.last().unwrap().boot_id.as_ref(), Some(&boot));
         }
     }
 

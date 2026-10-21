@@ -43,6 +43,10 @@ For a manual DMG install, use
 `/Applications/Flowmux.app/Contents/MacOS/flowmuxctl fix`.
 Codex users approve changed hooks in `/hooks`.
 
+Local workspaces restore after an app restart within the same macOS boot.
+After a system reboot, their old live-session state expires, matching Linux.
+Older saved state without a boot ID still restores on its first upgraded launch.
+
 To remove Flowmux, quit it and move the app to Trash; remove the
 `~/.local/bin/flowmux` and `~/.local/bin/flowmuxctl` links if installed.
 

@@ -43,7 +43,15 @@ pub(super) async fn check(app: &adw::Application, root: &std::path::Path) {
             }),
         },
     });
-    flowmux_state::save(&initial).unwrap();
+    let previous_owner = WindowOwner {
+        instance_id: uuid::Uuid::new_v4(),
+        pid: i32::MAX as u32,
+    };
+    flowmux_state::save_window_owned(previous_owner, initial).unwrap();
+    assert_eq!(
+        flowmux_state::load().unwrap().windows[0].boot_id,
+        flowmux_procmon::boot_session_id()
+    );
     let owner = WindowOwner::current();
     let store = StateStore::new_lazy_window(flowmux_state::claim_window(owner).unwrap(), owner);
     let (bridge, rx) = Bridge::new();
@@ -105,5 +113,15 @@ pub(super) async fn check(app: &adw::Application, root: &std::path::Path) {
     assert_eq!(disk.tab_count_in_pane(left).await, Some(2));
     assert_eq!(disk.tab_count_in_pane(right).await, Some(1));
     controller.window.destroy();
+    // Simulate a saved previous boot without rebooting the user's machine.
+    let mut previous_boot = flowmux_state::load().unwrap();
+    for window in &mut previous_boot.windows {
+        window.boot_id = Some("previous-boot".into());
+    }
+    flowmux_state::save(&previous_boot).unwrap();
+    let claimed = flowmux_state::claim_window(WindowOwner::current()).unwrap();
+    assert!(claimed.workspaces.is_empty());
+    assert!(flowmux_state::load().unwrap().workspaces.is_empty());
+    println!("MACOS_BOOT_RESTORE_POLICY_OK");
     println!("MACOS_RESTORED_ROOTS_OK");
 }

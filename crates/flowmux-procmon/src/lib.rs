@@ -17,7 +17,7 @@ use std::path::PathBuf;
 mod macos;
 
 #[cfg(target_os = "macos")]
-pub use macos::{process_cwd, process_environment};
+pub use macos::{boot_session_id, process_cwd, process_environment};
 
 #[cfg(target_os = "linux")]
 pub fn process_cwd(pid: u32) -> Option<PathBuf> {

@@ -73,6 +73,7 @@ export GSK_RENDERER=cairo
 printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
 run_phase macos-installer 180 python3 scripts/test-install-macos.py
+run_phase native-state 180 cargo test -p flowmux-state -p flowmux-procmon --locked
 run_phase build 900 cargo build --workspace --locked
 run_phase cli 300 cargo test -p flowmux-cli --locked
 git rev-parse HEAD
@@ -85,6 +86,10 @@ export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_phase native 600 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/native-smoke.log"
 grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
+
+FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY=1 run_phase boot-restore 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/boot-restore.log"
+grep -q '^MACOS_BOOT_RESTORE_POLICY_OK$' "$report_dir/boot-restore.log"
 
 FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY=1 run_phase editor-keyboard 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/editor-keyboard-smoke.log"

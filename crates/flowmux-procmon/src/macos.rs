@@ -4,6 +4,29 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 
+/// The kernel changes this UUID at boot, independently of wall-clock changes.
+pub fn boot_session_id() -> Option<String> {
+    let mut bytes = [0_u8; 37];
+    let mut size = bytes.len();
+    let result = unsafe {
+        libc::sysctlbyname(
+            c"kern.bootsessionuuid".as_ptr(),
+            bytes.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if result != 0 || size != bytes.len() {
+        return None;
+    }
+    std::ffi::CStr::from_bytes_with_nul(&bytes)
+        .ok()?
+        .to_str()
+        .ok()
+        .map(str::to_owned)
+}
+
 pub fn process_cwd(pid: u32) -> Option<PathBuf> {
     if pid == 0 || pid > i32::MAX as u32 {
         return None;
