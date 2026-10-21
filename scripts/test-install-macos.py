@@ -30,14 +30,14 @@ def main():
             shutil.copy2(REPO / relative, dest)
         shutil.copytree(REPO / "resources/icons", source / "resources/icons")
         (source / "Cargo.toml").write_text('''[workspace]
-members = ["flowmux", "flowmux-cli"]
+members = ["flowmux", "flowmux-cli", "flowmux-md-viewer"]
 resolver = "2"
 [workspace.package]
 version = "0.0.0"
 [profile.fast]
 inherits = "dev"
 ''')
-        for package, binary in [("flowmux", "flowmux"), ("flowmux-cli", "flowmuxctl")]:
+        for package, binary in [("flowmux", "flowmux"), ("flowmux-cli", "flowmuxctl"), ("flowmux-md-viewer", "flowmux-md-viewer")]:
             crate = source / package
             (crate / "src").mkdir(parents=True)
             (crate / "Cargo.toml").write_text(f'''[package]
@@ -53,10 +53,10 @@ path = "src/main.rs"
         config = source / ".cargo/config.toml"
         config.parent.mkdir()
         # Seed a valid stale Mach-O in the old hard-coded directory.
-        for package in ["flowmux", "flowmux-cli"]:
+        for package in ["flowmux", "flowmux-cli", "flowmux-md-viewer"]:
             (source / package / "src/main.rs").write_text('fn main() { println!("STALE"); }\n')
         run("cargo", "build", "--profile", "fast", cwd=source, env=env)
-        for package in ["flowmux", "flowmux-cli"]:
+        for package in ["flowmux", "flowmux-cli", "flowmux-md-viewer"]:
             (source / package / "src/main.rs").write_text('fn main() { println!("FRESH"); }\n')
         for name, profile, custom, configuration in [
             ("absolute", "fast", str(root / "custom target"), ""),
@@ -74,12 +74,12 @@ path = "src/main.rs"
             bundle = apps / "Flowmux.app"
             run("codesign", "--verify", "--deep", str(bundle))
             for directory in [bins, bundle / "Contents/MacOS"]:
-                for binary in ["flowmux", "flowmuxctl"]:
+                for binary in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]:
                     actual = run(str(directory / binary)).strip()
                     assert actual == "FRESH", (name, directory, binary, actual)
             print(f"INSTALL_ARTIFACT_OK {name} {profile}", flush=True)
         # Failed builds must leave the previously installed bundle and CLIs intact.
-        installed = [directory / binary for directory in [bins, bundle / "Contents/MacOS"] for binary in ["flowmux", "flowmuxctl"]]
+        installed = [directory / binary for directory in [bins, bundle / "Contents/MacOS"] for binary in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]]
         before = [path.read_bytes() for path in installed]
         # Packaging must not install, launch, or execute the CLI's hook refresh.
         marker = root / "cli-was-executed"
@@ -111,7 +111,7 @@ path = "src/main.rs"
         finally:
             run("hdiutil", "detach", str(mount))
         run("codesign", "--verify", "--deep", "--strict", str(copied))
-        for binary in ["flowmux", "flowmuxctl"]:
+        for binary in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]:
             assert run(str(copied / "Contents/MacOS" / binary)).strip() == "FRESH"
         rejected = subprocess.run(command + ["--launch"], cwd=root, env=package_env,
                                   capture_output=True, timeout=120)

@@ -101,3 +101,60 @@ fn cli_gui_accepts_markdown_file_argument() {
         "viewer should keep a GUI open for Markdown files: {stderr}"
     );
 }
+
+#[test]
+fn cli_png_includes_the_bottom_of_a_long_document_with_unicode_resource_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let resources = dir.path().join("리소스 directory");
+    std::fs::create_dir(&resources).unwrap();
+    let input = dir.path().join("long.md");
+    let output = dir.path().join("long.png");
+    image::RgbaImage::from_pixel(24, 16, image::Rgba([220, 10, 20, 255]))
+        .save(resources.join("red 한글 %.png"))
+        .unwrap();
+    std::fs::write(
+        &input,
+        format!(
+            "# Long document\n\n{}\n![red](<리소스 directory/red 한글 %.png>)",
+            "Paragraph\n\n".repeat(80)
+        ),
+    )
+    .unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_flowmux-md-viewer"))
+        .arg("--render-png")
+        .arg(&output)
+        .arg(&input)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let image = image::open(output).unwrap().to_rgba8();
+    assert!(image.height() > 2000);
+    assert!(
+        image
+            .enumerate_pixels()
+            .any(|(_, y, p)| y > image.height() * 3 / 4
+                && p.0[0] > 180
+                && p.0[1] < 80
+                && p.0[2] < 80),
+        "full document snapshot must include the final relative image"
+    );
+}
+
+#[test]
+fn cli_png_reports_unreadable_input_and_unwritable_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.md");
+    for create_input in [false, true] {
+        if create_input {
+            std::fs::write(&input, "# Test").unwrap();
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_flowmux-md-viewer"))
+            .arg("--render-png")
+            .arg(dir.path().join("missing/output.png"))
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!output.stderr.is_empty());
+    }
+}

@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-#[cfg(any(test, target_os = "linux"))]
 use std::time::SystemTime;
 
 #[cfg(target_os = "linux")]
@@ -29,11 +28,19 @@ use webkit6::prelude::*;
 #[cfg(all(test, target_os = "linux"))]
 mod mermaid_tests;
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos::{render_png, run_app};
+
+#[cfg(all(test, target_os = "macos"))]
+pub fn native_smoke() {
+    macos::smoke::run();
+}
+
 #[cfg(target_os = "linux")]
 const APP_ID: &str = "com.flowmux.App.Markdown";
-#[cfg(target_os = "linux")]
 const MARKDOWN_SCRIPT_WORLD: &str = "flowmux-markdown";
-#[cfg(target_os = "linux")]
 const WAIT_FOR_DIAGRAMS: &str = "
     if (!window.flowmuxMarkdownReady) throw new Error('Markdown renderer did not initialize');
     await window.flowmuxMarkdownReady;
@@ -41,7 +48,6 @@ const WAIT_FOR_DIAGRAMS: &str = "
     return true;
 ";
 const DEFAULT_WINDOW_HEIGHT: i32 = 700;
-#[cfg(any(test, target_os = "linux"))]
 const RENDER_TIMEOUT_SECS: u32 = 15;
 #[cfg(target_os = "linux")]
 const VIEWER_CHROME_CSS: &str = r#"
@@ -297,7 +303,7 @@ fn render_png(input: &Path, output: &Path, options: &RenderOptions) -> ExitCode 
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn render_png(_input: &Path, _output: &Path, _options: &RenderOptions) -> ExitCode {
     eprintln!("flowmux-md-viewer --render-png requires the Linux WebKitGTK build.");
     ExitCode::from(1)
@@ -318,7 +324,7 @@ fn run_app(args: Args) {
     app.run_with_args(&[APP_ID]);
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn run_app(args: Args) {
     let _ = (args.window_height, args.watch);
     eprintln!("flowmux-md-viewer requires the Linux WebKitGTK build.");
@@ -645,7 +651,6 @@ fn document_base_uri(document: &HtmlDocument) -> Option<String> {
     Some(uri)
 }
 
-#[cfg(target_os = "linux")]
 fn error_html(message: &str) -> String {
     format!(
         "<!doctype html><meta charset=\"utf-8\"><body style=\"font: 14px monospace; padding: 24px\"><h1>Markdown render error</h1><pre>{}</pre></body>",
@@ -653,7 +658,6 @@ fn error_html(message: &str) -> String {
     )
 }
 
-#[cfg(target_os = "linux")]
 fn html_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -734,14 +738,12 @@ fn should_reload_for_event(event: gio::FileMonitorEvent) -> bool {
     )
 }
 
-#[cfg(any(test, target_os = "linux"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FileSignature {
     modified: Option<SystemTime>,
     len: u64,
 }
 
-#[cfg(any(test, target_os = "linux"))]
 fn file_signature(path: &Path) -> Option<FileSignature> {
     let metadata = std::fs::metadata(path).ok()?;
     Some(FileSignature {

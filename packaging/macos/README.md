@@ -20,6 +20,10 @@ For manual installation, install the runtime libraries with
 from the DMG. [Build from source](../../docs/setup.md#build-from-source) if a
 macOS release is not yet available.
 
+Markdown files open in a separate viewer from Files. It supports Mermaid,
+live reload, zoom, and PNG export with `flowmux-md-viewer --render-png out.png README.md`.
+The executable is also available inside `Flowmux.app/Contents/MacOS`.
+
 ## Agent setup
 
 Run this in a Flowmux terminal tab, then restart your agents:

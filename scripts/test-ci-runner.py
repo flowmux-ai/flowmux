@@ -34,6 +34,10 @@ if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
     sys.exit(23)
 if name == 'python3' and args == ['scripts/test-agent-unit.py']:
     sys.exit(int(os.environ.get('AGENT_UNIT_EXIT', '0')))
+if name == 'cargo' and args[:3] == ['test', '-p', 'flowmux-md-viewer']:
+    if os.environ.get('MARKDOWN_MARKER', '1') == '1':
+        print('MACOS_MARKDOWN_NATIVE_OK')
+    sys.exit(int(os.environ.get('MARKDOWN_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
     if os.environ.get('FLOWMUX_SESSION_PATHS_SMOKE_ONLY'):
         if os.environ.get('SESSION_PATHS_MARKER', '1') == '1':
@@ -187,6 +191,16 @@ time.sleep(60)
                 native = [c for c in calls if c['session_paths'] == '1']
                 self.assertEqual(len(native), 1)
                 self.assertIsNone(native[0]['socket'])
+
+    def test_macos_markdown_gate_requires_success_and_native_marker(self):
+        for exit_code, marker, expected in [(0, '1', 0), (37, '1', 37), (0, '0', 1)]:
+            with self.subTest(exit_code=exit_code, marker=marker):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    MARKDOWN_EXIT=str(exit_code), MARKDOWN_MARKER=marker)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                markdown = [c for c in calls if 'flowmux-md-viewer' in c['args']]
+                self.assertEqual(len(markdown), 1)
+                self.assertIsNone(markdown[0]['socket'])
 
     def test_macos_agent_gates_run_and_propagate_failure(self):
         for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):

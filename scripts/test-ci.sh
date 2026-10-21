@@ -103,3 +103,7 @@ grep -q '^MACOS_NATIVE_AGENT_HOOKS_OK$' "$report_dir/agent-hooks.log"
 FLOWMUX_SESSION_PATHS_SMOKE_ONLY=1 run_phase session-paths 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/session-paths.log"
 grep -q '^MACOS_SESSION_PATHS_OK$' "$report_dir/session-paths.log"
+
+run_phase markdown 180 cargo test -p flowmux-md-viewer --locked -- --test-threads=1 \
+    2>&1 | tee "$report_dir/markdown.log"
+grep -q '^MACOS_MARKDOWN_NATIVE_OK$' "$report_dir/markdown.log"
