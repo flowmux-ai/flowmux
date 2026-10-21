@@ -2,7 +2,7 @@
 use super::*;
 use objc2_app_kit::NSAppearanceCustomization;
 
-fn check_theme(viewer: &Viewer, bg: [u8; 3], fg: &str, appearance: &str) {
+fn check_chrome(viewer: &Viewer, bg: [u8; 3], appearance: &str) {
     let color = viewer.window.backgroundColor();
     let channel = |v: f64| (v * 255.0).round() as u8;
     assert_eq!(
@@ -12,25 +12,48 @@ fn check_theme(viewer: &Viewer, bg: [u8; 3], fg: &str, appearance: &str) {
             channel(color.blueComponent())
         ],
         bg,
-        "window chrome must match the document"
+        "window chrome must follow the Flowmux theme"
     );
     assert_eq!(
         viewer.window.appearance().unwrap().name().to_string(),
         appearance
     );
-    let [r, g, b] = bg;
+    assert_eq!(
+        viewer
+            .state
+            .borrow()
+            .web
+            .appearance()
+            .unwrap()
+            .name()
+            .to_string(),
+        "NSAppearanceNameAqua"
+    );
+    let page = unsafe { viewer.state.borrow().web.underPageBackgroundColor() };
+    assert_eq!(
+        [
+            channel(page.redComponent()),
+            channel(page.greenComponent()),
+            channel(page.blueComponent())
+        ],
+        [255, 255, 255]
+    );
+}
+
+fn check_theme(viewer: &Viewer, bg: [u8; 3], appearance: &str) {
     assert_eq!(
         viewer
             .javascript("return getComputedStyle(document.body).backgroundColor;")
             .unwrap(),
-        format!("rgb({r}, {g}, {b})")
+        "rgb(255, 255, 255)"
     );
     assert_eq!(
         viewer
             .javascript("return getComputedStyle(document.documentElement).color;")
             .unwrap(),
-        fg
+        "rgb(32, 36, 40)"
     );
+    check_chrome(viewer, bg, appearance);
 }
 
 fn click(viewer: &Viewer, tag: isize) {
@@ -81,12 +104,7 @@ pub(crate) fn run() {
     let viewer = Viewer::new(args, true);
     viewer.ready().unwrap();
     assert!(viewer.window.isVisible());
-    check_theme(
-        &viewer,
-        [18, 52, 86],
-        "rgb(254, 220, 186)",
-        "NSAppearanceNameDarkAqua",
-    );
+    check_theme(&viewer, [18, 52, 86], "NSAppearanceNameDarkAqua");
     wait(&viewer, "document.querySelectorAll('.mermaid-chart > svg').length === 4 && document.querySelectorAll('.mermaid-error').length === 1");
     wait(
         &viewer,
@@ -130,12 +148,7 @@ pub(crate) fn run() {
     let scroll = viewer.javascript("return window.scrollY;").unwrap();
     std::fs::write(config.join("options.json"), r#"{"theme":"github-light"}"#).unwrap();
     viewer.poll();
-    check_theme(
-        &viewer,
-        [255, 255, 255],
-        "rgb(36, 41, 47)",
-        "NSAppearanceNameAqua",
-    );
+    check_theme(&viewer, [255, 255, 255], "NSAppearanceNameAqua");
     assert!(unsafe { viewer.state.borrow().web.pageZoom() } > 1.0);
     assert_eq!(viewer.javascript("return window.scrollY;").unwrap(), scroll);
     wait(
@@ -149,20 +162,10 @@ pub(crate) fn run() {
     )
     .unwrap();
     viewer.poll();
-    check_theme(
-        &viewer,
-        [17, 34, 51],
-        "rgb(171, 205, 239)",
-        "NSAppearanceNameDarkAqua",
-    );
+    check_theme(&viewer, [17, 34, 51], "NSAppearanceNameDarkAqua");
     std::fs::remove_file(config.join("theme")).unwrap();
     viewer.poll();
-    check_theme(
-        &viewer,
-        [40, 44, 52],
-        "rgb(255, 255, 255)",
-        "NSAppearanceNameDarkAqua",
-    );
+    check_theme(&viewer, [40, 44, 52], "NSAppearanceNameDarkAqua");
     click(&viewer, 4);
     assert_eq!(unsafe { viewer.state.borrow().web.pageZoom() }, 1.0);
     click(&viewer, 3);
@@ -189,12 +192,7 @@ pub(crate) fn run() {
         &viewer,
         "document.querySelector('h1')?.textContent === 'Markdown render error'",
     );
-    check_theme(
-        &viewer,
-        [40, 44, 52],
-        "rgb(255, 255, 255)",
-        "NSAppearanceNameDarkAqua",
-    );
+    check_chrome(&viewer, [40, 44, 52], "NSAppearanceNameDarkAqua");
     std::fs::write(&path, "# Recreated\n\n[Next](next.html)\n").unwrap();
     viewer.state.borrow_mut().poll();
     viewer.ready().unwrap();

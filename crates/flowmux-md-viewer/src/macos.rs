@@ -47,10 +47,6 @@ impl State {
             Ok(document) => (document.html, document.base_dir),
             Err(error) => (super::error_html(&error.to_string()), None),
         };
-        let html = match &self.theme {
-            Some(theme) => theme.document(html),
-            None => html,
-        };
         self.resources.set_document(html, base);
         let base =
             NSURL::URLWithString(&NSString::from_str("flowmux-markdown://document/")).unwrap();
@@ -276,13 +272,9 @@ impl Viewer {
             .theme
             .as_ref()
             .is_some_and(|old| old != &theme);
-        if changed && !unsafe { self.state.borrow().web.isLoading() } {
+        if changed {
             theme.apply(&self.window, &self.state.borrow().web);
-            // Update styles in place so changing Flowmux's theme preserves scroll and zoom.
-            let css = theme.css();
-            if self.javascript(&format!("let style = document.getElementById('flowmux-theme'); if (!style) {{ style = document.createElement('style'); style.id = 'flowmux-theme'; document.head.append(style); }} style.textContent = {css:?}; return true;")).is_ok() {
-                self.state.borrow_mut().theme = Some(theme);
-            }
+            self.state.borrow_mut().theme = Some(theme);
         }
         self.state.borrow_mut().poll();
     }
