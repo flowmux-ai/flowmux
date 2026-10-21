@@ -38,7 +38,15 @@ if name == 'cargo' and args[:3] == ['test', '-p', 'flowmux-md-viewer']:
     if os.environ.get('MARKDOWN_MARKER', '1') == '1':
         print('MACOS_MARKDOWN_NATIVE_OK')
     sys.exit(int(os.environ.get('MARKDOWN_EXIT', '0')))
+if name == 'cargo' and args[:3] == ['test', '-p', 'flowmux-notify']:
+    if os.environ.get('NOTIFICATIONS_MARKER', '1') == '1':
+        print('MACOS_NATIVE_DOCK_BADGE_OK')
+    sys.exit(int(os.environ.get('NOTIFICATIONS_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
+    if os.environ.get('FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY'):
+        if os.environ.get('CLEANUP_MARKER', '1') == '1':
+            print('MACOS_NOTIFICATION_CLEANUP_OK')
+        sys.exit(int(os.environ.get('CLEANUP_EXIT', '0')))
     if os.environ.get('FLOWMUX_SESSION_PATHS_SMOKE_ONLY'):
         if os.environ.get('SESSION_PATHS_MARKER', '1') == '1':
             print('MACOS_SESSION_PATHS_OK')
@@ -156,7 +164,7 @@ time.sleep(60)
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 5 if exit_code == 0 else 3)
+                self.assertEqual(len(native), 6 if exit_code == 0 else 3)
                 self.assertIsNone(native[0]['skills'])
                 self.assertEqual(native[2]['skills'], '1')
 
@@ -168,7 +176,7 @@ time.sleep(60)
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 5 if expected == 0 else 2)
+                self.assertEqual(len(native), 6 if expected == 0 else 2)
                 self.assertEqual(native[1]['keyboard'], '1')
                 self.assertIsNone(native[1]['socket'])
 
@@ -179,7 +187,7 @@ time.sleep(60)
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 5)
+                self.assertEqual(len(native), 6)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
 
     def test_macos_session_paths_gate_requires_success_and_marker(self):
@@ -201,6 +209,14 @@ time.sleep(60)
                 markdown = [c for c in calls if 'flowmux-md-viewer' in c['args']]
                 self.assertEqual(len(markdown), 1)
                 self.assertIsNone(markdown[0]['socket'])
+
+    def test_macos_notification_gates_require_success_and_markers(self):
+        for phase in ('NOTIFICATIONS', 'CLEANUP'):
+            for exit_code, marker, expected in [(0, '1', 0), (39, '1', 39), (0, '0', 1)]:
+                with self.subTest(phase=phase, exit_code=exit_code, marker=marker):
+                    result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                        **{phase + '_EXIT': str(exit_code), phase + '_MARKER': marker})
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
     def test_macos_agent_gates_run_and_propagate_failure(self):
         for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):

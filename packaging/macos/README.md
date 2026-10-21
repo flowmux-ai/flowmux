@@ -24,6 +24,10 @@ Markdown files open in a separate viewer from Files. It supports Mermaid,
 live reload, zoom, and PNG export with `flowmux-md-viewer --render-png out.png README.md`.
 The executable is also available inside `Flowmux.app/Contents/MacOS`.
 
+Allow notifications when macOS asks. Notification Center opens the originating
+pane, and the Dock badge follows the unread count. Desktop notifications require
+the installed app; permission can be changed in System Settings → Notifications.
+
 ## Agent setup
 
 Run this in a Flowmux terminal tab, then restart your agents:

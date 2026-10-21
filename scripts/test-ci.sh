@@ -107,3 +107,11 @@ grep -q '^MACOS_SESSION_PATHS_OK$' "$report_dir/session-paths.log"
 run_phase markdown 180 cargo test -p flowmux-md-viewer --locked -- --test-threads=1 \
     2>&1 | tee "$report_dir/markdown.log"
 grep -q '^MACOS_MARKDOWN_NATIVE_OK$' "$report_dir/markdown.log"
+
+run_phase notifications 120 cargo test -p flowmux-notify --features native-smoke --locked \
+    2>&1 | tee "$report_dir/notifications.log"
+grep -q '^MACOS_NATIVE_DOCK_BADGE_OK$' "$report_dir/notifications.log"
+FLOWMUX_NOTIFICATION_CLEANUP_SMOKE_ONLY=1 run_phase notification-cleanup 120 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/notification-cleanup.log"
+grep -q '^MACOS_NOTIFICATION_CLEANUP_OK$' "$report_dir/notification-cleanup.log"
+run_phase notification-routing 120 cargo test -p flowmux --bin flowmux --locked native_notification_target_opens_the_source_pid_socket

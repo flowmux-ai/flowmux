@@ -5,10 +5,27 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "OSC notification parser (9 / 99 / 777) and a D-Bus desktop sender."
+description = "OSC notification parser (9 / 99 / 777) and platform desktop notifications."
 
 [dependencies]
 flowmux-core = { workspace = true }
 zbus = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSBundle", "NSDate", "NSDictionary", "NSError", "NSValue", "NSObject", "NSRunLoop", "NSString"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNUserNotificationCenter", "block2"] }
+tokio = { workspace = true }
+
+[features]
+native-smoke = []
+
+[[test]]
+name = "macos_native"
+harness = false
+required-features = ["native-smoke"]

@@ -27,6 +27,7 @@ use flowmux_config::paths;
 use flowmux_daemon::{DaemonHandler, StateStore};
 use ipc_handler::GuiHandler;
 use std::cell::RefCell;
+#[cfg(not(target_os = "macos"))]
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -477,10 +478,13 @@ fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active
 }
 
+#[cfg(not(target_os = "macos"))]
 const APP_OBJECT_PATH: &str = "/com/flowmux/App";
 
+#[cfg(not(target_os = "macos"))]
 struct NotificationActionRouter;
 
+#[cfg(not(target_os = "macos"))]
 #[zbus::interface(name = "org.freedesktop.Application")]
 impl NotificationActionRouter {
     async fn activate_action(
@@ -499,31 +503,36 @@ impl NotificationActionRouter {
             tracing::warn!("desktop notification action omitted its target");
             return;
         };
-        let Some((pid, id)) = parse_notification_action_target(target) else {
-            tracing::warn!(%target, "invalid desktop notification action target");
-            return;
-        };
+        open_notification_target(target).await;
+    }
+}
 
-        let socket = paths::runtime_socket_for_pid(pid);
-        let result = async {
-            let client = flowmux_ipc::client::Client::connect(&socket).await?;
-            client
-                .call(flowmux_ipc::protocol::Request::NotificationOpen { id })
-                .await
+async fn open_notification_target(target: &str) {
+    let Some((pid, id)) = parse_notification_action_target(target) else {
+        tracing::warn!(%target, "invalid desktop notification action target");
+        return;
+    };
+
+    let socket = paths::runtime_socket_for_pid(pid);
+    let result = async {
+        let client = flowmux_ipc::client::Client::connect(&socket).await?;
+        client
+            .call(flowmux_ipc::protocol::Request::NotificationOpen { id })
+            .await
+    }
+    .await;
+    match result {
+        Ok(flowmux_ipc::protocol::Response::NotificationState { changed: true }) => {}
+        Ok(response) => {
+            tracing::warn!(?response, ?socket, %id, "notification target was not opened")
         }
-        .await;
-        match result {
-            Ok(flowmux_ipc::protocol::Response::NotificationState { changed: true }) => {}
-            Ok(response) => {
-                tracing::warn!(?response, ?socket, %id, "notification target was not opened")
-            }
-            Err(error) => {
-                tracing::warn!(%error, ?socket, %id, "notification target is unavailable")
-            }
+        Err(error) => {
+            tracing::warn!(%error, ?socket, %id, "notification target is unavailable")
         }
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 async fn register_notification_action_router(app_id: &str) -> zbus::Result<zbus::Connection> {
     let connection = zbus::connection::Builder::session()
         .serve_at(APP_OBJECT_PATH, NotificationActionRouter)
@@ -535,6 +544,14 @@ async fn register_notification_action_router(app_id: &str) -> zbus::Result<zbus:
         .await?;
     tracing::debug!(?reply, "desktop notification action router registered");
     Ok(connection)
+}
+
+#[cfg(target_os = "macos")]
+async fn register_notification_action_router(_app_id: &str) -> zbus::Result<()> {
+    let runtime = tokio::runtime::Handle::current();
+    flowmux_notify::sender::register_action_router(move |target| {
+        runtime.spawn(async move { open_notification_target(&target).await });
+    })
 }
 
 fn parse_notification_action_target(target: &str) -> Option<(u32, flowmux_core::NotificationId)> {
@@ -772,6 +789,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
     async fn activate_notification(
         caller: &zbus::Connection,
         app_id: &str,
@@ -832,6 +850,38 @@ mod tests {
         assert_eq!(parse_notification_action_target("nope:not-a-uuid"), None);
     }
 
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn native_notification_target_opens_the_source_pid_socket() {
+        let socket = paths::runtime_socket_for_pid(std::process::id());
+        assert!(!socket.exists());
+        let (opened_tx, mut opened_rx) = tokio::sync::mpsc::channel(1);
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move {
+            flowmux_ipc::server::run(&server_socket, Arc::new(NotificationOpenHandler(opened_tx)))
+                .await
+        });
+        for _ in 0..100 {
+            if socket.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(socket.exists());
+        let id = flowmux_core::NotificationId::new();
+        open_notification_target(&format!("{}:{id}", std::process::id())).await;
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), opened_rx.recv())
+                .await
+                .unwrap(),
+            Some(id)
+        );
+        server.abort();
+        let _ = server.await;
+        assert!(!socket.exists());
+    }
+
+    #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn queued_notification_router_takes_over_and_targets_the_source_pid_socket() {
         let socket = paths::runtime_socket_for_pid(std::process::id());
