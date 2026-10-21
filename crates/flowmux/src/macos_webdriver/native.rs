@@ -12,7 +12,7 @@ use objc2_foundation::{
     NSDate, NSDefaultRunLoopMode, NSNotFound, NSPoint, NSRange, NSRect, NSSize, NSString,
 };
 use objc2_web_kit::{WKWebView, WKWebViewConfiguration, WKWebsiteDataStore};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -58,6 +58,9 @@ pub(super) struct Window {
     pub window: Retained<NSWindow>,
     pub web: Retained<WKWebView>,
     pub registry: String,
+    navigation: Cell<usize>,
+    pub committed: Cell<bool>,
+    pub navigation_error: RefCell<Option<String>>,
 }
 
 impl Window {
@@ -85,6 +88,9 @@ impl Window {
                 window,
                 web,
                 registry: format!("__flowmux_{}", uuid::Uuid::new_v4().simple()),
+                navigation: Cell::new(0),
+                committed: Cell::new(true),
+                navigation_error: RefCell::new(None),
             }
         }
     }
@@ -334,7 +340,10 @@ pub(crate) fn smoke() {
 
 use objc2::{define_class, AnyThread, DefinedClass};
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSHTTPCookie, NSObject, NSObjectProtocol};
-use objc2_web_kit::{WKNavigationAction, WKSnapshotConfiguration, WKUIDelegate, WKWindowFeatures};
+use objc2_web_kit::{
+    WKNavigation, WKNavigationAction, WKNavigationDelegate, WKSnapshotConfiguration, WKUIDelegate,
+    WKWindowFeatures,
+};
 use std::collections::BTreeMap;
 use std::rc::Weak;
 type Windows = RefCell<BTreeMap<String, Rc<Window>>>;
@@ -345,13 +354,36 @@ define_class!(
     #[ivars = Weak<Windows>]
     struct Delegate;
     unsafe impl NSObjectProtocol for Delegate {}
+    unsafe impl WKNavigationDelegate for Delegate {
+        #[unsafe(method(webView:didStartProvisionalNavigation:))]
+        fn started(&self, web: &WKWebView, navigation: Option<&WKNavigation>) {
+            if let Some(window) = self.browser(web) {
+                window.navigation.set(navigation.map_or(0, |n| n as *const _ as usize));
+                window.committed.set(false);
+                *window.navigation_error.borrow_mut() = None;
+            }
+        }
+        #[unsafe(method(webView:didCommitNavigation:))]
+        fn committed(&self, web: &WKWebView, _: Option<&WKNavigation>) {
+            if let Some(window) = self.browser(web) { window.committed.set(true); }
+        }
+        #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
+        fn provisional_failed(&self, web: &WKWebView, navigation: Option<&WKNavigation>, error: &NSError) {
+            self.record_failure(web, navigation, error);
+        }
+        #[unsafe(method(webView:didFailNavigation:withError:))]
+        fn failed(&self, web: &WKWebView, navigation: Option<&WKNavigation>, error: &NSError) {
+            self.record_failure(web, navigation, error);
+        }
+    }
     unsafe impl WKUIDelegate for Delegate {
         #[unsafe(method_id(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:))]
         fn popup(&self, _: &WKWebView, configuration: &WKWebViewConfiguration,
             _: &WKNavigationAction, _: &WKWindowFeatures) -> Option<Retained<WKWebView>> {
             self.ivars().upgrade().map(|windows| {
             let browser = Rc::new(Window::new(configuration));
-            unsafe { browser.web.setUIDelegate(Some(objc2::runtime::ProtocolObject::from_ref(self))); }
+            unsafe { browser.web.setUIDelegate(Some(objc2::runtime::ProtocolObject::from_ref(self)));
+                browser.web.setNavigationDelegate(Some(objc2::runtime::ProtocolObject::from_ref(self))); }
             let web = browser.web.clone();
             windows.borrow_mut().insert(uuid::Uuid::new_v4().to_string(), browser);
             web
@@ -365,6 +397,25 @@ define_class!(
         }
     }
 );
+
+impl Delegate {
+    fn record_failure(&self, web: &WKWebView, navigation: Option<&WKNavigation>, error: &NSError) {
+        if let Some(window) = self.browser(web) {
+            if window.navigation.get() == navigation.map_or(0, |n| n as *const _ as usize) {
+                *window.navigation_error.borrow_mut() =
+                    Some(error.localizedDescription().to_string());
+            }
+        }
+    }
+    fn browser(&self, web: &WKWebView) -> Option<Rc<Window>> {
+        self.ivars()
+            .upgrade()?
+            .borrow()
+            .values()
+            .find(|window| &*window.web == web)
+            .cloned()
+    }
+}
 
 pub(super) struct Browsers {
     pub windows: Rc<Windows>,
@@ -397,6 +448,11 @@ impl Browsers {
             browser
                 .web
                 .setUIDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
+                    &*self.delegate,
+                )));
+            browser
+                .web
+                .setNavigationDelegate(Some(objc2::runtime::ProtocolObject::from_ref(
                     &*self.delegate,
                 )));
         }

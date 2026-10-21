@@ -301,8 +301,13 @@ impl Session {
         loop {
             let window = self.window()?;
             let ready = self.atom("return document.readyState;")?;
+            if let Some(message) = window.navigation_error.borrow().clone() {
+                return Err(native_error(message));
+            }
             if (!unsafe { window.web.isLoading() } && ready == "complete")
-                || (self.strategy == "eager" && (ready == "interactive" || ready == "complete"))
+                || (self.strategy == "eager"
+                    && window.committed.get()
+                    && (ready == "interactive" || ready == "complete"))
             {
                 return Ok(());
             }
@@ -369,6 +374,8 @@ impl Session {
                 let parsed = reqwest::Url::parse(&p.url).map_err(|_| error(ErrorStatus::InvalidArgument, "Invalid URL"))?;
                 if !matches!(parsed.scheme(), "http" | "https" | "about" | "data") { return Err(error(ErrorStatus::InvalidArgument, "Only http, https, about and data URLs are supported")); }
                 let url = NSURL::URLWithString(&NSString::from_str(&p.url)).ok_or_else(|| error(ErrorStatus::InvalidArgument, "Invalid URL"))?;
+                window.committed.set(false);
+                *window.navigation_error.borrow_mut() = None;
                 unsafe { window.web.loadRequest(&NSURLRequest::requestWithURL(&url)); }
                 self.loaded()?; Value::Null
             }

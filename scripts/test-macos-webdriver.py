@@ -21,6 +21,20 @@ smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
 
 
+class Fixture(smoke.Fixture):
+    def do_GET(self):
+        if self.path == "/broken":
+            self.connection.sendall(b"invalid HTTP response\r\n\r\n")
+            self.close_connection = True
+            return
+        if self.path == "/slow":
+            time.sleep(.5)
+        try:
+            super().do_GET()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # A timed-out navigation deliberately closes its request.
+
+
 def expect_error(driver, method, path, body, expected):
     try:
         driver.call(method, path, body)
@@ -114,9 +128,20 @@ def boundaries(driver, url):
     else:
         raise AssertionError("Incompatible browser accepted")
     session = driver.request("POST", "/session", {"capabilities": {"alwaysMatch": {
-        "browserName": "Flowmux", "pageLoadStrategy": "normal", "se:remoteUrl": driver.url
+        "browserName": "Flowmux", "pageLoadStrategy": "eager", "se:remoteUrl": driver.url
     }}})
+    assert session["capabilities"]["pageLoadStrategy"] == "eager"
     driver.session = "/session/" + session["sessionId"]
+    driver.call("POST", "/url", {"url": url})
+    driver.evaluate("document.body.insertAdjacentHTML('beforeend', '<a id=next href=/linked>Next</a>')")
+    driver.click("#next")
+    assert driver.call("GET", "/url") == url + "linked"
+    driver.call("POST", "/timeouts", {"pageLoad": 10000})
+    expect_error(driver, "POST", "/url", {"url": url + "broken"}, "unknown error")
+    driver.call("POST", "/timeouts", {"pageLoad": 50})
+    expect_error(driver, "POST", "/url", {"url": url + "slow"}, "timeout")
+    driver.call("POST", "/timeouts", {"pageLoad": 10000})
+    driver.call("POST", "/url", {"url": url})
     driver.stop()
     print("PASS: native clear, navigation, cookies, references, timeouts and protocol boundaries", flush=True)
 
@@ -133,7 +158,7 @@ def main():
         env["FLOWMUX_WEBDRIVER_SERVER"] = f"127.0.0.1:{port}"
         for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "FLOWMUX_RUNTIME_DIR"]:
             env[key] = directory + "/" + key
-        server = smoke.ThreadingHTTPServer(("127.0.0.1", 0), smoke.Fixture)
+        server = smoke.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         with open(directory + "/server.log", "w+") as log:
@@ -143,6 +168,10 @@ def main():
                 deadline = time.monotonic() + 15
                 while True:
                     assert process.poll() is None, "Driver exited during startup"
+                    if "Flowmux WebDriver listening on " not in Path(log.name).read_text():
+                        assert time.monotonic() < deadline, "Driver startup timed out"
+                        time.sleep(.05)
+                        continue
                     try:
                         assert driver.request("GET", "/status")["ready"]
                         break
