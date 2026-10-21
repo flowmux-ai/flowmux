@@ -31,8 +31,7 @@ pub struct ResolvedTheme {
     pub palette: Vec<gdk::RGBA>,
 }
 
-pub(crate) const DEFAULT_BG: &str = "#282c34";
-pub(crate) const DEFAULT_FG: &str = "#ffffff";
+pub(crate) use flowmux_config::theme::{DEFAULT_BG, DEFAULT_FG};
 
 /// Tomorrow-based ANSI palette adapted from Ghostty, with both black slots
 /// raised for contrast against flowmux's default background.
@@ -61,21 +60,7 @@ impl ResolvedTheme {
         options: &flowmux_config::options::Options,
         file_cfg: Option<flowmux_config::ghostty::GhosttyConfig>,
     ) -> Self {
-        let mut cfg = match options.theme.as_deref() {
-            Some(id) => {
-                let mut preset = flowmux_config::presets::config(id).unwrap_or_else(|| {
-                    tracing::warn!(theme = id, "unknown theme preset — using the default look");
-                    Default::default()
-                });
-                if let Some(file) = file_cfg {
-                    preset.font_family = preset.font_family.or(file.font_family);
-                    preset.font_size = preset.font_size.or(file.font_size);
-                }
-                preset
-            }
-            None => file_cfg.unwrap_or_default(),
-        };
-        cfg.merge(options.theme_overrides.to_ghostty());
+        let cfg = flowmux_config::theme::resolve(options, file_cfg);
         let theme = Self::from_ghostty(&cfg);
         tracing::info!(
             preset = ?options.theme.as_deref(),

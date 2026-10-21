@@ -1,5 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::*;
+use objc2_app_kit::NSAppearanceCustomization;
+
+fn check_theme(viewer: &Viewer, bg: [u8; 3], fg: &str, appearance: &str) {
+    let color = viewer.window.backgroundColor();
+    let channel = |v: f64| (v * 255.0).round() as u8;
+    assert_eq!(
+        [
+            channel(color.redComponent()),
+            channel(color.greenComponent()),
+            channel(color.blueComponent())
+        ],
+        bg,
+        "window chrome must match the document"
+    );
+    assert_eq!(
+        viewer.window.appearance().unwrap().name().to_string(),
+        appearance
+    );
+    let [r, g, b] = bg;
+    assert_eq!(
+        viewer
+            .javascript("return getComputedStyle(document.body).backgroundColor;")
+            .unwrap(),
+        format!("rgb({r}, {g}, {b})")
+    );
+    assert_eq!(
+        viewer
+            .javascript("return getComputedStyle(document.documentElement).color;")
+            .unwrap(),
+        fg
+    );
+}
 
 fn click(viewer: &Viewer, tag: isize) {
     let root = viewer.window.contentView().unwrap();
@@ -35,12 +67,26 @@ fn wait(viewer: &Viewer, predicate: &str) {
 
 pub(crate) fn run() {
     let fixture = tempfile::tempdir().unwrap();
+    let config = fixture.path().join("config/flowmux");
+    std::fs::create_dir_all(&config).unwrap();
+    std::env::set_var("XDG_CONFIG_HOME", config.parent().unwrap());
+    std::fs::write(
+        config.join("options.json"),
+        r##"{"theme":"nord","theme_overrides":{"background":"#123456","foreground":"#fedcba"}}"##,
+    )
+    .unwrap();
     let path = fixture.path().join("한글 문서.md");
     std::fs::write(&path, include_str!("../../tests/fixtures/mermaid.md")).unwrap();
     let args = Args::parse([path.to_string_lossy().to_string()]).unwrap();
     let viewer = Viewer::new(args, true);
     viewer.ready().unwrap();
     assert!(viewer.window.isVisible());
+    check_theme(
+        &viewer,
+        [18, 52, 86],
+        "rgb(254, 220, 186)",
+        "NSAppearanceNameDarkAqua",
+    );
     wait(&viewer, "document.querySelectorAll('.mermaid-chart > svg').length === 4 && document.querySelectorAll('.mermaid-error').length === 1");
     wait(
         &viewer,
@@ -78,9 +124,44 @@ pub(crate) fn run() {
         .unwrap();
     click(&viewer, 5);
     assert!(unsafe { viewer.state.borrow().web.pageZoom() } > 1.0);
+    viewer
+        .javascript("window.scrollTo(0, 120); return true;")
+        .unwrap();
+    let scroll = viewer.javascript("return window.scrollY;").unwrap();
+    std::fs::write(config.join("options.json"), r#"{"theme":"github-light"}"#).unwrap();
+    viewer.poll();
+    check_theme(
+        &viewer,
+        [255, 255, 255],
+        "rgb(36, 41, 47)",
+        "NSAppearanceNameAqua",
+    );
+    assert!(unsafe { viewer.state.borrow().web.pageZoom() } > 1.0);
+    assert_eq!(viewer.javascript("return window.scrollY;").unwrap(), scroll);
     wait(
         &viewer,
         "window.originalDiagram === document.querySelector('.mermaid-chart > svg')",
+    );
+    std::fs::write(config.join("options.json"), "{}").unwrap();
+    std::fs::write(
+        config.join("theme"),
+        "background = #112233\nforeground = #abcdef\n",
+    )
+    .unwrap();
+    viewer.poll();
+    check_theme(
+        &viewer,
+        [17, 34, 51],
+        "rgb(171, 205, 239)",
+        "NSAppearanceNameDarkAqua",
+    );
+    std::fs::remove_file(config.join("theme")).unwrap();
+    viewer.poll();
+    check_theme(
+        &viewer,
+        [40, 44, 52],
+        "rgb(255, 255, 255)",
+        "NSAppearanceNameDarkAqua",
     );
     click(&viewer, 4);
     assert_eq!(unsafe { viewer.state.borrow().web.pageZoom() }, 1.0);
@@ -107,6 +188,12 @@ pub(crate) fn run() {
     wait(
         &viewer,
         "document.querySelector('h1')?.textContent === 'Markdown render error'",
+    );
+    check_theme(
+        &viewer,
+        [40, 44, 52],
+        "rgb(255, 255, 255)",
+        "NSAppearanceNameDarkAqua",
     );
     std::fs::write(&path, "# Recreated\n\n[Next](next.html)\n").unwrap();
     viewer.state.borrow_mut().poll();

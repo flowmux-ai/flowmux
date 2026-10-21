@@ -5,6 +5,29 @@
 use crate::ghostty::GhosttyConfig;
 use std::path::PathBuf;
 
+pub const DEFAULT_BG: &str = "#282c34";
+pub const DEFAULT_FG: &str = "#ffffff";
+
+/// Resolve preset/file precedence and explicit overrides for every Flowmux window.
+pub fn resolve(options: &crate::options::Options, file: Option<GhosttyConfig>) -> GhosttyConfig {
+    let mut cfg = match options.theme.as_deref() {
+        Some(id) => {
+            let mut preset = crate::presets::config(id).unwrap_or_else(|| {
+                tracing::warn!(theme = id, "unknown theme preset — using the default look");
+                Default::default()
+            });
+            if let Some(file) = file {
+                preset.font_family = preset.font_family.or(file.font_family);
+                preset.font_size = preset.font_size.or(file.font_size);
+            }
+            preset
+        }
+        None => file.unwrap_or_default(),
+    };
+    cfg.merge(options.theme_overrides.to_ghostty());
+    cfg
+}
+
 /// `~/.config/flowmux/theme`
 pub fn user_theme_path() -> Option<PathBuf> {
     crate::paths::config_dir().map(|d| d.join("theme"))

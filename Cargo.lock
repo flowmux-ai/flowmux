@@ -1136,6 +1136,7 @@ version = "0.11.3"
 dependencies = [
  "block2",
  "comrak",
+ "flowmux-config",
  "gtk4",
  "image",
  "libadwaita",

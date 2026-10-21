@@ -28,6 +28,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod resources;
+mod theme;
 
 #[cfg(test)]
 pub(super) mod smoke;
@@ -37,6 +38,7 @@ struct State {
     web: Retained<WKWebView>,
     signature: Option<FileSignature>,
     resources: Retained<resources::Resources>,
+    theme: Option<theme::Theme>,
 }
 
 impl State {
@@ -44,6 +46,10 @@ impl State {
         let (html, base) = match render_markdown_file(&self.args.path, &self.args.options) {
             Ok(document) => (document.html, document.base_dir),
             Err(error) => (super::error_html(&error.to_string()), None),
+        };
+        let html = match &self.theme {
+            Some(theme) => theme.document(html),
+            None => html,
         };
         self.resources.set_document(html, base);
         let base =
@@ -171,11 +177,16 @@ impl Viewer {
             let root = NSView::initWithFrame(NSView::alloc(mtm), frame);
             root.addSubview(&web);
             window.setContentView(Some(&root));
+            let theme = visible.then(theme::Theme::load);
+            if let Some(theme) = &theme {
+                theme.apply(&window, &web);
+            }
             let state = Rc::new(RefCell::new(State {
                 signature: super::file_signature(&args.path),
                 args,
                 web,
                 resources,
+                theme,
             }));
             let controls: Retained<Controls> = msg_send![
                 super(Controls::alloc(mtm).set_ivars(Rc::clone(&state))),
@@ -255,6 +266,25 @@ impl Viewer {
             }
             self.app.updateWindows();
         });
+    }
+
+    fn poll(&self) {
+        let theme = theme::Theme::load();
+        let changed = self
+            .state
+            .borrow()
+            .theme
+            .as_ref()
+            .is_some_and(|old| old != &theme);
+        if changed && !unsafe { self.state.borrow().web.isLoading() } {
+            theme.apply(&self.window, &self.state.borrow().web);
+            // Update styles in place so changing Flowmux's theme preserves scroll and zoom.
+            let css = theme.css();
+            if self.javascript(&format!("let style = document.getElementById('flowmux-theme'); if (!style) {{ style = document.createElement('style'); style.id = 'flowmux-theme'; document.head.append(style); }} style.textContent = {css:?}; return true;")).is_ok() {
+                self.state.borrow_mut().theme = Some(theme);
+            }
+        }
+        self.state.borrow_mut().poll();
     }
 
     fn wait<T>(&self, result: &RefCell<Option<Result<T, String>>>) -> Result<T, String> {
@@ -382,7 +412,7 @@ pub(super) fn run_app(args: Args) {
     while viewer.window.isVisible() {
         viewer.tick();
         if polled.elapsed() >= Duration::from_millis(250) {
-            viewer.state.borrow_mut().poll();
+            viewer.poll();
             polled = Instant::now();
         }
     }
