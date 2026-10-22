@@ -4,6 +4,7 @@ use adw::prelude::*;
 use flowmux_cli::agent::{
     self, DoctorStatus, InstallOutcome, Skill, SkillOverrides, Target, UninstallOutcome,
 };
+use flowmux_cli::hook_install::{self, HookCheckStatus, HookTarget};
 use std::{cell::Cell, path::PathBuf, rc::Rc};
 
 pub(super) fn build() -> gtk::ScrolledWindow {
@@ -29,17 +30,31 @@ pub(super) fn build() -> gtk::ScrolledWindow {
                 let group = adw::PreferencesGroup::new();
                 let (title, description) = match skill {
                     Skill::Browser => ("Flowmux CLI", "flowmux-browser · Workspaces, terminals, browser automation, SSH and notifications."),
-                    Skill::Team => ("Flowmux Team", "flowmux-team · Work inline in ordinary workspaces, or delegate to interactive Claude Code and Codex split panes in Team workspaces. Requires Python 3.9+ and authenticated agent CLIs."),
+                    Skill::Team => ("Flowmux Team", "flowmux-team · Lead teams or run as a worker with Claude Code, Codex, Gemini CLI and Antigravity CLI (agy). Ordinary workspaces stay inline. Requires Python 3.9+ and signed-in agent CLIs."),
                 };
                 group.set_title(title);
                 group.set_description(Some(description));
+                let mut group_rows = Vec::new();
                 for &target in skill.targets() {
                     let path = skill.path(target, &home, codex_home.as_deref(), &overrides);
                     let row = SkillRow::new(skill, target, path);
                     group.add(&row.widget);
+                    group_rows.push(row.clone());
                     rows.push(row);
                 }
                 content.append(&group);
+                if skill == Skill::Team {
+                    let check = gtk::Button::with_label("Check Team setup");
+                    check.set_widget_name("flowmux-team-check");
+                    check.set_halign(gtk::Align::Start);
+                    check.set_tooltip_text(Some("Check Python, agent commands and lifecycle hooks. Does not sign in or change settings."));
+                    check.connect_clicked(move |_| {
+                        for row in &group_rows {
+                            row.run(Action::Refresh);
+                        }
+                    });
+                    content.append(&check);
+                }
                 content.append(&skill_preview(skill));
             }
         }
@@ -59,7 +74,7 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     });
     content.append(&refresh);
     let note = gtk::Label::new(Some(
-        "Start a new agent session to discover installed skills if needed. Existing sessions, agent hooks and settings are unchanged.",
+        "Installed means the files match this Flowmux version. Your agent may load another project or shared copy. Check its skill list and reload skills or start a new session if needed. Sign-in and active-session loading are not checked.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
@@ -136,7 +151,8 @@ impl SkillRow {
             Target::ClaudeCode => "Claude Code",
             Target::Codex => "Codex",
             Target::OpenCode => "OpenCode",
-            Target::Antigravity => "Antigravity",
+            Target::Antigravity => "Antigravity CLI (agy)",
+            Target::Gemini => "Gemini CLI",
             Target::Cline => "Cline",
         };
         let prefix = widget_prefix(skill);
@@ -226,32 +242,32 @@ impl SkillRow {
                 // A file symlink can be unlinked without touching its target;
                 // linked directories and non-file entries remain user-managed.
                 let linked_directory = path.parent().is_some_and(|parent| parent.is_symlink());
-                let duplicates = if target == Target::Codex {
-                    agent::resolved_home()
-                        .map(|home| {
-                            skill.codex_unmanaged_paths(
-                                &home,
-                                agent::resolved_codex_home().as_deref(),
-                            )
-                        })
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
+                let duplicates = agent::resolved_home()
+                    .map(|home| {
+                        skill.unmanaged_paths(
+                            target,
+                            &home,
+                            agent::resolved_codex_home().as_deref(),
+                            &SkillOverrides::from_env(),
+                        )
+                    })
+                    .unwrap_or_default();
                 let removable = skill.removable(&path);
+                let setup = (skill == Skill::Team).then(|| team_setup(target));
                 (
                     skill.doctor(&path),
                     outcome,
                     removable,
                     linked_directory,
                     duplicates,
+                    setup,
                 )
             })
             .await;
             row.busy.set(false);
             row.remove.set_label("Remove");
             match result {
-                Ok((status, outcome, removable, linked_directory, duplicates)) => {
+                Ok((status, outcome, removable, linked_directory, duplicates, setup)) => {
                     row.show_status(&status);
                     row.remove.set_sensitive(removable);
                     match outcome {
@@ -267,6 +283,10 @@ impl SkillRow {
                         _ => {}
                     }
                     let mut details = row.widget.subtitle().unwrap_or_default().to_string();
+                    details.push_str(&format!("\n{}", row.path.display()));
+                    if let Some(setup) = setup {
+                        details.push_str(&format!("\n{setup}"));
+                    }
                     if linked_directory {
                         details.push_str(
                             "\nManaged through a linked folder; change or remove it at its source.",
@@ -274,7 +294,7 @@ impl SkillRow {
                     }
                     for duplicate in duplicates {
                         details.push_str(&format!(
-                            "\nAnother copy remains at {}. It may still appear in your agent after removal here.",
+                            "\nAnother copy remains at {}. It may take precedence and remain available after removal here.",
                             duplicate.display()
                         ));
                     }
@@ -311,4 +331,46 @@ impl SkillRow {
         self.button.set_label(button);
         self.button.set_sensitive(enabled);
     }
+}
+
+fn team_setup(target: Target) -> String {
+    if flowmux_config::paths::is_flatpak_sandbox() {
+        return "Check Python 3.9+, agent sign-in and Flowmux hooks in your host terminal.".into();
+    }
+    let (command, hook) = match target {
+        Target::ClaudeCode => ("claude", HookTarget::Claude),
+        Target::Codex => ("codex", HookTarget::Codex),
+        Target::Gemini => ("gemini", HookTarget::Gemini),
+        Target::Antigravity => ("agy", HookTarget::Antigravity),
+        _ => return "Team workers are not supported for this agent.".into(),
+    };
+    let python = std::process::Command::new("python3")
+        .args([
+            "-I",
+            "-S",
+            "-c",
+            "import sys; sys.exit(sys.version_info < (3, 9))",
+        ])
+        .status()
+        .is_ok_and(|status| status.success());
+    let mut details = vec![if python {
+        "Python 3.9+ found".to_string()
+    } else {
+        "Python 3.9+ required".to_string()
+    }];
+    details.push(if hook_install::agent_has_real_binary(command) {
+        format!("{command} found")
+    } else {
+        format!("Install {command} or add it to PATH")
+    });
+    details.push(match hook_install::check(hook).status {
+        HookCheckStatus::Installed => "Lifecycle hooks installed".into(),
+        HookCheckStatus::Error(error) => format!("Check lifecycle hooks: {error}"),
+        _ => format!(
+            "Lifecycle hooks need setup: flowmux hooks setup --agent {}",
+            hook.slug()
+        ),
+    });
+    details.push("Sign-in not checked".into());
+    details.join(" · ")
 }

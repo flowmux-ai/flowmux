@@ -22,8 +22,8 @@ does not bundle development, design, skill-discovery or MCP-builder skills.
 
 The optional [Flowmux team skill](agent-teams.md) adds role-based pane delegation
 and result collection. Options → Skills manages both skills in separate sections.
-Flowmux Team supports Claude Code and Codex and installs its scripts and sample
-along with its instructions.
+Flowmux Team installs for Claude Code, Codex, Gemini CLI and Antigravity CLI
+(`agy`), including its scripts and sample with the instructions.
 
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
@@ -32,11 +32,13 @@ After changing the source, rebuild the CLI before updating installed copies.
 ## Install from Settings
 
 Open **Options → Skills → Flowmux CLI** and click **Install** beside the agent you use
-(Codex, Claude Code, OpenCode, Antigravity, or Cline). Each row shows whether the
+(Codex, Claude Code, OpenCode, Gemini CLI, Antigravity CLI, or Cline). Each row shows whether the
 Flowmux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
 shows the backup location. **Refresh status** checks changes made outside Flowmux.
-Hover over an agent row to inspect its destination path. Expand **View skill
+Each row displays its destination path. **Check Team setup** checks Python 3.9+,
+the agent executable and lifecycle hooks without changing settings or signing in.
+It does not prove that authentication or task execution will succeed. Expand **View skill
 instructions** to inspect the exact bundled instructions without installing them.
 The display name is **Flowmux CLI**; agents discover it under the existing
 `flowmux-browser` identifier. A known extra Codex copy is shown in the row and
@@ -56,7 +58,7 @@ Special files such as named pipes are rejected without waiting or modifying them
 
 ## CLI installation
 
-`flowmux agent install` installs for all five targets when `--agent` is omitted,
+`flowmux agent install` installs for all six CLI-skill targets when `--agent` is omitted,
 even if those agents have not been installed. Prefer an explicit target when
 setting up one agent. `flowmux fix` instead checks for existing agent config
 roots and skips absent ones; directory presence is a setup heuristic, not proof
@@ -69,6 +71,7 @@ they do not automatically install these user-level integrations.
 | `opencode` | `~/.config/opencode/skills/flowmux-browser/SKILL.md` | `XDG_CONFIG_HOME` replaces `~/.config`; Flatpak uses the host default |
 | `codex` | `~/.agents/skills/flowmux-browser/SKILL.md` | `CODEX_HOME` affects legacy-copy diagnostics and hooks, not this shared skills root |
 | `antigravity` | `~/.gemini/config/skills/flowmux-browser/SKILL.md` | Shared Antigravity config root |
+| `gemini` | `~/.gemini/skills/flowmux-browser/SKILL.md` | `GEMINI_CLI_HOME` replaces the home directory, before appending `.gemini/skills` |
 | `cline` | `~/.cline/skills/flowmux-browser/SKILL.md` | Default user skills root |
 
 Paths were checked against the official [Claude skills](https://code.claude.com/docs/en/skills)
@@ -79,14 +82,27 @@ and [configuration](https://code.claude.com/docs/en/env-vars) documentation,
 [Cline](https://docs.cline.bot/customization/skills) documentation on 2026-10-05.
 Agents' additional project, plugin, or custom search directories remain under
 that agent's management; Flowmux does not scan every possible discovery source.
-Gemini has lifecycle-hook support but is not a product-skill install target.
+`agy` is an alias for `antigravity`; it keeps the existing installation path.
+Gemini CLI 0.64.0 discovery and the installed agy skill list were also checked
+on 2026-10-22. Gemini also discovers `~/.agents/skills`, with precedence over
+`~/.gemini/skills`. The UI and doctor report known shared copies without changing
+them. Project skills can override both; check the agent's actual skill list.
 
 ```sh
 flowmux agent install --agent codex
 flowmux agent doctor --agent codex --json
 flowmux agent install --agent codex --force
 flowmux agent uninstall --agent codex --skills-only --json
+flowmux agent install --agent gemini --skill flowmux-team
+flowmux agent doctor --agent agy --skill flowmux-team --json
+flowmux agent uninstall --agent agy --skill flowmux-team --skills-only
 ```
+
+`--skill` accepts `flowmux-browser` (default) or `flowmux-team` for all three
+operations. Without `--agent`, the Team selection covers Claude Code, Codex,
+Gemini CLI and agy. Unsupported agent/skill combinations fail before writing.
+Team removal always preserves wrappers and the other skill, including when
+`--skills-only` is omitted. Team installation does not install or enable hooks.
 
 - `install`: identical content is a no-op. Different content fails without
   `--force`. Forced updates preserve the old bytes in a unique sibling named

@@ -223,11 +223,16 @@ commands are below.
 "$FLOWMUX_CLI" --json agent doctor --agent codex
 "$FLOWMUX_CLI" agent install --agent codex --force
 "$FLOWMUX_CLI" agent uninstall --agent codex --skills-only
+"$FLOWMUX_CLI" agent install --agent gemini --skill flowmux-team
+"$FLOWMUX_CLI" agent doctor --agent agy --skill flowmux-team
 "$FLOWMUX_CLI" doctor
 ```
 
-Install targets: `claude-code`, `opencode`, `codex`, `antigravity`, `cline`.
-Omitting `--agent` selects all five. This user guide retains the
+Install targets: `claude-code`, `opencode`, `codex`, `antigravity` (`agy` alias),
+`gemini`, `cline`. Omitting `--agent` selects every target supported by the selected
+skill. `--skill flowmux-browser` is the default; `--skill flowmux-team` selects
+the complete Team bundle for Claude Code, Codex, Gemini CLI or agy.
+This user guide retains the
 `flowmux-browser` skill name/path for existing installations. Installation copies
 the CLI's bundled guide; no external skill catalog or browser download is needed.
 Identical content is unchanged. `--force` backs up modified content before update;

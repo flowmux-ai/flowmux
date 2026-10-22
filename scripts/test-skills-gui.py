@@ -191,7 +191,8 @@ def main():
     args = parser.parse_args()
     args.protected_pid = []
     h = fixture.Harness(args)
-    h.env.update(GTK_A11Y='atspi', CLAUDE_CONFIG_DIR=str(h.root / 'claude'), CODEX_HOME=str(h.root / 'codex'))
+    h.env.update(GTK_A11Y='atspi', CLAUDE_CONFIG_DIR=str(h.root / 'claude'), CODEX_HOME=str(h.root / 'codex'),
+                 GEMINI_CLI_HOME=str(h.root / 'gemini-home'))
     h.env.pop('AT_SPI_BUS_ADDRESS', None)
     h.env.pop('CODEX_THREAD_ID', None)
     h.env.pop('CODEX_SESSION_ID', None)
@@ -248,12 +249,47 @@ def main():
         click(button('Options'))
         click(fixture.wait_for(lambda: find('Skills', Atspi.Role.PAGE_TAB), 'Skills tab'))
         group = fixture.wait_for(lambda: find('Flowmux Team', Atspi.Role.LIST), 'Team group')
-        assert [group.get_child_at_index(i).get_name() for i in range(group.get_child_count())] == ['Claude Code', 'Codex']
+        assert [group.get_child_at_index(i).get_name() for i in range(group.get_child_count())] == [
+            'Claude Code', 'Codex', 'Gemini CLI', 'Antigravity CLI (agy)']
         row = find('Claude Code', Atspi.Role.LIST_ITEM, group)
         cli_group = find('Flowmux CLI', Atspi.Role.LIST)
         cli_row = find('Claude Code', Atspi.Role.LIST_ITEM, cli_group)
+        gemini_row = find('Gemini CLI', Atspi.Role.LIST_ITEM, group)
+        gemini_cli_row = find('Gemini CLI', Atspi.Role.LIST_ITEM, cli_group)
+        assert find('Antigravity CLI (agy)', Atspi.Role.LIST_ITEM, cli_group)
         assert not team.exists(), 'Viewing Skills must not install'
         screenshot('skills-initial.png')
+        # The Gemini override isolates both user and shared discovery roots.
+        gemini_skills = h.root / 'gemini-home/.gemini/skills'
+        gemini_team = gemini_skills / 'flowmux-team'
+        gemini_browser = gemini_skills / 'flowmux-browser/SKILL.md'
+        click(button('Install', gemini_cli_row))
+        button('Installed', gemini_cli_row)
+        click(button('Install', gemini_row))
+        button('Installed', gemini_row)
+        assert gemini_browser.exists()
+        for name in files:
+            assert (gemini_team / name).read_bytes() == (source / name).read_bytes(), name
+        shared = h.root / 'gemini-home/.agents/skills/flowmux-team/SKILL.md'
+        shared.parent.mkdir(parents=True)
+        shared.write_text('shared instructions')
+        click(button('Check Team setup'))
+        fixture.wait_for(lambda: any('Another copy remains' in n.get_name() for n in walk(gemini_row)),
+                         'Gemini shared-copy warning')
+        assert any('Sign-in not checked' in n.get_name() for n in walk(gemini_row))
+        (gemini_team / 'scripts/team.py').write_text('modified Gemini helper')
+        click(button('Refresh status'))
+        click(button('Update', gemini_row))
+        button('Installed', gemini_row)
+        assert any(p.read_text() == 'modified Gemini helper' for p in (gemini_team / 'scripts').glob('*.flowmux-backup-*'))
+        click(button('Remove', gemini_row))
+        button('Install', gemini_row)
+        assert not (gemini_team / 'SKILL.md').exists()
+        assert shared.read_text() == 'shared instructions' and gemini_browser.exists()
+        click(button('Remove', gemini_cli_row))
+        button('Install', gemini_cli_row)
+        assert not gemini_browser.exists()
+        h.pass_check('Gemini user-root install/update/removal, Team setup and shared-copy preservation work in the live UI')
         click(button('Install', cli_row))
         fixture.wait_for(browser.exists, 'CLI installed')
         click(button('Install', row))
