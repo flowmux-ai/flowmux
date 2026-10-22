@@ -645,6 +645,11 @@ fn install_macos_editor_key_capture(
             return glib::Propagation::Proceed;
         }
         let handoff = native_focus && !editor.focus_widget().is_focus();
+        #[cfg(all(test, feature = "native-smoke"))]
+        eprintln!(
+            "EDITOR_KEY key={keyval:?} native={native_focus} gtk={} selected={:?} handoff={handoff}",
+            editor.focus_widget().is_focus(), focused.get()
+        );
         if handoff {
             // A native click can precede the focus poll and leave GTK targeting a terminal.
             editor.grab_focus();

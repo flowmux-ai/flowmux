@@ -62,12 +62,21 @@ pub fn forward_native_key(context: &gtk::IMMulticontext, event: &gtk::gdk::Event
     FORWARD_NATIVE_KEY.with(|forward| {
         let previous = forward.replace(true);
         context.filter_keypress(event);
+        #[cfg(all(test, feature = "native-smoke"))]
+        eprintln!("NATIVE_FORWARD sent={}", !forward.get());
         !forward.replace(previous)
     })
 }
 
 unsafe extern "C-unwind" fn key_down_forwarding(this: &AnyObject, cmd: Sel, event: &NSEvent) {
     if FORWARD_NATIVE_KEY.with(|forward| forward.replace(false)) {
+        #[cfg(all(test, feature = "native-smoke"))]
+        eprintln!(
+            "NATIVE_DISPATCH code={} text={:?} responder={:?}",
+            event.keyCode(),
+            event.characters(),
+            event.window().and_then(|window| window.firstResponder())
+        );
         NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap()).sendEvent(event);
     } else {
         ORIGINAL_KEY_DOWN.get().unwrap()(this, cmd, event);

@@ -182,6 +182,20 @@ pub(super) async fn check(
         })
         .await
         .unwrap_or_else(|_| {
+            for (index, terminal) in terminals.iter().enumerate() {
+                eprintln!(
+                    "TERMINAL_{index} focused={} screen={:?}",
+                    terminal.widget.is_focus(),
+                    terminal.screen_text()
+                );
+            }
+            for (index, editor) in editors.iter().enumerate() {
+                eprintln!(
+                    "EDITOR_{index} gtk={} native={}",
+                    editor.focus_widget().is_focus(),
+                    editor.has_native_focus()
+                );
+            }
             panic!(
                 "{kind} {index}: native input did not settle: {:?}",
                 std::fs::read_to_string(&file)

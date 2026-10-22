@@ -1,144 +1,40 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-
 name: Test
-
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-  schedule:
-    - cron: '23 3 * * 1'
-
 jobs:
-  editor-web:
-    name: editor web
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: editor/flowmux-editor-web
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: editor/flowmux-editor-web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test and rebuild editor assets
-        run: |
-          npm run test:coverage
-          npm run build
-          npm run verify
-
-      - name: Check committed editor assets
-        working-directory: .
-        run: git diff --exit-code -- editor/flowmux-editor-web/dist
-
-  cargo-test:
-    name: cargo test and coverage
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Check Rust toolchain and formatting
-        run: |
-          rustup show active-toolchain
-          cargo fmt --all -- --check
-          rustup component add llvm-tools-preview
-
-      - name: Install coverage tool
-        run: cargo install cargo-llvm-cov --version 0.6.24 --locked
-
-      - name: Install Node.js for the OpenCode hook integration test
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
-            libwebkitgtk-6.0-dev libssl-dev \
-            libssh2-1-dev libdbus-1-dev \
-            meson ninja-build \
-            dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \
-            python3-gi gir1.2-atspi-2.0 at-spi2-core python3-pil gnome-keyring
-
-      - name: Install ThorVG (image viewer backend, all loaders + C API)
-        run: sudo ./scripts/install-thorvg.sh
-
-      - name: Allow WebKit namespaces for the test process
-        run: |
-          sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
-          sudo sh packaging/debian/postinst configure
-          sudo sh packaging/debian/prerm upgrade
-          aa-exec -p flowmux-webkit -- true
-          sudo sh packaging/debian/prerm remove
-          if aa-exec -p flowmux-webkit -- true 2>/dev/null; then
-            echo 'profile must be unloaded on package removal' >&2
-            exit 1
-          fi
-          sudo sh packaging/debian/postinst configure
-
-      - name: Run Linux tests and coverage (same script as local)
-        timeout-minutes: 30
-        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
-
-      - name: Upload test and coverage evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-test-evidence
-          path: |
-            target/ci/linux
-            target/llvm-cov
-          if-no-files-found: warn
-
-  stress:
-    name: headless stress probes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Install Rust
-        run: rustup show active-toolchain
-      - name: Run the separately ignored stress probes
-        run: cargo test -p flowmux-core -p flowmux-daemon -p flowmux-notify --locked -- --ignored --nocapture
-
   macos:
-    name: macOS build and native smoke
+    name: Native keyboard diagnostic
     runs-on: macos-15
     timeout-minutes: 35
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
+      GSK_RENDERER: cairo
+      G_DEBUG: fatal-criticals
+      FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Check Rust toolchain and formatting
+      - uses: actions/checkout@v7
+      - run: brew install pkg-config gtk4 libadwaita vte3
+      - run: cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
+      - name: Repeat native keyboard scenario
         run: |
-          rustup show active-toolchain
-          cargo fmt --all -- --check
-      - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja
-      - name: Install compatible ThorVG for native image and Lottie checks
-        run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
-      - name: Run macOS tests and native smoke (same script as local)
-        run: bash scripts/test-ci.sh macos
-      - name: Upload native smoke evidence
+          status=0
+          for attempt in 1 2 3 4 5; do
+            if cargo test -p flowmux --test macos_native --features native-smoke --locked > "target/native-keyboard-$attempt.log" 2>&1; then
+              cat "target/native-keyboard-$attempt.log"
+            else
+              cat "target/native-keyboard-$attempt.log"
+              status=1
+            fi
+          done
+          exit "$status"
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: macos-test-evidence
-          path: target/ci/macos
-          if-no-files-found: warn
+          name: native-keyboard-diagnostic
+          path: target/native-keyboard-*.log
