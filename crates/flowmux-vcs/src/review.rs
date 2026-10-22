@@ -13,6 +13,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
+const DISPLAY_LINE_LIMIT: usize = 100_000;
 pub mod history;
 pub mod notes;
 mod repository;
@@ -388,6 +389,10 @@ impl Snapshot {
         let text = String::from_utf8(bytes).map_err(|_| {
             "This diff is not UTF-8 text. Review it with a binary-aware editor.".to_string()
         })?;
+        // Short lines can exhaust GTK's per-row storage while still below the byte limit.
+        if text.lines().nth(DISPLAY_LINE_LIMIT).is_some() {
+            return Err("This diff exceeds the 100,000-line display limit. Review a smaller change with Git or your editor.".into());
+        }
         Ok(parse_patch(&text))
     }
 }

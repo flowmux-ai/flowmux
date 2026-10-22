@@ -109,6 +109,7 @@ the list is cleared and no feedback is copied or sent.
 ## Limits
 
 Local and connected SSH checkouts are supported. Git reads run outside the GUI thread with
-a 30-second command timeout and an explicit 8 MiB output limit. Non-UTF-8 patch
+a 30-second command timeout and an explicit 8 MiB output limit. Diff previews
+also stop at 100,000 lines to bound per-line display memory. Non-UTF-8 patch
 content reports an error. Git paths retain their original bytes; control
 characters are escaped for display. Untracked symlinks are never followed.

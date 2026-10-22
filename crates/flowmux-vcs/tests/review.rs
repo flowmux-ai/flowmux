@@ -65,6 +65,24 @@ fn empty_unborn_and_non_repository() {
 }
 
 #[test]
+fn short_line_diff_is_bounded_before_building_display_rows() {
+    let dir = repo();
+    let path = dir.path().join("many-lines.txt");
+    // This is well below the byte limit but expensive as tagged GTK rows.
+    std::fs::write(&path, "x\n".repeat(100_001)).unwrap();
+    let snapshot = load(dir.path(), Scope::WorkingTree).unwrap();
+    let Err(error) = snapshot.patch(&snapshot.files[0]) else {
+        panic!("oversized diff must be rejected");
+    };
+    assert!(error.contains("100,000-line display limit"), "{error}");
+
+    std::fs::write(path, "x\n".repeat(99_000)).unwrap();
+    let snapshot = load(dir.path(), Scope::WorkingTree).unwrap();
+    let patch = snapshot.patch(&snapshot.files[0]).unwrap();
+    assert_eq!(patch.lines.last().unwrap().new, Some(99_000));
+}
+
+#[test]
 fn configured_blank_context_keeps_comment_line_numbers() {
     let dir = repo();
     let root = dir.path();
