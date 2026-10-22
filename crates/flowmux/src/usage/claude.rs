@@ -10,12 +10,13 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_TRANSCRIPT_LINE_BYTES: usize = 16 * 1024 * 1024;
 // A locked login keychain makes `security` block on a GUI unlock/authorization
 // prompt with no timeout of its own, which would wedge the whole usage refresh.
 #[cfg(target_os = "macos")]
@@ -417,7 +418,16 @@ fn sum_transcript_tree(
             Err(_) => return Err(transcript_io_error()),
         };
         let file_total = sum_transcript_reader(BufReader::new(file), target_day, offset, &mut seen)
-            .map_err(|_| transcript_io_error())?;
+            .map_err(|error| {
+                if error.kind() == io::ErrorKind::FileTooLarge {
+                    UsageError::new(
+                        UsageErrorKind::InvalidData,
+                        "A Claude usage history entry exceeds the 16 MiB read limit.",
+                    )
+                } else {
+                    transcript_io_error()
+                }
+            })?;
         total = total.saturating_add(file_total);
     }
     Ok(total)
@@ -431,15 +441,30 @@ fn transcript_io_error() -> UsageError {
 }
 
 fn sum_transcript_reader<R: BufRead>(
-    reader: R,
+    mut reader: R,
     target_day: NaiveDate,
     offset: FixedOffset,
     seen: &mut HashSet<String>,
 ) -> io::Result<u64> {
     let mut total = 0_u64;
-    for line in reader.lines() {
-        let line = line?;
-        let Ok(entry) = serde_json::from_str::<TranscriptEntry>(&line) else {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if reader
+            .by_ref()
+            .take(MAX_TRANSCRIPT_LINE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)?
+            == 0
+        {
+            break;
+        }
+        // Do not silently report a partial total when a record cannot be read safely.
+        if line.len() > MAX_TRANSCRIPT_LINE_BYTES {
+            return Err(io::Error::from(io::ErrorKind::FileTooLarge));
+        }
+        let line = std::str::from_utf8(&line)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let Ok(entry) = serde_json::from_str::<TranscriptEntry>(line) else {
             continue;
         };
         if entry.kind.as_deref() != Some("assistant") {
@@ -556,6 +581,35 @@ mod tests {
 
         assert_eq!(total, 17);
         assert_eq!(seen.len(), 1);
+    }
+
+    #[test]
+    fn transcript_reader_stops_before_allocating_an_entire_oversized_line() {
+        let limit = 16 * 1024 * 1024;
+        let mut reader = io::Cursor::new(vec![b'x'; limit + 100]);
+        let error = sum_transcript_reader(
+            &mut reader,
+            NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+            FixedOffset::east_opt(0).unwrap(),
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::FileTooLarge);
+        assert_eq!(reader.position(), limit as u64 + 1);
+    }
+
+    #[test]
+    fn oversized_history_reports_unavailable_instead_of_a_partial_total() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = File::create(temp.path().join("large.jsonl")).unwrap();
+        file.set_len(MAX_TRANSCRIPT_LINE_BYTES as u64 + 1).unwrap();
+        let error = sum_transcript_tree(
+            temp.path(),
+            NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+            FixedOffset::east_opt(0).unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, UsageErrorKind::InvalidData);
     }
 
     #[cfg(unix)]
