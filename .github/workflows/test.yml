@@ -19,12 +19,19 @@ jobs:
       FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY: "1"
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: native-key-debug-${{ github.sha }}
+          restore-keys: native-key-debug-
       - run: brew install pkg-config gtk4 libadwaita vte3
       - run: cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
       - name: Repeat native keyboard scenario
         run: |
           status=0
-          for attempt in 1 2 3 4 5; do
+          for attempt in $(seq 1 20); do
             if cargo test -p flowmux --test macos_native --features native-smoke --locked > "target/native-keyboard-$attempt.log" 2>&1; then
               cat "target/native-keyboard-$attempt.log"
             else

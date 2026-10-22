@@ -40,6 +40,25 @@ thread_local! {
     static FORWARD_NATIVE_KEY: Cell<bool> = const { Cell::new(false) };
 }
 
+#[cfg(all(test, feature = "native-smoke"))]
+thread_local! {
+    static KEY_TRACE: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(all(test, feature = "native-smoke"))]
+pub(crate) fn trace(message: String) {
+    KEY_TRACE.with(|trace| trace.borrow_mut().push(message));
+}
+
+#[cfg(all(test, feature = "native-smoke"))]
+pub(crate) fn dump_trace() {
+    KEY_TRACE.with(|trace| {
+        for line in trace.borrow_mut().drain(..) {
+            eprintln!("{line}");
+        }
+    });
+}
+
 /// Let Quartz recover the original NSEvent, including its IME metadata.
 // shortcut: uses GTK's private Quartz bridge until GDK exposes native key events.
 pub fn forward_native_key(context: &gtk::IMMulticontext, event: &gtk::gdk::Event) -> bool {
@@ -63,7 +82,7 @@ pub fn forward_native_key(context: &gtk::IMMulticontext, event: &gtk::gdk::Event
         let previous = forward.replace(true);
         context.filter_keypress(event);
         #[cfg(all(test, feature = "native-smoke"))]
-        eprintln!("NATIVE_FORWARD sent={}", !forward.get());
+        trace(format!("NATIVE_FORWARD sent={}", !forward.get()));
         !forward.replace(previous)
     })
 }
@@ -71,14 +90,14 @@ pub fn forward_native_key(context: &gtk::IMMulticontext, event: &gtk::gdk::Event
 unsafe extern "C-unwind" fn key_down_forwarding(this: &AnyObject, cmd: Sel, event: &NSEvent) {
     if FORWARD_NATIVE_KEY.with(|forward| forward.replace(false)) {
         #[cfg(all(test, feature = "native-smoke"))]
-        eprintln!(
+        trace(format!(
             "NATIVE_DISPATCH code={} text={:?} responder={:?}",
             event.keyCode(),
             event.characters(),
             event
                 .window(objc2::MainThreadMarker::new().unwrap())
                 .and_then(|window| window.firstResponder())
-        );
+        ));
         NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap()).sendEvent(event);
     } else {
         ORIGINAL_KEY_DOWN.get().unwrap()(this, cmd, event);

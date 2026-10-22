@@ -182,6 +182,7 @@ pub(super) async fn check(
         })
         .await
         .unwrap_or_else(|_| {
+            crate::ui::macos_ime::dump_trace();
             for (index, terminal) in terminals.iter().enumerate() {
                 eprintln!(
                     "TERMINAL_{index} focused={} screen={:?}",
@@ -217,16 +218,17 @@ pub(super) async fn check(
         }
     }
     controller.window.remove_controller(&focus_poll);
+    crate::ui::macos_ime::dump_trace();
     println!("MACOS_FOUR_PANE_EDITING_KEYS_OK");
 }
 
 async fn key(app: &NSApplication, window: &NSWindow, text: &str, code: u16, shift: bool) {
-    eprintln!(
+    crate::ui::macos_ime::trace(format!(
         "POST_KEY text={text:?} active={} key_window={} responder={:?}",
         app.isActive(),
         window.isKeyWindow(),
         window.firstResponder()
-    );
+    ));
     let text = NSString::from_str(text);
     let flags = if shift {
         NSEventModifierFlags::Shift
