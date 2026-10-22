@@ -121,6 +121,21 @@ pub(super) async fn check(
         std::fs::write(&file, "").unwrap();
         editor.open_file(&file).await.unwrap();
         editor.flush_pending_changes().await.unwrap();
+        editor
+            .keyboard_probe(
+                r#"
+            window.keyAudit = [];
+            for (const type of ['focus', 'blur', 'keydown', 'keyup', 'beforeinput', 'input']) {
+                document.addEventListener(type, event => keyAudit.push({
+                    type, key: event.key, data: event.data,
+                    tag: event.target.tagName, cls: event.target.className,
+                    value: event.target.value, focused: document.hasFocus()
+                }), true);
+            }
+            'armed'
+        "#,
+            )
+            .await;
     }
     for (index, terminal) in terminals.iter().enumerate() {
         terminal
@@ -171,7 +186,7 @@ pub(super) async fn check(
         let kind = if is_editor { "editor" } else { "terminal" };
         let file = root.join(format!("keyboard-{kind}-{index}.txt"));
         // Posting an NSEvent does not acknowledge its WebKit/PTY processing.
-        glib::future_with_timeout(Duration::from_secs(10), async {
+        let result = glib::future_with_timeout(Duration::from_secs(10), async {
             loop {
                 if is_editor {
                     editors[index].flush_pending_changes().await.unwrap();
@@ -191,8 +206,16 @@ pub(super) async fn check(
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
-        .await
-        .unwrap_or_else(|_| {
+        .await;
+        if is_editor {
+            eprintln!(
+                "DOM_TRACE index={index} {}",
+                editors[index]
+                    .keyboard_probe("JSON.stringify(keyAudit)")
+                    .await
+            );
+        }
+        result.unwrap_or_else(|_| {
             crate::ui::macos_ime::dump_trace();
             for (index, terminal) in terminals.iter().enumerate() {
                 eprintln!(
