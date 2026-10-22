@@ -2,7 +2,10 @@
 use super::*;
 use gtk::glib::translate::ToGlibPtr;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
+    NSWindow,
+};
 use objc2_foundation::{NSPoint, NSString};
 
 unsafe extern "C" {
@@ -18,6 +21,21 @@ pub(super) async fn check(
     editor_a: PaneId,
     root: &std::path::Path,
 ) {
+    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
+    // This main-thread harness does not enter NSApplication's normal launch loop.
+    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    app.finishLaunching();
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    let surface = controller.window.surface().unwrap();
+    let window = unsafe {
+        &*gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>()
+    };
+    window.makeKeyAndOrderFront(None);
+    wait_until("native keyboard window active", || {
+        app.isActive() && window.isKeyWindow()
+    })
+    .await;
     let terminal_b = controller
         .split_pane(terminal_a, SplitDirection::Horizontal)
         .await
@@ -98,13 +116,6 @@ pub(super) async fn check(
         "a deferred focus request replaced the newer pane selection"
     );
 
-    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
-    app.activate();
-    let surface = controller.window.surface().unwrap();
-    let window = unsafe {
-        &*gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>()
-    };
-    window.makeKeyAndOrderFront(None);
     for (index, editor) in editors.iter().enumerate() {
         let file = root.join(format!("keyboard-editor-{index}.txt"));
         std::fs::write(&file, "").unwrap();
