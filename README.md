@@ -108,7 +108,8 @@ against the terminal's current directory, and absolute paths work too.
 The Markdown preview refreshes every time you save, so you can
 write in the built-in editor and watch the result side by side. Fenced `mermaid`
 blocks render as diagrams offline, including in `flowmux-md-viewer --render-png`
-output. Invalid diagrams keep their source and show an error. Images require
+output. Markdown previews accept files up to 1 MiB; larger files can be opened
+as text in the editor. Invalid diagrams keep their source and show an error. Images require
 [ThorVG](docs/setup.md#thorvg-image-viewer).
 
 <img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />

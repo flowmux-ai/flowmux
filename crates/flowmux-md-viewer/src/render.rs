@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use comrak::{markdown_to_html, Options};
@@ -9,6 +10,8 @@ const MIN_WIDTH: u32 = 320;
 const MAX_WIDTH: u32 = 4096;
 const DEFAULT_WIDTH: u32 = 900;
 const DEFAULT_ZOOM: f32 = 1.0;
+// Markdown expands into an AST and then a WebKit DOM, both much larger than the source.
+const MAX_MARKDOWN_BYTES: usize = 1024 * 1024;
 const DEFAULT_FONT: &str = "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
 
 #[derive(Clone, Debug)]
@@ -57,12 +60,16 @@ pub struct HtmlDocument {
 #[derive(Debug)]
 pub enum RenderError {
     Io(String),
+    TooLarge,
 }
 
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(message) => f.write_str(message),
+            Self::TooLarge => f.write_str(
+                "Markdown exceeds the 1 MiB preview limit. Open a smaller document or use a text editor.",
+            ),
         }
     }
 }
@@ -73,7 +80,17 @@ pub fn render_markdown_file(
     path: &Path,
     options: &RenderOptions,
 ) -> Result<HtmlDocument, RenderError> {
-    let markdown = std::fs::read_to_string(path)
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take(MAX_MARKDOWN_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|err| RenderError::Io(format!("read {}: {err}", path.display())))?;
+    if bytes.len() > MAX_MARKDOWN_BYTES {
+        return Err(RenderError::TooLarge);
+    }
+    let markdown = String::from_utf8(bytes)
         .map_err(|err| RenderError::Io(format!("read {}: {err}", path.display())))?;
     let mut options = options.clone();
     if options.base_dir.is_none() {
@@ -90,6 +107,9 @@ pub fn render_markdown(
     markdown: &str,
     options: &RenderOptions,
 ) -> Result<HtmlDocument, RenderError> {
+    if markdown.len() > MAX_MARKDOWN_BYTES {
+        return Err(RenderError::TooLarge);
+    }
     let body = render_markdown_body(markdown);
     Ok(HtmlDocument {
         html: wrap_html_document(&body, options),
@@ -309,6 +329,31 @@ fn css_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_limits_apply_before_parsing_memory_and_file_inputs() {
+        let options = RenderOptions::default();
+        let markdown = " ".repeat(MAX_MARKDOWN_BYTES);
+        assert!(render_markdown(&markdown, &options).is_ok());
+        assert!(matches!(
+            render_markdown(&(markdown + "x"), &options),
+            Err(RenderError::TooLarge)
+        ));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.md");
+        // The read cap may split UTF-8; size rejection must still win over decoding.
+        std::fs::write(&path, "é".repeat(MAX_MARKDOWN_BYTES / 2 + 1)).unwrap();
+        assert!(matches!(
+            render_markdown_file(&path, &options),
+            Err(RenderError::TooLarge)
+        ));
+        std::fs::write(&path, "# Small again\n").unwrap();
+        assert!(render_markdown_file(&path, &options)
+            .unwrap()
+            .html
+            .contains("Small again"));
+    }
 
     #[test]
     fn renders_gfm_extensions_to_html() {
