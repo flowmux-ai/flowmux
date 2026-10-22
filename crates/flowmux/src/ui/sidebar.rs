@@ -276,10 +276,32 @@ impl Sidebar {
         // ---- Native sidebar header ----
         let new_btn = gtk::Button::from_icon_name("list-add-symbolic");
         new_btn.set_tooltip_text(Some("New workspace (Ctrl+N)"));
+        new_btn.set_widget_name("flowmux-new-workspace-button");
+        new_btn.update_property(&[gtk::accessible::Property::Label("New workspace")]);
         let bridge_for_new = bridge.clone();
         new_btn.connect_clicked(move |_| {
             create_local_workspace(&bridge_for_new);
         });
+        let creation_menu_btn = gtk::Button::from_icon_name("pan-down-symbolic");
+        creation_menu_btn.set_widget_name("flowmux-workspace-creation-menu-button");
+        creation_menu_btn.set_tooltip_text(Some("Workspace creation options"));
+        creation_menu_btn.update_property(&[gtk::accessible::Property::Label(
+            "Workspace creation options",
+        )]);
+        let menu_bridge = bridge.clone();
+        let new_ssh = on_new_ssh_workspace.clone();
+        creation_menu_btn.connect_clicked(move |button| {
+            crate::ui::overlay_menu::show_at(
+                button,
+                0.0,
+                f64::from(button.height()),
+                workspace_creation_items(&menu_bridge, new_ssh.clone()),
+            );
+        });
+        let creation_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        creation_buttons.add_css_class("flowmux-workspace-creation-buttons");
+        creation_buttons.append(&new_btn);
+        creation_buttons.append(&creation_menu_btn);
         let bell_button = gtk::MenuButton::new();
         bell_button.set_icon_name("notifications-symbolic");
         bell_button.set_tooltip_text(Some("Notifications"));
@@ -291,7 +313,7 @@ impl Sidebar {
         header.set_show_start_title_buttons(true);
         header.set_show_end_title_buttons(false);
         header.set_title_widget(Some(&header_title));
-        header.pack_start(&new_btn);
+        header.pack_start(&creation_buttons);
         header.pack_end(&bell_button);
 
         // Route options through the bridge so the controller can present the window.
@@ -2336,6 +2358,125 @@ mod tests {
             rx.recv().await.unwrap(),
             GtkCommand::NewWorkspace { team: true, .. }
         ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn header_workspace_menu_opens_dismisses_and_preserves_creation_actions() {
+        let (bridge, rx) = Bridge::new();
+        let ssh_calls = Rc::new(Cell::new(0));
+        let calls = ssh_calls.clone();
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            move || calls.set(calls.get() + 1),
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+            false,
+        );
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&sidebar.header);
+        content.append(&sidebar.root);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&content));
+        let window = gtk::Window::builder()
+            .default_width(400)
+            .default_height(500)
+            .child(&overlay)
+            .build();
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        let buttons = descendant_widgets(&sidebar.header);
+        let find_button = |name| {
+            buttons
+                .iter()
+                .find(|widget| widget.widget_name() == name)
+                .unwrap()
+                .clone()
+                .downcast::<gtk::Button>()
+                .unwrap()
+        };
+        let new_button = find_button("flowmux-new-workspace-button");
+        let menu_button = find_button("flowmux-workspace-creation-menu-button");
+        assert_eq!(
+            new_button.next_sibling(),
+            Some(menu_button.clone().upcast())
+        );
+        assert_eq!(
+            menu_button.tooltip_text().as_deref(),
+            Some("Workspace creation options")
+        );
+
+        for choice in [None, Some("New Team Workspace"), Some("New SSH Workspace")] {
+            menu_button.emit_clicked();
+            let scrim = overlay.last_child().unwrap();
+            assert!(
+                scrim.is::<gtk::Fixed>(),
+                "dropdown must open the overlay menu"
+            );
+            let menu = scrim.first_child().unwrap();
+            let items: Vec<gtk::Button> = descendant_widgets(&menu)
+                .into_iter()
+                .filter_map(|widget| widget.downcast().ok())
+                .collect();
+            assert_eq!(items.len(), 3);
+            assert!(
+                rx.try_recv().is_err(),
+                "opening the menu created a workspace"
+            );
+            if let Some(label) = choice {
+                items
+                    .iter()
+                    .find(|button| button.label().as_deref() == Some(label))
+                    .unwrap()
+                    .emit_clicked();
+                if label == "New Team Workspace" {
+                    assert!(matches!(
+                        rx.recv().await.unwrap(),
+                        GtkCommand::NewWorkspace { team: true, .. }
+                    ));
+                    assert_eq!(ssh_calls.get(), 0);
+                } else {
+                    assert_eq!(ssh_calls.get(), 1);
+                    assert!(rx.try_recv().is_err());
+                }
+            } else {
+                let controllers = menu.observe_controllers();
+                let key = (0..controllers.n_items())
+                    .find_map(|i| {
+                        controllers
+                            .item(i)
+                            .and_downcast::<gtk::EventControllerKey>()
+                    })
+                    .unwrap();
+                assert!(key.emit_by_name::<bool>(
+                    "key-pressed",
+                    &[
+                        &gtk::gdk::Key::Escape,
+                        &0u32,
+                        &gtk::gdk::ModifierType::empty(),
+                    ],
+                ));
+                assert_eq!(ssh_calls.get(), 0);
+                assert!(rx.try_recv().is_err());
+            }
+            assert!(
+                scrim.parent().is_none(),
+                "menu must close after dismissal or activation"
+            );
+        }
+
+        new_button.emit_clicked();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::NewWorkspace { team: false, .. }
+        ));
+        assert_eq!(ssh_calls.get(), 1);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(overlay.last_child(), Some(content.upcast()));
+        window.close();
     }
 
     #[cfg(not(target_os = "macos"))]

@@ -450,6 +450,11 @@ paned > separator {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
 }}
+.flowmux-workspace-creation-buttons button {{
+    min-width: 16px;
+    padding-left: 4px;
+    padding-right: 4px;
+}}
 .flowmux-window-split > separator {{
     background-color: transparent;
     background-image: none;
