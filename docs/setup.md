@@ -115,6 +115,13 @@ sudo scripts/install-thorvg.sh                 # ThorVG v1.0.6 → /usr/local
 PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 ```
 
+The v1.0.6 helper applies a JerryScript enum-range fix needed by Lottie
+expressions when built as C++. Existing source installations need to rerun the
+helper to receive it; the compatibility probe checks the API and loaders, not
+this patch. System packages need an equivalent upstream or distribution fix.
+Native regression checks are available with
+`bash scripts/test-thorvg-sanitizers.sh` (Clang 18, Meson, Ninja and pkg-config).
+
 Raster previews have a 64 MiB decoding budget. Images exceeding it show an error
 and can be opened in the default application explicitly. The limit applies to
 decoded pixels and decoder buffers, not the compressed file size.

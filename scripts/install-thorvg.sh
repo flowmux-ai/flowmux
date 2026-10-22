@@ -45,6 +45,12 @@ trap 'rm -rf "$src_dir"' EXIT
 echo "==> cloning ThorVG $THORVG_VERSION"
 git clone --depth 1 --branch "$THORVG_VERSION" https://github.com/thorvg/thorvg.git "$src_dir"
 
+# JerryScript is compiled as C++; masked function types need a valid enum range.
+if [ "$THORVG_VERSION" = v1.0.6 ]; then
+    scripts=$(cd "$(dirname "$0")" && pwd)
+    git -C "$src_dir" apply "$scripts/patches/thorvg-1.0.6-object-base-type.patch"
+fi
+
 echo "==> configuring (all loaders, C API, CPU/software engine)"
 build_options=(--buildtype=release)
 if [ "$(uname -s)" = Darwin ]; then

@@ -1,0 +1,17 @@
+SPDX-License-Identifier: Apache-2.0
+Copyright JS Foundation and other contributors, http://js.foundation
+
+ThorVG v1.0.6 compiles JerryScript as C++. The base-type mask also returns
+function/proxy values above ARRAY; include those in the enum value range.
+
+--- a/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-globals.h
++++ b/src/loaders/lottie/jerryscript/jerry-core/ecma/base/ecma-globals.h
+@@ -663,6 +663,8 @@
+   ECMA_OBJECT_BASE_TYPE_GENERAL = ECMA_OBJECT_TYPE_GENERAL, /**< generic objects */
+   ECMA_OBJECT_BASE_TYPE_CLASS = ECMA_OBJECT_TYPE_CLASS, /**< Objects with class property */
+   ECMA_OBJECT_BASE_TYPE_ARRAY = ECMA_OBJECT_TYPE_ARRAY, /**< Array object (15.4) */
++  /* Masked function/proxy types must also fit this enum's C++ value range. */
++  ECMA_OBJECT_BASE_TYPE__MAX = ECMA_OBJECT_TYPE__MAX,
+ } ecma_object_base_type_t;
+ 
+ /**

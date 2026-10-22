@@ -54,6 +54,7 @@ elif name == "pkg-config" and "--modversion" in sys.argv: print("1.0.6")
                 self.assertEqual("ldconfig " in commands, system == "Linux")
                 self.assertIn("-Dloaders=all", commands)
                 self.assertIn("-Dbindings=capi", commands)
+                self.assertIn("thorvg-1.0.6-object-base-type.patch", commands)
 
 
 class ProbeTests(unittest.TestCase):
