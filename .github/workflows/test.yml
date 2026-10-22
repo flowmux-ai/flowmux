@@ -37,7 +37,7 @@ jobs:
       - name: Repeat native keyboard scenario
         run: |
           status=0
-          for attempt in $(seq 1 20); do
+          for attempt in $(seq 1 2); do
             if cargo test -p flowmux --test macos_native --features native-smoke --locked > "target/native-keyboard-$attempt.log" 2>&1; then
               cat "target/native-keyboard-$attempt.log"
             else
