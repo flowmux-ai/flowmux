@@ -58,6 +58,8 @@ pub const CURSOR_BLINK_INTERVAL_DEFAULT: u32 = 530;
 /// Stable identity of a usage window; changing values and reset times are not keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageBarPin {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
     pub label: String,
     pub scope: Option<String>,
     pub duration_minutes: Option<u64>,
@@ -706,13 +708,22 @@ mod tests {
                 .usage_bar_pins,
             UsageBarPins::default()
         );
+        let legacy_pin: UsageBarPin = serde_json::from_value(serde_json::json!({
+            "label": "Weekly", "scope": null, "duration_minutes": 10080
+        }))
+        .unwrap();
+        assert_eq!(legacy_pin.source_id, None);
         with_xdg(|_| {
             let mut pinned = before.clone();
             pinned.usage_bar_pins.claude = Some(vec![UsageBarPin {
+                source_id: Some("seven_day_sonnet".into()),
                 label: "Weekly".into(),
                 scope: Some("Sonnet".into()),
                 duration_minutes: Some(10_080),
             }]);
+            let mut second = pinned.usage_bar_pins.claude.as_ref().unwrap()[0].clone();
+            second.source_id = Some("limits:sonnet-weekly".into());
+            pinned.usage_bar_pins.claude.as_mut().unwrap().push(second);
             save_changes(&before, &pinned).unwrap();
             let mut other = before.clone();
             other.usage_bar_pins.codex = Some(vec![]);

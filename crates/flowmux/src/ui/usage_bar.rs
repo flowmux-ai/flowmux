@@ -148,9 +148,10 @@ impl UsageBar {
                     .or_else(|| any_limit(state).map(|(name, value)| ("Limit", name, value)));
             }
             let pins = self.pins.borrow();
+            let selected = effective_pins(state, &pins);
             let slots: Vec<_> = match provider_pins(state.provider, &pins) {
                 None => slots.into_iter().collect(),
-                Some(selected) => state
+                Some(_) => state
                     .limits
                     .iter()
                     .flat_map(|limits| &limits.value)
@@ -223,6 +224,7 @@ impl UsageBar {
 
 fn window_pin(window: &UsageWindow) -> UsageBarPin {
     UsageBarPin {
+        source_id: window.source_id.clone(),
         label: window.label.clone(),
         scope: window.scope.clone(),
         duration_minutes: window.duration_minutes,
@@ -242,7 +244,35 @@ fn valid_percent(window: &UsageWindow) -> bool {
 
 fn effective_pins(state: &ProviderState, pins: &UsageBarPins) -> Vec<UsageBarPin> {
     if let Some(selected) = provider_pins(state.provider, pins) {
-        return selected.clone();
+        return selected
+            .iter()
+            .map(|pin| {
+                let matched = state
+                    .limits
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|limits| &limits.value)
+                    .filter(|window| match &pin.source_id {
+                        Some(id) => window.source_id.as_ref() == Some(id),
+                        None => {
+                            window.label == pin.label
+                                && window.scope == pin.scope
+                                && window.duration_minutes == pin.duration_minutes
+                        }
+                    })
+                    // Old selections have no source key: bind each to one stable source.
+                    .min_by_key(|window| {
+                        (
+                            !window
+                                .source_id
+                                .as_deref()
+                                .is_some_and(|id| id.starts_with("top:")),
+                            window.source_id.as_deref(),
+                        )
+                    });
+                matched.map(window_pin).unwrap_or_else(|| pin.clone())
+            })
+            .collect();
     }
     let Some(limits) = &state.limits else {
         return Vec::new();
@@ -337,6 +367,7 @@ pub(crate) mod tests {
                 values
                     .iter()
                     .map(|&(duration, percent)| UsageWindow {
+                        source_id: None,
                         label: String::new(),
                         scope: None,
                         used_percent: percent,
@@ -354,6 +385,7 @@ pub(crate) mod tests {
             provider,
             tokens: FieldRefresh::Failure(UsageError::network()),
             limits: FieldRefresh::Success(vec![UsageWindow {
+                source_id: None,
                 label: String::new(),
                 scope: Some(scope.to_owned()),
                 used_percent: percent,
@@ -362,6 +394,69 @@ pub(crate) mod tests {
             }]),
             collected_at: Utc::now(),
         }
+    }
+
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn colliding_pins_select_one_source_and_survive_refresh() {
+        let bar = UsageBar::new();
+        let mut state = UsagePanelState::default();
+        state.apply(refresh(
+            Provider::Claude,
+            &[(10_080, 20.0), (10_080, 40.0), (10_080, 60.0)],
+        ));
+        let windows = &mut state.claude.limits.as_mut().unwrap().value;
+        for (index, window) in windows.iter_mut().enumerate() {
+            window.label = "Weekly".into();
+            window.source_id = Some(format!("source:{index}"));
+        }
+        let windows = windows.clone();
+        bar.set_pins(UsageBarPins {
+            claude: Some(vec![]),
+            codex: Some(vec![]),
+        });
+        bar.toggle_pin(&state.claude, &windows[1], true);
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "40%(1W)");
+        assert!(!bar.meters[0].borrow()[1].root.is_visible());
+        assert!(!bar.is_pinned(&state.claude, &windows[0]));
+        assert!(bar.is_pinned(&state.claude, &windows[1]));
+        assert!(!bar.is_pinned(&state.claude, &windows[2]));
+        let saved = bar.pins();
+        let refreshed = &mut state.claude.limits.as_mut().unwrap().value;
+        refreshed.rotate_left(1);
+        refreshed[0].used_percent = 75.0;
+        refreshed[0].resets_at = Some(Utc::now());
+        bar.set_pins(saved);
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "75%(1W)");
+        assert!(!bar.meters[0].borrow()[1].root.is_visible());
+        let mut legacy = window_pin(&windows[0]);
+        legacy.source_id = None;
+        bar.set_pins(UsageBarPins {
+            claude: Some(vec![legacy]),
+            codex: Some(vec![]),
+        });
+        assert_eq!(
+            effective_pins(&state.claude, &bar.pins()),
+            vec![window_pin(&windows[0])]
+        );
+        bar.render(&state, true);
+        assert_eq!(
+            bar.meters[0]
+                .borrow()
+                .iter()
+                .filter(|meter| meter.root.is_visible())
+                .count(),
+            1
+        );
+        bar.toggle_pin(&state.claude, &windows[2], true);
+        assert_eq!(bar.pins().claude.as_ref().unwrap().len(), 2);
+        assert!(bar
+            .pins()
+            .claude
+            .unwrap()
+            .iter()
+            .all(|pin| pin.source_id.is_some()));
     }
 
     #[test]

@@ -38,6 +38,7 @@ pub(crate) struct TokenTotals {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct UsageWindow {
+    pub(crate) source_id: Option<String>,
     pub(crate) label: String,
     pub(crate) scope: Option<String>,
     pub(crate) used_percent: f64,
@@ -259,6 +260,7 @@ mod tests {
 
     fn window(duration_minutes: u64, used_percent: f64) -> UsageWindow {
         UsageWindow {
+            source_id: None,
             label: duration_label(Some(duration_minutes)),
             scope: None,
             used_percent,

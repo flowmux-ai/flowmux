@@ -341,8 +341,17 @@ fn parse_rate_limits_response(value: &Value) -> Result<Vec<UsageWindow>, UsageEr
         .get("rateLimits")
         .and_then(|snapshot| snapshot.get("limitId"))
         .and_then(Value::as_str);
+    let root_source = root_limit_id.or_else(|| {
+        let root = result.get("rateLimits")?;
+        result
+            .get("rateLimitsByLimitId")?
+            .as_object()?
+            .iter()
+            .find(|(_, snapshot)| *snapshot == root)
+            .map(|(id, _)| id.as_str())
+    });
     if let Some(snapshot) = result.get("rateLimits") {
-        append_snapshot_windows(snapshot, None, &mut windows);
+        append_snapshot_windows(snapshot, None, root_source.unwrap_or("root"), &mut windows);
     }
     if let Some(by_id) = result.get("rateLimitsByLimitId").and_then(Value::as_object) {
         for (limit_id, snapshot) in by_id {
@@ -350,7 +359,7 @@ fn parse_rate_limits_response(value: &Value) -> Result<Vec<UsageWindow>, UsageEr
                 .get("limitId")
                 .and_then(Value::as_str)
                 .unwrap_or(limit_id);
-            if Some(limit_id) == root_limit_id {
+            if Some(limit_id) == root_source {
                 continue;
             }
             let scope = snapshot
@@ -358,24 +367,18 @@ fn parse_rate_limits_response(value: &Value) -> Result<Vec<UsageWindow>, UsageEr
                 .and_then(Value::as_str)
                 .unwrap_or(limit_id)
                 .to_owned();
-            append_snapshot_windows(snapshot, Some(scope), &mut windows);
+            append_snapshot_windows(snapshot, Some(scope), limit_id, &mut windows);
         }
     }
     let mut seen = HashSet::new();
-    windows.retain(|window| {
-        seen.insert((
-            window.duration_minutes,
-            window.resets_at,
-            window.used_percent.to_bits(),
-            window.scope.clone(),
-        ))
-    });
+    windows.retain(|window| seen.insert(window.source_id.clone()));
     Ok(windows)
 }
 
 fn append_snapshot_windows(
     snapshot: &Value,
     fallback_scope: Option<String>,
+    source_id: &str,
     windows: &mut Vec<UsageWindow>,
 ) {
     let Some(object) = snapshot.as_object() else {
@@ -408,6 +411,7 @@ fn append_snapshot_windows(
             .map(|minutes| minutes.round() as u64);
         let resets_at = window.get("resetsAt").and_then(timestamp);
         windows.push(UsageWindow {
+            source_id: Some(format!("{source_id}:{key}")),
             label: duration_label(duration_minutes),
             scope: scope.clone(),
             used_percent,
@@ -420,6 +424,7 @@ fn append_snapshot_windows(
     if let Some(window) = object.get("individualLimit").and_then(Value::as_object) {
         if let Some(remaining_percent) = window.get("remainingPercent").and_then(json_number) {
             windows.push(UsageWindow {
+                source_id: Some(format!("{source_id}:individualLimit")),
                 label: duration_label(None),
                 scope: scope.or_else(|| Some("Individual".to_owned())),
                 used_percent: 100.0 - remaining_percent,
@@ -780,6 +785,20 @@ mod tests {
         assert!(windows
             .iter()
             .any(|window| window.scope.as_deref() == Some("Fable")));
+    }
+
+    #[test]
+    fn distinct_limit_ids_with_the_same_name_and_values_keep_independent_keys() {
+        let snapshot = serde_json::json!({
+            "limitName": "Team", "primary": {"usedPercent": 8, "windowDurationMins": 10080}
+        });
+        let windows = parse_rate_limits_response(&serde_json::json!({"result": {
+            "rateLimitsByLimitId": {"a": snapshot.clone(), "b": snapshot}
+        }}))
+        .unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].scope, windows[1].scope);
+        assert_ne!(windows[0].source_id, windows[1].source_id);
     }
 
     #[test]

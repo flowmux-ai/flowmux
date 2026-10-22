@@ -223,11 +223,17 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
         )
     })?;
     let mut windows = Vec::new();
-    windows.extend(parse_named_window(object.get("five_hour"), Some(300), None));
+    windows.extend(parse_named_window(
+        object.get("five_hour"),
+        Some(300),
+        None,
+        "top:five_hour".into(),
+    ));
     windows.extend(parse_named_window(
         object.get("seven_day"),
         Some(10_080),
         None,
+        "top:seven_day".into(),
     ));
     // Model- or feature-scoped windows (e.g. "seven_day_opus", "fable") arrive
     // as extra top-level objects; keep them all instead of the fixed two.
@@ -236,7 +242,13 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
     // "spend" restates "extra_usage" in money with a rounded percent, so it is
     // dropped whenever the finer-grained section reports a value. Orgs with
     // extra usage disabled still send the section, with a null utilization.
-    let has_extra_usage = parse_named_window(object.get("extra_usage"), None, None).is_some();
+    let has_extra_usage = parse_named_window(
+        object.get("extra_usage"),
+        None,
+        None,
+        "top:extra_usage".into(),
+    )
+    .is_some();
     for (key, entry) in object {
         if matches!(key.as_str(), "five_hour" | "seven_day" | "limits")
             || (key == "spend" && has_extra_usage)
@@ -244,7 +256,12 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
             continue;
         }
         let (duration_minutes, scope) = window_metadata(key);
-        windows.extend(parse_named_window(Some(entry), duration_minutes, scope));
+        windows.extend(parse_named_window(
+            Some(entry),
+            duration_minutes,
+            scope,
+            format!("top:{key}"),
+        ));
     }
     // Same for the optional "limits" array, which carries kind/group metadata.
     if let Some(limits) = object.get("limits").and_then(Value::as_array) {
@@ -254,7 +271,20 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
                 .and_then(Value::as_str)
                 .and_then(kind_duration_minutes);
             let scope = limit.get("group").and_then(Value::as_str).map(scope_label);
-            windows.extend(parse_named_window(Some(limit), duration_minutes, scope));
+            windows.extend(parse_named_window(
+                Some(limit),
+                duration_minutes,
+                scope,
+                format!(
+                    "limits:{}",
+                    serde_json::json!([
+                        limit.get("id"),
+                        limit.get("kind"),
+                        limit.get("group"),
+                        limit.get("scope")
+                    ])
+                ),
+            ));
         }
     }
     deduplicate_windows(&mut windows);
@@ -295,6 +325,7 @@ fn parse_named_window(
     value: Option<&Value>,
     duration_minutes: Option<u64>,
     scope: Option<String>,
+    source_id: String,
 ) -> Option<UsageWindow> {
     let object = value?.as_object()?;
     let used_percent = ["utilization", "percent"]
@@ -306,6 +337,7 @@ fn parse_named_window(
         .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
         .map(|value| value.with_timezone(&Utc));
     Some(UsageWindow {
+        source_id: Some(source_id),
         label: duration_label(duration_minutes),
         scope,
         used_percent,
@@ -316,14 +348,7 @@ fn parse_named_window(
 
 fn deduplicate_windows(windows: &mut Vec<UsageWindow>) {
     let mut seen = HashSet::new();
-    windows.retain(|window| {
-        seen.insert((
-            window.duration_minutes,
-            window.resets_at,
-            window.used_percent.to_bits(),
-            window.scope.clone(),
-        ))
-    });
+    windows.retain(|window| seen.insert(window.source_id.clone()));
 }
 
 #[derive(Deserialize)]
@@ -550,6 +575,88 @@ mod tests {
                 && window.duration_minutes == Some(10_080)
                 && window.used_percent == 78.0
         }));
+    }
+
+    #[test]
+    fn weekly_sources_keep_distinct_stable_keys_with_identical_metadata() {
+        let mut value = serde_json::json!({
+            "seven_day": {"utilization": 42},
+            "limits": [
+                {"id": "a", "kind": "weekly", "percent": 12},
+                {"id": "b", "kind": "weekly", "percent": 78}
+            ]
+        });
+        let before = parse_usage_response(&value).unwrap();
+        assert_eq!(before.len(), 3);
+        assert!(before
+            .iter()
+            .all(|window| window.label == "Weekly" && window.scope.is_none()));
+        assert_eq!(
+            before
+                .iter()
+                .map(|window| &window.source_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            3
+        );
+        value["limits"].as_array_mut().unwrap().reverse();
+        value["seven_day"]["utilization"] = serde_json::json!(78);
+        let after = parse_usage_response(&value).unwrap();
+        assert_eq!(
+            after.len(),
+            3,
+            "equal values must not merge distinct sources"
+        );
+        assert_eq!(before[0].source_id, after[0].source_id);
+        assert_eq!(before[1].source_id, after[2].source_id);
+        assert_eq!(before[2].source_id, after[1].source_id);
+    }
+
+    #[test]
+    fn idless_scoped_weekly_models_keep_keys_across_refresh_and_reordering() {
+        let mut value = serde_json::json!({
+            "five_hour": {"utilization": 23},
+            "seven_day": {"utilization": 46},
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 23, "scope": null},
+                {"kind": "weekly_all", "group": "weekly", "percent": 46, "scope": null},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 50,
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 50,
+                 "scope": {"model": {"id": null, "display_name": "Sonnet"}, "surface": null}}
+            ]
+        });
+        let before = parse_usage_response(&value).unwrap();
+        assert_eq!(before.len(), 6);
+        assert!(before[3..]
+            .iter()
+            .all(|window| window.label == "Usage limit"
+                && window.scope.as_deref() == Some("Weekly")
+                && window.duration_minutes.is_none()));
+        let keys: HashSet<_> = before
+            .iter()
+            .map(|window| window.source_id.clone())
+            .collect();
+        assert_eq!(keys.len(), 6);
+        let limits = value["limits"].as_array_mut().unwrap();
+        limits.rotate_left(2);
+        for limit in limits {
+            limit["percent"] = serde_json::json!(75);
+            limit["resets_at"] = serde_json::json!("2026-10-29T11:00:00Z");
+            limit["is_active"] = serde_json::json!(false);
+        }
+        let after = parse_usage_response(&value).unwrap();
+        assert_eq!(after.len(), 6);
+        assert_eq!(
+            keys,
+            after
+                .iter()
+                .map(|window| window.source_id.clone())
+                .collect()
+        );
+        assert_eq!(before[4].source_id, after[2].source_id);
+        assert_eq!(before[5].source_id, after[3].source_id);
+        assert_eq!(after[2].used_percent, 75.0);
     }
 
     #[test]

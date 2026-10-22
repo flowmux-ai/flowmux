@@ -61,6 +61,7 @@ pub(crate) async fn check(usage: &UsagePopover) {
     bar_tests::credit_based_plans_show_their_single_balance_in_the_first_slot();
     bar_tests::footer_font_tracks_global_terminal_font();
     bar_tests::pins_preserve_scopes_values_fonts_and_survive_missing_data();
+    bar_tests::colliding_pins_select_one_source_and_survive_refresh();
     tests::menu_button_owns_a_wide_upward_popover();
     tests::dropping_usage_popover_releases_refresh_widgets();
 
@@ -77,6 +78,7 @@ pub(crate) async fn check(usage: &UsagePopover) {
                     [(300, "5 hours", 22.0), (10_080, "Weekly", 35.0)]
                         .into_iter()
                         .map(|(duration, label, value)| UsageWindow {
+                            source_id: None,
                             label: label.into(),
                             scope: None,
                             used_percent: value,
