@@ -221,6 +221,12 @@ pub(super) async fn check(
 }
 
 async fn key(app: &NSApplication, window: &NSWindow, text: &str, code: u16, shift: bool) {
+    eprintln!(
+        "POST_KEY text={text:?} active={} key_window={} responder={:?}",
+        app.isActive(),
+        window.isKeyWindow(),
+        window.firstResponder()
+    );
     let text = NSString::from_str(text);
     let flags = if shift {
         NSEventModifierFlags::Shift

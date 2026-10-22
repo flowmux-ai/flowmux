@@ -75,7 +75,9 @@ unsafe extern "C-unwind" fn key_down_forwarding(this: &AnyObject, cmd: Sel, even
             "NATIVE_DISPATCH code={} text={:?} responder={:?}",
             event.keyCode(),
             event.characters(),
-            event.window().and_then(|window| window.firstResponder())
+            event
+                .window(objc2::MainThreadMarker::new().unwrap())
+                .and_then(|window| window.firstResponder())
         );
         NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap()).sendEvent(event);
     } else {

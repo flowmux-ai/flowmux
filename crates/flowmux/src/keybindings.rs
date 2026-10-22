@@ -637,11 +637,15 @@ fn install_macos_editor_key_capture(
                 .cloned()
         };
         let Some(editor) = editor else {
+            #[cfg(all(test, feature = "native-smoke"))]
+            eprintln!("EDITOR_KEY_NO_EDITOR key={keyval:?}");
             return glib::Propagation::Proceed;
         };
         let native_focus = editor.has_native_focus();
         if !native_focus && !window_focus_is_widget(&window_for_key, &editor.root.clone().upcast())
         {
+            #[cfg(all(test, feature = "native-smoke"))]
+            eprintln!("EDITOR_KEY_NO_FOCUS key={keyval:?}");
             return glib::Propagation::Proceed;
         }
         let handoff = native_focus && !editor.focus_widget().is_focus();
