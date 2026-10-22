@@ -1607,7 +1607,7 @@ impl WindowController {
                 opts.terminal_minimap_opacity,
             );
         }
-        let editor_appearance = resolved.editor_appearance(opts);
+        let editor_appearance = resolved.editor_appearance(opts, &self.window.pango_context());
         for editor in registry.editors.values() {
             editor.apply_appearance(editor_appearance.clone());
         }
@@ -7135,7 +7135,7 @@ mod tests {
         controller.window.present();
         let expected = controller
             .current_theme()
-            .editor_appearance(&light)
+            .editor_appearance(&light, &controller.window.pango_context())
             .background;
         glib::future_with_timeout(Duration::from_secs(20), async {
             loop {

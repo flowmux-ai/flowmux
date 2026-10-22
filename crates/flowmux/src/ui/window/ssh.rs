@@ -386,6 +386,8 @@ impl WindowController {
             .title("New SSH Workspace")
             .default_width(460)
             .build();
+        #[cfg(target_os = "linux")]
+        dialog.set_titlebar(Some(&gtk::HeaderBar::new()));
         let form = gtk::Box::new(gtk::Orientation::Vertical, 10);
         for set in [
             gtk::Widget::set_margin_top,
@@ -554,6 +556,8 @@ impl WindowController {
             .title("SSH Ports — local browser preview")
             .default_width(480)
             .build();
+        #[cfg(target_os = "linux")]
+        window.set_titlebar(Some(&gtk::HeaderBar::new()));
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.set_margin_top(12);
         content.set_margin_bottom(12);
@@ -1092,6 +1096,8 @@ impl WindowController {
             .default_height(360)
             .child(&master.root_widget())
             .build();
+        #[cfg(target_os = "linux")]
+        window.set_titlebar(Some(&gtk::HeaderBar::new()));
         window.connect_close_request(|window| {
             window.set_visible(false);
             glib::Propagation::Stop

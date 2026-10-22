@@ -322,6 +322,9 @@ test("accepts bounded light and multilingual editor appearance", () => {
       fontSize: 13.5,
     },
   };
+  for (const [fontSize, valid] of [[1, true], [256, true], [512, true], [0.5, false], [513, false]]) {
+    assert.equal(isHostMessage({ ...message, appearance: { ...message.appearance, fontSize } }), valid);
+  }
 
   assert.equal(isHostMessage(message), true);
   assert.equal(

@@ -10,7 +10,7 @@
   --selection: #365c59a0;
   --warning: #e1ad72;
   --danger: #e07a7a;
-  --ui-font: Inter, "SF Pro Text", "Noto Sans", "Apple SD Gothic Neo", sans-serif;
+  --ui-font: monospace;
 }
 
 * {
@@ -357,7 +357,7 @@ body {
 .search-result-preview {
   margin-top: 2px;
   color: var(--muted);
-  font-family: "SFMono-Regular", "Noto Sans Mono CJK KR", monospace;
+  font-family: var(--ui-font);
 }
 
 .search-result-preview mark {

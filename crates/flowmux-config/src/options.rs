@@ -213,10 +213,10 @@ pub struct Options {
     /// [`CURSOR_BLINK_INTERVAL_DEFAULT`].
     #[serde(default = "default_cursor_blink_interval")]
     pub cursor_blink_interval_ms: u32,
-    /// Terminal and editor font family selected in the options dialog. `None` means
-    /// "inherit the resolved theme font" (the `font-family` from the theme
-    /// file, or the built-in `monospace` fallback). A `Some` value overrides
-    /// the theme font for all terminals live.
+    /// Common UI, terminal and editor font family selected in the options dialog.
+    /// `None` inherits the theme font; without one, terminals and editors use
+    /// `monospace` and UI controls retain the native system font. A `Some` value
+    /// overrides the font throughout the application live.
     #[serde(default)]
     pub font_family: Option<String>,
     /// Terminal and editor font size in points. `None` inherits the resolved theme size

@@ -119,6 +119,8 @@ impl AutomationWindows {
             .default_height(750)
             .child(&root)
             .build();
+        #[cfg(target_os = "linux")]
+        window.set_titlebar(Some(&gtk::HeaderBar::new()));
         if let Some(app) = self.app.upgrade() {
             window.set_application(Some(&app));
         }

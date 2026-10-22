@@ -192,6 +192,8 @@ impl WindowController {
             .default_width(760)
             .default_height(520)
             .build();
+        #[cfg(target_os = "linux")]
+        dialog.set_titlebar(Some(&gtk::HeaderBar::new()));
         dialog.set_widget_name("terminal-output-search");
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.set_margin_top(12);

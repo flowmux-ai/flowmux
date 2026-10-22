@@ -61,13 +61,14 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     let path = dir.path().join("문서🙂.txt");
     fs::write(&path, "original\n").unwrap();
     let options = flowmux_config::options::Options::default();
-    let appearance = crate::theme::ResolvedTheme::resolve(&options).editor_appearance(&options);
+    let appearance = crate::theme::ResolvedTheme::resolve(&options)
+        .editor_appearance(&options, &gtk::Label::new(None).pango_context());
     let pane = EditorPane::new(
         PaneId::new(),
         SurfaceId::new(),
         dir.path().to_path_buf(),
         EditorSessionState::default(),
-        appearance,
+        appearance.clone(),
     )
     .unwrap();
     let window = gtk::Window::builder()
@@ -82,6 +83,42 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     page.wait("typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('original') === true").await;
     assert!(page.pane.bridge.ready.get());
     assert_eq!(page.pane.session_state().active_file.as_ref(), Some(&path));
+
+    // Compare native font resolution with the shipped editor at the user's zoom.
+    let terminal = vte::Terminal::new();
+    for (family, points, zoom) in [
+        (None, None, 90),
+        (Some("serif"), None, 75),
+        (Some("monospace"), None, 100),
+        (Some("DejaVu Sans Mono"), Some(14.0), 125),
+    ] {
+        let options = options
+            .clone()
+            .with_font_family(family.map(str::to_string))
+            .with_font_size(points)
+            .with_zoom_percent(zoom);
+        let theme = crate::theme::ResolvedTheme::resolve(&options);
+        let font = theme.terminal_font(&options);
+        let native = terminal
+            .pango_context()
+            .load_font(&font)
+            .unwrap()
+            .describe_with_absolute_size();
+        page.pane
+            .apply_appearance(theme.editor_appearance(&options, &terminal.pango_context()));
+        let expected_pixels = f64::from(native.size()) / f64::from(gtk::pango::SCALE);
+        page.wait(&format!(
+            "Math.abs(parseFloat(getComputedStyle(document.querySelector('#editor .view-lines')).fontSize) - {expected_pixels}) < 0.1"
+        ))
+        .await;
+        let family = serde_json::to_string(native.family().unwrap().as_str()).unwrap();
+        assert_eq!(page.eval(&format!(
+            "getComputedStyle(document.querySelector('#editor .view-lines')).fontFamily.includes({family})"
+        )).await, "true");
+        assert_eq!(page.eval(&format!(
+            "['body', '#search-query', '#save-as-submit'].every(selector => getComputedStyle(document.querySelector(selector)).fontFamily.includes({family}))"
+        )).await, "true");
+    }
 
     page.insert("한글🙂 ").await;
     assert_eq!(page.pane.dirty_document_paths(), vec![path.clone()]);

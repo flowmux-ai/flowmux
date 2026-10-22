@@ -77,6 +77,7 @@ pub struct EditorAppearance {
     pub selection_foreground: String,
     pub minimap_enabled: bool,
     pub font_family: String,
+    /// Logical pixels resolved by the native font context, including global zoom.
     pub font_size: f32,
 }
 
@@ -579,7 +580,7 @@ fn validate_appearance(appearance: &EditorAppearance) -> Result<(), ProtocolErro
         || appearance.font_family.len() > MAX_FONT_FAMILY_BYTES
         || appearance.font_family.chars().any(char::is_control)
         || !appearance.font_size.is_finite()
-        || !(4.0..=96.0).contains(&appearance.font_size)
+        || !(1.0..=512.0).contains(&appearance.font_size)
     {
         return Err(ProtocolError::InvalidIdentifier {
             field: "editor appearance",
@@ -714,6 +715,19 @@ mod tests {
         assert_eq!(value["appearance"]["dark"], false);
         assert_eq!(value["appearance"]["minimapEnabled"], true);
         assert_eq!(value["appearance"]["fontFamily"], appearance.font_family);
+
+        for (pixels, valid) in [
+            (1.0, true),
+            (256.0, true),
+            (512.0, true),
+            (0.5, false),
+            (513.0, false),
+            (f32::NAN, false),
+        ] {
+            let mut sized = appearance.clone();
+            sized.font_size = pixels;
+            assert_eq!(validate_appearance(&sized).is_ok(), valid, "{pixels}px");
+        }
 
         let mut invalid = appearance;
         invalid.background = "rgba(1, 2, 3, 1)".into();

@@ -214,8 +214,6 @@ const DEFAULT_APPEARANCE: EditorAppearance = {
   fontSize: 13,
 };
 const EDITOR_THEME = "flowmux-editor";
-const EDITOR_FONT_FALLBACKS =
-  'SFMono-Regular, "Cascadia Code", "Noto Sans Mono CJK KR", "Noto Sans Mono", "Apple SD Gothic Neo", "Hiragino Sans", monospace';
 let appliedAppearance = DEFAULT_APPEARANCE;
 defineEditorTheme(DEFAULT_APPEARANCE);
 
@@ -1536,6 +1534,7 @@ function applyAppearance(appearance: EditorAppearance): void {
   setMinimapEnabled(appearance.minimapEnabled);
 
   const root = document.documentElement;
+  root.style.setProperty("--ui-font", fontFamily);
   root.style.colorScheme = appearance.dark ? "dark" : "light";
   root.style.setProperty("--ink", appearance.background);
   root.style.setProperty("--text", appearance.foreground);
@@ -1550,7 +1549,7 @@ function setMinimapEnabled(enabled: boolean): void {
 }
 
 function editorFontFamily(primary: string): string {
-  return `${primary}, ${EDITOR_FONT_FALLBACKS}`;
+  return `${JSON.stringify(primary)}, monospace`;
 }
 
 function colorWithAlpha(color: string, alpha: number): string {

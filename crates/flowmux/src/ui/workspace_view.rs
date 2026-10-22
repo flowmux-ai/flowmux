@@ -2668,7 +2668,8 @@ mod tab_dnd_tests {
         let surface = SurfaceId::new();
         let workspace = WorkspaceId::new();
         let options = flowmux_config::options::Options::default();
-        let appearance = ResolvedTheme::load().editor_appearance(&options);
+        let appearance = ResolvedTheme::load()
+            .editor_appearance(&options, &gtk::Label::new(None).pango_context());
         let editor = EditorPane::new(
             pane,
             surface,
@@ -2714,7 +2715,8 @@ mod tab_dnd_tests {
         let src_workspace = WorkspaceId::new();
         let dst_workspace = WorkspaceId::new();
         let options = flowmux_config::options::Options::default();
-        let appearance = ResolvedTheme::load().editor_appearance(&options);
+        let appearance = ResolvedTheme::load()
+            .editor_appearance(&options, &gtk::Label::new(None).pango_context());
         let editor = EditorPane::new(
             src,
             surface,
@@ -2779,7 +2781,8 @@ mod tab_dnd_tests {
     fn closing_surface_and_pane_release_surface_focus_controllers() {
         let workspace = tempfile::tempdir().unwrap();
         let options = flowmux_config::options::Options::default();
-        let appearance = ResolvedTheme::load().editor_appearance(&options);
+        let appearance = ResolvedTheme::load()
+            .editor_appearance(&options, &gtk::Label::new(None).pango_context());
         let pane = PaneId::new();
         let surface = SurfaceId::new();
         let editor = EditorPane::new(
@@ -4310,7 +4313,7 @@ fn build_panel(
                     surface.id,
                     workspace_root.clone(),
                     session.clone(),
-                    theme.editor_appearance(&options),
+                    theme.editor_appearance(&options, &frame.pango_context()),
                 ) {
                     Ok(editor) => editor,
                     Err(error) => {

@@ -29,6 +29,7 @@ export interface EditorAppearance {
   selectionForeground: string;
   minimapEnabled: boolean;
   fontFamily: string;
+  /** Logical pixels resolved by the native font context, including global zoom. */
   fontSize: number;
 }
 
@@ -473,8 +474,8 @@ function isEditorAppearance(value: unknown): value is EditorAppearance {
     !/[\u0000-\u001f\u007f]/.test(value.fontFamily) &&
     typeof value.fontSize === "number" &&
     Number.isFinite(value.fontSize) &&
-    value.fontSize >= 4 &&
-    value.fontSize <= 96
+    value.fontSize >= 1 &&
+    value.fontSize <= 512
   );
 }
 

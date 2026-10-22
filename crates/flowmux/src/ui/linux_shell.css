@@ -1,0 +1,171 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Shared Linux chrome, including transient windows and popup surfaces.
+   Keep native window actions, focus handling and control semantics. */
+window.csd, dialog > contents {
+    border-radius: 8px;
+    outline: 1px solid alpha(@window_fg_color, 0.14);
+    outline-offset: -1px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28);
+}
+window.csd:backdrop {
+    outline-color: alpha(@window_fg_color, 0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+window.csd.maximized, window.csd.fullscreen,
+window.csd.tiled, window.csd.tiled-top, window.csd.tiled-bottom,
+window.csd.tiled-left, window.csd.tiled-right {
+    border-radius: 0;
+    outline: none;
+    box-shadow: none;
+}
+headerbar {
+    min-height: 2.692em;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid alpha(@window_fg_color, 0.10);
+    box-shadow: none;
+}
+headerbar > windowhandle > box, headerbar > windowhandle > centerbox {
+    padding: 0 8px;
+}
+button {
+    min-height: 1.846em;
+    border: 1px solid alpha(currentColor, 0.12);
+    border-radius: 4px;
+    padding: 3px 10px;
+    background-image: none;
+    box-shadow: none;
+}
+button.flat, button.image-button {
+    border-color: transparent;
+    background-color: transparent;
+}
+button.image-button {
+    min-width: 1.846em;
+    padding: 3px;
+}
+button:hover {
+    background-color: alpha(currentColor, 0.08);
+}
+button:checked, button:active {
+    background-color: alpha(currentColor, 0.14);
+}
+button.suggested-action {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+button.destructive-action {
+    background-color: @destructive_bg_color;
+    color: @destructive_fg_color;
+}
+button.suggested-action:hover {
+    background-color: shade(@accent_bg_color, 1.1);
+}
+button.destructive-action:hover {
+    background-color: shade(@destructive_bg_color, 1.1);
+}
+button.suggested-action:active {
+    background-color: shade(@accent_bg_color, 0.9);
+}
+button.destructive-action:active {
+    background-color: shade(@destructive_bg_color, 0.9);
+}
+button:disabled {
+    opacity: 0.5;
+}
+button:focus-visible, modelbutton:focus-visible {
+    outline: 2px solid @accent_bg_color;
+    outline-offset: -2px;
+}
+headerbar button, headerbar button.image-button, headerbar viewswitcher button {
+    min-height: 2.07em;
+    min-width: 2.07em;
+    margin: 4px 0;
+    padding: 0 2px;
+    border: 0;
+}
+headerbar viewswitcher button {
+    padding: 0 10px;
+}
+headerbar windowcontrols {
+    border-spacing: 0;
+}
+headerbar windowcontrols.start {
+    margin-left: -8px;
+}
+headerbar windowcontrols.end {
+    margin-right: -8px;
+}
+headerbar windowcontrols > button {
+    min-width: 3.538em;
+    min-height: 2.692em;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+headerbar windowcontrols > button > image {
+    -gtk-icon-size: 1.538em;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+headerbar windowcontrols > button:hover {
+    background-color: alpha(currentColor, 0.10);
+}
+headerbar windowcontrols > button:active {
+    background-color: alpha(currentColor, 0.18);
+}
+headerbar windowcontrols > button.close:hover {
+    background-color: #c42b1c;
+    color: white;
+}
+headerbar windowcontrols > button.close:active {
+    background-color: #a82418;
+}
+entry, spinbutton {
+    min-height: 2.154em;
+    border: 1px solid alpha(currentColor, 0.18);
+    border-radius: 4px;
+    background-color: alpha(@window_fg_color, 0.035);
+    box-shadow: none;
+}
+entry:focus-within, spinbutton:focus-within {
+    outline: 2px solid @accent_bg_color;
+    outline-offset: -2px;
+}
+spinbutton button {
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+}
+popover > contents, .flowmux-overlay-menu {
+    background-color: @popover_bg_color;
+    color: @popover_fg_color;
+    border: 1px solid alpha(@popover_fg_color, 0.14);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
+}
+popover modelbutton, .flowmux-overlay-menu button {
+    min-height: 1.846em;
+    border: 0;
+    border-radius: 4px;
+    padding: 3px 8px;
+}
+popover modelbutton:hover, .flowmux-overlay-menu button:hover {
+    background-color: alpha(currentColor, 0.08);
+}
+popover separator, .flowmux-overlay-menu separator {
+    min-height: 1px;
+    margin: 4px 0;
+    background-color: alpha(currentColor, 0.12);
+}
+tooltip > box {
+    border: 1px solid alpha(@popover_fg_color, 0.14);
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.20);
+}

@@ -135,7 +135,7 @@ fn build_dialog(
     general.set_margin_start(20);
     general.set_margin_end(20);
     general.append(&row("Global zoom (%)", &zoom_picker.drop));
-    general.append(&row("Terminal font", &font_widgets.family_drop));
+    general.append(&row("Font family", &font_widgets.family_drop));
     general.append(&row("Font size (pt)", &font_widgets.size_spin));
     general.append(&row("Browser web view", &gtk::Label::new(Some("WebKit"))));
     general.append(&row("Automatic focus colors", &focus_auto));
@@ -939,15 +939,18 @@ impl ZoomPicker {
     }
 
     fn rebuild_with_current(&self, font_size: f64, current: u16) {
-        let values = valid_zoom_percentages(font_size);
+        let current = Options::clamp_zoom(current);
+        let mut values = valid_zoom_percentages(font_size);
+        // Changing the font must not silently change the user's global zoom.
+        let selected = match values.binary_search(&current) {
+            Ok(index) => index,
+            Err(index) => {
+                values.insert(index, current);
+                index
+            }
+        };
         let labels: Vec<String> = values.iter().map(|value| format!("{value}%")).collect();
         let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let selected = values
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, value)| value.abs_diff(current))
-            .map(|(index, _)| index)
-            .unwrap_or(0);
         self.syncing.set(true);
         self.drop
             .set_model(Some(&gtk::StringList::new(&label_refs)));
@@ -969,7 +972,7 @@ fn valid_zoom_percentages(font_size: f64) -> Vec<u16> {
     let font_size = if font_size.is_finite() && font_size > 0.0 {
         font_size
     } else {
-        12.0
+        f64::from(crate::theme::DEFAULT_FONT_SIZE_PT)
     };
     let mut best: Vec<(f64, u16, f64)> = Vec::new();
     for percent in ZOOM_MIN..=ZOOM_MAX {
@@ -1088,7 +1091,7 @@ fn collect_options(
     }
 }
 
-/// Widgets + index→family map for the terminal font picker. `families[i]`
+/// Widgets + index→family map for the shared font picker. `families[i]`
 /// is the [`Options::font_family`] value the DropDown's index `i` represents;
 /// index 0 is the "System default (theme)" sentinel and maps to `None`.
 struct FontWidgets {
@@ -1108,7 +1111,11 @@ fn build_font_widgets(
 ) -> FontWidgets {
     // Build the index→Option<String> map. Index 0 = inherit the theme font.
     let mut families: Vec<Option<String>> = vec![None];
-    let mut labels: Vec<String> = vec![format!("System default ({default_family})")];
+    let mut labels = vec![if default_family == "monospace" {
+        "System default".to_string()
+    } else {
+        format!("Theme default ({default_family})")
+    }];
     // Show only curated developer fonts that are actually installed, ordered
     // by popularity, so the dropdown is not flooded with every monospace face
     // fontconfig reports (emoji fonts, generic aliases, PostScript clones).
@@ -1908,20 +1915,24 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn zoom_picker_only_exposes_whole_point_values() {
+    fn zoom_picker_preserves_current_zoom_when_font_changes() {
         let picker = ZoomPicker::new(85, 12.0);
-        assert_eq!(picker.selected(), 83);
+        assert_eq!(picker.selected(), 85);
         assert_eq!(picker.values.borrow().first(), Some(&50));
         assert_eq!(picker.values.borrow().last(), Some(&200));
-        assert_eq!(picker.drop.model().map(|model| model.n_items()), Some(19));
+        assert_eq!(picker.drop.model().map(|model| model.n_items()), Some(20));
 
         picker.rebuild(14.0);
+        assert_eq!(picker.selected(), 85);
         assert!(picker.values.borrow().contains(&100));
         assert!(picker
             .values
             .borrow()
             .iter()
             .all(|value| (50..=200).contains(value)));
+
+        let installed = ZoomPicker::new(75, 10.0);
+        assert_eq!(installed.selected(), 75);
     }
 
     #[cfg(not(target_os = "macos"))]

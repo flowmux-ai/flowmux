@@ -1237,6 +1237,8 @@ impl FileBrowserPanel {
             .default_width(360)
             .resizable(false)
             .build();
+        #[cfg(target_os = "linux")]
+        popup.set_titlebar(Some(&gtk::HeaderBar::new()));
 
         if let Some(window) = self
             .root
@@ -1397,6 +1399,8 @@ impl FileBrowserPanel {
             .default_width(360)
             .resizable(false)
             .build();
+        #[cfg(target_os = "linux")]
+        popup.set_titlebar(Some(&gtk::HeaderBar::new()));
         install_rename_popup_escape(&popup);
         if let Some(window) = self
             .root

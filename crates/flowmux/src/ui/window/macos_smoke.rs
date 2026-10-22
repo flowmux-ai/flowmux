@@ -584,6 +584,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let editor = controller.pane_registry.borrow().editors[&surface].clone();
     editor.open_file(&file).await.unwrap();
     editor.flush_pending_changes().await.unwrap();
+    editor.check_terminal_font(&terminal).await;
     editor.grab_focus();
     wait_until("editor focused", || editor.has_native_focus()).await;
     editor.insert_smoke_text("unsaved smoke");

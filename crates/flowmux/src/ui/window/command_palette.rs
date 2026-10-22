@@ -329,6 +329,8 @@ impl WindowController {
             .default_width(480)
             .default_height(420)
             .build();
+        #[cfg(target_os = "linux")]
+        dialog.set_titlebar(Some(&gtk::HeaderBar::new()));
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
         content.set_spacing(6);

@@ -182,9 +182,7 @@ impl ReviewWindow {
             .build();
         diff.set_widget_name("flowmux-review-diff");
         let code_style = gtk::CssProvider::new();
-        code_style.load_from_string(
-            "textview, textview text { font-family: monospace; font-size: 13px; }",
-        );
+        code_style.load_from_string("textview, textview text { font-size: 13px; }");
         #[allow(deprecated)]
         diff.style_context()
             .add_provider(&code_style, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);

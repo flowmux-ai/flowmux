@@ -19,6 +19,7 @@
 use flowmux_core::AGENT_BAR_ITEM_MIN_WIDTH_PX;
 use gtk::gdk;
 use gtk::pango;
+use gtk::prelude::*;
 
 pub struct ResolvedTheme {
     pub font: pango::FontDescription,
@@ -32,6 +33,8 @@ pub struct ResolvedTheme {
 }
 
 pub(crate) use flowmux_config::theme::{DEFAULT_BG, DEFAULT_FG};
+
+pub(crate) const DEFAULT_FONT_SIZE_PT: f32 = 12.0;
 
 /// Tomorrow-based ANSI palette adapted from Ghostty, with both black slots
 /// raised for contrast against flowmux's default background.
@@ -101,7 +104,7 @@ impl ResolvedTheme {
             .collect();
 
         let family = cfg.font_family.as_deref().unwrap_or("monospace");
-        let size = cfg.font_size.unwrap_or(12.0);
+        let size = cfg.font_size.unwrap_or(DEFAULT_FONT_SIZE_PT);
         let font = pango::FontDescription::from_string(&format!("{family} {size}"));
 
         Self {
@@ -130,7 +133,7 @@ impl ResolvedTheme {
     pub fn font_size(&self) -> f32 {
         let size = self.font.size();
         if size <= 0 {
-            12.0
+            DEFAULT_FONT_SIZE_PT
         } else {
             size as f32 / pango::SCALE as f32
         }
@@ -220,14 +223,42 @@ impl ResolvedTheme {
 
     pub(crate) fn css_for_options(&self, options: &flowmux_config::options::Options) -> String {
         let (color, alpha) = self.focus_style(options);
-        self.css(color, alpha, options.zoom_percent)
+        let font = self.font_with_overrides(options.font_family.as_deref(), options.font_size);
+        let family = font.family().unwrap_or_else(|| "monospace".into());
+        // Keep native UI typography unless a family was chosen in options or the theme.
+        if options.font_family.is_none() && family == "monospace" {
+            return self.css(color, alpha, options.zoom_percent);
+        }
+        // Pango accepts a comma-separated fallback list; quote each CSS family.
+        let families = family
+            .split(',')
+            .map(|family| {
+                let escaped = family
+                    .trim()
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace(['\n', '\r', '\u{000c}'], " ");
+                format!("\"{escaped}\"")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{}\nwindow, popover, tooltip, .monospace {{ font-family: {families}; }}\n",
+            self.css(color, alpha, options.zoom_percent)
+        )
     }
 
     pub(crate) fn editor_appearance(
         &self,
         options: &flowmux_config::options::Options,
+        context: &pango::Context,
     ) -> flowmux_editor::EditorAppearance {
-        let font = self.font_with_overrides(options.font_family.as_deref(), options.font_size);
+        let font = self.terminal_font(options);
+        // Use native font fallback and logical pixels, including the platform's DPI.
+        let font = context
+            .load_font(&font)
+            .map(|font| font.describe_with_absolute_size())
+            .unwrap_or(font);
         let selection_bg = self
             .selection_bg
             .unwrap_or_else(|| blend_with_alpha(&self.fg, 0.28));
@@ -244,10 +275,14 @@ impl ResolvedTheme {
                 .family()
                 .map(|family| family.to_string())
                 .unwrap_or_else(|| "monospace".into()),
-            font_size: if font.size() > 0 {
+            font_size: (if font.size() > 0 {
                 font.size() as f32 / pango::SCALE as f32
             } else {
-                12.0
+                DEFAULT_FONT_SIZE_PT
+            }) * if font.is_size_absolute() {
+                1.0
+            } else {
+                96.0 / 72.0
             },
         }
     }
@@ -289,6 +324,11 @@ impl ResolvedTheme {
         let toast_border_css = rgba_css(&blend_with_alpha(&self.fg, 0.18));
         let sidebar_zoom =
             flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
+        // The display provider also reaches transient windows and popup surfaces.
+        #[cfg(target_os = "linux")]
+        let desktop_css = include_str!("ui/linux_shell.css");
+        #[cfg(not(target_os = "linux"))]
+        let desktop_css = "";
         format!(
             r#"
 .flowmux-pane {{
@@ -844,6 +884,7 @@ paned > separator {{
 .flowmux-workspace-overview-card.active .flowmux-workspace-overview-name {{
     color: {fg};
 }}
+{desktop_css}
 "#,
             bg = bg_css,
             fg = rgba_css(&self.fg),
@@ -1085,6 +1126,149 @@ mod tests {
         ResolvedTheme::from_ghostty(&cfg).css("#fff4b3", 0.5, 100)
     }
 
+    #[cfg(target_os = "linux")]
+    #[gtk::test]
+    fn desktop_window_styles_parse_in_light_and_dark_themes() {
+        let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let provider = gtk::CssProvider::new();
+        let captured = errors.clone();
+        provider.connect_parsing_error(move |_, _, error| {
+            captured.borrow_mut().push(error.to_string());
+        });
+        for preset in ["github-light", "github-dark"] {
+            let options = flowmux_config::options::Options {
+                theme: Some(preset.into()),
+                ..Default::default()
+            };
+            let theme = ResolvedTheme::resolve_with_file(&options, None);
+            provider.load_from_string(&theme.css_for_options(&options));
+        }
+        assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[gtk::test]
+    async fn desktop_shared_fonts_preserve_native_sizes() {
+        use adw::prelude::*;
+        adw::init().unwrap();
+        let native_font = gtk::Label::new(None)
+            .pango_context()
+            .font_description()
+            .unwrap();
+        let display = gdk::Display::default().unwrap();
+        let provider = gtk::CssProvider::new();
+        let theme = ResolvedTheme::from_ghostty(&Default::default());
+        provider.load_from_string(&theme.css_for_options(&Default::default()));
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        let left = adw::HeaderBar::new();
+        left.set_show_end_title_buttons(false);
+        left.pack_start(&gtk::Button::from_icon_name("list-add-symbolic"));
+        let menu = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .build();
+        let popup_text = gtk::Label::new(Some("Sample text"));
+        let popup = gtk::Popover::builder().child(&popup_text).build();
+        menu.set_popover(Some(&popup));
+        left.pack_end(&menu);
+        let right = adw::HeaderBar::new();
+        let header_text = gtk::Label::new(Some("Sample text"));
+        right.set_title_widget(Some(&header_text));
+        right.set_hexpand(true);
+        let headers = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        headers.append(&left);
+        headers.append(&right);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let body_text = gtk::Label::new(Some("Sample text"));
+        content.append(&headers);
+        let tab = gtk::Button::builder().child(&body_text).build();
+        tab.add_css_class("flowmux-pane-tab-main");
+        content.append(&tab);
+        let window = adw::Window::builder().content(&content).build();
+        let dialog_text = gtk::Label::new(Some("Sample text"));
+        let dialog = gtk::Window::builder()
+            .transient_for(&window)
+            .titlebar(&gtk::HeaderBar::new())
+            .child(&dialog_text)
+            .build();
+        window.present();
+        dialog.present();
+        gtk::glib::future_with_timeout(std::time::Duration::from_secs(3), async {
+            while dialog.titlebar().unwrap().height() == 0 {
+                gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("dialog must be allocated before opening the parent's popup");
+        for (zoom, family) in [
+            (100, Some("DejaVu Sans Mono")),
+            (125, Some("Mono \"Quoted\" \\ 한글")),
+            (90, Some("monospace")),
+            (200, None),
+        ] {
+            let options = flowmux_config::options::Options::default()
+                .with_font_family(family.map(str::to_string))
+                .with_zoom_percent(zoom);
+            provider.load_from_string(&theme.css_for_options(&options));
+            popup.popup();
+            gtk::glib::future_with_timeout(std::time::Duration::from_secs(3), async {
+                while [&body_text, &header_text, &popup_text, &dialog_text]
+                    .iter()
+                    .any(|label| {
+                        label
+                            .layout()
+                            .context()
+                            .font_description()
+                            .unwrap()
+                            .family()
+                            .as_deref()
+                            != Some(family.unwrap_or(native_font.family().as_deref().unwrap()))
+                    })
+                {
+                    gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .expect("font changes must reach existing controls");
+            gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            assert_eq!(left.height(), right.height(), "split headers at {zoom}%");
+            assert_eq!(left.height(), dialog.titlebar().unwrap().height());
+            let text_height = body_text.layout().pixel_size().1;
+            assert_eq!(text_height, popup_text.layout().pixel_size().1);
+            assert_eq!(text_height, dialog_text.layout().pixel_size().1);
+            for (name, label) in [
+                ("tab", &body_text),
+                ("title", &header_text),
+                ("popup", &popup_text),
+                ("dialog", &dialog_text),
+            ] {
+                assert_eq!(
+                    label
+                        .pango_context()
+                        .font_description()
+                        .unwrap()
+                        .family()
+                        .as_deref(),
+                    Some(family.unwrap_or(native_font.family().as_deref().unwrap())),
+                    "shared font on {name} at {zoom}% (mapped={})",
+                    label.is_mapped()
+                );
+            }
+            assert_eq!(
+                body_text.pango_context().font_description().unwrap().size(),
+                native_font.size(),
+                "window chrome must preserve the native type size"
+            );
+        }
+        popup.popdown();
+        dialog.close();
+        window.close();
+        gtk::style_context_remove_provider_for_display(&display, &provider);
+    }
+
     #[test]
     fn resolve_prefers_preset_over_theme_file_but_keeps_its_font() {
         let file_cfg = flowmux_config::ghostty::parse(
@@ -1105,7 +1289,7 @@ mod tests {
         assert!((theme.font_size() - 14.0).abs() < 0.01);
     }
 
-    #[test]
+    #[gtk::test]
     fn editor_appearance_uses_theme_colors_and_font_overrides() {
         let cfg = flowmux_config::ghostty::parse(
             "background = #f8f8f8\nforeground = #202020\ncursor-color = #005fb8\nselection-background = #4080c0\nfont-family = Theme Mono\nfont-size = 12\n",
@@ -1115,7 +1299,12 @@ mod tests {
             .with_font_family(Some("다국어 Mono".into()))
             .with_font_size(Some(14.0));
 
-        let appearance = theme.editor_appearance(&options);
+        let context = gtk::Label::new(None).pango_context();
+        let native = context
+            .load_font(&theme.terminal_font(&options))
+            .unwrap()
+            .describe_with_absolute_size();
+        let appearance = theme.editor_appearance(&options, &context);
 
         assert!(!appearance.dark);
         assert_eq!(appearance.background, "#f8f8f8ff");
@@ -1123,8 +1312,11 @@ mod tests {
         assert_eq!(appearance.cursor, "#005fb8ff");
         assert_eq!(appearance.selection_background, "#4080c0ff");
         assert!(appearance.minimap_enabled);
-        assert_eq!(appearance.font_family, "다국어 Mono");
-        assert_eq!(appearance.font_size, 14.0);
+        assert_eq!(appearance.font_family, native.family().unwrap().as_str());
+        assert_eq!(
+            appearance.font_size,
+            native.size() as f32 / pango::SCALE as f32
+        );
     }
 
     #[test]
@@ -1146,6 +1338,26 @@ mod tests {
             theme.terminal_font(&exact_size).size(),
             (10.5 * pango::SCALE as f32) as i32
         );
+    }
+
+    #[test]
+    fn default_terminal_font_preserves_original_size_and_zoom() {
+        let theme = ResolvedTheme::from_ghostty(&Default::default());
+        assert_eq!(theme.font_family(), "monospace");
+        assert_eq!(theme.font_size(), 12.0);
+        for (zoom, points) in [(50, 6), (75, 9), (90, 11), (100, 12), (125, 15), (200, 24)] {
+            let options = flowmux_config::options::Options::default().with_zoom_percent(zoom);
+            assert_eq!(
+                theme.terminal_font(&options),
+                pango::FontDescription::from_string(&format!("monospace {points}")),
+                "original terminal typography at {zoom}%"
+            );
+        }
+        let configured =
+            ResolvedTheme::from_ghostty(&flowmux_config::ghostty::parse("font-size = 14\n"));
+        assert_eq!(configured.font_size(), 14.0);
+        let options = flowmux_config::options::Options::default().with_font_size(Some(11.0));
+        assert_eq!(configured.terminal_font(&options).size(), 11 * pango::SCALE);
     }
 
     #[test]

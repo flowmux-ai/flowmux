@@ -558,6 +558,31 @@ impl EditorPane {
     }
 
     #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_terminal_font(
+        &self,
+        terminal: &super::super::ghostty_pane::GhosttyPane,
+    ) {
+        let original = self.appearance.borrow().clone();
+        let context = terminal.widget.pango_context();
+        for zoom in [75, 90, 100, 125] {
+            let options = flowmux_config::options::Options::default().with_zoom_percent(zoom);
+            let theme = crate::theme::ResolvedTheme::resolve(&options);
+            let font = context
+                .load_font(&theme.terminal_font(&options))
+                .unwrap()
+                .describe_with_absolute_size();
+            self.apply_appearance(theme.editor_appearance(&options, &context));
+            let pixels = f64::from(font.size()) / f64::from(gtk::pango::SCALE);
+            let family = serde_json::to_string(font.family().unwrap().as_str()).unwrap();
+            save_ack_smoke::wait_js(self, &format!(
+                "document.querySelector('#editor .view-lines') !== null && Math.abs(parseFloat(getComputedStyle(document.querySelector('#editor .view-lines')).fontSize) - {pixels}) < 0.1 && ['#editor .view-lines', 'body', '#search-query', '#save-as-submit'].every(selector => getComputedStyle(document.querySelector(selector)).fontFamily.includes({family}))"
+            )).await;
+        }
+        self.apply_appearance(original);
+        println!("MACOS_EDITOR_TERMINAL_FONT_OK");
+    }
+
+    #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_save_ack(&self, root: &Path) {
         save_ack_smoke::check(self, root).await;
     }

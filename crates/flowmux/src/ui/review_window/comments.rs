@@ -57,9 +57,7 @@ fn style_card(card: &gtk::Box) {
     card.add_css_class("card");
     card.add_css_class("review-comment");
     let style = gtk::CssProvider::new();
-    style.load_from_string(
-        ".review-comment { padding: 10px; font-family: sans-serif; font-size: 12px; }",
-    );
+    style.load_from_string(".review-comment { padding: 10px; font-size: 12px; }");
     #[allow(deprecated)]
     card.style_context()
         .add_provider(&style, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);

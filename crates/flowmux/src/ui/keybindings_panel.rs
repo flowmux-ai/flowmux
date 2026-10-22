@@ -175,6 +175,8 @@ fn present_edit_dialog(
         .default_height(220)
         .title(format!("Edit shortcut: {}", action.label()))
         .build();
+    #[cfg(target_os = "linux")]
+    dialog.set_titlebar(Some(&gtk::HeaderBar::new()));
     if let Some(p) = &parent {
         dialog.set_transient_for(Some(p));
     }
@@ -295,6 +297,8 @@ fn present_capture_overlay(anchor: &gtk::Button, entry: gtk::Entry) {
         .default_height(140)
         .title("Press a shortcut")
         .build();
+    #[cfg(target_os = "linux")]
+    dialog.set_titlebar(Some(&gtk::HeaderBar::new()));
     if let Some(p) = &parent {
         dialog.set_transient_for(Some(p));
     }
