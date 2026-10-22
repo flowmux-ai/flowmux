@@ -701,16 +701,6 @@ fn macos_editor_needs_native_key(key: gtk::gdk::Key, state: gtk::gdk::ModifierTy
                 | gtk::gdk::Key::space
                 | gtk::gdk::Key::Tab
                 | gtk::gdk::Key::ISO_Left_Tab
-                | gtk::gdk::Key::BackSpace
-                | gtk::gdk::Key::Delete
-                | gtk::gdk::Key::Left
-                | gtk::gdk::Key::Right
-                | gtk::gdk::Key::Up
-                | gtk::gdk::Key::Down
-                | gtk::gdk::Key::Home
-                | gtk::gdk::Key::End
-                | gtk::gdk::Key::Page_Up
-                | gtk::gdk::Key::Page_Down
         ))
 }
 
@@ -1276,16 +1266,6 @@ mod tests {
             Key::space,
             Key::Tab,
             Key::ISO_Left_Tab,
-            Key::BackSpace,
-            Key::Delete,
-            Key::Left,
-            Key::Right,
-            Key::Up,
-            Key::Down,
-            Key::Home,
-            Key::End,
-            Key::Page_Up,
-            Key::Page_Down,
         ] {
             assert!(macos_editor_needs_native_key(key, ModifierType::empty()));
             assert!(macos_editor_needs_native_key(key, ModifierType::SHIFT_MASK));
@@ -1307,7 +1287,7 @@ mod tests {
             ));
         }
         assert!(!macos_editor_needs_native_key(
-            Key::F1,
+            Key::Left,
             ModifierType::empty()
         ));
     }

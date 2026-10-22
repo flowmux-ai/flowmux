@@ -43,6 +43,7 @@ jobs:
             else
               cat "target/native-keyboard-$attempt.log"
               status=1
+              break
             fi
           done
           exit "$status"

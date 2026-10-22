@@ -164,12 +164,6 @@ pub(super) async fn check(
             key(&app, window, text, code, false).await;
         }
         if is_editor {
-            // Mix native text, deletion and selection without draining WebKit between keys.
-            key(&app, window, "\u{f702}", 123, false).await;
-            key(&app, window, "\u{f728}", 117, false).await;
-            key(&app, window, "4", 21, false).await;
-            key(&app, window, "\u{f702}", 123, true).await;
-            key(&app, window, "4", 21, false).await;
             key(&app, window, "\t", 48, true).await;
         }
         key(&app, window, "\r", 36, false).await;
