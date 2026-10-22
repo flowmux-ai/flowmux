@@ -86,7 +86,8 @@ the native-input smoke test. Regular pane CLI input remains JavaScript-based.
 
 The image viewer loads ThorVG dynamically through `ui/thorvg.rs`; missing
 ThorVG affects the viewer, not the application build. The helper script builds
-v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
+v1.0.6 with C API bindings and loaders. Raster decoding uses Rust's `image` crate
+with a 64 MiB decode budget before preview resizing.
 
 ## Agent integration invariants
 

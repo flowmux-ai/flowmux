@@ -25,13 +25,23 @@ const MAX_VIEW_HEIGHT: u32 = 900;
 const DEFAULT_LOTTIE_WIDTH: u32 = 640;
 const DEFAULT_LOTTIE_HEIGHT: u32 = 480;
 const MAX_LOTTIE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_RASTER_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn open_image_viewer(parent: &adw::ApplicationWindow, path: PathBuf) {
     let content = match load_viewer_content(&path) {
         Ok(content) => content,
         Err(error) => {
-            tracing::warn!(path = %path.display(), %error, "ThorVG image open failed; falling back to default app");
-            crate::ui::file_browser::open_file(&path);
+            tracing::warn!(path = %path.display(), %error, "image open failed");
+            let dialog = adw::AlertDialog::new(Some("Unable to open image"), Some(&error));
+            dialog.add_responses(&[("close", "Close"), ("external", "Open in Default App")]);
+            dialog.set_default_response(Some("close"));
+            dialog.set_close_response("close");
+            dialog.connect_response(None, move |_, response| {
+                if response == "external" {
+                    crate::ui::file_browser::open_file(&path);
+                }
+            });
+            dialog.present(Some(parent));
             return;
         }
     };
@@ -121,13 +131,7 @@ enum ViewerContent {
 
 fn load_viewer_content(path: &Path) -> Result<ViewerContent, String> {
     match image_kind(path) {
-        // ThorVG decodes png / jpg / webp natively; fall back to the
-        // `image` crate only if ThorVG's loader rejects the file.
-        ImageKind::NativeRaster => render_native(path)
-            .or_else(|_| render_raster(path))
-            .map(ViewerContent::Static),
-        // ThorVG has no loader for these (e.g. gif); decode with the
-        // `image` crate, then hand the pixels to ThorVG to render.
+        // Bound decoding before handing preview pixels to ThorVG.
         ImageKind::Raster => render_raster(path).map(ViewerContent::Static),
         ImageKind::Svg => render_native(path).map(ViewerContent::Svg),
         ImageKind::Lottie => ThorvgAnimationRenderer::new(path)
@@ -137,10 +141,7 @@ fn load_viewer_content(path: &Path) -> Result<ViewerContent, String> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ImageKind {
-    /// Decoded by the `image` crate (formats ThorVG can't load, e.g. gif).
     Raster,
-    /// Decoded natively by ThorVG's built-in loaders.
-    NativeRaster,
     Svg,
     Lottie,
 }
@@ -168,7 +169,6 @@ fn image_kind(path: &Path) -> ImageKind {
     {
         Some("svg") => ImageKind::Svg,
         Some("json") | Some("lottie") => ImageKind::Lottie,
-        Some("png") | Some("jpg") | Some("jpeg") | Some("webp") => ImageKind::NativeRaster,
         _ => ImageKind::Raster,
     }
 }
@@ -287,12 +287,19 @@ fn raster_preview(image: image::DynamicImage) -> image::RgbaImage {
 }
 
 fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
-    let image = image::ImageReader::open(path)
+    let mut reader = image::ImageReader::open(path)
         .map_err(|err| format!("read failed: {err}"))?
         .with_guessed_format()
-        .map_err(|err| format!("format detection failed: {err}"))?
-        .decode()
-        .map_err(|err| format!("decode failed: {err}"))?;
+        .map_err(|err| format!("format detection failed: {err}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_RASTER_BYTES);
+    reader.limits(limits);
+    let image = reader.decode().map_err(|err| match err {
+        image::ImageError::Limits(_) => {
+            "This image exceeds the viewer's 64 MiB decoding limit.".to_string()
+        }
+        _ => format!("decode failed: {err}"),
+    })?;
     let rgba = raster_preview(image);
     let (source_width, source_height) = rgba.dimensions();
     let source_pixels = rgba
@@ -348,8 +355,7 @@ fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
     canvas.render()
 }
 
-/// Load an image through ThorVG's native file loaders (svg, png, jpg, webp).
-/// ThorVG picks the loader from the file's extension and content.
+/// Load SVG through ThorVG; raster decoding uses the bounded Rust loader.
 fn render_native(path: &Path) -> Result<RenderedFrame, String> {
     render_native_with_size(path, None)
 }
@@ -903,6 +909,26 @@ mod tests {
     }
 
     #[test]
+    fn viewer_rejects_large_raster_before_decoding_pixels() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.png");
+        // A 10,000 × 10,000 RGB header with no pixel payload.
+        std::fs::write(
+            &path,
+            [
+                137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 39, 16, 0, 0,
+                39, 16, 8, 2, 0, 0, 0, 53, 44, 245, 112, 0, 0, 0, 8, 73, 68, 65, 84, 120, 156, 3,
+                0, 0, 0, 0, 1, 72, 6, 137, 210, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+            ],
+        )
+        .unwrap();
+        match load_viewer_content(&path) {
+            Err(error) => assert!(error.contains("64 MiB"), "{error}"),
+            Ok(_) => panic!("oversized raster accepted"),
+        }
+    }
+
+    #[test]
     fn render_native_draws_vector_through_thorvg() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("vector.svg");
@@ -937,14 +963,15 @@ mod tests {
     }
 
     #[test]
-    fn render_native_decodes_png_through_thorvg() {
+    fn viewer_decodes_png_through_bounded_loader() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pixel.png");
         let image = image::RgbaImage::from_pixel(2, 1, image::Rgba([255, 0, 0, 255]));
         image.save(&path).expect("write png");
 
-        // ThorVG's built-in png loader decodes the file directly.
-        let frame = render_native(&path).expect("render png natively");
+        let ViewerContent::Static(frame) = load_viewer_content(&path).expect("render png") else {
+            panic!("expected raster preview");
+        };
 
         assert_eq!((frame.width, frame.height), (2, 1));
         assert_eq!(frame.buffer.len(), 2);
@@ -952,7 +979,7 @@ mod tests {
     }
 
     #[test]
-    fn render_native_decodes_jpeg_through_thorvg() {
+    fn viewer_decodes_jpeg_through_bounded_loader() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pixel.jpg");
         // JPEG has no alpha channel, so encode from RGB.
@@ -961,8 +988,9 @@ mod tests {
             .save_with_format(&path, image::ImageFormat::Jpeg)
             .expect("write jpeg");
 
-        // ThorVG's built-in jpg loader decodes the file directly.
-        let frame = render_native(&path).expect("render jpeg natively");
+        let ViewerContent::Static(frame) = load_viewer_content(&path).expect("render jpeg") else {
+            panic!("expected raster preview");
+        };
 
         assert_eq!((frame.width, frame.height), (4, 4));
         assert_eq!(frame.buffer.len(), 16);
@@ -970,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn render_native_decodes_webp_through_thorvg() {
+    fn viewer_decodes_webp_through_bounded_loader() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("pixel.webp");
         let image = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
@@ -978,8 +1006,9 @@ mod tests {
             .save_with_format(&path, image::ImageFormat::WebP)
             .expect("write webp");
 
-        // ThorVG's built-in webp loader decodes the file directly.
-        let frame = render_native(&path).expect("render webp natively");
+        let ViewerContent::Static(frame) = load_viewer_content(&path).expect("render webp") else {
+            panic!("expected raster preview");
+        };
 
         assert_eq!((frame.width, frame.height), (4, 4));
         assert_eq!(frame.buffer.len(), 16);

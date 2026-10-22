@@ -115,6 +115,10 @@ sudo scripts/install-thorvg.sh                 # ThorVG v1.0.6 → /usr/local
 PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 ```
 
+Raster previews have a 64 MiB decoding budget. Images exceeding it show an error
+and can be opened in the default application explicitly. The limit applies to
+decoded pixels and decoder buffers, not the compressed file size.
+
 Restart flowmux afterwards. Other builds must expose the compatible ThorVG
 C API and loaders; a package name alone does not establish compatibility.
 
