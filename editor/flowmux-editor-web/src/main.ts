@@ -239,6 +239,15 @@ const editor = monaco.editor.create(editorContainer, {
 window.addEventListener(
   "keydown",
   (event) => {
+    const target = diffDocumentId === null ? editor : diffEditor?.getModifiedEditor();
+    if (
+      event.target instanceof HTMLTextAreaElement &&
+      target?.getDomNode()?.contains(event.target) &&
+      !target.hasTextFocus()
+    ) {
+      // WKWebView can deliver a native key before its document focus notification.
+      target.focus();
+    }
     const zoomDirection = editorZoomDirectionForKey(event);
     if (zoomDirection !== null) {
       event.preventDefault();
