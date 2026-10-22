@@ -5,7 +5,7 @@ use crate::{LineEnding, TextEncoding, DEFAULT_MAX_DOCUMENT_BYTES};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, Permissions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -198,7 +198,7 @@ impl RecoveryStore {
     ) -> Result<Option<(RecoverySnapshot, RecoveryDiskState)>, RecoveryError> {
         let identity_path = identity_path.as_ref();
         let path = self.snapshot_path(identity_path);
-        let mut file = match fs::File::open(&path) {
+        let file = match fs::File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound && self.scope_id.is_some() => {
                 let legacy = self.legacy_snapshot_path(identity_path);
@@ -224,9 +224,16 @@ impl RecoveryStore {
                 limit: MAX_RECOVERY_FILE_BYTES,
             });
         }
-        let mut bytes = Vec::with_capacity(length as usize);
-        file.read_to_end(&mut bytes)
-            .map_err(|source| recovery_io("read snapshot", &path, source))?;
+        let bytes = crate::read_limited(file, MAX_RECOVERY_FILE_BYTES).map_err(|source| {
+            if source.kind() == io::ErrorKind::FileTooLarge {
+                RecoveryError::TooLarge {
+                    path: path.clone(),
+                    limit: MAX_RECOVERY_FILE_BYTES,
+                }
+            } else {
+                recovery_io("read snapshot", &path, source)
+            }
+        })?;
         let snapshot: RecoverySnapshot =
             serde_json::from_slice(&bytes).map_err(|source| RecoveryError::InvalidJson {
                 path: path.clone(),
@@ -250,8 +257,12 @@ impl RecoveryStore {
                 limit: DEFAULT_MAX_DOCUMENT_BYTES,
             });
         }
-        let disk_state = match fs::read(identity_path) {
-            Ok(bytes) if content_hash(&bytes) == snapshot.base_hash => RecoveryDiskState::Unchanged,
+        let disk_state = match fs::File::open(identity_path).and_then(|mut file| {
+            let mut hash = Sha256::new();
+            io::copy(&mut file, &mut hash)?;
+            Ok(format!("{:x}", hash.finalize()))
+        }) {
+            Ok(hash) if hash == snapshot.base_hash => RecoveryDiskState::Unchanged,
             Ok(_) => RecoveryDiskState::Changed,
             Err(error) if error.kind() == io::ErrorKind::NotFound => RecoveryDiskState::Deleted,
             Err(source) => return Err(recovery_io("read document", identity_path, source)),
@@ -411,6 +422,26 @@ mod tests {
             store.read(&path).unwrap().unwrap().1,
             RecoveryDiskState::Deleted
         );
+    }
+
+    #[test]
+    fn oversized_disk_file_does_not_block_recovery() {
+        let workspace = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let path = workspace.path().join("grown.txt");
+        fs::write(&path, b"base").unwrap();
+        let store = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+        let recovery = snapshot(&store, &path, b"base");
+        store.write(&recovery).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(DEFAULT_MAX_DOCUMENT_BYTES + 1)
+            .unwrap();
+        let (loaded, status) = store.read(&path).unwrap().unwrap();
+        assert_eq!(loaded, recovery);
+        assert_eq!(status, RecoveryDiskState::Changed);
     }
 
     #[test]

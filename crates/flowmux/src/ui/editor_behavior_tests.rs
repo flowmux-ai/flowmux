@@ -93,6 +93,20 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     assert!(page.pane.dirty_document_paths().is_empty());
 
     page.insert("unsaved ").await;
+    // A growing file must report a conflict without loading its whole contents.
+    let large_size = 1024 * 1024 * 1024;
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(large_size)
+        .unwrap();
+    page.wait("!document.querySelector('#conflict-banner').hidden")
+        .await;
+    assert!(page.pane.save_all_dirty().await.is_err());
+    assert_eq!(fs::metadata(&path).unwrap().len(), large_size);
+    page.wait("document.querySelector('#editor .view-lines').textContent.includes('unsaved')")
+        .await;
     fs::write(&path, "external update\n").unwrap();
     // Native file monitoring/polling must update the actual conflict UI.
     page.wait("!document.querySelector('#conflict-banner').hidden")

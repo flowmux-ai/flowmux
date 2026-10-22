@@ -195,7 +195,9 @@ pub fn search_workspace(
         if metadata.len() > options.max_file_bytes {
             continue;
         }
-        let Ok(bytes) = fs::read(entry.path()) else {
+        let Ok(bytes) = fs::File::open(entry.path())
+            .and_then(|file| crate::read_limited(file, options.max_file_bytes))
+        else {
             continue;
         };
         if bytes.contains(&0) {
@@ -636,6 +638,27 @@ mod tests {
         assert_eq!(result.matches.len(), 1);
         assert_eq!(result.matches[0].path, "src/main.rs");
         assert_eq!(result.matches[0].column, 0);
+    }
+
+    #[test]
+    fn search_skips_oversized_files_but_includes_the_exact_limit() {
+        let workspace = tempdir().unwrap();
+        fs::write(workspace.path().join("exact.txt"), "hit").unwrap();
+        fs::write(workspace.path().join("large.txt"), "hit!").unwrap();
+        let options = SearchOptions {
+            max_file_bytes: 3,
+            ..SearchOptions::default()
+        };
+        let result = search_workspace(
+            workspace.path(),
+            "hit",
+            &options,
+            &[],
+            &SearchCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(result.matches.len(), 1);
+        assert_eq!(result.matches[0].path, "exact.txt");
     }
 
     #[test]

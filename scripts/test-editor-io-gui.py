@@ -128,6 +128,22 @@ def main():
         gui.wait_for(lambda: document.read_text().endswith("xyz"), "edit during save remains dirty and saves next")
         h.pass_check(f"3-second document save: GTK responds in {latency:.4f}s; concurrent edit is preserved")
 
+        original = document.read_bytes()
+        def rss_kib():
+            status = Path(f"/proc/{process.pid}/status").read_text()
+            return int(re.search(r"VmRSS:\s+(\d+)", status)[1])
+        before = rss_kib()
+        with document.open("r+b") as growing:
+            growing.truncate(1024 ** 3)
+        time.sleep(2)
+        latency = responsive(terminal)
+        assert document.stat().st_size == 1024 ** 3
+        growth = rss_kib() - before
+        assert growth < 64 * 1024, f"external file consumed {growth} KiB"
+        document.write_bytes(original)
+        time.sleep(1)
+        h.pass_check(f"1 GiB external file: GTK responds in {latency:.4f}s; RSS change {growth} KiB; disk preserved")
+
         document.unlink()
         os.mkfifo(document)
         time.sleep(1.5)

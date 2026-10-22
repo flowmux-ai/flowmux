@@ -430,8 +430,11 @@ impl DocumentService {
             });
         }
 
-        let disk_matches_base = match fs::read(&document.snapshot.identity_path) {
+        let disk_matches_base = match fs::File::open(&document.snapshot.identity_path)
+            .and_then(|file| read_limited(file, document.base_bytes.len() as u64))
+        {
             Ok(current) => !document.base_missing && current == document.base_bytes,
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => false,
             Err(error) if error.kind() == io::ErrorKind::NotFound => document.base_missing,
             Err(source) => {
                 return Err(io_error(
@@ -571,12 +574,15 @@ impl DocumentService {
                 }
             }
         }
-        match fs::read(&document.snapshot.identity_path) {
+        match fs::File::open(&document.snapshot.identity_path)
+            .and_then(|file| read_limited(file, document.base_bytes.len() as u64))
+        {
             Ok(bytes) if !document.base_missing && bytes == document.base_bytes => {
                 document.refresh_base_disk();
                 Ok(DiskStatus::Unchanged)
             }
             Ok(_) => Ok(DiskStatus::Modified),
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => Ok(DiskStatus::Modified),
             Err(error) if error.kind() == io::ErrorKind::NotFound && document.base_missing => {
                 Ok(DiskStatus::Unchanged)
             }
@@ -616,7 +622,9 @@ impl DocumentService {
     ) -> Result<DocumentSnapshot, DocumentError> {
         let document = self.documents.get(&id).ok_or(DocumentError::NotOpen(id))?;
         let identity_path = document.snapshot.identity_path.clone();
-        match fs::read(&identity_path) {
+        match fs::File::open(&identity_path)
+            .and_then(|file| read_limited(file, self.max_document_bytes))
+        {
             Ok(bytes) => {
                 let metadata = fs::metadata(&identity_path)
                     .map_err(|source| io_error("inspect", &identity_path, source))?;
@@ -641,6 +649,12 @@ impl DocumentService {
                 document.snapshot.read_only = false;
                 document.base_disk.set(None);
                 Ok(document.snapshot.clone())
+            }
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
+                Err(DocumentError::TooLarge {
+                    path: identity_path,
+                    limit: self.max_document_bytes,
+                })
             }
             Err(source) => Err(io_error("read external version", &identity_path, source)),
         }
@@ -725,6 +739,18 @@ fn absolute_path(path: &Path) -> Result<PathBuf, DocumentError> {
     }
 }
 
+// Read one extra byte to detect growth without retaining an unbounded file.
+fn read_limited(reader: impl Read, limit: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::from(io::ErrorKind::FileTooLarge));
+    }
+    Ok(bytes)
+}
+
 fn read_text_document(
     path: &Path,
     max_document_bytes: u64,
@@ -741,7 +767,17 @@ fn read_text_document(
             limit: max_document_bytes,
         });
     }
-    let bytes = fs::read(path).map_err(|source| io_error("read", path, source))?;
+    let file = fs::File::open(path).map_err(|source| io_error("open", path, source))?;
+    let bytes = read_limited(file, max_document_bytes).map_err(|source| {
+        if source.kind() == io::ErrorKind::FileTooLarge {
+            DocumentError::TooLarge {
+                path: path.to_path_buf(),
+                limit: max_document_bytes,
+            }
+        } else {
+            io_error("read", path, source)
+        }
+    })?;
     if bytes.contains(&0) {
         return Err(DocumentError::Binary {
             path: path.to_path_buf(),
@@ -855,6 +891,54 @@ mod tests {
 
     fn write(path: &Path, bytes: &[u8]) {
         fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn limited_reads_reject_growth_and_allow_the_exact_limit() {
+        assert_eq!(read_limited(&b"abcd"[..], 4).unwrap(), b"abcd");
+        assert!(read_limited(&b""[..], 0).unwrap().is_empty());
+        assert_eq!(
+            read_limited(&b"x"[..], 0).unwrap_err().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        let mut endless = std::io::repeat(b'a');
+        assert_eq!(
+            read_limited(&mut endless, 8).unwrap_err().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        assert_eq!(read_limited(&b"x"[..], u64::MAX).unwrap(), b"x");
+    }
+
+    #[test]
+    fn oversized_external_change_preserves_unsaved_text_and_disk() {
+        let workspace = tempdir().unwrap();
+        let path = workspace.path().join("growing.txt");
+        write(&path, b"base");
+        let mut service = DocumentService::with_max_document_bytes(workspace.path(), 8).unwrap();
+        let opened = service.open(&path).unwrap().document;
+        let edited = service
+            .update_text(opened.id, opened.version, "edited".into())
+            .unwrap();
+        // The unchanged prefix must not hide growth beyond the comparison limit.
+        write(&path, b"base followed by more data");
+        assert_eq!(
+            service.disk_status_after_fs_event(edited.id).unwrap(),
+            DiskStatus::Modified
+        );
+        assert!(matches!(
+            service.save(edited.id, edited.version),
+            Err(DocumentError::ExternalChange { .. })
+        ));
+        assert!(matches!(
+            service.accept_external_as_base(edited.id),
+            Err(DocumentError::TooLarge { .. })
+        ));
+        assert!(matches!(
+            service.disk_text(edited.id),
+            Err(DocumentError::TooLarge { .. })
+        ));
+        assert_eq!(service.snapshot(edited.id).unwrap().text, "edited");
+        assert_eq!(fs::read(&path).unwrap(), b"base followed by more data");
     }
 
     #[test]
