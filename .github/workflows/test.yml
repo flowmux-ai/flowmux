@@ -28,6 +28,12 @@ jobs:
           restore-keys: native-key-debug-
       - run: brew install pkg-config gtk4 libadwaita vte3
       - run: cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
+      - uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: native-key-debug-${{ github.sha }}
       - name: Repeat native keyboard scenario
         run: |
           status=0
