@@ -59,7 +59,17 @@ path = "src/main.rs"
             (source / package / "src/main.rs").write_text('fn main() { println!("STALE"); }\n')
         run("cargo", "build", "--profile", "fast", cwd=source, env=env)
         for package in ["flowmux", "flowmux-cli", "flowmux-md-viewer"]:
-            (source / package / "src/main.rs").write_text('fn main() { println!("FRESH"); }\n')
+            (source / package / "src/main.rs").write_text('''fn main() {
+    if std::env::args().any(|arg| arg == "--version") {
+        println!("flowmux 0.0.0");
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--wait") {
+        std::thread::sleep(std::time::Duration::from_secs(90));
+    }
+    println!("FRESH");
+}
+''')
         for name, profile, custom, configuration in [
             ("absolute", "fast", str(root / "custom target"), ""),
             ("relative", "debug", "relative-target", ""),
@@ -80,6 +90,54 @@ path = "src/main.rs"
                     actual = run(str(directory / binary)).strip()
                     assert actual == "FRESH", (name, directory, binary, actual)
             print(f"INSTALL_ARTIFACT_OK {name} {profile}", flush=True)
+        # Reject a mismatched binary before touching the installed app.
+        installed = [directory / binary for directory in [bins, bundle / "Contents/MacOS"]
+                     for binary in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]]
+        before = [path.read_bytes() for path in installed]
+        manifest = source / "Cargo.toml"
+        original_manifest = manifest.read_text()
+        manifest.write_text(original_manifest.replace('version = "0.0.0"', 'version = "0.0.1"'))
+        mismatch = subprocess.run(["bash", str(source / "install.sh"), "--app-dir", str(apps),
+                                   "--bin-dir", str(bins)], cwd=root, env=env, text=True,
+                                  capture_output=True, timeout=120, start_new_session=True)
+        assert mismatch.returncode != 0 and "expected flowmux 0.0.1" in mismatch.stderr
+        assert [path.read_bytes() for path in installed] == before
+        assert not list(apps.glob(".Flowmux.app.previous.*"))
+        manifest.write_text(original_manifest)
+        # Install with every bundled executable active, preserving Dock's directory
+        # and the old executable inodes while replacing the installed bytes.
+        app_inode = bundle.stat().st_ino
+        executables = [bundle / "Contents/MacOS" / name
+                       for name in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]]
+        old_inodes = [path.stat().st_ino for path in executables]
+        processes = [subprocess.Popen([str(path), "--wait"], stdout=subprocess.DEVNULL)
+                     for path in executables]
+        try:
+            for package in ["flowmux", "flowmux-cli", "flowmux-md-viewer"]:
+                path = source / package / "src/main.rs"
+                path.write_text(path.read_text().replace('println!("FRESH")', 'println!("UPDATED")'))
+            output = run("bash", str(source / "install.sh"), "--app-dir", str(apps),
+                         "--bin-dir", str(bins), cwd=root, env=env)
+            assert "installed Flowmux 0.0.0" in output
+            assert bundle.stat().st_ino == app_inode
+            assert all(process.poll() is None for process in processes)
+            backup, = apps.glob(".Flowmux.app.previous.*")
+            assert [(backup / "Contents/MacOS" / path.name).stat().st_ino
+                    for path in executables] == old_inodes
+            for path in installed:
+                assert run(str(path)).strip() == "UPDATED"
+            for path in executables:
+                assert run(str(backup / "Contents/MacOS" / path.name)).strip() == "FRESH"
+            run("codesign", "--verify", "--deep", "--strict", str(bundle))
+            run("codesign", "--verify", "--deep", "--strict", str(backup))
+        finally:
+            for process in processes:
+                process.terminate()
+                process.wait()
+        for package in ["flowmux", "flowmux-cli", "flowmux-md-viewer"]:
+            path = source / package / "src/main.rs"
+            path.write_text(path.read_text().replace('println!("UPDATED")', 'println!("FRESH")'))
+        print("INSTALL_RUNNING_APPS_PRESERVED_AND_UPDATED_OK", flush=True)
         # Failed builds must leave the previously installed bundle and CLIs intact.
         installed = [directory / binary for directory in [bins, bundle / "Contents/MacOS"] for binary in ["flowmux", "flowmuxctl", "flowmux-md-viewer"]]
         before = [path.read_bytes() for path in installed]

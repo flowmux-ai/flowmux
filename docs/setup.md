@@ -23,7 +23,12 @@ Use `--check` to check dependencies without installing.
 
 Ubuntu installs binaries to `~/.local/bin` (and `~/.cargo/bin` when present),
 plus desktop entries and icons. macOS installs `~/Applications/Flowmux.app`
-and CLI commands in `~/.local/bin`; a running app is updated after it exits.
+and CLI commands in `~/.local/bin`. You can run `./install.sh` from a Flowmux
+terminal while the app is running. The new version is installed immediately;
+existing sessions keep running their current version until you quit and reopen
+the app. The installer prints the installed executable's version and retains
+the previous app in a hidden `.Flowmux.app.previous.*` directory beside the app.
+These backups can be removed after all sessions using them have exited.
 Use `./install.sh --release --launch` for a macOS release build.
 
 To enable agent hooks, run `flowmux fix` and restart agent sessions.

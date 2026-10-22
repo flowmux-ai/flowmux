@@ -113,6 +113,8 @@ elif name == "cargo": sys.exit(23)  # Stop before any real build or app mutation
             path.chmod(0o755)
         # Include the host tool paths so configure_macos_path does not prepend them.
         self.env = dict(os.environ, TEST_ROOT=str(self.root),
+                        FLOWMUX_MACOS_APP_DIR=str(self.root / "Applications"),
+                        FLOWMUX_MACOS_BIN_DIR=str(self.root / "installed-bin"),
                         PATH=f"{self.bin}:{Path.home() / '.cargo/bin'}:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin")
 
     def run_installer(self, *args, answer=None, **env):

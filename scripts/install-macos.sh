@@ -140,7 +140,7 @@ EOF
     fi
 
     local missing_commands=()
-    for command in cargo python3 pkg-config codesign iconutil install launchctl open plutil xattr xcrun; do
+    for command in cargo python3 pkg-config codesign iconutil install open plutil xattr xcrun; do
         if ! command -v "$command" >/dev/null 2>&1; then
             missing_commands+=("$command")
         fi
@@ -195,48 +195,6 @@ configure_macos_path() {
 
 workspace_version() {
     awk -F '"' '/^version = / { print $2; exit }' "$REPO_ROOT/Cargo.toml"
-}
-
-running_flowmux_pid() {
-    local executable="$1"
-    local candidate="${FLOWMUX_UPDATE_HOST_PID:-$PPID}"
-    local pid command
-
-    while read -r pid command; do
-        if [ "$command" = "$executable" ] || [ "$command" -ef "$executable" ]; then
-            printf '%s\n' "$pid"
-            return 0
-        fi
-    done < <(ps -ww -p "$candidate" -o pid=,comm= 2>/dev/null)
-
-    while read -r pid command; do
-        if [ "$command" = "$executable" ] || [ "$command" -ef "$executable" ]; then
-            printf '%s\n' "$pid"
-            return 0
-        fi
-    done < <(ps -ww -axo pid=,comm=)
-    return 1
-}
-
-submit_deferred_app_swap() {
-    local running_pid="$1"
-    local staged_bundle="$2"
-    local destination_bundle="$3"
-    local backup_bundle="$4"
-    local label="com.flowmux.update.$running_pid"
-    local update_dir="$HOME/.cache/flowmux"
-    local update_log="$update_dir/update.log"
-    local swap_helper="$update_dir/deferred-macos-app-swap.sh"
-
-    mkdir -p "$update_dir"
-    install -m755 "$REPO_ROOT/scripts/deferred-macos-app-swap.sh" "$swap_helper"
-    launchctl remove "$label" >/dev/null 2>&1 || true
-    launchctl submit \
-        -l "$label" \
-        -o "$update_log" \
-        -e "$update_log" \
-        -- /bin/sh "$swap_helper" \
-        "$running_pid" "$staged_bundle" "$destination_bundle" "$backup_bundle"
 }
 
 create_icon() {
@@ -405,21 +363,35 @@ if [ "$BUNDLE_ONLY" = true ]; then
 fi
 
 mkdir -p "$APP_DIR" "$BIN_DIR"
-running_pid="$(running_flowmux_pid "$bundle_dest/Contents/MacOS/flowmux" || true)"
-if [ -n "$running_pid" ]; then
-    bundle_pending="$APP_DIR/.Flowmux.app.pending.$running_pid"
-    bundle_backup="$APP_DIR/.Flowmux.app.previous.$running_pid"
-    echo "==> staging app update until Flowmux exits"
+bundle_pending=$(mktemp -d "$APP_DIR/.Flowmux.app.previous.XXXXXX")
+echo "==> installing app to $bundle_dest"
+cp -R "$bundle_work/Contents" "$bundle_pending/Contents"
+codesign --verify --deep --strict "$bundle_pending"
+installed_version="$("$bundle_pending/Contents/MacOS/flowmux" --version)"
+if [ "$installed_version" != "flowmux $version" ]; then
+    echo "error: built app reports '$installed_version'; expected flowmux $version" >&2
     rm -rf "$bundle_pending"
-    cp -R "$bundle_work" "$bundle_pending"
-    submit_deferred_app_swap "$running_pid" "$bundle_pending" "$bundle_dest" "$bundle_backup"
-else
-    bundle_pending="$APP_DIR/.Flowmux.app.pending"
-    bundle_backup="$APP_DIR/.Flowmux.app.previous"
-    echo "==> installing app to $bundle_dest"
-    rm -rf "$bundle_dest" "$bundle_pending" "$bundle_backup"
-    cp -R "$bundle_work" "$bundle_dest"
+    exit 1
 fi
+# Keep the outer app directory for Dock bookmarks and retain old mapped files.
+python3 - "$bundle_pending" "$bundle_dest" <<'PYTHON'
+import ctypes
+import os
+import sys
+
+pending, destination = sys.argv[1:]
+if os.path.exists(destination):
+    libc = ctypes.CDLL(None, use_errno=True)
+    swap = libc.renamex_np
+    swap.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+    swap.restype = ctypes.c_int
+    if swap(os.fsencode(pending + "/Contents"),
+            os.fsencode(destination + "/Contents"), 0x00000002) != 0:  # RENAME_SWAP
+        raise OSError(ctypes.get_errno(), "could not atomically replace app contents")
+    print("==> previous app retained for running sessions: " + pending)
+else:
+    os.rename(pending, destination)
+PYTHON
 install -m755 "$flowmux_binary" "$BIN_DIR/flowmux"
 install -m755 "$cli_binary" "$BIN_DIR/flowmuxctl"
 install -m755 "$markdown_binary" "$BIN_DIR/flowmux-md-viewer"
@@ -428,22 +400,15 @@ install -m755 "$markdown_binary" "$BIN_DIR/flowmux-md-viewer"
 echo "==> existing agent wrappers refreshed; provider settings and hooks unchanged"
 echo "    Run '$BIN_DIR/flowmuxctl fix' to enable or repair other integrations."
 
-if [ -n "$running_pid" ]; then
-    echo "==> staged app update: $bundle_pending"
-    echo "==> installed CLI:"
-    echo "    $BIN_DIR/flowmux"
-    echo "    $BIN_DIR/flowmuxctl"
-    echo "    $BIN_DIR/flowmux-md-viewer"
-    echo "==> restart Flowmux to finish installing $bundle_dest"
-else
-    echo "==> installed:"
-    echo "    $bundle_dest"
-    echo "    $BIN_DIR/flowmux"
-    echo "    $BIN_DIR/flowmuxctl"
-    echo "    $BIN_DIR/flowmux-md-viewer"
-    echo "==> launch with: open \"$bundle_dest\""
+echo "==> installed Flowmux $version:"
+echo "    $bundle_dest"
+echo "    $BIN_DIR/flowmux"
+echo "    $BIN_DIR/flowmuxctl"
+echo "    $BIN_DIR/flowmux-md-viewer"
+echo "$installed_version"
+echo "==> running sessions keep their current version; the next app launch uses $version"
+echo "==> launch with: open \"$bundle_dest\""
 
-    if [ "$LAUNCH" = true ]; then
-        open "$bundle_dest"
-    fi
+if [ "$LAUNCH" = true ]; then
+    open "$bundle_dest"
 fi
