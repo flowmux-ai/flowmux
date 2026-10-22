@@ -325,10 +325,11 @@ impl ResolvedTheme {
         let sidebar_zoom =
             flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
         // The display provider also reaches transient windows and popup surfaces.
+        let desktop_css = include_str!("ui/desktop_shell.css");
         #[cfg(target_os = "linux")]
-        let desktop_css = include_str!("ui/linux_shell.css");
+        let window_controls_css = include_str!("ui/linux_shell.css");
         #[cfg(not(target_os = "linux"))]
-        let desktop_css = "";
+        let window_controls_css = "";
         format!(
             r#"
 .flowmux-pane {{
@@ -885,6 +886,7 @@ paned > separator {{
     color: {fg};
 }}
 {desktop_css}
+{window_controls_css}
 "#,
             bg = bg_css,
             fg = rgba_css(&self.fg),

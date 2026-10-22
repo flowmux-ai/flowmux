@@ -337,6 +337,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         return;
     }
 
+    check_desktop_shell(&controller).await;
     let review_only = std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some();
     if review_only {
         check_sidebar_footer(&controller).await;
@@ -958,6 +959,76 @@ async fn check_sidebar_footer(controller: &WindowController) {
     .await;
     controller.sidebar_split.set_position(previous);
     println!("DIFF_REVIEW_SIDEBAR_FOOTER_OK");
+}
+
+#[allow(deprecated)]
+async fn check_desktop_shell(controller: &WindowController) {
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let captured = errors.clone();
+    let handler = controller
+        .css_provider
+        .connect_parsing_error(move |_, _, error| {
+            captured.borrow_mut().push(error.to_string());
+        });
+    let display = gtk::gdk::Display::default().unwrap();
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &controller.css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    let button = gtk::Button::with_label("Modern button");
+    let entry = gtk::Entry::new();
+    let menu = gtk::MenuButton::builder().label("Menu").build();
+    let popup_button = gtk::Button::with_label("Popup action");
+    let popup = gtk::Popover::builder().child(&popup_button).build();
+    menu.set_popover(Some(&popup));
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    content.append(&button);
+    content.append(&entry);
+    content.append(&menu);
+    let window = gtk::Window::builder()
+        .transient_for(&controller.window)
+        .title("Desktop shell verification")
+        .child(&content)
+        .build();
+    window.present();
+    wait_until("desktop shell controls mapped", || {
+        button.is_mapped() && button.width() > 0
+    })
+    .await;
+    for preset in ["github-light", "github-dark"] {
+        let options = flowmux_config::options::Options {
+            theme: Some(preset.into()),
+            ..Default::default()
+        };
+        controller.apply_runtime_theme(&options);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        popup.popup();
+        wait_until("desktop shell popup mapped", || popup_button.is_mapped()).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
+        for widget in [&button, &popup_button] {
+            assert_eq!(
+                widget.style_context().border().left(),
+                1,
+                "modern button border in {preset}"
+            );
+            assert_eq!(
+                widget.style_context().padding().left(),
+                10,
+                "modern button padding in {preset}"
+            );
+        }
+        assert_eq!(entry.style_context().border().left(), 1);
+        popup.popdown();
+        wait_until("desktop shell popup closed", || !popup.is_mapped()).await;
+        assert!(entry.grab_focus());
+        println!("MACOS_DESKTOP_SHELL_THEME_OK {preset}");
+    }
+    window.close();
+    controller.apply_runtime_theme(&flowmux_config::options::Options::default());
+    controller.css_provider.disconnect(handler);
+    println!("MACOS_DESKTOP_SHELL_OK");
 }
 
 async fn check_theme_focus(controller: &WindowController) {
