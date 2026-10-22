@@ -1378,7 +1378,10 @@ async fn check_skills(controller: &WindowController) {
         .unwrap()
         .contains("Another copy remains"));
     // Matching linked directories are healthy but intentionally not removable.
-    let (_, linked_dir_path, _) = &paths[3];
+    let (_, linked_dir_path, _) = paths
+        .iter()
+        .find(|(target, _, _)| *target == Target::Antigravity)
+        .unwrap();
     let directory_source = home.join("managed-dotfiles");
     std::fs::rename(linked_dir_path.parent().unwrap(), &directory_source).unwrap();
     std::os::unix::fs::symlink(&directory_source, linked_dir_path.parent().unwrap()).unwrap();
@@ -1402,7 +1405,10 @@ async fn check_skills(controller: &WindowController) {
     std::fs::rename(&directory_source, linked_dir_path.parent().unwrap()).unwrap();
 
     // An external edit is exposed as Update; replacement keeps exactly one backup.
-    let (_, path, button) = &paths[2];
+    let (_, path, button) = paths
+        .iter()
+        .find(|(target, _, _)| *target == Target::Codex)
+        .unwrap();
     std::fs::write(path, "custom skill notes").unwrap();
     refresh.emit_clicked();
     wait_until("skill update offered", || {
@@ -1433,7 +1439,10 @@ async fn check_skills(controller: &WindowController) {
     assert_eq!(std::fs::read_to_string(path).unwrap(), Target::payload());
 
     // Protect user-managed links and show the reason in the row.
-    let (_, linked, linked_button) = &paths[0];
+    let (_, linked, linked_button) = paths
+        .iter()
+        .find(|(target, _, _)| *target == Target::ClaudeCode)
+        .unwrap();
     std::fs::remove_file(linked).unwrap();
     let source = home.join("custom-skill.md");
     std::fs::write(&source, "user-managed").unwrap();
@@ -1449,7 +1458,10 @@ async fn check_skills(controller: &WindowController) {
     assert_eq!(std::fs::read_to_string(&source).unwrap(), "user-managed");
 
     // A new file appearing after the status check needs a separate Update click.
-    let (_, raced, raced_button) = &paths[1];
+    let (_, raced, raced_button) = paths
+        .iter()
+        .find(|(target, _, _)| *target == Target::OpenCode)
+        .unwrap();
     std::fs::remove_file(raced).unwrap();
     refresh.emit_clicked();
     wait_until("missing skill rechecked", || {
@@ -1473,7 +1485,10 @@ async fn check_skills(controller: &WindowController) {
         .starts_with("Installation failed:"));
 
     // A stale Remove button must surface filesystem errors without deleting data.
-    let (_, cline_path, _) = &paths[4];
+    let (_, cline_path, _) = paths
+        .iter()
+        .find(|(target, _, _)| *target == Target::Cline)
+        .unwrap();
     let cline_remove: gtk::Button = theme_widget(dialog.upcast_ref(), "flowmux-skill-remove-cline");
     wait_until("remove ready after refresh", || cline_remove.is_sensitive()).await;
     std::fs::remove_file(cline_path).unwrap();
