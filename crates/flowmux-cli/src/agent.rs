@@ -22,6 +22,8 @@ pub const SKILL_BODY: &str = include_str!("../../../.agents/skills/flowmux-brows
 pub struct SkillOverrides {
     pub claude: Option<PathBuf>,
     pub opencode: Option<PathBuf>,
+    /// Gemini CLI home override; its config lives in the .gemini child.
+    pub gemini: Option<PathBuf>,
 }
 
 impl SkillOverrides {
@@ -33,6 +35,7 @@ impl SkillOverrides {
         };
         Self {
             claude: nonempty("CLAUDE_CONFIG_DIR"),
+            gemini: nonempty("GEMINI_CLI_HOME"),
             opencode: if flowmux_config::paths::is_flatpak_sandbox() {
                 None // The host agent cannot discover sandbox-private XDG paths.
             } else {
@@ -42,6 +45,13 @@ impl SkillOverrides {
     }
 
     pub fn path(&self, target: Target, home: &Path, codex_home: Option<&Path>) -> PathBuf {
+        if target == Target::Gemini {
+            return self
+                .gemini
+                .as_deref()
+                .unwrap_or(home)
+                .join(".gemini/skills/flowmux-browser/SKILL.md");
+        }
         let root = match target {
             Target::ClaudeCode => self.claude.as_ref(),
             Target::OpenCode => self.opencode.as_ref(),
@@ -67,6 +77,8 @@ pub enum Target {
     Codex,
     /// `~/.gemini/config/skills/flowmux-browser/SKILL.md` (shared Gemini config root).
     Antigravity,
+    /// Gemini CLI user skills under ~/.gemini/skills.
+    Gemini,
     /// `~/.cline/skills/flowmux-browser/SKILL.md`.
     Cline,
 }
@@ -77,6 +89,7 @@ impl Target {
         Target::OpenCode,
         Target::Codex,
         Target::Antigravity,
+        Target::Gemini,
         Target::Cline,
     ];
 
@@ -86,11 +99,15 @@ impl Target {
             Target::OpenCode => "opencode",
             Target::Codex => "codex",
             Target::Antigravity => "antigravity",
+            Target::Gemini => "gemini",
             Target::Cline => "cline",
         }
     }
 
     pub fn from_slug(s: &str) -> Option<Self> {
+        if s == "agy" {
+            return Some(Self::Antigravity);
+        }
         Self::ALL.iter().copied().find(|t| t.slug() == s)
     }
 
@@ -121,6 +138,7 @@ impl Target {
                 .join("skills")
                 .join("flowmux-browser")
                 .join("SKILL.md"),
+            Target::Gemini => home.join(".gemini/skills/flowmux-browser/SKILL.md"),
             Target::Antigravity => home
                 .join(".gemini")
                 .join("config")

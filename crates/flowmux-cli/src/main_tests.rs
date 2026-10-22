@@ -796,8 +796,8 @@ fn local_only_commands_parse_to_local_variants() {
     assert!(matches!(
         agent.cmd,
         Cmd::Agent {
-            op: AgentOp::Install { agent, force }
-        } if agent == vec!["codex"] && force
+            op: AgentOp::Install { agent, skill, force }
+        } if agent == vec!["codex"] && skill == "flowmux-browser" && force
     ));
 
     let hooks = Cli::try_parse_from([
@@ -827,7 +827,7 @@ fn cline_is_supported_as_a_skill_not_a_file_hook() {
     assert!(matches!(
         agent.cmd,
         Cmd::Agent {
-            op: AgentOp::Doctor { agent }
+            op: AgentOp::Doctor { agent, .. }
         } if agent == vec!["cline"]
     ));
 
@@ -844,7 +844,7 @@ fn antigravity_is_supported_by_skill_and_hook_management_parsers() {
                 op: AgentOp::Install { agent, .. },
             }
             | Cmd::Agent {
-                op: AgentOp::Doctor { agent },
+                op: AgentOp::Doctor { agent, .. },
             }
             | Cmd::Agent {
                 op: AgentOp::Uninstall { agent, .. },

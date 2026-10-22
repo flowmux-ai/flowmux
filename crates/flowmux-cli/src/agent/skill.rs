@@ -18,10 +18,19 @@ impl Skill {
         }
     }
 
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|skill| skill.slug() == slug)
+    }
+
     pub fn targets(self) -> &'static [Target] {
         match self {
             Self::Browser => Target::ALL,
-            Self::Team => &[Target::ClaudeCode, Target::Codex],
+            Self::Team => &[
+                Target::ClaudeCode,
+                Target::Codex,
+                Target::Gemini,
+                Target::Antigravity,
+            ],
         }
     }
 
@@ -44,6 +53,36 @@ impl Skill {
             vec![legacy]
         } else {
             Vec::new()
+        }
+    }
+
+    /// Existing user-owned copies that can also be discovered by this agent.
+    /// Gemini gives ~/.agents/skills precedence over its own user skill root.
+    pub fn unmanaged_paths(
+        self,
+        target: Target,
+        home: &Path,
+        codex_home: Option<&Path>,
+        overrides: &SkillOverrides,
+    ) -> Vec<PathBuf> {
+        match target {
+            Target::Codex => self.codex_unmanaged_paths(home, codex_home),
+            Target::Gemini => {
+                let shared = overrides
+                    .gemini
+                    .as_deref()
+                    .unwrap_or(home)
+                    .join(".agents/skills")
+                    .join(self.slug())
+                    .join("SKILL.md");
+                let managed = self.path(target, home, codex_home, overrides);
+                if shared != managed && shared.exists() {
+                    vec![shared]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
         }
     }
 

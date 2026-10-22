@@ -155,27 +155,44 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
     let codex_home = agent::resolved_codex_home();
     let overrides = agent::SkillOverrides::from_env();
 
-    let parse_targets = |slugs: &[String]| -> anyhow::Result<Vec<agent::Target>> {
-        if slugs.is_empty() {
-            Ok(agent::Target::ALL.to_vec())
-        } else {
-            slugs
-                .iter()
-                .map(|s| {
-                    agent::Target::from_slug(s).ok_or_else(|| anyhow::anyhow!("unknown agent: {s}"))
-                })
-                .collect()
-        }
-    };
+    let parse_targets =
+        |slugs: &[String], skill: agent::Skill| -> anyhow::Result<Vec<agent::Target>> {
+            if slugs.is_empty() {
+                Ok(skill.targets().to_vec())
+            } else {
+                slugs
+                    .iter()
+                    .map(|s| {
+                        let target = agent::Target::from_slug(s)
+                            .ok_or_else(|| anyhow::anyhow!("unknown agent: {s}"))?;
+                        anyhow::ensure!(
+                            skill.targets().contains(&target),
+                            "{} does not support {}",
+                            s,
+                            skill.slug()
+                        );
+                        Ok(target)
+                    })
+                    .collect()
+            }
+        };
 
     match op {
         AgentOp::Install {
             agent: slugs,
             force,
+            skill,
         } => {
-            let targets = parse_targets(slugs)?;
-            let outcomes =
-                agent::install_all(&targets, &home, codex_home.as_deref(), *force, &overrides)?;
+            let skill = agent::Skill::from_slug(skill).expect("validated skill");
+            let targets = parse_targets(slugs, skill)?;
+            let outcomes = targets
+                .iter()
+                .map(|&target| {
+                    let path = skill.path(target, &home, codex_home.as_deref(), &overrides);
+                    let outcome = skill.install(&path, *force)?;
+                    Ok((target, path, outcome))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             if json {
                 let body = outcomes
                     .iter()
@@ -211,14 +228,24 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        AgentOp::Doctor { agent: slugs } => {
-            let targets = parse_targets(slugs)?;
-            let report = agent::doctor_all(&targets, &home, codex_home.as_deref(), &overrides);
-            let codex_duplicates = if targets.contains(&agent::Target::Codex) {
-                agent::codex_unmanaged_skill_paths(&home, codex_home.as_deref())
-            } else {
-                Vec::new()
-            };
+        AgentOp::Doctor {
+            agent: slugs,
+            skill,
+        } => {
+            let skill = agent::Skill::from_slug(skill).expect("validated skill");
+            let targets = parse_targets(slugs, skill)?;
+            let report = targets
+                .iter()
+                .map(|&target| {
+                    let path = skill.path(target, &home, codex_home.as_deref(), &overrides);
+                    let status = skill.doctor(&path);
+                    agent::DoctorEntry {
+                        target,
+                        path,
+                        status,
+                    }
+                })
+                .collect::<Vec<_>>();
             let any_bad = report
                 .iter()
                 .any(|e| !matches!(e.status, agent::DoctorStatus::Ok));
@@ -234,14 +261,7 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                                 agent::DoctorStatus::Error(message) => Some(message),
                                 _ => None,
                             },
-                            "unmanaged_duplicates": if e.target == agent::Target::Codex {
-                                codex_duplicates
-                                    .iter()
-                                    .map(|p| p.display().to_string())
-                                    .collect::<Vec<_>>()
-                            } else {
-                                Vec::new()
-                            },
+                            "unmanaged_duplicates": skill.unmanaged_paths(e.target, &home, codex_home.as_deref(), &overrides),
                         })
                     })
                     .collect::<Vec<_>>();
@@ -258,11 +278,12 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                         println!("           {message}");
                     }
                 }
-                for path in &codex_duplicates {
-                    println!(
-                        "warn       codex         {} (unmanaged duplicate)",
-                        path.display()
-                    );
+                for &target in &targets {
+                    for path in
+                        skill.unmanaged_paths(target, &home, codex_home.as_deref(), &overrides)
+                    {
+                        println!("warn       {:12}  {} (unmanaged duplicate; shared skills may take precedence)", target.slug(), path.display());
+                    }
                 }
             }
             if any_bad {
@@ -273,13 +294,16 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
         AgentOp::Uninstall {
             agent: slugs,
             skills_only,
+            skill,
         } => {
-            let targets = parse_targets(slugs)?;
-            let remove_tmux = !skills_only && targets.contains(&agent::Target::ClaudeCode);
+            let skill = agent::Skill::from_slug(skill).expect("validated skill");
+            let targets = parse_targets(slugs, skill)?;
+            let preserve_shims = *skills_only || skill == agent::Skill::Team;
+            let remove_tmux = !preserve_shims && targets.contains(&agent::Target::ClaudeCode);
             let mut removed = Vec::new();
             for t in targets {
-                let path = overrides.path(t, &home, codex_home.as_deref());
-                let outcome = agent::uninstall_one(&path)?;
+                let path = skill.path(t, &home, codex_home.as_deref(), &overrides);
+                let outcome = skill.uninstall(&path)?;
                 let label = match outcome {
                     agent::UninstallOutcome::Removed => "removed",
                     agent::UninstallOutcome::Preserved { .. } => "removed",
@@ -298,7 +322,7 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                         println!("backup   {:12}  {}", t.slug(), backup.display());
                     }
                 }
-                if *skills_only {
+                if preserve_shims {
                     continue;
                 }
                 let shim = match t {
@@ -306,6 +330,7 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                     agent::Target::OpenCode => "opencode",
                     agent::Target::Codex => "codex",
                     agent::Target::Antigravity => "agy",
+                    agent::Target::Gemini => "gemini",
                     agent::Target::Cline => "cline",
                 };
                 for path in hook_install::uninstall_agent_shim(shim)? {

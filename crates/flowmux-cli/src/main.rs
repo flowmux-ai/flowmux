@@ -609,8 +609,11 @@ enum AgentOp {
     Install {
         /// Limit installation to one agent. Repeat the flag to pick
         /// multiple. Omit to install for all known agents.
-        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity"])]
+        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity", "agy", "gemini"])]
         agent: Vec<String>,
+        /// Product skill to manage; defaults to the browser skill.
+        #[arg(long, default_value = "flowmux-browser", value_parser = ["flowmux-browser", "flowmux-team"])]
+        skill: String,
         /// Back up and replace drifted files instead of erroring.
         #[arg(long)]
         force: bool,
@@ -619,14 +622,20 @@ enum AgentOp {
     /// matches the bundled SKILL. Exit code is 0 only when every
     /// checked target is `ok`.
     Doctor {
-        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity"])]
+        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity", "agy", "gemini"])]
         agent: Vec<String>,
+        /// Product skill to manage; defaults to the browser skill.
+        #[arg(long, default_value = "flowmux-browser", value_parser = ["flowmux-browser", "flowmux-team"])]
+        skill: String,
     },
     /// Remove flowmux's SKILL and wrapper shim for each agent. The agent's
     /// own files are left untouched.
     Uninstall {
-        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity"])]
+        #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline", "antigravity", "agy", "gemini"])]
         agent: Vec<String>,
+        /// Product skill to manage; defaults to the browser skill.
+        #[arg(long, default_value = "flowmux-browser", value_parser = ["flowmux-browser", "flowmux-team"])]
+        skill: String,
         /// Remove only the skill, preserving agent and tmux wrapper shims.
         #[arg(long)]
         skills_only: bool,

@@ -49,7 +49,7 @@ fn install_update_uninstall_reinstall_all_targets() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
     let missing = run(home, &["agent", "doctor"], false);
-    assert_eq!(missing.as_array().unwrap().len(), 5);
+    assert_eq!(missing.as_array().unwrap().len(), 6);
     assert!(missing
         .as_array()
         .unwrap()
@@ -361,4 +361,130 @@ fn opencode_default_hook_and_skill_roots_match_on_every_os() {
         .join(".config/opencode/plugins/flowmux-session.js")
         .exists());
     assert!(!home.join("Library/Application Support/opencode").exists());
+}
+
+#[test]
+fn gemini_and_agy_team_bundles_preserve_settings_and_shared_copies() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let gemini_home = home.join("gemini-home");
+    let env = [("GEMINI_CLI_HOME", gemini_home.as_path())];
+    let shared = gemini_home.join(".agents/skills/flowmux-team/SKILL.md");
+    fs::create_dir_all(shared.parent().unwrap()).unwrap();
+    fs::write(&shared, "user shared skill").unwrap();
+    let settings = gemini_home.join(".gemini/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, r#"{"hooks":{"custom":true}}"#).unwrap();
+    let shim = home.join("data/flowmux/agent-shims/gemini");
+    fs::create_dir_all(shim.parent().unwrap()).unwrap();
+    fs::write(&shim, "user wrapper").unwrap();
+    let args = [
+        "agent",
+        "install",
+        "--agent",
+        "gemini",
+        "--agent",
+        "agy",
+        "--skill",
+        "flowmux-team",
+    ];
+    let installed = run_with_env(home, &args, true, &env);
+    assert_eq!(installed.as_array().unwrap().len(), 2);
+    let path = gemini_home.join(".gemini/skills/flowmux-team/SKILL.md");
+    assert_eq!(installed[0]["path"], path.to_string_lossy().as_ref());
+    assert_eq!(installed[1]["agent"], "antigravity");
+    let script = path.parent().unwrap().join("scripts/team.py");
+    assert!(script.exists());
+    fs::write(&script, "user edited").unwrap();
+    let doctor = [
+        "agent",
+        "doctor",
+        "--agent",
+        "gemini",
+        "--skill",
+        "flowmux-team",
+    ];
+    let report = run_with_env(home, &doctor, false, &env);
+    assert_eq!(report[0]["status"], "drift");
+    assert_eq!(
+        report[0]["unmanaged_duplicates"][0],
+        shared.to_string_lossy().as_ref()
+    );
+    let mut force = args.to_vec();
+    force.push("--force");
+    run_with_env(home, &force, true, &env);
+    run_with_env(home, &doctor, true, &env);
+    fs::remove_file(&script).unwrap();
+    run_with_env(home, &["fix"], true, &env);
+    assert!(script.exists());
+    let backups: Vec<_> = fs::read_dir(script.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".flowmux-backup-")
+        })
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(
+        fs::read_to_string(backups[0].path()).unwrap(),
+        "user edited"
+    );
+    run_with_env(
+        home,
+        &[
+            "agent",
+            "uninstall",
+            "--agent",
+            "gemini",
+            "--skill",
+            "flowmux-team",
+        ],
+        true,
+        &env,
+    );
+    assert!(!path.exists());
+    assert!(shim.exists());
+    run_with_env(home, &["fix"], true, &env);
+    assert!(!path.exists(), "fix must not enable an absent Team bundle");
+    assert_eq!(fs::read_to_string(shared).unwrap(), "user shared skill");
+    assert_eq!(
+        fs::read_to_string(settings).unwrap(),
+        r#"{"hooks":{"custom":true}}"#
+    );
+}
+
+#[test]
+fn explicit_browser_selection_and_gemini_default_root() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let installed = run(
+        home,
+        &[
+            "agent",
+            "install",
+            "--agent",
+            "gemini",
+            "--skill",
+            "flowmux-browser",
+        ],
+        true,
+    );
+    assert_eq!(
+        installed[0]["path"],
+        home.join(".gemini/skills/flowmux-browser/SKILL.md")
+            .to_string_lossy()
+            .as_ref()
+    );
+    run(home, &["agent", "doctor", "--agent", "gemini"], true);
+    run(
+        home,
+        &["agent", "uninstall", "--agent", "gemini", "--skills-only"],
+        true,
+    );
+    let team = run(home, &["agent", "install", "--skill", "flowmux-team"], true);
+    assert_eq!(team.as_array().unwrap().len(), 4);
+    assert!(!home.join(".config/opencode/skills/flowmux-team").exists());
 }

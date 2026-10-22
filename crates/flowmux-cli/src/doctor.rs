@@ -316,6 +316,18 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
                 });
             }
         }
+        for &skill in agent::Skill::ALL {
+            if *target == agent::Target::Codex && skill == agent::Skill::Browser {
+                continue; // Already reported with the legacy Codex diagnostics above.
+            }
+            for path in skill.unmanaged_paths(*target, home, codex_home, &overrides) {
+                entries.push(Entry {
+                    name: format!("{} duplicate {} skill", target.slug(), skill.slug()),
+                    status: Status::Warn,
+                    detail: format!("{} is outside flowmux management; shared skills may take precedence; keep copies synchronized or remove manually", path.display()),
+                });
+            }
+        }
         if let Some(hook_target) = hook_target_for(*target) {
             let hook = hook_report
                 .iter()
@@ -494,7 +506,7 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
         agent::Target::OpenCode => Some(hook_install::HookTarget::OpenCode),
         agent::Target::Codex => Some(hook_install::HookTarget::Codex),
         agent::Target::Antigravity => Some(hook_install::HookTarget::Antigravity),
-        agent::Target::Cline => None,
+        agent::Target::Cline | agent::Target::Gemini => None,
     }
 }
 
@@ -505,11 +517,13 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
 /// `~/.gemini/config` with Gemini, so its own state root or binary is the signal.
 fn agent_is_installed(t: agent::Target, home: &Path, codex_home: Option<&Path>) -> bool {
     match t {
-        agent::Target::ClaudeCode | agent::Target::OpenCode => agent::SkillOverrides::from_env()
-            .path(t, home, codex_home)
-            .ancestors()
-            .nth(3)
-            .is_some_and(Path::is_dir),
+        agent::Target::ClaudeCode | agent::Target::OpenCode | agent::Target::Gemini => {
+            agent::SkillOverrides::from_env()
+                .path(t, home, codex_home)
+                .ancestors()
+                .nth(3)
+                .is_some_and(Path::is_dir)
+        }
         agent::Target::Codex => codex_home
             .map(Path::to_path_buf)
             .unwrap_or_else(|| home.join(".codex"))
