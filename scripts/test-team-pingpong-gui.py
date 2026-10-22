@@ -28,11 +28,11 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 PROVIDER = r'''
-import json, os, pathlib, re, socket, sys, time
+import json, os, pathlib, re, socket, subprocess, sys, time
 agent = pathlib.Path(sys.argv[0]).name
 prompt = sys.argv[-1]
 lead = sys.argv[1:2] == ['--lead-fixture']
-session = prompt if lead else re.search(r'FLOWMUX_TEAM_JOB:(\S+)', prompt)[1]
+session = sys.argv[2] if lead else re.search(r'FLOWMUX_TEAM_JOB:(\S+)', prompt)[1]
 profile = pathlib.Path(os.environ['CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'])
 transcript = profile / ('sessions/2026/10/10' if agent == 'codex' else 'projects/fixture') / (session + '.jsonl')
 transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +42,7 @@ def event(value):
 def activity(value):
     request = dict(id=1, kind='request', verb='agent_activity_update',
         pane=os.environ['FLOWMUX_PANE_ID'], surface=os.environ['FLOWMUX_SURFACE_ID'],
-        agent=agent, activity=value, session_id=session, pid=os.getpid(), source='flowmux:hook')
+        agent='antigravity' if agent == 'agy' else agent, activity=value, session_id=session, pid=os.getpid(), source='flowmux:hook')
     with socket.socket(socket.AF_UNIX) as stream:
         stream.connect(os.environ['FLOWMUX_SOCKET_PATH'])
         stream.sendall((json.dumps(request) + '\n').encode())
@@ -50,6 +50,9 @@ def activity(value):
 if lead:
     activity('running')
     print('LEAD_READY ' + session, flush=True)
+    if len(sys.argv) > 3:
+        result = subprocess.run(sys.argv[3:])
+        print('LEAD_RESULT ' + str(result.returncode), flush=True)
     sys.stdin.readline()
     raise SystemExit
 if agent == 'codex':
@@ -121,7 +124,7 @@ def main():
     if not args.real_agent:
         bin_dir = h.root / 'bin'
         bin_dir.mkdir()
-        for agent in ('claude', 'codex'):
+        for agent in ('claude', 'codex', 'gemini', 'agy'):
             path = bin_dir / agent
             path.write_text('#!/usr/bin/env python3\n' + PROVIDER)
             path.chmod(0o700)
@@ -230,6 +233,27 @@ def main():
                 assert 'Approval required' in h.screen(socket, worker['pane'])
                 assert len(h.workspace(socket, other_workspace)['panes']) == len(other_before['panes'])
                 h.pass_check(f'{agent}: stale pane and other Team focus retain lead; approval handoff targets exact worker')
+        if not args.real_agent:
+            for lead in ('gemini', 'agy'):
+                workspace = h.rpc(socket, 'workspace_create', name=f'Team lead: {lead}',
+                                  root=str(REPO), team=True)['workspace_created']['id']
+                pane = h.workspace(socket, workspace)['panes'][0]['id']
+                session = str(uuid.uuid4())
+                command = [str(bin_dir / lead), '--lead-fixture', session, sys.executable,
+                           str(examples), '--case', 'review', '--agent', 'codex', '--cwd', str(REPO),
+                           '--cli', args.cli, '--timeout', str(args.timeout)]
+                h.send(socket, pane, shlex.join(command))
+                fixture.wait_for(lambda: 'LEAD_RESULT ' in h.screen(socket, pane),
+                                 f'{lead} lead completes worker review', timeout=args.timeout + 30)
+                screen = h.screen(socket, pane)
+                (h.root / f'{lead}-lead.screen.txt').write_text(screen)
+                assert 'LEAD_RESULT 0' in screen, screen
+                tree = h.workspace(socket, workspace)
+                assert len(tree['panes']) == 3, tree
+                source = next(p for p in tree['panes'] if p['id'] == pane)
+                assert any(tab.get('agent', {}).get('name') == ('antigravity' if lead == 'agy' else lead)
+                           for tab in source['tabs']), source
+                h.pass_check(f'{lead} lead: two Codex workers complete four tracked turns from its real pane')
         h.close_window(process)
     finally:
         h.cleanup()

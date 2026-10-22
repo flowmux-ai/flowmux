@@ -277,6 +277,7 @@ def main():
         fixture.wait_for(lambda: any('Another copy remains' in n.get_name() for n in walk(gemini_row)),
                          'Gemini shared-copy warning')
         assert any('Sign-in not checked' in n.get_name() for n in walk(gemini_row))
+        assert any('Team lead supported' in n.get_name() for n in walk(gemini_row))
         (gemini_team / 'scripts/team.py').write_text('modified Gemini helper')
         click(button('Refresh status'))
         click(button('Update', gemini_row))

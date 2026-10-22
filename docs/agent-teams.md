@@ -2,6 +2,10 @@
 
 # Flowmux team skill
 
+Claude Code, Codex, Gemini CLI and Antigravity CLI (`agy`) can lead a Team
+workspace with this skill. The supported worker providers are Claude Code and
+Codex, regardless of which agent is leading.
+
 `flowmux-team` delegates bounded assignments to interactive Claude Code or Codex
 workers in visible panes. The lead collects evidence, requests corrections from
 the same workers, and verifies the user's acceptance checks. A role describes a
@@ -122,7 +126,23 @@ proxy returned `unix sockets unsupported` even with a Unix socket allowlist,
 so that setting alone is not a working solution on that build. Installing the
 skill does not grant socket access, disable the sandbox, or change hook trust.
 
-Open **Options → Skills → Flowmux Team** to install for Claude Code or Codex.
+Open **Options → Skills → Flowmux Team** to install for Claude Code, Codex,
+Gemini CLI or Antigravity CLI (`agy`). **Check Team setup** reports Python 3.9+,
+the selected CLI and lifecycle hook availability without changing settings or
+signing in. For Gemini/agy leads, it also checks whether a supported worker CLI
+is present. Authentication and actual task execution are separate checks.
+
+The CLI equivalent is `flowmux agent install --agent gemini --skill flowmux-team`
+(use `--agent agy` for Antigravity). Updates back up local changes; removing Team
+preserves the CLI skill, agent settings and wrappers.
+
+Gemini and agy are not yet worker targets. Their `AfterAgent`/`Stop` hooks run
+before other hooks can reject the answer and continue working, so a saved final
+answer and an idle notification do not reliably prove task completion. Supporting
+them as workers requires a native completion signal after all stop decisions.
+Their lead skills can already delegate to Claude Code and Codex; Flowmux does not
+disable existing hooks to extend worker support.
+
 Each row checks the complete bundle: `SKILL.md`, `scripts/team.py`,
 `scripts/examples.py`, `references/sample.md` and `references/cookbook.md`.
 Missing or changed resources offer **Update**, which

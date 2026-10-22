@@ -1,11 +1,22 @@
 ---
 name: flowmux-team
-description: Coordinate Claude Code and Codex tasks in Flowmux. In Team workspaces, delegate to interactive agents in split panes and collect their results; in ordinary workspaces, complete the work in the current agent.
+description: Lead Flowmux teams from Claude Code, Codex, Gemini CLI or Antigravity CLI (agy). In Team workspaces, delegate to interactive Claude Code or Codex workers in split panes and collect their results; in ordinary workspaces, complete the work in the current agent.
 ---
 
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
 # Flowmux team
+
+Claude Code, Codex, Gemini CLI and Antigravity CLI (`agy`) can use this skill as
+the lead. Install it with `flowmux agent install --agent gemini --skill flowmux-team`
+or `--agent agy`, or use **Options → Skills → Flowmux Team**. Use the same commands
+below from any lead. The worker providers are Claude Code and Codex.
+
+Gemini/agy worker completion is not supported: their stop hooks can run before
+another hook rejects the answer and continues the task. An idle notification
+or saved answer alone cannot prove completion. Do not substitute screen scraping,
+disable the user's hooks, or claim a Gemini/agy worker completed successfully.
+Authentication and trust prompts require the user's action in the native CLI.
 
 Resolve the current workspace before choosing how to work. Use `scripts/team.py`
 relative to this skill directory. It requires Python 3.9+ and the Flowmux CLI.

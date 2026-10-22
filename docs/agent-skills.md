@@ -24,6 +24,7 @@ The optional [Flowmux team skill](agent-teams.md) adds role-based pane delegatio
 and result collection. Options → Skills manages both skills in separate sections.
 Flowmux Team installs for Claude Code, Codex, Gemini CLI and Antigravity CLI
 (`agy`), including its scripts and sample with the instructions.
+All four can lead teams; worker sessions currently use Claude Code or Codex.
 
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.

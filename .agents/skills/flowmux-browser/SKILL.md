@@ -232,6 +232,7 @@ Install targets: `claude-code`, `opencode`, `codex`, `antigravity` (`agy` alias)
 `gemini`, `cline`. Omitting `--agent` selects every target supported by the selected
 skill. `--skill flowmux-browser` is the default; `--skill flowmux-team` selects
 the complete Team bundle for Claude Code, Codex, Gemini CLI or agy.
+All four can lead teams; worker sessions currently use Claude Code or Codex.
 This user guide retains the
 `flowmux-browser` skill name/path for existing installations. Installation copies
 the CLI's bundled guide; no external skill catalog or browser download is needed.

@@ -30,7 +30,7 @@ pub(super) fn build() -> gtk::ScrolledWindow {
                 let group = adw::PreferencesGroup::new();
                 let (title, description) = match skill {
                     Skill::Browser => ("Flowmux CLI", "flowmux-browser · Workspaces, terminals, browser automation, SSH and notifications."),
-                    Skill::Team => ("Flowmux Team", "flowmux-team · Lead teams or run as a worker with Claude Code, Codex, Gemini CLI and Antigravity CLI (agy). Ordinary workspaces stay inline. Requires Python 3.9+ and signed-in agent CLIs."),
+                    Skill::Team => ("Flowmux Team", "flowmux-team · Lead from Claude Code, Codex, Gemini CLI or Antigravity CLI (agy). Workers use Claude Code or Codex. Ordinary workspaces stay inline. Requires Python 3.9+ and signed-in agent CLIs."),
                 };
                 group.set_title(title);
                 group.set_description(Some(description));
@@ -372,5 +372,17 @@ fn team_setup(target: Target) -> String {
         ),
     });
     details.push("Sign-in not checked".into());
+    if matches!(target, Target::Gemini | Target::Antigravity) {
+        details.push(
+            if hook_install::agent_has_real_binary("claude")
+                || hook_install::agent_has_real_binary("codex")
+            {
+                "Team lead supported · Claude/Codex worker CLI found"
+            } else {
+                "Team lead supported · Install Claude Code or Codex for workers"
+            }
+            .into(),
+        );
+    }
     details.join(" · ")
 }
