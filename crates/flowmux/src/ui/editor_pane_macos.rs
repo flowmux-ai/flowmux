@@ -578,11 +578,6 @@ impl EditorPane {
     }
 
     #[cfg(all(test, feature = "native-smoke"))]
-    pub(crate) async fn keyboard_probe(&self, source: &str) -> String {
-        save_ack_smoke::javascript(self, source).await
-    }
-
-    #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_terminal_focus(
         &self,
         terminal: &crate::ui::pane_terminal::PaneTerminal,

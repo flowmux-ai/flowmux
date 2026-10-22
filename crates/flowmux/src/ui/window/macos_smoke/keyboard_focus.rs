@@ -2,10 +2,7 @@
 use super::*;
 use gtk::glib::translate::ToGlibPtr;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
-    NSWindow,
-};
+use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
 use objc2_foundation::{NSPoint, NSString};
 
 unsafe extern "C" {
@@ -21,21 +18,6 @@ pub(super) async fn check(
     editor_a: PaneId,
     root: &std::path::Path,
 ) {
-    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
-    // This main-thread harness does not enter NSApplication's normal launch loop.
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    app.finishLaunching();
-    #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
-    let surface = controller.window.surface().unwrap();
-    let window = unsafe {
-        &*gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>()
-    };
-    window.makeKeyAndOrderFront(None);
-    wait_until("native keyboard window active", || {
-        app.isActive() && window.isKeyWindow()
-    })
-    .await;
     let terminal_b = controller
         .split_pane(terminal_a, SplitDirection::Horizontal)
         .await
@@ -116,26 +98,18 @@ pub(super) async fn check(
         "a deferred focus request replaced the newer pane selection"
     );
 
+    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
+    app.activate();
+    let surface = controller.window.surface().unwrap();
+    let window = unsafe {
+        &*gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>()
+    };
+    window.makeKeyAndOrderFront(None);
     for (index, editor) in editors.iter().enumerate() {
         let file = root.join(format!("keyboard-editor-{index}.txt"));
         std::fs::write(&file, "").unwrap();
         editor.open_file(&file).await.unwrap();
         editor.flush_pending_changes().await.unwrap();
-        editor
-            .keyboard_probe(
-                r#"
-            window.keyAudit = [];
-            for (const type of ['focus', 'blur', 'keydown', 'keyup', 'beforeinput', 'input']) {
-                document.addEventListener(type, event => keyAudit.push({
-                    type, key: event.key, data: event.data,
-                    tag: event.target.tagName, cls: event.target.className,
-                    value: event.target.value, focused: document.hasFocus()
-                }), true);
-            }
-            'armed'
-        "#,
-            )
-            .await;
     }
     for (index, terminal) in terminals.iter().enumerate() {
         terminal
@@ -186,7 +160,7 @@ pub(super) async fn check(
         let kind = if is_editor { "editor" } else { "terminal" };
         let file = root.join(format!("keyboard-{kind}-{index}.txt"));
         // Posting an NSEvent does not acknowledge its WebKit/PTY processing.
-        let result = glib::future_with_timeout(Duration::from_secs(10), async {
+        glib::future_with_timeout(Duration::from_secs(10), async {
             loop {
                 if is_editor {
                     editors[index].flush_pending_changes().await.unwrap();
@@ -206,31 +180,8 @@ pub(super) async fn check(
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
-        .await;
-        if is_editor {
-            eprintln!(
-                "DOM_TRACE index={index} {}",
-                editors[index]
-                    .keyboard_probe("JSON.stringify(keyAudit)")
-                    .await
-            );
-        }
-        result.unwrap_or_else(|_| {
-            crate::ui::macos_ime::dump_trace();
-            for (index, terminal) in terminals.iter().enumerate() {
-                eprintln!(
-                    "TERMINAL_{index} focused={} screen={:?}",
-                    terminal.widget.is_focus(),
-                    terminal.screen_text()
-                );
-            }
-            for (index, editor) in editors.iter().enumerate() {
-                eprintln!(
-                    "EDITOR_{index} gtk={} native={}",
-                    editor.focus_widget().is_focus(),
-                    editor.has_native_focus()
-                );
-            }
+        .await
+        .unwrap_or_else(|_| {
             panic!(
                 "{kind} {index}: native input did not settle: {:?}",
                 std::fs::read_to_string(&file)
@@ -252,17 +203,10 @@ pub(super) async fn check(
         }
     }
     controller.window.remove_controller(&focus_poll);
-    crate::ui::macos_ime::dump_trace();
     println!("MACOS_FOUR_PANE_EDITING_KEYS_OK");
 }
 
 async fn key(app: &NSApplication, window: &NSWindow, text: &str, code: u16, shift: bool) {
-    crate::ui::macos_ime::trace(format!(
-        "POST_KEY text={text:?} active={} key_window={} responder={:?}",
-        app.isActive(),
-        window.isKeyWindow(),
-        window.firstResponder()
-    ));
     let text = NSString::from_str(text);
     let flags = if shift {
         NSEventModifierFlags::Shift

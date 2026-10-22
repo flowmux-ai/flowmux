@@ -637,23 +637,14 @@ fn install_macos_editor_key_capture(
                 .cloned()
         };
         let Some(editor) = editor else {
-            #[cfg(all(test, feature = "native-smoke"))]
-            crate::ui::macos_ime::trace(format!("EDITOR_KEY_NO_EDITOR key={keyval:?}"));
             return glib::Propagation::Proceed;
         };
         let native_focus = editor.has_native_focus();
         if !native_focus && !window_focus_is_widget(&window_for_key, &editor.root.clone().upcast())
         {
-            #[cfg(all(test, feature = "native-smoke"))]
-            crate::ui::macos_ime::trace(format!("EDITOR_KEY_NO_FOCUS key={keyval:?}"));
             return glib::Propagation::Proceed;
         }
         let handoff = native_focus && !editor.focus_widget().is_focus();
-        #[cfg(all(test, feature = "native-smoke"))]
-        crate::ui::macos_ime::trace(format!(
-            "EDITOR_KEY key={keyval:?} native={native_focus} gtk={} selected={:?} handoff={handoff}",
-            editor.focus_widget().is_focus(), focused.get()
-        ));
         if handoff {
             // A native click can precede the focus poll and leave GTK targeting a terminal.
             editor.grab_focus();
