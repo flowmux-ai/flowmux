@@ -117,6 +117,10 @@ Snapshot names prefer valid `aria-labelledby` references, then `aria-label`,
 associated HTML labels and element text. Referenced hidden labels are included;
 title and placeholder provide fallbacks. This is a DOM summary, not a complete
 platform accessibility tree (for example, CSS-generated text is not included).
+Snapshots include nested open Shadow DOM. For those refs, `shadow_path` lists
+host selectors from outermost to innermost; `selector` is relative to the last
+shadow root. Use the ref for actions, which validate the original node and root.
+Closed shadow roots are not exposed.
 Snapshot JSON includes `page.surface_id`. Pass `browser --surface UUID` before
 any browser command except `open` to keep targeting that tab after another tab
 becomes active. A closed tab or a surface outside the given pane returns an error.

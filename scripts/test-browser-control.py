@@ -48,9 +48,21 @@ class Fixture(BaseHTTPRequestHandler):
         <input type=password value=secret aria-label=Password></p>
         <video id=clip controls muted playsinline preload=auto width=96 height=64
           aria-label=Clip src=/clip.mp4></video>
+        <div id=shadowHost></div>
         <script>window.clicks=0;window.mutations=[];
-        new MutationObserver(xs=>mutations.push(...xs)).observe(document.documentElement,
-          {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
+        const outer=shadowHost.attachShadow({mode:'open'});
+        outer.innerHTML='<section id=inner></section>';
+        const inner=outer.querySelector('#inner').attachShadow({mode:'open'});
+        inner.innerHTML='<label for=field>Shadow field</label><input id=field><button>Shadow button</button>';
+        window.shadowClicks=0;
+        inner.querySelector('button').onclick=()=>shadowClicks++;
+        window.shadowInputs=0;
+        document.addEventListener('input',event=>{
+          if(event.composedPath().includes(inner.querySelector('input'))) shadowInputs++;
+        });
+        for (const root of [document.documentElement,outer,inner])
+          new MutationObserver(xs=>mutations.push(...xs)).observe(root,
+            {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -96,6 +108,35 @@ def exercise(cli, url, root):
     browser("fill", reference(first, "Contact email"), "agent@example.test")
     assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
     print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)
+    shadow_field = reference(first, "Shadow field")
+    assert first["refs"][shadow_field]["shadow_path"] == ["#shadowHost", "#inner"]
+    browser("fill", shadow_field, "inside")
+    assert browser("value", shadow_field)["browser_result"]["value"] == "inside"
+    assert evaluate("String(shadowInputs)") == "1", "fill did not reach the outer application"
+    assert browser("value", reference(first, "Field"))["browser_result"]["value"] == ""
+    browser("focus", shadow_field)
+    browser("type", " shadow")
+    assert browser("value", shadow_field)["browser_result"]["value"] == "inside shadow"
+    browser("press", "Backspace")
+    assert browser("value", shadow_field)["browser_result"]["value"] == "inside shado"
+    evaluate("shadowHost.inert=true; 'inert host'")
+    assert not browser("is-enabled", shadow_field)["browser_bool_result"]["value"]
+    browser("fill", shadow_field, "blocked", error=True)
+    evaluate("shadowHost.inert=false; shadowHost.style.opacity='0'; 'hidden host'")
+    assert not browser("is-visible", shadow_field)["browser_bool_result"]["value"]
+    browser("fill", shadow_field, "blocked", error=True)
+    evaluate("shadowHost.style.opacity='1'; 'visible host'")
+    assert browser("value", shadow_field)["browser_result"]["value"] == "inside shado"
+    print("PASS: nested Shadow DOM names, fill, focus and native text input", flush=True)
+    evaluate("window.shadowCover=document.createElement('div'); shadowCover.style='position:fixed;inset:0;z-index:999999;background:white'; document.body.append(shadowCover); 'covered'")
+    browser("click", reference(first, "Shadow button"), error=True)
+    assert evaluate("String(shadowClicks)") == "0"
+    evaluate("shadowCover.remove(); 'uncovered'")
+    browser("click", reference(first, "Shadow button"))
+    assert evaluate("String(shadowClicks)") == "1"
+    evaluate("shadowHost.outerHTML=shadowHost.outerHTML; 'replaced shadow host'")
+    browser("fill", shadow_field, "stale", error=True)
+    print("PASS: nested open Shadow DOM refs target their own roots and expire with their host", flush=True)
     clip = reference(first, "Clip")
 
     def media(action, *args):

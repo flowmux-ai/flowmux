@@ -225,6 +225,7 @@ mod tests {
             role: role.into(),
             name: String::new(),
             selector: selector.into(),
+            shadow_path: Vec::new(),
         }
     }
 

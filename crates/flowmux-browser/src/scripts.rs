@@ -56,7 +56,9 @@ pub const SNAPSHOT_JS: &str = r#"
     if (r.width < 4 || r.height < 4) return false;
     const cs = window.getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none') return false;
-    if (Number(cs.opacity) === 0) return false;
+    for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {
+      if (Number(getComputedStyle(parent).opacity) === 0) return false;
+    }
     return true;
   }
 
@@ -91,6 +93,7 @@ pub const SNAPSHOT_JS: &str = r#"
   // matches one element. Stopping early keeps the selector short; repeated
   // markup without ids may need a path anchored at <html>.
   function cssPath(el) {
+    const document = el.getRootNode();
     if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) {
       return '#' + CSS.escape(el.id);
     }
@@ -123,21 +126,24 @@ pub const SNAPSHOT_JS: &str = r#"
   const lines = [];
   let counter = 0;
 
-  document.querySelectorAll(
-    'a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video'
-  ).forEach((el) => {
-    if (!visible(el)) return;
-    const role = implicitRole(el);
-    if (!INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
-    counter += 1;
-    const token = 'e' + counter + '-' + nonce;
-    const sel = cssPath(el);
-    const nm = name(el).slice(0, 120);
-    refs[token] = { role: role, name: nm, selector: sel };
-    nodes.set(token, el);
-    const safe = nm.split(String.fromCharCode(34)).join('\\"');
-    lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
-  });
+  function walk(root, shadowPath) {
+    root.querySelectorAll('*').forEach((el) => {
+      if (el.shadowRoot) walk(el.shadowRoot, [...shadowPath, cssPath(el)]);
+      if (!el.matches('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video') || !visible(el)) return;
+      const role = implicitRole(el);
+      if (!INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
+      counter += 1;
+      const token = 'e' + counter + '-' + nonce;
+      const sel = cssPath(el);
+      const nm = name(el).slice(0, 120);
+      refs[token] = { role: role, name: nm, selector: sel };
+      if (shadowPath.length) refs[token].shadow_path = shadowPath;
+      nodes.set(token, { el, root });
+      const safe = nm.split(String.fromCharCode(34)).join('\\"');
+      lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
+    });
+  }
+  walk(document, []);
 
   const text = (document.body && document.body.innerText
     ? document.body.innerText : '').slice(0, 4000);
@@ -163,8 +169,10 @@ pub const SNAPSHOT_JS: &str = r#"
 pub fn with_ref(ref_id: &str, selector: &str, script: &str) -> String {
     format!(
         r#"(function() {{
-            const el = globalThis.__flowmuxRefs?.get("{reference}");
-            if (!el || !el.isConnected || document.querySelector("{selector}") !== el)
+            const record = globalThis.__flowmuxRefs?.get("{reference}");
+            const el = record?.el;
+            const document = record?.root;
+            if (!el || !el.isConnected || el.getRootNode() !== document || document.querySelector("{selector}") !== el)
                 throw new Error("stale element ref: take a fresh snapshot");
             return {script};
         }})()"#,
@@ -250,7 +258,9 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
             const style = getComputedStyle(el);
             if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || style.visibility !== 'visible')
                 return "error: element is not visible";
-            for (let parent = el; parent; parent = parent.parentElement) {{
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+                if (parent.hasAttribute('inert') || ({enabled} && parent.getAttribute('aria-disabled') === 'true'))
+                    return "error: element is disabled or inert";
                 if (Number(getComputedStyle(parent).opacity) === 0)
                     return "error: element is not visible";
             }}
@@ -260,8 +270,16 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                 const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
                 const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
                 if (right <= left || bottom <= top) return "error: element is outside the viewport";
-                const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
-                if (!hit || !el.contains(hit)) return "error: element is covered or cannot receive pointer input";
+                const x = (left + right) / 2, y = (top + bottom) / 2;
+                let hit = el.ownerDocument.elementFromPoint(x, y);
+                while (hit?.shadowRoot) {{
+                    const next = hit.shadowRoot.elementFromPoint(x, y);
+                    if (!next || next === hit) break;
+                    hit = next;
+                }}
+                while (hit && hit !== el)
+                    hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
+                if (!hit) return "error: element is covered or cannot receive pointer input";
             }}
             {action}
         }})()"#,
@@ -310,7 +328,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
                 if (before !== after) throw new Error('pointer target moved; inspect the page before retrying');
             }}
             state.listener = event => {{
-                if (event.isTrusted && state.el.contains(event.target)) {{
+                if (event.isTrusted && event.composedPath().includes(state.el)) {{
                     state.received = true;
                     if (state.done) queueMicrotask(state.done);
                 }}
@@ -368,7 +386,7 @@ pub fn fill_by_selector(selector: &str, value: &str) -> String {
             }} else {{
                 el.value = "{v}";
             }}
-            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }}));
             el.dispatchEvent(new Event('change', {{ bubbles: true }}));
             return el.value === "{v}" ? "ok" : "error: fill value was not retained";
         "#,
@@ -462,14 +480,17 @@ pub fn prepare_text_input(text: &str) -> String {
     format!(
         r#"(function() {{
         if (globalThis.__flowmuxInput) return "error: browser input is already pending";
-        const el = document.activeElement;
+        let el = document.activeElement;
+        while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
         const field = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
         if (!el || (!field && !el.isContentEditable)) return "error: focused element is not editable";
         if (el.matches(':disabled') || el.readOnly || el.closest('[inert],[aria-disabled="true"]'))
             return "error: focused element is disabled or readonly";
         if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || getComputedStyle(el).visibility !== 'visible')
             return "error: focused element is not visible";
-        for (let parent = el; parent; parent = parent.parentElement) {{
+        for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+            if (parent.matches('[inert],[aria-disabled="true"]'))
+                return "error: focused element is disabled or readonly";
             if (Number(getComputedStyle(parent).opacity) === 0)
                 return "error: focused element is not visible";
         }}
@@ -492,7 +513,9 @@ pub const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
     delete globalThis.__flowmuxInput;
     if (!state) return "error: page changed during native input";
     state.el.removeEventListener('input', state.listener);
-    if (!state.el.isConnected || document.activeElement !== state.el)
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    if (!state.el.isConnected || active !== state.el)
         return "error: input target changed";
     if (!state.received) return "error: native input was not applied";
     if (state.expected !== null && state.el.value !== state.expected)
@@ -623,7 +646,9 @@ pub fn is_visible_selector(selector: &str) -> String {
             if (r.width < 1 || r.height < 1) return "false";
             const cs = window.getComputedStyle(el);
             if (cs.visibility === 'hidden' || cs.display === 'none') return "false";
-            if (Number(cs.opacity) === 0) return "false";
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+                if (Number(getComputedStyle(parent).opacity) === 0) return "false";
+            }}
             return "true";
         }})()"#,
         s = js_string(selector)
@@ -637,7 +662,11 @@ pub fn is_enabled_selector(selector: &str) -> String {
         r#"(function() {{
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
-            return (el.disabled === true) ? "false" : "true";
+            if (el.matches(':disabled')) return "false";
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+                if (parent.matches('[inert],[aria-disabled="true"]')) return "false";
+            }}
+            return "true";
         }})()"#,
         s = js_string(selector)
     )

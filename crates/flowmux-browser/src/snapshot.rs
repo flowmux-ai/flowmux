@@ -44,11 +44,13 @@ pub struct DomSnapshot {
 pub struct RefMeta {
     /// ARIA role (or implicit role inferred from the tag).
     pub role: String,
-    /// Best-effort accessible name (aria-label, alt, title,
-    /// placeholder, or trimmed innerText).
+    /// Best-effort accessible name from ARIA references, labels and content.
     pub name: String,
-    /// CSS path the server stores in the RefStore.
+    /// CSS path relative to the element's document or shadow root.
     pub selector: String,
+    /// Outer-to-inner CSS selectors for open shadow hosts; absent for light DOM.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_path: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +99,7 @@ mod tests {
                 role: "textbox".into(),
                 name: "Email".into(),
                 selector: "form#login > input:nth-of-type(1)".into(),
+                shadow_path: Vec::new(),
             },
         );
         refs.insert(
@@ -105,6 +108,7 @@ mod tests {
                 role: "button".into(),
                 name: "Sign in".into(),
                 selector: "form#login > button:nth-of-type(1)".into(),
+                shadow_path: Vec::new(),
             },
         );
         DomSnapshot {
