@@ -718,7 +718,7 @@ class FollowupTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='fm-turn-test-')
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.transcript = self.root / 'session.jsonl'
         self.transcript.write_text('old completed turn\n')
         self.manifest = dict(agent='codex', token='original', model='fixture', effort='high', role='reviewer',
