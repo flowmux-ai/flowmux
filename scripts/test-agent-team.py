@@ -1227,6 +1227,17 @@ class UsageRoutingTests(unittest.TestCase):
             self.snapshot(windows=[window])
             self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
 
+    def test_claude_web_limits_do_not_exclude_cli_workers(self):
+        for scope, opus, sonnet in [('Opus · Claude.ai', 'unknown', 'unknown'),
+                                    ('Opus · Claude Code', 'exhausted', 'unknown'),
+                                    ('Opus · claude_code', 'exhausted', 'unknown'),
+                                    ('Claude Code', 'exhausted', 'exhausted'),
+                                    ('claude_code', 'exhausted', 'exhausted')]:
+            with self.subTest(scope=scope):
+                self.snapshot('claude', [dict(scope=scope, used_percent=100, resets_at=11000)])
+                self.assertEqual(team.usage_status(dict(agent='claude', model='opus'))['status'], opus)
+                self.assertEqual(team.usage_status(dict(agent='claude', model='sonnet'))['status'], sonnet)
+
     def test_native_quota_is_shared_until_known_reset_even_after_usage_becomes_stale(self):
         self.snapshot()
         team.remember_quota(self.route)
@@ -1262,6 +1273,25 @@ class UsageRoutingTests(unittest.TestCase):
         directory = team.state_directory() / 'team-quota'
         self.assertEqual(len(list(directory.glob('*.json'))), 1)
         self.assertFalse(list(directory.glob('.*')))
+
+    def test_new_quota_does_not_restore_a_released_hold(self):
+        self.snapshot()
+        team.remember_quota(self.route)
+        self.now.return_value = 10002
+        self.snapshot(windows=[dict(scope=None, used_percent=25, resets_at=11000)], collected_at=10001)
+        self.assertEqual(team.usage_status(self.route)['status'], 'available')
+        team.remember_quota(self.route)
+        self.assertEqual(team.usage_status(self.route)['until'], 10302)
+
+    def test_fresh_usage_keeps_a_later_reset_than_the_native_backoff(self):
+        team.remember_quota(self.route)
+        self.assertEqual(team.usage_status(self.route)['until'], 10300)
+        self.now.return_value = 10002
+        self.snapshot(collected_at=10001)
+        self.assertEqual(team.usage_status(self.route)['until'], 11000)
+        team.remember_quota(self.route)
+        self.now.return_value = 10400
+        self.assertEqual(team.usage_status(self.route)['until'], 11000)
 
 
 if __name__ == '__main__':

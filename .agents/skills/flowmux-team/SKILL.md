@@ -73,7 +73,8 @@ Pass `--complexity` on every start; use scope, expected work and uncertainty to
 choose it. `--agent auto` (the default) chooses an eligible installed CLI, preferring
 Codex, then Claude, Gemini and agy. Latest matching-profile Claude/Codex usage
 observations exclude exhausted routes before a pane is created. Model-scoped
-limits only exclude matching models. With fallback enabled, this can also replace
+limits only exclude matching models; Claude web-only limits do not apply to CLI workers.
+With fallback enabled, this can also replace
 an explicitly selected exhausted provider; `--no-fallback` instead returns a
 diagnostic before launching. `--model sol|terra|opus|sonnet` accepts short names
 (`sonet` is also accepted); Terra maps to `gpt-5.6-terra`. Gemini CLI has no

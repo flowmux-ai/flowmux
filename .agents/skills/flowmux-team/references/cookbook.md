@@ -462,3 +462,30 @@ Local evidence: `/tmp/fm-gui-0eyhnsrs` (Skills GUI),
 `/tmp/fm-gui-39lp8ygq` (native agy), and
 `/tmp/fm-native-protocol-debda9c5` (Gemini account blocker).
 Native review/repair cases and macOS were not rerun in this check.
+
+## Shared usage routing follow-up — 2026-10-23, Linux
+
+Commit `fc747464` connected the existing usage collector to initial worker routing
+and shared native quota holds across jobs. Post-commit review found and corrected
+three cases: Claude web-only limits excluding CLI models, a released old quota
+hold returning after a new error, and a short native backoff hiding a later reset
+from a fresh usage observation. Independent protocol-error fixtures now clear
+only their own quota cache so one case cannot bypass the next case's native error.
+
+The final check passed 69 helper tests, 9 Rust skill integration tests, 45 Rust
+usage tests and 14 usage UI tests. Formatting, Clippy and whitespace checks passed.
+Isolated GUI runs passed 4 usage-routing checks, 15 recovery checks, 17 Skills
+checks and 10 deterministic communication checks. They cover collection through
+the existing app-server path, skipping exhausted routes before pane creation,
+sharing quota failures, expiry, failed-worker cleanup, supervisor loss, time
+budgets, same-session follow-ups, retained reports, YOLO and native keyboard focus.
+
+Evidence: `/tmp/fm-gui-sxmfcro6` (usage), `/tmp/fm-gui-m3o4xrm8` (recovery),
+`/tmp/fm-gui-3xt9j0si` (Skills) and `/tmp/fm-gui-17v2l7n9` (communication).
+Native Codex and Claude both passed missing-input clarification followed by
+same-session completion with 16 remaining seats after the usage-routing commit:
+`/tmp/fm-gui-2wlh8nh5` and `/tmp/fm-gui-1cuho9l9` respectively. Native accounts
+were not intentionally exhausted; quota transitions use native-shaped fixtures.
+Gemini/agy have no preflight collector, and Gemini account access remains blocked
+by the previously recorded unsupported-client response. Native agy, native
+review/repair cases, the full CI/coverage gate and macOS were not rerun in this follow-up.

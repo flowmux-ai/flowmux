@@ -75,7 +75,11 @@ def matching_scope(scope, agent, model):
         return True
     if not isinstance(scope, str):
         return False
-    scope = scope.lower().strip()
+    scope = scope.lower().strip().replace("_", " ")
+    if agent == "claude" and "·" in scope:
+        scope, surface = (part.strip() for part in scope.split("·", 1))
+        if surface not in ("claude code", "cli"):
+            return False
     if scope in ("", "all", "all models", "codex", "claude code", "cli", "individual"):
         return True
     if agent == "claude":
@@ -108,7 +112,8 @@ def usage_status(route, env=None):
     if (finite_number(cooldown.get("until")) and cooldown["until"] > now
             and finite_number(cooldown.get("recorded_at")) and cooldown["recorded_at"] <= now
             and not (status["status"] == "available" and collected > cooldown["recorded_at"])):
-        return {"status": "exhausted", "reason": "Recent native quota error", "until": cooldown["until"]}
+        return {"status": "exhausted", "reason": "Recent native quota error",
+                "until": max(cooldown["until"], status.get("until", 0))}
     return status
 
 
@@ -118,14 +123,11 @@ def remember_quota(manifest):
     profile, key = usage_identity(agent, env)
     directory = state_directory() / "team-quota"
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    now = time.time()
-    until = usage_status(manifest, env).get("until", now + UNKNOWN_QUOTA_BACKOFF)
     path = directory / (key + ".json")
     with (directory / (key + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        previous = observation(path, agent, profile)
-        if finite_number(previous.get("until")):
-            until = max(until, previous["until"])
+        now = time.time()
+        until = usage_status(manifest, env).get("until", now + UNKNOWN_QUOTA_BACKOFF)
         write_json(path, {"schema": 1, "agent": agent, "profile": profile,
                           "recorded_at": now, "until": until})
 

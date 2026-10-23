@@ -123,6 +123,9 @@ time.sleep(120)
 
     for standalone, code in [(True, 'usage_limit_exceeded'), (False, 'usage_limit_exceeded'),
                              (False, 'server_overloaded')]:
+        # Each protocol error is independent; cross-job quota holds are tested separately.
+        for cached in (h.root / 'state/flowmux/team-quota').glob('*.json'):
+            cached.unlink()
         quota = code == 'usage_limit_exceeded'
         error = {'codex_error_info': code, 'message': 'You’ve hit your usage limit.' if quota else 'Selected model is at capacity.'}
         (h.root / 'provider-error.json').write_text(json.dumps({'standalone': standalone, 'error': error}))

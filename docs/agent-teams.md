@@ -250,7 +250,8 @@ flag. `team.py route` previews the selection and alternatives without launching.
 Routing also consumes the existing GUI usage collector's credential-free,
 profile-scoped snapshots in the state directory's `team-usage/`. Current
 Claude/Codex observations exclude exhausted provider/model routes before pane
-creation; model-scoped limits do not block unrelated models. Missing, failed,
+creation; model-scoped limits do not block unrelated models, and Claude web-only
+limits do not apply to CLI workers. Missing, failed,
 expired or more-than-five-minute-old observations are explicitly unknown/stale
 and retain native error-based fallback. The helper adds no usage API requests.
 Refresh **AI Usage** to renew observations. Gemini/agy have no preflight usage
