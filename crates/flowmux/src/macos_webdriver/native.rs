@@ -280,7 +280,7 @@ pub(crate) fn smoke() {
         assert!(Instant::now() < deadline);
         pump();
     }
-    browser.evaluate("window.pointerReady=false;requestAnimationFrame(()=>requestAnimationFrame(()=>pointerReady=true));true").unwrap();
+    browser.evaluate("(()=>{window.pointerReady=false;requestAnimationFrame(()=>requestAnimationFrame(()=>window.pointerReady=true));return true})()").unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while browser.evaluate("pointerReady").unwrap() != true {
         assert!(
