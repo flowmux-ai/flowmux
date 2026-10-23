@@ -1198,7 +1198,7 @@ impl GhosttyPane {
                     cursor.saturating_add(rows),
                 )
             } else {
-                self.agent_status_text()
+                self.live_normal_screen_text(self.widget.row_count().max(1))
             };
         }
         self.widget
@@ -1258,13 +1258,17 @@ impl GhosttyPane {
         found
     }
 
-    /// Recent live terminal rows for Agent status and unmapped pane inspection.
+    /// Recent live terminal rows for Agent status.
     pub fn agent_status_text(&self) -> Option<String> {
         if self.terminal_alternate_screen.get() {
             // Alternate-screen row coordinates differ from scrollback ranges.
             // VTE's viewport extraction includes status rows below the cursor.
             return self.screen_text();
         }
+        self.live_normal_screen_text(self.widget.row_count().clamp(1, AGENT_STATUS_TEXT_ROWS))
+    }
+
+    fn live_normal_screen_text(&self, rows: i64) -> Option<String> {
         let (_, cursor_row) = self.widget.cursor_position();
         let last_row = self
             .widget
@@ -1273,13 +1277,8 @@ impl GhosttyPane {
             .map_or(cursor_row, |row| row.max(cursor_row));
         // ED2 may move the replaced frame into scrollback (notably VTE 0.76).
         // Read the live grid, never an old spinner above it, even when scrolled back.
-        let rows = self.widget.row_count().clamp(1, AGENT_STATUS_TEXT_ROWS);
         let first_row = last_row.saturating_sub(rows - 1);
-        let last_column = self.widget.column_count().max(1) - 1;
-        self.widget
-            .text_range_format(vte::Format::Text, first_row, 0, last_row, last_column)
-            .0
-            .map(|text| text.to_string())
+        self.output_search_text(first_row, last_row.saturating_add(1))
     }
 
     /// Styled terminal history for persistence. VTE exposes cell attributes
@@ -4822,6 +4821,41 @@ mod tests {
         assert!(pane.screen_text().unwrap().contains("alternate-input"));
         assert!(!pane.widget.is_mapped());
         pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn hidden_screen_text_preserves_full_tall_viewport_and_final_cell() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sleep".into(), "30".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        )
+        .unwrap();
+        pane.widget.set_size(100, 100);
+        // ED2 after output also exercises VTE's absolute scrollback coordinates.
+        pane.widget.feed(b"old frame\r\n\x1b[2J\x1b[H");
+        let frame = (1..=100)
+            .map(|row| format!("\x1b[{row};1HROW_{row:03}_{}X", ".".repeat(91)))
+            .collect::<String>();
+        pane.widget.feed(format!("{frame}\x1b[H").as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(!pane.widget.is_mapped());
+        let text = pane.screen_text().unwrap();
+        let status = pane.agent_status_text().unwrap();
+        pane.close_pty();
+        assert!(text.contains("ROW_001_"), "{text:?}");
+        assert!(
+            text.contains(&format!("ROW_100_{}X", ".".repeat(91))),
+            "{text:?}"
+        );
+        assert!(!text.contains("old frame"));
+        assert!(!status.contains("ROW_001_"));
+        assert!(status.lines().count() <= AGENT_STATUS_TEXT_ROWS as usize);
     }
 
     #[cfg(not(target_os = "macos"))]
