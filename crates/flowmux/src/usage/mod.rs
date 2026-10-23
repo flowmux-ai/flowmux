@@ -7,6 +7,8 @@ use std::path::PathBuf;
 mod claude;
 mod codex;
 
+pub(crate) use claude::canonical_source_id as canonical_claude_source_id;
+
 pub(crate) async fn collect_all(home: PathBuf) -> [ProviderRefresh; 2] {
     join_provider_refreshes(
         claude::collect(home.clone(), reqwest::Client::new()),

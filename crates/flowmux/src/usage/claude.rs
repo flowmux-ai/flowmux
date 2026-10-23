@@ -270,25 +270,58 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
                 .get("kind")
                 .and_then(Value::as_str)
                 .and_then(kind_duration_minutes);
-            let scope = limit.get("group").and_then(Value::as_str).map(scope_label);
+            let source_id = format!(
+                "limits:{}",
+                serde_json::json!([
+                    limit.get("id"),
+                    limit.get("kind"),
+                    limit.get("group"),
+                    limit.get("scope")
+                ])
+            );
             windows.extend(parse_named_window(
                 Some(limit),
                 duration_minutes,
-                scope,
-                format!(
-                    "limits:{}",
-                    serde_json::json!([
-                        limit.get("id"),
-                        limit.get("kind"),
-                        limit.get("group"),
-                        limit.get("scope")
-                    ])
-                ),
+                limit_scope(limit),
+                canonical_source_id(&source_id).to_owned(),
             ));
         }
     }
     deduplicate_windows(&mut windows);
     Ok(windows)
+}
+
+// These array entries repeat the legacy totals; use the same keys for data and saved pins.
+pub(crate) fn canonical_source_id(source_id: &str) -> &str {
+    match source_id {
+        r#"limits:[null,"session","session",null]"# => "top:five_hour",
+        r#"limits:[null,"weekly_all","weekly",null]"# => "top:seven_day",
+        _ => source_id,
+    }
+}
+
+fn limit_scope(limit: &Value) -> Option<String> {
+    let labels: Vec<_> = ["model", "surface"]
+        .into_iter()
+        .filter_map(|key| {
+            let scope = limit.get("scope")?.get(key)?;
+            ["display_name", "id"].into_iter().find_map(|field| {
+                scope
+                    .get(field)?
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+            })
+        })
+        .collect();
+    if !labels.is_empty() {
+        return Some(labels.join(" · "));
+    }
+    limit
+        .get("group")
+        .and_then(Value::as_str)
+        .filter(|group| !matches!(*group, "session" | "weekly" | "daily"))
+        .map(scope_label)
 }
 
 fn window_metadata(key: &str) -> (Option<u64>, Option<String>) {
@@ -303,9 +336,9 @@ fn window_metadata(key: &str) -> (Option<u64>, Option<String>) {
 
 fn kind_duration_minutes(kind: &str) -> Option<u64> {
     match kind {
-        "five_hour" => Some(300),
+        "five_hour" | "session" => Some(300),
         "daily" => Some(1_440),
-        "weekly" | "seven_day" => Some(10_080),
+        "weekly" | "seven_day" | "weekly_all" | "weekly_scoped" => Some(10_080),
         _ => None,
     }
 }
@@ -627,17 +660,20 @@ mod tests {
             ]
         });
         let before = parse_usage_response(&value).unwrap();
-        assert_eq!(before.len(), 6);
-        assert!(before[3..]
+        assert_eq!(before.len(), 4);
+        assert_eq!(before[0].duration_minutes, Some(300));
+        assert_eq!(before[0].scope, None);
+        assert_eq!(before[1].scope, None);
+        assert_eq!(before[2].scope.as_deref(), Some("Fable"));
+        assert_eq!(before[3].scope.as_deref(), Some("Sonnet"));
+        assert!(before[1..]
             .iter()
-            .all(|window| window.label == "Usage limit"
-                && window.scope.as_deref() == Some("Weekly")
-                && window.duration_minutes.is_none()));
+            .all(|window| window.label == "Weekly" && window.duration_minutes == Some(10_080)));
         let keys: HashSet<_> = before
             .iter()
             .map(|window| window.source_id.clone())
             .collect();
-        assert_eq!(keys.len(), 6);
+        assert_eq!(keys.len(), 4);
         let limits = value["limits"].as_array_mut().unwrap();
         limits.rotate_left(2);
         for limit in limits {
@@ -646,7 +682,7 @@ mod tests {
             limit["is_active"] = serde_json::json!(false);
         }
         let after = parse_usage_response(&value).unwrap();
-        assert_eq!(after.len(), 6);
+        assert_eq!(after.len(), 4);
         assert_eq!(
             keys,
             after
@@ -654,9 +690,44 @@ mod tests {
                 .map(|window| window.source_id.clone())
                 .collect()
         );
-        assert_eq!(before[4].source_id, after[2].source_id);
-        assert_eq!(before[5].source_id, after[3].source_id);
+        assert_eq!(before[2].source_id, after[2].source_id);
+        assert_eq!(before[3].source_id, after[3].source_id);
         assert_eq!(after[2].used_percent, 75.0);
+
+        value.as_object_mut().unwrap().remove("five_hour");
+        value.as_object_mut().unwrap().remove("seven_day");
+        let only_limits = parse_usage_response(&value).unwrap();
+        assert_eq!(only_limits.len(), 4);
+        for window in &only_limits {
+            let previous = before
+                .iter()
+                .find(|previous| previous.source_id == window.source_id)
+                .unwrap();
+            assert_eq!(window.label, previous.label);
+            assert_eq!(window.scope, previous.scope);
+            assert_eq!(window.duration_minutes, previous.duration_minutes);
+        }
+    }
+
+    #[test]
+    fn scoped_limits_use_model_names_ids_and_surfaces() {
+        let value = serde_json::json!({"limits": [
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 50,
+             "scope": {"model": {"id": "claude-fable", "display_name": "Fable"}}},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 50,
+             "scope": {"model": {"id": "claude-sonnet", "display_name": " "},
+                       "surface": {"id": "code", "display_name": "Claude Code"}}},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 50,
+             "scope": {"model": {"id": null, "display_name": null}}}
+        ]});
+        let windows = parse_usage_response(&value).unwrap();
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[0].scope.as_deref(), Some("Fable"));
+        assert_eq!(
+            windows[1].scope.as_deref(),
+            Some("claude-sonnet · Claude Code")
+        );
+        assert_eq!(windows[2].scope, None);
     }
 
     #[test]

@@ -253,7 +253,15 @@ fn effective_pins(state: &ProviderState, pins: &UsageBarPins) -> Vec<UsageBarPin
                     .into_iter()
                     .flat_map(|limits| &limits.value)
                     .filter(|window| match &pin.source_id {
-                        Some(id) => window.source_id.as_ref() == Some(id),
+                        Some(id) => {
+                            window.source_id.as_deref()
+                                == Some(match state.provider {
+                                    Provider::Claude => {
+                                        crate::usage::canonical_claude_source_id(id)
+                                    }
+                                    Provider::Codex => id.as_str(),
+                                })
+                        }
                         None => {
                             window.label == pin.label
                                 && window.scope == pin.scope
@@ -457,6 +465,33 @@ pub(crate) mod tests {
             .unwrap()
             .iter()
             .all(|pin| pin.source_id.is_some()));
+    }
+
+    #[test]
+    fn claude_total_aliases_preserve_saved_pins() {
+        let mut state = UsagePanelState::default();
+        state.apply(refresh(Provider::Claude, &[(300, 23.0), (10_080, 46.0)]));
+        let windows = &mut state.claude.limits.as_mut().unwrap().value;
+        windows[0].source_id = Some("top:five_hour".into());
+        windows[1].source_id = Some("top:seven_day".into());
+        let pins = UsageBarPins {
+            claude: Some(
+                [
+                    r#"limits:[null,"session","session",null]"#,
+                    r#"limits:[null,"weekly_all","weekly",null]"#,
+                ]
+                .map(|id| UsageBarPin {
+                    source_id: Some(id.into()),
+                    label: "Usage limit".into(),
+                    scope: Some("Weekly".into()),
+                    duration_minutes: None,
+                })
+                .to_vec(),
+            ),
+            codex: None,
+        };
+        let expected: Vec<_> = windows.iter().map(window_pin).collect();
+        assert_eq!(effective_pins(&state.claude, &pins), expected);
     }
 
     #[test]
