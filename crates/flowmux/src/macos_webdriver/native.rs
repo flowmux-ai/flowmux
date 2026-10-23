@@ -266,6 +266,28 @@ pub(crate) fn smoke() {
         assert!(Instant::now() < deadline);
         pump();
     }
+    browser
+        .evaluate("field.onpointermove=e=>window.hoverTrusted=e.isTrusted")
+        .unwrap();
+    crate::macos_input::pointer(
+        &browser.web,
+        flowmux_browser::input::PointerAction::Hover,
+        NSPoint::new(30.0, 15.0),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while browser
+        .evaluate("window.hoverTrusted === true && field.matches(':hover')")
+        .unwrap()
+        != true
+    {
+        assert!(
+            Instant::now() < deadline,
+            "native hover did not reach input: {}",
+            browser.evaluate("JSON.stringify({trusted:window.hoverTrusted,hover:field.matches(':hover'),focus:document.hasFocus(),rect:field.getBoundingClientRect()})").unwrap()
+        );
+        pump();
+    }
     browser.click(NSPoint::new(30.0, 15.0)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

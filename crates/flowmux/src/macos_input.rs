@@ -160,7 +160,15 @@ pub(crate) fn pointer(
             window.windowNumber(), None, 0, count, 1.0,
         ).ok_or("could not create pointer event")
     };
-    web.mouseMoved(&*event(NSEventType::MouseMoved, 0)?);
+    // WKWebView routes motion through its tracking owner, not NSResponder::mouseMoved.
+    let motion = event(NSEventType::MouseMoved, 0)?;
+    let supported: Bool = unsafe { msg_send![web, respondsToSelector: sel!(_simulateMouseMove:)] };
+    if !supported.as_bool() {
+        return Err("this WebKit version cannot deliver native pointer motion".into());
+    }
+    unsafe {
+        let _: () = msg_send![web, _simulateMouseMove: &*motion];
+    }
     let count = match action {
         PointerAction::Hover => 0,
         PointerAction::Click => 1,
