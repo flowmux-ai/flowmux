@@ -49,6 +49,7 @@ pub(crate) fn run() {
     std::env::set_var("SHELL", "/bin/sh");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _entered = runtime.enter();
+    crate::ui::macos_layer::install_tile_refresh();
     adw::init().expect("native macOS display must be available");
     let app = adw::Application::builder()
         .application_id("com.flowmux.NativeSmoke")

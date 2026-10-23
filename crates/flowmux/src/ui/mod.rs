@@ -12,6 +12,8 @@ mod integration_status;
 pub mod keybindings_panel;
 #[cfg(target_os = "macos")]
 pub mod macos_ime;
+#[cfg(target_os = "macos")]
+pub mod macos_layer;
 mod notification_popover;
 pub mod options_dialog;
 pub mod overlay_menu;

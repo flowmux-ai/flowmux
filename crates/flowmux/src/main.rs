@@ -296,6 +296,11 @@ fn main() -> anyhow::Result<()> {
     // before the first key event can hit it.
     #[cfg(target_os = "macos")]
     ui::macos_ime::install_insert_text_accumulation();
+    // GDK leaves freshly re-tiled window layers without contents outside the
+    // frame's damage, which shows the desktop through panes while an
+    // in-window dialog animates; refresh every tile on such frames.
+    #[cfg(target_os = "macos")]
+    ui::macos_layer::install_tile_refresh();
 
     // GTK runs on the main thread.
     let app = build_application();
