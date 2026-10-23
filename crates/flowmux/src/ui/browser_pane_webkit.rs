@@ -114,6 +114,18 @@ impl BrowserPane {
     ) -> Self {
         let pane_id = Rc::new(Cell::new(id));
         let navigation_enabled = Rc::new(Cell::new(true));
+        // A retained user script keeps the named world alive between evaluations.
+        web_view
+            .user_content_manager()
+            .unwrap()
+            .add_script(&webkit6::UserScript::for_world(
+                "void 0",
+                webkit6::UserContentInjectedFrames::TopFrame,
+                webkit6::UserScriptInjectionTime::Start,
+                "flowmux.browser",
+                &[],
+                &[],
+            ));
         let network_session = web_view
             .network_session()
             .expect("WebView has a network session");
