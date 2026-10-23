@@ -788,6 +788,15 @@ impl BrowserPane {
         self.evaluate_in_world(body, None, true, on_done);
     }
 
+    pub fn insert_text(&self, text: &str) -> Result<(), String> {
+        if !self.navigation_enabled.get() {
+            return Err("SSH preview expired; open a new preview after reconnecting".into());
+        }
+        self.web_view
+            .execute_editing_command_with_argument("InsertText", text);
+        Ok(())
+    }
+
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,

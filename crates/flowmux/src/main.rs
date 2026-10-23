@@ -65,6 +65,9 @@ const _: () = {
 #[cfg(target_os = "macos")]
 mod macos_webdriver;
 
+#[cfg(target_os = "macos")]
+mod macos_input;
+
 fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     if let Some(address) = std::env::var_os("FLOWMUX_WEBDRIVER_SERVER") {

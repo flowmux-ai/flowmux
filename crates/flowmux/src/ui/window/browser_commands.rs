@@ -210,8 +210,37 @@ impl WindowController {
                         }
                     }
                     BrowserOp::Type { text } => {
-                        let js = flowmux_browser::scripts::type_keys(&text);
-                        run_browser_js(&browser, &js, ack, true);
+                        if text.is_empty() {
+                            let _ = ack.send(Ok(BrowserActionResult::Ok));
+                            return;
+                        }
+                        let target = browser.clone();
+                        browser.evaluate_automation_js(
+                            &flowmux_browser::scripts::prepare_text_input(&text),
+                            move |prepared| {
+                                match prepared {
+                                    Ok(value) if value == "ok" => {}
+                                    result => {
+                                        let _ = ack.send(Err(result.unwrap_or_else(|error| error)));
+                                        return;
+                                    }
+                                }
+                                let inserted = target.insert_text(&text);
+                                target.evaluate_automation_js(
+                                    flowmux_browser::scripts::FINISH_TEXT_INPUT_JS,
+                                    move |result| {
+                                        let result = inserted.and(result).and_then(|value| {
+                                            if value == "ok" {
+                                                Ok(BrowserActionResult::Ok)
+                                            } else {
+                                                Err(value)
+                                            }
+                                        });
+                                        let _ = ack.send(result);
+                                    },
+                                );
+                            },
+                        );
                     }
                     BrowserOp::Press { key } => {
                         let js = flowmux_browser::scripts::press_key(&key);

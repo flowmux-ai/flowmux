@@ -120,6 +120,9 @@ Without this option, commands use the pane's active tab.
 Actions reject hidden or inert elements. Clicks also reject disabled or covered
 targets, and fill rejects disabled or readonly fields. Wait for the page to reach
 the required state before retrying; commands do not retry side effects.
+`type` uses native editing at the current selection, including contenteditable,
+and reports canceled input. It emits native input events without artificial
+per-character key events. On macOS the target tab must be visible.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

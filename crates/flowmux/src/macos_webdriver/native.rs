@@ -2,15 +2,12 @@
 //! AppKit input confined to this process's ephemeral automation windows.
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::Bool;
 use objc2::{msg_send, sel, ClassType, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSEvent, NSEventMask,
     NSEventModifierFlags, NSEventType, NSView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{
-    NSDate, NSDefaultRunLoopMode, NSNotFound, NSPoint, NSRange, NSRect, NSSize, NSString,
-};
+use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSPoint, NSRect, NSSize, NSString};
 use objc2_web_kit::{WKWebView, WKWebViewConfiguration, WKWebsiteDataStore};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -179,25 +176,7 @@ impl Window {
     }
 
     pub fn text(&self, text: &str) -> Result<(), String> {
-        let responder = self
-            .window
-            .firstResponder()
-            .filter(|responder| {
-                responder
-                    .downcast_ref::<NSView>()
-                    .is_some_and(|view| view.isDescendantOf(self.web.as_super()))
-            })
-            .ok_or("browser does not own keyboard focus")?;
-        let supported: Bool = unsafe {
-            msg_send![&*responder, respondsToSelector: sel!(insertText:replacementRange:)]
-        };
-        if !supported.as_bool() {
-            return Err("focused view cannot insert text".into());
-        }
-        unsafe {
-            let _: () = msg_send![&*responder, insertText: &*NSString::from_str(text), replacementRange: NSRange::new(NSNotFound as usize, 0)];
-        }
-        Ok(())
+        crate::macos_input::insert_text(&self.web, text)
     }
 
     pub fn key(

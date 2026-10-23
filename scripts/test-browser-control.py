@@ -165,6 +165,30 @@ def exercise(cli, url, root):
     assert browser("wait", "--js", "window.asyncLate === true")["browser_bool_result"]["value"]
     print("PASS: async results settle, rejection is reported and timeout keeps the browser responsive", flush=True)
 
+    current = snapshot()
+    field = reference(current, "Field")
+    browser("fill", field, "abcDEFghi")
+    browser("focus", field)
+    evaluate("window.typedEvents=[]; document.querySelector('#field').addEventListener('input', e=>typedEvents.push(e.isTrusted)); document.querySelector('#field').setSelectionRange(3, 6); 'selected'")
+    browser("type", "한글😀")
+    assert evaluate("document.querySelector('#field').value") == "abc한글😀ghi", "typing did not replace the selection"
+    assert evaluate("JSON.stringify(typedEvents)") == "[true]", "typing did not use native editing"
+    evaluate("document.querySelector('#field').addEventListener('beforeinput', e=>e.preventDefault(), {once:true}); 'cancel next input'")
+    browser("type", "blocked", error=True)
+    assert evaluate("document.querySelector('#field').value") == "abc한글😀ghi"
+    evaluate("document.querySelector('#field').readOnly=true; 'readonly'")
+    browser("type", "blocked", error=True)
+    evaluate("document.querySelector('#field').readOnly=false; 'editable'")
+    browser("type", "!")
+    assert evaluate("document.querySelector('#field').value") == "abc한글😀!ghi", "failed input retained a pending lock"
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<div id=editor contenteditable role=textbox aria-label=Editor>abcd</div>'); 'editor'")
+    editor = reference(snapshot(), "Editor")
+    browser("focus", editor)
+    evaluate("const range=document.createRange(); range.setStart(document.querySelector('#editor').firstChild,1); range.setEnd(document.querySelector('#editor').firstChild,3); getSelection().removeAllRanges(); getSelection().addRange(range); 'selected rich text'")
+    browser("type", "가😀")
+    assert evaluate("document.querySelector('#editor').textContent") == "a가😀d"
+    print("PASS: native text insertion replaces selection, emits trusted input and respects cancellation", flush=True)
+
 
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/flowmux").resolve()

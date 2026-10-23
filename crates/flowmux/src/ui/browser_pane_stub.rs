@@ -146,6 +146,10 @@ impl BrowserPane {
         self.evaluate_js(body, on_done);
     }
 
+    pub fn insert_text(&self, _text: &str) -> Result<(), String> {
+        Err(UNSUPPORTED.into())
+    }
+
     pub fn evaluate_js<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _source: &str,

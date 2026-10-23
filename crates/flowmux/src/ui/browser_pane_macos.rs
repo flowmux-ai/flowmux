@@ -1266,6 +1266,17 @@ impl BrowserPane {
         self.evaluate_in_world(body, false, true, on_done);
     }
 
+    pub fn insert_text(&self, text: &str) -> Result<(), String> {
+        if !self.native.navigation_enabled.get() {
+            return Err("SSH preview expired; open a new preview after reconnecting".into());
+        }
+        if !self.web_view.is_mapped() {
+            return Err("native text input requires a visible browser tab".into());
+        }
+        focus_native_view(&self.native.web_view);
+        crate::macos_input::insert_text(&self.native.web_view, text)
+    }
+
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,

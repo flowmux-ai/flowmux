@@ -4,6 +4,10 @@
 #[path = "../src/macos_webdriver/native.rs"]
 mod native;
 
+#[cfg(target_os = "macos")]
+#[path = "../src/macos_input.rs"]
+mod macos_input;
+
 fn main() {
     #[cfg(target_os = "macos")]
     native::smoke();

@@ -300,37 +300,48 @@ pub fn attr_of_selector(selector: &str, name: &str) -> String {
     )
 }
 
-/// Dispatch synthetic key events to the active element. Inputs and textareas
-/// append to their value through the native setter, so framework value
-/// trackers see the change, and receive input/change events. Contenteditable
-/// elements insert at the caret. Selection replacement in inputs is not
-/// simulated.
-pub fn type_keys(text: &str) -> String {
+/// Observe the focused editor before a native insertion; serialize pending input.
+pub fn prepare_text_input(text: &str) -> String {
     format!(
         r#"(function() {{
-            const el = document.activeElement;
-            if (!el) return "error: no focus";
-            const text = "{t}";
-            const field = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
-            const setter = field && Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set;
-            for (const ch of text) {{
-                el.dispatchEvent(new KeyboardEvent('keydown', {{ key: ch, bubbles: true }}));
-                if (field) {{
-                    setter.call(el, el.value + ch);
-                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                }} else if (el.isContentEditable) {{
-                    if (!document.execCommand('insertText', false, ch)) return "error: text insertion failed";
-                }}
-                el.dispatchEvent(new KeyboardEvent('keyup', {{ key: ch, bubbles: true }}));
-            }}
-            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
-                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            }}
-            return "ok";
-        }})()"#,
-        t = js_string(text)
+        if (globalThis.__flowmuxInput) return "error: browser input is already pending";
+        const el = document.activeElement;
+        const field = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+        if (!el || (!field && !el.isContentEditable)) return "error: focused element is not editable";
+        if (el.matches(':disabled') || el.readOnly || el.closest('[inert],[aria-disabled="true"]'))
+            return "error: focused element is disabled or readonly";
+        if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || getComputedStyle(el).visibility !== 'visible')
+            return "error: focused element is not visible";
+        for (let parent = el; parent; parent = parent.parentElement) {{
+            if (Number(getComputedStyle(parent).opacity) === 0)
+                return "error: focused element is not visible";
+        }}
+        const text = "{text}";
+        const expected = field && el.selectionStart !== null
+            ? el.value.slice(0, el.selectionStart) + text + el.value.slice(el.selectionEnd) : null;
+        const state = {{ el, expected, received: false }};
+        state.listener = event => {{ if (event.isTrusted) state.received = true; }};
+        el.addEventListener('input', state.listener);
+        globalThis.__flowmuxInput = state;
+        return "ok";
+    }})()"#,
+        text = js_string(text)
     )
 }
+
+/// Read the native edit result and always release the pending-input observation.
+pub const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
+    const state = globalThis.__flowmuxInput;
+    delete globalThis.__flowmuxInput;
+    if (!state) return "error: page changed during native input";
+    state.el.removeEventListener('input', state.listener);
+    if (!state.el.isConnected || document.activeElement !== state.el)
+        return "error: input target changed";
+    if (!state.received) return "error: native input was not applied";
+    if (state.expected !== null && state.el.value !== state.expected)
+        return "error: input value was not retained";
+    return "ok";
+})()"#;
 
 /// Double-click the element matched by `selector`.
 pub fn dblclick_by_selector(selector: &str) -> String {

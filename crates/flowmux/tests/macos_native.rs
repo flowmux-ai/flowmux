@@ -32,6 +32,10 @@ mod usage;
 
 const APP_ID: &str = "com.flowmux.App";
 
+#[cfg(target_os = "macos")]
+#[path = "../src/macos_input.rs"]
+mod macos_input;
+
 fn main() {
     #[cfg(target_os = "macos")]
     ui::window::macos_smoke::run();
