@@ -1278,7 +1278,7 @@ impl BrowserPane {
         if !self.native.navigation_enabled.get() {
             return Err("SSH preview expired; open a new preview after reconnecting".into());
         }
-        if !self.web_view.is_mapped() {
+        if !self.web_view.is_mapped() || !self.web_view.grab_focus() {
             return Err("native text input requires a visible browser tab".into());
         }
         focus_native_view(&self.native.web_view);
@@ -1286,7 +1286,10 @@ impl BrowserPane {
     }
 
     pub fn press_key(&self, stroke: &flowmux_browser::input::KeyStroke) -> Result<(), String> {
-        if !self.native.navigation_enabled.get() || !self.web_view.is_mapped() {
+        if !self.native.navigation_enabled.get()
+            || !self.web_view.is_mapped()
+            || !self.web_view.grab_focus()
+        {
             return Err("native key input requires a visible, active browser tab".into());
         }
         focus_native_view(&self.native.web_view);

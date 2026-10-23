@@ -202,9 +202,7 @@ pub(super) fn press(view: &webkit6::WebView, stroke: &KeyStroke) -> Result<(), S
             .map(|device| device.id);
         free(devices);
         let keyboard = keyboard.ok_or("XInput keyboard is unavailable")?;
-        let root = view.root().ok_or("browser has no root")?;
-        root.set_focus(Some(view));
-        if root.focus().as_ref() != Some(view.upcast_ref()) {
+        if !view.grab_focus() {
             return Err("browser could not acquire keyboard focus".into());
         }
         let window = get_window(surface.to_glib_none().0);

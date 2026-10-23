@@ -75,6 +75,30 @@ impl Drop for Page {
 }
 
 #[gtk::test]
+async fn native_keys_do_not_bypass_modal_dialogs() {
+    let page = Page::new("<input id='field' value='safe'>").await;
+    page.window.set_child(None::<&gtk::Widget>);
+    let window = adw::Window::builder().content(&page.pane.root).build();
+    window.present();
+    page.ok(focus_by_selector("#field")).await;
+    let dialog = adw::AlertDialog::new(Some("Input is blocked"), None);
+    dialog.add_response("close", "Close");
+    dialog.present(Some(&window));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !dialog.is_mapped() {
+        assert!(Instant::now() < deadline, "dialog did not appear");
+        glib::timeout_future(Duration::from_millis(10)).await;
+    }
+    assert!(page
+        .pane
+        .press_key(&flowmux_browser::input::KeyStroke::parse("Backspace").unwrap())
+        .is_err());
+    assert_eq!(page.eval("field.value").await, "safe");
+    dialog.close();
+    window.destroy();
+}
+
+#[gtk::test]
 async fn snapshot_resolves_real_elements_without_mutating_the_document() {
     let page = Page::new(
         r#"

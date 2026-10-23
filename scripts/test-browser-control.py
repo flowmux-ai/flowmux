@@ -235,6 +235,9 @@ def main():
             (root / child).mkdir(mode=0o700, exist_ok=True)
             env[key] = str(root / child)
         env["SHELL"] = "/bin/sh"
+        marker = root / "state/flowmux/welcome-seen"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
         env["GSK_RENDERER"] = "cairo"
         env["FLOWMUX_BUNDLED_CLI_PATH"] = str(cli_binary)
         server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
