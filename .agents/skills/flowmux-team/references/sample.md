@@ -87,10 +87,10 @@ Success produces two new worker panes, two completed job receipts, and
 `research.md` / `review.md` in the printed sample directory. The reviewer gets
 a path to the researcher's actual final answer through its task file; the lead receives the
 review through the helper's JSON output. Inspect the receipts and both results.
-A native quota error can substitute the other provider once in the same pane;
+Recoverable native failures can replace the failed worker pane within the attempt budget;
 final output discloses the actual providers and whether review stayed cross-provider.
-Blocked/failed tasks after substitution and malformed task reports stop the chain before the next
-worker starts. Each launch diagnostic is printed on failure and saved in
+Task-level blocked reports and exhausted recovery stop the chain before the next
+assignment starts. Each launch diagnostic is printed on failure and saved in
 `ROLE-launch.log`, including the job path when dispatch is uncertain. Final
 status and blockers are saved in `ROLE-status.log`. Do not retry an uncertain
 launch automatically. A worker's declared completion still needs review against

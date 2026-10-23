@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Run and continue bounded Claude/Codex tasks in visible Flowmux panes."""
+"""Run and continue bounded provider tasks in visible Flowmux panes."""
 import argparse
 import fcntl
 import json
 import os
+import signal
 from pathlib import Path
 import shlex
 import shutil
@@ -22,15 +23,51 @@ MODEL_ROUTES = {
               "complex": ("gpt-6-astra", "high")},
     "claude": {"simple": ("haiku", "low"),
                "standard": ("sonnet", "medium"),
-               "complex": ("fable", "high")},
+               "complex": ("opus", "high")},
+    "gemini": {"simple": ("flash-lite", None),
+               "standard": ("flash", None),
+               "complex": ("pro", None)},
+    "agy": {"simple": ("gemini-3.8-flash-low", "low"),
+            "standard": ("gemini-4-argon-medium", "medium"),
+            "complex": ("claude-opus-5-5-high", "high")},
 }
+MODEL_ALIASES = {"sol": ("codex", "gpt-6.1-sol"), "terra": ("codex", "gpt-5.6-terra"),
+                 "opus": ("claude", "opus"), "sonnet": ("claude", "sonnet"),
+                 "sonet": ("claude", "sonnet")}
 
 
 def model_route(args):
-    model, effort = MODEL_ROUTES[args.agent][args.complexity]
+    agent = args.agent
+    explicit = args.model
+    if explicit in MODEL_ALIASES and agent in ("auto", MODEL_ALIASES[explicit][0]):
+        agent, explicit = MODEL_ALIASES[explicit]
+    if agent == "auto":
+        agent = next((name for name in MODEL_ROUTES if shutil.which(name)), None)
+        if agent is None:
+            raise ValueError("No supported worker CLI is installed/on PATH")
+    model, effort = MODEL_ROUTES[agent][args.complexity]
+    if agent == "gemini" and args.effort:
+        raise ValueError("Gemini CLI selects reasoning through its model; --effort is not supported")
     # An explicit model keeps its provider's effort unless the user sets it too.
-    return {"complexity": args.complexity, "model": args.model or model,
+    return {"agent": agent, "complexity": args.complexity, "model": explicit or model,
             "effort": args.effort or (None if args.model else effort)}
+
+
+def route_plan(args):
+    first = model_route(args)
+    routes = [first]
+    # Rotate providers before trying another model on the same account.
+    for agent in MODEL_ROUTES:
+        if agent != first["agent"] and shutil.which(agent):
+            model, effort = MODEL_ROUTES[agent][args.complexity]
+            routes.append({"agent": agent, "model": model, "effort": effort})
+    if first["agent"] == "codex":
+        routes.append({"agent": "codex", "model": "gpt-6.1-sol" if first["model"] == "gpt-5.6-terra" else "gpt-5.6-terra",
+                       "effort": "high"})
+    elif first["agent"] == "claude":
+        routes.append({"agent": "claude", "model": "sonnet" if first["model"] == "opus" else "opus",
+                       "effort": "high"})
+    return routes[:1] if getattr(args, "no_fallback", False) else routes
 
 
 def write_json(path, value):
@@ -95,9 +132,10 @@ def start(args):
     task = args.task_file.read_text().strip()
     if not task or not args.role.strip():
         raise ValueError("Role and task must not be empty")
-    executable = shutil.which(args.agent)
+    selection = model_route(args)
+    executable = shutil.which(selection["agent"])
     if executable is None:
-        raise ValueError(f"{args.agent} is not installed/on PATH")
+        raise ValueError(f"{selection['agent']} is not installed/on PATH")
     state_home = os.environ.get("XDG_STATE_HOME") or (
         os.environ.get("XDG_DATA_HOME") or Path.home() / "Library/Application Support"
         if sys.platform == "darwin" else Path.home() / ".local/state")
@@ -108,42 +146,26 @@ def start(args):
     print(f"Job artifacts: {job}", file=sys.stderr, flush=True)
     token = str(uuid.uuid4())
     (job / "task.txt").write_text(task + "\n")
-    manifest = {"agent": args.agent, "executable": executable, "cwd": str(cwd),
+    manifest = {"executable": executable, "cwd": str(cwd),
                 "role": args.role, "allow_edits": args.allow_edits,
                 "timeout": args.timeout, "socket": socket, "cli": cli,
                 "workspace": origin["workspace"], "source_pane": pane,
-                "token": token, "created_at": time.time(), **model_route(args),
+                "token": token, "created_at": time.time(), **selection,
                 # A resolved Flowmux shim still needs the lead's PATH to find its provider.
                 "provider_env": {"PATH": os.environ.get("PATH", os.defpath),
                                  **{key: str(Path(os.environ.get(key) or Path.home() / default).resolve())
-                                    for key, default in (("CODEX_HOME", ".codex"), ("CLAUDE_CONFIG_DIR", ".claude"))}},
+                                    for key, default in (("CODEX_HOME", ".codex"), ("CLAUDE_CONFIG_DIR", ".claude"),
+                                                         ("GEMINI_CLI_HOME", "."))}},
                 "executables": {agent: shutil.which(agent) for agent in MODEL_ROUTES},
-                "fallback_on_quota": not args.no_fallback}
+                "fallback_on_quota": not args.no_fallback,
+                "routes": route_plan(args), "generation": 1, "assignment": str(job),
+                "max_attempts": getattr(args, "max_attempts", 4),
+                "stall_timeout": getattr(args, "stall_timeout", 180)}
     (job / "prompt.txt").write_text(worker_prompt(job, manifest))
     write_json(job / "status.json", {"state": "pending"})
     try:
         write_json(job / "job.json", manifest)
-        launcher = job / "launch.sh"
-        helper = job / "worker.py"
-        shutil.copyfile(Path(__file__).resolve(), helper)
-        command = shlex.join([sys.executable, str(helper), "_worker", str(job)])
-        exports = "".join(f"export {key}={shlex.quote(value)}\n" for key, value in manifest["provider_env"].items())
-        resume_commands = exports
-        for agent, path in manifest["executables"].items():
-            if path:
-                resumed = {**manifest, "agent": agent, "executable": path}
-                if agent != manifest["agent"]:
-                    resumed["model"], resumed["effort"] = MODEL_ROUTES[agent][args.complexity]
-                argv = shlex.join(agent_command(job, resumed, resume=True))
-                resume_commands += f'{agent}() {{ {argv} "$@"; }}\n'
-        launcher.write_text("#!/bin/sh\n" + exports
-                            + "unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID\n"
-                            # The GUI's resume command must retain the worker's CLI and permission bounds.
-                            + 'if [ "$1" = "-lic" ]; then\n'
-                            + f'  exec /bin/sh -ic {shlex.quote(resume_commands)}"$2"\nfi\n'
-                            + 'if [ "$#" -gt 0 ]; then exec /bin/sh "$@"; fi\n'
-                            + f"{command}\nexec /bin/sh -i\n")
-        launcher.chmod(0o700)
+        launcher = write_launcher(job, manifest, 1)
         created = flowmux(cli, socket, "team-spawn", pane, "--cwd", str(cwd),
                           "--role", args.role, "--shell", str(launcher))["surface_created"]
         manifest["pane"] = created["pane"]
@@ -156,6 +178,32 @@ def start(args):
     print(json.dumps({"job": str(job), **manifest}, ensure_ascii=False))
     return 0
 
+
+
+def write_launcher(job, manifest, generation):
+    launcher = job / ("launch.sh" if generation == 1 else f"launch-{generation}.sh")
+    helper = job / "worker.py"
+    if Path(__file__).resolve() != helper:
+        shutil.copyfile(Path(__file__).resolve(), helper)
+    command = shlex.join([sys.executable, str(helper), "_worker", str(job), "--generation", str(generation)])
+    exports = "".join(f"export {key}={shlex.quote(value)}\n" for key, value in manifest["provider_env"].items())
+    resume_commands = exports
+    for agent, path in manifest["executables"].items():
+        if path:
+            resumed = {**manifest, "agent": agent, "executable": path}
+            if agent != manifest["agent"]:
+                resumed["model"], resumed["effort"] = MODEL_ROUTES[agent][manifest["complexity"]]
+            argv = shlex.join(agent_command(job, resumed, resume=True))
+            resume_commands += f'{agent}() {{ {argv} "$@"; }}\n'
+    launcher.write_text("#!/bin/sh\n" + exports
+                        + "unset CLAUDECODE CODEX_THREAD_ID CODEX_SESSION_ID\n"
+                        # Restore the same provider and YOLO mode without replaying the task.
+                        + 'if [ "$1" = "-lic" ]; then\n'
+                        + f'  exec /bin/sh -ic {shlex.quote(resume_commands)}"$2"\nfi\n'
+                        + 'if [ "$#" -gt 0 ]; then exec /bin/sh "$@"; fi\n'
+                        + f"{command}\nexec /bin/sh -i\n")
+    launcher.chmod(0o700)
+    return launcher
 
 def worker_prompt(job, manifest):
     return (f"FLOWMUX_TEAM_JOB:{manifest['token']}\nRole: {manifest['role']}. "
@@ -183,23 +231,38 @@ def agent_command(job, manifest, resume=False):
     prompt = [] if resume else ["--", (job / "prompt.txt").read_text()]
     selection = ["--model", manifest["model"]] if manifest.get("model") else []
     effort = manifest.get("effort")
+    if manifest["agent"] == "gemini":
+        identity = (["--resume", manifest["session_id"]] if manifest.get("resume_session") else
+                    ["--session-id", manifest["token"]])
+        return [manifest["executable"], "--approval-mode", "yolo", *selection,
+                *([] if resume else identity), *([] if resume else
+                ["--output-format", "stream-json", "--prompt", (job / "prompt.txt").read_text()])]
+    if manifest["agent"] == "agy":
+        if effort:
+            selection += ["--effort", effort]
+        identity = ["--conversation", manifest["session_id"]] if manifest.get("resume_session") else []
+        return [manifest["executable"], "--dangerously-skip-permissions", *selection,
+                *([] if resume else identity), *([] if resume else
+                ["--output-format", "stream-json", "--print", (job / "prompt.txt").read_text()])]
     if manifest["agent"] == "codex":
         if effort:
             selection += ["-c", f'model_reasoning_effort="{effort}"']
         # A dedicated TUI keeps this worker's tools in its own pane process tree.
-        return [manifest["executable"], "--no-daemon", "--sandbox",
-                "workspace-write" if manifest["allow_edits"] else "read-only", *selection, *prompt]
+        return [manifest["executable"], "--no-daemon",
+                "--dangerously-bypass-approvals-and-sandbox", *selection, *prompt]
     if effort:
         selection += ["--effort", effort]
-    allowed = "Read,Glob,Grep" + (",Edit,Write" if manifest["allow_edits"] else "")
     session = [] if resume else ["--session-id", manifest["token"]]
     return [manifest["executable"], *session, *selection,
-            "--permission-mode", "dontAsk", "--tools", allowed,
-            "--allowedTools", allowed, "--strict-mcp-config",
-            "--mcp-config", '{"mcpServers":{}}', *prompt]
+            "--allow-dangerously-skip-permissions", "--permission-mode", "bypassPermissions", *prompt]
 
 
 def task_report(answer):
+    if not isinstance(answer, str):
+        raise ValueError("Final answer must be a string containing a JSON task report")
+    lines = answer.strip().splitlines()
+    if len(lines) >= 3 and lines[0] in ("```json", "```") and lines[-1] == "```":
+        answer = "\n".join(lines[1:-1])
     try:
         value = json.loads(answer)
     except ValueError as error:
@@ -293,7 +356,8 @@ def worker_tab(cli, manifest, allow_unbound=False):
     if not tab or tab["kind"] != "terminal":
         raise ValueError("Recorded worker surface is missing; no input sent")
     agent = tab.get("agent") or {}
-    if agent.get("name") != manifest["agent"] or (
+    expected = "antigravity" if manifest["agent"] == "agy" else manifest["agent"]
+    if agent.get("name") != expected or (
             agent.get("session_id") != manifest["session_id"]
             and not (allow_unbound and not agent.get("session_id"))):
         raise ValueError("Live worker session does not match the receipt; no input sent")
@@ -311,6 +375,8 @@ def idle_worker(cli, manifest):
 
 
 def collect_turn(job):
+    if json.loads((job / "job.json").read_text()).get("generation"):
+        return json.loads((job / "status.json").read_text())
     with (job / "worker.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state = json.loads((job / "status.json").read_text())
@@ -337,7 +403,7 @@ def collect_turn(job):
 def followup(args):
     root = args.job
     manifest = json.loads((root / "job.json").read_text())
-    if "root_job" in manifest:
+    if "root_job" in manifest and Path(manifest["root_job"]) != root:
         raise ValueError("Use the original worker job, not a turn directory, for followup")
     task = args.task_file.read_text().strip()
     if not task:
@@ -360,9 +426,20 @@ def followup(args):
         if not previous.get("task_status") or previous.get("blocker_kind"):
             raise ValueError("Previous assignment has no completed task report; inspect it before continuing")
         # The effective attempt may have switched providers for quota.
-        manifest.update({key: state[key] for key in ("agent", "model", "effort") if key in state})
-        manifest.update(session_id=state["session_id"], transcript=state["transcript"])
-        idle_worker(cli, manifest)
+        manifest.update({key: previous[key] for key in ("agent", "model", "effort", "pane", "surface") if key in previous})
+        manifest.update(session_id=previous["session_id"], transcript=previous["transcript"])
+        streamed = manifest["agent"] in ("gemini", "agy")
+        if streamed:
+            managed_pane(manifest)
+            with (root / "worker.lock").open("a") as owner:
+                try:
+                    fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    pass
+                else:
+                    raise ValueError("Worker supervisor is no longer live; no follow-up sent")
+        else:
+            idle_worker(cli, manifest)
         turn = root / "turns" / f"{len(turns) + 1:04d}"
         turn.mkdir(parents=True)
         token = str(uuid.uuid4())
@@ -376,6 +453,12 @@ def followup(args):
         # Persist uncertainty before any input; status can recover a received reply.
         write_json(turn / "status.json", {"state": "dispatch_unknown", "received": False,
                    **{key: manifest[key] for key in ("agent", "model", "effort", "session_id", "transcript") if key in manifest}})
+        if streamed:
+            manifest["resume_session"] = True
+            write_json(turn / "job.json", manifest)
+            write_json(root / "active-turn.json", {"job": str(turn)})
+            print(json.dumps(receipt, ensure_ascii=False))
+            return 0
         try:
             before = flowmux(cli, manifest["socket"], "read-screen", manifest["pane"])["screen_contents"]["text"]
             (turn / "screen-before.txt").write_text(before)
@@ -394,11 +477,14 @@ def followup(args):
                     raise ValueError("Pasted marker not visible; inspect the pane, Enter was not sent")
                 time.sleep(0.1)
             idle_worker(cli, manifest)
+            if manifest.get("generation"):
+                write_json(root / "active-turn.json", {"job": str(turn)})
             flowmux(cli, manifest["socket"], "send-key", "Enter", "--pane", manifest["pane"])
         except Exception as error:
             write_json(turn / "dispatch-error.json", {"error": str(error)})
             raise RuntimeError(f"Follow-up unconfirmed; inspect {turn}. Do not resend: {error}") from error
-        collect_turn(turn)
+        if not manifest.get("generation"):
+            collect_turn(turn)
         print(json.dumps(receipt, ensure_ascii=False))
     return 0
 
@@ -462,7 +548,18 @@ def run_attempt(root, attempt, manifest, env):
 def reconcile_stopped_worker(job):
     """Caller holds worker.lock; a supervised job without its owner cannot finish."""
     state = json.loads((job / "status.json").read_text())
-    started = job / "started"
+    manifest = json.loads((job / "job.json").read_text())
+    root = Path(manifest.get("root_job", job))
+    generation = manifest.get("generation")
+    started = root / (f"started-{generation}" if generation else "started")
+    if generation and state["state"] in ("recovering", "closing_failed_pane"):
+        recovery = json.loads((root / "recovery.json").read_text())
+        if recovery.get("pid"):
+            try:
+                os.kill(recovery["pid"], 0)
+                return state
+            except ProcessLookupError:
+                pass
     # Older workers did not hold a lock, so absence of a lock cannot prove their death.
     if (state["state"] not in TERMINAL and started.exists()
             and started.read_text() == "lock-v1\n"):
@@ -472,26 +569,38 @@ def reconcile_stopped_worker(job):
     return state
 
 
-def worker(job):
+def worker(job, generation=1):
+    managed = json.loads((job / "job.json").read_text()).get("generation")
+    started = job / (f"started-{generation}" if managed else "started")
     with (job / "worker.lock").open("a") as lock:
         while True:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                if (job / "started").exists():
+                if started.exists():
                     print("Job already started. No task was repeated.", flush=True)
                     return 1
                 time.sleep(0.05)  # A status reader may briefly hold the lock before startup.
-        if (job / "started").exists():
+        if started.exists():
             reconcile_stopped_worker(job)
             print(f"Job already started; inspect {job}/status.json. No task was repeated.", flush=True)
             return 1
-        (job / "started").write_text("lock-v1\n")
-        return run_worker(job)
+        if managed and json.loads((job / "job.json").read_text())["generation"] != generation:
+            return 1
+        started.write_text("lock-v1\n")
+        try:
+            return run_worker(job)
+        except Exception as error:
+            manifest = json.loads((job / "job.json").read_text())
+            assignment = Path(manifest.get("assignment", job))
+            write_json(assignment / "status.json", {"state": "failed", "error": str(error)})
+            raise
 
 
 def run_worker(job):
+    if json.loads((job / "job.json").read_text()).get("generation"):
+        return managed_worker(job)
     process = None
     try:
         deadline = time.monotonic() + 20
@@ -568,22 +677,413 @@ def run_worker(job):
     return 0
 
 
+def native_stream(path, agent):
+    """Read the private stdout of one invocation, never a shared hook or screen."""
+    session, answer, error, finished = None, "", None, False
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if agent == "agy":
+            if event.get("event") == "init":
+                session = event.get("conversation_id")
+            if event.get("event") == "result":
+                result = event["result"]
+                session = result.get("conversation_id") or session
+                finished = True
+                answer = result.get("response", "")
+                if result.get("status") != "SUCCESS":
+                    error = result
+        else:
+            if event.get("type") == "init":
+                session = event.get("session_id")
+            if event.get("type") == "tool_use":
+                answer = ""
+            if event.get("type") == "message" and event.get("role") == "assistant":
+                answer += event.get("content", "")
+            if event.get("type") == "error":
+                error = event
+                if str(event.get("message", "")).startswith("Agent execution blocked:"):
+                    answer = ""
+            if event.get("type") == "result":
+                finished = True
+                if event.get("status") != "success":
+                    error = error or event
+                else:
+                    error = None
+    return session, answer, error, finished
+
+
+def process_snapshot():
+    result = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid=,lstart=,stat="],
+                            capture_output=True, text=True, check=True, timeout=5)
+    return {int(p[0]): (int(p[1]), int(p[2]), " ".join(p[3:8]), p[8])
+            for line in result.stdout.splitlines() if len(p := line.split()) >= 9}
+
+
+def owned_processes(pid, owned):
+    snapshot = process_snapshot()
+    # A private process group also retains wrapper children after their parent exits.
+    for child, info in snapshot.items():
+        if child == pid or info[1] == pid:
+            if child not in owned:
+                owned[child] = info[2]
+    while True:
+        children = {child: info[2] for child, info in snapshot.items()
+                    if child not in owned and info[0] in owned
+                    and snapshot.get(info[0], (None, None, None))[2] == owned[info[0]]}
+        if not children:
+            break
+        owned.update(children)
+    return {child: info for child, info in snapshot.items()
+            if child in owned and info[2] == owned[child] and not info[3].startswith("Z")}
+
+
+def stop_owned(process, owned):
+    """Terminate only this invocation's verified process tree, then prove it stopped."""
+    for sig, duration in ((signal.SIGTERM, 3), (signal.SIGKILL, 3)):
+        alive = owned_processes(process.pid, owned)
+        if any(info[1] == process.pid for info in alive.values()):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                pass
+        for pid in alive:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        until = time.monotonic() + duration
+        while time.monotonic() < until:
+            process.poll()
+            if not owned_processes(process.pid, owned):
+                return
+            time.sleep(.1)
+    raise RuntimeError("Owned agent descendants did not stop; replacement was not started")
+
+
+def provider_process_group():
+    os.setpgrp()
+    if os.isatty(0):
+        signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+        os.tcsetpgrp(0, os.getpid())
+        signal.signal(signal.SIGTTOU, signal.SIG_DFL)
+
+
+def managed_pane(manifest):
+    tree = flowmux(manifest["cli"], manifest["socket"], "tree")["tree"]["workspaces"]
+    workspace = next((w for w in tree if w["id"] == manifest["workspace"]
+                      and w["location"]["type"] == "team"), None)
+    if not workspace or not any(p["id"] == manifest["source_pane"] for p in workspace["panes"]):
+        raise ValueError("Original Team workspace/lead is missing; no pane was changed")
+    pane = next((p for p in workspace["panes"] if p["id"] == manifest["pane"]), None)
+    if manifest["pane"] == manifest["source_pane"] or not pane or len(pane["tabs"]) != 1:
+        raise ValueError("Managed worker pane is missing or has changed; no pane was changed")
+    tab = pane["tabs"][0]
+    agent = tab.get("agent") or {}
+    expected = "antigravity" if manifest["agent"] == "agy" else manifest["agent"]
+    if (tab["id"] != manifest["surface"] or tab["kind"] != "terminal"
+            or (agent.get("name") and agent["name"] != expected)
+            or (agent.get("session_id") and manifest.get("session_id")
+                and agent["session_id"] != manifest["session_id"])):
+        raise ValueError(f"Managed worker identity changed (expected {expected}/{manifest.get('session_id')}, "
+                         f"observed {agent.get('name')}/{agent.get('session_id')}); no pane was changed")
+    return tab
+
+
+def native_failure(error):
+    text = json.dumps(error, ensure_ascii=False) if not isinstance(error, str) else error
+    lower = text.lower()
+    if any(word in lower for word in ("unsupported_client", "no longer supported", "model_not_found", "model not found")):
+        return "unavailable"
+    if any(word in lower for word in ("authenticat", "not trusted", "permission", "forbidden", "unauthorized")):
+        return "input_required"
+    if quota_error(text, text) or any(word in lower for word in ("quota", "resource_exhausted", "rate_limit", "rate limit")):
+        return "quota"
+    return "provider_error"
+
+
+def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
+    previous = json.loads((assignment / "status.json").read_text())
+    state = {"state": "running", "attempts": previous.get("attempts", []),
+             "closed_panes": previous.get("closed_panes", []),
+             **{k: manifest[k] for k in ("agent", "model", "effort", "pane", "surface", "generation")},
+             "pid": process.pid}
+    deadline = time.monotonic() + manifest["timeout"]
+    last_progress, signature, bound = time.monotonic(), None, manifest.get("transcript")
+    offsets = {"stdout.jsonl": 0, "stderr.txt": 0}
+    while True:
+        try:
+            owned_processes(process.pid, owned)
+            session, answer, blocker = None, None, None
+            if streamed:
+                for name in offsets:
+                    path = attempt / name
+                    with path.open() as stream:
+                        stream.seek(offsets[name])
+                        text = stream.read()
+                        offsets[name] = stream.tell()
+                    if text:
+                        print(text, end="", flush=True)
+                session, response, error, finished = native_stream(attempt / "stdout.jsonl", manifest["agent"])
+                evidence = (attempt / "stdout.jsonl").stat()
+                progress = (evidence.st_size, evidence.st_mtime_ns)
+                # Native result plus successful process exit is the post-hook boundary.
+                if process.poll() is not None:
+                    if error or process.returncode:
+                        detail = error or (attempt / "stderr.txt").read_text() or f"Agent exit {process.returncode}"
+                        blocker = native_failure(detail)
+                        answer = json.dumps({"task_status": "blocked", "report": str(detail)})
+                    elif finished:
+                        answer = response
+                    else:
+                        raise ValueError("Provider exited without its native final result")
+                bound = str(attempt / "stdout.jsonl")
+            else:
+                matches = []
+                for path in ([Path(bound)] if bound else transcript_candidates(manifest)):
+                    matched, identity, response, reason = transcript_report(path, manifest)
+                    if matched:
+                        matches.append((path, identity, response, reason))
+                if len(matches) > 1:
+                    state.update(state="blocked", blocker_kind="interference", error="Multiple sessions received this assignment")
+                    break
+                if matches:
+                    path, session, answer, blocker = matches[0]
+                    bound = str(path)
+                    state["received"] = True
+                evidence = Path(bound).stat() if bound else None
+                progress = (evidence.st_size, evidence.st_mtime_ns) if evidence else None
+                if blocker == "provider_error":
+                    blocker = native_failure(answer)
+            if bound:
+                state["transcript"] = bound
+            if session:
+                state["session_id"] = session
+                manifest["session_id"] = session
+            if answer is not None:
+                (attempt / "answer.txt").write_text(answer if isinstance(answer, str) else json.dumps(answer))
+                outcome, report = task_report(answer)
+                (attempt / "result.md").write_text(report)
+                state.update(state=outcome, task_status=outcome)
+                if blocker:
+                    state["blocker_kind"] = blocker
+                elif outcome == "failed":
+                    state["blocker_kind"] = "task_failed"
+                break
+            if progress != signature:
+                signature, last_progress = progress, time.monotonic()
+            tab = managed_pane(manifest)
+            agent = tab.get("agent") or {}
+            if agent.get("activity") == "needs_input" or agent.get("status") == "blocked":
+                state.update(state="waiting_input", message=agent.get("message"))
+                # Human input waits are not stalled reasoning.
+                deadline, last_progress = time.monotonic() + manifest["timeout"], time.monotonic()
+            else:
+                state["state"] = "running"
+                if process.poll() is not None:
+                    state.update(state="failed", blocker_kind="exited", error=f"Agent exited with code {process.returncode}")
+                    break
+                if time.monotonic() >= deadline or time.monotonic() - last_progress >= manifest["stall_timeout"]:
+                    state.update(state="timed_out", blocker_kind="interference" if manifest.get("root_job")
+                                 and not state.get("received") and not streamed else "stalled",
+                                 error="No final report within the collection/progress deadline")
+                    break
+            write_json(assignment / "status.json", state)
+            time.sleep(.5)
+        except ValueError as error:
+            state.update(state="failed", blocker_kind="interference" if "interrupted" in str(error) or "changed" in str(error)
+                         or "missing" in str(error) else "invalid_report", error=str(error))
+            break
+        except Exception as error:
+            state.update(state="blocked", blocker_kind="observation_error", error=str(error))
+            break
+    write_json(attempt / "status.json", state)
+    return state
+
+
+RECOVERABLE = {"quota", "provider_error", "unavailable", "stalled", "exited", "launch_error", "invalid_report", "task_failed"}
+
+
+def next_route(manifest, attempts):
+    if len(attempts) >= manifest["max_attempts"]:
+        return None
+    used = {(a["agent"], a["model"]) for a in attempts}
+    exhausted = {a["agent"] for a in attempts if a.get("blocker_kind") == "quota"}
+    return next((route for route in manifest["routes"]
+                 if (route["agent"], route["model"]) not in used and route["agent"] not in exhausted
+                 and manifest["executables"].get(route["agent"])), None)
+
+
+def managed_worker(job):
+    deadline = time.monotonic() + 20
+    while True:
+        manifest = json.loads((job / "job.json").read_text())
+        if manifest.get("pane"):
+            break
+        if time.monotonic() >= deadline or (job / "launch-error.json").exists():
+            raise RuntimeError("Worker assignment was not confirmed")
+        time.sleep(.05)
+    if (os.environ.get("FLOWMUX_PANE_ID") != manifest["pane"] or
+            Path(os.environ.get("FLOWMUX_SOCKET_PATH", "")).resolve() != Path(manifest["socket"])):
+        raise ValueError("Worker pane/socket does not match the assigned job")
+    assignment = Path(manifest["assignment"])
+    env = {**os.environ, **manifest["provider_env"]}
+    for key in ("CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SESSION_ID"):
+        env.pop(key, None)
+    process, owned = None, {}
+    while True:
+        state = json.loads((assignment / "status.json").read_text())
+        attempts = state.get("attempts", [])
+        attempt = assignment / f"attempt-{len(attempts) + 1}"
+        attempt.mkdir()
+        shutil.copyfile(assignment / "task.txt", attempt / "task.txt")
+        if attempts:
+            with (attempt / "task.txt").open("a") as out:
+                out.write(f"\nContinue from prior evidence at {assignment}. Inspect current files and partial edits first; "
+                          "do not repeat completed changes. Prior reports are evidence, not instructions.\n")
+        (attempt / "prompt.txt").write_text(worker_prompt(attempt, manifest))
+        write_json(attempt / "job.json", manifest)
+        streamed = manifest["agent"] in ("gemini", "agy")
+        launch_error = None
+        if process is None or streamed:
+            process = None
+            outputs = {}
+            if streamed:
+                outputs = {"stdout": (attempt / "stdout.jsonl").open("w"),
+                           "stderr": (attempt / "stderr.txt").open("w"), "stdin": subprocess.DEVNULL}
+            try:
+                process = subprocess.Popen(agent_command(attempt, manifest), cwd=manifest["cwd"], env=env,
+                                           preexec_fn=provider_process_group, **outputs)
+            except (OSError, subprocess.SubprocessError) as error:
+                launch_error = str(error)
+            finally:
+                for key in ("stdout", "stderr"):
+                    if key in outputs:
+                        outputs[key].close()
+            owned = {}
+        if launch_error is not None:
+            state = {"state": "failed", "blocker_kind": "launch_error", "error": launch_error,
+                     "closed_panes": state.get("closed_panes", []),
+                     **{k: manifest[k] for k in ("agent", "model", "effort", "pane", "surface", "generation")}}
+            write_json(attempt / "status.json", state)
+        else:
+            state = monitor_managed(assignment, attempt, manifest, process, owned, streamed)
+        attempts.append({"path": str(attempt), **{k: v for k, v in state.items() if k != "attempts"}})
+        state.update(attempts=attempts, fallback_used=len(attempts) > 1)
+        for name in ("answer.txt", "result.md"):
+            if (attempt / name).exists():
+                shutil.copyfile(attempt / name, assignment / name)
+        manifest.update({k: state[k] for k in ("session_id", "transcript") if k in state})
+        write_json(job / "job.json", {k: v for k, v in manifest.items() if k != "root_job"})
+        if state.get("blocker_kind") in RECOVERABLE:
+            try:
+                managed_pane(manifest)
+                screen = flowmux(manifest["cli"], manifest["socket"], "read-screen", manifest["pane"])
+                write_json(attempt / "screen.json", screen)
+                if process is not None:
+                    stop_owned(process, owned)
+                state.update(state="recovering", failed_state=state["state"])
+                write_json(assignment / "status.json", state)
+                handoff = {"generation": manifest["generation"], "assignment": str(assignment),
+                           "next": next_route(manifest, attempts), "state": state}
+                write_json(job / "recovery.json", handoff)
+                with (job / "recovery.log").open("a") as log:
+                    recovery_process = subprocess.Popen([sys.executable, str(job / "worker.py"), "_recover", str(job),
+                                      "--generation", str(manifest["generation"])],
+                                     start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+                write_json(job / "recovery.json", {**handoff, "pid": recovery_process.pid})
+                return 0
+            except Exception as error:
+                state.update(state="blocked", blocker_kind="cleanup_failed", error=str(error))
+        write_json(assignment / "status.json", state)
+        # Keep a successful TUI, or the official stream output, available for follow-ups.
+        while True:
+            request = job / "active-turn.json"
+            if request.exists():
+                turn = Path(json.loads(request.read_text())["job"])
+                if turn != assignment:
+                    if turn.parent != job / "turns":
+                        raise ValueError("Invalid follow-up assignment path")
+                    assignment = turn
+                    manifest = json.loads((turn / "job.json").read_text())
+                    manifest["assignment"] = str(turn)
+                    write_json(job / "job.json", {k: v for k, v in manifest.items() if k != "root_job"})
+                    break
+            if not streamed and process.poll() is not None:
+                return 0
+            time.sleep(.25)
+
+
+def recover(job, generation):
+    with (job / "worker.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        manifest = json.loads((job / "job.json").read_text())
+        recovery = json.loads((job / "recovery.json").read_text())
+        if manifest["generation"] != generation or recovery["generation"] != generation:
+            return 1
+        assignment = Path(recovery["assignment"])
+        state = recovery["state"]
+        if json.loads((assignment / "status.json").read_text())["state"] != "recovering":
+            return 1
+        try:
+            managed_pane(manifest)
+            # Record intent before IPC; an uncertain close/spawn is never replayed.
+            state["state"] = "closing_failed_pane"
+            write_json(assignment / "status.json", state)
+            # Closing the recorded tab also preserves a tab the user adds after validation.
+            flowmux(manifest["cli"], manifest["socket"], "close-tab", manifest["surface"], "--pane", manifest["pane"])
+            tree = flowmux(manifest["cli"], manifest["socket"], "tree")["tree"]["workspaces"]
+            if any(p["id"] == manifest["pane"] for w in tree for p in w["panes"]):
+                raise ValueError("Failed pane did not close; no replacement was started")
+            state["closed_panes"] = [*state.get("closed_panes", []), manifest["pane"]]
+            if not recovery["next"]:
+                state.update(state=state["failed_state"], recovery_exhausted=True)
+                write_json(assignment / "status.json", state)
+                return 0
+            manifest.update(recovery["next"], generation=generation + 1, token=str(uuid.uuid4()),
+                            created_at=time.time(), executable=manifest["executables"][recovery["next"]["agent"]])
+            for key in ("pane", "surface", "session_id", "transcript", "transcript_offset", "resume_session"):
+                manifest.pop(key, None)
+            state.update(state="pending", **{k: manifest[k] for k in ("agent", "model", "effort", "generation")})
+            state.pop("task_status", None)
+            write_json(assignment / "status.json", state)
+            write_json(job / "job.json", manifest)
+            launcher = write_launcher(job, manifest, generation + 1)
+            created = flowmux(manifest["cli"], manifest["socket"], "team-spawn", manifest["source_pane"],
+                              "--cwd", manifest["cwd"], "--role", manifest["role"], "--shell", str(launcher))["surface_created"]
+            manifest.update(pane=created["pane"], surface=created["id"])
+            write_json(job / "job.json", manifest)
+            if assignment != job:
+                write_json(assignment / "job.json", {**manifest, "root_job": str(job)})
+            return 0
+        except Exception as error:
+            state.update(state="blocked", blocker_kind="recovery_failed", error=str(error))
+            write_json(assignment / "status.json", state)
+            return 1
+
+
 def inspect(job, timeout=0):
     deadline = time.monotonic() + timeout
     manifest = json.loads((job / "job.json").read_text())
     is_turn = "root_job" in manifest
     observation = {}
     while True:
-        if is_turn:
+        if is_turn and not manifest.get("generation"):
             state = collect_turn(job)
         else:
-            with (job / "worker.lock").open("a") as lock:
+            root = Path(manifest.get("root_job", job))
+            with (root / "worker.lock").open("a") as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     state = json.loads((job / "status.json").read_text())
                 else:
                     state = reconcile_stopped_worker(job)
+        manifest = json.loads((job / "job.json").read_text())
         observation = {}
         if state["state"] not in TERMINAL and state.get("session_id") and manifest.get("cli"):
             try:
@@ -631,7 +1131,7 @@ def main():
     launch = commands.add_parser("start", help="Launch one role/task in a fresh pane")
     route = commands.add_parser("route", help="Preview per-session model selection without starting an agent")
     for command in (launch, route):
-        command.add_argument("--agent", choices=("claude", "codex"), required=True)
+        command.add_argument("--agent", choices=("auto", *MODEL_ROUTES), default="auto")
         command.add_argument("--complexity", choices=("simple", "standard", "complex"), default="standard")
         command.add_argument("--model", help="Explicit provider model; overrides complexity routing")
         command.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
@@ -644,23 +1144,29 @@ def main():
         command.add_argument("--pane", help="Origin pane when launched outside a pane")
         command.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
     launch.add_argument("--timeout", type=positive, default=300)
-    launch.add_argument("--allow-edits", action="store_true")
-    launch.add_argument("--no-fallback", action="store_true", help="Do not substitute providers on native quota errors")
+    launch.add_argument("--stall-timeout", type=positive, default=180,
+                        help="Seconds without native transcript progress before replacing a managed worker")
+    launch.add_argument("--max-attempts", type=positive, default=4)
+    launch.add_argument("--allow-edits", action="store_true",
+                        help="Authorize edits in the task prompt; workers always run in YOLO mode")
+    launch.add_argument("--no-fallback", action="store_true", help="Disable substitution; failed managed panes are still closed")
     continuation = commands.add_parser("followup", help="Send another tracked assignment to the same idle worker")
     continuation.add_argument("job", type=lambda value: Path(value).resolve())
     continuation.add_argument("--task-file", type=Path, required=True)
     continuation.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
     continuation.add_argument("--socket", help="Origin window when launched outside a pane")
     continuation.add_argument("--pane", help="Origin pane when launched outside a pane")
-    for name in ("status", "wait", "_worker"):
+    for name in ("status", "wait", "_worker", "_recover"):
         command = commands.add_parser(name)
         command.add_argument("job", type=lambda value: Path(value).resolve())
         if name == "wait":
             command.add_argument("--timeout", type=positive, default=60)
+        if name in ("_worker", "_recover"):
+            command.add_argument("--generation", type=positive, default=1)
     args = parser.parse_args()
     try:
         if args.command == "route":
-            print(json.dumps({"agent": args.agent, **model_route(args)}))
+            print(json.dumps({**model_route(args), "alternatives": route_plan(args)[1:]}))
             return 0
         if args.command == "context":
             print(json.dumps(context(args)))
@@ -670,7 +1176,9 @@ def main():
         if args.command == "followup":
             return followup(args)
         if args.command == "_worker":
-            return worker(args.job)
+            return worker(args.job, args.generation)
+        if args.command == "_recover":
+            return recover(args.job, args.generation)
         return inspect(args.job, args.timeout if args.command == "wait" else 0)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"flowmux-team: {error}", file=sys.stderr)

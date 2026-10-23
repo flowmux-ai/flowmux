@@ -7,16 +7,16 @@
 후속 지시를 보내는 흐름입니다. 사용자가 worker pane마다 직접 입력할 필요는 없습니다.
 
 아래 대화는 **기대 동작을 설명하는 예시이며 실제 모델 대화 기록은 아닙니다.**
-현재 검증된 범위는 실제 GUI pane에서 모의 에이전트로 실행한 전달·응답·세션 재사용입니다.
-실제 Codex의 승인 화면을 감지하고 원래 리드에게 입력 대기를 알리는 동작도 검증했습니다.
-실제 Claude/Codex 모델로 끝까지 실행한 결과는 아직 확보하지 못했습니다.
-막힌 원인과 검증 기록은 문서 마지막에 있습니다.
+실제 GUI pane의 모의 에이전트로 전달·응답·세션 재사용과 자동 복구를 검증했습니다.
+실제 Claude/Codex 모델은 정보 부족 → 후속 입력 → 완료 사례를 통과했고,
+agy도 동일 대화의 후속 작업까지 통과했습니다. Gemini의 실제 계정 실행은
+현재 클라이언트 지원 제한으로 막혀 있습니다. 상세 검증 기록은 문서 마지막에 있습니다.
 
 ## 시작하기
 
 1. Flowmux의 **New Team Workspace**에서 프로젝트를 열고 리드 에이전트를 실행합니다.
 2. **Options → Skills → Flowmux Team**에서 리드가 사용할 스킬을 설치하거나 업데이트합니다.
-3. 인증 및 초기 설정을 마친 Claude Code 또는 Codex CLI가 필요합니다.
+3. 인증 및 초기 설정을 마친 Claude Code, Codex, Gemini 또는 agy CLI가 필요합니다.
    아래 프롬프트는 worker로 Codex를 지정합니다. Claude를 쓰려면 프롬프트의
    `Codex`를 `Claude Code`로 바꾸세요. 실제 실행에는 계정 사용량이 발생합니다.
 4. 리드는 `team.py context`로 Team 모드를 확인해야 합니다. 일반 workspace에서
@@ -193,7 +193,8 @@ shipping.py만 고치게 해줘. 테스트 수정은 허용하지 마.
 **완료 기준:** 원래 workspace의 같은 worker가 응답하고 최초 보고서가 보존됩니다.
 다른 리드에서 같은 job으로 `followup`을 시도하면 입력 전에 거부되어야 합니다.
 이때는 원래 리드 대화로 돌아가세요. 환경 변수나 영수증을 바꿔 우회하지 않습니다.
-대상 선택은 포커스와 독립적이지만, 작업 중 화면 포커스가 그대로 유지된다는 뜻은 아닙니다.
+백그라운드 worker 생성과 실패한 pane의 정리·교체 중에도 현재 workspace와 키보드
+포커스가 유지됩니다. 다른 workspace에서 사용 중인 pane의 확대 상태도 유지됩니다.
 
 ## 사례 5. 승인·입력 대기 → 사용자 처리 → 같은 작업 결과 수집
 
@@ -298,12 +299,14 @@ status means the worker finished that assignment; the lead still checks it.
 | `observation_error` / UI busy / missing session | Diagnose the recorded pane and session; do not type or fabricate state. |
 | Follow-up from a different lead/workspace | No input is sent. Return to the original lead; do not rewrite its origin. |
 | Wait exits 124 | Deadline elapsed, task not cancelled. Keep evidence and decide whether to wait more. |
-| Malformed report / changed transcript | Stop automated handoff; inspect the retained answer and session. |
+| Malformed report | Managed jobs retain evidence, close the failed pane and try a bounded alternative. Inspect final failure if attempts are exhausted. |
+| Changed transcript/session identity | Stop automated handoff; inspect the retained answer and session. |
 
 `followup` rejects concurrent dispatch and unresolved earlier assignments.
 It preserves uncertain delivery rather than risking a duplicate. It does not
-queue into a busy TUI, interrupt a running task, replace a failed session, or
-restart the lead after the lead has ended its own turn.
+queue into a busy TUI, interrupt a running task, or restart the lead after the
+lead has ended its own turn. After confirmed receipt, managed follow-ups use
+the same bounded failure recovery and pane replacement as initial assignments.
 
 ## Reproduce verification from the source checkout
 
@@ -312,6 +315,8 @@ python3 scripts/test-agent-team.py
 cargo build -p flowmux -p flowmux-cli
 cargo test -p flowmux-cli --lib codex_shim_first_tool_gui -- --ignored --nocapture
 python3 scripts/test-team-pingpong-gui.py
+python3 scripts/test-team-recovery-gui.py
+python3 scripts/test-skills-gui.py
 # Explicit live-account checks, same examples and real provider CLIs:
 python3 scripts/test-team-pingpong-gui.py --real-agent claude
 python3 scripts/test-team-pingpong-gui.py --real-agent codex
@@ -376,3 +381,64 @@ The isolated live GUI check in `/tmp/fm-gui-3ncg9drf` passed wrapper upgrade,
 first-tool lookup, shared-daemon rejection and automatic restore with reordered
 PATH. Native new-lead model execution remains subject to the sandbox blocker
 recorded above; fixture success is not full native cookbook success.
+
+## Verification record — 2026-10-23, Linux
+
+New Team workers now run in YOLO mode: Codex bypasses approvals and sandboxing;
+Claude uses `--allow-dangerously-skip-permissions --permission-mode bypassPermissions`
+with its normal tools and MCP configuration. The earlier sandbox observations
+above describe the old worker launch mode. Authentication and hook trust are
+unchanged, and existing worker sessions are not migrated.
+
+The helper's 40 tests passed, as did the skill unit/integration and Team store
+tests. All six deterministic GUI cases passed, including same-session followups,
+wrong-lead rejection, input handoff and Gemini/agy lead routing. The isolated
+Skills GUI suite passed installation, update/backups, removal, quota fallback,
+interruption and YOLO session restoration.
+
+Native Codex / GPT-6 Luna and Claude / Haiku both passed the clarification case:
+missing input returned `blocked`, then a followup in the same session returned
+the correct 16 seats. Claude initially exposed a report-parser bug by wrapping
+valid JSON in a Markdown code block. A single surrounding JSON block is now
+accepted; extra prose, multiple blocks and invalid report schemas remain errors.
+The original transcript and a fresh native run both verified the fix.
+
+Local evidence: `/tmp/fm-gui-cq7ztxnn` (deterministic communication),
+`/tmp/fm-gui-5k6o0plj` (Skills GUI and restoration),
+`/tmp/fm-gui-tlae9ssl` (native Codex clarification), and
+`/tmp/fm-gui-0tla22z5` (native Claude clarification after the fix).
+Native review/repair cases and macOS were not rerun in this check.
+
+## Routing, recovery and focus verification — 2026-10-23, Linux
+
+The helper's 49 regression tests passed. The isolated Skills GUI suite passed
+all 17 checks, including four-provider skill installation, update/backups,
+restoration, YOLO launch, quota replacement and native keyboard focus. The
+recovery GUI suite passed all 11 checks: quota, capacity, stalled progress,
+crash, malformed reports, launch errors, attempt limits, no-fallback cleanup,
+Gemini/agy exact-conversation follow-ups and follow-up quota recovery. Owned
+process trees (including a TERM-resistant child) stopped before failed panes
+closed; replacements preserved the foreground workspace and native input.
+
+The GTK focus regression passed background root/nested splits and both pane
+close paths while preserving the visible stack page, focused widget and zoom.
+It caught a separate root-split collapse bug that workspace-ID checks alone
+missed. Unmapped-terminal tests passed normal and alternate-screen reads without
+focusing the worker. The deterministic communication suite passed all 10 checks.
+
+Native Codex / GPT-6 Luna and Claude / Haiku again passed clarification and
+same-session follow-up from background panes. Native agy /
+`gemini-3.8-flash-medium` passed YOLO launch and an exact-conversation follow-up.
+Its isolated test retained access to the existing unlocked user keyring without
+copying credentials or changing authentication settings. Native Gemini returned
+`IneligibleTierError` / `UNSUPPORTED_CLIENT` for this account; fixture protocol
+and recovery checks do not establish successful Gemini account access.
+
+Local evidence: `/tmp/fm-gui-0eyhnsrs` (Skills GUI),
+`/tmp/fm-gui-nchc798e` (recovery and native input),
+`/tmp/fm-final-focus-ebkcu2nv` (GTK focus/zoom),
+`/tmp/fm-gui-lxobj0ib` (deterministic communication),
+`/tmp/fm-gui-uwjkypks` (native Codex), `/tmp/fm-gui-buf79n14` (native Claude),
+`/tmp/fm-gui-39lp8ygq` (native agy), and
+`/tmp/fm-native-protocol-debda9c5` (Gemini account blocker).
+Native review/repair cases and macOS were not rerun in this check.

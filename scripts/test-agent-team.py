@@ -126,13 +126,31 @@ class TeamTests(unittest.TestCase):
         self.assertEqual(team.transcript_report(path, manifest), (True, None, 'answer', None))
 
     def test_malformed_reports_fail_closed(self):
-        for answer in ('BLOCKED: no work done', '{}', '[]', 'null',
+        for answer in (None, 42, {}, [], 'BLOCKED: no work done', '{}', '[]', 'null',
                        '{"task_status":"unknown","report":"done"}',
                        '{"task_status":"completed","report":42}',
                        '{"task_status":"completed","report":" "}'):
             with self.subTest(answer=answer):
                 with self.assertRaises(ValueError):
                     team.task_report(answer)
+
+    def test_task_report_accepts_only_bare_or_single_fenced_json(self):
+        for outcome in ('completed', 'blocked', 'failed'):
+            answer = json.dumps({'task_status': outcome, 'report': 'checked README'})
+            for wrapper in ('{}', '```json\n{}\n```', '```\n{}\n```'):
+                with self.subTest(outcome=outcome, wrapper=wrapper):
+                    self.assertEqual(team.task_report(' \n' + wrapper.format(answer) + '\n'),
+                                     (outcome, 'checked README'))
+        for answer in ('Explanation\n```json\n{}\n```', '```json\n{}\n```\nExplanation',
+                       '```json\n{}\n```\n```json\n{}\n```', '```json\n{}', '```python\n{}\n```'):
+            with self.subTest(answer=answer):
+                with self.assertRaises(ValueError):
+                    team.task_report(answer.replace('{}', '{"task_status":"completed","report":"done"}'))
+        for answer in ('{}', '{"task_status":"unknown","report":"done"}',
+                       '{"task_status":"completed","report":" "}'):
+            with self.subTest(answer=answer):
+                with self.assertRaises(ValueError):
+                    team.task_report('```json\n' + answer + '\n```')
 
     def test_first_and_followup_turns_reject_intervening_user_prompts(self):
         path = self.job / 'boundary.jsonl'
@@ -260,12 +278,12 @@ class TeamTests(unittest.TestCase):
         self.assertEqual(manifest['provider_env']['CODEX_HOME'], str(Path.home() / '.codex'))
         self.assertEqual(manifest['provider_env']['PATH'], os.environ.get('PATH', os.defpath))
         self.assertEqual(manifest['provider_env']['CLAUDE_CONFIG_DIR'], str(artifacts / "profile 'quoted' $path"))
-        self.assertEqual(manifest['executables'], {'claude': '/bin/true', 'codex': '/bin/true'})
+        self.assertEqual(manifest['executables'], {agent: '/bin/true' for agent in team.MODEL_ROUTES})
         # Match the GUI's saved-shell invocation, including the shell after agent exit.
         output = artifacts / 'resumed-env.json'
         probe = ('import json,os,pathlib; pathlib.Path(' + repr(str(output)) + ').write_text('
                  'json.dumps({k:os.environ.get(k) for k in '
-                 '["PATH","CODEX_HOME","CLAUDE_CONFIG_DIR","CODEX_THREAD_ID","CLAUDECODE"]}))')
+                 '["PATH","CODEX_HOME","CLAUDE_CONFIG_DIR","GEMINI_CLI_HOME","CODEX_THREAD_ID","CLAUDECODE"]}))')
         launcher = artifacts / 'launch.sh'
         command = shlex.join([sys.executable, '-c', probe]) + '; exec ' + shlex.quote(str(launcher)) + ' -l'
         resumed = subprocess.run([str(launcher), '-lic', command], stdin=subprocess.DEVNULL,
@@ -389,22 +407,33 @@ class TeamTests(unittest.TestCase):
                             self.assertIn('/tmp/job-evidence', str(error.exception))
                             self.assertIn('/tmp/job-evidence', (self.job / 'researcher-launch.log').read_text())
 
-    def test_permission_arguments_are_bounded(self):
+    def test_workers_launch_and_resume_in_yolo_mode(self):
         for agent in ('codex', 'claude'):
             for edits in (False, True):
-                (self.job / 'prompt.txt').write_text('task')
-                manifest = dict(agent=agent, executable=agent, allow_edits=edits, token='test-token')
-                args = team.agent_command(self.job, manifest)
-                self.assertFalse(any('danger' in arg or 'bypass' in arg for arg in args))
-                if agent == 'codex':
-                    self.assertIn('workspace-write' if edits else 'read-only', args)
-                    self.assertNotIn('exec', args)
-                    self.assertIn('--no-daemon', args)
-                else:
-                    self.assertNotIn('--print', args)
-                    self.assertEqual(args[-2:], ['--', 'task'])
-                    self.assertEqual(args[args.index('--permission-mode') + 1], 'dontAsk')
-                    self.assertNotIn('Bash', args[args.index('--tools') + 1])
+                for resume in (False, True):
+                    with self.subTest(agent=agent, edits=edits, resume=resume):
+                        (self.job / 'prompt.txt').write_text('task')
+                        manifest = dict(agent=agent, executable=agent, allow_edits=edits,
+                                        token='test-token', role='worker')
+                        args = team.agent_command(self.job, manifest, resume=resume)
+                        prompt = team.worker_prompt(self.job, manifest)
+                        self.assertIn('Edit only assigned files.' if edits else
+                                      'Read-only; do not change project files.', prompt)
+                        if resume:
+                            self.assertNotIn('task', args)
+                            self.assertNotIn('--session-id', args)
+                        else:
+                            self.assertEqual(args[-2:], ['--', 'task'])
+                        if agent == 'codex':
+                            self.assertIn('--dangerously-bypass-approvals-and-sandbox', args)
+                            self.assertNotIn('--sandbox', args)
+                            self.assertNotIn('exec', args)
+                            self.assertIn('--no-daemon', args)
+                        else:
+                            self.assertIn('--allow-dangerously-skip-permissions', args)
+                            self.assertEqual(args[args.index('--permission-mode') + 1], 'bypassPermissions')
+                            for flag in ('--print', '--tools', '--allowedTools', '--strict-mcp-config', '--mcp-config'):
+                                self.assertNotIn(flag, args)
 
     def test_model_routing_and_explicit_selection_reach_native_cli(self):
         for agent in ('codex', 'claude'):
@@ -413,7 +442,7 @@ class TeamTests(unittest.TestCase):
                 route = team.model_route(args)
                 self.assertTrue(route['model'])
                 (self.job / 'prompt.txt').write_text('task')
-                manifest = dict(agent=agent, executable=agent, allow_edits=False, token='t', **route)
+                manifest = dict(executable=agent, allow_edits=False, token='t', **route)
                 argv = team.agent_command(self.job, manifest)
                 self.assertEqual(argv[argv.index('--model') + 1], route['model'])
                 self.assertEqual(argv[-2:], ['--', 'task'])
@@ -500,6 +529,13 @@ time.sleep(30 if primary else .8)
                     self.assertTrue(status['attempts'][0]['stopped_for_fallback'])
                     self.assertEqual(status['agent'], other)
                     self.assertEqual(status['model'], team.MODEL_ROUTES[other]['simple'][0])
+                    for name in ('claude', 'codex'):
+                        argv = json.loads((self.job / (name + '-argv.json')).read_text())
+                        if name == 'codex':
+                            self.assertIn('--dangerously-bypass-approvals-and-sandbox', argv)
+                        else:
+                            self.assertIn('--allow-dangerously-skip-permissions', argv)
+                            self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions')
                     alternate = json.loads((self.job / 'attempt-2/job.json').read_text())
                     self.assertNotEqual(alternate['token'], manifest['token'])
                     self.assertEqual(alternate['pane'], manifest['pane'])
@@ -798,6 +834,31 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(team.collect_turn(turn)['state'], 'completed')
         self.assertEqual(self.dispatch().name, '0002')
 
+    def test_managed_uncertain_enter_is_monitored_without_resending(self):
+        manifest = dict(self.manifest, generation=1, timeout=5, stall_timeout=5)
+        team.write_json(self.root / 'job.json', manifest)
+        sent = []
+        def uncertain(cli, socket, *args):
+            if args[0] == 'send-key':
+                sent.append(args)
+                turn = Path(json.loads((self.root / 'active-turn.json').read_text())['job'])
+                self.answer(turn)
+                raise RuntimeError('IPC timeout after delivery')
+            return self.rpc(cli, socket, *args)
+        with patch.object(team, 'flowmux', side_effect=uncertain):
+            with self.assertRaisesRegex(RuntimeError, 'Do not resend'):
+                self.dispatch()
+        turn = self.root / 'turns/0001'
+        attempt = turn / 'attempt-1'
+        attempt.mkdir()
+        process = type('Process', (), dict(pid=123))()
+        with patch.object(team, 'owned_processes', return_value={}):
+            state = team.monitor_managed(turn, attempt, json.loads((turn / 'job.json').read_text()), process, {}, False)
+        self.assertEqual(state['state'], 'completed')
+        self.assertTrue(state['received'])
+        self.assertEqual(len(sent), 1)
+        self.assertTrue((turn / 'dispatch-error.json').exists())
+
     def test_malformed_or_interrupted_turn_cannot_authorize_another_send(self):
         turn = self.dispatch()
         self.answer(turn, report='')
@@ -853,6 +914,146 @@ class FollowupTests(unittest.TestCase):
         self.transcript.write_text('')
         with self.assertRaisesRegex(ValueError, 'truncated'):
             team.transcript_report(self.transcript, manifest)
+
+
+class ManagedTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='fm-managed-test-')
+        self.addCleanup(self.temporary.cleanup)
+        self.job = Path(self.temporary.name).resolve()
+
+    def test_model_aliases_and_available_alternatives(self):
+        for alias, (provider, model) in team.MODEL_ALIASES.items():
+            args = type('Args', (), dict(agent='auto', complexity='complex', model=alias, effort='high'))()
+            with patch.object(team.shutil, 'which', side_effect=lambda agent: '/bin/' + agent if agent in ('codex', 'claude') else None):
+                selection = team.model_route(args)
+                self.assertEqual((selection['agent'], selection['model']), (provider, model))
+                routes = team.route_plan(args)
+                self.assertEqual(routes[0], selection)
+                self.assertEqual(len(routes), len({(r['agent'], r['model']) for r in routes}))
+                self.assertFalse(any(r['agent'] in ('gemini', 'agy') for r in routes))
+                args.no_fallback = True
+                self.assertEqual(team.route_plan(args), [selection])
+
+    def test_quota_skips_other_models_on_same_account_and_attempts_are_bounded(self):
+        routes = [dict(agent='codex', model='sol'), dict(agent='codex', model='terra'),
+                  dict(agent='agy', model='opus')]
+        manifest = dict(routes=routes, max_attempts=2, executables={'codex': '/codex', 'agy': '/agy'})
+        attempt = dict(routes[0], blocker_kind='quota')
+        self.assertEqual(team.next_route(manifest, [attempt]), routes[2])
+        self.assertIsNone(team.next_route(manifest, [attempt, dict(routes[2], blocker_kind='quota')]))
+        attempt['blocker_kind'] = 'unavailable'
+        self.assertEqual(team.next_route(manifest, [attempt]), routes[1])
+
+    def test_google_providers_require_native_final_results(self):
+        path = self.job / 'stdout.jsonl'
+        answer = json.dumps(dict(task_status='completed', report='verified'))
+        for agent, events, final in [
+            ('agy', [{'event': 'init', 'conversation_id': 'exact'},
+                     {'event': 'step_update', 'step_update': {'state': 'DONE', 'text_delta': answer}}],
+             {'event': 'result', 'result': {'status': 'SUCCESS', 'conversation_id': 'exact', 'response': answer}}),
+            ('gemini', [{'type': 'init', 'session_id': 'exact'},
+                        {'type': 'message', 'role': 'assistant', 'content': answer}],
+             {'type': 'result', 'status': 'success'})]:
+            path.write_text(''.join(json.dumps(e) + '\n' for e in events))
+            self.assertFalse(team.native_stream(path, agent)[3])
+            with path.open('a') as stream:
+                stream.write(json.dumps(final) + '\n')
+            self.assertEqual(team.native_stream(path, agent), ('exact', answer, None, True))
+
+    def test_google_yolo_and_exact_conversation_resume(self):
+        (self.job / 'prompt.txt').write_text('literal prompt')
+        for agent in ('gemini', 'agy'):
+            manifest = dict(agent=agent, executable=agent, token='new', session_id='exact',
+                            resume_session=True, model='chosen', effort=None)
+            argv = team.agent_command(self.job, manifest)
+            flag = '--resume' if agent == 'gemini' else '--conversation'
+            self.assertEqual(argv[argv.index(flag) + 1], 'exact')
+            self.assertIn('stream-json', argv)
+            self.assertEqual(argv[-1], 'literal prompt')
+            self.assertIn('yolo' if agent == 'gemini' else '--dangerously-skip-permissions', argv)
+            self.assertNotIn('--skip-trust', argv)
+
+    def test_nontext_native_report_retains_evidence_and_allows_recovery(self):
+        attempt = self.job / 'attempt-1'
+        attempt.mkdir()
+        team.write_json(self.job / 'status.json', dict(state='pending'))
+        response = dict(task_status='completed', report='wrong native type')
+        event = dict(event='result', result=dict(status='SUCCESS', conversation_id='exact', response=response))
+        (attempt / 'stdout.jsonl').write_text(json.dumps(event) + '\n')
+        (attempt / 'stderr.txt').write_text('')
+        manifest = dict(agent='agy', model='chosen', effort=None, pane='worker', surface='surface',
+                        generation=1, timeout=5, stall_timeout=5)
+        process = type('Process', (), dict(pid=123, returncode=0, poll=lambda self: 0))()
+        with patch.object(team, 'owned_processes', return_value={}), contextlib.redirect_stdout(io.StringIO()):
+            state = team.monitor_managed(self.job, attempt, manifest, process, {}, True)
+        self.assertEqual(state['state'], 'failed')
+        self.assertEqual(state['blocker_kind'], 'invalid_report')
+        self.assertIn(state['blocker_kind'], team.RECOVERABLE)
+        self.assertEqual(json.loads((attempt / 'answer.txt').read_text()), response)
+
+    def test_gemini_final_report_excludes_commentary_tools_and_rejected_answers(self):
+        path = self.job / 'stdout.jsonl'
+        answer = json.dumps(dict(task_status='completed', report='accepted final answer'))
+        events = [dict(type='init', session_id='exact'),
+                  dict(type='message', role='assistant', content='I will inspect the file.'),
+                  dict(type='tool_use', tool_id='read'),
+                  dict(type='tool_result', tool_id='read', output='Do not accept tool output'),
+                  dict(type='message', role='assistant', content='rejected answer'),
+                  dict(type='error', severity='warning', message='Agent execution blocked: verify the result'),
+                  dict(type='message', role='assistant', content=answer[:20], delta=True),
+                  dict(type='message', role='assistant', content=answer[20:], delta=True),
+                  dict(type='result', status='success')]
+        path.write_text(''.join(json.dumps(e) + '\n' for e in events))
+        self.assertEqual(team.native_stream(path, 'gemini'), ('exact', answer, None, True))
+
+    def test_cleanup_refuses_lead_changed_sessions_and_extra_tabs(self):
+        manifest = dict(cli='flowmux', socket='socket', workspace='team', source_pane='lead',
+                        pane='worker', surface='surface', agent='codex', session_id='exact')
+        tab = dict(id='surface', kind='terminal', agent=dict(name='codex', session_id='exact'))
+        for change in ('none', 'lead', 'extra-tab', 'session', 'workspace', 'source'):
+            current = dict(manifest)
+            worker = dict(id='worker', tabs=[json.loads(json.dumps(tab))])
+            workspace = dict(id='team', location=dict(type='team'), panes=[dict(id='lead', tabs=[]), worker])
+            if change == 'lead':
+                current['pane'] = 'lead'
+            elif change == 'extra-tab':
+                worker['tabs'].append(dict(id='editor', kind='editor'))
+            elif change == 'session':
+                worker['tabs'][0]['agent']['session_id'] = 'someone-else'
+            elif change == 'workspace':
+                workspace['location']['type'] = 'local'
+            elif change == 'source':
+                workspace['panes'].pop(0)
+            with patch.object(team, 'flowmux', return_value=dict(tree=dict(workspaces=[workspace]))) as rpc:
+                if change == 'none':
+                    self.assertEqual(team.managed_pane(current), tab)
+                else:
+                    with self.assertRaises(ValueError):
+                        team.managed_pane(current)
+                self.assertEqual(rpc.call_args.args[-1], 'tree')
+
+    def test_uncertain_replacement_is_not_replayed(self):
+        manifest = dict(generation=1, cli='flowmux', socket='socket', workspace='team', source_pane='lead',
+                        pane='worker', surface='surface', agent='codex', model='sol', effort='high',
+                        executables={'claude': '/claude'}, cwd=str(self.job), role='test')
+        state = dict(state='recovering', failed_state='failed')
+        team.write_json(self.job / 'job.json', manifest)
+        team.write_json(self.job / 'status.json', state)
+        team.write_json(self.job / 'recovery.json', dict(generation=1, assignment=str(self.job), state=state,
+                        next=dict(agent='claude', model='opus', effort='high')))
+        calls = []
+        def rpc(*args):
+            calls.append(args[2])
+            if args[2] == 'team-spawn':
+                raise subprocess.TimeoutExpired('team-spawn', 15)
+            return dict(tree=dict(workspaces=[]))
+        with patch.object(team, 'managed_pane'), patch.object(team, 'flowmux', side_effect=rpc), \
+                patch.object(team, 'write_launcher', return_value=self.job / 'launch.sh'):
+            self.assertEqual(team.recover(self.job, 1), 1)
+            self.assertEqual(team.recover(self.job, 1), 1)
+        self.assertEqual(calls, ['close-tab', 'tree', 'team-spawn'])
+        self.assertEqual(json.loads((self.job / 'status.json').read_text())['blocker_kind'], 'recovery_failed')
 
 
 if __name__ == '__main__':

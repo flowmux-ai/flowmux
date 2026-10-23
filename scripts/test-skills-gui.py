@@ -21,7 +21,7 @@ import time
 
 sys.dont_write_bytecode = True
 from PIL import Image
-from Xlib import X, display
+from Xlib import X, XK, display
 from Xlib.ext import xtest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -45,12 +45,19 @@ import json, os, pathlib, re, sys, time
 agent = pathlib.Path(sys.argv[0]).name.removeprefix('fixture-')
 root = pathlib.Path(os.environ['XDG_STATE_HOME']).parent
 profile = pathlib.Path(os.environ['CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'])
+if 'app-server' in sys.argv:
+    sys.exit()
+if agent == 'codex':
+    assert '--no-daemon' in sys.argv and '--dangerously-bypass-approvals-and-sandbox' in sys.argv, sys.argv
+    assert '--sandbox' not in sys.argv, sys.argv
+else:
+    assert '--allow-dangerously-skip-permissions' in sys.argv, sys.argv
+    assert sys.argv[sys.argv.index('--permission-mode') + 1] == 'bypassPermissions', sys.argv
+    assert not any(flag in sys.argv for flag in ('--tools', '--allowedTools', '--strict-mcp-config', '--mcp-config')), sys.argv
 if '--resume' in sys.argv or 'resume' in sys.argv:
     (root / (agent + '-resumed.json')).write_text(json.dumps({'argv': sys.argv, 'profile': str(profile)}))
     print('RESUMED ' + agent, flush=True)
     time.sleep(120)
-    sys.exit()
-if 'app-server' in sys.argv:
     sys.exit()
 token = re.search(r'FLOWMUX_TEAM_JOB:([^\s]+)', sys.argv[-1])[1]
 if (root / 'interrupt-worker').exists():
@@ -112,7 +119,7 @@ time.sleep(120)
         status = json.loads(status_path.read_text())
         assert str(h.root / ('lead-' + job['agent'])) in status['transcript'], status
         fixture.wait_for(lambda: 'PROFILE VERIFIED' in h.screen(socket, job['pane']), 'visible profile completion')
-    h.pass_check('Both providers launch through PATH-dispatching wrappers with lead-only binaries and profiles')
+    h.pass_check('Both providers launch in YOLO mode through PATH-dispatching wrappers with lead-only binaries and profiles')
 
     for standalone, code in [(True, 'usage_limit_exceeded'), (False, 'usage_limit_exceeded'),
                              (False, 'server_overloaded')]:
@@ -124,21 +131,17 @@ time.sleep(120)
         status_path = Path(job['job']) / 'status.json'
         fixture.wait_for(lambda: json.loads(status_path.read_text())['state'] in ('completed', 'blocked'), 'native error result')
         status = json.loads(status_path.read_text())
-        assert status['state'] == ('completed' if quota else 'blocked'), status
-        assert status['fallback_used'] == quota, status
-        assert len(status['attempts']) == (2 if quota else 1), status
-        if quota:
-            assert status['agent'] == 'claude', status
-            fixture.wait_for(lambda: 'switching to claude' in h.screen(socket, job['pane']), 'visible provider substitution')
-        else:
-            assert status['blocker_kind'] == 'provider_error', status
-            assert (Path(job['job']) / 'result.md').read_text() == error['message']
+        assert status['state'] == 'completed', status
+        assert status['fallback_used'] and len(status['attempts']) == 2, status
+        assert status['agent'] == 'claude', status
+        assert job['pane'] in status['closed_panes'] and status['pane'] != job['pane'], status
         after_error = h.workspace(socket, workspace)
         assert len(after_error['panes']) == len(before_error['panes']) + 1
-        worker_pane = next(p for p in after_error['panes'] if p['id'] == job['pane'])
+        assert all(p['id'] != job['pane'] for p in after_error['panes'])
+        worker_pane = next(p for p in after_error['panes'] if p['id'] == status['pane'])
         assert len(worker_pane['tabs']) == 1, worker_pane
         (h.root / 'provider-error.json').unlink()
-    h.pass_check('Native Codex quota errors switch to Claude in the same pane/tab; nested capacity errors stop with their cause')
+    h.pass_check('Native Codex quota and capacity errors close the failed pane and continue in a fresh Claude pane')
 
     (h.root / 'interrupt-worker').touch()
     interrupted = start('claude')
@@ -160,6 +163,7 @@ time.sleep(120)
     shutil.rmtree(transient)
     helper.rename(helper.with_suffix('.disabled'))
     process, socket = h.window('lifecycle-restored')
+    fixture.wait_for(lambda: h.rpc(socket, 'workspace_focus', workspace=workspace), 'restored lifecycle workspace rendered')
     for job in jobs:
         evidence = h.root / (job['agent'] + '-resumed.json')
         fixture.wait_for(evidence.exists, 'native resume ' + job['agent'])
@@ -168,17 +172,19 @@ time.sleep(120)
         assert resume['profile'] == str(h.root / ('lead-' + job['agent'])), resume
         argv = resume['argv']
         if job['agent'] == 'codex':
-            assert '--no-daemon' in argv and argv[argv.index('--sandbox') + 1] == 'read-only', argv
+            assert '--no-daemon' in argv and '--dangerously-bypass-approvals-and-sandbox' in argv, argv
+            assert '--sandbox' not in argv, argv
         else:
-            assert '--session-id' not in argv and argv[argv.index('--tools') + 1] == 'Read,Glob,Grep', argv
-            assert argv[argv.index('--permission-mode') + 1] == 'dontAsk', argv
+            assert '--session-id' not in argv and '--allow-dangerously-skip-permissions' in argv, argv
+            assert argv[argv.index('--permission-mode') + 1] == 'bypassPermissions', argv
+            assert '--tools' not in argv and '--strict-mcp-config' not in argv, argv
         fixture.wait_for(lambda: 'RESUMED ' + job['agent'] in h.screen(socket, job['pane']), 'visible resumed agent')
         assert len(list(Path(job['job']).glob('attempt-*'))) == 1
         assert json.loads((Path(job['job']) / 'status.json').read_text())['state'] == 'completed'
     after = h.workspace(socket, workspace)
     assert [p['id'] for p in after['panes']] == [p['id'] for p in before['panes']]
     fixture.wait_for(lambda: 'No task was repeated' in h.screen(socket, interrupted['pane']), 'interrupted assignment not repeated')
-    h.pass_check('Claude and Codex resume in the same panes with lead profiles; original tasks and final results stay unchanged')
+    h.pass_check('Claude and Codex resume in YOLO mode in the same panes with lead profiles; original tasks and final results stay unchanged')
     h.pass_check('Worker restoration survives temporary cleanup and removal of the installed helper')
     helper.with_suffix('.disabled').rename(helper)
     h.close_window(process)
@@ -277,7 +283,7 @@ def main():
         fixture.wait_for(lambda: any('Another copy remains' in n.get_name() for n in walk(gemini_row)),
                          'Gemini shared-copy warning')
         assert any('Sign-in not checked' in n.get_name() for n in walk(gemini_row))
-        assert any('Team lead supported' in n.get_name() for n in walk(gemini_row))
+        assert any('Team lead and worker supported' in n.get_name() for n in walk(gemini_row))
         (gemini_team / 'scripts/team.py').write_text('modified Gemini helper')
         click(button('Refresh status'))
         click(button('Update', gemini_row))
@@ -399,6 +405,22 @@ time.sleep(1)
         assert gui_team['location']['type'] == 'team', gui_team
         fixture.wait_for(lambda: find('Team', Atspi.Role.LABEL), 'Team badge')
         h.pass_check('Sidebar New Team Workspace creates a distinct Team type and visible badge')
+        # Keep a real lead process alive so periodic process polling preserves its hook binding.
+        lead_fixture = bin_dir / 'codex'
+        lead_fixture.write_text('#!' + sys.executable + '\n' + r'''
+import json, os, socket, subprocess, sys
+session, runner = sys.argv[1:]
+request = dict(id=1, kind='request', verb='agent_activity_update',
+    pane=os.environ['FLOWMUX_PANE_ID'], surface=os.environ['FLOWMUX_SURFACE_ID'],
+    agent='codex', activity='running', session_id=session, pid=os.getpid(), source='flowmux:hook')
+with socket.socket(socket.AF_UNIX) as stream:
+    stream.connect(os.environ['FLOWMUX_SOCKET_PATH'])
+    stream.sendall((json.dumps(request) + '\n').encode())
+    stream.makefile().readline()
+subprocess.run(['/bin/sh', runner], check=True)
+sys.stdin.readline()
+''')
+        lead_fixture.chmod(0o700)
         # The shared Codex server may retain the other window's environment.
         def topology(workspaces):
             return [(w['id'], [(p['id'], [(t['id'], t['kind'], t['active']) for t in p['tabs']])
@@ -413,8 +435,6 @@ time.sleep(1)
         source_before = h.workspace(socket, workspace)
         session = str(uuid.uuid4())
         surface = source_before['panes'][0]['tabs'][0]['id']
-        h.rpc(socket, 'agent_activity_update', pane=pane, surface=surface, agent='codex',
-              activity='running', session_id=session, source='flowmux:hook')
         task = h.root / 'routing-task.txt'
         task.write_text('Return the fixture report. No changes.')
         receipt = h.root / 'routing-receipt.json'
@@ -430,10 +450,39 @@ time.sleep(1)
             'FLOWMUX_PANE_ID=' + other_pane, 'CODEX_THREAD_ID=' + session,
             'FLOWMUX_BUNDLED_CLI_PATH=' + str(Path(args.cli).resolve()), *command]) +
             ' > ' + shlex.quote(str(receipt)) + ' 2> ' + shlex.quote(str(errors)) + '\n')
-        h.send(socket, pane, '/bin/sh ' + shlex.quote(str(runner)))
+        foreground_pane = last_before['panes'][0]['id']
+        h.rpc(socket, 'workspace_focus', workspace=inactive)
+        h.rpc(socket, 'pane_focus', pane=foreground_pane)
+        with closing(display.Display(h.env['DISPLAY'])) as connection:
+            atom = connection.intern_atom('_NET_WM_PID')
+            window = next(window for window in connection.screen().root.query_tree().children
+                          if (owner := window.get_full_property(atom, X.AnyPropertyType)) is not None
+                          and int(owner.value[0]) == process.pid and window.get_geometry().width > 100)
+            window.configure(stack_mode=X.Above)
+            window.set_input_focus(X.RevertToParent, X.CurrentTime)
+            connection.sync()
+        # The X11 focus acknowledgement precedes GTK's focus-event dispatch.
+        time.sleep(.3)
+
+        def type_native(text):
+            with closing(display.Display(h.env['DISPLAY'])) as connection:
+                for character in text:
+                    code = connection.keysym_to_keycode(XK.string_to_keysym(character))
+                    xtest.fake_input(connection, X.KeyPress, code)
+                    xtest.fake_input(connection, X.KeyRelease, code)
+                connection.sync()
+
+        type_native('teamfocusbefore')
+        fixture.wait_for(lambda: 'teamfocusbefore' in h.screen(socket, foreground_pane), 'foreground typing before worker spawn')
+        assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == inactive
+        h.send(socket, pane, shlex.join([str(lead_fixture), session, str(runner)]))
         job = fixture.wait_for(lambda: json.loads(receipt.read_text()) if receipt.exists() and receipt.stat().st_size else None,
                                'worker launched in originating window')
         fixture.wait_for(lambda: 'TOOL  Read' in h.screen(socket, job['pane']), 'live tool progress')
+        assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == inactive, 'Team worker stole the active workspace'
+        type_native('teamfocusafter')
+        fixture.wait_for(lambda: 'teamfocusbeforeteamfocusafter' in h.screen(socket, foreground_pane), 'native typing stays in the foreground pane')
+        assert 'teamfocusafter' not in h.screen(socket, job['pane'])
         assert json.loads((Path(job['job']) / 'status.json').read_text())['state'] == 'running'
         screenshot('team-live-progress.png')
         result = subprocess.run([sys.executable, str(team / 'scripts/team.py'), 'wait', job['job'], '--timeout', '20'],
@@ -443,8 +492,10 @@ time.sleep(1)
         assert len(h.workspace(socket, workspace)['panes']) == len(source_before['panes']) + 1
         assert topology([h.workspace(socket, inactive)]) == topology([last_before])
         assert topology(h.tree(other_socket)) == topology(other_before)
-        fixture.wait_for(lambda: 'Fixture report:' in h.screen(socket, job['pane']), 'correct window visible worker report')
+        assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == inactive, 'Worker completion stole the active workspace'
+        assert 'Fixture report:' in json.loads(result.stdout)['result']
         h.pass_check('Two windows: stale Codex context resolves to source session, not other window or last workspace')
+        h.pass_check('Background Team workers preserve active workspace and native keyboard input through launch and completion')
         screenshot('team-origin-window.png')
         before = [topology(h.tree(socket)), topology(h.tree(other_socket))]
         for extra, identity in [(['--pane', other_pane], session), ([], str(uuid.uuid4()))]:
@@ -472,6 +523,7 @@ time.sleep(1)
         restored = h.workspace(socket, workspace)
         assert restored['location']['type'] == 'team'
         assert len(restored['panes']) == len(source_before['panes']) + 1
+        fixture.wait_for(lambda: h.rpc(socket, 'workspace_focus', workspace=workspace), 'restored Team workspace rendered')
         fixture.wait_for(lambda: 'No task was repeated' in h.screen(socket, job['pane']), 'restored worker does not rerun')
         h.pass_check('Team workspace persists and restoring workers does not rerun tasks')
         h.close_window(process)

@@ -373,16 +373,7 @@ fn team_setup(target: Target) -> String {
     });
     details.push("Sign-in not checked".into());
     if matches!(target, Target::Gemini | Target::Antigravity) {
-        details.push(
-            if hook_install::agent_has_real_binary("claude")
-                || hook_install::agent_has_real_binary("codex")
-            {
-                "Team lead supported · Claude/Codex worker CLI found"
-            } else {
-                "Team lead supported · Install Claude Code or Codex for workers"
-            }
-            .into(),
-        );
+        details.push("Team lead and worker supported".into());
     }
     details.join(" · ")
 }

@@ -136,7 +136,7 @@ class Examples:
                         "assert free_shipping(50), '50 must be true: boundary is inclusive'\n"
                         "assert free_shipping(51), '51 must be true'\nprint('3 boundary checks passed')\n")
         original_test = test.read_text()
-        # Followup cannot add editing tools; the first phase's no-edit rule is prompt-only.
+        # Authorize the repair at start; the first phase's no-edit rule is prompt-only.
         self.request("implementer", f"Inspect {source}. Describe its current behavior. Do not edit yet.", edits=True)
         failed = subprocess.run([sys.executable, str(test)], capture_output=True, text=True, cwd=self.root)
         evidence = self.root / "failing-check.txt"

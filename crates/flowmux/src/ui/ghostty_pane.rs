@@ -1123,6 +1123,8 @@ impl GhosttyPane {
         // lifecycle); `watch_child` lets VTE reap the child and fire
         // `child-exited` with the real status.
         let (init_cols, init_rows): (u16, u16) = (80, 24);
+        // Unmapped worker panes need a usable grid before GTK's first allocation.
+        term.set_size(init_cols.into(), init_rows.into());
         let mut pty = flowmux_terminal::pty::Pty::spawn(
             &argv_refs,
             cwd.as_deref(),
@@ -1186,6 +1188,19 @@ impl GhosttyPane {
     /// Read-only — VTE's text extraction (enabled by the `v0_76` feature) does
     /// not mutate the grid, selection, or scroll position.
     pub fn screen_text(&self) -> Option<String> {
+        if !self.widget.is_mapped() {
+            // An unmapped VTE viewport can lag behind its live terminal grid.
+            return if self.terminal_alternate_screen.get() {
+                let rows = self.widget.row_count().max(1);
+                let cursor = self.widget.cursor_position().1;
+                self.output_search_text(
+                    cursor.saturating_sub(rows - 1),
+                    cursor.saturating_add(rows),
+                )
+            } else {
+                self.agent_status_text()
+            };
+        }
         self.widget
             .text_format(vte::Format::Text)
             .map(|g| g.to_string())
@@ -1243,7 +1258,7 @@ impl GhosttyPane {
         found
     }
 
-    /// Recent live terminal rows used only for Agent status detection.
+    /// Recent live terminal rows for Agent status and unmapped pane inspection.
     pub fn agent_status_text(&self) -> Option<String> {
         if self.terminal_alternate_screen.get() {
             // Alternate-screen row coordinates differ from scrollback ranges.
@@ -4742,6 +4757,54 @@ mod tests {
             gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         }
         assert_eq!(calls.get(), 1, "mapping catches up the visible Agent state");
+        pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn unmapped_terminal_starts_with_a_usable_grid() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/cat".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        )
+        .unwrap();
+        assert!(!pane.widget.is_mapped());
+        assert_eq!(pane.widget.column_count(), 80);
+        assert_eq!(pane.widget.row_count(), 24);
+        pane.write_input(b"working\nresult\nFLOWMUX_TEAM_JOB:background-input\n")
+            .unwrap();
+        for _ in 0..100 {
+            if pane
+                .screen_text()
+                .is_some_and(|text| text.contains("FLOWMUX_TEAM_JOB:background-input"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert!(pane
+            .screen_text()
+            .unwrap()
+            .contains("FLOWMUX_TEAM_JOB:background-input"));
+        pane.widget
+            .feed(b"\x1b[?1049h\x1b[20;1Halternate-input\x1b[H");
+        pane.terminal_alternate_screen.set(true);
+        for _ in 0..100 {
+            if pane
+                .screen_text()
+                .is_some_and(|text| text.contains("alternate-input"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert!(pane.screen_text().unwrap().contains("alternate-input"));
+        assert!(!pane.widget.is_mapped());
         pane.close_pty();
     }
 

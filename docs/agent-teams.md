@@ -3,11 +3,10 @@
 # Flowmux team skill
 
 Claude Code, Codex, Gemini CLI and Antigravity CLI (`agy`) can lead a Team
-workspace with this skill. The supported worker providers are Claude Code and
-Codex, regardless of which agent is leading.
+workspace with this skill. All four providers can also run workers, regardless
+of which agent is leading.
 
-`flowmux-team` delegates bounded assignments to interactive Claude Code or Codex
-workers in visible panes. The lead collects evidence, requests corrections from
+`flowmux-team` delegates bounded assignments to workers in visible panes. The lead collects evidence, requests corrections from
 the same workers, and verifies the user's acceptance checks. A role describes a
 worker's responsibility; each assignment supplies context, file ownership and
 acceptance checks. The [communication cookbook](../.agents/skills/flowmux-team/references/cookbook.md)
@@ -21,7 +20,7 @@ sequenceDiagram
     participant Lead as Lead agent
     participant Helper as team.py
     participant Pane as New Flowmux pane
-    participant Agent as Claude / Codex
+    participant Agent as Claude / Codex / Gemini / agy
     Lead->>Helper: start(role, task file, cwd)
     Helper->>Pane: Team-only split with launcher in its first tab
     Helper-->>Lead: job directory + pane/tab IDs
@@ -44,7 +43,9 @@ sequenceDiagram
 The helper first resolves the lead's workspace with `team.py context`. Normal
 and SSH workspaces return `inline`: the current agent completes the work itself.
 Team workspaces allow `team-spawn`, which creates a split with a single tab
-running the normal interactive Claude Code or Codex interface. The provider's
+running the normal Claude/Codex interactive interface or Gemini/agy native
+structured output. Worker creation and recovery preserve the current workspace,
+keyboard focus and another workspace's pane zoom. The provider's
 initial prompt carries a task-file reference and a unique job marker. Each worker may use a
 different provider; pass the first report into the next worker's task file for
 cross-provider review.
@@ -73,10 +74,12 @@ periodic process poll and does not synthesize a session or activity event.
 
 Results come from a completed turn in the saved conversation containing the
 exact job marker in its user prompt. The final JSON report must declare
-`task_status: completed|blocked|failed` and a nonempty `report`. Tool output and
+`task_status: completed|blocked|failed` and a nonempty `report`. A single surrounding
+JSON code block is accepted, but extra prose is rejected. Tool output and
 intermediate commentary cannot complete a task. Missing, malformed and ambiguous
 reports fail closed. Reports, session/transcript IDs and pane receipts stay in
-the private job directory. Read-only sandbox/tool restrictions remain in place.
+the private job directory. Workers run in YOLO mode; read-only assignments are
+prompt instructions rather than sandbox/tool restrictions.
 
 The interactive agent stays open after completing its turn. `team.py followup
 JOB --task-file FILE` sends another assignment to the same idle worker and returns
@@ -86,8 +89,8 @@ The helper verifies the live session, workspace, pane and active surface before
 input, retains paste evidence, and correlates completion with a unique user-prompt
 marker after the recorded transcript offset. Concurrent or unresolved assignments
 prevent another dispatch. Uncertain delivery is retained, never blindly retried.
-A report-collection timeout preserves the session for diagnosis; it does not
-kill the agent or approve dialogs. A restored launcher never reruns its task.
+Managed collection/progress timeouts trigger bounded recovery; verified input
+waits pause these deadlines and never approve dialogs. A restored launcher never reruns its task.
 With automatic agent restoration enabled, the launcher passes the saved resume
 command to a real shell so the conversation reopens in its original pane.
 New jobs keep their private launchers, worker code and reports under
@@ -114,7 +117,7 @@ from a trusted local repository in a **Team workspace**. Create one with the
 sidebar menu or command palette → **New Team Workspace**, or
 `flowmux workspace new --team --root /absolute/project`, then start the lead
 agent there. Normal and SSH workspaces reject team worker creation. Each worker
-uses the split’s sole tab and displays its native interactive interface. Python 3.9+ and an authenticated
+uses the split’s sole tab and displays its native interface or structured output. Python 3.9+ and an authenticated
 agent CLI are required. The sample selects a simple-tier model on the configured account.
 
 The lead also needs access to that window's Unix socket and `.ctl` companion.
@@ -129,19 +132,17 @@ skill does not grant socket access, disable the sandbox, or change hook trust.
 Open **Options → Skills → Flowmux Team** to install for Claude Code, Codex,
 Gemini CLI or Antigravity CLI (`agy`). **Check Team setup** reports Python 3.9+,
 the selected CLI and lifecycle hook availability without changing settings or
-signing in. For Gemini/agy leads, it also checks whether a supported worker CLI
-is present. Authentication and actual task execution are separate checks.
+signing in. Gemini/agy support both lead and worker roles. Authentication and actual task execution are separate checks.
 
 The CLI equivalent is `flowmux agent install --agent gemini --skill flowmux-team`
 (use `--agent agy` for Antigravity). Updates back up local changes; removing Team
 preserves the CLI skill, agent settings and wrappers.
 
-Gemini and agy are not yet worker targets. Their `AfterAgent`/`Stop` hooks run
-before other hooks can reject the answer and continue working, so a saved final
-answer and an idle notification do not reliably prove task completion. Supporting
-them as workers requires a native completion signal after all stop decisions.
-Their lead skills can already delegate to Claude Code and Codex; Flowmux does not
-disable existing hooks to extend worker support.
+Gemini/agy workers use their official `stream-json` per-turn mode inside the
+pane. The helper requires a native final result and successful exit; an ordinary
+saved answer, step completion or Stop/AfterAgent hook is insufficient. Follow-ups
+resume the recorded conversation through native CLI arguments. Existing hooks
+remain enabled. Account access and trusted-directory requirements still apply.
 
 Each row checks the complete bundle: `SKILL.md`, `scripts/team.py`,
 `scripts/examples.py`, `references/sample.md` and `references/cookbook.md`.
@@ -185,16 +186,23 @@ The source is also discoverable by agents that load repository `.agents/skills`.
 
 ## Limits and validation
 
-The helper supports local Flowmux panes with Claude Code and Codex. It does not
+The helper supports local Flowmux panes with Claude, Codex, Gemini and agy. It does not
 attach to an existing agent conversation. For existing Claude sessions, use
 Claude's `ListAgents`/`SendMessage` contract described in [AGENTS.md](../AGENTS.md).
 It does not implement the native Claude Agent Teams shared task list, automatic
-merges, permissions bypasses, persistent scheduling or remote SSH workers.
+merges, persistent scheduling or remote SSH workers.
 
-Claude workers have file-reading tools, plus Edit/Write when explicitly enabled;
-they do not execute shell tests. Codex editing workers use `workspace-write`.
-Provider configuration, hook trust and authentication are retained. Permission
-failures remain blockers; do not weaken permissions to pass a demo.
+Team workers launch in YOLO mode. Codex uses
+`--no-daemon --dangerously-bypass-approvals-and-sandbox`; Claude uses
+`--allow-dangerously-skip-permissions --permission-mode bypassPermissions` with
+its normal tools and MCP configuration, including shell checks. The Claude allow
+flag alone does not activate bypass mode. Gemini uses `--approval-mode yolo`;
+agy uses `--dangerously-skip-permissions`. The same mode applies to replacement
+and restored sessions. `--allow-edits` authorizes edits in the task prompt; omitting
+it supplies a read-only instruction, not an enforced filesystem restriction.
+Keep tasks within the user's authorized scope. Provider configuration files,
+hook trust, authentication and the lead's permissions are unchanged. Remaining
+authentication, trust or permission failures are still blockers.
 
 Run the account-free regression checks with `python3 scripts/test-agent-team.py`.
 After building, run `cargo test -p flowmux-cli --lib codex_shim_first_tool_gui -- --ignored --nocapture`
@@ -213,6 +221,10 @@ bundle repair/removal, the installed sample's handoff, profile inheritance,
 session restoration and interrupted workers with fixture agents in an isolated
 GUI. It requires the accessibility and Xvfb dependencies listed in
 the script and preserves screenshots and logs in its printed artifact directory.
+`python3 scripts/test-team-recovery-gui.py` checks bounded model replacement,
+owned process shutdown, failed-pane cleanup and native foreground input in the
+same isolated GUI harness. The GTK regression additionally checks the visible
+workspace, actual focused widget and zoom during background splits and closes.
 
 ## Task routing and prompt size
 
@@ -223,20 +235,46 @@ This is a workflow default, not a provider capability restriction. Simple work
 needs no automatic second reviewer.
 
 `team.py start --complexity simple|standard|complex` chooses a model and effort
-for the new worker only. Defaults are Luna/high, GPT-6.1 Sol/medium, Astra/high
-for Codex, and Haiku/low, Sonnet/medium, Fable/high for Claude. The default tier
-is standard. `--model` and `--effort` override that selection; `team.py route`
-previews it without creating panes. Model availability depends on the account
-and CLI. Unavailable models remain blockers. Native session/credit exhaustion
-switches once to the other provider at the same complexity tier, unless
-`--no-fallback` is set. The helper stops its own original worker before launching
-the replacement in the same pane/tab with the original task and prior evidence.
-Both attempts are retained; final status identifies the effective provider/model
-and `fallback_used`. If both providers are exhausted, stop. Authentication,
-permissions, transient rate limits, timeout and uncertain launches never trigger
-substitution. Existing lead sessions and provider settings are unchanged.
-Automatic substitution covers helper-managed initial turns only. A review whose
-provider changed to the researcher's provider is no longer cross-provider review.
+for the new worker only. The lead assesses scope, expected work, uncertainty and
+consequence rather than prompt length. Defaults are Luna/high, Sol/medium,
+Astra/high for Codex; Haiku/low, Sonnet/medium, Opus/high for Claude; Flash Lite,
+Flash, Pro for Gemini; Gemini Flash/low, Gemini Argon/medium, Claude Opus/high for
+agy. `--agent auto` selects an installed CLI. Explicit `--agent`, `--model` and
+`--effort` take priority. `sol`, `terra`, `opus`, `sonnet` and `sonet` aliases are
+accepted; Terra is `gpt-5.6-terra`. Gemini uses its model tier instead of an effort
+flag. `team.py route` previews the selection and alternatives without launching.
+
+Native quota/capacity errors, unavailable models/clients, unexpected exits,
+malformed/failed reports and stalled attempts trigger bounded substitution.
+The default is at most four attempts, without repeating provider/model pairs;
+quota-exhausted providers are skipped for the rest of the assignment. Current
+account limits are enforced by the provider, not inferred from CLI installation.
+`--timeout` defaults to 300 seconds per attempt; `--stall-timeout` defaults to
+180 seconds without native progress. Verified input waits pause both deadlines.
+Increase them for expected long tools or reasoning. `--no-fallback` disables
+substitution, while retaining failed-worker cleanup.
+
+The supervisor saves evidence, stops its owned process tree and verifies death.
+A detached handoff then validates and closes the failed single-terminal pane,
+and opens its replacement from the original lead. It preserves user focus and
+never closes the lead, another session, or a pane with added tabs. If identity,
+shutdown, close or dispatch is uncertain, it stops with a diagnostic. Old launchers
+cannot replay assignments. Partial edits remain for the replacement to inspect.
+
+The same policy covers helper follow-ups after confirmed receipt. Manual TUI
+turns are not managed. Earlier results remain intact; `status`/`wait` return the
+current pane/surface, `attempts`, `closed_panes` and `fallback_used`. Successful
+and task-level blocked panes remain open. When no alternative remains, the failed
+pane is closed and its artifacts/failure are retained. A substituted review using
+the researcher's provider is independent-session review, not cross-provider review.
+Jobs created by older helpers retain their copied implementation.
+
+`python3 scripts/test-team-recovery-gui.py` checks quota/capacity, stalled or
+crashed processes, malformed reports, descendant shutdown, pane replacement,
+Gemini/agy completion and exact-session follow-ups in isolated real PTYs.
+`test-skills-gui.py` also types native keys in another workspace across worker
+launch/completion; the GTK regression covers background nested splits and cleanup
+while the foreground pane is zoomed.
 
 Assignments are copied into private job `task.txt` files. The interactive TUI
 receives a short file reference plus the result contract. Give workers relevant

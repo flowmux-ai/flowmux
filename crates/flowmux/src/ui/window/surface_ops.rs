@@ -128,10 +128,13 @@ impl WindowController {
             // paned-as-name is freed before we register `sibling`
             // under the same name.
             let name = ws_id.to_string();
+            let was_visible = stack.visible_child().as_ref() == Some(&paned_widget);
             stack.remove(&paned);
             stack.add_named(&sibling, Some(&name));
             self.surfaces.borrow_mut().insert(ws_id, sibling.clone());
-            stack.set_visible_child_name(&name);
+            if was_visible {
+                stack.set_visible_child_name(&name);
+            }
         } else if let Some(b) = grand.downcast_ref::<gtk::Box>().filter(|container| {
             container.has_css_class("flowmux-ssh-workspace")
                 && container.last_child().as_ref() == Some(&paned_widget)

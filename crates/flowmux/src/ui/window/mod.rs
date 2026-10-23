@@ -9189,6 +9189,113 @@ mod tests {
         assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn team_spawn_preserves_background_workspace_focus_and_zoom() {
+        adw::init().unwrap();
+        let store = StateStore::new_lazy(State::default());
+        let root = std::env::temp_dir();
+        let team_id = store.create_workspace_kind(None, root.clone(), true).await;
+        let foreground_id = store.create_workspace(None, root.clone()).await;
+        let team = store.get_workspace(team_id).await.unwrap();
+        let foreground = store.get_workspace(foreground_id).await.unwrap();
+        let source = team.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let foreground_pane = foreground.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.TeamBackgroundFocus")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&team);
+        controller.render_workspace(&foreground);
+        controller
+            .split_pane(foreground_pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        controller.activate_workspace(foreground_id).await;
+        controller.window.present();
+        controller.focus_pane(foreground_pane);
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        controller
+            .dispatch(GtkCommand::TogglePaneZoom {
+                pane: foreground_pane,
+            })
+            .await;
+        for _ in 0..100 {
+            if controller.stack.visible_child_name().as_deref() == Some(PANE_ZOOM_PAGE) {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(PANE_ZOOM_PAGE)
+        );
+        controller.focus_pane(foreground_pane);
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let focus = gtk::prelude::GtkWindowExt::focus(&controller.window);
+        let visible = controller.stack.visible_child_name();
+        assert!(focus.is_some());
+        assert_eq!(controller.zoomed_pane(), Some(foreground_pane));
+        let mut target = source;
+        let mut children = Vec::new();
+        // Exercise both root replacement and a nested split while another workspace is visible.
+        for _ in 0..2 {
+            let (ack, response) = oneshot::channel();
+            controller
+                .dispatch(GtkCommand::TeamSpawn {
+                    pane: target,
+                    cwd: root.clone(),
+                    shell: "/bin/sh".into(),
+                    role: "worker".into(),
+                    ack,
+                })
+                .await;
+            let (child, surface) = response.await.unwrap().unwrap();
+            gtk::glib::timeout_future(Duration::from_millis(100)).await;
+            assert_eq!(store.active_workspace().await, Some(foreground_id));
+            assert_eq!(controller.stack.visible_child_name(), visible);
+            assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+            assert_eq!(controller.zoomed_pane(), Some(foreground_pane));
+            assert_eq!(gtk::prelude::GtkWindowExt::focus(&controller.window), focus);
+            assert_eq!(
+                controller.pane_registry.borrow().active_surface(child),
+                Some(surface)
+            );
+            assert!(controller
+                .pane_registry
+                .borrow()
+                .active_terminal(child)
+                .is_some());
+            target = child;
+            children.push((child, surface));
+        }
+        for (pane, surface) in children.into_iter().rev() {
+            let (ack, response) = oneshot::channel();
+            let command = if pane == target {
+                GtkCommand::CloseFocused { pane, ack }
+            } else {
+                GtkCommand::CloseSurface { pane, surface, ack }
+            };
+            controller.dispatch(command).await;
+            response.await.unwrap().unwrap();
+            gtk::glib::timeout_future(Duration::from_millis(100)).await;
+            assert_eq!(store.active_workspace().await, Some(foreground_id));
+            assert_eq!(controller.stack.visible_child_name(), visible);
+            assert_eq!(controller.zoomed_pane(), Some(foreground_pane));
+            assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+            assert_eq!(gtk::prelude::GtkWindowExt::focus(&controller.window), focus);
+        }
+    }
+
     /// Regression: same terminal-identity contract across nested splits — the
     /// scenario the user reported was a deeper split tree, not a flat
     /// side-by-side. Build Pane A (claude) → split A right to get B → focus B

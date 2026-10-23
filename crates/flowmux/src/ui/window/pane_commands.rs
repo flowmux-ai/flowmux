@@ -9,12 +9,15 @@ impl WindowController {
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
-            GtkCommand::TeamSpawn { .. }
-            | GtkCommand::SplitPane { .. }
+            GtkCommand::TeamSpawn { pane, .. }
+            | GtkCommand::CloseFocused { pane, .. }
+            | GtkCommand::CloseSurface { pane, .. } => zoomed.is_some_and(|zoom| {
+                let registry = self.pane_registry.borrow();
+                registry.workspace_of_pane(*pane) == registry.workspace_of_pane(zoom)
+            }),
+            GtkCommand::SplitPane { .. }
             | GtkCommand::SplitFocused { .. }
-            | GtkCommand::CloseFocused { .. }
             | GtkCommand::FocusDirection { .. }
-            | GtkCommand::CloseSurface { .. }
             | GtkCommand::TearOffSurface { .. }
             | GtkCommand::MoveSurfaceToPane { .. }
             | GtkCommand::MoveSurfaceToWorkspace { .. }
@@ -46,8 +49,7 @@ impl WindowController {
                         SplitDirection::Vertical,
                     )
                     .await?;
-                    self.activate_workspace(workspace).await;
-                    self.activate_surface_now(child, surface).await?;
+                    // Worker creation must not redirect the user's workspace or keyboard focus.
                     Ok((child, surface))
                 }
                 .await;
