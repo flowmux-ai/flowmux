@@ -24,6 +24,8 @@ jobs:
           node-version: 22
       - name: Install native dependencies
         run: |
+          # Match Test CI's fallback for slow Azure downloads.
+          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|s/priority:1/priority:4/' /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
