@@ -382,6 +382,8 @@ def require_supervisor(root, manifest):
             fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             identity = root / "supervisor.json"
+            if manifest.get("timeout_policy") == "progress" and not identity.exists():
+                raise ValueError("Worker supervisor identity is missing; no follow-up sent")
             if identity.exists():
                 saved = json.loads(identity.read_text())
                 process = process_snapshot().get(saved["pid"])

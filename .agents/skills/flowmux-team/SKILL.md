@@ -273,7 +273,8 @@ Managed jobs also require a live supervisor before creating a turn and immediate
 before sending input. A live agent alone is insufficient; after supervisor loss,
 inspect the retained pane and reports rather than sending an unmonitored task.
 `followup --timeout SECONDS --stall-timeout SECONDS` overrides the recorded limits
-for the next assignment; zero disables the total limit. These overrides require
+for the next assignment and are then inherited by later follow-ups; zero disables
+the total limit. These overrides require
 a job created by this updated helper. Old copied helpers retain their time policy.
 
 Only one unresolved assignment per worker is allowed. `dispatch_unknown` means

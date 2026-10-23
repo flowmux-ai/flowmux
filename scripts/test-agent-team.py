@@ -886,6 +886,9 @@ class FollowupTests(unittest.TestCase):
             team.write_json(self.root / 'supervisor.json', changed)
             with self.assertRaisesRegex(ValueError, 'supervisor identity'):
                 self.dispatch()
+        (self.root / 'supervisor.json').unlink()
+        with self.assertRaisesRegex(ValueError, 'supervisor identity is missing'):
+            self.dispatch()
         self.assertFalse(self.calls)
 
     def test_supervisor_exit_after_paste_prevents_enter(self):

@@ -409,6 +409,26 @@ Local evidence: `/tmp/fm-gui-cq7ztxnn` (deterministic communication),
 `/tmp/fm-gui-0tla22z5` (native Claude clarification after the fix).
 Native review/repair cases and macOS were not rerun in this check.
 
+## Supervisor and deadline follow-up — 2026-10-23, Linux
+
+Commit `5d81545` added supervisor checks before managed follow-up input and
+separated no-progress stalls from explicit time budgets. Post-commit verification
+passed 58 helper tests, 9 Rust skill integration tests, 17 Skills GUI checks,
+10 deterministic communication checks and 15 recovery GUI checks. A further
+review hardened missing supervisor identity handling for new jobs; its regression
+also checks stale process identity and generation, not just the presence of a lock.
+
+In isolated real panes, killing only the supervisor left Claude/Codex fixtures
+alive and idle, yet no follow-up input was sent. A progressing follow-up exceeded
+its original budget after `--timeout 0`; a subsequent explicit budget expired as
+`time_budget`, closed its worker and did not launch an alternative. Native keyboard
+focus, previous reports, YOLO flags and ordinary stalled-worker recovery stayed intact.
+An accelerated-clock unit check also passed continued progress beyond 300 seconds.
+
+Evidence: `/tmp/fm-gui-qz0kjv_8` (recovery), `/tmp/fm-gui-wra2sjel` (Skills GUI),
+and `/tmp/fm-gui-011nh_de` (communication). These checks use native-shaped fixtures;
+they do not add a new native-account or macOS validation claim.
+
 ## Routing, recovery and focus verification — 2026-10-23, Linux
 
 The helper's 49 regression tests passed. The isolated Skills GUI suite passed
