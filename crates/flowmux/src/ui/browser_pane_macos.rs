@@ -1266,6 +1266,14 @@ impl BrowserPane {
         self.evaluate_in_world(body, false, true, on_done);
     }
 
+    pub fn evaluate_automation_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(body, true, true, on_done);
+    }
+
     pub fn insert_text(&self, text: &str) -> Result<(), String> {
         if !self.native.navigation_enabled.get() {
             return Err("SSH preview expired; open a new preview after reconnecting".into());
@@ -1275,6 +1283,38 @@ impl BrowserPane {
         }
         focus_native_view(&self.native.web_view);
         crate::macos_input::insert_text(&self.native.web_view, text)
+    }
+
+    pub fn press_key(&self, stroke: &flowmux_browser::input::KeyStroke) -> Result<(), String> {
+        if !self.native.navigation_enabled.get() || !self.web_view.is_mapped() {
+            return Err("native key input requires a visible, active browser tab".into());
+        }
+        focus_native_view(&self.native.web_view);
+        crate::macos_input::press_key(&self.native.web_view, stroke)
+    }
+
+    pub fn finish_key_input(
+        &self,
+        stroke: &flowmux_browser::input::KeyStroke,
+    ) -> Result<(), String> {
+        // GTK has no AppKit Select All menu item to handle an unconsumed Cmd+A.
+        if stroke.meta && !stroke.control && !stroke.alt && !stroke.shift && stroke.key == "a" {
+            let web = &self.native.web_view;
+            let responder = web
+                .as_super()
+                .window()
+                .and_then(|window| window.firstResponder())
+                .filter(|responder| {
+                    responder
+                        .downcast_ref::<NSView>()
+                        .is_some_and(|view| view.isDescendantOf(web.as_super()))
+                })
+                .ok_or("browser lost keyboard focus")?;
+            if !unsafe { responder.tryToPerform_with(objc2::sel!(selectAll:), None) } {
+                return Err("focused browser cannot select all".into());
+            }
+        }
+        Ok(())
     }
 
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
@@ -1307,7 +1347,12 @@ impl BrowserPane {
         });
         unsafe {
             if asynchronous {
-                let world = WKContentWorld::pageWorld(MainThreadMarker::new().unwrap());
+                let mtm = MainThreadMarker::new().unwrap();
+                let world = if isolated {
+                    WKContentWorld::defaultClientWorld(mtm)
+                } else {
+                    WKContentWorld::pageWorld(mtm)
+                };
                 self.native
                     .web_view
                     .callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
@@ -1359,6 +1404,7 @@ fn create_web_view(
     inspector::configure(&preferences);
     unsafe {
         preferences.setJavaScriptCanOpenWindowsAutomatically(true);
+        preferences.setTabFocusesLinks(true);
         preferences.setElementFullscreenEnabled(true);
         config.setPreferences(&preferences);
         config.setMediaTypesRequiringUserActionForPlayback(WKAudiovisualMediaTypes::None);

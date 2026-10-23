@@ -150,6 +150,18 @@ impl BrowserPane {
         Err(UNSUPPORTED.into())
     }
 
+    pub fn evaluate_automation_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_js(body, on_done);
+    }
+
+    pub fn press_key(&self, _stroke: &flowmux_browser::input::KeyStroke) -> Result<(), String> {
+        Err(UNSUPPORTED.into())
+    }
+
     pub fn evaluate_js<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _source: &str,

@@ -2,9 +2,107 @@
 //! Native editing confined to a process-owned WKWebView.
 use objc2::runtime::Bool;
 use objc2::{msg_send, sel, ClassType};
-use objc2_app_kit::NSView;
-use objc2_foundation::{NSNotFound, NSRange, NSString};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags as Flags, NSEventType, NSView};
+use objc2_foundation::{NSNotFound, NSPoint, NSRange, NSString};
 use objc2_web_kit::WKWebView;
+
+pub(crate) fn physical_key(key: &str) -> Option<(&str, u16)> {
+    Some(match key {
+        "Enter" => ("\r", 36),
+        "Tab" => ("\t", 48),
+        "Escape" => ("\u{1b}", 53),
+        "Backspace" => ("\u{7f}", 51),
+        "Delete" => ("\u{f728}", 117),
+        "Insert" => ("\u{f727}", 114),
+        "Home" => ("\u{f729}", 115),
+        "End" => ("\u{f72b}", 119),
+        "PageUp" => ("\u{f72c}", 116),
+        "PageDown" => ("\u{f72d}", 121),
+        "ArrowLeft" => ("\u{f702}", 123),
+        "ArrowRight" => ("\u{f703}", 124),
+        "ArrowUp" => ("\u{f700}", 126),
+        "ArrowDown" => ("\u{f701}", 125),
+        "F1" => ("\u{f704}", 122),
+        "F2" => ("\u{f705}", 120),
+        "F3" => ("\u{f706}", 99),
+        "F4" => ("\u{f707}", 118),
+        "F5" => ("\u{f708}", 96),
+        "F6" => ("\u{f709}", 97),
+        "F7" => ("\u{f70a}", 98),
+        "F8" => ("\u{f70b}", 100),
+        "F9" => ("\u{f70c}", 101),
+        "F10" => ("\u{f70d}", 109),
+        "F11" => ("\u{f70e}", 103),
+        "F12" => ("\u{f70f}", 111),
+        _ if key.is_ascii() && key.len() == 1 => {
+            let shifted = "~!@#$%^&*()_+{}|:\"<>?";
+            let plain = "`1234567890-=[]\\;',./";
+            let base = shifted
+                .find(key)
+                .map(|i| &plain[i..i + 1])
+                .unwrap_or(key)
+                .to_ascii_lowercase();
+            let codes = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\rlj'k;\\,/nm.\t `";
+            (key, codes.find(&base)? as u16)
+        }
+        _ => return None,
+    })
+}
+
+pub(crate) fn press_key(
+    web: &WKWebView,
+    stroke: &flowmux_browser::input::KeyStroke,
+) -> Result<(), String> {
+    let (text, code) =
+        physical_key(&stroke.key).ok_or("key is not available; use type for text")?;
+    let window = web
+        .as_super()
+        .window()
+        .ok_or("browser view is not attached")?;
+    if !window.firstResponder().is_some_and(|responder| {
+        responder
+            .downcast_ref::<NSView>()
+            .is_some_and(|view| view.isDescendantOf(web.as_super()))
+    }) {
+        return Err("browser does not own keyboard focus".into());
+    }
+    let mut flags = Flags::empty();
+    if stroke.control {
+        flags |= Flags::Control;
+    }
+    if stroke.alt {
+        flags |= Flags::Option;
+    }
+    if stroke.meta {
+        flags |= Flags::Command;
+    }
+    let shifted = "~!@#$%^&*()_+{}|:\"<>?";
+    if stroke.shift
+        || (text.len() == 1
+            && (text.chars().all(|c| c.is_ascii_uppercase()) || shifted.contains(text)))
+    {
+        flags |= Flags::Shift;
+    }
+    let characters = if stroke.key.len() == 1 {
+        stroke.event_key()
+    } else {
+        text.to_string()
+    };
+    let chars = NSString::from_str(&characters);
+    for kind in [NSEventType::KeyDown, NSEventType::KeyUp] {
+        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            kind, NSPoint::new(0.0,0.0), flags, gtk::glib::monotonic_time() as f64 / 1_000_000.0,
+            window.windowNumber(), None, &chars, &NSString::from_str(text), false, code,
+        ).ok_or("could not create keyboard event")?;
+        if kind == NSEventType::KeyUp
+            || !flags.contains(Flags::Command)
+            || !web.performKeyEquivalent(&event)
+        {
+            window.sendEvent(&event);
+        }
+    }
+    Ok(())
+}
 
 pub(crate) fn insert_text(web: &WKWebView, text: &str) -> Result<(), String> {
     let responder = web
@@ -27,4 +125,21 @@ pub(crate) fn insert_text(web: &WKWebView, text: &str) -> Result<(), String> {
         let _: () = msg_send![&*responder, insertText: &*NSString::from_str(text), replacementRange: NSRange::new(NSNotFound as usize, 0)];
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_keys_preserve_named_codes_and_shifted_positions() {
+        assert_eq!(physical_key("Enter"), Some(("\r", 36)));
+        assert_eq!(physical_key("a"), Some(("a", 0)));
+        assert_eq!(physical_key("A"), Some(("A", 0)));
+        assert_eq!(physical_key("!"), Some(("!", 18)));
+        assert_eq!(physical_key("Tab"), Some(("\t", 48)));
+        assert_eq!(physical_key("F12"), Some(("\u{f70f}", 111)));
+        assert!(physical_key("한").is_none());
+        assert!(physical_key("Unknown").is_none());
+    }
 }

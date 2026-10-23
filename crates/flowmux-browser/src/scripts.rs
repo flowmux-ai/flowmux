@@ -343,6 +343,52 @@ pub const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
     return "ok";
 })()"#;
 
+pub fn prepare_key_input(stroke: &crate::input::KeyStroke) -> String {
+    format!(
+        "(function() {{ const expectedKey={}; return {}; }})()",
+        serde_json::to_string(&stroke.event_key()).unwrap(),
+        PREPARE_KEY_INPUT_JS
+    )
+}
+
+const PREPARE_KEY_INPUT_JS: &str = r#"(function() {
+    if (globalThis.__flowmuxInput) return "error: browser input is already pending";
+    const state = { received: false, down: null };
+    // WebKitGTK reports ISO_Left_Tab as Unidentified but preserves its physical code.
+    const matches = event => event.key === expectedKey ||
+        (expectedKey === 'Tab' && event.key === 'Unidentified' && event.code === 'Tab');
+    state.keydown = event => {
+        if (event.isTrusted && matches(event)) state.down = event;
+    };
+    state.listener = event => {
+        if (event.isTrusted && matches(event) && state.down) {
+            state.received = true;
+            if (state.done) queueMicrotask(state.done);
+        }
+    };
+    window.addEventListener('keyup', state.listener, true);
+    window.addEventListener('keydown', state.keydown, true);
+    globalThis.__flowmuxInput = state;
+    return "ok";
+})()"#;
+
+pub const FINISH_KEY_INPUT_JS: &str = r#"
+const state = globalThis.__flowmuxInput;
+if (!state) throw new Error('page changed during native key input');
+return await new Promise(resolve => {
+    const finish = result => {
+        clearTimeout(timer);
+        window.removeEventListener('keyup', state.listener, true);
+        window.removeEventListener('keydown', state.keydown, true);
+        delete globalThis.__flowmuxInput;
+        resolve(result);
+    };
+    const timer = setTimeout(() => finish('error: native key input completion timed out'), 10000);
+    state.done = () => finish(state.down?.defaultPrevented ? 'prevented' : 'ok');
+    if (state.received) state.done();
+});
+"#;
+
 /// Double-click the element matched by `selector`.
 pub fn dblclick_by_selector(selector: &str) -> String {
     element_action(
@@ -489,21 +535,6 @@ pub fn count_selector(selector: &str) -> String {
             return String(document.querySelectorAll("{s}").length);
         }})()"#,
         s = js_string(selector)
-    )
-}
-
-/// Send a single named key (`Enter`, `Tab`, `ArrowDown`, …) as a
-/// `keydown`+`keyup` pair to the active element.
-pub fn press_key(key: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.activeElement || document.body;
-            const k = "{k}";
-            el.dispatchEvent(new KeyboardEvent('keydown', {{ key: k, bubbles: true }}));
-            el.dispatchEvent(new KeyboardEvent('keyup', {{ key: k, bubbles: true }}));
-            return "ok";
-        }})()"#,
-        k = js_string(key)
     )
 }
 

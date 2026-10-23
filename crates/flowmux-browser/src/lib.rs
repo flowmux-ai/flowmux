@@ -4,6 +4,7 @@
 
 pub mod bookmarks;
 pub mod controller;
+pub mod input;
 pub mod profile;
 pub mod refs;
 pub mod scripts;

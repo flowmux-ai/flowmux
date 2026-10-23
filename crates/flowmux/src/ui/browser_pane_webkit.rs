@@ -7,6 +7,8 @@ use crate::ui::browser_downloads::DownloadManager;
 use crate::ui::pane_terminal::PaneCallbacks;
 use adw::prelude::*;
 use flowmux_browser::{BrowserProfile, RefScope, RefStore};
+#[path = "browser_pane_webkit/input.rs"]
+mod input;
 use flowmux_config::options::BrowserEngine;
 use flowmux_core::{PaneId, SurfaceId};
 use std::cell::{Cell, RefCell};
@@ -788,6 +790,14 @@ impl BrowserPane {
         self.evaluate_in_world(body, None, true, on_done);
     }
 
+    pub fn evaluate_automation_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(body, Some("flowmux.browser"), true, on_done);
+    }
+
     pub fn insert_text(&self, text: &str) -> Result<(), String> {
         if !self.navigation_enabled.get() {
             return Err("SSH preview expired; open a new preview after reconnecting".into());
@@ -795,6 +805,13 @@ impl BrowserPane {
         self.web_view
             .execute_editing_command_with_argument("InsertText", text);
         Ok(())
+    }
+
+    pub fn press_key(&self, stroke: &flowmux_browser::input::KeyStroke) -> Result<(), String> {
+        if !self.navigation_enabled.get() {
+            return Err("SSH preview expired; open a new preview after reconnecting".into());
+        }
+        input::press(&self.web_view, stroke)
     }
 
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(

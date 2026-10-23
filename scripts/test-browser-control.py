@@ -97,6 +97,8 @@ def exercise(cli, url, root):
     browser("fill", reference(third, "Field"), "pinned", "--surface", first_surface)
     assert browser("value", reference(third, "Field"), "--surface", first_surface)["browser_result"]["value"] == "pinned"
     assert evaluate("document.querySelector('#field').value") == ""
+    browser("press", "Enter", "--surface", first_surface, error=True)
+    assert evaluate("document.querySelector('#field').value") == ""
     cli("browser", "url", terminal, "--surface", first_surface, error=True)
     cli("close-tab", first_surface, "--pane", pane)
     browser("type", "must not reach other tab", "--surface", first_surface, error=True)
@@ -188,6 +190,37 @@ def exercise(cli, url, root):
     browser("type", "가😀")
     assert evaluate("document.querySelector('#editor').textContent") == "a가😀d"
     print("PASS: native text insertion replaces selection, emits trusted input and respects cancellation", flush=True)
+
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<form id=keyform><input id=keyfield aria-label=Keyboard><button id=keysubmit>Submit</button></form>'); window.submissions=0; window.keyEvents=[]; keyform.onsubmit=e=>{e.preventDefault();submissions++}; keyform.addEventListener('keydown', e=>keyEvents.push([e.key,e.isTrusted,e.code])); 'keys'")
+    keyboard = reference(snapshot(), "Keyboard")
+    browser("focus", keyboard)
+    for key in ["Unknown", "Control+", "Ctrl+Control+a"]:
+        browser("press", key, error=True)
+    browser("press", "Enter")
+    assert evaluate("String(submissions)") == "1", "Enter did not submit the form"
+    browser("press", "Tab")
+    assert evaluate("document.activeElement.id") == "keysubmit", evaluate("JSON.stringify({focus:document.activeElement.id,keyEvents})")
+    browser("press", "Shift+Tab")
+    assert evaluate("document.activeElement.id") == "keyfield"
+    browser("type", "replace me")
+    browser("press", "Meta+a" if sys.platform == "darwin" else "Control+a")
+    assert evaluate("String(keyfield.selectionStart)+':'+keyfield.selectionEnd") == "0:10", evaluate("JSON.stringify({value:keyfield.value,start:keyfield.selectionStart,end:keyfield.selectionEnd,keyEvents})")
+    browser("type", "replaced")
+    assert evaluate("keyfield.value") == "replaced"
+    assert evaluate("String(keyEvents.every(e=>e[1]))") == "true"
+    evaluate("keyfield.setSelectionRange(3,3); keyfield.onkeydown=e=>{if(e.key==='a'){e.preventDefault();keyfield.onkeydown=null}}; 'cancel select all'")
+    browser("press", "Meta+a" if sys.platform == "darwin" else "Control+a")
+    assert evaluate("String(keyfield.selectionStart)+':'+keyfield.selectionEnd") == "3:3"
+    evaluate("keyfield.addEventListener('keydown', e=>e.preventDefault(), {once:true}); 'cancel tab'")
+    browser("press", "Tab")
+    assert evaluate("document.activeElement.id") == "keyfield"
+    browser("press", "ArrowLeft")
+    assert evaluate("String(keyfield.selectionStart)") == "2"
+    browser("press", "Shift+ArrowRight")
+    assert evaluate("String(keyfield.selectionStart)+':'+keyfield.selectionEnd") == "2:3"
+    browser("press", "Delete")
+    assert evaluate("keyfield.value") == "relaced"
+    print("PASS: native Enter, Tab, reverse Tab, select-all and canceled keys", flush=True)
 
 
 def main():

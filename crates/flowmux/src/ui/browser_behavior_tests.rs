@@ -247,14 +247,17 @@ async fn form_actions_preserve_text_and_deliver_events_to_page_listeners() {
     page.pane.insert_text("가😀").unwrap();
     assert_eq!(page.eval(&value_of_selector("#input")).await, "가😀");
     assert_eq!(page.events().await, ["input:input"]);
-    page.ok(press_key("Enter")).await;
+    page.pane
+        .press_key(&flowmux_browser::input::KeyStroke::parse("Enter").unwrap())
+        .unwrap();
+    page.wait("events.includes('input:keyup:Enter')").await;
     assert_eq!(
         page.events().await,
-        ["input:keydown:Enter", "input:keyup:Enter"]
+        ["input:keydown:Enter", "input:change", "input:keyup:Enter"]
     );
     page.ok(blur_by_selector("#input")).await;
     assert_ne!(page.eval("document.activeElement.id").await, "input");
-    assert_eq!(page.events().await, ["input:change"]);
+    assert!(page.events().await.is_empty());
 
     for (value, expected) in [("two", "two"), ("First", "one")] {
         page.ok(select_option_by_selector("#select", value)).await;

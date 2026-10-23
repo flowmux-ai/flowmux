@@ -123,6 +123,11 @@ the required state before retrying; commands do not retry side effects.
 `type` uses native editing at the current selection, including contenteditable,
 and reports canceled input. It emits native input events without artificial
 per-character key events. On macOS the target tab must be visible.
+`press` sends native keys to a visible tab on macOS and X11, including Enter,
+Tab, Shift+Tab and Control+a (macOS: Meta+a). Page key handlers can cancel their
+default action. Completion confirms delivery, so still check the expected page
+state. Wayland native keys are not enabled yet and return an error. Use `type`
+for Unicode text or characters missing from the current keyboard layout.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

@@ -514,9 +514,7 @@ fn key_code(key: &str) -> Result<(&str, u16)> {
             return Err(unsupported())
         }
         _ if key.is_ascii() && key.len() == 1 => {
-            let codes = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\rlj'k;\\,/nm.\t `";
-            let code = codes.find(key.to_ascii_lowercase().as_str()).unwrap_or(0) as u16;
-            (key, code)
+            crate::macos_input::physical_key(key).ok_or_else(unsupported)?
         }
         _ => (key, u16::MAX),
     })

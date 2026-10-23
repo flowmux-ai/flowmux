@@ -243,8 +243,43 @@ impl WindowController {
                         );
                     }
                     BrowserOp::Press { key } => {
-                        let js = flowmux_browser::scripts::press_key(&key);
-                        run_browser_js(&browser, &js, ack, true);
+                        let registry = self.pane_registry.clone();
+                        let expected_surface =
+                            surface.or_else(|| registry.borrow().active_surface(pane));
+                        let stroke = match flowmux_browser::input::KeyStroke::parse(&key) {
+                            Ok(stroke) => stroke,
+                            Err(error) => {
+                                let _ = ack.send(Err(error));
+                                return;
+                            }
+                        };
+                        let target = browser.clone();
+                        browser.evaluate_automation_js(&flowmux_browser::scripts::prepare_key_input(&stroke), move |prepared| {
+                            match prepared {
+                                Ok(value) if value == "ok" => {}
+                                result => { let _ = ack.send(Err(result.unwrap_or_else(|error| error))); return; }
+                            }
+                            let sent = if registry.borrow().active_surface(pane) != expected_surface {
+                                Err("native key input requires the active browser tab".into())
+                            } else {
+                                target.press_key(&stroke)
+                            };
+                            if let Err(error) = sent {
+                                target.evaluate_automation_js("(function(){const state=globalThis.__flowmuxInput; if(state){window.removeEventListener('keyup', state.listener, true); window.removeEventListener('keydown', state.keydown, true); delete globalThis.__flowmuxInput;} return 'ok';})()", move |_| { let _ = ack.send(Err(error)); });
+                                return;
+                            }
+                            #[cfg(target_os = "macos")]
+                            let finished = target.clone();
+                            target.evaluate_automation_async_js(flowmux_browser::scripts::FINISH_KEY_INPUT_JS, move |result| {
+                                let result = result.and_then(|value| {
+                                    if value != "ok" && value != "prevented" { return Err(value); }
+                                    #[cfg(target_os = "macos")]
+                                    if value == "ok" { finished.finish_key_input(&stroke)?; }
+                                    Ok(BrowserActionResult::Ok)
+                                });
+                                let _ = ack.send(result);
+                            });
+                        });
                     }
                     BrowserOp::Text { target } => match ref_script(
                         &browser,

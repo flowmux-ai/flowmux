@@ -5,6 +5,7 @@
 mod native;
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code, unused_imports)]
 #[path = "../src/macos_input.rs"]
 mod macos_input;
 

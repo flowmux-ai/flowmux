@@ -8,7 +8,8 @@ inside its engine, including native editing, Tab focus and Enter submission.
 This uses WebKitGTK on Linux and WKWebView on macOS, like the normal browser.
 
 This is an opt-in connection. It does not attach to existing pane
-tabs or change the JavaScript-based `flowmux browser click/type/press` commands.
+tabs. The pane CLI has its own controls: `type` uses native editing, and `press`
+uses native keys on macOS and X11. Pointer commands currently use DOM actions.
 WebDriver owns separate windows labelled **Flowmux · WebDriver**; they are not
 CLI pane targets and are not restored with workspaces. Both `window` and `tab`
 requests create separate windows. Popups remain in the same automation session.

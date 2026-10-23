@@ -82,7 +82,8 @@ WebView insertion, which is not implemented.
 Opt-in Linux WebKitWebDriver and macOS native WebDriver sessions use separate
 ephemeral browser windows;
 see [WebKit automation](docs/webkit-automation.md) for runtime requirements and
-the native-input smoke test. Regular pane CLI input remains JavaScript-based.
+the native-input smoke test. Pane CLI `type` uses native editing and `press`
+uses native keys on macOS and X11; pointer commands currently use DOM actions.
 
 The image viewer loads ThorVG dynamically through `ui/thorvg.rs`; missing
 ThorVG affects the viewer, not the application build. The helper script builds
