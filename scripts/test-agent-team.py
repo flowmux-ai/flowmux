@@ -721,6 +721,17 @@ class FollowupTests(unittest.TestCase):
         origin.start()
         self.addCleanup(origin.stop)
 
+    def managed(self, **overrides):
+        manifest = dict(self.manifest, generation=1, timeout=0, stall_timeout=180, timeout_policy='progress')
+        manifest.update(overrides)
+        team.write_json(self.root / 'job.json', manifest)
+        self.owner = (self.root / 'worker.lock').open('a')
+        fcntl.flock(self.owner, fcntl.LOCK_EX)
+        self.addCleanup(self.owner.close)
+        team.write_json(self.root / 'supervisor.json', dict(pid=os.getpid(),
+                        started=team.process_snapshot()[os.getpid()][2], generation=1))
+        return manifest
+
     def rpc(self, cli, socket, *args):
         self.calls.append(args)
         if args[0] == 'tree':
@@ -835,8 +846,7 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(self.dispatch().name, '0002')
 
     def test_managed_uncertain_enter_is_monitored_without_resending(self):
-        manifest = dict(self.manifest, generation=1, timeout=5, stall_timeout=5)
-        team.write_json(self.root / 'job.json', manifest)
+        self.managed(timeout=5, stall_timeout=5)
         sent = []
         def uncertain(cli, socket, *args):
             if args[0] == 'send-key':
@@ -858,6 +868,53 @@ class FollowupTests(unittest.TestCase):
         self.assertTrue(state['received'])
         self.assertEqual(len(sent), 1)
         self.assertTrue((turn / 'dispatch-error.json').exists())
+
+    def test_dead_supervisor_rejects_all_providers_before_input_or_turn_creation(self):
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            with self.subTest(agent=agent):
+                self.managed(agent=agent)
+                self.owner.close()
+                with self.assertRaisesRegex(ValueError, 'supervisor is no longer live'):
+                    self.dispatch()
+                self.assertFalse(self.calls)
+                self.assertFalse((self.root / 'turns').exists())
+
+    def test_held_lock_cannot_mask_changed_supervisor_identity(self):
+        self.managed()
+        saved = json.loads((self.root / 'supervisor.json').read_text())
+        for changed in (dict(saved, started='reused pid'), dict(saved, generation=2), dict(saved, pid=-1)):
+            team.write_json(self.root / 'supervisor.json', changed)
+            with self.assertRaisesRegex(ValueError, 'supervisor identity'):
+                self.dispatch()
+        self.assertFalse(self.calls)
+
+    def test_supervisor_exit_after_paste_prevents_enter(self):
+        self.managed()
+        def interrupted(cli, socket, *args):
+            result = self.rpc(cli, socket, *args)
+            if args[0] == 'send-keys':
+                self.owner.close()
+            return result
+        with patch.object(team, 'flowmux', side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, 'supervisor is no longer live'):
+                self.dispatch()
+        self.assertFalse(any(call[0] == 'send-key' for call in self.calls))
+        self.assertFalse((self.root / 'active-turn.json').exists())
+
+    def test_followup_budget_overrides_are_recorded_without_changing_previous_assignment(self):
+        original = self.managed(timeout=300)
+        self.args.timeout, self.args.stall_timeout = 0, 900
+        turn = self.dispatch()
+        updated = json.loads((turn / 'job.json').read_text())
+        self.assertEqual((updated['timeout'], updated['stall_timeout']), (0, 900))
+        self.assertEqual(json.loads((self.root / 'job.json').read_text()), original)
+        self.assertEqual((self.root / 'result.md').read_text(), 'original result')
+
+    def test_old_copied_helper_cannot_silently_ignore_new_timeout_policy(self):
+        self.args.timeout = 0
+        with self.assertRaisesRegex(ValueError, 'updated helper'):
+            self.dispatch()
+        self.assertFalse(self.calls)
 
     def test_malformed_or_interrupted_turn_cannot_authorize_another_send(self):
         turn = self.dispatch()
@@ -921,6 +978,48 @@ class ManagedTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='fm-managed-test-')
         self.addCleanup(self.temporary.cleanup)
         self.job = Path(self.temporary.name).resolve()
+
+    def monitor_clock(self, *, timeout=0, progress=True, waiting=False):
+        attempt = self.job / 'attempt-1'
+        attempt.mkdir()
+        path = self.job / 'native.jsonl'
+        path.touch()
+        team.write_json(self.job / 'status.json', dict(state='pending'))
+        manifest = dict(agent='codex', model='chosen', effort=None, pane='worker', surface='tab',
+                        generation=1, timeout=timeout, stall_timeout=180, transcript=str(path))
+        clock = [0]
+        def native(path, manifest):
+            if progress:
+                with path.open('a') as stream:
+                    stream.write('native progress\n')
+            return True, 'exact', json.dumps(dict(task_status='completed', report='verified')) if clock[0] >= 400 else None, None
+        def advance(seconds):
+            clock[0] += 100
+        def pane(manifest):
+            return dict(agent=dict(status='blocked' if waiting and clock[0] < 300 else 'working'))
+        process = type('Process', (), dict(pid=123, poll=lambda self: None))()
+        with patch.object(team, 'owned_processes', return_value={}), \
+                patch.object(team, 'transcript_report', side_effect=native), \
+                patch.object(team, 'managed_pane', side_effect=pane), \
+                patch.object(team.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(team.time, 'sleep', side_effect=advance):
+            return team.monitor_managed(self.job, attempt, manifest, process, {}, False)
+
+    def test_progressing_work_completes_beyond_old_300_second_limit(self):
+        self.assertEqual(self.monitor_clock()['state'], 'completed')
+
+    def test_explicit_budget_is_not_stall_or_retry(self):
+        state = self.monitor_clock(timeout=300)
+        self.assertEqual((state['state'], state['blocker_kind']), ('timed_out', 'time_budget'))
+        self.assertNotIn(state['blocker_kind'], team.RECOVERABLE)
+
+    def test_no_native_progress_still_triggers_recovery(self):
+        state = self.monitor_clock(progress=False)
+        self.assertEqual(state['blocker_kind'], 'stalled')
+        self.assertIn(state['blocker_kind'], team.RECOVERABLE)
+
+    def test_input_wait_pauses_time_budget_and_stall_deadline(self):
+        self.assertEqual(self.monitor_clock(timeout=200, waiting=True)['state'], 'completed')
 
     def test_model_aliases_and_available_alternatives(self):
         for alias, (provider, model) in team.MODEL_ALIASES.items():

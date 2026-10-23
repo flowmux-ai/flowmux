@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -73,6 +74,10 @@ while True:
             time.sleep(120)
         if failure == 'crash':
             os._exit(7)
+        if failure == 'progress':
+            for step in range(8):
+                save({'type': 'progress', 'step': step})
+                time.sleep(.5)
         if failure == 'invalid_report':
             answer = 'malformed answer'
         if agent == 'codex':
@@ -239,6 +244,53 @@ def main():
         assert json.loads((Path(receipt['job']) / 'status.json').read_text())['session_id'] == state['session_id']
         assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
         h.pass_check('Follow-up quota recovery replaces its pane while preserving earlier reports and foreground')
+        h.rpc(socket, 'pane_close', pane=following['pane'])
+
+        (h.root / 'behavior.json').write_text('{}')
+        receipt = start('codex', '--timeout', '2')
+        state = finished(receipt)
+        h.rpc(socket, 'agent_activity_update', pane=state['pane'], surface=state['surface'], agent='codex',
+              activity='idle', session_id=state['session_id'], source='flowmux:hook')
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'progress'}))
+        turn = command('followup', receipt['job'], '--task-file', str(task), '--cli', args.cli,
+                       '--timeout', '0', '--stall-timeout', '2')
+        following = finished(turn)
+        assert following['state'] == 'completed' and following['pane'] == state['pane'], following
+        assert len(following['attempts']) == 1 and not following['fallback_used'], following
+        h.pass_check('A progressing follow-up outlives the original budget when its total limit is disabled')
+        h.rpc(socket, 'agent_activity_update', pane=state['pane'], surface=state['surface'], agent='codex',
+              activity='idle', session_id=state['session_id'], source='flowmux:hook')
+        turn = command('followup', receipt['job'], '--task-file', str(task), '--cli', args.cli, '--timeout', '1')
+        limited = finished(turn)
+        assert limited['state'] == 'timed_out' and limited['blocker_kind'] == 'time_budget', limited
+        assert len(limited['attempts']) == 1 and limited['recovery_exhausted'], limited
+        assert state['pane'] not in [p['id'] for p in h.workspace(socket, workspace)['panes']]
+        h.pass_check('Explicit time budget closes the owned worker without labeling progress stalled or starting a replacement')
+
+        (h.root / 'behavior.json').write_text('{}')
+        for agent in ('codex', 'claude'):
+            receipt = start(agent)
+            state = finished(receipt)
+            h.rpc(socket, 'agent_activity_update', pane=state['pane'], surface=state['surface'], agent=agent,
+                  activity='idle', session_id=state['session_id'], source='flowmux:hook')
+            root = Path(receipt['job'])
+            supervisor = json.loads((root / 'supervisor.json').read_text())
+            os.kill(supervisor['pid'], signal.SIGKILL)
+            fixture.wait_for(lambda: stopped(supervisor['pid']), 'test-owned supervisor exited')
+            assert not stopped(state['pid']), 'provider must remain live to reproduce orphaned collection'
+            rejected = subprocess.run([sys.executable, str(HELPER), 'followup', str(root),
+                                      '--task-file', str(task), '--cli', args.cli], env=env,
+                                     capture_output=True, text=True, timeout=25)
+            assert rejected.returncode == 1 and 'supervisor is no longer live' in rejected.stderr, rejected
+            assert not (root / 'turns').exists()
+            assert 'FLOWMUX_TEAM_JOB:' not in h.screen(socket, state['pane'])
+            assert json.loads((root / 'status.json').read_text())['state'] == 'completed'
+            h.rpc(socket, 'pane_close', pane=state['pane'])
+            h.pass_check(f'{agent}: live idle agent receives no follow-up after its supervisor exits')
+        assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+        type_native('y')
+        typed += 'y'
+        fixture.wait_for(lambda: typed in h.screen(socket, foreground_pane), 'native foreground input after supervision checks')
     finally:
         h.cleanup()
 

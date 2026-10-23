@@ -174,10 +174,13 @@ assignment. Available alternatives and their effort are recorded in the receipt;
 the native provider enforces its current account limits. No account/credential
 rotation or provider-default changes are made.
 
-`--timeout` bounds each attempt (default 300 seconds). `--stall-timeout` bounds
-absence of native transcript/stream progress (default 180 seconds). Increase these
-for expected long reasoning or tools. A verified native input wait pauses these
-deadlines. Authentication, trust/permission prompts, changed session identity,
+`--stall-timeout` bounds absence of native transcript/stream progress (default
+180 seconds). Increase it for expected quiet reasoning or long tools. There is
+no total time limit by default (`--timeout 0`), so continued progress can outlive
+five minutes. An explicit positive `--timeout` bounds an attempt; expiry is
+`time_budget`, closes the owned worker and stops without a replacement. It is
+distinct from `stalled` recovery. Verified native input waits pause the deadlines.
+Authentication, trust/permission prompts, changed session identity,
 extra/user-owned tabs and uncertain IPC delivery require inspection, not a retry.
 
 Before replacement, the helper saves evidence, stops its owned process tree,
@@ -266,6 +269,12 @@ only the matching turn from the pinned transcript. Every follow-up returns its o
 job receipt. The original report and earlier turns stay unchanged. Always pass the
 original worker job to `followup`; pass a turn's receipt to `status`/`wait`.
 Existing jobs can continue if their session is still uniquely identified and idle.
+Managed jobs also require a live supervisor before creating a turn and immediately
+before sending input. A live agent alone is insufficient; after supervisor loss,
+inspect the retained pane and reports rather than sending an unmonitored task.
+`followup --timeout SECONDS --stall-timeout SECONDS` overrides the recorded limits
+for the next assignment; zero disables the total limit. These overrides require
+a job created by this updated helper. Old copied helpers retain their time policy.
 
 Only one unresolved assignment per worker is allowed. `dispatch_unknown` means
 receipt is not yet proven by the saved user prompt; `running` with `received: true`

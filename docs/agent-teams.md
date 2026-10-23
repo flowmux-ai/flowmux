@@ -89,6 +89,9 @@ The helper verifies the live session, workspace, pane and active surface before
 input, retains paste evidence, and correlates completion with a unique user-prompt
 marker after the recorded transcript offset. Concurrent or unresolved assignments
 prevent another dispatch. Uncertain delivery is retained, never blindly retried.
+Managed follow-ups verify that their supervisor still owns its lock before
+dispatch; new jobs additionally verify its process identity and generation.
+A live idle provider without its supervisor receives no new assignment.
 Managed collection/progress timeouts trigger bounded recovery; verified input
 waits pause these deadlines and never approve dialogs. A restored launcher never reruns its task.
 With automatic agent restoration enabled, the launcher passes the saved resume
@@ -249,10 +252,14 @@ malformed/failed reports and stalled attempts trigger bounded substitution.
 The default is at most four attempts, without repeating provider/model pairs;
 quota-exhausted providers are skipped for the rest of the assignment. Current
 account limits are enforced by the provider, not inferred from CLI installation.
-`--timeout` defaults to 300 seconds per attempt; `--stall-timeout` defaults to
-180 seconds without native progress. Verified input waits pause both deadlines.
-Increase them for expected long tools or reasoning. `--no-fallback` disables
-substitution, while retaining failed-worker cleanup.
+`--stall-timeout` defaults to 180 seconds without native progress. There is no
+total deadline by default (`--timeout 0`). A positive `--timeout` is an explicit
+attempt budget: expiry stops and closes the owned worker with `time_budget`,
+without automatic replacement or a false `stalled` diagnosis. Verified input waits
+pause both deadlines. Increase the stall interval for expected quiet tools or
+reasoning. `followup` accepts both limits as overrides for updated-helper jobs;
+older jobs retain their copied policy. `--no-fallback` disables substitution,
+while retaining failed-worker cleanup.
 
 The supervisor saves evidence, stops its owned process tree and verifies death.
 A detached handoff then validates and closes the failed single-terminal pane,

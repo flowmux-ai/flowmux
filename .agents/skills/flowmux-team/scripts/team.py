@@ -148,7 +148,7 @@ def start(args):
     (job / "task.txt").write_text(task + "\n")
     manifest = {"executable": executable, "cwd": str(cwd),
                 "role": args.role, "allow_edits": args.allow_edits,
-                "timeout": args.timeout, "socket": socket, "cli": cli,
+                "timeout": args.timeout, "timeout_policy": "progress", "socket": socket, "cli": cli,
                 "workspace": origin["workspace"], "source_pane": pane,
                 "token": token, "created_at": time.time(), **selection,
                 # A resolved Flowmux shim still needs the lead's PATH to find its provider.
@@ -374,6 +374,24 @@ def idle_worker(cli, manifest):
         raise ValueError("Worker is busy or needs input; inspect its pane before continuing")
 
 
+def require_supervisor(root, manifest):
+    if not manifest.get("generation"):
+        return  # Legacy follow-ups collect their transcript without a resident supervisor.
+    with (root / "worker.lock").open("a") as owner:
+        try:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            identity = root / "supervisor.json"
+            if identity.exists():
+                saved = json.loads(identity.read_text())
+                process = process_snapshot().get(saved["pid"])
+                if (not process or process[2] != saved["started"] or process[3].startswith("Z")
+                        or saved["generation"] != manifest["generation"]):
+                    raise ValueError("Worker supervisor identity is no longer live; no follow-up sent")
+            return
+    raise ValueError("Worker supervisor is no longer live; no follow-up sent")
+
+
 def collect_turn(job):
     if json.loads((job / "job.json").read_text()).get("generation"):
         return json.loads((job / "status.json").read_text())
@@ -420,6 +438,12 @@ def followup(args):
         if (origin["socket"], origin["workspace"], origin["pane"], origin["mode"]) != (
                 manifest["socket"], manifest["workspace"], manifest["source_pane"], "team"):
             raise ValueError("Followup must come from the original lead pane and Team workspace; no input sent")
+        require_supervisor(root, manifest)
+        overrides = {key: getattr(args, key, None) for key in ("timeout", "stall_timeout")}
+        overrides = {key: value for key, value in overrides.items() if value is not None}
+        if overrides and manifest.get("timeout_policy") != "progress":
+            raise ValueError("Timeout overrides require a worker started by the updated helper")
+        manifest.update(overrides)
         state = json.loads((root / "status.json").read_text())
         turns = sorted((root / "turns").glob("[0-9]*"))
         previous = collect_turn(turns[-1]) if turns else state
@@ -431,13 +455,6 @@ def followup(args):
         streamed = manifest["agent"] in ("gemini", "agy")
         if streamed:
             managed_pane(manifest)
-            with (root / "worker.lock").open("a") as owner:
-                try:
-                    fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    pass
-                else:
-                    raise ValueError("Worker supervisor is no longer live; no follow-up sent")
         else:
             idle_worker(cli, manifest)
         turn = root / "turns" / f"{len(turns) + 1:04d}"
@@ -454,6 +471,7 @@ def followup(args):
         write_json(turn / "status.json", {"state": "dispatch_unknown", "received": False,
                    **{key: manifest[key] for key in ("agent", "model", "effort", "session_id", "transcript") if key in manifest}})
         if streamed:
+            require_supervisor(root, manifest)
             manifest["resume_session"] = True
             write_json(turn / "job.json", manifest)
             write_json(root / "active-turn.json", {"job": str(turn)})
@@ -466,6 +484,7 @@ def followup(args):
             if any(ord(c) < 32 for c in prompt):
                 raise ValueError("Control characters in prompt path")
             idle_worker(cli, manifest)
+            require_supervisor(root, manifest)
             flowmux(cli, manifest["socket"], "send-keys", manifest["pane"], prompt.replace("\\", "\\\\"))
             deadline = time.monotonic() + 5
             while True:
@@ -477,6 +496,7 @@ def followup(args):
                     raise ValueError("Pasted marker not visible; inspect the pane, Enter was not sent")
                 time.sleep(0.1)
             idle_worker(cli, manifest)
+            require_supervisor(root, manifest)
             if manifest.get("generation"):
                 write_json(root / "active-turn.json", {"job": str(turn)})
             flowmux(cli, manifest["socket"], "send-key", "Enter", "--pane", manifest["pane"])
@@ -590,6 +610,9 @@ def worker(job, generation=1):
             return 1
         started.write_text("lock-v1\n")
         try:
+            if managed:
+                write_json(job / "supervisor.json", {"pid": os.getpid(),
+                           "started": process_snapshot()[os.getpid()][2], "generation": generation})
             return run_worker(job)
         except Exception as error:
             manifest = json.loads((job / "job.json").read_text())
@@ -812,7 +835,7 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
              "closed_panes": previous.get("closed_panes", []),
              **{k: manifest[k] for k in ("agent", "model", "effort", "pane", "surface", "generation")},
              "pid": process.pid}
-    deadline = time.monotonic() + manifest["timeout"]
+    deadline = time.monotonic() + manifest["timeout"] if manifest["timeout"] else None
     last_progress, signature, bound = time.monotonic(), None, manifest.get("transcript")
     offsets = {"stdout.jsonl": 0, "stderr.txt": 0}
     while True:
@@ -881,16 +904,19 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
             if agent.get("activity") == "needs_input" or agent.get("status") == "blocked":
                 state.update(state="waiting_input", message=agent.get("message"))
                 # Human input waits are not stalled reasoning.
-                deadline, last_progress = time.monotonic() + manifest["timeout"], time.monotonic()
+                deadline = time.monotonic() + manifest["timeout"] if manifest["timeout"] else None
+                last_progress = time.monotonic()
             else:
                 state["state"] = "running"
                 if process.poll() is not None:
                     state.update(state="failed", blocker_kind="exited", error=f"Agent exited with code {process.returncode}")
                     break
-                if time.monotonic() >= deadline or time.monotonic() - last_progress >= manifest["stall_timeout"]:
+                stalled = time.monotonic() - last_progress >= manifest["stall_timeout"]
+                if stalled or (deadline is not None and time.monotonic() >= deadline):
                     state.update(state="timed_out", blocker_kind="interference" if manifest.get("root_job")
-                                 and not state.get("received") and not streamed else "stalled",
-                                 error="No final report within the collection/progress deadline")
+                                 and not state.get("received") and not streamed else "stalled" if stalled else "time_budget",
+                                 error="No native progress within the stall deadline" if stalled
+                                 else "Explicit task time budget exhausted; no automatic retry")
                     break
             write_json(assignment / "status.json", state)
             time.sleep(.5)
@@ -979,7 +1005,7 @@ def managed_worker(job):
                 shutil.copyfile(attempt / name, assignment / name)
         manifest.update({k: state[k] for k in ("session_id", "transcript") if k in state})
         write_json(job / "job.json", {k: v for k, v in manifest.items() if k != "root_job"})
-        if state.get("blocker_kind") in RECOVERABLE:
+        if state.get("blocker_kind") in RECOVERABLE | {"time_budget"}:
             try:
                 managed_pane(manifest)
                 screen = flowmux(manifest["cli"], manifest["socket"], "read-screen", manifest["pane"])
@@ -989,7 +1015,8 @@ def managed_worker(job):
                 state.update(state="recovering", failed_state=state["state"])
                 write_json(assignment / "status.json", state)
                 handoff = {"generation": manifest["generation"], "assignment": str(assignment),
-                           "next": next_route(manifest, attempts), "state": state}
+                           "next": None if state["blocker_kind"] == "time_budget" else next_route(manifest, attempts),
+                           "state": state}
                 write_json(job / "recovery.json", handoff)
                 with (job / "recovery.log").open("a") as log:
                     recovery_process = subprocess.Popen([sys.executable, str(job / "worker.py"), "_recover", str(job),
@@ -1125,6 +1152,13 @@ def positive(value):
     return number
 
 
+def budget(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be zero (no total limit) or a positive integer")
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1143,7 +1177,8 @@ def main():
         command.add_argument("--socket", help="Origin window when launched outside a pane")
         command.add_argument("--pane", help="Origin pane when launched outside a pane")
         command.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
-    launch.add_argument("--timeout", type=positive, default=300)
+    launch.add_argument("--timeout", type=budget, default=0,
+                        help="Explicit seconds per attempt; 0 (default) allows continued progress without a total limit")
     launch.add_argument("--stall-timeout", type=positive, default=180,
                         help="Seconds without native transcript progress before replacing a managed worker")
     launch.add_argument("--max-attempts", type=positive, default=4)
@@ -1156,6 +1191,8 @@ def main():
     continuation.add_argument("--cli", default=os.environ.get("FLOWMUX_BUNDLED_CLI_PATH", "flowmux"))
     continuation.add_argument("--socket", help="Origin window when launched outside a pane")
     continuation.add_argument("--pane", help="Origin pane when launched outside a pane")
+    continuation.add_argument("--timeout", type=budget, help="Override this follow-up's total budget; 0 disables it")
+    continuation.add_argument("--stall-timeout", type=positive, help="Override this follow-up's no-progress deadline")
     for name in ("status", "wait", "_worker", "_recover"):
         command = commands.add_parser(name)
         command.add_argument("job", type=lambda value: Path(value).resolve())
