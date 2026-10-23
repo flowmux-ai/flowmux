@@ -106,6 +106,17 @@ async fn browser_action(
             "async timeout must be positive".into(),
         ));
     }
+    if let BrowserOp::Drag { from, to } = &op {
+        if from
+            .iter()
+            .chain(to)
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Response::Error(RpcError::InvalidArgument(
+                "drag coordinates must be finite and nonnegative".into(),
+            ));
+        }
+    }
     if let BrowserOp::Pointer { x, y, .. } = &op {
         if !x.is_finite() || !y.is_finite() || *x < 0.0 || *y < 0.0 {
             return Response::Error(RpcError::InvalidArgument(
@@ -160,6 +171,7 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserDrag { pane, from, to } => (pane, BrowserOp::Drag { from, to }),
             Request::BrowserPointer { pane, action, x, y } => {
                 (pane, BrowserOp::Pointer { action, x, y })
             }
@@ -447,6 +459,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserMedia { .. }
                 | Request::BrowserFileChooser { .. }
                 | Request::BrowserPointer { .. }
+                | Request::BrowserDrag { .. }
                 | Request::BrowserDialog { .. }
                 | Request::BrowserDownload { .. } => self.handle_browser_verb(req).await,
                 Request::ClaudeTeams { .. }

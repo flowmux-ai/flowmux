@@ -276,6 +276,17 @@ impl WindowController {
                         let value = browser.current_title();
                         let _ = ack.send(Ok(BrowserActionResult::String(value)));
                     }
+                    BrowserOp::Drag { from, to } => self.pointer_action(
+                        &browser,
+                        pane,
+                        surface,
+                        Ok(flowmux_browser::scripts::drag_target(from, to)),
+                        flowmux_browser::input::PointerAction::Drag {
+                            to_x: to[0],
+                            to_y: to[1],
+                        },
+                        ack,
+                    ),
                     BrowserOp::Pointer { action, x, y } => {
                         use flowmux_browser::input::PointerAction;
                         use flowmux_ipc::protocol::BrowserPointerAction;

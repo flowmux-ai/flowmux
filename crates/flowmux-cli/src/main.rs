@@ -583,6 +583,18 @@ enum BrowserOp {
     Url { pane: PaneId },
     /// Print the current page title of a browser pane.
     Title { pane: PaneId },
+    /// Drag the left pointer between two CSS viewport coordinates.
+    Drag {
+        pane: PaneId,
+        #[arg(allow_hyphen_values = true)]
+        from_x: f64,
+        #[arg(allow_hyphen_values = true)]
+        from_y: f64,
+        #[arg(allow_hyphen_values = true)]
+        to_x: f64,
+        #[arg(allow_hyphen_values = true)]
+        to_y: f64,
+    },
     /// Send native pointer input at CSS viewport coordinates (click, dblclick, hover).
     Pointer {
         pane: PaneId,

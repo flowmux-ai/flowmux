@@ -218,7 +218,7 @@ pub(crate) fn check_pointer_button_state() {
 pub(crate) fn pointer(
     web: &WKWebView,
     action: flowmux_browser::input::PointerAction,
-    mut point: NSPoint,
+    point: NSPoint,
 ) -> Result<(), String> {
     use flowmux_browser::input::{PointerAction, PointerTarget};
     if NSEvent::pressedMouseButtons() != 0 {
@@ -226,37 +226,53 @@ pub(crate) fn pointer(
     }
     let view = web.as_super();
     let bounds = view.bounds();
-    PointerTarget {
-        x: point.x,
-        y: point.y,
-        width: bounds.size.width,
-        height: bounds.size.height,
-    }
-    .scale(bounds.size.width, bounds.size.height)?;
     let window = view.window().ok_or("browser view is not attached")?;
-    if !view.isFlipped() {
-        point.y = bounds.size.height - point.y;
-    }
-    let content = window
-        .contentView()
-        .ok_or("browser has no native content view")?;
-    let parent = unsafe { content.superview() };
-    let hit = content.hitTest(view.convertPoint_toView(point, parent.as_deref()));
-    if !hit.as_ref().is_some_and(|hit| hit.isDescendantOf(view)) {
-        tracing::debug!(target = ?point, bounds = ?bounds, web_frame = ?view.frame(),
-            content_frame = ?content.frame(), content_flipped = content.isFlipped(),
-            hit = ?hit, "native browser pointer target is covered");
-        return Err("browser pointer target is covered by a native view".into());
-    }
-    let point = view.convertPoint_toView(point, None);
-    let event = |kind, count| {
+    let to_window = |mut point: NSPoint| -> Result<NSPoint, String> {
+        PointerTarget {
+            x: point.x,
+            y: point.y,
+            width: bounds.size.width,
+            height: bounds.size.height,
+        }
+        .scale(bounds.size.width, bounds.size.height)?;
+        if !view.isFlipped() {
+            point.y = bounds.size.height - point.y;
+        }
+        let content = window
+            .contentView()
+            .ok_or("browser has no native content view")?;
+        let parent = unsafe { content.superview() };
+        let hit = content.hitTest(view.convertPoint_toView(point, parent.as_deref()));
+        if !hit.as_ref().is_some_and(|hit| hit.isDescendantOf(view)) {
+            tracing::debug!(target = ?point, bounds = ?bounds, web_frame = ?view.frame(),
+                content_frame = ?content.frame(), content_flipped = content.isFlipped(),
+                hit = ?hit, "native browser pointer target is covered");
+            return Err("browser pointer target is covered by a native view".into());
+        }
+        Ok(view.convertPoint_toView(point, None))
+    };
+    let drag_points = if let PointerAction::Drag { to_x, to_y } = action {
+        (1..=16)
+            .map(|step| {
+                let fraction = f64::from(step) / 16.0;
+                to_window(NSPoint::new(
+                    point.x + (to_x - point.x) * fraction,
+                    point.y + (to_y - point.y) * fraction,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
+    let point = to_window(point)?;
+    let event = |kind, count, point| {
         NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
             kind, point, Flags::empty(), gtk::glib::monotonic_time() as f64 / 1_000_000.0,
             window.windowNumber(), None, 0, count, 1.0,
         ).ok_or("could not create pointer event")
     };
     // WKWebView routes motion through its tracking owner, not NSResponder::mouseMoved.
-    let motion = event(NSEventType::MouseMoved, 0)?;
+    let motion = event(NSEventType::MouseMoved, 0, point)?;
     let supported: Bool = unsafe { msg_send![web, respondsToSelector: sel!(_simulateMouseMove:)] };
     if !supported.as_bool() {
         return Err("this WebKit version cannot deliver native pointer motion".into());
@@ -264,14 +280,43 @@ pub(crate) fn pointer(
     unsafe {
         let _: () = msg_send![web, _simulateMouseMove: &*motion];
     }
+    if let Some(end) = drag_points.last() {
+        let down = event(NSEventType::LeftMouseDown, 1, point)?;
+        let up = event(NSEventType::LeftMouseUp, 1, *end)?;
+        let motions = drag_points
+            .iter()
+            .map(|point| event(NSEventType::LeftMouseDragged, 0, *point))
+            .collect::<Result<Vec<_>, _>>()?;
+        struct Release<'a> {
+            window: &'a objc2_app_kit::NSWindow,
+            event: objc2::rc::Retained<NSEvent>,
+        }
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                if with_pointer_buttons(0, || self.window.sendEvent(&self.event)).is_err() {
+                    self.window.sendEvent(&self.event);
+                }
+            }
+        }
+        with_pointer_buttons(1, || window.sendEvent(&down))?;
+        let _release = Release {
+            window: &window,
+            event: up,
+        };
+        for motion in motions {
+            with_pointer_buttons(1, || window.sendEvent(&motion))?;
+        }
+        return Ok(());
+    }
     let count = match action {
         PointerAction::Hover => 0,
         PointerAction::Click => 1,
         PointerAction::DoubleClick => 2,
+        PointerAction::Drag { .. } => unreachable!(),
     };
     for count in 1..=count {
         for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
-            let event = event(kind, count)?;
+            let event = event(kind, count, point)?;
             with_pointer_buttons(usize::from(kind == NSEventType::LeftMouseDown), || {
                 window.sendEvent(&event);
             })?;

@@ -286,50 +286,83 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
         guard.device = Some(device);
         focus(dpy, window, 2, 0);
         if let Input::Pointer(action, target) = input {
-            let (x, y) = target.scale(f64::from(view.width()), f64::from(view.height()))?;
-            let native = view.native().ok_or("browser has no native widget")?;
-            let point = view
-                .compute_point(
-                    native.upcast_ref::<gtk::Widget>(),
-                    &gtk::graphene::Point::new(x as f32, y as f32),
-                )
-                .ok_or("could not map browser pointer coordinates")?;
-            if !native
-                .upcast_ref::<gtk::Widget>()
-                .pick(
-                    f64::from(point.x()),
-                    f64::from(point.y()),
-                    gtk::PickFlags::DEFAULT,
-                )
-                .is_some_and(|hit| {
-                    hit == *view.upcast_ref::<gtk::Widget>() || hit.is_ancestor(view)
-                })
-            {
-                return Err("browser pointer target is covered by a native widget".into());
-            }
-            let scale = f64::from(surface.scale_factor());
-            let (surface_x, surface_y) = native.surface_transform();
-            let (mut root_x, mut root_y, mut child) = (0, 0, 0);
-            if translate(
-                dpy,
-                window,
-                root_window(dpy),
-                ((f64::from(point.x()) + surface_x) * scale).round() as c_int,
-                ((f64::from(point.y()) + surface_y) * scale).round() as c_int,
-                &mut root_x,
-                &mut root_y,
-                &mut child,
-            ) == 0
-            {
-                return Err("could not locate the browser window".into());
-            }
+            let to_root = |target: &PointerTarget| -> Result<(c_int, c_int), String> {
+                let (x, y) = target.scale(f64::from(view.width()), f64::from(view.height()))?;
+                let native = view.native().ok_or("browser has no native widget")?;
+                let point = view
+                    .compute_point(
+                        native.upcast_ref::<gtk::Widget>(),
+                        &gtk::graphene::Point::new(x as f32, y as f32),
+                    )
+                    .ok_or("could not map browser pointer coordinates")?;
+                if !native
+                    .upcast_ref::<gtk::Widget>()
+                    .pick(
+                        f64::from(point.x()),
+                        f64::from(point.y()),
+                        gtk::PickFlags::DEFAULT,
+                    )
+                    .is_some_and(|hit| {
+                        hit == *view.upcast_ref::<gtk::Widget>() || hit.is_ancestor(view)
+                    })
+                {
+                    return Err("browser pointer target is covered by a native widget".into());
+                }
+                let scale = f64::from(surface.scale_factor());
+                let (surface_x, surface_y) = native.surface_transform();
+                let (mut root_x, mut root_y, mut child) = (0, 0, 0);
+                if translate(
+                    dpy,
+                    window,
+                    root_window(dpy),
+                    ((f64::from(point.x()) + surface_x) * scale).round() as c_int,
+                    ((f64::from(point.y()) + surface_y) * scale).round() as c_int,
+                    &mut root_x,
+                    &mut root_y,
+                    &mut child,
+                ) == 0
+                {
+                    return Err("could not locate the browser window".into());
+                }
+                Ok((root_x, root_y))
+            };
+            let (root_x, root_y) = to_root(target)?;
+            let drag_points = if let PointerAction::Drag { to_x, to_y } = action {
+                (1..=16)
+                    .map(|step| {
+                        let fraction = f64::from(step) / 16.0;
+                        to_root(&PointerTarget {
+                            x: target.x + (to_x - target.x) * fraction,
+                            y: target.y + (to_y - target.y) * fraction,
+                            width: target.width,
+                            height: target.height,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                Vec::new()
+            };
             if motion(dpy, -1, root_x, root_y, 0) == 0 {
                 return Err("native pointer motion failed".into());
+            }
+            if !drag_points.is_empty() {
+                if fake_button(dpy, 1, 1, 0) == 0 {
+                    return Err("native pointer press failed".into());
+                }
+                guard.button_down = true;
+                for (x, y) in drag_points {
+                    if motion(dpy, -1, x, y, 0) == 0 {
+                        return Err("native drag motion failed".into());
+                    }
+                }
+                // The guard releases the held button before ungrabbing the device.
+                return Ok(());
             }
             let count = match action {
                 PointerAction::Hover => 0,
                 PointerAction::Click => 1,
                 PointerAction::DoubleClick => 2,
+                PointerAction::Drag { .. } => unreachable!(),
             };
             for _ in 0..count {
                 if fake_button(dpy, 1, 1, 0) == 0 {

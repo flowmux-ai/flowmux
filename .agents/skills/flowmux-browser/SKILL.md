@@ -225,6 +225,12 @@ inert/hidden targets and inaccessible cross-origin frames are rejected before
 input. Use `--surface` to pin the tab, and inspect the page again after scrolling
 or resizing before choosing new coordinates.
 
+`drag PANE FROM_X FROM_Y TO_X TO_Y` holds the left button while moving along a
+straight path between two viewport points, then releases it. Both endpoints
+must remain stable before input starts. Canvas pointer capture is supported;
+coordinates, tab visibility and native overlays are checked before pressing.
+Afterward inspect the page to confirm the application's intended result.
+
 Page-created popups open as browser tabs in the source pane. They retain their
 engine-created window context, including `opener`, named-window reuse and
 `postMessage`; `noopener` still isolates the child. Use a fresh snapshot and

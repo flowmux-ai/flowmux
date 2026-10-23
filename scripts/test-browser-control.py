@@ -197,9 +197,29 @@ def exercise(cli, url, root):
     assert evaluate("String(canvas.matches(':scope:hover'))") == "true"
     browser("pointer", "dblclick", *map(str, point))
     assert evaluate("String(events.some(e=>e.type==='dblclick'&&e.trusted))") == "true"
+    evaluate("events=[];window.dragged=null;canvas.onpointerdown=e=>canvas.setPointerCapture(e.pointerId);canvas.onpointermove=e=>{if(e.buttons===1)dragged=[e.clientX,e.clientY]};'drag ready'")
+    destination = [point[0]+140,point[1]+45]
+    browser("drag", *map(str, point + destination))
+    dragged = json.loads(evaluate("JSON.stringify(dragged)"))
+    assert dragged and all(abs(actual-expected)<1.5 for actual,expected in zip(dragged,destination)), (dragged,destination)
+    drag_events = json.loads(evaluate("JSON.stringify(events)"))
+    assert all(e["trusted"] for e in drag_events)
+    assert any(e["type"] == "pointermove" and e["buttons"] == 1 for e in drag_events), drag_events
+    assert [e["buttons"] for e in drag_events if e["type"] == "pointerup"] == [0], drag_events
+    evaluate("events=[];'cleared'")
+    browser("drag", *map(str, point + [999999,0]), error=True)
+    assert evaluate("String(events.length)") == "0", "invalid drag pressed the pointer"
+    evaluate("window.slider=document.createElement('input');slider.type='range';slider.value='0';slider.style='position:fixed;left:30px;top:30px;width:240px';document.body.append(slider);window.rangeEvents=[];slider.oninput=e=>rangeEvents.push(e.isTrusted);'range ready'")
+    bounds = json.loads(evaluate("JSON.stringify(slider.getBoundingClientRect())"))
+    browser("drag", str(bounds["x"] + 8), str(bounds["y"] + bounds["height"] / 2),
+            str(bounds["right"] - 12), str(bounds["y"] + bounds["height"] / 2))
+    assert evaluate("slider.valueAsNumber>90 && rangeEvents.length>0 && rangeEvents.every(Boolean)") == "true"
+    evaluate("slider.remove();'range removed'")
+    browser("pointer", "click", *map(str, point))
     coordinate_surface = snapshot()["page"]["surface_id"]
     cli("focus-tab", coordinate_parent, "--pane", pane)
     browser("pointer", "click", *map(str, point), "--surface", coordinate_surface, error=True)
+    browser("drag", *map(str, point + destination), "--surface", coordinate_surface, error=True)
     cli("close-tab", coordinate_surface, "--pane", pane)
     assert snapshot()["page"]["surface_id"] == coordinate_parent
     print("PASS: viewport coordinates deliver trusted canvas input and reject invalid or hidden targets", flush=True)

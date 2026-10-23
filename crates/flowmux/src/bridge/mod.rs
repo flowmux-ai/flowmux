@@ -32,6 +32,10 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    Drag {
+        from: [f64; 2],
+        to: [f64; 2],
+    },
     Pointer {
         action: flowmux_ipc::protocol::BrowserPointerAction,
         x: f64,
@@ -147,6 +151,7 @@ impl BrowserOp {
     /// cannot silently omit its agent-facing name.
     pub fn capability_name(&self) -> &'static str {
         match self {
+            Self::Drag { .. } => "drag",
             Self::Pointer { .. } => "pointer",
             Self::FileChooser { .. } => "file-chooser",
             Self::Dialog { .. } => "dialog",

@@ -3139,3 +3139,26 @@ async fn browser_pointer_rejects_invalid_coordinates_before_dispatch() {
         }
     }
 }
+
+#[tokio::test]
+async fn browser_drag_rejects_invalid_coordinates_before_dispatch() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    for value in [-1.0, f64::NAN, f64::INFINITY] {
+        for index in 0..4 {
+            let mut points = [0.0; 4];
+            points[index] = value;
+            let response = handler
+                .handle(Request::BrowserDrag {
+                    pane,
+                    from: [points[0], points[1]],
+                    to: [points[2], points[3]],
+                })
+                .await;
+            assert!(matches!(
+                response,
+                Response::Error(RpcError::InvalidArgument(_))
+            ));
+            assert!(rx.try_recv().is_err());
+        }
+    }
+}

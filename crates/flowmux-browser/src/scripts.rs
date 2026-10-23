@@ -393,6 +393,22 @@ pub fn coordinate_target(x: f64, y: f64, hover: bool) -> String {
     )
 }
 
+pub fn drag_target(from: [f64; 2], to: [f64; 2]) -> String {
+    let start = coordinate_target(from[0], from[1], false);
+    let end = coordinate_target(to[0], to[1], false);
+    format!(
+        r#"(() => {{
+        const start = {start};
+        if (start.startsWith('error:')) return start;
+        const source = globalThis.__flowmuxInput.el;
+        const end = {end};
+        if (end.startsWith('error:')) return end;
+        globalThis.__flowmuxInput.dragSource = source;
+        return JSON.stringify({{...JSON.parse(start), end:JSON.parse(end)}});
+    }})()"#
+    )
+}
+
 pub fn element_capture(selector: &str) -> String {
     element_action(
         selector,
@@ -427,6 +443,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
         PointerAction::Click => "click",
         PointerAction::DoubleClick => "dblclick",
         PointerAction::Hover => "pointermove",
+        PointerAction::Drag { .. } => "pointerup",
     };
     format!(
         r#"
@@ -436,23 +453,24 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
         try {{
             const before = {geometry};
             if (before.startsWith('error:')) throw new Error(before);
-            const element = state.el;
+            const element = state.el, dragSource = state.dragSource;
             for (let frame = 0; frame < 2; frame++) {{
                 await new Promise((resolve, reject) => {{
                     const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 1000);
                     requestAnimationFrame(() => {{clearTimeout(timeout); resolve();}});
                 }});
                 const after = {geometry};
-                if (before !== after || element !== state.el) throw new Error('pointer target moved; inspect the page before retrying');
+                if (before !== after || element !== state.el || dragSource !== state.dragSource) throw new Error('pointer target moved; inspect the page before retrying');
             }}
             state.listener = event => {{
-                if (event.isTrusted && event.composedPath().includes(state.el)) {{
+                if (event.isTrusted && (event.composedPath().includes(state.el) || event.composedPath().includes(state.dragSource))) {{
                     state.received = true;
                     if (state.done) queueMicrotask(state.done);
                 }}
             }};
-            state.window = state.el.ownerDocument.defaultView;
-            state.window.addEventListener(state.event, state.listener, true);
+            state.windows = new Set([state.el.ownerDocument.defaultView]);
+            if (state.dragSource) state.windows.add(state.dragSource.ownerDocument.defaultView);
+            for (const view of state.windows) view.addEventListener(state.event, state.listener, true);
             return before;
         }} catch (error) {{
             delete globalThis.__flowmuxInput;
@@ -464,7 +482,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
 
 pub const CANCEL_POINTER_INPUT_JS: &str = r#"(function() {
     const state = globalThis.__flowmuxInput;
-    if (state?.window) state.window.removeEventListener(state.event, state.listener, true);
+    for (const view of state?.windows || []) view.removeEventListener(state.event, state.listener, true);
     delete globalThis.__flowmuxInput;
     return 'ok';
 })()"#;
@@ -476,7 +494,7 @@ return await new Promise(resolve => {
     const finish = result => {
         clearTimeout(timer);
         clearInterval(hoverPoll);
-        state.window.removeEventListener(state.event, state.listener, true);
+        for (const view of state.windows) view.removeEventListener(state.event, state.listener, true);
         delete globalThis.__flowmuxInput;
         resolve(result);
     };

@@ -6,6 +6,7 @@ pub enum PointerAction {
     Click,
     DoubleClick,
     Hover,
+    Drag { to_x: f64, to_y: f64 },
 }
 
 #[derive(serde::Deserialize)]

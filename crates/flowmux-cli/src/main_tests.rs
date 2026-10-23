@@ -2457,3 +2457,30 @@ fn pointer_actions_preserve_coordinates_and_reject_nonfinite_values() {
         assert!(parse("click", "0", value).is_err());
     }
 }
+
+#[test]
+fn drag_preserves_endpoints_and_rejects_invalid_coordinates() {
+    let pane = PaneId::new().to_string();
+    let parse = |points: [&str; 4]| {
+        build_request(
+            Cli::try_parse_from(
+                ["flowmuxctl", "browser", "drag", &pane]
+                    .into_iter()
+                    .chain(points),
+            )
+            .unwrap()
+            .cmd,
+        )
+    };
+    let wire = serde_json::to_value(parse(["10.5", "20", "90", "30.25"]).unwrap()).unwrap();
+    assert_eq!(wire["verb"], "browser_drag");
+    assert_eq!(wire["from"], serde_json::json!([10.5, 20.0]));
+    assert_eq!(wire["to"], serde_json::json!([90.0, 30.25]));
+    for value in ["NaN", "inf", "-1"] {
+        for index in 0..4 {
+            let mut points = ["0"; 4];
+            points[index] = value;
+            assert!(parse(points).is_err());
+        }
+    }
+}

@@ -656,3 +656,44 @@ async fn coordinate_pointer_rejects_replaced_elements_at_the_same_position() {
         "undefined"
     );
 }
+
+#[gtk::test]
+async fn drag_rejects_replaced_source_and_recovers_without_held_buttons() {
+    let page = Page::new("<div id=source style='position:fixed;left:10px;top:10px;width:100px;height:100px'>Source</div><div id=target style='position:fixed;left:200px;top:10px;width:100px;height:100px'>Target</div>").await;
+    let action = PointerAction::Drag {
+        to_x: 230.0,
+        to_y: 30.0,
+    };
+    let geometry = drag_target([30.0, 30.0], [230.0, 30.0]);
+    let result = page
+        .eval_async(&format!(
+            "requestAnimationFrame(()=>source.replaceWith(source.cloneNode(true)));{}",
+            prepare_pointer_input(&geometry, action)
+        ))
+        .await;
+    assert!(result.unwrap_err().contains("pointer target moved"));
+    page.eval("window.events=[];source.onpointerdown=e=>source.setPointerCapture(e.pointerId);for(const type of ['pointerdown','pointermove','pointerup'])source.addEventListener(type,e=>events.push([e.type,e.buttons,e.isTrusted,e.clientX]));'ready'").await;
+    let prepared = page
+        .eval_async(&prepare_pointer_input(&geometry, action))
+        .await
+        .unwrap();
+    let target = serde_json::from_str(&prepared).unwrap();
+    assert!(page
+        .pane
+        .pointer(
+            PointerAction::Drag {
+                to_x: 999999.0,
+                to_y: 30.0
+            },
+            &target
+        )
+        .is_err());
+    assert_eq!(page.eval("events.length").await, "0");
+    page.pane.pointer(action, &target).unwrap();
+    assert_eq!(
+        page.eval_async(FINISH_POINTER_INPUT_JS).await.unwrap(),
+        "ok"
+    );
+    assert_eq!(page.eval("events.every(e=>e[2]) && events.some(e=>e[0]==='pointermove'&&e[1]===1&&Math.abs(e[3]-230)<1.5) && events.filter(e=>e[0]==='pointerup'&&e[1]===0).length===1").await, "true");
+    page.pointer("#source", PointerAction::Click).await.unwrap();
+}

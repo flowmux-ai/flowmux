@@ -46,6 +46,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "dialog",
     "file-chooser",
     "pointer",
+    "drag",
 ];
 
 /// Browser features that are intentionally unsupported and return a
@@ -772,6 +773,11 @@ pub enum Request {
         pane: PaneId,
         body: String,
         timeout_ms: u32,
+    },
+    BrowserDrag {
+        pane: PaneId,
+        from: [f64; 2],
+        to: [f64; 2],
     },
     BrowserPointer {
         pane: PaneId,

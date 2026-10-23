@@ -1509,6 +1509,18 @@ impl BrowserPane {
         }
         let bounds = self.native.web_view.as_super().bounds();
         let (x, y) = target.scale(bounds.size.width, bounds.size.height)?;
+        let action = if let flowmux_browser::input::PointerAction::Drag { to_x, to_y } = action {
+            let (to_x, to_y) = flowmux_browser::input::PointerTarget {
+                x: to_x,
+                y: to_y,
+                width: target.width,
+                height: target.height,
+            }
+            .scale(bounds.size.width, bounds.size.height)?;
+            flowmux_browser::input::PointerAction::Drag { to_x, to_y }
+        } else {
+            action
+        };
         crate::macos_input::pointer(&self.native.web_view, action, NSPoint::new(x, y))
     }
 

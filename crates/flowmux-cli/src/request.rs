@@ -8,6 +8,25 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Drag {
+            pane,
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+        } => {
+            if [from_x, from_y, to_x, to_y]
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+            {
+                anyhow::bail!("drag coordinates must be finite and nonnegative");
+            }
+            Request::BrowserDrag {
+                pane,
+                from: [from_x, from_y],
+                to: [to_x, to_y],
+            }
+        }
         BrowserOp::Pointer { pane, action, x, y } => {
             if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
                 anyhow::bail!("pointer coordinates must be finite and nonnegative");
