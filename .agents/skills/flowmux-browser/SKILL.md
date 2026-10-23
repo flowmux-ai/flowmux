@@ -163,7 +163,14 @@ for the current page; these are independent examples, not a script to run blindl
 "$FLOWMUX_CLI" browser attr "pane:$PANE" e3 href
 "$FLOWMUX_CLI" browser count "pane:$PANE" ".result-row"
 "$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-page.png
+"$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-document.png --full-page
 ```
+
+Screenshots default to the visible viewport. `--full-page` captures the document
+without scrolling or resizing the page and rejects bitmaps above 64 MiB at the
+current zoom and display scale. On macOS it requires WebKit's content-rectangle
+snapshot support (macOS 15 or newer). Native document snapshots may omit video
+and WebGL layers; they are not a recording of the composited screen.
 
 | Command family | Usage after `browser` |
 |---|---|

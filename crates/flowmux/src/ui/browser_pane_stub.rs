@@ -125,6 +125,7 @@ impl BrowserPane {
     pub fn snapshot_to_png<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _path: std::path::PathBuf,
+        _document: Option<flowmux_browser::snapshot::CaptureSize>,
         on_done: F,
     ) {
         on_done(Err(UNSUPPORTED.into()));

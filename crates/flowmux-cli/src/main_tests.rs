@@ -460,7 +460,7 @@ fn browser_wait_and_screenshot_map_to_ipc_requests() {
     .expect("browser screenshot should parse");
     assert!(matches!(
         build_request(cli.cmd).unwrap(),
-        Request::BrowserScreenshot { pane: got, path }
+        Request::BrowserScreenshot { pane: got, path, full_page: false }
             if got == pane && path.as_path() == std::path::Path::new("/tmp/flowmux-page.png")
     ));
 
@@ -479,6 +479,22 @@ fn browser_wait_and_screenshot_map_to_ipc_requests() {
         build_request(cli.cmd).unwrap(),
         Request::BrowserScreenshot { path, .. } if path == expected
     ));
+}
+
+#[test]
+fn browser_full_page_screenshot_preserves_the_capture_mode() {
+    let pane = PaneId::new().to_string();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "screenshot",
+        &pane,
+        "/tmp/page.png",
+        "--full-page",
+    ])
+    .unwrap();
+    let request = serde_json::to_value(build_request(cli.cmd).unwrap()).unwrap();
+    assert_eq!(request["full_page"], true);
 }
 
 #[test]

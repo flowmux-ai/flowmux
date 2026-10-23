@@ -744,10 +744,23 @@ impl BrowserPane {
     pub fn snapshot_to_png<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         path: std::path::PathBuf,
+        document: Option<flowmux_browser::snapshot::CaptureSize>,
         on_done: F,
     ) {
+        if let Some(size) = document {
+            if let Err(error) =
+                size.check(self.web_view.zoom_level() * f64::from(self.web_view.scale_factor()))
+            {
+                on_done(Err(error));
+                return;
+            }
+        }
         self.web_view.snapshot(
-            webkit6::SnapshotRegion::Visible,
+            if document.is_some() {
+                webkit6::SnapshotRegion::FullDocument
+            } else {
+                webkit6::SnapshotRegion::Visible
+            },
             webkit6::SnapshotOptions::NONE,
             gtk::gio::Cancellable::NONE,
             move |result| {

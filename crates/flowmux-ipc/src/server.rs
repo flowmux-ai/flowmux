@@ -577,6 +577,7 @@ mod tests {
             Request::BrowserScreenshot {
                 pane,
                 path: "/tmp/screenshot.png".into(),
+                full_page: false,
             },
         ] {
             assert_eq!(query_timeout(&request), None);

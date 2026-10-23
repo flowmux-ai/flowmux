@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -121,6 +122,23 @@ def exercise(cli, url, root):
     browser("fill", reference(first, "Contact email"), "agent@example.test")
     assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
     print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)
+    evaluate("window.captureBox=document.createElement('div'); captureBox.style='width:700px;height:1800px;background:red'; document.body.append(captureBox); window.scrollTo(40,100); 'capture fixture'")
+    size = json.loads(evaluate("JSON.stringify({width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight,x:scrollX,y:scrollY})"))
+    viewport_path, full_path = root / "viewport.png", root / "full.png"
+    browser("screenshot", str(viewport_path))
+    browser("screenshot", str(full_path), "--full-page")
+    viewport_png, full_png = viewport_path.read_bytes(), full_path.read_bytes()
+    assert full_png[:8] == viewport_png[:8] == b"\x89PNG\r\n\x1a\n"
+    viewport_width, viewport_height = struct.unpack(">II", viewport_png[16:24])
+    width, height = struct.unpack(">II", full_png[16:24])
+    assert height > viewport_height
+    assert abs(width / size["width"] - height / size["height"]) < .01, (width, height, size)
+    assert evaluate("JSON.stringify([scrollX,scrollY])") == json.dumps([size["x"], size["y"]], separators=(",", ":"))
+    evaluate("captureBox.style.height='10000000px'; 'oversized document'")
+    browser("screenshot", str(root / "oversized.png"), "--full-page", error=True)
+    assert not (root / "oversized.png").exists()
+    evaluate("captureBox.remove(); window.scrollTo(0,0); 'capture fixture removed'")
+    print("PASS: full-document PNG covers offscreen content and preserves scrolling", flush=True)
     frame_field = reference(first, "Frame field")
     nested_field = reference(first, "Nested frame field")
     assert [entry["selector"] for entry in first["refs"][nested_field]["frame_path"]] == ["#frame", "#nested"]

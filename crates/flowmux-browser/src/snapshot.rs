@@ -15,6 +15,26 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct CaptureSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl CaptureSize {
+    pub fn check(self, scale: f64) -> Result<(), String> {
+        // Bound the uncompressed bitmap to 64 MiB before asking WebKit to allocate it.
+        if ![self.width, self.height, scale]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+            || (self.width * scale).ceil() * (self.height * scale).ceil() > 16_777_216.0
+        {
+            return Err("document capture exceeds the 64 MiB bitmap limit".into());
+        }
+        Ok(())
+    }
+}
+
 /// Top-level snapshot returned by the WebView script.
 ///
 /// Wire shape (JSON):
@@ -103,6 +123,29 @@ impl DomSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_size_bounds_physical_pixels_before_allocation() {
+        let size = CaptureSize {
+            width: 2048.0,
+            height: 2048.0,
+        };
+        assert!(size.check(2.0).is_ok());
+        assert!(size.check(2.01).is_err());
+        assert!(size.check(f64::NAN).is_err());
+        assert!(CaptureSize {
+            width: -1.0,
+            height: 5.0
+        }
+        .check(1.0)
+        .is_err());
+        assert!(CaptureSize {
+            width: f64::INFINITY,
+            height: 5.0
+        }
+        .check(1.0)
+        .is_err());
+    }
 
     fn sample() -> DomSnapshot {
         let mut refs = BTreeMap::new();

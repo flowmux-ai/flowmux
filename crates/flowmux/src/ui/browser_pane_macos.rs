@@ -12,8 +12,8 @@ use gtk::glib::{self, translate::ToGlibPtr};
 use objc2::rc::{autoreleasepool, Retained};
 use objc2::runtime::{AnyObject, Bool, NSObject, ProtocolObject};
 use objc2::{
-    define_class, msg_send, AnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly,
-    Message,
+    define_class, msg_send, sel, AnyThread, ClassType, DefinedClass, MainThreadMarker,
+    MainThreadOnly, Message,
 };
 use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSResponder, NSView, NSWindow};
 use objc2_foundation::{
@@ -1211,8 +1211,40 @@ impl BrowserPane {
     pub fn snapshot_to_png<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         path: PathBuf,
+        document: Option<flowmux_browser::snapshot::CaptureSize>,
         on_done: F,
     ) {
+        let configuration = if let Some(size) = document {
+            let scale = self
+                .native
+                .web_view
+                .as_super()
+                .window()
+                .map_or(1.0, |window| unsafe {
+                    msg_send![&*window, backingScaleFactor]
+                });
+            if let Err(error) = size.check(scale * unsafe { self.native.web_view.pageZoom() }) {
+                on_done(Err(error));
+                return;
+            }
+            let config = unsafe { WKSnapshotConfiguration::new(MainThreadMarker::new().unwrap()) };
+            let supported: Bool =
+                unsafe { msg_send![&*config, respondsToSelector: sel!(_setUsesContentsRect:)] };
+            if !supported.as_bool() {
+                // shortcut: older WebKit needs a separately validated tiled-capture fallback.
+                on_done(Err(
+                    "full-document capture requires macOS 15 or newer WebKit".into(),
+                ));
+                return;
+            }
+            // The content-rect snapshot paints offscreen content without resizing or scrolling.
+            unsafe {
+                let _: () = msg_send![&*config, _setUsesContentsRect: true];
+            }
+            Some(config)
+        } else {
+            None
+        };
         let callback = Rc::new(RefCell::new(Some(on_done)));
         let path_for_block = path.clone();
         let block = block2::RcBlock::new(
@@ -1232,10 +1264,7 @@ impl BrowserPane {
         unsafe {
             self.native
                 .web_view
-                .takeSnapshotWithConfiguration_completionHandler(
-                    Option::<&WKSnapshotConfiguration>::None,
-                    &block,
-                );
+                .takeSnapshotWithConfiguration_completionHandler(configuration.as_deref(), &block);
         }
     }
 

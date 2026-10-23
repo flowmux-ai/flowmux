@@ -612,7 +612,13 @@ enum BrowserOp {
         poll_ms: u64,
     },
     /// Save the visible browser viewport to a PNG file.
-    Screenshot { pane: PaneId, path: PathBuf },
+    Screenshot {
+        pane: PaneId,
+        path: PathBuf,
+        /// Capture the entire document without scrolling the page.
+        #[arg(long)]
+        full_page: bool,
+    },
     /// Count elements matching a CSS selector.
     Count { pane: PaneId, selector: String },
 }

@@ -130,9 +130,14 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             }
         }
         // The GUI process writes the file; resolve against the caller's cwd.
-        BrowserOp::Screenshot { pane, path } => Request::BrowserScreenshot {
+        BrowserOp::Screenshot {
+            pane,
+            path,
+            full_page,
+        } => Request::BrowserScreenshot {
             pane,
             path: std::path::absolute(path)?,
+            full_page,
         },
         BrowserOp::Count { pane, selector } => Request::BrowserCount { pane, selector },
     };

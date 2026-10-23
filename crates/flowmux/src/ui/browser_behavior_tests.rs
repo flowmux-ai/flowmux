@@ -188,6 +188,36 @@ async fn snapshot_resolves_real_elements_without_mutating_the_document() {
 }
 
 #[gtk::test]
+async fn document_capture_paints_pixels_beyond_the_viewport_without_scrolling() {
+    let page = Page::new("<div style='height:1800px;background:red'></div>").await;
+    page.pane.set_zoom_level(1.25);
+    page.eval("window.scrollTo(0,100); 'scrolled'").await;
+    let size = serde_json::from_str(&page.eval("JSON.stringify({width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight})").await).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("document.png");
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    page.pane
+        .snapshot_to_png(path.clone(), Some(size), move |result| {
+            let _ = tx.send(result);
+        });
+    glib::future_with_timeout(Duration::from_secs(10), rx)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let image = image::open(path).unwrap().to_rgba8();
+    let scale = f64::from(page.pane.web_view.scale_factor()) * 1.25;
+    assert!(f64::from(image.height()) > 1800.0 * scale);
+    assert_eq!(
+        image
+            .get_pixel((20.0 * scale) as u32, (1750.0 * scale) as u32)
+            .0,
+        [255, 0, 0, 255]
+    );
+    assert_eq!(page.eval("scrollY").await, "100");
+}
+
+#[gtk::test]
 async fn native_pointer_coordinates_include_window_decoration_offsets() {
     let page = Page::new("<button id='target' style='margin:80px' onclick='window.point=[event.clientX,event.clientY]'>Click</button>").await;
     page.pointer("#target", PointerAction::Click).await.unwrap();

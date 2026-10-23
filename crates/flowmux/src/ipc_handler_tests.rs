@@ -2079,9 +2079,11 @@ async fn browser_actions_dispatch_form_read_and_phase5_ops() {
         Request::BrowserScreenshot {
             pane,
             path: std::path::PathBuf::from("/tmp/page.png"),
+            full_page: true,
         },
         |op| match op {
-            BrowserOp::Screenshot { path } => {
+            BrowserOp::Screenshot { path, full_page } => {
+                assert!(full_page);
                 assert_eq!(path, std::path::PathBuf::from("/tmp/page.png"));
             }
             other => panic!("expected BrowserOp::Screenshot, got {other:?}"),

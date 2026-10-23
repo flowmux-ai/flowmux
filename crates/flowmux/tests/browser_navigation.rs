@@ -388,6 +388,7 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
         Request::BrowserScreenshot {
             pane,
             path: screenshot.clone(),
+            full_page: false,
         },
     )
     .await;

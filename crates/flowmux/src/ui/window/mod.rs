@@ -3939,15 +3939,27 @@ fn browser_js_truthy(value: &str) -> bool {
 fn run_browser_screenshot(
     browser: &crate::ui::browser_pane::BrowserPane,
     path: PathBuf,
+    full_page: bool,
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
 ) {
-    let cell = std::cell::Cell::new(Some(ack));
-    browser.snapshot_to_png(path, move |result| {
-        if let Some(ack) = cell.take() {
-            let mapped = result.map(BrowserActionResult::String);
-            let _ = ack.send(mapped);
-        }
-    });
+    let finish = move |result: Result<String, String>| {
+        let _ = ack.send(result.map(BrowserActionResult::String));
+    };
+    if full_page {
+        let capture = browser.clone();
+        browser.evaluate_automation_js(
+            "JSON.stringify({width:Math.max(innerWidth,document.documentElement.scrollWidth,document.body?.scrollWidth||0),height:Math.max(innerHeight,document.documentElement.scrollHeight,document.body?.scrollHeight||0)})",
+            move |result| match result.and_then(|json| {
+                serde_json::from_str::<flowmux_browser::snapshot::CaptureSize>(&json)
+                    .map_err(|error| error.to_string())
+            }) {
+                Ok(size) => capture.snapshot_to_png(path, Some(size), finish),
+                Err(error) => finish(Err(error)),
+            },
+        );
+    } else {
+        browser.snapshot_to_png(path, None, finish);
+    }
 }
 
 /// Finish one control message without admitting another ordered command.

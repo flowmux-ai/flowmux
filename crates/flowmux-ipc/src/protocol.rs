@@ -592,10 +592,12 @@ pub enum Request {
         timeout_ms: u64,
         poll_ms: u64,
     },
-    /// `flowmux browser screenshot <pane> <path>` — write a visible-viewport PNG.
+    /// Write a viewport or full-document PNG.
     BrowserScreenshot {
         pane: PaneId,
         path: PathBuf,
+        #[serde(default)]
+        full_page: bool,
     },
 
     // Element targets resolve through the latest browser snapshot's RefStore.
@@ -989,6 +991,21 @@ pub enum Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screenshot_without_capture_mode_keeps_viewport_behavior() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "verb": "browser_screenshot", "pane": PaneId::new(), "path": "/tmp/page.png"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            Request::BrowserScreenshot {
+                full_page: false,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn request_envelope_uses_tagged_newline_json_shape() {
