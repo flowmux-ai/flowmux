@@ -29,9 +29,13 @@ done
 work=$(mktemp -d /tmp/fm-dmg-update.XXXXXX)
 mounted=0
 staged=
+detach_image() {
+    # This is our private read-only mount; background scanners can keep it busy.
+    hdiutil detach "$work/mount" -quiet || hdiutil detach -force "$work/mount" -quiet
+}
 cleanup() {
-    if [ "$mounted" -eq 1 ]; then hdiutil detach "$work/mount" -quiet || true; fi
     if [ -n "$staged" ]; then rm -rf "$staged"; fi
+    if [ "$mounted" -eq 1 ]; then detach_image || return; fi
     rm -rf "$work"
 }
 trap cleanup EXIT
@@ -55,7 +59,7 @@ codesign --verify --deep --strict "$bundle"
 staged="$parent/.$name.pending.$host_pid"
 ditto "$bundle" "$staged"
 codesign --verify --deep --strict "$staged"
-hdiutil detach "$work/mount" -quiet
+detach_image
 mounted=0
 
 # Every current instance using this bundle must exit before the shared swap.

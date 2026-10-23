@@ -165,6 +165,31 @@ class DmgUpdateTests(unittest.TestCase):
         self.assertTrue(all(host.poll() is None for host in self.hosts))
         self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
 
+    def test_busy_readonly_image_is_detached_after_validation_failure(self):
+        tools = pathlib.Path(self.temp.name) / "tools"
+        tools.mkdir()
+        hdiutil = tools / "hdiutil"
+        hdiutil.write_text('#!/bin/sh\n'
+                           'if [ "$1" = detach ] && [ "$2" != -force ]; then exit 16; fi\n'
+                           'exec /usr/bin/hdiutil "$@"\n')
+        hdiutil.chmod(0o755)
+        env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ.get("PATH", ""))
+        try:
+            result = self.install(wanted="9.8.8", env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(version(self.dest), "1.0.0")
+            self.assertTrue(all(host.poll() is None for host in self.hosts))
+            images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
+            self.assertFalse(any(item.get("image-path") == str(self.image) for item in images),
+                             result.stdout + result.stderr)
+        finally:
+            # Clean only this fixture's device if the regression is present.
+            images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
+            for item in images:
+                if item.get("image-path") == str(self.image):
+                    device = item["system-entities"][0]["dev-entry"]
+                    run("hdiutil", "detach", "-force", device)
+
     def test_wrong_version_and_invalid_image_preserve_running_app(self):
         self.assertNotEqual(self.install(wanted="9.8.8").returncode, 0)
         bad = pathlib.Path(self.temp.name) / "bad.dmg"
