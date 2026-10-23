@@ -230,6 +230,32 @@ async fn native_pointer_coordinates_include_window_decoration_offsets() {
 }
 
 #[gtk::test]
+async fn native_input_stays_in_its_window_after_resize_and_focus_changes() {
+    let html = "<input id=field value=safe style='margin:40px;width:60%'><script>window.hits=0;field.onclick=()=>hits++</script>";
+    let first = Page::new(html).await;
+    let second = Page::new(html).await;
+    for page in [&first, &second, &first] {
+        page.pointer("#field", PointerAction::Click).await.unwrap();
+        for key in ["End", "Backspace"] {
+            let stroke = flowmux_browser::input::KeyStroke::parse(key).unwrap();
+            page.ok(prepare_key_input(&stroke)).await;
+            page.pane.press_key(&stroke).unwrap();
+            assert_eq!(page.eval_async(FINISH_KEY_INPUT_JS).await.unwrap(), "ok");
+        }
+    }
+    assert_eq!(first.eval("field.value").await, "sa");
+    assert_eq!(second.eval("field.value").await, "saf");
+    assert_eq!(first.eval("hits").await, "2");
+    assert_eq!(second.eval("hits").await, "1");
+    let width = first.eval("innerWidth").await;
+    first.window.set_default_size(640, 480);
+    first.wait(&format!("innerWidth !== {width}")).await;
+    first.pointer("#field", PointerAction::Click).await.unwrap();
+    assert_eq!(first.eval("hits").await, "3");
+    assert_eq!(second.eval("hits").await, "1");
+}
+
+#[gtk::test]
 async fn hover_completion_observes_css_when_the_page_stops_pointer_events() {
     let page = Page::new("<button id='target' disabled style='margin:80px'>Hover</button>").await;
     page.pane

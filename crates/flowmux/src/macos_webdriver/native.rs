@@ -350,6 +350,46 @@ pub(crate) fn smoke() {
         );
     }
     assert!(events.iter().all(|(_, trusted)| *trusted));
+    let other = Window::new(&config);
+    unsafe {
+        other.web.loadHTMLString_baseURL(&NSString::from_str(
+            "<input id=field value=safe><script>window.hits=0;document.onclick=()=>hits++</script>"
+        ), None);
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while other
+        .evaluate("!!document.querySelector('#field')")
+        .unwrap_or_default()
+        != true
+    {
+        assert!(Instant::now() < deadline);
+        pump();
+    }
+    // The production pointer path addresses its own NSWindow while another is key.
+    crate::macos_input::pointer(
+        &browser.web,
+        flowmux_browser::input::PointerAction::Click,
+        NSPoint::new(30.0, 15.0),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while browser.evaluate("document.activeElement.id").unwrap() != "field" {
+        assert!(
+            Instant::now() < deadline,
+            "pointer did not focus its own window"
+        );
+        pump();
+    }
+    crate::macos_input::press_key(
+        &browser.web,
+        &flowmux_browser::input::KeyStroke::parse("End").unwrap(),
+    )
+    .unwrap();
+    browser.text("!").unwrap();
+    assert!(browser.evaluate("field.value.includes('!')").unwrap() == true);
+    assert_eq!(other.evaluate("field.value").unwrap(), "safe");
+    assert_eq!(other.evaluate("hits").unwrap(), 0);
+    println!("MACOS_POINTER_WINDOW_ISOLATION_OK");
     println!("MACOS_WEBDRIVER_NATIVE_INPUT_OK");
 }
 
