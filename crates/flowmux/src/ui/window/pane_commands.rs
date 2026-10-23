@@ -508,7 +508,7 @@ impl WindowController {
                 title,
             } => {
                 // VTE parsed an OSC 0/2 window title. Prompt-shaped shell
-                // titles such as "user@host:~/path" duplicate cwd-driven labels,
+                // titles such as "user@host:~/path" restore cwd-driven labels,
                 // and trim-empty or whitespace-only values are ignored. Everything
                 // else follows BrowserTitleChanged semantics, respecting title_locked.
                 if title.trim().is_empty() {

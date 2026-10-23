@@ -1602,8 +1602,9 @@ fn terminal_current_dir(term: &vte::Terminal, pid: &Rc<Cell<Option<i32>>>) -> Op
 /// side panel, agent bar, and window title for every frame invalidates most of
 /// the GSK scene and can make adjacent terminal text shimmer. Deliver the first
 /// change immediately, suppress intermediate frames, and deliver the final
-/// title only after a complete quiet window.
+/// title after a quiet window, with a one-second limit for continuous output.
 const TITLE_COALESCE_WINDOW_MS: u64 = 200;
+const TITLE_COALESCE_MAX_WINDOWS: u32 = 5;
 
 #[derive(Default)]
 struct TitleCoalesce {
@@ -1614,6 +1615,7 @@ struct TitleCoalesce {
     /// Candidate retained until a full window passes without a newer title.
     settling: RefCell<Option<String>>,
     window_open: Cell<bool>,
+    pending_windows: Cell<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1626,9 +1628,13 @@ impl TitleCoalesce {
     fn finish_window(&self) -> TitleWindowResult {
         if let Some(title) = self.pending.borrow_mut().take() {
             *self.settling.borrow_mut() = Some(title);
-            return TitleWindowResult::Rearm;
+            self.pending_windows.set(self.pending_windows.get() + 1);
+            if self.pending_windows.get() < TITLE_COALESCE_MAX_WINDOWS {
+                return TitleWindowResult::Rearm;
+            }
         }
 
+        self.pending_windows.set(0);
         self.window_open.set(false);
         let title = self
             .settling
@@ -3473,21 +3479,31 @@ mod tests {
     }
 
     #[test]
-    fn animated_title_storm_only_settles_after_a_quiet_window() {
+    fn animated_title_storm_delivers_latest_title_without_a_quiet_window() {
         let coalesce = TitleCoalesce::default();
         *coalesce.last_sent.borrow_mut() = "frame-0".into();
         coalesce.window_open.set(true);
 
-        for frame in 1..100 {
+        for frame in 1..5 {
             *coalesce.pending.borrow_mut() = Some(format!("frame-{frame}"));
             assert_eq!(coalesce.finish_window(), TitleWindowResult::Rearm);
         }
 
+        *coalesce.pending.borrow_mut() = Some("new task".into());
         assert_eq!(
             coalesce.finish_window(),
-            TitleWindowResult::Settled(Some("frame-99".into()))
+            TitleWindowResult::Settled(Some("new task".into()))
         );
         assert!(!coalesce.window_open.get());
+
+        coalesce.window_open.set(true);
+        *coalesce.pending.borrow_mut() = Some("done".into());
+        assert_eq!(coalesce.finish_window(), TitleWindowResult::Rearm);
+        assert_eq!(
+            coalesce.finish_window(),
+            TitleWindowResult::Settled(Some("done".into()))
+        );
+        assert_eq!(coalesce.finish_window(), TitleWindowResult::Settled(None));
     }
 
     #[test]

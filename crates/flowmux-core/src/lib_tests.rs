@@ -580,16 +580,16 @@ fn title_is_shell_cwd_echo_passes_program_titles() {
 }
 
 #[test]
-fn set_surface_title_auto_drops_shell_ps1_echo_on_terminal() {
+fn set_surface_title_auto_restores_cwd_on_shell_ps1_echo() {
     // Regression guard: shell PS1-shaped OSC 0/2 titles (`user@host: /path`)
-    // emitted on every prompt must not overwrite cwd-based folder labels.
-    // flowmux's cwd-notify flow applies folder names through
-    // set_surface_cwd, so OSC 0/2 echoes should be ignored.
+    // emitted on every prompt restore folder labels after a program exits,
+    // even when the shell stays in the same directory.
     let pane_id = PaneId::new();
     let cwd = PathBuf::from("/tmp/flowmux-shell-echo-test");
+    let folder_title = terminal_tab_title_for_cwd(Some(&cwd));
     let mut pane = Pane::Leaf {
         id: pane_id,
-        content: PaneContent::tabbed_terminal("flowmux-shell-...", Some(cwd.clone())),
+        content: PaneContent::tabbed_terminal(folder_title.clone(), Some(cwd.clone())),
     };
     let surface_id = pane.active_surface_id(pane_id).unwrap();
 
@@ -606,7 +606,7 @@ fn set_surface_title_auto_drops_shell_ps1_echo_on_terminal() {
     ));
     assert_eq!(
         pane.surface_title(pane_id, surface_id),
-        Some("flowmux-shell-...")
+        Some(folder_title.as_str())
     );
 
     // External program titles, such as vi, still apply normally.
@@ -615,6 +615,26 @@ fn set_surface_title_auto_drops_shell_ps1_echo_on_terminal() {
         pane.surface_title(pane_id, surface_id),
         Some("vim src/main.rs")
     );
+
+    let shell_title = format!("junsu@host: {}", cwd.display());
+    assert!(pane.set_surface_title_auto(pane_id, surface_id, shell_title.clone()));
+    assert_eq!(
+        pane.surface_title(pane_id, surface_id),
+        Some(folder_title.as_str())
+    );
+    assert!(!pane.set_surface_title_auto(pane_id, surface_id, shell_title.clone()));
+
+    // A prompt can reach the title handler before its cwd notification.
+    pane.find_surface_mut(pane_id, surface_id).unwrap().title = shell_title.clone();
+    assert!(pane.set_surface_title_auto(pane_id, surface_id, shell_title.clone()));
+    assert_eq!(
+        pane.surface_title(pane_id, surface_id),
+        Some(folder_title.as_str())
+    );
+
+    assert!(pane.rename_surface(pane_id, surface_id, "Pinned".into()));
+    assert!(!pane.set_surface_title_auto(pane_id, surface_id, shell_title));
+    assert_eq!(pane.surface_title(pane_id, surface_id), Some("Pinned"));
 }
 
 #[test]

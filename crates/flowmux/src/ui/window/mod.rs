@@ -5696,6 +5696,31 @@ mod tests {
             controller.window.title().map(|s| s.to_string()).as_deref(),
             Some("flowmux - vim src/main.rs"),
         );
+
+        // Returning to the shell without cd must clear the previous program title.
+        controller
+            .dispatch(GtkCommand::TerminalTitleChanged {
+                pane,
+                surface,
+                title: format!("junsu@host: {}", next.display()),
+            })
+            .await;
+        assert_eq!(
+            store.surface_title(pane, surface).await.as_deref(),
+            Some(initial_title.as_str())
+        );
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .surface_title_text(surface)
+                .as_deref(),
+            Some(initial_title.as_str())
+        );
+        assert_eq!(
+            controller.window.title().as_deref(),
+            Some(format!("flowmux - {initial_title}").as_str())
+        );
     }
 
     /// When a new tab is added (NewSurface), that tab becomes active and the

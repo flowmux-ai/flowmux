@@ -81,8 +81,8 @@ pub fn terminal_tab_title_for_cwd(cwd: Option<&Path>) -> String {
 }
 
 /// Determine whether an OSC 0/2 title from a terminal surface is the shell's
-/// PS1 window title, effectively an echo of cwd. If true, callers should ignore
-/// the title and keep the cwd-based folder name.
+/// PS1 window title, effectively an echo of cwd. If true, callers should use
+/// the cwd-based folder name.
 ///
 /// Recognized patterns:
 /// * Title equals the cwd absolute path itself (`/tmp/foo`).
@@ -92,7 +92,7 @@ pub fn terminal_tab_title_for_cwd(cwd: Option<&Path>) -> String {
 ///
 /// Titles from external programs such as vi, codex, claude, or tmux, for
 /// example `vi src/main.rs` or `tmux: 0:bash*`, do not match this structure and
-/// pass through. Callers drop PS1 echoes but accept program titles.
+/// pass through. Callers normalize PS1 echoes but accept program titles.
 pub fn title_is_shell_cwd_echo(title: &str, cwd: &Path, home: Option<&Path>) -> bool {
     let title = title.trim_end();
     if title.is_empty() {
@@ -1303,7 +1303,8 @@ impl Pane {
     }
 
     /// Auto-rename a surface from an external title signal. User-locked titles,
-    /// empty or identical titles, and local shell cwd echoes are ignored.
+    /// empty or identical titles are ignored. Local shell cwd echoes restore
+    /// the folder name after a program exits without changing directory.
     pub fn set_surface_title_auto(
         &mut self,
         target: PaneId,
@@ -1316,7 +1317,7 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
-        if surface.title_locked || surface.title == new_title {
+        if surface.title_locked {
             return false;
         }
         // The `$HOME` lookup runs only after the surface is found and only for a
@@ -1324,8 +1325,11 @@ impl Pane {
         if let SurfaceKind::Terminal { cwd: Some(cwd), .. } = &surface.kind {
             let home = std::env::var_os("HOME").map(PathBuf::from);
             if title_is_shell_cwd_echo(&new_title, cwd, home.as_deref()) {
-                return false;
+                return normalize_unlocked_terminal_title(surface);
             }
+        }
+        if surface.title == new_title {
+            return false;
         }
         surface.title = new_title;
         true
