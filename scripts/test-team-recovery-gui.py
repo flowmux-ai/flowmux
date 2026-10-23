@@ -166,6 +166,9 @@ def main():
             return json.loads(result.stdout)
 
         def start(agent='codex', *extra):
+            # Fault cases are independent; shared quota behavior has its own GUI suite.
+            for cached in (h.root / 'state/flowmux/team-quota').glob('*.json'):
+                cached.unlink()
             return command('start', '--agent', agent, '--role', 'recovery fixture', '--cwd', str(h.root),
                            '--task-file', str(task), '--cli', args.cli, '--stall-timeout', '3', '--timeout', '15', *extra)
 

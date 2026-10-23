@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 mod claude;
 mod codex;
+pub(crate) mod team;
 
 pub(crate) use claude::canonical_source_id as canonical_claude_source_id;
 

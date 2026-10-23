@@ -3,7 +3,9 @@
 """Run and continue bounded provider tasks in visible Flowmux panes."""
 import argparse
 import fcntl
+import hashlib
 import json
+import math
 import os
 import signal
 from pathlib import Path
@@ -34,6 +36,107 @@ MODEL_ROUTES = {
 MODEL_ALIASES = {"sol": ("codex", "gpt-6.1-sol"), "terra": ("codex", "gpt-5.6-terra"),
                  "opus": ("claude", "opus"), "sonnet": ("claude", "sonnet"),
                  "sonet": ("claude", "sonnet")}
+USAGE_MAX_AGE = 300
+UNKNOWN_QUOTA_BACKOFF = 300
+
+
+def state_directory():
+    root = os.environ.get("XDG_STATE_HOME") or (
+        os.environ.get("XDG_DATA_HOME") or Path.home() / "Library/Application Support"
+        if sys.platform == "darwin" else Path.home() / ".local/state")
+    return Path(root).resolve() / "flowmux"
+
+
+def usage_identity(agent, env=None):
+    env = os.environ if env is None else env
+    key, default = {"codex": ("CODEX_HOME", ".codex"), "claude": ("CLAUDE_CONFIG_DIR", ".claude"),
+                    "gemini": ("GEMINI_CLI_HOME", "."), "agy": ("GEMINI_CLI_HOME", ".")}[agent]
+    profile = str(Path(env.get(key) or Path.home() / default).resolve())
+    return profile, agent + "-" + hashlib.sha256(profile.encode()).hexdigest()
+
+
+def observation(path, agent, profile):
+    try:
+        value = json.loads(path.read_text())
+        if (isinstance(value, dict) and value.get("schema") == 1
+                and value.get("agent") == agent and value.get("profile") == profile):
+            return value
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def finite_number(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def matching_scope(scope, agent, model):
+    if scope is None:
+        return True
+    if not isinstance(scope, str):
+        return False
+    scope = scope.lower().strip()
+    if scope in ("", "all", "all models", "codex", "claude code", "cli", "individual"):
+        return True
+    if agent == "claude":
+        return any(name in scope and name in model.lower() for name in ("opus", "sonnet", "haiku"))
+    return scope == model.lower()
+
+
+def usage_status(route, env=None):
+    agent, model = route["agent"], route["model"]
+    profile, key = usage_identity(agent, env)
+    now = time.time()
+    saved = observation(state_directory() / "team-usage" / (key + ".json"), agent, profile)
+    status = {"status": "unknown", "reason": "No current usage observation for this profile"}
+    collected = saved.get("collected_at")
+    if finite_number(collected) and 0 <= now - collected <= USAGE_MAX_AGE and not saved.get("error"):
+        windows = saved.get("windows")
+        relevant = [w for w in windows if isinstance(w, dict) and matching_scope(w.get("scope"), agent, model)
+                    and finite_number(w.get("used_percent")) and w["used_percent"] >= 0
+                    and (w.get("resets_at") is None or finite_number(w["resets_at"]) and w["resets_at"] > now)] \
+                   if isinstance(windows, list) else []
+        if relevant:
+            exhausted = [w for w in relevant if w["used_percent"] >= 100]
+            status = {"status": "exhausted" if exhausted else "available", "collected_at": collected,
+                      "reason": "Current usage observation", "remaining_percent": max(0, 100 - max(w["used_percent"] for w in relevant))}
+            if exhausted:
+                status["until"] = max(w.get("resets_at") or now + UNKNOWN_QUOTA_BACKOFF for w in exhausted)
+    elif finite_number(collected) and now - collected > USAGE_MAX_AGE:
+        status = {"status": "stale", "reason": "Usage observation is older than five minutes", "collected_at": collected}
+    cooldown = observation(state_directory() / "team-quota" / (key + ".json"), agent, profile)
+    if (finite_number(cooldown.get("until")) and cooldown["until"] > now
+            and finite_number(cooldown.get("recorded_at")) and cooldown["recorded_at"] <= now
+            and not (status["status"] == "available" and collected > cooldown["recorded_at"])):
+        return {"status": "exhausted", "reason": "Recent native quota error", "until": cooldown["until"]}
+    return status
+
+
+def remember_quota(manifest):
+    agent = manifest["agent"]
+    env = manifest.get("provider_env")
+    profile, key = usage_identity(agent, env)
+    directory = state_directory() / "team-quota"
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    now = time.time()
+    until = usage_status(manifest, env).get("until", now + UNKNOWN_QUOTA_BACKOFF)
+    path = directory / (key + ".json")
+    with (directory / (key + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        previous = observation(path, agent, profile)
+        if finite_number(previous.get("until")):
+            until = max(until, previous["until"])
+        write_json(path, {"schema": 1, "agent": agent, "profile": profile,
+                          "recorded_at": now, "until": until})
+
+
+def select_routes(args):
+    routes = route_plan(args)
+    usage = [{"agent": route["agent"], "model": route["model"], **usage_status(route)} for route in routes]
+    eligible = [route for route, state in zip(routes, usage) if state["status"] != "exhausted"]
+    if not eligible:
+        raise ValueError("All selected workers have known exhausted limits; no pane created: " + json.dumps(usage))
+    return eligible, usage
 
 
 def model_route(args):
@@ -71,9 +174,15 @@ def route_plan(args):
 
 
 def write_json(path, value):
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
-    temporary.replace(path)
+    # Shared quota records and job readers must never observe a partial write.
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix="." + path.name + ".", delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+            stream.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def flowmux(cli, socket, *args):
@@ -132,14 +241,12 @@ def start(args):
     task = args.task_file.read_text().strip()
     if not task or not args.role.strip():
         raise ValueError("Role and task must not be empty")
-    selection = model_route(args)
+    routes, usage = select_routes(args)
+    selection = {"complexity": args.complexity, **routes[0]}
     executable = shutil.which(selection["agent"])
     if executable is None:
         raise ValueError(f"{selection['agent']} is not installed/on PATH")
-    state_home = os.environ.get("XDG_STATE_HOME") or (
-        os.environ.get("XDG_DATA_HOME") or Path.home() / "Library/Application Support"
-        if sys.platform == "darwin" else Path.home() / ".local/state")
-    jobs = Path(state_home) / "flowmux/team-jobs"
+    jobs = state_directory() / "team-jobs"
     jobs.mkdir(mode=0o700, parents=True, exist_ok=True)
     # The saved terminal shell points here, so tmp cleanup must not remove it.
     job = Path(tempfile.mkdtemp(prefix="job-", dir=jobs))
@@ -158,7 +265,7 @@ def start(args):
                                                          ("GEMINI_CLI_HOME", "."))}},
                 "executables": {agent: shutil.which(agent) for agent in MODEL_ROUTES},
                 "fallback_on_quota": not args.no_fallback,
-                "routes": route_plan(args), "generation": 1, "assignment": str(job),
+                "routes": route_plan(args), "routing_usage": usage, "generation": 1, "assignment": str(job),
                 "max_attempts": getattr(args, "max_attempts", 4),
                 "stall_timeout": getattr(args, "stall_timeout", 180)}
     (job / "prompt.txt").write_text(worker_prompt(job, manifest))
@@ -943,7 +1050,8 @@ def next_route(manifest, attempts):
     exhausted = {a["agent"] for a in attempts if a.get("blocker_kind") == "quota"}
     return next((route for route in manifest["routes"]
                  if (route["agent"], route["model"]) not in used and route["agent"] not in exhausted
-                 and manifest["executables"].get(route["agent"])), None)
+                 and manifest["executables"].get(route["agent"])
+                 and usage_status(route, manifest.get("provider_env"))["status"] != "exhausted"), None)
 
 
 def managed_worker(job):
@@ -1002,6 +1110,11 @@ def managed_worker(job):
             state = monitor_managed(assignment, attempt, manifest, process, owned, streamed)
         attempts.append({"path": str(attempt), **{k: v for k, v in state.items() if k != "attempts"}})
         state.update(attempts=attempts, fallback_used=len(attempts) > 1)
+        if state.get("blocker_kind") == "quota":
+            try:
+                remember_quota(manifest)
+            except (OSError, ValueError) as error:
+                state["quota_cache_error"] = str(error)
         for name in ("answer.txt", "result.md"):
             if (attempt / name).exists():
                 shutil.copyfile(attempt / name, assignment / name)
@@ -1205,7 +1318,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "route":
-            print(json.dumps({**model_route(args), "alternatives": route_plan(args)[1:]}))
+            routes, usage = select_routes(args)
+            print(json.dumps({"complexity": args.complexity, **routes[0], "alternatives": routes[1:], "usage": usage}))
             return 0
         if args.command == "context":
             print(json.dumps(context(args)))

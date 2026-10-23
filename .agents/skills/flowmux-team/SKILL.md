@@ -70,8 +70,12 @@ length or role name. Start with the smallest tier that can meet its checks:
 | `complex` | Unclear root cause, cross-module design, concurrency, security or data-loss-sensitive review | GPT-6 Astra / high | Opus / high | Pro | Claude Opus / high |
 
 Pass `--complexity` on every start; use scope, expected work and uncertainty to
-choose it. `--agent auto` (the default) chooses an installed CLI, preferring Codex,
-then Claude, Gemini and agy. `--model sol|terra|opus|sonnet` accepts short names
+choose it. `--agent auto` (the default) chooses an eligible installed CLI, preferring
+Codex, then Claude, Gemini and agy. Latest matching-profile Claude/Codex usage
+observations exclude exhausted routes before a pane is created. Model-scoped
+limits only exclude matching models. With fallback enabled, this can also replace
+an explicitly selected exhausted provider; `--no-fallback` instead returns a
+diagnostic before launching. `--model sol|terra|opus|sonnet` accepts short names
 (`sonet` is also accepted); Terra maps to `gpt-5.6-terra`. Gemini CLI has no
 `--effort` flag; choose its model tier instead. agy's model IDs depend on account
 access; use `agy models` when choosing an override.
@@ -173,6 +177,21 @@ assignment. Available alternatives and their effort are recorded in the receipt;
 `route` previews them. A catalog or installed CLI does not prove remaining credit:
 the native provider enforces its current account limits. No account/credential
 rotation or provider-default changes are made.
+
+The existing Flowmux usage collector publishes credential-free observations under
+the state directory's `team-usage/`. `route` and launch receipts show `available`,
+`exhausted`, `stale` or `unknown` for each candidate. Only observations at most five
+minutes old, from the exact configuration root, affect initial selection; missing,
+failed, expired or unsupported observations retain native error-based fallback.
+No new account request is made by the helper. Refresh **AI Usage** to renew data.
+Gemini/agy currently have no preflight usage collector.
+
+Native quota errors are shared across jobs under `team-quota/`, scoped to the
+provider's configuration root. The hold lasts until a known reset, or five minutes
+when no reset is known. A newer available observation releases it early. Concurrent
+jobs update the record under a lock; profiles never borrow each other's limits.
+This reduces repeated failed launches, but cannot reserve quota against concurrent
+provider usage. Successful work and the native provider remain authoritative.
 
 `--stall-timeout` bounds absence of native transcript/stream progress (default
 180 seconds). Increase it for expected quiet reasoning or long tools. There is

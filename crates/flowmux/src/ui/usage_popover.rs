@@ -396,10 +396,13 @@ fn request_refresh(
         // `refreshing` is set, so a collector that never returns would strand the
         // popover forever. On timeout, deliver a synthetic failure so the state
         // machine always finishes and the user can refresh again.
-        let result = match tokio::time::timeout(REFRESH_DEADLINE, collect_all(home)).await {
+        let result = match tokio::time::timeout(REFRESH_DEADLINE, collect_all(home.clone())).await {
             Ok(refreshes) => refreshes,
             Err(_) => refresh_timeout_failure(),
         };
+        if let Err(error) = crate::usage::team::publish(&home, &result) {
+            tracing::warn!(%error, "could not publish Team usage observations");
+        }
         let _ = result_tx.send(result).await;
         // Wake the GTK main loop explicitly. On the macOS backend the main loop
         // parks in AppKit's `nextEventMatchingMask`, and async-channel readiness

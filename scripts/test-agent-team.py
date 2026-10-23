@@ -981,6 +981,9 @@ class ManagedTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='fm-managed-test-')
         self.addCleanup(self.temporary.cleanup)
         self.job = Path(self.temporary.name).resolve()
+        environment = patch.dict(os.environ, XDG_STATE_HOME=str(self.job / 'state'))
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def monitor_clock(self, *, timeout=0, progress=True, waiting=False):
         attempt = self.job / 'attempt-1'
@@ -1156,6 +1159,109 @@ class ManagedTests(unittest.TestCase):
             self.assertEqual(team.recover(self.job, 1), 1)
         self.assertEqual(calls, ['close-tab', 'tree', 'team-spawn'])
         self.assertEqual(json.loads((self.job / 'status.json').read_text())['blocker_kind'], 'recovery_failed')
+
+
+class UsageRoutingTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='fm-routing-test-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        environment = patch.dict(os.environ, XDG_STATE_HOME=str(self.root), CODEX_HOME=str(self.root / 'codex'),
+                                 CLAUDE_CONFIG_DIR=str(self.root / 'claude'))
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.clock = patch.object(team.time, 'time', return_value=10000)
+        self.now = self.clock.start()
+        self.addCleanup(self.clock.stop)
+        installed = patch.object(team.shutil, 'which', side_effect=lambda agent: '/bin/' + agent if agent in ('codex', 'claude') else None)
+        installed.start()
+        self.addCleanup(installed.stop)
+        self.route = dict(agent='codex', model='gpt-6.1-sol')
+        self.args = type('Args', (), dict(agent='auto', complexity='standard', model=None, effort=None, no_fallback=False))()
+
+    def snapshot(self, agent='codex', windows=None, **fields):
+        profile, key = team.usage_identity(agent)
+        directory = team.state_directory() / 'team-usage'
+        directory.mkdir(parents=True, exist_ok=True)
+        value = dict(schema=1, agent=agent, profile=profile, collected_at=10000,
+                     windows=windows if windows is not None else [dict(scope=None, used_percent=100, resets_at=11000)])
+        value.update(fields)
+        path = directory / (key + '.json')
+        team.write_json(path, value)
+        return path
+
+    def test_known_exhausted_provider_is_skipped_before_launch(self):
+        self.snapshot()
+        routes, observed = team.select_routes(self.args)
+        self.assertEqual(routes[0]['agent'], 'claude')
+        self.assertFalse(any(route['agent'] == 'codex' for route in routes))
+        self.assertEqual(observed[0]['status'], 'exhausted')
+        self.args.no_fallback = True
+        with self.assertRaisesRegex(ValueError, 'no pane created'):
+            team.select_routes(self.args)
+
+    def test_stale_unknown_wrong_profile_and_invalid_observations_do_not_block(self):
+        self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
+        for fields, expected in [(dict(collected_at=9600), 'stale'), (dict(profile='/another-account'), 'unknown'),
+                                 (dict(error='offline'), 'unknown'), (dict(collected_at=11000), 'unknown'),
+                                 (dict(windows='malformed'), 'unknown'), (dict(schema=2), 'unknown')]:
+            self.snapshot(**fields)
+            self.assertEqual(team.usage_status(self.route)['status'], expected)
+            self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+        self.snapshot().write_text('{truncated')
+        self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
+
+    def test_scoped_limits_only_block_the_relevant_claude_model(self):
+        self.snapshot('claude', [dict(scope='Sonnet', used_percent=100, resets_at=11000),
+                                 dict(scope=None, used_percent=40, resets_at=12000)])
+        self.assertEqual(team.usage_status(dict(agent='claude', model='sonnet'))['status'], 'exhausted')
+        self.assertEqual(team.usage_status(dict(agent='claude', model='opus'))['status'], 'available')
+        self.snapshot('claude', [dict(scope=None, used_percent=100, resets_at=11000)])
+        self.assertEqual(team.usage_status(dict(agent='claude', model='opus'))['status'], 'exhausted')
+
+    def test_expired_or_nonfinite_windows_are_not_current_exhaustion(self):
+        for window in [dict(scope=None, used_percent=100, resets_at=9999),
+                       dict(scope=None, used_percent=float('nan'), resets_at=11000),
+                       dict(scope=None, used_percent=True, resets_at=11000),
+                       dict(scope='Unknown model family', used_percent=100, resets_at=11000)]:
+            self.snapshot(windows=[window])
+            self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
+
+    def test_native_quota_is_shared_until_known_reset_even_after_usage_becomes_stale(self):
+        self.snapshot()
+        team.remember_quota(self.route)
+        self.now.return_value = 10400
+        self.assertEqual(team.usage_status(self.route)['until'], 11000)
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'claude')
+        self.now.return_value = 11001
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+
+    def test_unknown_quota_uses_bounded_backoff_and_does_not_cross_profiles(self):
+        team.remember_quota(self.route)
+        self.assertEqual(team.usage_status(self.route)['status'], 'exhausted')
+        self.assertEqual(team.usage_status(self.route, dict(CODEX_HOME=str(self.root / 'other')))['status'], 'unknown')
+        profile, key = team.usage_identity('codex')
+        saved = team.state_directory() / 'team-quota' / (key + '.json')
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        self.now.return_value = 10301
+        self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
+
+    def test_only_newer_available_usage_releases_a_native_quota_hold(self):
+        team.remember_quota(self.route)
+        self.snapshot(windows=[dict(scope=None, used_percent=25, resets_at=11000)], collected_at=9999)
+        self.assertEqual(team.usage_status(self.route)['status'], 'exhausted')
+        self.now.return_value = 10002
+        self.snapshot(windows=[dict(scope=None, used_percent=25, resets_at=11000)], collected_at=10001)
+        self.assertEqual(team.usage_status(self.route)['status'], 'available')
+
+    def test_concurrent_native_quota_records_remain_complete(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            list(workers.map(lambda _: team.remember_quota(self.route), range(12)))
+        self.assertEqual(team.usage_status(self.route)['status'], 'exhausted')
+        directory = team.state_directory() / 'team-quota'
+        self.assertEqual(len(list(directory.glob('*.json'))), 1)
+        self.assertFalse(list(directory.glob('.*')))
 
 
 if __name__ == '__main__':

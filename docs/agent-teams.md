@@ -247,6 +247,23 @@ agy. `--agent auto` selects an installed CLI. Explicit `--agent`, `--model` and
 accepted; Terra is `gpt-5.6-terra`. Gemini uses its model tier instead of an effort
 flag. `team.py route` previews the selection and alternatives without launching.
 
+Routing also consumes the existing GUI usage collector's credential-free,
+profile-scoped snapshots in the state directory's `team-usage/`. Current
+Claude/Codex observations exclude exhausted provider/model routes before pane
+creation; model-scoped limits do not block unrelated models. Missing, failed,
+expired or more-than-five-minute-old observations are explicitly unknown/stale
+and retain native error-based fallback. The helper adds no usage API requests.
+Refresh **AI Usage** to renew observations. Gemini/agy have no preflight usage
+collector yet. `route` and job receipts retain candidate usage decisions.
+
+When fallback is enabled, known exhaustion can replace an explicit provider before
+launch. With `--no-fallback`, it returns a diagnostic without creating a pane.
+Native quota errors also create a locked, atomic hold in `team-quota/` shared by
+jobs using the same provider configuration root. A known reset ends the hold;
+unknown resets use five minutes. A newer available observation releases it early.
+These are observations, not quota reservations; simultaneous provider work can
+still exhaust an account after selection.
+
 Native quota/capacity errors, unavailable models/clients, unexpected exits,
 malformed/failed reports and stalled attempts trigger bounded substitution.
 The default is at most four attempts, without repeating provider/model pairs;
@@ -282,6 +299,8 @@ Gemini/agy completion and exact-session follow-ups in isolated real PTYs.
 `test-skills-gui.py` also types native keys in another workspace across worker
 launch/completion; the GTK regression covers background nested splits and cleanup
 while the foreground pane is zoomed.
+`python3 scripts/test-team-usage-gui.py` exercises the real GUI usage collector,
+initial provider exclusion, quota holds across jobs and expiry in isolated panes.
 
 Assignments are copied into private job `task.txt` files. The interactive TUI
 receives a short file reference plus the result contract. Give workers relevant
