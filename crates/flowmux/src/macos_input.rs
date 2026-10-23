@@ -277,6 +277,10 @@ pub(crate) fn pointer(
     if !supported.as_bool() {
         return Err("this WebKit version cannot deliver native pointer motion".into());
     }
+    if !matches!(action, PointerAction::Hover) && !window.isKeyWindow() {
+        // Otherwise AppKit can consume the first click to activate the window.
+        window.makeKeyAndOrderFront(None);
+    }
     unsafe {
         let _: () = msg_send![web, _simulateMouseMove: &*motion];
     }

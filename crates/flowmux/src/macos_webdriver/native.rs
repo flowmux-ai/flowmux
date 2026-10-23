@@ -365,6 +365,9 @@ pub(crate) fn smoke() {
         assert!(Instant::now() < deadline);
         pump();
     }
+    other.activate().unwrap();
+    assert!(other.window.isKeyWindow());
+    assert!(!browser.window.isKeyWindow());
     // The production pointer path addresses its own NSWindow while another is key.
     crate::macos_input::pointer(
         &browser.web,
@@ -372,6 +375,7 @@ pub(crate) fn smoke() {
         NSPoint::new(30.0, 15.0),
     )
     .unwrap();
+    assert!(browser.window.isKeyWindow());
     let deadline = Instant::now() + Duration::from_secs(5);
     while browser.evaluate("document.activeElement.id").unwrap() != "field" {
         assert!(
