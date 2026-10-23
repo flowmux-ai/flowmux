@@ -269,6 +269,25 @@ async fn hover_completion_observes_css_when_the_page_stops_pointer_events() {
 }
 
 #[gtk::test]
+async fn hover_completion_handles_quirks_mode_without_pointer_events() {
+    let page = Page::new("<p>initial</p>").await;
+    page.pane.web_view.load_html(
+        "<title>quirks hover</title><button id=target disabled style='margin:80px'>Hover</button><script>window.addEventListener('pointermove',e=>e.stopImmediatePropagation(),true)</script>",
+        Some("file:///flowmux-test/"),
+    );
+    page.wait("document.title === 'quirks hover' && document.readyState === 'complete'")
+        .await;
+    assert_eq!(page.eval("document.compatMode").await, "BackCompat");
+    let result = page.pointer("#target", PointerAction::Hover).await;
+    assert_eq!(page.eval("target.matches('#target:hover')").await, "true");
+    assert_eq!(page.eval("target.matches(':hover')").await, "false");
+    assert!(
+        result.is_ok(),
+        "hover completion rejected a hovered element: {result:?}"
+    );
+}
+
+#[gtk::test]
 async fn snapshot_selectors_stay_unique_in_deeply_repeated_markup() {
     // Identical subtrees deeper than any fixed ancestor limit, with no ids.
     let nested = "<div><div><div><div><div><div><div><span><button>Go</button></span></div></div></div></div></div></div></div>";

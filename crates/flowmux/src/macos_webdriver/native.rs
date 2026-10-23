@@ -290,7 +290,7 @@ pub(crate) fn smoke() {
         pump();
     }
     browser
-        .evaluate("field.onpointermove=e=>{window.hoverTrusted=e.isTrusted;window.hoverDuringMove=field.matches(':hover')}")
+        .evaluate("field.onpointermove=e=>{window.hoverTrusted=e.isTrusted;window.hoverDuringMove=field.matches(':scope:hover')}")
         .unwrap();
     crate::macos_input::pointer(
         &browser.web,
@@ -300,14 +300,14 @@ pub(crate) fn smoke() {
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while browser
-        .evaluate("window.hoverTrusted === true && field.matches(':hover')")
+        .evaluate("window.hoverTrusted === true && field.matches(':scope:hover')")
         .unwrap()
         != true
     {
         assert!(
             Instant::now() < deadline,
             "native hover did not reach input: {}",
-            browser.evaluate("JSON.stringify({trusted:window.hoverTrusted,hoverDuringMove:window.hoverDuringMove,hover:field.matches(':hover'),focus:document.hasFocus(),rect:field.getBoundingClientRect()})").unwrap()
+            browser.evaluate("JSON.stringify({trusted:window.hoverTrusted,hoverDuringMove:window.hoverDuringMove,hover:field.matches(':scope:hover'),focus:document.hasFocus(),rect:field.getBoundingClientRect()})").unwrap()
         );
         pump();
     }

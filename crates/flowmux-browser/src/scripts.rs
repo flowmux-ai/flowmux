@@ -442,11 +442,12 @@ return await new Promise(resolve => {
     };
     const timer = setTimeout(() => finish('error: native pointer input completion timed out'), 10000);
     // Disabled controls and page handlers can suppress the pointer event while CSS still changes.
+    // :scope avoids the bare :hover quirk that excludes non-links in legacy pages.
     const hoverPoll = state.event === 'pointermove' ? setInterval(() => {
-        if (state.el.isConnected && state.el.matches(':hover')) finish('ok');
+        if (state.el.isConnected && state.el.matches(':scope:hover')) finish('ok');
     }, 25) : null;
     state.done = () => finish('ok');
-    if (state.received || (state.event === 'pointermove' && state.el.matches(':hover'))) state.done();
+    if (state.received || (state.event === 'pointermove' && state.el.matches(':scope:hover'))) state.done();
 });
 "#;
 
