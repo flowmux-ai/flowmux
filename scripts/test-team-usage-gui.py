@@ -41,8 +41,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gui', default=str(REPO / 'target/debug/flowmux'))
     parser.add_argument('--cli', default=str(REPO / 'target/debug/flowmuxctl'))
+    parser.add_argument('--protected-pid', type=int, action='append', default=[])
     args = parser.parse_args()
-    args.protected_pid = []
     h = fixture.Harness(args)
     for key in list(h.env):
         if key.startswith('CODEX_'):
@@ -57,6 +57,9 @@ def main():
         path.chmod(0o700)
     h.env['PATH'] = str(native) + os.pathsep + str(Path(args.cli).parent) + os.pathsep + os.defpath
     (h.root / 'behavior.json').write_text('{}')
+    options = h.root / 'config/flowmux/options.json'
+    options.parent.mkdir(parents=True)
+    options.write_text(json.dumps(dict(usage_bar_enabled=False, default_shell='/bin/sh')))
     usage = h.root / 'usage-behavior.json'
     usage.write_text(json.dumps(dict(used=100, reset=int(time.time()) + 3600)))
     task = h.root / 'task.txt'
@@ -75,6 +78,14 @@ def main():
         assert record['profile'] == str(h.root / 'codex'), record
         assert record['schema'] == 1 and 'tokens' not in record
         h.pass_check('Existing GUI usage collector publishes current profile-scoped limits without credentials')
+
+        # Startup failures retry at 5, 20 and 60 seconds. Let them settle,
+        # then cross the first 150-second periodic tick without a Team workspace.
+        time.sleep(110)
+        settled = observed(100)['collected_at']
+        time.sleep(55)
+        assert observed(100)['collected_at'] == settled
+        h.pass_check('Disabled usage bar without a Team workspace does not keep polling after startup retries')
 
         workspace = h.rpc(socket, 'workspace_create', name='Team usage', root=str(h.root), team=True)['workspace_created']['id']
         source = h.workspace(socket, workspace)['panes'][0]['id']
@@ -105,7 +116,9 @@ def main():
         h.pass_check('Known exhausted Codex is skipped before any worker runs; no-fallback creates no pane')
 
         usage.write_text(json.dumps(dict(used=20, reset=int(time.time()) + 3600)))
-        fixture.wait_for(lambda: observed(20), 'new available usage is published', timeout=45)
+        fixture.wait_for(lambda: observed(20), 'background Team refreshes usage with its bar disabled', timeout=185)
+        assert not json.loads(options.read_text())['usage_bar_enabled']
+        h.pass_check('Disabled usage bar still refreshes the existing collector for a background Team workspace')
         (h.root / 'behavior.json').write_text(json.dumps({'codex': 'quota'}))
         receipt = launch()
         assert receipt['agent'] == 'codex'
@@ -121,7 +134,7 @@ def main():
 
         quotas = h.root / 'state/flowmux/team-quota'
         usage.write_text(json.dumps(dict(used=30, reset=int(time.time()) + 3600)))
-        fixture.wait_for(lambda: observed(30), 'fresh usage releases the old hold', timeout=95)
+        fixture.wait_for(lambda: observed(30), 'fresh usage releases the old hold', timeout=185)
         (h.root / 'behavior.json').write_text('{}')
         receipt = launch()
         assert receipt['agent'] == 'codex' and receipt['routing_usage'][0]['status'] == 'available', receipt

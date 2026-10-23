@@ -6,6 +6,7 @@ use crate::usage::{
 };
 use chrono::{DateTime, Local, Utc};
 use flowmux_config::options::UsageBarPins;
+use flowmux_core::WorkspaceId;
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -24,6 +25,7 @@ pub(crate) struct UsagePopover {
     cards: gtk::Box,
     refresh_button: gtk::Button,
     spinner: gtk::Spinner,
+    team_workspaces: Rc<RefCell<HashSet<WorkspaceId>>>,
 }
 
 type PinsChanged = Box<dyn Fn(UsageBarPins)>;
@@ -291,16 +293,19 @@ impl UsagePopover {
 
         let toggle_weak = show_bar.downgrade();
         let bar_weak = Rc::downgrade(&bar);
+        let team_workspaces = Rc::new(RefCell::new(HashSet::new()));
+        let teams_for_refresh = team_workspaces.clone();
         gtk::glib::timeout_add_seconds_local(BAR_REFRESH_SECONDS, move || {
             let (Some(toggle), Some(bar)) = (toggle_weak.upgrade(), bar_weak.upgrade()) else {
                 return gtk::glib::ControlFlow::Break;
             };
-            if toggle.is_active() {
+            // Team routing consumes usage observations even when the bar is hidden.
+            if toggle.is_active() || !teams_for_refresh.borrow().is_empty() {
                 // The periodic refresh must not be postponed by the popover
                 // cache throttle; the in-flight guard still prevents overlap.
                 request_refresh(&state, true, &tokio_handle, &result_tx);
                 // Render retained values while the refresh is in flight.
-                bar.render(&state.borrow(), true);
+                bar.render(&state.borrow(), toggle.is_active());
             }
             gtk::glib::ControlFlow::Continue
         });
@@ -313,6 +318,16 @@ impl UsagePopover {
             cards,
             refresh_button,
             spinner,
+            team_workspaces,
+        }
+    }
+
+    pub(crate) fn set_team_workspace(&self, id: WorkspaceId, team: bool) {
+        let mut workspaces = self.team_workspaces.borrow_mut();
+        if team {
+            workspaces.insert(id);
+        } else {
+            workspaces.remove(&id);
         }
     }
 
@@ -766,6 +781,23 @@ pub(crate) mod tests {
         assert_eq!(delays, [Some(5), Some(20), Some(60), None, None]);
         assert_eq!(next_retry(false, attempt), (None, 0));
         assert_eq!(next_retry(true, 0), (Some(5), 1));
+    }
+
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(crate) fn team_refresh_tracks_all_workspaces_without_enabling_the_bar() {
+        let usage = UsagePopover::new(None);
+        let first = WorkspaceId::new();
+        let second = WorkspaceId::new();
+        usage.set_team_workspace(first, true);
+        usage.set_team_workspace(first, true);
+        usage.set_team_workspace(second, true);
+        assert_eq!(usage.team_workspaces.borrow().len(), 2);
+        usage.set_team_workspace(first, false);
+        assert!(!usage.team_workspaces.borrow().is_empty());
+        usage.set_team_workspace(second, false);
+        assert!(usage.team_workspaces.borrow().is_empty());
+        assert!(!usage.show_bar.is_active());
+        assert!(!usage.bar.root.is_visible());
     }
 
     #[test]

@@ -1007,7 +1007,7 @@ class ManagedTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400):
+    def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400, tool=False):
         attempt = self.job / 'attempt-1'
         attempt.mkdir()
         path = self.job / 'native.jsonl'
@@ -1016,7 +1016,9 @@ class ManagedTests(unittest.TestCase):
         manifest = dict(agent='codex', model='chosen', effort=None, pane='worker', surface='tab',
                         generation=1, timeout=timeout, stall_timeout=180, transcript=str(path))
         clock = [0]
-        def native(path, manifest):
+        def native(path, manifest, pending_tools=None):
+            if tool and pending_tools is not None:
+                pending_tools.add('quiet-tool')
             if progress:
                 with path.open('a') as stream:
                     stream.write('native progress\n')
@@ -1045,6 +1047,111 @@ class ManagedTests(unittest.TestCase):
         state = self.monitor_clock(progress=False)
         self.assertEqual(state['blocker_kind'], 'stalled')
         self.assertIn(state['blocker_kind'], team.RECOVERABLE)
+
+    def test_quiet_native_tool_gets_bounded_grace(self):
+        self.assertEqual(self.monitor_clock(progress=False, tool=True)['state'], 'completed')
+
+    def test_hung_native_tool_still_recovers(self):
+        state = self.monitor_clock(progress=False, tool=True, complete_at=2000)
+        self.assertEqual(state['blocker_kind'], 'stalled')
+        self.assertEqual(state['pending_tools'], 1)
+
+    def test_tool_grace_does_not_extend_explicit_budget(self):
+        state = self.monitor_clock(timeout=180, progress=False, tool=True)
+        self.assertEqual(state['blocker_kind'], 'time_budget')
+
+    def test_stream_exit_reloads_final_events_before_classification(self):
+        attempt = self.job / 'attempt-1'
+        attempt.mkdir()
+        output = attempt / 'stdout.jsonl'
+        (attempt / 'stderr.txt').touch()
+        manifest = dict(agent='gemini', model='flash', effort=None, pane='worker', surface='tab',
+                        generation=1, timeout=0, stall_timeout=180)
+        for exit_on in (1, 2):
+            for error in (False, True):
+                with self.subTest(exit_on=exit_on, error=error):
+                    output.write_text('')
+                    team.write_json(self.job / 'status.json', dict(state='pending'))
+                    class Process:
+                        pid = 123
+                        returncode = 0
+                        polls = 0
+                        def poll(self):
+                            self.polls += 1
+                            if self.polls < exit_on:
+                                return None
+                            if self.polls == exit_on:
+                                events = [dict(type='init', session_id='exact')]
+                                if error:
+                                    events.append(dict(type='error', code='permission_denied', message='model_not_found'))
+                                else:
+                                    events.append(dict(type='message', role='assistant', content=json.dumps(dict(task_status='completed', report='done'))))
+                                events.append(dict(type='result', status='error' if error else 'success'))
+                                output.write_text(''.join(json.dumps(e) + '\n' for e in events))
+                            return 0
+                    with patch.object(team, 'owned_processes', return_value={}), \
+                            patch.object(team, 'managed_pane', return_value={}), \
+                            patch.object(team.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+                        state = team.monitor_managed(self.job, attempt, manifest, Process(), {}, True)
+                    self.assertEqual(state['state'], 'blocked' if error else 'completed')
+                    if error:
+                        self.assertEqual(state['blocker_kind'], 'input_required')
+
+    def test_native_tool_tracking_uses_matching_ids_and_turn_boundaries(self):
+        path = self.job / 'tools.jsonl'
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            with self.subTest(agent=agent):
+                if agent == 'codex':
+                    prompt = dict(type='response_item', payload=dict(role='user', content='FLOWMUX_TEAM_JOB:mine'))
+                    start = lambda key: dict(type='response_item', payload=dict(type='function_call', call_id=key, name='exec_command'))
+                    end = lambda key: dict(type='response_item', payload=dict(type='function_call_output', call_id=key, output='done'))
+                elif agent == 'claude':
+                    prompt = dict(type='user', sessionId='exact', message=dict(content='FLOWMUX_TEAM_JOB:mine'))
+                    start = lambda key: dict(type='assistant', message=dict(content=[dict(type='tool_use', id=key, name='Bash')]))
+                    end = lambda key: dict(type='user', message=dict(content=[dict(type='tool_result', tool_use_id=key, content='done')]))
+                elif agent == 'gemini':
+                    prompt = dict(type='init', session_id='exact')
+                    start = lambda key: dict(type='tool_use', tool_id=key, tool_name='run_shell_command')
+                    end = lambda key: dict(type='tool_result', tool_id=key, status='success')
+                else:
+                    prompt = dict(event='init', conversation_id='exact')
+                    start = lambda key: dict(event='step_update', step_update=dict(step_type='tool', step_index=key, state='ACTIVE'))
+                    end = lambda key: dict(event='step_update', step_update=dict(step_type='tool', step_index=key, state='DONE'))
+                events = [prompt, start('a'), start('b'), end('a')]
+                pending = set()
+                def collect():
+                    path.write_text(''.join(json.dumps(e) + '\n' for e in events))
+                    if agent in ('codex', 'claude'):
+                        team.transcript_report(path, dict(agent=agent, token='mine'), pending)
+                    else:
+                        team.native_stream(path, agent, pending)
+                collect()
+                self.assertEqual(pending, {'b'})
+                events.append(end('b'))
+                collect()
+                self.assertEqual(pending, set())
+                if agent in ('codex', 'claude'):
+                    events[:] = [start('old'), prompt, end('old')]
+                    collect()
+                    self.assertEqual(pending, set())
+
+    def test_agy_failed_or_cancelled_tools_release_quiet_grace(self):
+        path = self.job / 'agy.jsonl'
+        for state in ('ERROR', 'CANCELED', 'CANCELLED', 'HALTED', 'INTERRUPTED'):
+            with self.subTest(state=state):
+                events = [dict(event='step_update', step_update=dict(step_type='tool', step_index=3, state=status))
+                          for status in ('ACTIVE', state)]
+                path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+                pending = set()
+                team.native_stream(path, 'agy', pending)
+                self.assertFalse(pending)
+
+    def test_retired_model_diagnostic_cannot_exclude_the_whole_client(self):
+        for text in ('Model X is no longer supported. Click here.',
+                     'Model X is no longer supported by this CLI.'):
+            self.assertEqual(team.native_failure(text), 'model_unavailable')
+        self.assertEqual(team.native_failure('This CLI is no longer supported.'), 'client_unavailable')
+        self.assertEqual(team.native_failure('Requests decline because API v1 is no longer supported.'), 'provider_error')
 
     def test_input_wait_pauses_time_budget_and_stall_deadline(self):
         self.assertEqual(self.monitor_clock(timeout=200, waiting=(0, 300))['state'], 'completed')
@@ -1089,10 +1196,11 @@ class ManagedTests(unittest.TestCase):
                       dict(error=dict(code='invalid_api_key'), message='unsupported_client'),
                       dict(status='UNAUTHENTICATED', response='Usage limit reached')]:
             self.assertEqual(team.native_failure(error), 'input_required')
-        self.assertEqual(team.native_failure(dict(code='model_not_found')), 'unavailable')
+        self.assertEqual(team.native_failure(dict(code='model_not_found')), 'model_unavailable')
+        self.assertEqual(team.native_failure(dict(code='unsupported_client')), 'client_unavailable')
         self.assertEqual(team.native_failure(dict(code='resource_exhausted')), 'quota')
         self.assertEqual(team.native_failure(dict(code='usage_limit_exceeded', message='Contact authentication support')), 'quota')
-        self.assertEqual(team.native_failure(dict(code='model_not_found', message='Check account permissions')), 'unavailable')
+        self.assertEqual(team.native_failure(dict(code='model_not_found', message='Check account permissions')), 'model_unavailable')
 
     def test_model_aliases_and_available_alternatives(self):
         for alias, (provider, model) in team.MODEL_ALIASES.items():
@@ -1116,6 +1224,8 @@ class ManagedTests(unittest.TestCase):
         self.assertIsNone(team.next_route(manifest, [attempt, dict(routes[2], blocker_kind='quota')]))
         attempt['blocker_kind'] = 'unavailable'
         self.assertEqual(team.next_route(manifest, [attempt]), routes[1])
+        attempt['blocker_kind'] = 'client_unavailable'
+        self.assertEqual(team.next_route(manifest, [attempt]), routes[2])
 
     def test_google_providers_require_native_final_results(self):
         path = self.job / 'stdout.jsonl'
@@ -1266,6 +1376,48 @@ class UsageRoutingTests(unittest.TestCase):
         self.args.no_fallback = True
         with self.assertRaisesRegex(ValueError, 'no pane created'):
             team.select_routes(self.args)
+
+    def test_model_failure_is_shared_but_other_models_remain_eligible(self):
+        team.remember_unavailable(self.route, 'model_unavailable')
+        routes, observed = team.select_routes(self.args)
+        self.assertEqual(routes[0]['agent'], 'claude')
+        self.assertEqual(observed[0]['status'], 'unavailable')
+        self.assertTrue(any(r['model'] == 'gpt-5.6-terra' for r in routes))
+        self.args.no_fallback = True
+        with self.assertRaisesRegex(ValueError, 'no pane created'):
+            team.select_routes(self.args)
+
+    def test_client_failure_excludes_all_models_and_expires(self):
+        team.remember_unavailable(self.route, 'client_unavailable')
+        self.assertFalse(any(r['agent'] == 'codex' for r in team.select_routes(self.args)[0]))
+        manifest = dict(routes=team.route_plan(self.args), max_attempts=4,
+                        executables={'codex': '/codex', 'claude': '/claude'})
+        self.assertEqual(team.next_route(manifest, [])['agent'], 'claude')
+        self.now.return_value = 10301
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+
+    def test_unavailable_does_not_cross_profiles_or_cache_other_failures(self):
+        for kind in ('input_required', 'provider_error', 'stalled', 'quota'):
+            team.remember_unavailable(self.route, kind)
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+        team.remember_unavailable(self.route, 'client_unavailable')
+        with patch.dict(os.environ, CODEX_HOME=str(self.root / 'other-profile')):
+            self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'claude')
+
+    def test_concurrent_unavailable_records_are_complete_and_malformed_ones_ignored(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            list(workers.map(lambda _: team.remember_unavailable(self.route, 'model_unavailable'), range(12)))
+        paths = list((team.state_directory() / 'team-unavailable').glob('*.json'))
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(json.loads(paths[0].read_text())['model'], self.route['model'])
+        saved = paths[0].read_text()
+        for fields in (dict(recorded_at=11000), dict(recorded_at=float('nan')), dict(model='other'), dict(profile='/other')):
+            paths[0].write_text(json.dumps({**json.loads(saved), **fields}))
+            self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
+        paths[0].write_text('{truncated')
+        self.assertEqual(team.select_routes(self.args)[0][0]['agent'], 'codex')
 
     def test_stale_unknown_wrong_profile_and_invalid_observations_do_not_block(self):
         self.assertEqual(team.usage_status(self.route)['status'], 'unknown')

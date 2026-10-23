@@ -181,10 +181,12 @@ rotation or provider-default changes are made.
 
 The existing Flowmux usage collector publishes credential-free observations under
 the state directory's `team-usage/`. `route` and launch receipts show `available`,
-`exhausted`, `stale` or `unknown` for each candidate. Only observations at most five
+`exhausted`, `unavailable`, `stale` or `unknown` for each candidate. Only observations at most five
 minutes old, from the exact configuration root, affect initial selection; missing,
 failed, expired or unsupported observations retain native error-based fallback.
 No new account request is made by the helper. Refresh **AI Usage** to renew data.
+The existing collector also refreshes while a Team workspace exists, even with
+the usage bar hidden; hiding the bar controls display, not Team routing freshness.
 Gemini/agy currently have no preflight usage collector.
 
 Native quota errors are shared across jobs under `team-quota/`, scoped to the
@@ -196,8 +198,20 @@ jobs update the record under a lock; profiles never borrow each other's limits.
 This reduces repeated failed launches, but cannot reserve quota against concurrent
 provider usage. Successful work and the native provider remain authoritative.
 
+Native `model_not_found` and `unsupported_client` failures are shared under
+`team-unavailable/` for five minutes, scoped to the provider configuration root.
+A missing model excludes only that model; an unsupported client excludes all
+models of that provider. Other profiles remain eligible. Expiry allows a retry,
+including after a client update. Authentication/permission errors are never cached
+as unavailability. `route` reports these holds before a pane is created.
+
 `--stall-timeout` bounds absence of native transcript/stream progress (default
-180 seconds). Increase it for expected quiet reasoning or long tools. There is
+180 seconds). Matching native tool start/result IDs grant up to five times this
+quiet interval while a tool is pending (15 minutes by default), without resetting
+the clock on polling. Codex/Claude tool calls, Gemini tool events and agy tool
+steps supply this evidence; a working label or live process alone does not.
+Hung tools still reach the extended stall deadline. Increase `--stall-timeout`
+for longer expected quiet tools or reasoning. There is
 no total time limit by default (`--timeout 0`), so continued progress can outlive
 five minutes. An explicit positive `--timeout` bounds an attempt; expiry is
 `time_budget`, closes the owned worker and stops without a replacement. It is

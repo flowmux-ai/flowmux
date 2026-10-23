@@ -2071,6 +2071,10 @@ impl WindowController {
     }
 
     fn render_workspace_with_activation(&self, ws: &Workspace, activate: bool) {
+        self.sidebar.usage.set_team_workspace(
+            ws.id,
+            matches!(ws.location, flowmux_core::WorkspaceLocation::Team { .. }),
+        );
         if activate {
             self.clear_pane_zoom();
         }
@@ -2095,6 +2099,10 @@ impl WindowController {
     }
 
     pub fn rerender_workspace(&self, ws: &Workspace) {
+        self.sidebar.usage.set_team_workspace(
+            ws.id,
+            matches!(ws.location, flowmux_core::WorkspaceLocation::Team { .. }),
+        );
         self.preserve_ssh_channels(ws.id);
         let name = ws.id.to_string();
         let activate = self.stack.visible_child_name().as_deref() == Some(name.as_str());
@@ -2539,6 +2547,7 @@ impl WindowController {
     /// Drop the workspace's stack page entirely (used when its last
     /// surface is closed).
     pub fn drop_workspace(&self, id: WorkspaceId) {
+        self.sidebar.usage.set_team_workspace(id, false);
         let (closing_surfaces, closing_panes) = {
             let registry = self.pane_registry.borrow();
             (

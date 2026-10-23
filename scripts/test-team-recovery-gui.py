@@ -52,10 +52,34 @@ def save(event):
         stream.write(json.dumps(event) + '\n')
 def emit(event):
     print(json.dumps(event), flush=True)
+def run_tool():
+    if failure not in ('quiet_tool', 'hung_tool', 'failed_tool'):
+        return
+    def tool(active):
+        if agent == 'codex':
+            save({'type': 'response_item', 'payload': {'type': 'function_call' if active else 'function_call_output',
+                  'call_id': 'quiet', 'name': 'exec_command'}})
+        elif agent == 'claude':
+            block = {'type': 'tool_use', 'id': 'quiet', 'name': 'Bash'} if active else {'type': 'tool_result', 'tool_use_id': 'quiet', 'content': 'done'}
+            save({'type': 'assistant' if active else 'user', 'message': {'content': [block]}})
+        elif agent == 'gemini':
+            emit({'type': 'tool_use' if active else 'tool_result', 'tool_id': 'quiet', 'tool_name': 'run_shell_command'})
+        else:
+            emit({'event': 'step_update', 'step_update': {'step_type': 'tool', 'step_index': 1, 'state': 'ACTIVE' if active else 'DONE'}})
+    tool(True)
+    if failure == 'failed_tool':
+        emit({'event': 'step_update', 'step_update': {'step_type': 'tool', 'step_index': 1, 'state': 'ERROR'}})
+        time.sleep(120)
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(' + ('120' if failure == 'hung_tool' else '6') + ')'])
+    evidence['child'] = child.pid
+    (root / (token + '-process.json')).write_text(json.dumps(evidence))
+    child.wait()
+    tool(False)
 while True:
     token = re.search(r'FLOWMUX_TEAM_JOB:([^\s]+)', prompt)[1]
     behavior = json.loads((root / 'behavior.json').read_text())
     failure = behavior.get(agent)
+    unavailable = {'model_unavailable': 'model_not_found', 'client_unavailable': 'unsupported_client'}.get(failure)
     evidence = {'argv': sys.argv, 'pid': os.getpid(), 'session': session, 'token': token, 'started': time.monotonic()}
     if failure in ('quota', 'stalled', 'crash', 'invalid_report', 'provider_error'):
         child = subprocess.Popen([sys.executable, '-c', 'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(120)'])
@@ -70,6 +94,7 @@ while True:
             save({'type': 'user', 'sessionId': session, 'message': {'content': prompt}})
         print('WORKING ' + agent, flush=True)
         time.sleep(.6)
+        run_tool()
         if failure == 'stalled':
             time.sleep(120)
         if failure == 'crash':
@@ -86,12 +111,17 @@ while True:
                 final = {'type': 'error', 'codex_error_info': 'usage_limit_exceeded' if failure == 'quota' else 'server_overloaded', 'message': failure}
             if failure == 'auth':
                 final = {'type': 'error', 'codex_error_info': 'permission_denied', 'message': 'Usage limit reached; model_not_found'}
+            if unavailable:
+                final = {'type': 'error', 'codex_error_info': unavailable, 'message': unavailable}
             save({'type': 'event_msg', 'payload': final})
         else:
             final = {'type': 'assistant', 'message': {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': answer}]}}
             if failure == 'auth':
                 final.update(isApiErrorMessage=True, error='authentication_error')
                 final['message']['content'][0]['text'] = 'Usage limit reached; model_not_found'
+            if unavailable:
+                final.update(isApiErrorMessage=True, error=unavailable)
+                final['message']['content'][0]['text'] = unavailable
             save(final)
         print('READY ' + answer, flush=True)
         prompt = sys.stdin.readline()
@@ -99,8 +129,13 @@ while True:
             break
     elif agent == 'gemini':
         emit({'type': 'init', 'session_id': session})
+        run_tool()
         if failure == 'auth':
             emit({'type': 'error', 'code': 'permission_denied', 'message': 'Usage limit reached; model_not_found'})
+            emit({'type': 'result', 'status': 'error'})
+            break
+        if unavailable:
+            emit({'type': 'error', 'code': unavailable, 'message': unavailable})
             emit({'type': 'result', 'status': 'error'})
             break
         emit({'type': 'message', 'role': 'assistant', 'content': answer})
@@ -110,9 +145,14 @@ while True:
         break
     else:
         emit({'event': 'init', 'conversation_id': session})
+        run_tool()
         if failure == 'auth':
             emit({'event': 'result', 'result': {'status': 'ERROR', 'code': 'invalid_api_key',
                   'conversation_id': session, 'response': 'Usage limit reached; model_not_found'}})
+            break
+        if unavailable:
+            emit({'event': 'result', 'result': {'status': 'ERROR', 'code': unavailable,
+                  'conversation_id': session, 'response': unavailable}})
             break
         emit({'event': 'step_update', 'step_update': {'state': 'DONE', 'text_delta': answer}})
         time.sleep(1)
@@ -179,10 +219,12 @@ def main():
             assert result.returncode == 0, result.stdout + result.stderr
             return json.loads(result.stdout)
 
-        def start(agent='codex', *extra):
-            # Fault cases are independent; shared quota behavior has its own GUI suite.
-            for cached in (h.root / 'state/flowmux/team-quota').glob('*.json'):
-                cached.unlink()
+        def start(agent='codex', *extra, preserve_failures=False):
+            # Keep unrelated fault cases independent of shared routing holds.
+            if not preserve_failures:
+                for directory in ('team-quota', 'team-unavailable'):
+                    for cached in (h.root / 'state/flowmux' / directory).glob('*.json'):
+                        cached.unlink()
             return command('start', '--agent', agent, '--role', 'recovery fixture', '--cwd', str(h.root),
                            '--task-file', str(task), '--cli', args.cli, '--stall-timeout', '3', '--timeout', '15', *extra)
 
@@ -231,6 +273,53 @@ def main():
             fixture.wait_for(lambda: typed in h.screen(socket, foreground_pane), 'native foreground input after recovery')
             h.pass_check(f'{failure}: old process tree and pane removed before replacement; foreground preserved')
             h.rpc(socket, 'pane_close', pane=state['pane'])
+
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            (h.root / 'behavior.json').write_text(json.dumps({agent: 'quiet_tool'}))
+            receipt = start(agent, '--stall-timeout', '2')
+            state = finished(receipt)
+            assert state['state'] == 'completed' and not state['fallback_used'], state
+            assert state['pane'] == receipt['pane'] and not state['closed_panes'], state
+            assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+            h.pass_check(f'{agent}: a native tool working silently past the stall deadline keeps its pane and completes')
+            h.rpc(socket, 'pane_close', pane=state['pane'])
+
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'hung_tool'}))
+        receipt = start('codex', '--stall-timeout', '1', '--timeout', '0')
+        state = finished(receipt)
+        assert state['state'] == 'completed' and state['agent'] == 'claude', state
+        assert state['attempts'][0]['blocker_kind'] == 'stalled' and receipt['pane'] in state['closed_panes'], state
+        evidence = json.loads((h.root / (receipt['token'] + '-process.json')).read_text())
+        fixture.wait_for(lambda: stopped(evidence['pid']) and stopped(evidence['child']), 'hung native tool is stopped')
+        h.pass_check('Hung native tools exhaust bounded grace, stop and close their pane before replacement')
+        h.rpc(socket, 'pane_close', pane=state['pane'])
+
+        (h.root / 'behavior.json').write_text(json.dumps({'agy': 'failed_tool'}))
+        receipt = start('agy', '--stall-timeout', '2', '--timeout', '0')
+        state = finished(receipt)
+        first = state['attempts'][0]
+        assert state['state'] == 'completed' and first['blocker_kind'] == 'stalled', state
+        assert first['pending_tools'] == 0 and first['stall_timeout'] == 2, state
+        assert receipt['pane'] in state['closed_panes'], state
+        h.pass_check('Failed agy tools release grace so a subsequent stall uses the normal deadline')
+        h.rpc(socket, 'pane_close', pane=state['pane'])
+
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            for kind in ('model_unavailable', 'client_unavailable'):
+                (h.root / 'behavior.json').write_text(json.dumps({agent: kind}))
+                receipt = start(agent)
+                state = finished(receipt)
+                assert state['state'] == 'completed' and state['attempts'][0]['blocker_kind'] == kind, state
+                assert receipt['pane'] in state['closed_panes'], state
+                h.rpc(socket, 'pane_close', pane=state['pane'])
+                (h.root / 'behavior.json').write_text('{}')
+                next_job = start(agent, preserve_failures=True)
+                assert next_job['agent'] != agent, next_job
+                state = finished(next_job)
+                assert state['state'] == 'completed' and len(state['attempts']) == 1, state
+                assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+                h.pass_check(f'{agent}: {kind} is shared with the next job before any failed worker launches')
+                h.rpc(socket, 'pane_close', pane=state['pane'])
 
         (native / 'codex').write_text('#!/missing/flowmux-test-interpreter\n')
         receipt = start()

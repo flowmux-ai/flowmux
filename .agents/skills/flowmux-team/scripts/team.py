@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import signal
 from pathlib import Path
 import shlex
@@ -38,6 +39,8 @@ MODEL_ALIASES = {"sol": ("codex", "gpt-6.1-sol"), "terra": ("codex", "gpt-5.6-te
                  "sonet": ("claude", "sonnet")}
 USAGE_MAX_AGE = 300
 UNKNOWN_QUOTA_BACKOFF = 300
+UNAVAILABLE_BACKOFF = 300
+TOOL_STALL_MULTIPLIER = 5
 
 
 def state_directory():
@@ -143,12 +146,43 @@ def remember_quota(manifest):
                           "recorded_at": now, "until": until})
 
 
+def unavailable_path(agent, model, env=None):
+    profile, key = usage_identity(agent, env)
+    scope = hashlib.sha256(model.encode()).hexdigest() if model is not None else "client"
+    return profile, state_directory() / "team-unavailable" / (key + "-" + scope + ".json")
+
+
+def remember_unavailable(manifest, kind):
+    if kind not in ("model_unavailable", "client_unavailable"):
+        return
+    model = manifest["model"] if kind == "model_unavailable" else None
+    profile, path = unavailable_path(manifest["agent"], model, manifest.get("provider_env"))
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        write_json(path, {"schema": 1, "agent": manifest["agent"], "profile": profile,
+                          "model": model, "recorded_at": time.time()})
+
+
+def route_status(route, env=None):
+    for model in (None, route["model"]):
+        profile, path = unavailable_path(route["agent"], model, env)
+        saved = observation(path, route["agent"], profile)
+        recorded = saved.get("recorded_at")
+        if ("model" in saved and saved["model"] == model and finite_number(recorded)
+                and 0 <= time.time() - recorded < UNAVAILABLE_BACKOFF):
+            return {"status": "unavailable", "reason": "Recent native " +
+                    ("unsupported-client error" if model is None else "model-not-found error"),
+                    "until": recorded + UNAVAILABLE_BACKOFF}
+    return usage_status(route, env)
+
+
 def select_routes(args):
     routes = route_plan(args)
-    usage = [{"agent": route["agent"], "model": route["model"], **usage_status(route)} for route in routes]
-    eligible = [route for route, state in zip(routes, usage) if state["status"] != "exhausted"]
+    usage = [{"agent": route["agent"], "model": route["model"], **route_status(route)} for route in routes]
+    eligible = [route for route, state in zip(routes, usage) if state["status"] not in ("exhausted", "unavailable")]
     if not eligible:
-        raise ValueError("All selected workers have known exhausted limits; no pane created: " + json.dumps(usage))
+        raise ValueError("All selected workers have exhausted limits or are unavailable; no pane created: " + json.dumps(usage))
     return eligible, usage
 
 
@@ -395,13 +429,20 @@ def task_report(answer):
     return value["task_status"], value["report"]
 
 
-def transcript_report(path, manifest):
+def update_tool(pending, identity, active):
+    if isinstance(identity, (str, int)) and str(identity):
+        (pending.add if active else pending.discard)(str(identity))
+
+
+def transcript_report(path, manifest, pending_tools=None):
     """Accept only a completed turn following this job's exact user prompt marker."""
     marker = "FLOWMUX_TEAM_JOB:" + manifest["token"]
     matched = False
     answer = None
     session = manifest.get("session_id")
     blocker = None
+    pending_tools = set() if pending_tools is None else pending_tools
+    pending_tools.clear()
     offset = manifest.get("transcript_offset", 0)
     with path.open("rb") as stream:
         if os.fstat(stream.fileno()).st_size < offset:
@@ -427,6 +468,9 @@ def transcript_report(path, manifest):
                 matched = True
             elif user and matched:
                 raise ValueError("Another user prompt interrupted the tracked turn")
+            elif matched and event.get("type") == "response_item" and payload.get("type") in (
+                    "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"):
+                update_tool(pending_tools, payload.get("call_id"), not payload["type"].endswith("_output"))
             elif (matched and event.get("type") == "event_msg"
                   and payload.get("type") in ("error", "task_complete")):
                 error = payload if payload["type"] == "error" else payload.get("error")
@@ -441,6 +485,12 @@ def transcript_report(path, manifest):
                 break
         else:
             content = event.get("message", {}).get("content", "")
+            if matched and isinstance(content, list):
+                for block in content:
+                    if event.get("type") == "assistant" and block.get("type") == "tool_use":
+                        update_tool(pending_tools, block.get("id"), True)
+                    elif event.get("type") == "user" and block.get("type") == "tool_result":
+                        update_tool(pending_tools, block.get("tool_use_id"), False)
             user_text = content if isinstance(content, str) else "\n".join(
                 b.get("text", "") for b in content if b.get("type") == "text")
             if event.get("type") == "user" and marker in user_text:
@@ -825,9 +875,11 @@ def run_worker(job):
     return 0
 
 
-def native_stream(path, agent):
+def native_stream(path, agent, pending_tools=None):
     """Read the private stdout of one invocation, never a shared hook or screen."""
     session, answer, error, finished = None, "", None, False
+    pending_tools = set() if pending_tools is None else pending_tools
+    pending_tools.clear()
     for line in path.read_text(errors="replace").splitlines():
         try:
             event = json.loads(line)
@@ -838,6 +890,11 @@ def native_stream(path, agent):
         if agent == "agy":
             if event.get("event") == "init":
                 session = event.get("conversation_id")
+            if event.get("event") == "step_update":
+                step = event.get("step_update", {})
+                if step.get("step_type") == "tool" and step.get("state") in (
+                        "ACTIVE", "DONE", "ERROR", "CANCELED", "CANCELLED", "HALTED", "INTERRUPTED"):
+                    update_tool(pending_tools, step.get("step_index"), step["state"] == "ACTIVE")
             if event.get("event") == "result":
                 result = event["result"]
                 session = result.get("conversation_id") or session
@@ -850,6 +907,9 @@ def native_stream(path, agent):
                 session = event.get("session_id")
             if event.get("type") == "tool_use":
                 answer = ""
+                update_tool(pending_tools, event.get("tool_id"), True)
+            if event.get("type") == "tool_result":
+                update_tool(pending_tools, event.get("tool_id"), False)
             if event.get("type") == "message" and event.get("role") == "assistant":
                 answer += event.get("content", "")
             if event.get("type") == "error":
@@ -952,8 +1012,14 @@ def native_failure(error):
         if any(word in lower for word in ("authenticat", "not trusted", "permission", "forbidden", "unauthorized",
                                           "invalid_api_key", "invalid api key", "access_denied", "access denied")):
             return "input_required"
-        if any(word in lower for word in ("unsupported_client", "no longer supported", "model_not_found", "model not found")):
-            return "unavailable"
+        if "unsupported_client" in lower:
+            return "client_unavailable"
+        retired = "no longer supported" in lower
+        if (any(word in lower for word in ("model_not_found", "model not found"))
+                or retired and re.search(r"\bmodels?\b", lower)):
+            return "model_unavailable"
+        if retired and re.search(r"\b(?:client|cli)\b", lower):
+            return "client_unavailable"
         if quota_error(detail, detail) or any(word in lower for word in ("quota", "resource_exhausted", "rate_limit", "rate limit")):
             return "quota"
     return "provider_error"
@@ -973,7 +1039,10 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
         try:
             owned_processes(process.pid, owned)
             session, answer, blocker = None, None, None
+            pending_tools = set()
             if streamed:
+                # Observe exit before reading so the final flushed events cannot be missed.
+                exited = process.poll() is not None
                 for name in offsets:
                     path = attempt / name
                     with path.open() as stream:
@@ -982,11 +1051,11 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
                         offsets[name] = stream.tell()
                     if text:
                         print(text, end="", flush=True)
-                session, response, error, finished = native_stream(attempt / "stdout.jsonl", manifest["agent"])
+                session, response, error, finished = native_stream(attempt / "stdout.jsonl", manifest["agent"], pending_tools)
                 evidence = (attempt / "stdout.jsonl").stat()
                 progress = (evidence.st_size, evidence.st_mtime_ns)
                 # Native result plus successful process exit is the post-hook boundary.
-                if process.poll() is not None:
+                if exited:
                     if error or process.returncode:
                         detail = error or (attempt / "stderr.txt").read_text() or f"Agent exit {process.returncode}"
                         blocker = native_failure(detail)
@@ -999,14 +1068,15 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
             else:
                 matches = []
                 for path in ([Path(bound)] if bound else transcript_candidates(manifest)):
-                    matched, identity, response, reason = transcript_report(path, manifest)
+                    calls = set()
+                    matched, identity, response, reason = transcript_report(path, manifest, calls)
                     if matched:
-                        matches.append((path, identity, response, reason))
+                        matches.append((path, identity, response, reason, calls))
                 if len(matches) > 1:
                     state.update(state="blocked", blocker_kind="interference", error="Multiple sessions received this assignment")
                     break
                 if matches:
-                    path, session, answer, blocker = matches[0]
+                    path, session, answer, blocker, pending_tools = matches[0]
                     bound = str(path)
                     state["received"] = True
                 evidence = Path(bound).stat() if bound else None
@@ -1016,6 +1086,9 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
             if session:
                 state["session_id"] = session
                 manifest["session_id"] = session
+            # A native tool can be quiet while working, but a hung tool still has a deadline.
+            stall_timeout = manifest["stall_timeout"] * (TOOL_STALL_MULTIPLIER if pending_tools else 1)
+            state.update(pending_tools=len(pending_tools), stall_timeout=stall_timeout)
             if answer is not None:
                 (attempt / "answer.txt").write_text(answer if isinstance(answer, str) else json.dumps(answer))
                 outcome, report = task_report(answer)
@@ -1043,9 +1116,11 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
                     last_progress, paused_at = now, None
                 state["state"] = "running"
                 if process.poll() is not None:
+                    if streamed:
+                        continue  # It exited during this poll; collect its final stream next.
                     state.update(state="failed", blocker_kind="exited", error=f"Agent exited with code {process.returncode}")
                     break
-                stalled = now - last_progress >= manifest["stall_timeout"]
+                stalled = now - last_progress >= stall_timeout
                 budget_expired = deadline is not None and now >= deadline
                 if stalled or budget_expired:
                     state.update(state="timed_out", blocker_kind="interference" if manifest.get("root_job")
@@ -1066,18 +1141,19 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
     return state
 
 
-RECOVERABLE = {"quota", "provider_error", "unavailable", "stalled", "exited", "launch_error", "invalid_report", "task_failed"}
+RECOVERABLE = {"quota", "provider_error", "unavailable", "model_unavailable", "client_unavailable",
+               "stalled", "exited", "launch_error", "invalid_report", "task_failed"}
 
 
 def next_route(manifest, attempts):
     if len(attempts) >= manifest["max_attempts"]:
         return None
     used = {(a["agent"], a["model"]) for a in attempts}
-    exhausted = {a["agent"] for a in attempts if a.get("blocker_kind") == "quota"}
+    exhausted = {a["agent"] for a in attempts if a.get("blocker_kind") in ("quota", "client_unavailable")}
     return next((route for route in manifest["routes"]
                  if (route["agent"], route["model"]) not in used and route["agent"] not in exhausted
                  and manifest["executables"].get(route["agent"])
-                 and usage_status(route, manifest.get("provider_env"))["status"] != "exhausted"), None)
+                 and route_status(route, manifest.get("provider_env"))["status"] not in ("exhausted", "unavailable")), None)
 
 
 def managed_worker(job):
@@ -1141,6 +1217,11 @@ def managed_worker(job):
                 remember_quota(manifest)
             except (OSError, ValueError) as error:
                 state["quota_cache_error"] = str(error)
+        if state.get("blocker_kind") in ("model_unavailable", "client_unavailable"):
+            try:
+                remember_unavailable(manifest, state["blocker_kind"])
+            except (OSError, ValueError) as error:
+                state["unavailable_cache_error"] = str(error)
         for name in ("answer.txt", "result.md"):
             if (attempt / name).exists():
                 shutil.copyfile(attempt / name, assignment / name)
@@ -1321,7 +1402,7 @@ def main():
     launch.add_argument("--timeout", type=budget, default=0,
                         help="Explicit seconds per attempt; 0 (default) allows continued progress without a total limit")
     launch.add_argument("--stall-timeout", type=positive, default=180,
-                        help="Seconds without native transcript progress before replacing a managed worker")
+                        help="Seconds without native progress before replacement; pending native tools get up to 5x this interval")
     launch.add_argument("--max-attempts", type=positive, default=4)
     launch.add_argument("--allow-edits", action="store_true",
                         help="Authorize edits in the task prompt; workers always run in YOLO mode")

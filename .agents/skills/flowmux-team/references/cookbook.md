@@ -523,3 +523,33 @@ Passing evidence: `/tmp/fm-gui-a0fssdf3` (recovery), `/tmp/fm-gui-ha_5owbd`
 `/tmp/fm-gui-fv70j9z4` (communication). Provider errors are native-shaped
 fixtures in real GUI panes; no real account was deliberately denied or exhausted.
 Native-account cases, the full CI/coverage gate and macOS were not rerun here.
+
+## Quiet tools, hidden usage and unavailable routes — 2026-10-23, Linux
+
+Pending native tool IDs now grant a bounded quiet interval of five times the
+configured stall timeout. Normal reasoning keeps its original deadline; tool
+completion, failure or cancellation releases the grace, and explicit attempt
+budgets still win. Native stream exit is observed before reading the final events,
+so a fast exit cannot hide a completed report or turn an auth error into recovery.
+
+The existing usage collector continues its 150-second refresh while a Team
+workspace exists, including background workspaces with the usage bar disabled.
+With no Team workspace and a hidden bar, periodic collection remains disabled.
+Native unavailable-model/client errors are shared for five minutes per provider
+profile. Missing models exclude only themselves; unsupported clients exclude all
+their models. Expired, malformed and other-profile records do not block routing.
+
+Verification passed 87 Python tests, 9 Rust skill integration tests and 7 usage UI
+tests. Isolated GUI suites passed 35 recovery checks and 8 usage checks using
+native-shaped provider fixtures. They exercise four-provider quiet tools,
+hung-tool cleanup, agy failed-tool grace release, shared unavailable routes,
+auth protection, foreground keyboard focus, same-session follow-ups and actual
+periodic usage collection with the bar hidden. Failed regressions were observed
+before the stream-exit and review corrections. A Claude Opus review and follow-up
+found no remaining issues after the corrections.
+
+Evidence: `/tmp/fm-gui-d0r3ln6z` (recovery), `/tmp/fm-gui-i1z61xo3` (usage),
+and `/tmp/fm-gui-2473tuqo` (the original stream-exit race).
+Native-account limit/error cases, the full CI/coverage gate and macOS were not
+rerun. Existing jobs retain their copied helper; these changes do not alter
+already-running supervisors.
