@@ -491,8 +491,10 @@ pub const FINISH_POINTER_INPUT_JS: &str = r#"
 const state = globalThis.__flowmuxInput;
 if (!state) throw new Error('page changed during native pointer input');
 return await new Promise(resolve => {
+    let completionTimer;
     const finish = result => {
         clearTimeout(timer);
+        clearTimeout(completionTimer);
         clearInterval(hoverPoll);
         for (const view of state.windows) view.removeEventListener(state.event, state.listener, true);
         delete globalThis.__flowmuxInput;
@@ -504,7 +506,8 @@ return await new Promise(resolve => {
     const hoverPoll = state.event === 'pointermove' ? setInterval(() => {
         if (state.el.isConnected && state.el.matches(':scope:hover')) finish('ok');
     }, 25) : null;
-    state.done = () => finish('ok');
+    // Capture listeners run before target handlers and native default actions.
+    state.done = () => { completionTimer ??= setTimeout(() => finish('ok'), 0); };
     if (state.received || (state.event === 'pointermove' && state.el.matches(':scope:hover'))) state.done();
 });
 "#;

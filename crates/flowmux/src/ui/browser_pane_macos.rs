@@ -714,6 +714,10 @@ pub fn ref_scope_for_surface(surface_id: SurfaceId) -> RefScope {
 }
 
 impl BrowserPane {
+    pub(crate) fn has_pending_dialog(&self) -> bool {
+        self.native._ui_delegate.ivars().dialogs.has_pending()
+    }
+
     pub async fn file_chooser(
         &self,
         action: &flowmux_ipc::protocol::BrowserFileChooserAction,

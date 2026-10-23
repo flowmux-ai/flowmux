@@ -230,6 +230,26 @@ async fn native_pointer_coordinates_include_window_decoration_offsets() {
 }
 
 #[gtk::test]
+async fn pointer_completion_waits_for_the_target_event_handler() {
+    let page = Page::new("<button id=target onclick='window.clicked=true'>Click</button><script>window.clicked=false</script>").await;
+    let geometry = pointer_target("#target", false);
+    let prepared = page
+        .eval_async(&prepare_pointer_input(&geometry, PointerAction::Click))
+        .await
+        .unwrap();
+    let target = serde_json::from_str(&prepared).unwrap();
+    let pane = page.pane.clone();
+    glib::timeout_add_local_once(Duration::from_millis(50), move || {
+        pane.pointer(PointerAction::Click, &target).unwrap();
+    });
+    let result = page.eval_async(&format!("const completion=await (async()=>{{{FINISH_POINTER_INPUT_JS}}})(); return JSON.stringify({{completion,clicked}});")).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+        serde_json::json!({"completion":"ok","clicked":true})
+    );
+}
+
+#[gtk::test]
 async fn native_input_stays_in_its_window_after_resize_and_focus_changes() {
     let html = "<input id=field value=safe style='margin:40px;width:60%'><script>window.hits=0;field.onclick=()=>hits++</script>";
     let first = Page::new(html).await;

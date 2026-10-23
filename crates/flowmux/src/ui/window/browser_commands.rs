@@ -80,16 +80,35 @@ impl WindowController {
                     });
                     return;
                 }
+                let reply = Rc::new(RefCell::new(Some(ack)));
+                let dialog_reply = reply.clone();
+                let pending_input = input.clone();
+                // A page dialog pauses JavaScript; its native presentation also completes the action.
+                glib::timeout_add_local(Duration::from_millis(10), move || {
+                    let mut reply = dialog_reply.borrow_mut();
+                    if pending_input.has_pending_dialog() {
+                        if let Some(ack) = reply.take() {
+                            let _ = ack.send(Ok(BrowserActionResult::Ok));
+                        }
+                    }
+                    if reply.is_some() {
+                        glib::ControlFlow::Continue
+                    } else {
+                        glib::ControlFlow::Break
+                    }
+                });
                 input.evaluate_automation_async_js(
                     scripts::FINISH_POINTER_INPUT_JS,
                     move |result| {
-                        let _ = ack.send(result.and_then(|value| {
-                            if value == "ok" {
-                                Ok(BrowserActionResult::Ok)
-                            } else {
-                                Err(value)
-                            }
-                        }));
+                        if let Some(ack) = reply.borrow_mut().take() {
+                            let _ = ack.send(result.and_then(|value| {
+                                if value == "ok" {
+                                    Ok(BrowserActionResult::Ok)
+                                } else {
+                                    Err(value)
+                                }
+                            }));
+                        }
                     },
                 );
             },

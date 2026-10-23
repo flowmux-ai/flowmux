@@ -71,6 +71,10 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub(crate) fn has_pending_dialog(&self) -> bool {
+        self.dialogs.has_pending()
+    }
+
     pub async fn file_chooser(
         &self,
         action: &flowmux_ipc::protocol::BrowserFileChooserAction,

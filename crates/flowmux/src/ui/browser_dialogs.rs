@@ -46,6 +46,10 @@ struct PendingDialog {
 }
 
 impl PageDialogs {
+    pub(crate) fn has_pending(&self) -> bool {
+        self.pending.borrow().is_some()
+    }
+
     pub(crate) async fn control(
         &self,
         action: &flowmux_ipc::protocol::BrowserDialogAction,

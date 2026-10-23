@@ -418,7 +418,17 @@ def exercise(cli, url, root):
     dialog("dismiss", pending["id"])
     assert browser("wait", "--js", "dialogResult === undefined")["browser_bool_result"]["value"]
     assert dialog() is None
-    print("PASS: page dialogs require matching IDs and preserve confirm/prompt/alert replies", flush=True)
+    evaluate("document.body.insertAdjacentHTML('beforeend','<button id=dialogButton>Click dialog</button>'); dialogButton.onclick=()=>{window.dialogResult=confirm('Clicked?')}; 'ready'")
+    dialog_button = reference(snapshot(), "Click dialog")
+    for accept in (True, False):
+        browser("click", dialog_button)
+        pending = dialog()
+        assert pending and pending["kind"] == "confirm" and pending["message"] == "Clicked?", pending
+        dialog("accept" if accept else "dismiss", pending["id"])
+        assert browser("wait", "--js", f"dialogResult === {str(accept).lower()}")["browser_bool_result"]["value"]
+    evaluate("dialogButton.remove(); 'removed'")
+    evaluate("mutations.length=0; 'reset fixture changes'")
+    print("PASS: page dialogs require matching IDs, complete native clicks and preserve confirm/prompt/alert replies", flush=True)
     def chooser(*args, **kwargs):
         result = browser("file-chooser", *(args or ("status",)), **kwargs)
         return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["file_chooser"]
