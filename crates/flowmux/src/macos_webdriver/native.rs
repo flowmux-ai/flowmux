@@ -252,6 +252,20 @@ pub(crate) fn smoke() {
         config.setWebsiteDataStore(&WKWebsiteDataStore::nonPersistentDataStore(mtm));
     }
     let browser = Window::new(&config);
+    let view = browser.web.as_super();
+    let original_frame = view.frame();
+    view.setFrame(NSRect::new(
+        NSPoint::new(40.0, 40.0),
+        NSSize::new(800.0, 500.0),
+    ));
+    crate::macos_input::pointer(
+        &browser.web,
+        flowmux_browser::input::PointerAction::Hover,
+        NSPoint::new(5.0, 5.0),
+    )
+    .expect("hit testing must use the content view's parent coordinates");
+    view.setFrame(original_frame);
+    println!("MACOS_POINTER_HIT_TEST_OK");
     unsafe {
         browser.web.loadHTMLString_baseURL(&NSString::from_str(
         "<form><input id=field><button id=submit>Submit</button></form><script>window.events=[];window.submissions=0;for(const name of ['pointerdown','mousedown','click','keydown','input'])document.addEventListener(name,e=>events.push([e.type,e.isTrusted]));document.querySelector('form').onsubmit=e=>{e.preventDefault();submissions++}</script>"
