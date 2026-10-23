@@ -29,6 +29,7 @@ impl Page {
             .default_height(600)
             .child(&pane.root)
             .build();
+        window.set_titlebar(Some(&gtk::HeaderBar::new()));
         window.present();
         pane.web_view.load_html(
             &format!("<!doctype html><title>flowmux test</title>{html}"),
@@ -184,6 +185,18 @@ async fn snapshot_resolves_real_elements_without_mutating_the_document() {
         .await
         .unwrap();
     assert_eq!(page.eval("clicked").await, "Second");
+}
+
+#[gtk::test]
+async fn native_pointer_coordinates_include_window_decoration_offsets() {
+    let page = Page::new("<button id='target' style='margin:80px' onclick='window.point=[event.clientX,event.clientY]'>Click</button>").await;
+    page.pointer("#target", PointerAction::Click).await.unwrap();
+    assert_eq!(
+        page.eval("(()=>{const r=target.getBoundingClientRect();return Math.abs(point[0]-(r.left+r.width/2))<1.5 && Math.abs(point[1]-(r.top+r.height/2))<1.5})()").await,
+        "true",
+        "pointer coordinates: {}",
+        page.eval("JSON.stringify({point,rect:target.getBoundingClientRect()})").await
+    );
 }
 
 #[gtk::test]

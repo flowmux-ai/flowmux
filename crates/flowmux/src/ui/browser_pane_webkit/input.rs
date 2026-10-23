@@ -308,13 +308,14 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
                 return Err("browser pointer target is covered by a native widget".into());
             }
             let scale = f64::from(surface.scale_factor());
+            let (surface_x, surface_y) = native.surface_transform();
             let (mut root_x, mut root_y, mut child) = (0, 0, 0);
             if translate(
                 dpy,
                 window,
                 root_window(dpy),
-                (f64::from(point.x()) * scale).round() as c_int,
-                (f64::from(point.y()) * scale).round() as c_int,
+                ((f64::from(point.x()) + surface_x) * scale).round() as c_int,
+                ((f64::from(point.y()) + surface_y) * scale).round() as c_int,
                 &mut root_x,
                 &mut root_y,
                 &mut child,
