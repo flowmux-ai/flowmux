@@ -280,8 +280,17 @@ pub(crate) fn smoke() {
         assert!(Instant::now() < deadline);
         pump();
     }
+    browser.evaluate("window.pointerReady=false;requestAnimationFrame(()=>requestAnimationFrame(()=>pointerReady=true));true").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while browser.evaluate("pointerReady").unwrap() != true {
+        assert!(
+            Instant::now() < deadline,
+            "browser did not present the pointer fixture"
+        );
+        pump();
+    }
     browser
-        .evaluate("field.onpointermove=e=>window.hoverTrusted=e.isTrusted")
+        .evaluate("field.onpointermove=e=>{window.hoverTrusted=e.isTrusted;window.hoverDuringMove=field.matches(':hover')}")
         .unwrap();
     crate::macos_input::pointer(
         &browser.web,
@@ -298,7 +307,7 @@ pub(crate) fn smoke() {
         assert!(
             Instant::now() < deadline,
             "native hover did not reach input: {}",
-            browser.evaluate("JSON.stringify({trusted:window.hoverTrusted,hover:field.matches(':hover'),focus:document.hasFocus(),rect:field.getBoundingClientRect()})").unwrap()
+            browser.evaluate("JSON.stringify({trusted:window.hoverTrusted,hoverDuringMove:window.hoverDuringMove,hover:field.matches(':hover'),focus:document.hasFocus(),rect:field.getBoundingClientRect()})").unwrap()
         );
         pump();
     }
