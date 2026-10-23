@@ -607,6 +607,28 @@ time.sleep(30 if primary else .8)
                 process.wait(timeout=5)
         self.assertEqual(self.state(), 'completed')
 
+    def test_observation_failure_becomes_interrupted_only_after_supervisor_exit(self):
+        self.fixture('pass')
+        (self.job / 'started').write_text('lock-v1\n')
+        state = dict(state='blocked', blocker_kind='observation_error', error='window socket disappeared')
+        team.write_json(self.job / 'status.json', state)
+        with (self.job / 'worker.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with contextlib.redirect_stdout(io.StringIO()):
+                team.inspect(self.job)
+            self.assertEqual(json.loads((self.job / 'status.json').read_text()), state)
+        with contextlib.redirect_stdout(io.StringIO()):
+            team.inspect(self.job)
+        stopped = json.loads((self.job / 'status.json').read_text())
+        self.assertEqual(stopped['blocker_kind'], 'interrupted')
+        self.assertEqual(stopped['observation_error'], state['error'])
+        state['task_status'] = 'blocked'
+        (self.job / 'result.md').write_text('Final task report remains unchanged')
+        team.write_json(self.job / 'status.json', state)
+        with contextlib.redirect_stdout(io.StringIO()):
+            team.inspect(self.job)
+        self.assertEqual(json.loads((self.job / 'status.json').read_text()), state)
+
     def test_only_authoritative_quota_triggers_fallback(self):
         for code, message, expected in (
             ('UsageLimitExceeded', 'limit', True),

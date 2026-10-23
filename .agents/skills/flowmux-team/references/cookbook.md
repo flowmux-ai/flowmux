@@ -489,3 +489,37 @@ were not intentionally exhausted; quota transitions use native-shaped fixtures.
 Gemini/agy have no preflight collector, and Gemini account access remains blocked
 by the previously recorded unsupported-client response. Native agy, native
 review/repair cases, the full CI/coverage gate and macOS were not rerun in this follow-up.
+
+## Failure classification, budget and quota-release follow-up — 2026-10-23, Linux
+
+Commit `b810f7e` addressed three reproduced edge cases. Recognized native error
+codes now outrank diagnostic wording, so auth/permission failures retain their
+panes without substitution or quota holds, while genuine quota/model errors keep
+their classification. An explicit time budget wins when both deadlines expire;
+input waits preserve time already spent. Available usage releases an old native
+hold under the writer's lock, re-reading the record so a concurrent newer failure
+survives. Released holds cannot return merely because usage becomes stale or a
+refresh fails; new native quota errors still establish new holds.
+
+The new regression cases failed before their fixes. Verification passed 76 Python
+tests, 9 Rust skill integration tests, formatting and Clippy. Isolated GUI suites
+passed 21 recovery checks, 6 usage-routing checks, 17 Skills checks and 10
+communication checks. Recovery includes four-provider auth errors, equal
+deadlines and a real input wait after four seconds of a six-second budget; the
+worker stops on its remaining budget without replacement. Foreground workspace
+and native keyboard input, YOLO, retained reports and same-session follow-ups
+remain covered.
+
+Post-commit Skills verification exposed a shutdown race: a socket observation
+failure could be saved just before its supervisor exited and remain terminal.
+Reconciliation now marks that unfinished job interrupted only after the worker
+lock proves supervision ended, retaining the original diagnostic. The GUI test
+forces socket loss before shutdown, and unit coverage checks that live supervisors
+and final task reports remain unchanged. The failing evidence was retained at
+`/tmp/fm-gui-srnm3uyg`; its saved state also passed replay after the correction.
+
+Passing evidence: `/tmp/fm-gui-a0fssdf3` (recovery), `/tmp/fm-gui-ha_5owbd`
+(usage), `/tmp/fm-gui-js6x1p5y` (Skills after the shutdown correction) and
+`/tmp/fm-gui-fv70j9z4` (communication). Provider errors are native-shaped
+fixtures in real GUI panes; no real account was deliberately denied or exhausted.
+Native-account cases, the full CI/coverage gate and macOS were not rerun here.

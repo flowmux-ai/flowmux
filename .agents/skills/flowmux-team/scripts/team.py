@@ -703,8 +703,11 @@ def reconcile_stopped_worker(job):
             except ProcessLookupError:
                 pass
     # Older workers did not hold a lock, so absence of a lock cannot prove their death.
-    if (state["state"] not in TERMINAL and started.exists()
+    observation_failed = state.get("blocker_kind") == "observation_error" and not state.get("task_status")
+    if ((state["state"] not in TERMINAL or observation_failed) and started.exists()
             and started.read_text() == "lock-v1\n"):
+        if observation_failed:
+            state["observation_error"] = state.get("error")
         state.update(state="failed", blocker_kind="interrupted",
                      error="Worker supervisor exited before collecting a final report; inspect the pane and artifacts before starting new work")
         write_json(job / "status.json", state)

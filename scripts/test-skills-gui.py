@@ -150,11 +150,20 @@ time.sleep(120)
     interrupted = start('claude')
     fixture.wait_for(lambda: 'WAITING for interruption' in h.screen(socket, interrupted['pane']), 'live interrupted worker')
     before = h.workspace(socket, workspace)
+    # Force the shutdown ordering that used to strand an observation error as final.
+    assert socket.parent == h.root / 'run'
+    socket.unlink()
+    interrupted_root = Path(interrupted['job'])
+    fixture.wait_for(lambda: json.loads((interrupted_root / 'status.json').read_text()).get('blocker_kind') == 'observation_error',
+                     'socket failure is observed before supervisor exit')
+    supervisor = json.loads((interrupted_root / 'supervisor.json').read_text())['pid']
     h.close_window(process)
+    fixture.wait_for(lambda: not fixture.alive(supervisor), 'test supervisor exits with its window')
     result = subprocess.run([sys.executable, str(helper), 'wait', interrupted['job'], '--timeout', '5'],
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 1, result.stdout + result.stderr
     assert json.loads(result.stdout)['blocker_kind'] == 'interrupted', result.stdout
+    assert 'observation_error' in json.loads(result.stdout), result.stdout
     h.pass_check('Closing the isolated GUI turns an unfinished worker into a terminal interrupted failure')
     (h.root / 'interrupt-worker').unlink()
 
