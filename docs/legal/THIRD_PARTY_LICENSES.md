@@ -3098,7 +3098,7 @@ MIT License
 Copyright (c) <year> <copyright holders>
 ~~~~
 
-Used by: tokio 1.54.0, tokio-util 0.7.20
+Used by: tokio 1.54.1, tokio-util 0.7.20
 
 ~~~~text
 MIT License
