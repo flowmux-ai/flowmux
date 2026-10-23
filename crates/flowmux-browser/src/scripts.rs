@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! JavaScript for DOM snapshots and browser actions. The snapshot allocates
-//! `eN` tokens in page-side JavaScript without modifying the DOM. Rust stores
+//! opaque, snapshot-specific tokens without modifying the DOM. Rust stores
 //! the returned selector map and resolves tokens before evaluating actions.
 
 /// Walk the document for everything an agent might want to act on
@@ -102,6 +102,8 @@ pub const SNAPSHOT_JS: &str = r#"
   }
 
   const refs = {};
+  const nodes = new Map();
+  const nonce = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16).padStart(8, '0')).join('');
   const lines = [];
   let counter = 0;
 
@@ -112,10 +114,11 @@ pub const SNAPSHOT_JS: &str = r#"
     const role = implicitRole(el);
     if (!INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
     counter += 1;
-    const token = 'e' + counter;
+    const token = 'e' + counter + '-' + nonce;
     const sel = cssPath(el);
     const nm = name(el).replace(/\n+/g, ' ').slice(0, 120);
     refs[token] = { role: role, name: nm, selector: sel };
+    nodes.set(token, el);
     const safe = nm.split(String.fromCharCode(34)).join('\\"');
     lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
   });
@@ -129,6 +132,8 @@ pub const SNAPSHOT_JS: &str = r#"
     text: text
   };
 
+  // Kept in the application script world, never in page attributes.
+  globalThis.__flowmuxRefs = nodes;
   return JSON.stringify({
     markdown: lines.join('\n') + (lines.length ? '\n' : ''),
     refs: refs,
@@ -136,6 +141,21 @@ pub const SNAPSHOT_JS: &str = r#"
   });
 })()
 "#;
+
+/// Validate node identity and execute the action in the same script turn.
+/// The caller must use the same isolated script world as the snapshot.
+pub fn with_ref(ref_id: &str, selector: &str, script: &str) -> String {
+    format!(
+        r#"(function() {{
+            const el = globalThis.__flowmuxRefs?.get("{reference}");
+            if (!el || !el.isConnected || document.querySelector("{selector}") !== el)
+                throw new Error("stale element ref: take a fresh snapshot");
+            return {script};
+        }})()"#,
+        reference = js_string(ref_id.strip_prefix('@').unwrap_or(ref_id)),
+        selector = js_string(selector),
+    )
+}
 
 /// Click the element matched by `selector`. Returns `"ok"` on success,
 /// `"error: not found"` if `querySelector` returns nothing.

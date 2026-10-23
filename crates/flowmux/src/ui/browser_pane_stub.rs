@@ -130,6 +130,14 @@ impl BrowserPane {
         on_done(Err(UNSUPPORTED.into()));
     }
 
+    pub fn evaluate_automation_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        source: &str,
+        on_done: F,
+    ) {
+        self.evaluate_js(source, on_done);
+    }
+
     pub fn evaluate_js<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _source: &str,

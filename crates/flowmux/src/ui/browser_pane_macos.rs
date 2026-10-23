@@ -21,11 +21,11 @@ use objc2_foundation::{
     NSString, NSURLRequest, NSURL, NSUUID,
 };
 use objc2_web_kit::{
-    WKAudiovisualMediaTypes, WKDownload, WKDownloadDelegate, WKFrameInfo, WKMediaCaptureType,
-    WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
-    WKNavigationResponse, WKNavigationResponsePolicy, WKPermissionDecision, WKPreferences,
-    WKSecurityOrigin, WKSnapshotConfiguration, WKUIDelegate, WKWebView, WKWebViewConfiguration,
-    WKWebsiteDataStore, WKWindowFeatures,
+    WKAudiovisualMediaTypes, WKContentWorld, WKDownload, WKDownloadDelegate, WKFrameInfo,
+    WKMediaCaptureType, WKNavigation, WKNavigationAction, WKNavigationActionPolicy,
+    WKNavigationDelegate, WKNavigationResponse, WKNavigationResponsePolicy, WKPermissionDecision,
+    WKPreferences, WKSecurityOrigin, WKSnapshotConfiguration, WKUIDelegate, WKWebView,
+    WKWebViewConfiguration, WKWebsiteDataStore, WKWindowFeatures,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -1247,6 +1247,23 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
+        self.evaluate_in_world(source, false, on_done);
+    }
+
+    pub fn evaluate_automation_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        source: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(source, true, on_done);
+    }
+
+    fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        source: &str,
+        isolated: bool,
+        on_done: F,
+    ) {
         if !self.native.navigation_enabled.get() {
             on_done(Err(
                 "SSH preview expired; open a new preview after reconnecting".into(),
@@ -1269,9 +1286,21 @@ impl BrowserPane {
             }
         });
         unsafe {
-            self.native
-                .web_view
-                .evaluateJavaScript_completionHandler(&script, Some(&block));
+            if isolated {
+                let world = WKContentWorld::defaultClientWorld(MainThreadMarker::new().unwrap());
+                self.native
+                    .web_view
+                    .evaluateJavaScript_inFrame_inContentWorld_completionHandler(
+                        &script,
+                        None,
+                        &world,
+                        Some(&block),
+                    );
+            } else {
+                self.native
+                    .web_view
+                    .evaluateJavaScript_completionHandler(&script, Some(&block));
+            }
         }
     }
 }

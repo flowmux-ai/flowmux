@@ -99,7 +99,8 @@ with a 64 MiB decode budget before preview resizing.
   Distinguish a pane's UUID from its individual tab surface UUID.
 - Snapshot references belong to the latest snapshot of one browser surface.
   The snapshot must not add tracking attributes to the DOM. Reused token
-  names can point to different elements after a new snapshot.
+  names from old snapshots must never act on another element. Copy complete
+  opaque tokens, including their snapshot suffix.
 - Hooks and user skill text are embedded in the CLI. Keep `doctor`/`fix`
   drift detection consistent with changes to installed payloads.
 - Native lifecycle hooks are activity evidence; process inspection establishes

@@ -3764,19 +3764,20 @@ impl ClipboardToast {
 /// Resolve an agent-supplied ref token (e.g. `e3` or `@e3`) to a CSS
 /// selector via the browser pane's [`flowmux_browser::RefStore`].
 /// Return an error when the ref is absent so the caller can take a fresh snapshot.
-fn resolve_ref(
+fn ref_script(
     browser: &crate::ui::browser_pane::BrowserPane,
     ref_id: &str,
+    script: impl FnOnce(&str) -> String,
 ) -> Result<String, String> {
     let refs = browser.refs.borrow();
-    refs.resolve(browser.ref_scope, ref_id)
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            format!(
-                "ref `{ref_id}` not found in this pane's snapshot — \
-                 take a fresh `flowmux browser snapshot` first"
-            )
-        })
+    let selector = refs.resolve(browser.ref_scope, ref_id).ok_or_else(|| {
+        format!("ref `{ref_id}` not found in this tab's snapshot — take a fresh snapshot")
+    })?;
+    Ok(flowmux_browser::scripts::with_ref(
+        ref_id,
+        selector,
+        &script(selector),
+    ))
 }
 
 /// Like [`run_browser_js`] but expects the page to evaluate to
@@ -3789,7 +3790,7 @@ fn run_browser_js_bool(
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
 ) {
     let cell = std::cell::Cell::new(Some(ack));
-    browser.evaluate_js(js, move |result| {
+    browser.evaluate_automation_js(js, move |result| {
         if let Some(ack) = cell.take() {
             let mapped = match result {
                 Ok(s) if s == "true" => Ok(BrowserActionResult::Bool(true)),
@@ -3809,7 +3810,7 @@ fn run_browser_js(
     ok_string_required: bool,
 ) {
     let cell = std::cell::Cell::new(Some(ack));
-    browser.evaluate_js(js, move |result| {
+    browser.evaluate_automation_js(js, move |result| {
         if let Some(ack) = cell.take() {
             let mapped = match result {
                 Ok(s) => {

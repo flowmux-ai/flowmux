@@ -80,12 +80,12 @@ flowmux browser wait pane:$PANE --ready-state complete
 # when it prints false.
 
 # 3. Take an interactive snapshot. The result is a Markdown tree with
-#    `eN` ref tokens, plus a refs map carrying selectors. Refs belong to
+#    opaque ref tokens (e.g. `e1-<snapshot-id>`) plus a selector map. Refs belong to
 #    the active browser tab. Take a fresh snapshot after switching tabs,
 #    navigation, page changes, or another snapshot.
 flowmux --json browser snapshot pane:$PANE
 
-# 4. Act on the page using ref tokens.
+# 4. Act on the page using complete returned ref tokens (e3/e1 below are placeholders).
 flowmux browser click pane:$PANE e3
 flowmux browser fill  pane:$PANE e1 "user@example.com"
 flowmux browser type  pane:$PANE "password"     # active element

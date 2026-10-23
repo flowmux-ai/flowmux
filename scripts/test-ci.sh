@@ -75,6 +75,7 @@ printf 'GSK_RENDERER=%s\n' "$GSK_RENDERER"
 
 run_phase macos-installer 180 python3 scripts/test-install-macos.py
 run_phase build 900 cargo build --workspace --locked
+run_phase browser-control 120 python3 scripts/test-browser-control.py "$CARGO_TARGET_DIR/debug/flowmux"
 run_phase macos-layer 180 cargo test -p flowmux --bin flowmux --locked ui::macos_layer::tests
 run_phase macos-update-unit 180 cargo test -p flowmux --bin flowmux --locked update::
 run_phase macos-update-options 180 cargo test -p flowmux --bin flowmux --locked dmg_update_tab

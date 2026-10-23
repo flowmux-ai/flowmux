@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Server-side ref token → CSS selector store.
 //!
-//! The snapshot script returns `e1`, `e2`, … tokens and CSS selectors.
+//! The snapshot script returns opaque tokens and CSS selectors.
 //! Each browser surface stores that map for subsequent actions; [`RefStore::resolve`]
 //! also accepts cmux-style `@eN` input. A new snapshot replaces the old map.
 //!
@@ -75,7 +75,7 @@ impl RefStore {
     }
 
     /// Replace `scope`'s refs with the `token → selector` pairs from a
-    /// fresh snapshot. Tokens can be reused for different selectors; callers
+    /// fresh snapshot. Production snapshots use unique tokens; callers
     /// must use the latest snapshot. Called after [`crate::scripts::SNAPSHOT_JS`].
     pub fn populate_from_snapshot(
         &mut self,

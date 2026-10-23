@@ -110,7 +110,10 @@ calling pane. A new WebView initially shows `about:blank`. Wait for the requeste
 URL and readiness before taking a snapshot. Wait prints `true` or `false`;
 **check the value**, not just the exit code. Stop on timeout.
 
-A snapshot returns a Markdown tree and `eN` refs. Use only refs actually returned
+A snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
+Copy the entire returned ref; short names such as `e1` are not aliases.
+Refs expire when their element is replaced, even if its selector stays the same.
+Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 
 ```bash

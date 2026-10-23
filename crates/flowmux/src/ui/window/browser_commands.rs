@@ -50,32 +50,35 @@ impl WindowController {
                         // calls resolve. The page DOM is never stamped.
                         let browser2 = browser.clone();
                         let cell = std::cell::Cell::new(Some(ack));
-                        browser.evaluate_js(flowmux_browser::scripts::SNAPSHOT_JS, move |result| {
-                            if let Some(ack) = cell.take() {
-                                // An expired query must not replace a newer
-                                // snapshot's references when its callback arrives.
-                                if ack.is_closed() {
-                                    return;
-                                }
-                                let mapped = match result {
-                                    Ok(json) => {
-                                        if let Ok(snap) =
-                                            serde_json::from_str::<flowmux_browser::DomSnapshot>(
-                                                &json,
-                                            )
-                                        {
-                                            browser2
-                                                .refs
-                                                .borrow_mut()
-                                                .populate_from_snapshot(browser2.ref_scope, &snap);
-                                        }
-                                        Ok(BrowserActionResult::String(json))
+                        browser.evaluate_automation_js(
+                            flowmux_browser::scripts::SNAPSHOT_JS,
+                            move |result| {
+                                if let Some(ack) = cell.take() {
+                                    // An expired query must not replace a newer
+                                    // snapshot's references when its callback arrives.
+                                    if ack.is_closed() {
+                                        return;
                                     }
-                                    Err(e) => Err(e),
-                                };
-                                let _ = ack.send(mapped);
-                            }
-                        });
+                                    let mapped = match result {
+                                        Ok(json) => {
+                                            if let Ok(snap) = serde_json::from_str::<
+                                                flowmux_browser::DomSnapshot,
+                                            >(
+                                                &json
+                                            ) {
+                                                browser2.refs.borrow_mut().populate_from_snapshot(
+                                                    browser2.ref_scope,
+                                                    &snap,
+                                                );
+                                            }
+                                            Ok(BrowserActionResult::String(json))
+                                        }
+                                        Err(e) => Err(e),
+                                    };
+                                    let _ = ack.send(mapped);
+                                }
+                            },
+                        );
                     }
                     BrowserOp::Navigate { url } => {
                         // Any navigation invalidates the current snapshot's
@@ -112,50 +115,46 @@ impl WindowController {
                         let value = browser.current_title();
                         let _ = ack.send(Ok(BrowserActionResult::String(value)));
                     }
-                    BrowserOp::Click { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::click_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Click { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::click_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Fill { target, value } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::fill_by_selector(&sel, &value),
-                            ack,
-                            true,
-                        ),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
+                    BrowserOp::Fill { target, value } => {
+                        match ref_script(&browser, &target, |sel| {
+                            flowmux_browser::scripts::fill_by_selector(sel, &value)
+                        }) {
+                            Ok(js) => run_browser_js(&browser, &js, ack, true),
+                            Err(e) => {
+                                let _ = ack.send(Err(e));
+                            }
                         }
-                    },
-                    BrowserOp::Select { target, value } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::select_option_by_selector(&sel, &value),
-                            ack,
-                            true,
-                        ),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
+                    }
+                    BrowserOp::Select { target, value } => {
+                        match ref_script(&browser, &target, |sel| {
+                            flowmux_browser::scripts::select_option_by_selector(sel, &value)
+                        }) {
+                            Ok(js) => run_browser_js(&browser, &js, ack, true),
+                            Err(e) => {
+                                let _ = ack.send(Err(e));
+                            }
                         }
-                    },
-                    BrowserOp::Scroll { target, x, y } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::scroll_by_selector(&sel, x, y),
-                            ack,
-                            true,
-                        ),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
+                    }
+                    BrowserOp::Scroll { target, x, y } => {
+                        match ref_script(&browser, &target, |sel| {
+                            flowmux_browser::scripts::scroll_by_selector(sel, x, y)
+                        }) {
+                            Ok(js) => run_browser_js(&browser, &js, ack, true),
+                            Err(e) => {
+                                let _ = ack.send(Err(e));
+                            }
                         }
-                    },
+                    }
                     BrowserOp::Type { text } => {
                         let js = flowmux_browser::scripts::type_keys(&text);
                         run_browser_js(&browser, &js, ack, true);
@@ -164,35 +163,30 @@ impl WindowController {
                         let js = flowmux_browser::scripts::press_key(&key);
                         run_browser_js(&browser, &js, ack, true);
                     }
-                    BrowserOp::Text { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::text_of_selector(&sel),
-                            ack,
-                            false,
-                        ),
+                    BrowserOp::Text { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::text_of_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, false),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Value { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::value_of_selector(&sel),
-                            ack,
-                            false,
-                        ),
+                    BrowserOp::Value { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::value_of_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, false),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Attr { target, name } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::attr_of_selector(&sel, &name),
-                            ack,
-                            false,
-                        ),
+                    BrowserOp::Attr { target, name } => match ref_script(&browser, &target, |sel| {
+                        flowmux_browser::scripts::attr_of_selector(sel, &name)
+                    }) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, false),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
@@ -204,98 +198,92 @@ impl WindowController {
                         poll_ms,
                     } => run_browser_wait(browser.clone(), condition, timeout_ms, poll_ms, ack),
                     BrowserOp::Screenshot { path } => run_browser_screenshot(&browser, path, ack),
-                    BrowserOp::DblClick { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::dblclick_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::DblClick { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::dblclick_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Hover { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::hover_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Hover { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::hover_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Focus { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::focus_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Focus { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::focus_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Blur { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::blur_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Blur { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::blur_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Check { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::check_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Check { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::check_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::Uncheck { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js(
-                            &browser,
-                            &flowmux_browser::scripts::uncheck_by_selector(&sel),
-                            ack,
-                            true,
-                        ),
+                    BrowserOp::Uncheck { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::uncheck_by_selector,
+                    ) {
+                        Ok(js) => run_browser_js(&browser, &js, ack, true),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::IsVisible { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js_bool(
-                            &browser,
-                            &flowmux_browser::scripts::is_visible_selector(&sel),
-                            ack,
-                        ),
+                    BrowserOp::IsVisible { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::is_visible_selector,
+                    ) {
+                        Ok(js) => run_browser_js_bool(&browser, &js, ack),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::IsEnabled { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js_bool(
-                            &browser,
-                            &flowmux_browser::scripts::is_enabled_selector(&sel),
-                            ack,
-                        ),
+                    BrowserOp::IsEnabled { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::is_enabled_selector,
+                    ) {
+                        Ok(js) => run_browser_js_bool(&browser, &js, ack),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
                     },
-                    BrowserOp::IsChecked { target } => match resolve_ref(&browser, &target) {
-                        Ok(sel) => run_browser_js_bool(
-                            &browser,
-                            &flowmux_browser::scripts::is_checked_selector(&sel),
-                            ack,
-                        ),
+                    BrowserOp::IsChecked { target } => match ref_script(
+                        &browser,
+                        &target,
+                        flowmux_browser::scripts::is_checked_selector,
+                    ) {
+                        Ok(js) => run_browser_js_bool(&browser, &js, ack),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }

@@ -757,6 +757,23 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
+        self.evaluate_in_world(source, None, on_done);
+    }
+
+    pub fn evaluate_automation_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        source: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(source, Some("flowmux.browser"), on_done);
+    }
+
+    fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        source: &str,
+        world: Option<&str>,
+        on_done: F,
+    ) {
         if !self.navigation_enabled.get() {
             on_done(Err(
                 "SSH preview expired; open a new preview after reconnecting".into(),
@@ -766,7 +783,7 @@ impl BrowserPane {
         let navigation_enabled = self.navigation_enabled.clone();
         self.web_view.evaluate_javascript(
             source,
-            None,
+            world,
             None,
             gtk::gio::Cancellable::NONE,
             move |result| {
