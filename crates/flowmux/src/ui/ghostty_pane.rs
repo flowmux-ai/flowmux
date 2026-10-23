@@ -1370,11 +1370,11 @@ const URL_REGEX_PATTERN: &str = r#"(?i)(?:https?|ftp|file)://[^\s<>"'`]+"#;
 // Balanced parentheses belong to filenames when followed by more path text.
 // Otherwise start inside the surrounding delimiter.
 // The recursive group also preserves names such as `(draft(v2)).md`.
-// Possessive inner text avoids exhausting VTE's match limit on wrappers.
+// Consume plain text in runs to avoid VTE's match limit on long paths and wrappers.
 const FILE_PATH_REGEX_PATTERN: &str = r#"(?x)
     (?<![^\s<>"'`(])
     (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))(?=[^\s<>"'`:),;!?])
-        |[^\s<>"'`:()\[\]{},;!?])+
+        |[^\s<>"'`:()\[\]{},;!?]++)+
 "#;
 
 /// PCRE2 compile flags.
@@ -4043,6 +4043,38 @@ mod tests {
             }
             window.close();
         }
+    }
+
+    #[gtk::test]
+    async fn terminal_file_links_match_long_soft_wrapped_paths() {
+        let path = "/home/user/dev/os/f-project/plugins/research/upstream-updates-for-flutter-tizen-2026-10-23.md";
+        let prefix = "Report: ";
+        let term = vte::Terminal::new();
+        let regex =
+            vte::Regex::for_match(FILE_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS).unwrap();
+        term.match_add_regex(&regex, 0);
+        let window = gtk::Window::new();
+        window.set_default_size(600, 300);
+        window.set_child(Some(&term));
+        window.present();
+        glib::timeout_future(Duration::from_millis(100)).await;
+        term.feed(format!("{prefix}{path}\r\n").as_bytes());
+        glib::timeout_future(Duration::from_millis(100)).await;
+
+        let columns = term.column_count() as usize;
+        assert!(columns > prefix.len() && columns < prefix.len() + path.len());
+        for cell in prefix.len()..prefix.len() + path.len() {
+            let x =
+                (cell % columns) as f64 * term.char_width() as f64 + term.char_width() as f64 / 2.0;
+            let y = (cell / columns) as f64 * term.char_height() as f64
+                + term.char_height() as f64 / 2.0;
+            assert_eq!(
+                terminal_file_candidate(&term, &regex, x, y).as_deref(),
+                Some(path)
+            );
+            assert_eq!(term.check_match_at(x, y).0.as_deref(), Some(path));
+        }
+        window.close();
     }
 
     #[test]
