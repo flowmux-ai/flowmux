@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Native editing confined to a process-owned WKWebView.
-use objc2::runtime::Bool;
+use objc2::runtime::{AnyClass, Bool, Imp, Method, Sel};
 use objc2::{msg_send, sel, ClassType};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags as Flags, NSEventType, NSView};
 use objc2_foundation::{NSNotFound, NSPoint, NSRange, NSString};
 use objc2_web_kit::WKWebView;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 pub(crate) fn physical_key(key: &str) -> Option<(&str, u16)> {
     Some(match key {
@@ -127,12 +129,101 @@ pub(crate) fn insert_text(web: &WKWebView, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+type MouseButtonsImp = unsafe extern "C-unwind" fn(&AnyClass, Sel) -> usize;
+static ORIGINAL_MOUSE_BUTTONS: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+thread_local! {
+    static POINTER_BUTTONS: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+unsafe extern "C-unwind" fn pointer_buttons(class: &AnyClass, selector: Sel) -> usize {
+    if let Some(buttons) = POINTER_BUTTONS.with(Cell::get) {
+        return buttons;
+    }
+    // Other threads retain the physical state while the main thread dispatches.
+    let original: MouseButtonsImp =
+        unsafe { std::mem::transmute(ORIGINAL_MOUSE_BUTTONS.load(Ordering::Acquire)) };
+    unsafe { original(class, selector) }
+}
+
+struct PointerButtonsGuard<'a> {
+    method: &'a Method,
+    original: Imp,
+}
+
+impl Drop for PointerButtonsGuard<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            self.method.set_implementation(self.original);
+        }
+        POINTER_BUTTONS.with(|buttons| buttons.set(None));
+    }
+}
+
+fn with_pointer_buttons(buttons: usize, send: impl FnOnce()) -> Result<(), String> {
+    let _mtm = objc2::MainThreadMarker::new().ok_or("pointer input requires the main thread")?;
+    if POINTER_BUTTONS.with(Cell::get).is_some() {
+        return Err("native pointer dispatch is already pending".into());
+    }
+    let method = NSEvent::class()
+        .class_method(sel!(pressedMouseButtons))
+        .ok_or("native pointer button state is unavailable")?;
+    let original = method.implementation();
+    ORIGINAL_MOUSE_BUTTONS.store(original as *mut (), Ordering::Release);
+    POINTER_BUTTONS.with(|state| state.set(Some(buttons)));
+    // WebKit reads this class method, which otherwise ignores generated NSEvents.
+    let replacement: MouseButtonsImp = pointer_buttons;
+    unsafe {
+        method.set_implementation(std::mem::transmute::<MouseButtonsImp, Imp>(replacement));
+    }
+    let _restore = PointerButtonsGuard { method, original };
+    send();
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn check_pointer_button_state() {
+    let physical = NSEvent::pressedMouseButtons();
+    let method = NSEvent::class()
+        .class_method(sel!(pressedMouseButtons))
+        .unwrap();
+    let original = method.implementation() as usize;
+    with_pointer_buttons(1, || {
+        assert_eq!(
+            NSEvent::pressedMouseButtons(),
+            1,
+            "native dispatch lost the held button"
+        );
+        assert!(with_pointer_buttons(0, || panic!("nested input must not run")).is_err());
+        assert_eq!(NSEvent::pressedMouseButtons(), 1);
+        assert_eq!(
+            std::thread::spawn(NSEvent::pressedMouseButtons)
+                .join()
+                .unwrap(),
+            physical,
+            "synthetic buttons leaked to another thread"
+        );
+    })
+    .unwrap();
+    assert_eq!(NSEvent::pressedMouseButtons(), physical);
+    with_pointer_buttons(0, || assert_eq!(NSEvent::pressedMouseButtons(), 0)).unwrap();
+    assert_eq!(NSEvent::pressedMouseButtons(), physical);
+    assert_eq!(
+        method.implementation() as usize,
+        original,
+        "native button method was not restored"
+    );
+    println!("MACOS_POINTER_BUTTON_STATE_OK");
+}
+
 pub(crate) fn pointer(
     web: &WKWebView,
     action: flowmux_browser::input::PointerAction,
     mut point: NSPoint,
 ) -> Result<(), String> {
     use flowmux_browser::input::{PointerAction, PointerTarget};
+    if NSEvent::pressedMouseButtons() != 0 {
+        return Err("release held pointer buttons before native input".into());
+    }
     let view = web.as_super();
     let bounds = view.bounds();
     PointerTarget {
@@ -180,7 +271,10 @@ pub(crate) fn pointer(
     };
     for count in 1..=count {
         for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
-            window.sendEvent(&*event(kind, count)?);
+            let event = event(kind, count)?;
+            with_pointer_buttons(usize::from(kind == NSEventType::LeftMouseDown), || {
+                window.sendEvent(&event);
+            })?;
         }
     }
     Ok(())

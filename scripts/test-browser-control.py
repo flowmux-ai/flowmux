@@ -94,7 +94,7 @@ class Fixture(BaseHTTPRequestHandler):
             body = b"""<!doctype html><title>Canvas input</title>
             <style>body{height:1600px}canvas{position:absolute;left:31.5px;top:420.5px;width:240px;height:120px;background:blue}canvas:hover{outline:3px solid green}</style>
             <canvas id=canvas width=480 height=240></canvas>
-            <script>window.events=[];for(const name of ['pointerdown','pointerup','click','dblclick','pointermove'])canvas.addEventListener(name,e=>events.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));</script>"""
+            <script>window.events=[];for(const name of ['pointerdown','pointerup','click','dblclick','pointermove'])canvas.addEventListener(name,e=>events.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY,buttons:e.buttons}));</script>"""
         elif self.path == "/popup":
             body = b"""<!doctype html><title>Popup destination</title>
             <input aria-label="Popup destination">
@@ -189,6 +189,7 @@ def exercise(cli, url, root):
     browser("pointer", "click", *map(str, point))
     event = json.loads(evaluate("JSON.stringify(events.find(e=>e.type==='click'))"))
     assert event["trusted"] and abs(event["x"]-point[0])<1.5 and abs(event["y"]-point[1])<1.5, (event, point)
+    assert json.loads(evaluate("JSON.stringify(events.filter(e=>['pointerdown','pointerup'].includes(e.type)).map(e=>[e.type,e.buttons]))")) == [["pointerdown",1],["pointerup",0]]
     event_count = evaluate("String(events.length)")
     browser("pointer", "click", "999999", "0", error=True)
     assert evaluate("String(events.length)") == event_count
@@ -736,10 +737,10 @@ def exercise(cli, url, root):
     assert evaluate("keyfield.value") == "relaced"
     print("PASS: native Enter, Tab, reverse Tab, select-all and canceled keys", flush=True)
 
-    evaluate("document.body.insertAdjacentHTML('beforeend', '<button id=pointer>Native pointer</button>'); window.pointerEvents=[]; for(const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick']) pointer.addEventListener(type,e=>pointerEvents.push([e.type,e.isTrusted])); 'pointer'")
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<button id=pointer>Native pointer</button>'); window.pointerEvents=[]; for(const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick']) pointer.addEventListener(type,e=>pointerEvents.push([e.type,e.isTrusted,e.buttons])); 'pointer'")
     pointer = reference(snapshot(), "Native pointer")
     browser("click", pointer)
-    assert json.loads(evaluate("JSON.stringify(pointerEvents)")) == [[name, True] for name in ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]], "click did not use native pointer events"
+    assert json.loads(evaluate("JSON.stringify(pointerEvents)")) == [[name, True, 1 if name in ("pointerdown", "mousedown") else 0] for name in ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]], "click did not use native pointer events"
     browser("hover", pointer)
     assert evaluate("String(document.querySelector('#pointer').matches(':hover'))") == "true", "hover did not activate CSS hover"
     evaluate("pointerEvents=[]; 'clear'")

@@ -246,6 +246,7 @@ impl Drop for Window {
 #[cfg(test)]
 pub(crate) fn smoke() {
     let _app = application();
+    crate::macos_input::check_pointer_button_state();
     let mtm = MainThreadMarker::new().unwrap();
     let config = unsafe { WKWebViewConfiguration::new(mtm) };
     unsafe {
