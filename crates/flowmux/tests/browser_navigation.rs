@@ -190,6 +190,10 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
     let dir = tempfile::tempdir().unwrap();
     let runtime = dir.path().join("runtime");
     std::fs::create_dir(&runtime).unwrap();
+    // This fixture tests browser navigation with onboarding already completed.
+    let state = dir.path().join("state/flowmux");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(state.join("welcome-seen"), "").unwrap();
     let first = dir.path().join("first.html");
     std::fs::write(
         &first,
@@ -278,17 +282,15 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
         .unwrap()
         .0
         .clone();
-    assert!(matches!(
-        call(
-            &client,
-            Request::BrowserClick {
-                pane,
-                target: old_ref.clone()
-            }
-        )
-        .await,
-        Response::BrowserOk
-    ));
+    let clicked = call(
+        &client,
+        Request::BrowserClick {
+            pane,
+            target: old_ref.clone(),
+        },
+    )
+    .await;
+    assert!(matches!(clicked, Response::BrowserOk), "{clicked:?}");
     wait_page(&client, pane, "second").await;
     // Both pages deliberately contain #next. Retaining the old selector would
     // silently click a different element instead of reporting an expired ref.
