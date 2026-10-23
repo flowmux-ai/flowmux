@@ -146,6 +146,11 @@ for the current page; these are independent examples, not a script to run blindl
 | Scrolling | `scroll PANE REF X Y` |
 | Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
+| Async completion | `eval-async PANE BODY --timeout-ms 10000`; BODY is a function body, e.g. `return await fetch('/status').then(r => r.text())` |
+
+`eval-async` waits for the returned Promise and reports rejection or timeout.
+A timeout stops waiting, but cannot cancel page effects; inspect state before
+retrying a command that changes the page.
 
 Refs belong to the latest snapshot of one browser tab. After navigation, reload,
 tab switches or page changes, wait and take a fresh snapshot before using refs.

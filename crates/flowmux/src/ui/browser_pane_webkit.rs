@@ -769,7 +769,7 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
-        self.evaluate_in_world(source, None, on_done);
+        self.evaluate_in_world(source, None, false, on_done);
     }
 
     pub fn evaluate_automation_js<F: FnOnce(Result<String, String>) + 'static>(
@@ -777,13 +777,22 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
-        self.evaluate_in_world(source, Some("flowmux.browser"), on_done);
+        self.evaluate_in_world(source, Some("flowmux.browser"), false, on_done);
+    }
+
+    pub fn evaluate_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(body, None, true, on_done);
     }
 
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,
         world: Option<&str>,
+        asynchronous: bool,
         on_done: F,
     ) {
         if !self.navigation_enabled.get() {
@@ -793,25 +802,37 @@ impl BrowserPane {
             return;
         }
         let navigation_enabled = self.navigation_enabled.clone();
-        self.web_view.evaluate_javascript(
-            source,
-            world,
-            None,
-            gtk::gio::Cancellable::NONE,
-            move |result| {
-                if !navigation_enabled.get() {
-                    on_done(Err(
-                        "SSH preview expired; open a new preview after reconnecting".into(),
-                    ));
-                    return;
-                }
-                let r = match result {
-                    Ok(value) => Ok(value.to_str().to_string()),
-                    Err(e) => Err(e.to_string()),
-                };
-                on_done(r);
-            },
-        );
+        let callback = move |result: Result<webkit6::javascriptcore::Value, gtk::glib::Error>| {
+            if !navigation_enabled.get() {
+                on_done(Err(
+                    "SSH preview expired; open a new preview after reconnecting".into(),
+                ));
+                return;
+            }
+            let r = match result {
+                Ok(value) => Ok(value.to_str().to_string()),
+                Err(e) => Err(e.to_string()),
+            };
+            on_done(r);
+        };
+        if asynchronous {
+            self.web_view.call_async_javascript_function(
+                source,
+                None,
+                world,
+                None,
+                gtk::gio::Cancellable::NONE,
+                callback,
+            );
+        } else {
+            self.web_view.evaluate_javascript(
+                source,
+                world,
+                None,
+                gtk::gio::Cancellable::NONE,
+                callback,
+            );
+        }
     }
 }
 

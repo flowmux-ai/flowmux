@@ -208,6 +208,36 @@ fn browser_and_cookie_commands_map_to_ipc_requests() {
 /// the docs show — including the `pane:` prefix — and confirm it
 /// reaches the right IPC request without translation.
 #[test]
+fn async_browser_body_and_timeout_are_preserved() {
+    let pane = PaneId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "eval-async",
+        &pane.to_string(),
+        "return await Promise.resolve('한글')",
+        "--timeout-ms",
+        "125",
+    ])
+    .unwrap();
+    let request = build_request(cli.cmd).unwrap();
+    assert!(
+        matches!(request, Request::BrowserEvalAsync { pane: got, body, timeout_ms: 125 }
+        if got == pane && body == "return await Promise.resolve('한글')")
+    );
+    assert!(Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "eval-async",
+        &pane.to_string(),
+        "return 1",
+        "--timeout-ms",
+        "0",
+    ])
+    .is_err());
+}
+
+#[test]
 fn browser_surface_target_is_preserved_and_open_rejects_it() {
     let pane = PaneId::new();
     let surface = SurfaceId::new();

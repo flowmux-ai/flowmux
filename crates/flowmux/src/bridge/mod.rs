@@ -32,6 +32,10 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    EvalAsync {
+        body: String,
+        timeout_ms: u32,
+    },
     /// Take a non-mutating page snapshot. Runs `scripts::SNAPSHOT_JS`,
     /// repopulates the pane's `RefStore` from the returned `refs` map,
     /// and returns the snapshot JSON. The live DOM is never stamped.
@@ -123,6 +127,7 @@ impl BrowserOp {
     /// cannot silently omit its agent-facing name.
     pub fn capability_name(&self) -> &'static str {
         match self {
+            Self::EvalAsync { .. } => "eval-async",
             Self::Snapshot => "snapshot",
             Self::Navigate { .. } => "navigate",
             Self::Back => "back",

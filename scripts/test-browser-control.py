@@ -153,6 +153,18 @@ def exercise(cli, url, root):
     browser("select", choice, "two", error=True)
     print("PASS: hidden, covered, disabled and readonly targets reject actions without effects", flush=True)
 
+    result = browser("eval-async", "return await new Promise(resolve => setTimeout(() => resolve('finished'), 50))", "--surface", other["page"]["surface_id"])
+    assert result["browser_result"]["value"] == "finished"
+    rejected = browser("eval-async", "return Promise.reject(new Error('expected rejection'))", error=True)
+    assert "expected rejection" in rejected["error"]["message"], rejected
+    start = time.monotonic()
+    expired = browser("eval-async", "return new Promise(resolve => setTimeout(() => { window.asyncLate = true; resolve('late'); }, 1000))", "--timeout-ms", "100", error=True)
+    assert "timed out" in expired["error"]["message"], expired
+    assert .08 <= time.monotonic() - start < 5, "async execution did not honor its timeout"
+    assert evaluate("'still responsive'") == "still responsive"
+    assert browser("wait", "--js", "window.asyncLate === true")["browser_bool_result"]["value"]
+    print("PASS: async results settle, rejection is reported and timeout keeps the browser responsive", flush=True)
+
 
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/flowmux").resolve()

@@ -101,6 +101,11 @@ async fn browser_action(
     surface: Option<flowmux_core::SurfaceId>,
     op: BrowserOp,
 ) -> Response {
+    if matches!(op, BrowserOp::EvalAsync { timeout_ms: 0, .. }) {
+        return Response::Error(RpcError::InvalidArgument(
+            "async timeout must be positive".into(),
+        ));
+    }
     tracing::debug!(
         %pane,
         verb = op.capability_name(),
@@ -137,6 +142,11 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserEvalAsync {
+                pane,
+                body,
+                timeout_ms,
+            } => (pane, BrowserOp::EvalAsync { body, timeout_ms }),
             Request::BrowserNavigate { pane, url } => (pane, BrowserOp::Navigate { url }),
             Request::BrowserBack { pane } => (pane, BrowserOp::Back),
             Request::BrowserForward { pane } => (pane, BrowserOp::Forward),
@@ -390,6 +400,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserSnapshot { .. }
                 | Request::ImportCookies { .. }
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
+                Request::BrowserEvalAsync { .. } => self.handle_browser_verb(req).await,
                 Request::ClaudeTeams { .. }
                 | Request::TmuxCompat { .. }
                 | Request::AgentSessionUpdate { .. }

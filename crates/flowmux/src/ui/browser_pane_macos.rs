@@ -1247,7 +1247,7 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
-        self.evaluate_in_world(source, false, on_done);
+        self.evaluate_in_world(source, false, false, on_done);
     }
 
     pub fn evaluate_automation_js<F: FnOnce(Result<String, String>) + 'static>(
@@ -1255,13 +1255,22 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
-        self.evaluate_in_world(source, true, on_done);
+        self.evaluate_in_world(source, true, false, on_done);
+    }
+
+    pub fn evaluate_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_in_world(body, false, true, on_done);
     }
 
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,
         isolated: bool,
+        asynchronous: bool,
         on_done: F,
     ) {
         if !self.native.navigation_enabled.get() {
@@ -1286,7 +1295,18 @@ impl BrowserPane {
             }
         });
         unsafe {
-            if isolated {
+            if asynchronous {
+                let world = WKContentWorld::pageWorld(MainThreadMarker::new().unwrap());
+                self.native
+                    .web_view
+                    .callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
+                        &script,
+                        None,
+                        None,
+                        &world,
+                        Some(&block),
+                    );
+            } else if isolated {
                 let world = WKContentWorld::defaultClientWorld(MainThreadMarker::new().unwrap());
                 self.native
                     .web_view
@@ -1758,7 +1778,19 @@ fn error_description(error: *mut NSError) -> String {
     if error.is_null() {
         return "unknown WebKit error".into();
     }
-    unsafe { (&*error).localizedDescription().to_string() }
+    unsafe {
+        let error = &*error;
+        let description = error.localizedDescription().to_string();
+        if let Some(message) = error
+            .userInfo()
+            .objectForKey(&NSString::from_str("WKJavaScriptExceptionMessage"))
+        {
+            if let Some(message) = message.downcast_ref::<NSString>() {
+                return format!("{description}: {message}");
+            }
+        }
+        description
+    }
 }
 
 fn normalize_uri(raw: &str) -> String {

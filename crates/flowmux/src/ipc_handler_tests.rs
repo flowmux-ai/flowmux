@@ -2495,6 +2495,23 @@ async fn browser_snapshot_reports_not_found_for_missing_browser_pane() {
 }
 
 #[tokio::test]
+async fn browser_async_rejects_zero_timeout_before_dispatch() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    let response = handler
+        .handle(Request::BrowserEvalAsync {
+            pane,
+            body: "document.body.remove()".into(),
+            timeout_ms: 0,
+        })
+        .await;
+    assert!(matches!(
+        response,
+        Response::Error(RpcError::InvalidArgument(_))
+    ));
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn browser_surface_target_rejects_non_browser_open_and_nested_requests() {
     let (handler, rx, pane, surface) = single_pane_handler().await;
     for request in [

@@ -501,6 +501,13 @@ enum BrowserOp {
     Snapshot { pane: PaneId },
     /// Run JS in a browser pane and print the result.
     Eval { pane: PaneId, source: String },
+    /// Run an async JS function body (use return for its result).
+    EvalAsync {
+        pane: PaneId,
+        body: String,
+        #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u32).range(1..))]
+        timeout_ms: u32,
+    },
     /// Navigate a browser pane to a new URL.
     Navigate { pane: PaneId, url: String },
     /// Move a browser pane backward in session history.

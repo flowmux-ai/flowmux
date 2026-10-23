@@ -67,6 +67,28 @@ impl WindowController {
                     }
                 };
                 match op {
+                    BrowserOp::EvalAsync { body, timeout_ms } => {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        browser.evaluate_async_js(&body, move |result| {
+                            let _ = tx.send(result);
+                        });
+                        glib::spawn_future_local(async move {
+                            let result = match glib::future_with_timeout(
+                                std::time::Duration::from_millis(timeout_ms.into()),
+                                rx,
+                            )
+                            .await
+                            {
+                                Ok(Ok(result)) => result.map(BrowserActionResult::String),
+                                Ok(Err(_)) => Err("browser closed before async completion".into()),
+                                Err(_) => Err(
+                                    "async script timed out; its page effects may still complete"
+                                        .into(),
+                                ),
+                            };
+                            let _ = ack.send(result);
+                        });
+                    }
                     BrowserOp::Snapshot => {
                         // Run the non-mutating snapshot script, then mirror
                         // its `refs` map into the pane's server-side

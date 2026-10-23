@@ -38,6 +38,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "is-checked",
     "count",
     "eval",
+    "eval-async",
     "wait",
     "screenshot",
 ];
@@ -756,6 +757,12 @@ pub enum Request {
     BrowserEval {
         pane: PaneId,
         source: String,
+    },
+    /// Evaluate a function body and wait for its returned Promise.
+    BrowserEvalAsync {
+        pane: PaneId,
+        body: String,
+        timeout_ms: u32,
     },
 
     /// `flowmux import-cookies --from firefox [--domain example.com]`

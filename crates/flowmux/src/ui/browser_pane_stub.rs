@@ -138,6 +138,14 @@ impl BrowserPane {
         self.evaluate_js(source, on_done);
     }
 
+    pub fn evaluate_async_js<F: FnOnce(Result<String, String>) + 'static>(
+        &self,
+        body: &str,
+        on_done: F,
+    ) {
+        self.evaluate_js(body, on_done);
+    }
+
     pub fn evaluate_js<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _source: &str,

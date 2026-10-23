@@ -32,6 +32,15 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
         }
         BrowserOp::Snapshot { pane } => Request::BrowserSnapshot { pane },
         BrowserOp::Eval { pane, source } => Request::BrowserEval { pane, source },
+        BrowserOp::EvalAsync {
+            pane,
+            body,
+            timeout_ms,
+        } => Request::BrowserEvalAsync {
+            pane,
+            body,
+            timeout_ms,
+        },
         BrowserOp::Navigate { pane, url } => Request::BrowserNavigate { pane, url },
         BrowserOp::Back { pane } => Request::BrowserBack { pane },
         BrowserOp::Forward { pane } => Request::BrowserForward { pane },
