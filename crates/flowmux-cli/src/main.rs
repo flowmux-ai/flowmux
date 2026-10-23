@@ -485,6 +485,19 @@ enum NotificationOp {
 }
 
 #[derive(Subcommand)]
+enum FileChooserAction {
+    Status,
+    Select {
+        id: String,
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<PathBuf>,
+    },
+    Cancel {
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum DialogAction {
     Status,
     Accept {
@@ -511,6 +524,12 @@ enum DownloadAction {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Inspect or answer a page's pending file chooser.
+    FileChooser {
+        pane: PaneId,
+        #[command(subcommand)]
+        action: FileChooserAction,
+    },
     /// Inspect or answer the current page alert, confirm, or prompt.
     Dialog {
         pane: PaneId,

@@ -32,6 +32,14 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub async fn file_chooser(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserFileChooserAction,
+    ) -> Result<String, String> {
+        let _ = action;
+        Err(UNSUPPORTED.into())
+    }
+
     pub async fn dialog(
         &self,
         action: &flowmux_ipc::protocol::BrowserDialogAction,

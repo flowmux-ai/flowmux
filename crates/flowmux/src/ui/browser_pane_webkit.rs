@@ -5,6 +5,7 @@
 use crate::ui::browser_bookmarks::BookmarkMenu;
 use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::DownloadManager;
+use crate::ui::browser_file_chooser::FileChoosers;
 use crate::ui::pane_terminal::PaneCallbacks;
 use adw::prelude::*;
 use flowmux_browser::{BrowserProfile, RefScope, RefStore};
@@ -35,6 +36,7 @@ pub struct BrowserPane {
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
     dialogs: PageDialogs,
+    file_choosers: FileChoosers,
     _downloads: DownloadManager,
     _download_signal: Rc<NetworkSessionSignal>,
     pub refs: Rc<RefCell<RefStore>>,
@@ -69,6 +71,13 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub async fn file_chooser(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserFileChooserAction,
+    ) -> Result<String, String> {
+        self.file_choosers.control(action).await
+    }
+
     pub async fn dialog(
         &self,
         action: &flowmux_ipc::protocol::BrowserDialogAction,
@@ -330,6 +339,52 @@ impl BrowserPane {
         let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
         inspector.add_css_class("flat");
         inspector.set_tooltip_text(Some("Open Web Inspector"));
+        let file_choosers = FileChoosers::default();
+        {
+            let file_choosers = file_choosers.clone();
+            web_view.connect_run_file_chooser(move |view, request| {
+                let Some(parent) = view
+                    .root()
+                    .and_then(|root| root.downcast::<gtk::Window>().ok())
+                else {
+                    return false;
+                };
+                let dialog = gtk::FileDialog::builder()
+                    .title("Choose files")
+                    .modal(true)
+                    .build();
+                if let Some(filter) = request.mime_types_filter() {
+                    let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
+                    filters.append(&filter);
+                    dialog.set_filters(Some(&filters));
+                    dialog.set_default_filter(Some(&filter));
+                }
+                if let Some(path) = request.selected_files().first() {
+                    dialog.set_initial_file(Some(&gtk::gio::File::for_path(path)));
+                }
+                let native = request.clone();
+                // shortcut: GTK requests expose no folder mode; add it when the native API does.
+                file_choosers.present(
+                    &parent,
+                    &dialog,
+                    request.selects_multiple(),
+                    false,
+                    move |paths| {
+                        if let Some(paths) = paths {
+                            native.select_files(
+                                &paths
+                                    .iter()
+                                    .map(|path| path.to_str().expect("validated path"))
+                                    .collect::<Vec<_>>(),
+                            );
+                        } else {
+                            native.cancel();
+                        }
+                    },
+                );
+                true
+            });
+        }
         let dialogs = PageDialogs::default();
         {
             let dialogs = dialogs.clone();
@@ -705,6 +760,7 @@ impl BrowserPane {
             zoom_label,
             find_entry,
             dialogs,
+            file_choosers,
             _downloads: downloads,
             _download_signal: download_signal,
             refs,

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -65,12 +66,17 @@ class Fixture(BaseHTTPRequestHandler):
         <textarea title="Message title" placeholder=Wrong>existing message</textarea>
         <label for=multi>First label</label><label for=multi>Second label</label><input id=multi>
         <input type=password value=secret aria-label=Password></p>
+        <input id=upload type=file aria-label="Upload file" accept="text/plain">
+        <input id=uploads type=file multiple aria-label="Upload files">
         <iframe id=frame src=/frame title="Form frame" width=380 height=220 style="margin:20px;border:5px solid"></iframe>
         <iframe id=restricted sandbox src=/inner title="Restricted frame" width=150 height=60></iframe>
         <video id=clip controls muted playsinline preload=auto width=96 height=64
           aria-label=Clip src=/clip.mp4></video>
         <div id=shadowHost></div>
         <script>window.clicks=0;window.mutations=[];
+        for (const input of [upload,uploads]) input.onchange=async event=>{
+          window.uploadResult={trusted:event.isTrusted,files:await Promise.all([...input.files].map(async file=>({name:file.name,text:await file.text()})))};
+        };
         const outer=shadowHost.attachShadow({mode:'open'});
         outer.innerHTML='<section id=inner></section>';
         const inner=outer.querySelector('#inner').attachShadow({mode:'open'});
@@ -248,6 +254,64 @@ def exercise(cli, url, root):
     assert browser("wait", "--js", "dialogResult === undefined")["browser_bool_result"]["value"]
     assert dialog() is None
     print("PASS: page dialogs require matching IDs and preserve confirm/prompt/alert replies", flush=True)
+    def chooser(*args, **kwargs):
+        result = browser("file-chooser", *(args or ("status",)), **kwargs)
+        return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["file_chooser"]
+
+    def open_chooser(name):
+        browser("focus", reference(snapshot(), name))
+        browser("press", "Enter")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            pending = chooser()
+            if pending:
+                return pending
+            time.sleep(.02)
+        raise AssertionError("file chooser did not appear")
+
+    upload_file = root / "한글 upload.txt"
+    upload_file.write_text("private fixture 한글🙂")
+    another_file = root / "second.txt"
+    another_file.write_text("second fixture")
+    assert chooser() is None
+    pending = open_chooser("Upload file")
+    assert not pending["multiple"]
+    chooser("select", "stale-id", str(upload_file), error=True)
+    chooser("select", pending["id"], str(root / "missing"), error=True)
+    chooser("select", pending["id"], str(root), error=True)
+    chooser("select", pending["id"], str(upload_file), str(another_file), error=True)
+    assert chooser()["id"] == pending["id"]
+    chooser("select", pending["id"], str(upload_file))
+    assert browser("wait", "--js", "window.uploadResult?.files.length === 1")["browser_bool_result"]["value"]
+    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
+    for item in uploaded["files"]:
+        item["name"] = unicodedata.normalize("NFC", item["name"])
+    assert uploaded == {"trusted": True, "files": [{"name": upload_file.name, "text": upload_file.read_text()}]}, uploaded
+    pending = open_chooser("Upload files")
+    assert pending["multiple"]
+    chooser("select", pending["id"], str(upload_file), str(another_file))
+    assert browser("wait", "--js", "window.uploadResult?.files.length === 2")["browser_bool_result"]["value"]
+    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
+    for item in uploaded["files"]:
+        item["name"] = unicodedata.normalize("NFC", item["name"])
+    assert uploaded["trusted"] and uploaded["files"] == [{"name": f.name, "text": f.read_text()} for f in [upload_file, another_file]], uploaded
+    previous_id = pending["id"]
+    pending = open_chooser("Upload files")
+    chooser("cancel", previous_id, error=True)
+    chooser("cancel", pending["id"])
+    assert chooser() is None
+    assert evaluate("String(uploads.files.length)") == "2", "cancel replaced existing files"
+    original_surface = snapshot()["page"]["surface_id"]
+    cli("browser", "open", url, pane_context=terminal)
+    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    closing_surface = snapshot()["page"]["surface_id"]
+    pending = open_chooser("Upload file")
+    cli("close-tab", closing_surface, "--pane", pane)
+    assert snapshot()["page"]["surface_id"] == original_surface
+    chooser("select", pending["id"], str(upload_file), error=True)
+    assert chooser() is None
+    print("PASS: native file selection validates paths and IDs and delivers exact file contents", flush=True)
     before = evaluate("document.documentElement.outerHTML")
     first = snapshot()
     assert evaluate("document.documentElement.outerHTML") == before

@@ -138,6 +138,16 @@ impl WindowController {
                     }
                 };
                 match op {
+                    BrowserOp::FileChooser { action } => {
+                        glib::spawn_future_local(async move {
+                            let _ = ack.send(
+                                browser
+                                    .file_chooser(&action)
+                                    .await
+                                    .map(BrowserActionResult::String),
+                            );
+                        });
+                    }
                     BrowserOp::Dialog { action } => {
                         glib::spawn_future_local(async move {
                             let _ = ack.send(

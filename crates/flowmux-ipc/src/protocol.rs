@@ -44,6 +44,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "media",
     "download",
     "dialog",
+    "file-chooser",
 ];
 
 /// Browser features that are intentionally unsupported and return a
@@ -771,6 +772,10 @@ pub enum Request {
         body: String,
         timeout_ms: u32,
     },
+    BrowserFileChooser {
+        pane: PaneId,
+        action: BrowserFileChooserAction,
+    },
     BrowserDialog {
         pane: PaneId,
         action: BrowserDialogAction,
@@ -850,6 +855,14 @@ pub enum BrowserDialogAction {
     Status,
     Accept { id: String, text: Option<String> },
     Dismiss { id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum BrowserFileChooserAction {
+    Status,
+    Select { id: String, paths: Vec<PathBuf> },
+    Cancel { id: String },
 }
 
 impl Request {

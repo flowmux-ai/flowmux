@@ -187,6 +187,7 @@ cannot be combined.
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |
+| File selection | `file-chooser PANE status`, `select ID PATH...`, or `cancel ID` |
 | Scrolling | `scroll PANE REF X Y` |
 | Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
@@ -215,6 +216,17 @@ timeout, inspect `status` before retrying because the page may already have
 received its answer. Use `--surface` for dialogs belonging to an inactive tab.
 These commands handle page JavaScript dialogs, not permission requests or
 before-unload confirmation. The visible panel still accepts normal user input.
+
+Activate a file input with `click REF`, or `focus REF` then `press Enter`.
+`file-chooser status` returns `{"file_chooser": null}` when none is pending;
+otherwise it returns an `id`, `multiple`, and `directories` flag. Use that ID
+with `select` to provide existing readable paths, or `cancel` to preserve the
+page's previous selection. Relative paths are resolved from the CLI's working
+directory. The selection must match the native request's count and file/folder
+type. Invalid paths and stale IDs leave the pending chooser untouched. Selection
+makes those files available to the requesting page; verify its change event or
+upload result afterward. The standard file picker also remains usable manually.
+Use `--surface` to keep responses on the intended browser tab.
 
 `download` returns JSON with the tab's `directory` and ordered `downloads`.
 Each item has an `id`, `state` (`in_progress`, `cancelling`, `complete`,

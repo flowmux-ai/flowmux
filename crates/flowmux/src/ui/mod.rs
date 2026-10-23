@@ -5,6 +5,7 @@ mod browser_bookmarks;
 mod browser_capture;
 mod browser_dialogs;
 mod browser_downloads;
+mod browser_file_chooser;
 pub mod browser_pane;
 pub mod editor_pane;
 pub mod file_browser;

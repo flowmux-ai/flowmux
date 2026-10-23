@@ -153,6 +153,9 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserFileChooser { pane, action } => {
+                (pane, BrowserOp::FileChooser { action })
+            }
             Request::BrowserDialog { pane, action } => (pane, BrowserOp::Dialog { action }),
             Request::BrowserDownload { pane, action } => (pane, BrowserOp::Download { action }),
             Request::BrowserMedia {
@@ -432,6 +435,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
                 Request::BrowserEvalAsync { .. }
                 | Request::BrowserMedia { .. }
+                | Request::BrowserFileChooser { .. }
                 | Request::BrowserDialog { .. }
                 | Request::BrowserDownload { .. } => self.handle_browser_verb(req).await,
                 Request::ClaudeTeams { .. }

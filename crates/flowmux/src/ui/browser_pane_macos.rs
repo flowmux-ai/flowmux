@@ -4,6 +4,7 @@
 use crate::ui::browser_bookmarks::BookmarkMenu;
 use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::{DownloadItem, DownloadManager};
+use crate::ui::browser_file_chooser::FileChoosers;
 use crate::ui::pane_terminal::PaneCallbacks;
 use adw::prelude::*;
 use flowmux_browser::{BrowserProfile, RefScope, RefStore};
@@ -106,6 +107,7 @@ struct BrowserNavigationDelegateIvars {
 
 struct BrowserUIDelegateIvars {
     dialogs: PageDialogs,
+    file_choosers: FileChoosers,
     navigation_enabled: Rc<Cell<bool>>,
     pane_id: Rc<Cell<PaneId>>,
     open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
@@ -171,6 +173,56 @@ define_class!(
                 media_capture_name(capture_type),
                 site,
                 decision_handler.copy(),
+            );
+        }
+
+        #[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+        #[allow(non_snake_case)]
+        fn webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler(
+            &self,
+            _web_view: &WKWebView,
+            parameters: &objc2_web_kit::WKOpenPanelParameters,
+            _frame: &WKFrameInfo,
+            completion_handler: &block2::DynBlock<dyn Fn(*mut objc2_foundation::NSArray<NSURL>)>,
+        ) {
+            let Some(parent) = self
+                .ivars()
+                .placeholder
+                .upgrade()
+                .and_then(|widget| widget.root())
+                .and_then(|root| root.downcast::<gtk::Window>().ok())
+            else {
+                completion_handler.call((std::ptr::null_mut(),));
+                return;
+            };
+            let native_suspend = suspend_native_browser_views(&parent, false);
+            let handler = completion_handler.copy();
+            let dialog = gtk::FileDialog::builder()
+                .title("Choose files")
+                .modal(true)
+                .build();
+            self.ivars().file_choosers.present(
+                &parent,
+                &dialog,
+                unsafe { parameters.allowsMultipleSelection() },
+                unsafe { parameters.allowsDirectories() },
+                move |paths| {
+                    if let Some(paths) = paths {
+                        let urls: Vec<_> = paths
+                            .iter()
+                            .map(|path| {
+                                NSURL::fileURLWithPath(&NSString::from_str(
+                                    path.to_str().expect("validated path"),
+                                ))
+                            })
+                            .collect();
+                        let urls = objc2_foundation::NSArray::from_retained_slice(&urls);
+                        handler.call((Retained::as_ptr(&urls).cast_mut(),));
+                    } else {
+                        handler.call((std::ptr::null_mut(),));
+                    }
+                    drop(native_suspend);
+                },
             );
         }
 
@@ -634,6 +686,18 @@ pub fn ref_scope_for_surface(surface_id: SurfaceId) -> RefScope {
 }
 
 impl BrowserPane {
+    pub async fn file_chooser(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserFileChooserAction,
+    ) -> Result<String, String> {
+        self.native
+            ._ui_delegate
+            .ivars()
+            .file_choosers
+            .control(action)
+            .await
+    }
+
     pub async fn dialog(
         &self,
         action: &flowmux_ipc::protocol::BrowserDialogAction,
@@ -1505,6 +1569,7 @@ fn install_ui_delegate(
 ) -> Retained<BrowserUIDelegate> {
     let delegate = BrowserUIDelegate::alloc(mtm).set_ivars(BrowserUIDelegateIvars {
         dialogs: PageDialogs::default(),
+        file_choosers: FileChoosers::default(),
         navigation_enabled,
         pane_id,
         open_url,
