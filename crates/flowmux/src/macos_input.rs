@@ -150,7 +150,10 @@ pub(crate) fn pointer(
         .contentView()
         .ok_or("browser has no native content view")?;
     let hit = content.hitTest(view.convertPoint_toView(point, Some(&content)));
-    if !hit.is_some_and(|hit| hit.isDescendantOf(view)) {
+    if !hit.as_ref().is_some_and(|hit| hit.isDescendantOf(view)) {
+        tracing::debug!(target = ?point, bounds = ?bounds, web_frame = ?view.frame(),
+            content_frame = ?content.frame(), content_flipped = content.isFlipped(),
+            hit = ?hit, "native browser pointer target is covered");
         return Err("browser pointer target is covered by a native view".into());
     }
     let point = view.convertPoint_toView(point, None);

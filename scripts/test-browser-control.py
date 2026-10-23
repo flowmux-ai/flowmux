@@ -211,7 +211,11 @@ def exercise(cli, url, root):
     browser("click", reference(first, "Shadow button"), error=True)
     assert evaluate("String(shadowClicks)") == "0"
     evaluate("shadowCover.remove(); 'uncovered'")
-    browser("click", reference(first, "Shadow button"))
+    try:
+        browser("click", reference(first, "Shadow button"))
+    except AssertionError:
+        print("SHADOW_POINTER_FAILURE_STATE=" + evaluate("JSON.stringify({rect:shadowHost.shadowRoot.querySelector('#inner').shadowRoot.querySelector('button').getBoundingClientRect(),viewport:[innerWidth,innerHeight],scroll:[scrollX,scrollY]})"), flush=True)
+        raise
     assert evaluate("String(shadowClicks)") == "1"
     evaluate("shadowHost.outerHTML=shadowHost.outerHTML; 'replaced shadow host'")
     browser("fill", shadow_field, "stale", error=True)
