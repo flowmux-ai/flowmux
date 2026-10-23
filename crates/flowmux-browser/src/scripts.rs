@@ -42,7 +42,7 @@ pub const SNAPSHOT_JS: &str = r#"
       const ty = (el.getAttribute('type') || 'text').toLowerCase();
       if (ty === 'checkbox') return 'checkbox';
       if (ty === 'radio') return 'radio';
-      if (ty === 'submit' || ty === 'button') return 'button';
+      if (ty === 'submit' || ty === 'button' || ty === 'reset') return 'button';
       if (ty === 'search') return 'searchbox';
       return 'textbox';
     }
@@ -60,14 +60,30 @@ pub const SNAPSHOT_JS: &str = r#"
     return true;
   }
 
-  function name(el) {
-    return (
-      el.getAttribute('aria-label') ||
-      el.getAttribute('alt') ||
-      el.getAttribute('title') ||
-      el.getAttribute('placeholder') ||
-      (el.innerText || '').trim().slice(0, 120)
-    );
+  function flat(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function name(el, referenced = false) {
+    // IDREF traversal is not recursive, including self references and cycles.
+    if (!referenced) {
+      const labels = flat(el.getAttribute('aria-labelledby')).split(' ')
+        .map(id => el.getRootNode().getElementById(id)).filter(Boolean);
+      if (labels.length) return flat(labels.map(label => name(label, true)).join(' '));
+    }
+    const aria = flat(el.getAttribute('aria-label'));
+    if (aria) return aria;
+    if (el.labels?.length) {
+      const label = flat(Array.from(el.labels, label => name(label, true)).join(' '));
+      if (label) return label;
+    }
+    if (el.matches('input[type=button],input[type=submit],input[type=reset]') && flat(el.value))
+      return flat(el.value);
+    if (el.hasAttribute('alt')) return flat(el.getAttribute('alt'));
+    // shortcut: CSS-generated content and embedded-control naming need a full accessibility-tree API.
+    const content = el.matches('input,textarea,select') ? ''
+      : flat(el.innerText || (referenced ? el.textContent : ''));
+    return content || flat(el.getAttribute('title')) || flat(el.getAttribute('placeholder'));
   }
 
   // Build a CSS selector that matches only `el`. Prefer `#id` when the id is
@@ -116,7 +132,7 @@ pub const SNAPSHOT_JS: &str = r#"
     counter += 1;
     const token = 'e' + counter + '-' + nonce;
     const sel = cssPath(el);
-    const nm = name(el).replace(/\n+/g, ' ').slice(0, 120);
+    const nm = name(el).slice(0, 120);
     refs[token] = { role: role, name: nm, selector: sel };
     nodes.set(token, el);
     const safe = nm.split(String.fromCharCode(34)).join('\\"');

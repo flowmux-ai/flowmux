@@ -113,6 +113,10 @@ URL and readiness before taking a snapshot. Wait prints `true` or `false`;
 A snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
 Copy the entire returned ref; short names such as `e1` are not aliases.
 Refs expire when their element is replaced, even if its selector stays the same.
+Snapshot names prefer valid `aria-labelledby` references, then `aria-label`,
+associated HTML labels and element text. Referenced hidden labels are included;
+title and placeholder provide fallbacks. This is a DOM summary, not a complete
+platform accessibility tree (for example, CSS-generated text is not included).
 Snapshot JSON includes `page.surface_id`. Pass `browser --surface UUID` before
 any browser command except `open` to keep targeting that tab after another tab
 becomes active. A closed tab or a surface outside the given pane returns an error.

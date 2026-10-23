@@ -18,6 +18,18 @@ class Fixture(BaseHTTPRequestHandler):
         body = b"""<!doctype html><title>Browser control fixture</title>
         <button id=target onclick="window.clicks++">Original</button>
         <input id=field aria-label=Field><input type=checkbox id=check>
+        <p><label for=contact>Contact email</label><input id=contact placeholder=Wrong>
+        <label>Postal code <input id=postal title=Wrong></label>
+        <span id=first hidden>Confirm</span><span id=second hidden> order </span>
+        <button id=named aria-labelledby="first second" aria-label=Wrong>Wrong</button>
+        <input type=submit value=Send title=Wrong>
+        <input type=reset value=Clear title=Wrong>
+        <button aria-labelledby=missing aria-label="Fallback name">Wrong</button>
+        <button id=self aria-labelledby="self second" aria-label=Self>Wrong</button>
+        <button title=Wrong>Visible name</button>
+        <textarea title="Message title" placeholder=Wrong>existing message</textarea>
+        <label for=multi>First label</label><label for=multi>Second label</label><input id=multi>
+        <input type=password value=secret aria-label=Password></p>
         <script>window.clicks=0;window.mutations=[];
         new MutationObserver(xs=>mutations.push(...xs)).observe(document.documentElement,
           {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
@@ -55,9 +67,18 @@ def exercise(cli, url, root):
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
     before = evaluate("document.documentElement.outerHTML")
     first = snapshot()
-    original = reference(first, "Original")
     assert evaluate("document.documentElement.outerHTML") == before
     assert evaluate("String(mutations.length)") == "0", "snapshot mutated the DOM"
+    names = {meta["name"] for meta in first["refs"].values()}
+    assert {"Contact email", "Postal code", "Confirm order", "Send", "Clear",
+            "Fallback name", "Self order", "Visible name", "Message title",
+            "First label Second label", "Password"} <= names, names
+    assert "secret" not in first["markdown"]
+    assert first["refs"][reference(first, "Clear")]["role"] == "button"
+    browser("fill", reference(first, "Contact email"), "agent@example.test")
+    assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
+    print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)
+    original = reference(first, "Original")
     browser("click", "@" + original)
     assert evaluate("String(clicks)") == "1"
     browser("fill", reference(first, "Field"), "retained")
