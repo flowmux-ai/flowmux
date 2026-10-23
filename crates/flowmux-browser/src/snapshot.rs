@@ -53,6 +53,9 @@ pub struct RefMeta {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PageMeta {
+    /// Present when the GUI binds the snapshot to a concrete browser tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_id: Option<String>,
     pub url: String,
     pub title: String,
     /// `document.readyState`: `"loading" | "interactive" | "complete"`.
@@ -71,6 +74,7 @@ impl DomSnapshot {
             markdown: String::new(),
             refs: BTreeMap::new(),
             page: PageMeta {
+                surface_id: None,
                 url: url.into(),
                 title: String::new(),
                 ready_state: "loading".into(),
@@ -107,6 +111,7 @@ mod tests {
             markdown: "- textbox \"Email\" [ref=e1]\n- button \"Sign in\" [ref=e2]\n".into(),
             refs,
             page: PageMeta {
+                surface_id: None,
                 url: "https://example.com/login".into(),
                 title: "Sign in".into(),
                 ready_state: "complete".into(),

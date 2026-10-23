@@ -688,6 +688,7 @@ pub enum GtkCommand {
     },
     /// Evaluate JavaScript in a browser pane.
     BrowserEval {
+        surface: Option<SurfaceId>,
         pane: PaneId,
         source: String,
         ack: oneshot::Sender<Result<String, String>>,
@@ -696,6 +697,7 @@ pub enum GtkCommand {
     /// the cmux-style scriptable verbs (navigate / click / fill /
     /// snapshot / …) the IPC layer exposes.
     BrowserAction {
+        surface: Option<SurfaceId>,
         pane: PaneId,
         op: BrowserOp,
         ack: oneshot::Sender<Result<BrowserActionResult, String>>,
@@ -1033,6 +1035,7 @@ mod tests {
         let (ack, _) = oneshot::channel();
         bridge
             .send(GtkCommand::BrowserEval {
+                surface: None,
                 pane,
                 source: "location.reload()".into(),
                 ack,

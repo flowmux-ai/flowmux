@@ -62,11 +62,14 @@ pub struct Capabilities {
     pub unsupported: Vec<String>,
     #[serde(default)]
     pub cookie_import_browsers: Vec<String>,
+    #[serde(default)]
+    pub browser_surface_targeting: bool,
 }
 
 /// Build the capability descriptor from the canonical static lists.
 pub fn capabilities() -> Capabilities {
     Capabilities {
+        browser_surface_targeting: true,
         browser_verbs: BROWSER_VERBS.iter().map(|s| s.to_string()).collect(),
         unsupported: UNSUPPORTED_FEATURES.iter().map(|s| s.to_string()).collect(),
         cookie_import_browsers: COOKIE_IMPORT_BROWSERS
@@ -737,6 +740,12 @@ pub enum Request {
         root: std::path::PathBuf,
     },
 
+    /// Pin a browser command to one tab instead of the pane's active tab.
+    /// Only browser actions and eval are accepted; nesting and open are rejected.
+    BrowserOnSurface {
+        surface: SurfaceId,
+        request: Box<Request>,
+    },
     /// `flowmux browser snapshot <pane>` — return a JSON snapshot
     /// of the page DOM/a11y tree (for agent automation).
     BrowserSnapshot {

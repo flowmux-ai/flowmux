@@ -113,6 +113,10 @@ URL and readiness before taking a snapshot. Wait prints `true` or `false`;
 A snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
 Copy the entire returned ref; short names such as `e1` are not aliases.
 Refs expire when their element is replaced, even if its selector stays the same.
+Snapshot JSON includes `page.surface_id`. Pass `browser --surface UUID` before
+any browser command except `open` to keep targeting that tab after another tab
+becomes active. A closed tab or a surface outside the given pane returns an error.
+Without this option, commands use the pane's active tab.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

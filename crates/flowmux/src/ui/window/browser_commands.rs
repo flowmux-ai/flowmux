@@ -4,28 +4,45 @@
 use super::*;
 
 impl WindowController {
-    pub(super) async fn dispatch_browser_command(&self, cmd: GtkCommand) {
-        let pane = match &cmd {
-            GtkCommand::BrowserEval { pane, .. } | GtkCommand::BrowserAction { pane, .. } => {
-                Some(*pane)
+    fn browser_target(
+        &self,
+        pane: PaneId,
+        surface: Option<SurfaceId>,
+    ) -> Result<crate::ui::browser_pane::BrowserPane, String> {
+        let surface = {
+            let registry = self.pane_registry.borrow();
+            match surface {
+                Some(surface) if registry.pane_for_surface(surface) == Some(pane) => surface,
+                Some(surface) => {
+                    return Err(format!("browser surface not found: {surface} in {pane}"))
+                }
+                None => registry
+                    .active_surface(pane)
+                    .ok_or_else(|| format!("browser pane not found: {pane}"))?,
             }
-            _ => None,
         };
-        if let Some(pane) = pane {
-            let surface = self.pane_registry.borrow().active_surface(pane);
-            if let Some(surface) = surface {
-                let _ =
-                    crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface);
-            }
-        }
+        crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)?;
+        self.pane_registry
+            .borrow()
+            .browsers
+            .get(&surface)
+            .cloned()
+            .ok_or_else(|| format!("browser surface not found: {surface} in {pane}"))
+    }
+
+    pub(super) async fn dispatch_browser_command(&self, cmd: GtkCommand) {
         match cmd {
-            GtkCommand::BrowserEval { pane, source, ack } => {
-                let registry = self.pane_registry.borrow();
-                match registry.active_browser(pane) {
-                    None => {
-                        let _ = ack.send(Err(format!("browser pane not found: {pane}")));
+            GtkCommand::BrowserEval {
+                pane,
+                surface,
+                source,
+                ack,
+            } => {
+                match self.browser_target(pane, surface) {
+                    Err(error) => {
+                        let _ = ack.send(Err(error));
                     }
-                    Some(browser) => {
+                    Ok(browser) => {
                         // evaluate_js is callback-style; bridge it to the ack.
                         let cell = std::cell::Cell::new(Some(ack));
                         browser.evaluate_js(&source, move |result| {
@@ -36,11 +53,18 @@ impl WindowController {
                     }
                 }
             }
-            GtkCommand::BrowserAction { pane, op, ack } => {
-                let browser = self.pane_registry.borrow().active_browser(pane).cloned();
-                let Some(browser) = browser else {
-                    let _ = ack.send(Err(format!("browser pane not found: {pane}")));
-                    return;
+            GtkCommand::BrowserAction {
+                pane,
+                surface,
+                op,
+                ack,
+            } => {
+                let browser = match self.browser_target(pane, surface) {
+                    Ok(browser) => browser,
+                    Err(error) => {
+                        let _ = ack.send(Err(error));
+                        return;
+                    }
                 };
                 match op {
                     BrowserOp::Snapshot => {
@@ -61,17 +85,25 @@ impl WindowController {
                                     }
                                     let mapped = match result {
                                         Ok(json) => {
-                                            if let Ok(snap) = serde_json::from_str::<
+                                            if let Ok(mut snap) = serde_json::from_str::<
                                                 flowmux_browser::DomSnapshot,
                                             >(
                                                 &json
                                             ) {
+                                                snap.page.surface_id = Some(
+                                                    uuid::Uuid::from_u128(browser2.ref_scope.0)
+                                                        .to_string(),
+                                                );
                                                 browser2.refs.borrow_mut().populate_from_snapshot(
                                                     browser2.ref_scope,
                                                     &snap,
                                                 );
+                                                serde_json::to_string(&snap)
+                                                    .map(BrowserActionResult::String)
+                                                    .map_err(|error| error.to_string())
+                                            } else {
+                                                Err("browser snapshot could not be decoded".into())
                                             }
-                                            Ok(BrowserActionResult::String(json))
                                         }
                                         Err(e) => Err(e),
                                     };

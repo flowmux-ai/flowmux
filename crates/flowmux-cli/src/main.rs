@@ -269,6 +269,9 @@ enum Cmd {
     /// hyphenated `browser-*` commands remain as hidden compatibility
     /// aliases.
     Browser {
+        /// Pin the operation to this browser tab, even when another tab is active.
+        #[arg(long, global = true)]
+        surface: Option<SurfaceId>,
         #[command(subcommand)]
         op: BrowserOp,
     },

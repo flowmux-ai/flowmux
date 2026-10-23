@@ -241,7 +241,21 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             cwd,
             shell,
         },
-        Cmd::Browser { op } => browser_op_to_request(op)?,
+        Cmd::Browser { surface, op } => {
+            if surface.is_some() && matches!(op, BrowserOp::Open { .. }) {
+                anyhow::bail!(
+                    "--surface targets an existing browser tab; it cannot be used with open"
+                );
+            }
+            let request = browser_op_to_request(op)?;
+            match surface {
+                Some(surface) => Request::BrowserOnSurface {
+                    surface,
+                    request: Box::new(request),
+                },
+                None => request,
+            }
+        }
         Cmd::NotifyStream { .. } => unreachable!("handled before request build"),
         Cmd::TmuxCompat { .. } => unreachable!("handled before request build"),
         Cmd::ClaudeTeams { count, root, args } => Request::ClaudeTeams {

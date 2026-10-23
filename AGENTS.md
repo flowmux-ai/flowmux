@@ -108,6 +108,11 @@ flowmux browser title pane:$PANE
 
 ## Action coverage
 
+Snapshot JSON includes `page.surface_id`. Use `flowmux browser --surface UUID ...`
+to target that specific tab even if the active tab changes. The surface must
+belong to the supplied pane; closed or foreign tabs fail without falling back.
+This option applies to every browser command except `open`.
+
 | Verb family | flowmux supports | Notes |
 |---|---|---|
 | navigate / back / forward / reload / url / title | yes | |

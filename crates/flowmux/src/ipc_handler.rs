@@ -42,7 +42,8 @@ async fn query_agent_surface_visible(bridge: &Bridge, surface: flowmux_core::Sur
 }
 
 fn browser_error_response(error: String) -> Response {
-    if error.starts_with("browser pane not found:")
+    if error.starts_with("browser surface not found:")
+        || error.starts_with("browser pane not found:")
         || error.starts_with("pane not found:")
         || error == "no target pane focused"
     {
@@ -94,7 +95,12 @@ async fn activate_workspace(bridge: &Bridge, id: flowmux_core::WorkspaceId) -> R
     reply.await.map_err(|_| "bridge closed".to_string())?
 }
 
-async fn browser_action(bridge: &Bridge, pane: flowmux_core::PaneId, op: BrowserOp) -> Response {
+async fn browser_action(
+    bridge: &Bridge,
+    pane: flowmux_core::PaneId,
+    surface: Option<flowmux_core::SurfaceId>,
+    op: BrowserOp,
+) -> Response {
     tracing::debug!(
         %pane,
         verb = op.capability_name(),
@@ -103,7 +109,12 @@ async fn browser_action(bridge: &Bridge, pane: flowmux_core::PaneId, op: Browser
     );
     let (tx, rx) = oneshot::channel();
     let _ = bridge
-        .send(GtkCommand::BrowserAction { pane, op, ack: tx })
+        .send(GtkCommand::BrowserAction {
+            pane,
+            surface,
+            op,
+            ack: tx,
+        })
         .await;
     match rx.await {
         Ok(Ok(BrowserActionResult::Ok)) => Response::BrowserOk,
@@ -347,7 +358,8 @@ impl Handler for GuiHandler {
                 | Request::PaneFocus { .. }
                 | Request::PaneResize { .. }
                 | Request::PaneClose { .. } => self.handle_pane_verb(req).await,
-                Request::BrowserOpen { .. }
+                Request::BrowserOnSurface { .. }
+                | Request::BrowserOpen { .. }
                 | Request::BrowserNavigate { .. }
                 | Request::BrowserBack { .. }
                 | Request::BrowserForward { .. }
@@ -723,10 +735,21 @@ impl GuiHandler {
 
     /// Dispatch for the browser verb group (split out of the `handle` match).
     async fn handle_browser_verb(&self, req: Request) -> Response {
+        let (surface, req) = match req {
+            Request::BrowserOnSurface { surface, request } => (Some(surface), *request),
+            req => (None, req),
+        };
         let req = match BrowserActionRequest::try_from(req) {
-            Ok(action) => return browser_action(&self.bridge, action.pane, action.op).await,
+            Ok(action) => {
+                return browser_action(&self.bridge, action.pane, surface, action.op).await
+            }
             Err(req) => req,
         };
+        if surface.is_some() && !matches!(req, Request::BrowserEval { .. }) {
+            return Response::Error(RpcError::InvalidArgument(
+                "surface targeting requires a browser action or eval".into(),
+            ));
+        }
         match req {
             Request::BrowserOpen {
                 url,
@@ -792,6 +815,7 @@ impl GuiHandler {
                     .bridge
                     .tx
                     .send(GtkCommand::BrowserEval {
+                        surface,
                         pane,
                         source,
                         ack: tx,

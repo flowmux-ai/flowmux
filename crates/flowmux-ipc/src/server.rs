@@ -27,6 +27,11 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn query_timeout(request: &Request) -> Option<Duration> {
     match request {
+        Request::BrowserOnSurface { request, .. }
+            if !matches!(request.as_ref(), Request::BrowserOnSurface { .. }) =>
+        {
+            query_timeout(request)
+        }
         Request::BrowserWait { timeout_ms, .. } => {
             Some(Duration::from_millis(*timeout_ms).saturating_add(QUERY_TIMEOUT))
         }
@@ -529,6 +534,20 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     struct PingHandler;
+
+    #[test]
+    fn surface_target_preserves_browser_wait_timeout() {
+        let request = Request::BrowserOnSurface {
+            surface: flowmux_core::SurfaceId::new(),
+            request: Box::new(Request::BrowserWait {
+                pane: flowmux_core::PaneId::new(),
+                condition: crate::protocol::BrowserWaitCondition::Text("ready".into()),
+                timeout_ms: 60_000,
+                poll_ms: 100,
+            }),
+        };
+        assert_eq!(query_timeout(&request), Some(Duration::from_secs(70)));
+    }
 
     #[test]
     fn explicit_browser_wait_keeps_its_budget_and_effects_are_not_timed_out() {

@@ -1875,6 +1875,7 @@ async fn assert_browser_action_dispatches(
         command = rx.recv() => command.expect("browser action should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2316,6 +2317,7 @@ async fn browser_navigate_dispatches_action_and_maps_ok_result() {
         command = rx.recv() => command.expect("browser navigate should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2344,6 +2346,7 @@ async fn browser_title_dispatches_action_and_maps_string_result() {
         command = rx.recv() => command.expect("browser title should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2376,6 +2379,7 @@ async fn browser_is_visible_dispatches_action_and_maps_bool_result() {
         command = rx.recv() => command.expect("browser is-visible should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2407,6 +2411,7 @@ async fn browser_action_reports_not_found_for_missing_browser_pane() {
         command = rx.recv() => command.expect("browser action should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2437,6 +2442,7 @@ async fn browser_snapshot_dispatches_snapshot_and_maps_json_result() {
     };
 
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2469,6 +2475,7 @@ async fn browser_snapshot_reports_not_found_for_missing_browser_pane() {
         command = rx.recv() => command.expect("browser snapshot should dispatch to GTK"),
     };
     let GtkCommand::BrowserAction {
+        surface: None,
         pane: command_pane,
         op,
         ack,
@@ -2481,6 +2488,71 @@ async fn browser_snapshot_reports_not_found_for_missing_browser_pane() {
     ack.send(Err(format!("browser pane not found: {pane}")))
         .unwrap();
 
+    assert!(matches!(
+        response.await,
+        Response::Error(RpcError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn browser_surface_target_rejects_non_browser_open_and_nested_requests() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    for request in [
+        Request::SurfaceClose { pane, surface },
+        Request::BrowserOpen {
+            url: "https://example.com".into(),
+            target_pane: Some(pane),
+            direction: SplitDirection::Vertical,
+        },
+        Request::BrowserOnSurface {
+            surface,
+            request: Box::new(Request::BrowserReload { pane }),
+        },
+    ] {
+        let response = handler
+            .handle(Request::BrowserOnSurface {
+                surface,
+                request: Box::new(request),
+            })
+            .await;
+        assert!(matches!(
+            response,
+            Response::Error(RpcError::InvalidArgument(_))
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "invalid target dispatched an effect"
+        );
+    }
+}
+
+#[tokio::test]
+async fn browser_surface_target_reaches_bridge_and_missing_surface_is_not_found() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let response = handler.handle(Request::BrowserOnSurface {
+        surface,
+        request: Box::new(Request::BrowserReload { pane }),
+    });
+    tokio::pin!(response);
+    let command = tokio::select! {
+        response = &mut response => panic!("completed before bridge ack: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::BrowserAction {
+        pane: got_pane,
+        surface: got_surface,
+        op: BrowserOp::Reload,
+        ack,
+    } = command
+    else {
+        panic!("expected reload on explicit surface");
+    };
+    assert_eq!(got_pane, pane);
+    assert_eq!(got_surface, Some(surface));
+    ack.send(Err(format!(
+        "browser surface not found: {surface} in {pane}"
+    )))
+    .unwrap();
     assert!(matches!(
         response.await,
         Response::Error(RpcError::NotFound(_))
@@ -2501,6 +2573,7 @@ async fn browser_eval_dispatches_eval_and_maps_string_result() {
         command = rx.recv() => command.expect("browser eval should dispatch to GTK"),
     };
     let GtkCommand::BrowserEval {
+        surface: None,
         pane: command_pane,
         source,
         ack,
@@ -2533,6 +2606,7 @@ async fn browser_eval_reports_not_found_for_missing_browser_pane() {
         command = rx.recv() => command.expect("browser eval should dispatch to GTK"),
     };
     let GtkCommand::BrowserEval {
+        surface: None,
         pane: command_pane,
         source,
         ack,

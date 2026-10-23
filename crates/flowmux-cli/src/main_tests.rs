@@ -208,6 +208,47 @@ fn browser_and_cookie_commands_map_to_ipc_requests() {
 /// the docs show — including the `pane:` prefix — and confirm it
 /// reaches the right IPC request without translation.
 #[test]
+fn browser_surface_target_is_preserved_and_open_rejects_it() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "type",
+        &pane.to_string(),
+        "한글",
+        "--surface",
+        &surface.to_string(),
+    ])
+    .unwrap();
+    let request = build_request(cli.cmd).unwrap();
+    let encoded = serde_json::to_string(&request).unwrap();
+    let request: Request = serde_json::from_str(&encoded).unwrap();
+    let Request::BrowserOnSurface {
+        surface: got,
+        request,
+    } = request
+    else {
+        panic!("expected explicit browser surface");
+    };
+    assert_eq!(got, surface);
+    assert!(
+        matches!(*request, Request::BrowserType { pane: got, text } if got == pane && text == "한글")
+    );
+
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "--surface",
+        &surface.to_string(),
+        "open",
+        "https://example.com",
+    ])
+    .unwrap();
+    assert!(build_request(cli.cmd).is_err());
+}
+
+#[test]
 fn browser_namespace_parses_documented_examples() {
     let pane = PaneId::new();
     let pane_arg = format!("pane:{pane}");
@@ -926,6 +967,7 @@ fn browser_open_no_flags_defaults_to_right_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
             right: false,
@@ -953,6 +995,7 @@ fn browser_open_picks_target_pane_from_flowmux_pane_id_env() {
     }
 
     let req = build_request(Cmd::Browser {
+        surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
             right: false,
@@ -979,6 +1022,7 @@ fn browser_open_ignores_invalid_flowmux_pane_id_env() {
     }
 
     let req = build_request(Cmd::Browser {
+        surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
             right: false,
@@ -1008,6 +1052,7 @@ fn browser_open_with_right_is_vertical_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        surface: None,
         op: BrowserOp::Open {
             url: "https://a.test".into(),
             right: true,
@@ -1033,6 +1078,7 @@ fn browser_open_with_down_is_horizontal_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        surface: None,
         op: BrowserOp::Open {
             url: "https://a.test".into(),
             right: false,

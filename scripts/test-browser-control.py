@@ -74,6 +74,7 @@ def exercise(cli, url, root):
     assert evaluate("String(clicks)") == "2"
     browser("click", original, error=True)
     third = snapshot()
+    first_surface = third["page"].get("surface_id")
     browser("click", reference(second, "Original"), error=True)
     browser("click", reference(third, "Original"))
     assert evaluate("String(clicks)") == "3"
@@ -89,6 +90,18 @@ def exercise(cli, url, root):
     browser("click", reference(other, "Original"))
     assert evaluate("String(clicks)") == "1"
     print("PASS: stale nodes, snapshots and tabs rejected; live actions and non-mutating snapshots preserved", flush=True)
+    assert first_surface, "snapshot must identify its browser tab"
+    browser("click", reference(third, "Original"), "--surface", first_surface)
+    assert browser("eval", "String(clicks)", "--surface", first_surface)["browser_result"]["value"] == "4"
+    assert evaluate("String(clicks)") == "1", "pinned action changed the active tab"
+    browser("fill", reference(third, "Field"), "pinned", "--surface", first_surface)
+    assert browser("value", reference(third, "Field"), "--surface", first_surface)["browser_result"]["value"] == "pinned"
+    assert evaluate("document.querySelector('#field').value") == ""
+    cli("browser", "url", terminal, "--surface", first_surface, error=True)
+    cli("close-tab", first_surface, "--pane", pane)
+    browser("type", "must not reach other tab", "--surface", first_surface, error=True)
+    assert evaluate("document.querySelector('#field').value") == ""
+    print("PASS: explicit browser tab targeting survives active-tab changes and rejects closed or foreign tabs", flush=True)
 
 
 def main():
