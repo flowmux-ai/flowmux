@@ -117,6 +117,9 @@ Snapshot JSON includes `page.surface_id`. Pass `browser --surface UUID` before
 any browser command except `open` to keep targeting that tab after another tab
 becomes active. A closed tab or a surface outside the given pane returns an error.
 Without this option, commands use the pane's active tab.
+Actions reject hidden or inert elements. Clicks also reject disabled or covered
+targets, and fill rejects disabled or readonly fields. Wait for the page to reach
+the required state before retrying; commands do not retry side effects.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

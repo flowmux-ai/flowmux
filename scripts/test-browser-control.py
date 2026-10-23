@@ -103,6 +103,56 @@ def exercise(cli, url, root):
     assert evaluate("document.querySelector('#field').value") == ""
     print("PASS: explicit browser tab targeting survives active-tab changes and rejects closed or foreign tabs", flush=True)
 
+    button = reference(other, "Original")
+    field = reference(other, "Field")
+    for style in ["display:none", "visibility:hidden", "opacity:0", "pointer-events:none"]:
+        evaluate(f"document.querySelector('#target').style.cssText={json.dumps(style)}; 'hidden'")
+        browser("click", button, error=True)
+        assert evaluate("String(clicks)") == "1", "inaccessible button was clicked"
+    evaluate("document.querySelector('#target').style.cssText=''; 'visible'")
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<div id=cover style=\"position:fixed;inset:0;z-index:99\"></div>'); 'covered'")
+    browser("click", button, error=True)
+    assert evaluate("String(clicks)") == "1"
+    evaluate("document.querySelector('#cover').remove(); 'uncovered'")
+    evaluate("document.querySelector('#target').disabled=true; 'disabled'")
+    browser("click", button, error=True)
+    evaluate("window.hovers=0; document.querySelector('#target').onmouseover=()=>hovers++; 'listen'")
+    browser("hover", button)
+    assert evaluate("String(hovers)") == "1", "disabled controls still support hover"
+    evaluate("document.querySelector('#target').disabled=false; 'enabled'")
+    for attribute in ["aria-disabled", "inert"]:
+        evaluate(f"document.body.setAttribute('{attribute}', 'true'); 'blocked'")
+        browser("click", button, error=True)
+        evaluate(f"document.body.removeAttribute('{attribute}'); 'unblocked'")
+    evaluate("document.querySelector('#target').insertAdjacentHTML('beforebegin', '<fieldset id=group disabled></fieldset>'); document.querySelector('#group').append(document.querySelector('#target')); 'disabled fieldset'")
+    browser("click", button, error=True)
+    evaluate("document.querySelector('#group').replaceWith(document.querySelector('#target')); 'unwrapped'")
+    browser("click", button)
+    assert evaluate("String(clicks)") == "2"
+    for attribute in ["disabled", "readonly"]:
+        evaluate(f"document.querySelector('#field').setAttribute('{attribute}', ''); 'locked'")
+        browser("fill", field, "must not be written", error=True)
+        assert evaluate("document.querySelector('#field').value") == ""
+        evaluate(f"document.querySelector('#field').removeAttribute('{attribute}'); 'unlocked'")
+    browser("fill", button, "must not change button", error=True)
+    evaluate("document.querySelector('#target').onfocus=()=>document.querySelector('#target').blur(); 'refuse focus'")
+    browser("focus", button, error=True)
+    evaluate("document.querySelector('#target').onfocus=null; 'allow focus'")
+    browser("focus", field)
+    assert evaluate("document.activeElement.id") == "field"
+    browser("fill", field, "editable")
+    assert evaluate("document.querySelector('#field').value") == "editable"
+    browser("select", button, "invalid", error=True)
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<select id=choice aria-label=Choice><option>one</option><option disabled>blocked</option><option>two</option></select>'); 'select'")
+    choice = reference(snapshot(), "Choice")
+    browser("select", choice, "blocked", error=True)
+    assert evaluate("document.querySelector('#choice').value") == "one"
+    browser("select", choice, "two")
+    assert evaluate("document.querySelector('#choice').value") == "two"
+    evaluate("document.querySelector('#choice').onchange=e=>e.target.value='one'; 'reject change'")
+    browser("select", choice, "two", error=True)
+    print("PASS: hidden, covered, disabled and readonly targets reject actions without effects", flush=True)
+
 
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/flowmux").resolve()

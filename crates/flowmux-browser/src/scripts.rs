@@ -157,28 +157,54 @@ pub fn with_ref(ref_id: &str, selector: &str, script: &str) -> String {
     )
 }
 
-/// Click the element matched by `selector`. Returns `"ok"` on success,
-/// `"error: not found"` if `querySelector` returns nothing.
-pub fn click_by_selector(selector: &str) -> String {
+fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) -> String {
     format!(
         r#"(function() {{
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
-            el.click();
-            return "ok";
+            if (el.closest('[inert]') || ({enabled} && (el.matches(':disabled') || el.closest('[aria-disabled="true"]'))))
+                return "error: element is disabled or inert";
+            const style = getComputedStyle(el);
+            if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || style.visibility !== 'visible')
+                return "error: element is not visible";
+            for (let parent = el; parent; parent = parent.parentElement) {{
+                if (Number(getComputedStyle(parent).opacity) === 0)
+                    return "error: element is not visible";
+            }}
+            if ({pointer}) {{
+                el.scrollIntoView({{block:'center', inline:'nearest', behavior:'instant'}});
+                const rect = el.getClientRects()[0];
+                const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+                const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+                if (right <= left || bottom <= top) return "error: element is outside the viewport";
+                const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+                if (!hit || !el.contains(hit)) return "error: element is covered or cannot receive pointer input";
+            }}
+            {action}
         }})()"#,
         s = js_string(selector)
     )
+}
+
+/// Click only when the element can receive pointer input.
+pub fn click_by_selector(selector: &str) -> String {
+    element_action(selector, true, true, "el.click(); return 'ok';")
 }
 
 /// Set `value` on an input/textarea (`<select>` should use
 /// [`select_option_by_selector`] instead) and dispatch the standard
 /// `input` + `change` events so framework listeners fire.
 pub fn fill_by_selector(selector: &str, value: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
+    element_action(
+        selector,
+        false,
+        true,
+        &format!(
+            r#"
+            if (el.tagName !== 'TEXTAREA' && (el.tagName !== 'INPUT' ||
+                ['button','checkbox','color','file','hidden','image','radio','range','reset','submit'].includes(el.type)))
+                return "error: element is not a text field";
+            if (el.readOnly) return "error: element is readonly";
             const setter = Object.getOwnPropertyDescriptor(el.__proto__, 'value');
             if (setter && setter.set) {{
                 setter.set.call(el, "{v}");
@@ -187,32 +213,36 @@ pub fn fill_by_selector(selector: &str, value: &str) -> String {
             }}
             el.dispatchEvent(new Event('input', {{ bubbles: true }}));
             el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            return "ok";
-        }})()"#,
-        s = js_string(selector),
-        v = js_string(value)
+            return el.value === "{v}" ? "ok" : "error: fill value was not retained";
+        "#,
+            v = js_string(value)
+        ),
     )
 }
 
 /// `<select>` value picker — looks up an `<option>` by its `value`
 /// or, failing that, by its visible text.
 pub fn select_option_by_selector(selector: &str, value: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
+    element_action(
+        selector,
+        false,
+        true,
+        &format!(
+            r#"
+            if (el.tagName !== 'SELECT') return "error: element is not a select";
             const want = "{v}";
             for (const opt of el.options) {{
                 if (opt.value === want || opt.textContent.trim() === want) {{
+                    if (opt.matches(':disabled')) return "error: option is disabled";
                     opt.selected = true;
                     el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    return "ok";
+                    return opt.selected ? "ok" : "error: selection was not retained";
                 }}
             }}
             return "error: option not found";
-        }})()"#,
-        s = js_string(selector),
-        v = js_string(value)
+        "#,
+            v = js_string(value)
+        ),
     )
 }
 
@@ -304,42 +334,42 @@ pub fn type_keys(text: &str) -> String {
 
 /// Double-click the element matched by `selector`.
 pub fn dblclick_by_selector(selector: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
-            el.dispatchEvent(new MouseEvent('dblclick', {{ bubbles: true, cancelable: true }}));
+    element_action(
+        selector,
+        true,
+        true,
+        r#"
+            el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
             return "ok";
-        }})()"#,
-        s = js_string(selector)
+        "#,
     )
 }
 
 /// Hover (mouseenter + mouseover) over the element matched by `selector`.
 pub fn hover_by_selector(selector: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
-            el.dispatchEvent(new MouseEvent('mouseenter', {{ bubbles: false }}));
-            el.dispatchEvent(new MouseEvent('mouseover', {{ bubbles: true }}));
+    element_action(
+        selector,
+        true,
+        false,
+        r#"
+            el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+            el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
             return "ok";
-        }})()"#,
-        s = js_string(selector)
+        "#,
     )
 }
 
 /// Focus the element matched by `selector` (uses `HTMLElement.focus()`).
 pub fn focus_by_selector(selector: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
+    element_action(
+        selector,
+        false,
+        true,
+        r#"
             if (typeof el.focus !== 'function') return "error: not focusable";
             el.focus();
-            return "ok";
-        }})()"#,
-        s = js_string(selector)
+            return document.activeElement === el ? "ok" : "error: focus was not applied";
+        "#,
     )
 }
 
@@ -360,36 +390,36 @@ pub fn blur_by_selector(selector: &str) -> String {
 /// Click an unchecked checkbox / radio so the page sees click, input and
 /// change events, as frameworks that track clicks require.
 pub fn check_by_selector(selector: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
+    element_action(
+        selector,
+        true,
+        true,
+        r#"
             if (el.type !== 'checkbox' && el.type !== 'radio') return "error: not checkable";
-            if (!el.checked) {{
+            if (!el.checked) {
                 el.click();
                 if (!el.checked) return "error: check was prevented";
-            }}
+            }
             return "ok";
-        }})()"#,
-        s = js_string(selector)
+        "#,
     )
 }
 
 /// Click a checked checkbox so the page sees click, input and change events.
 /// Returns `"error: not a checkbox"` for radios and other element types.
 pub fn uncheck_by_selector(selector: &str) -> String {
-    format!(
-        r#"(function() {{
-            const el = document.querySelector("{s}");
-            if (!el) return "error: not found";
+    element_action(
+        selector,
+        true,
+        true,
+        r#"
             if (el.type !== 'checkbox') return "error: not a checkbox";
-            if (el.checked) {{
+            if (el.checked) {
                 el.click();
                 if (el.checked) return "error: uncheck was prevented";
-            }}
+            }
             return "ok";
-        }})()"#,
-        s = js_string(selector)
+        "#,
     )
 }
 
