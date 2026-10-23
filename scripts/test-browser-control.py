@@ -13,6 +13,7 @@ import threading
 import time
 import unicodedata
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -90,7 +91,13 @@ class Fixture(BaseHTTPRequestHandler):
         for (const root of [document.documentElement,outer,inner])
           new MutationObserver(xs=>mutations.push(...xs)).observe(root,
             {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
-        if self.path == "/canvas":
+        if self.path == "/layers":
+            body = b"""<!doctype html><title>Capture layers</title><style>body{height:1200px}</style>
+            <canvas id=glcanvas width=96 height=64 style="position:absolute;left:10px;top:10px"></canvas>
+            <video id=clip aria-label=Clip muted playsinline src=/clip.mp4 style="position:absolute;left:150px;top:10px;width:96px;height:64px"></video>
+            <script>window.gl=glcanvas.getContext('webgl',{preserveDrawingBuffer:true});
+            if(gl){gl.clearColor(0,1,0,1);gl.clear(gl.COLOR_BUFFER_BIT)}</script>"""
+        elif self.path == "/canvas":
             body = b"""<!doctype html><title>Canvas input</title>
             <style>body{height:1600px}canvas{position:absolute;left:31.5px;top:420.5px;width:240px;height:120px;background:blue}canvas:hover{outline:3px solid green}</style>
             <canvas id=canvas width=480 height=240></canvas>
@@ -194,7 +201,48 @@ def exercise(cli, url, root):
     saved = recording.read_bytes()
     browser("record", str(recording), "--seconds", "1", error=True)
     assert recording.read_bytes() == saved, "recording replaced an existing file"
-    print("PASS: pinned browser recording produces decodable changing H264 frames", flush=True)
+    resized_recording = root / "resized.mp4"
+    width = int(evaluate("innerWidth"))
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        capture = workers.submit(browser, "record", str(resized_recording), "--seconds", "3", "--fps", "5")
+        time.sleep(.6)
+        cli("resize-pane", pane, "--ratio", ".7")
+        assert browser("wait", "--js", f"innerWidth < {width}")["browser_bool_result"]["value"]
+        time.sleep(.8)
+        cli("resize-pane", pane, "--ratio", ".5")
+        capture.result()
+    resized_duration = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                                "-of", "default=nw=1:nk=1", str(resized_recording)])
+    assert 2.8 <= float(resized_duration) <= 4.0, resized_duration
+    padded = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(resized_recording),
+                                      "-vf", "format=rgb24,crop=1:1:10:10", "-f", "rawvideo", "-"])
+    colors = [padded[i:i+3] for i in range(0,len(padded),3)]
+    assert any(max(pixel)<8 for pixel in colors) and any(max(pixel)>32 for pixel in colors), colors
+    print("PASS: pinned recording retains timing and content through viewport resizing", flush=True)
+    browser("navigate", url + "layers")
+    assert browser("wait", "--url", url + "layers")["browser_bool_result"]["value"]
+    assert browser("wait", "--js", "window.gl && clip.readyState>=2")["browser_bool_result"]["value"]
+    clip = reference(snapshot(), "Clip")
+    for second in (1, 2):
+        browser("media", clip, "seek", str(second))
+        expected = json.loads(evaluate("JSON.stringify((()=>{const c=document.createElement('canvas');c.width=96;c.height=64;const x=c.getContext('2d');x.drawImage(clip,0,0);return [...x.getImageData(30,30,1,1).data].slice(0,3)})())"))
+        assert max(expected) > 32, expected
+        width = int(evaluate("innerWidth"))
+        for mode in ((), ("--full-page",), ("--element", clip)):
+            capture = root / "layers.png"
+            browser("screenshot", str(capture), *mode)
+            pixels = struct.unpack(">II", capture.read_bytes()[16:24])
+            element = mode and mode[0] == "--element"
+            scale = pixels[0] / (96 if element else width)
+            x, y = (30, 30) if element else (180, 40)
+            actual = png_pixel(capture, round(x * scale), round(y * scale))
+            assert all(abs(a-b) <= 8 for a,b in zip(actual,expected)), (mode, actual, expected)
+            if not element:
+                assert png_pixel(capture, round(20 * scale), round(20 * scale)) == (0, 255, 0)
+    browser("navigate", url)
+    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    print("PASS: viewport, document and element captures retain decoded video and WebGL pixels", flush=True)
     cli("browser", "open", url + "canvas", pane_context=terminal)
     assert browser("wait", "--url", url + "canvas")["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]

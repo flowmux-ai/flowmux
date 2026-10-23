@@ -70,12 +70,13 @@ pub(crate) async fn record(
             data.starts_with(b"\x89PNG\r\n\x1a\n") && data.len() >= 24,
             "browser capture is not a PNG"
         );
-        let size = data[16..24].to_vec();
+        let width = u32::from_be_bytes(data[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(data[20..24].try_into().unwrap());
         anyhow::ensure!(
-            dimensions.as_ref().is_none_or(|first| first == &size),
-            "browser viewport resized during recording"
+            width > 0 && height > 0 && u64::from(width) * u64::from(height) <= 16 * 1024 * 1024,
+            "browser recording frame exceeds the 64 MiB pixel budget"
         );
-        dimensions = Some(size);
+        dimensions.get_or_insert((width + width % 2, height + height % 2));
         bytes += data.len();
         anyhow::ensure!(
             bytes <= 256 * 1024 * 1024,
@@ -102,6 +103,8 @@ pub(crate) async fn record(
         )?;
     }
     writeln!(manifest, "file '{}'", captured.last().unwrap().0)?;
+    let (width, height) = dimensions.unwrap();
+    let fit = format!("scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1");
     let errors = tempfile::tempfile()?;
     let mut encoder = tokio::process::Command::new("ffmpeg")
         .args(["-nostdin", "-v", "error", "-y", "-f", "concat", "-i"])
@@ -109,7 +112,7 @@ pub(crate) async fn record(
         .args([
             "-an",
             "-vf",
-            "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            &fit,
             "-fps_mode",
             "vfr",
             "-c:v",
@@ -158,7 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn recording_pins_each_capture_and_cleans_up_failure_or_cancellation() {
-        for mode in ["resized", "tab closed", "cancelled"] {
+        for mode in ["not a PNG", "pixel budget", "tab closed", "cancelled"] {
             let directory = tempfile::tempdir().unwrap();
             let socket = directory.path().join("ipc");
             let listener = UnixListener::bind(&socket).unwrap();
@@ -223,8 +226,16 @@ mod tests {
                             Response::Error(RpcError::InvalidArgument("tab closed".into()))
                         } else {
                             let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-                            png.extend_from_slice(&(index as u32).to_be_bytes());
+                            let width = if index == 2 && mode == "pixel budget" {
+                                u32::MAX
+                            } else {
+                                index as u32
+                            };
+                            png.extend_from_slice(&width.to_be_bytes());
                             png.extend_from_slice(&1u32.to_be_bytes());
+                            if index == 2 && mode == "not a PNG" {
+                                png.clear();
+                            }
                             std::fs::write(&frame_path, png).unwrap();
                             Response::BrowserResult {
                                 value: frame_path.display().to_string(),
