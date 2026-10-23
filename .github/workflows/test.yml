@@ -72,7 +72,7 @@ jobs:
             build-essential pkg-config \
             libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
             libwebkitgtk-6.0-dev libssl-dev \
-            gstreamer1.0-plugins-good gstreamer1.0-libav \
+            gstreamer1.0-plugins-good gstreamer1.0-libav ffmpeg \
             libssh2-1-dev libdbus-1-dev \
             meson ninja-build \
             dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \
@@ -133,7 +133,7 @@ jobs:
           rustup show active-toolchain
           cargo fmt --all -- --check
       - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja
+        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja ffmpeg
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
       - name: Run macOS tests and native smoke (same script as local)

@@ -41,6 +41,9 @@ Install `dbus-x11`, `openssh-server`, `tmux`, and `python3-xlib` to run the
 SSH and GUI integration checks used by CI. The SSH autofill check also uses
 `gnome-keyring`, `python3-gi`, `gir1.2-atspi-2.0`, `at-spi2-core`, and
 `python3-pil`; it starts a password-protected keyring on a private D-Bus session.
+Browser recording and its integration check need `ffmpeg` and `ffprobe` with
+the H.264 encoder: `sudo apt install ffmpeg` on Ubuntu or `brew install ffmpeg`
+on macOS. Other browser controls do not require these tools.
 
 ```bash
 cargo build --release --workspace   # binaries under target/release/

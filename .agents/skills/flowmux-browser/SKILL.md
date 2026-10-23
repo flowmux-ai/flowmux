@@ -231,6 +231,15 @@ must remain stable before input starts. Canvas pointer capture is supported;
 coordinates, tab visibility and native overlays are checked before pressing.
 Afterward inspect the page to confirm the application's intended result.
 
+`record PANE output.mp4 --seconds 5 --fps 5` samples the viewport into a silent
+H.264 MP4. It requires `ffmpeg` with `libx264` on PATH, pins the initial browser
+tab (or `--surface`), and refuses to replace an existing file. The command runs
+in the foreground; Ctrl-C cancels it and removes temporary frames. Duration is
+1–60 seconds and sampling is 1–10 fps, with actual capture timing preserved.
+Keep the viewport size fixed during capture; resizing fails without publishing
+a partial recording. The temporary frame budget is 256 MiB. This uses the same
+snapshot path as PNG capture, so hardware video/WebGL layers may be omitted.
+
 Page-created popups open as browser tabs in the source pane. They retain their
 engine-created window context, including `opener`, named-window reuse and
 `postMessage`; `noopener` still isolates the child. Use a fresh snapshot and

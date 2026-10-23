@@ -8,6 +8,7 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Record { .. } => anyhow::bail!("recording requires the CLI capture loop"),
         BrowserOp::Drag {
             pane,
             from_x,

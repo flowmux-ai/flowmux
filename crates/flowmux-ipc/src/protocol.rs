@@ -47,6 +47,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "file-chooser",
     "pointer",
     "drag",
+    "record",
 ];
 
 /// Browser features that are intentionally unsupported and return a

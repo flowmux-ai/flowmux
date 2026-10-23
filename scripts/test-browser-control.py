@@ -180,6 +180,21 @@ def exercise(cli, url, root):
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
     coordinate_parent = snapshot()["page"]["surface_id"]
+    evaluate("window.recordTick=0;window.recordTimer=setInterval(()=>{document.body.style.background=++recordTick%2?'red':'blue'},150);'record ready'")
+    recording = root / "browser.mp4"
+    recorded = json.loads(browser("record", str(recording), "--seconds", "2", "--fps", "5")["browser_result"]["value"])
+    evaluate("clearInterval(recordTimer);document.body.style.background='';'record done'")
+    assert recorded["surface"] == coordinate_parent and recorded["frames"] >= 2, recorded
+    probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(recording)]))
+    assert probe["streams"][0]["codec_name"] == "h264", probe
+    assert 1.8 <= float(probe["format"]["duration"]) <= 3.0, probe
+    decoded = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(recording), "-f", "framemd5", "-"]).decode()
+    hashes = [line.rsplit(",", 1)[1].strip() for line in decoded.splitlines() if not line.startswith("#")]
+    assert len(set(hashes)) > 1, "recording contained no visual changes"
+    saved = recording.read_bytes()
+    browser("record", str(recording), "--seconds", "1", error=True)
+    assert recording.read_bytes() == saved, "recording replaced an existing file"
+    print("PASS: pinned browser recording produces decodable changing H264 frames", flush=True)
     cli("browser", "open", url + "canvas", pane_context=terminal)
     assert browser("wait", "--url", url + "canvas")["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
@@ -807,7 +822,7 @@ def main():
                                         env={**env, **({"FLOWMUX_PANE_ID": pane_context} if pane_context else {})},
                                         capture_output=True, text=True, timeout=30)
                 assert bool(result.returncode) == error, (args, result.stdout, result.stderr)
-                response = json.loads(result.stdout)
+                response = json.loads(result.stdout) if result.stdout else {"error": result.stderr}
                 if error:
                     assert "error" in response, response
                 return response

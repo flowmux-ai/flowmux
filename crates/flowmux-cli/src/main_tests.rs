@@ -2484,3 +2484,37 @@ fn drag_preserves_endpoints_and_rejects_invalid_coordinates() {
         }
     }
 }
+
+#[test]
+fn recording_limits_duration_and_sampling_rate() {
+    let pane = PaneId::new().to_string();
+    for (option, value) in [
+        ("--seconds", "0"),
+        ("--seconds", "61"),
+        ("--fps", "0"),
+        ("--fps", "11"),
+    ] {
+        assert!(Cli::try_parse_from([
+            "flowmuxctl",
+            "browser",
+            "record",
+            &pane,
+            "out.mp4",
+            option,
+            value
+        ])
+        .is_err());
+    }
+    let cli = Cli::try_parse_from(["flowmuxctl", "browser", "record", &pane, "out.mp4"]).unwrap();
+    assert!(matches!(
+        cli.cmd,
+        Cmd::Browser {
+            op: BrowserOp::Record {
+                seconds: 5,
+                fps: 5,
+                ..
+            },
+            ..
+        }
+    ));
+}

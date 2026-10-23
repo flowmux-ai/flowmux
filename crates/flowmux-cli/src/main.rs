@@ -26,6 +26,7 @@ mod hooks;
 mod keys;
 mod output;
 mod pty_tee;
+mod recording;
 mod request;
 use cmd_hooks::*;
 use cmd_ops::*;
@@ -524,6 +525,15 @@ enum DownloadAction {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Record sampled viewport frames to an MP4 (requires ffmpeg).
+    Record {
+        pane: PaneId,
+        path: PathBuf,
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=60))]
+        seconds: u64,
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=10))]
+        fps: u32,
+    },
     /// Inspect or answer a page's pending file chooser.
     FileChooser {
         pane: PaneId,
@@ -1169,6 +1179,29 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
 
     if matches!(cmd, Cmd::Agents) {
         return run_agents(&client, json_mode).await;
+    }
+
+    if let Cmd::Browser {
+        surface,
+        op:
+            BrowserOp::Record {
+                pane,
+                path,
+                seconds,
+                fps,
+            },
+    } = cmd
+    {
+        let result = tokio::select! {
+            result = recording::record(&client, pane, surface, path, seconds, fps) => result,
+            _ = tokio::signal::ctrl_c() => anyhow::bail!("browser recording cancelled"),
+        }?;
+        return print_response(
+            &Response::BrowserResult {
+                value: result.to_string(),
+            },
+            json_mode,
+        );
     }
 
     let mut req = build_request(cmd)?;
