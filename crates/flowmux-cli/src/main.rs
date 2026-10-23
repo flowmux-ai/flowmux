@@ -485,7 +485,25 @@ enum NotificationOp {
 }
 
 #[derive(Subcommand)]
+enum DownloadAction {
+    List,
+    Cancel {
+        id: u64,
+    },
+    /// Set an existing directory for subsequent downloads in this tab.
+    Directory {
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
 enum BrowserOp {
+    /// Inspect downloads, cancel one, or choose this tab's download directory.
+    Download {
+        pane: PaneId,
+        #[command(subcommand)]
+        action: DownloadAction,
+    },
     /// Control an audio/video element by snapshot ref and return its state.
     Media {
         pane: PaneId,

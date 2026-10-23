@@ -126,6 +126,7 @@ This option applies to every browser command except `open`.
 | eval-async | yes | async function body; waits for the returned Promise with `--timeout-ms` |
 | screenshot | yes | viewport PNG, or `--full-page` for a document PNG; see the CLI skill for platform limits |
 | media | yes | audio/video ref: status, play, pause, seek seconds, mute, unmute; returns playback state |
+| download | yes | tab-scoped list, cancel ID, directory EXISTING_PATH; poll terminal state before using a file |
 | wait | yes | polls for selector / text / url / ready-state / JS predicate (timeout + poll interval) |
 | viewport / network mocking / screencast | no | CDP-only; WebKitGTK 6 / WKWebView do not expose CDP |
 

@@ -138,6 +138,10 @@ impl WindowController {
                     }
                 };
                 match op {
+                    BrowserOp::Download { action } => {
+                        let _ =
+                            ack.send(browser.download(&action).map(BrowserActionResult::String));
+                    }
                     BrowserOp::Media { target, action } => {
                         let action =
                             serde_json::to_string(&action).expect("validated media action");

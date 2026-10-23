@@ -17,6 +17,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path in ("/download", "/slow-download"):
+            slow = self.path == "/slow-download"
+            data = b"Flowmux download fixture\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="result.txt"')
+            self.send_header("Content-Length", str(len(data) * (10000 if slow else 1)))
+            self.end_headers()
+            try:
+                for _ in range(10000 if slow else 1):
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                    if slow:
+                        time.sleep(.01)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         if self.path == "/clip.mp4":
             data = (Path(__file__).parent / "fixtures/browser-control.mp4").read_bytes()
             start, end = 0, len(data) - 1
@@ -147,6 +164,48 @@ def exercise(cli, url, root):
 
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    def downloads(*args, **kwargs):
+        result = browser("download", *(args or ("list",)), **kwargs)
+        return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])
+
+    folder = root / "downloads"
+    folder.mkdir()
+    (folder / "result.txt").write_text("keep existing file")
+    initial_downloads = downloads()
+    assert initial_downloads["downloads"] == []
+    downloads("directory", str(folder / "missing"), error=True)
+    downloads("directory", str(folder / "result.txt"), error=True)
+    assert downloads()["directory"] == initial_downloads["directory"]
+    assert Path(downloads("directory", str(folder))["directory"]) == folder.resolve()
+
+    def trigger_download(path):
+        evaluate(f"(()=>{{const a=document.createElement('a');a.href={json.dumps(path)};a.download='result.txt';a.click();return 'started'}})()")
+
+    def await_download(state):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            entries = downloads()["downloads"]
+            if entries and entries[-1]["state"] == state:
+                return entries[-1]
+            time.sleep(.05)
+        raise AssertionError((state, entries))
+
+    trigger_download("/download")
+    finished = await_download("complete")
+    assert Path(finished["path"]).parent == folder.resolve()
+    assert Path(finished["path"]).read_bytes() == b"Flowmux download fixture\n"
+    assert (folder / "result.txt").read_text() == "keep existing file"
+    downloads("cancel", str(finished["id"]), error=True)
+    downloads("cancel", "999999", error=True)
+    trigger_download("/slow-download")
+    active = await_download("in_progress")
+    assert active["id"] != finished["id"]
+    downloads("cancel", str(active["id"]))
+    cancelled = await_download("cancelled")
+    assert cancelled["id"] == active["id"]
+    assert downloads()["downloads"][0]["state"] == "complete"
+    evaluate("mutations.length=0; 'reset observations'")
+    print("PASS: native downloads save exact content without overwrite and expose cancellation", flush=True)
     before = evaluate("document.documentElement.outerHTML")
     first = snapshot()
     assert evaluate("document.documentElement.outerHTML") == before
@@ -339,6 +398,11 @@ def exercise(cli, url, root):
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
     other = snapshot()
+    assert downloads()["downloads"] == []
+    assert downloads()["directory"] == initial_downloads["directory"]
+    pinned = downloads("list", "--surface", first_surface)
+    assert [item["state"] for item in pinned["downloads"]] == ["complete", "cancelled"]
+    assert Path(pinned["directory"]) == folder.resolve()
     browser("click", reference(third, "Original"), error=True)
     assert evaluate("String(clicks)") == "0", "old tab ref reached new tab"
     browser("click", reference(other, "Original"))

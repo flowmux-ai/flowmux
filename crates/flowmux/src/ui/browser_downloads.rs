@@ -189,6 +189,7 @@ pub(crate) struct WeakDownloadManager {
 }
 
 struct DownloadManagerInner {
+    directory: RefCell<PathBuf>,
     button: gtk::MenuButton,
     #[cfg(all(test, not(target_os = "macos")))]
     scroll: gtk::ScrolledWindow,
@@ -254,6 +255,13 @@ impl DownloadManager {
         crate::ui::popover_pos::set_menu_popover(&button, &popover);
 
         let inner = Rc::new(DownloadManagerInner {
+            directory: RefCell::new(
+                gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads"))
+                    })
+                    .unwrap_or_else(std::env::temp_dir),
+            ),
             button,
             #[cfg(all(test, not(target_os = "macos")))]
             scroll,
@@ -270,6 +278,58 @@ impl DownloadManager {
             }
         });
         Self { inner }
+    }
+
+    pub(crate) fn directory(&self) -> PathBuf {
+        self.inner.directory.borrow().clone()
+    }
+
+    pub(crate) fn control(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserDownloadAction,
+    ) -> Result<String, String> {
+        use flowmux_ipc::protocol::BrowserDownloadAction;
+        match action {
+            BrowserDownloadAction::List => {}
+            BrowserDownloadAction::Directory { path } => {
+                if !path.is_absolute() {
+                    return Err("download directory must be absolute".into());
+                }
+                let path = path.canonicalize().map_err(|error| error.to_string())?;
+                if !path.is_dir() {
+                    return Err("download destination must be an existing directory".into());
+                }
+                self.inner.directory.replace(path);
+            }
+            BrowserDownloadAction::Cancel { id } => {
+                if self.inner.collection.borrow().phase(*id) != Some(&DownloadPhase::InProgress) {
+                    return Err("download not found or no longer in progress".into());
+                }
+                self.inner.request_cancel(*id);
+            }
+        }
+        let collection = self.inner.collection.borrow();
+        let rows = self.inner.rows.borrow();
+        let mut ids: Vec<_> = collection.entries.keys().copied().collect();
+        ids.sort_unstable();
+        let downloads: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                let row = rows.get(&id)?;
+                let (state, error) = match collection.phase(id)? {
+                    DownloadPhase::InProgress => ("in_progress", None),
+                    DownloadPhase::Cancelling => ("cancelling", None),
+                    DownloadPhase::Complete => ("complete", None),
+                    DownloadPhase::Cancelled => ("cancelled", None),
+                    DownloadPhase::Failed(error) => ("failed", Some(error)),
+                };
+                Some(serde_json::json!({
+                    "id": id, "state": state, "path": *row.destination.borrow(),
+                    "progress": row.progress.fraction(), "error": error,
+                }))
+            })
+            .collect();
+        Ok(serde_json::json!({"directory": self.directory(), "downloads": downloads}).to_string())
     }
 
     pub(crate) fn button(&self) -> gtk::MenuButton {
@@ -558,11 +618,14 @@ impl DownloadManagerInner {
         if !self.collection.borrow_mut().request_cancel(id) {
             return;
         }
-        if let Some(row) = self.rows.borrow().get(&id) {
+        let cancel = self.rows.borrow().get(&id).map(|row| {
             row.progress.set_text(Some("Cancelling…"));
             row.progress.set_show_text(true);
             row.cancel.set_sensitive(false);
-            (row.cancel_action)();
+            row.cancel_action.clone()
+        });
+        if let Some(cancel) = cancel {
+            cancel();
         }
     }
 
@@ -701,6 +764,39 @@ mod tests {
 
     use super::*;
     use std::cell::Cell;
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn control_reports_failures_and_handles_synchronous_cancellation() {
+        use flowmux_ipc::protocol::BrowserDownloadAction as Action;
+        let manager = DownloadManager::new();
+        let original = manager.directory();
+        assert!(manager
+            .control(&Action::Directory {
+                path: PathBuf::from("relative")
+            })
+            .is_err());
+        assert_eq!(manager.directory(), original);
+        let failed = manager.add(|| {});
+        failed.fail("connection reset".into());
+        let pending = Rc::new(RefCell::new(None::<DownloadItem>));
+        let callback = pending.clone();
+        let active =
+            manager.add(move || callback.borrow().as_ref().unwrap().fail("cancelled".into()));
+        pending.replace(Some(active.clone()));
+        let report: serde_json::Value =
+            serde_json::from_str(&manager.control(&Action::Cancel { id: active.id }).unwrap())
+                .unwrap();
+        assert_eq!(report["downloads"][0]["state"], "failed");
+        assert_eq!(report["downloads"][0]["error"], "connection reset");
+        assert_eq!(report["downloads"][1]["state"], "cancelled");
+        assert!(manager.control(&Action::Cancel { id: active.id }).is_err());
+        assert!(manager.control(&Action::Cancel { id: 999 }).is_err());
+        manager.clear_terminal();
+        let report: serde_json::Value =
+            serde_json::from_str(&manager.control(&Action::List).unwrap()).unwrap();
+        assert_eq!(report["downloads"], serde_json::json!([]));
+    }
 
     #[test]
     fn cancelled_finish_never_becomes_complete() {

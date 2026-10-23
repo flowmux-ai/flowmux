@@ -100,7 +100,6 @@ struct BrowserNavigationDelegateIvars {
     refs: Rc<RefCell<RefStore>>,
     ref_scope: RefScope,
     download_manager: DownloadManager,
-    download_directory: PathBuf,
     downloads: RefCell<HashMap<usize, DownloadUi>>,
 }
 
@@ -340,7 +339,7 @@ define_class!(
             completion_handler: &block2::DynBlock<dyn Fn(*mut NSURL)>,
         ) {
             let key = download_key(download);
-            let directory = &self.ivars().download_directory;
+            let directory = &self.ivars().download_manager.directory();
             if let Err(error) = std::fs::create_dir_all(directory) {
                 if let Some(ui) = self.ivars().downloads.borrow().get(&key) {
                     ui.item.fail(error.to_string());
@@ -361,7 +360,7 @@ define_class!(
         #[unsafe(method(downloadDidFinish:))]
         #[allow(non_snake_case)]
         fn downloadDidFinish(&self, download: &WKDownload) {
-            self.finish_download(download, None);
+            self.finish_download(download_key(download), None);
         }
 
         #[unsafe(method(download:didFailWithError:resumeData:))]
@@ -372,7 +371,7 @@ define_class!(
             error: &NSError,
             _resume_data: Option<&objc2_foundation::NSData>,
         ) {
-            self.finish_download(download, Some(error.localizedDescription().to_string()));
+            self.finish_download(download_key(download), Some(error.localizedDescription().to_string()));
         }
     }
 );
@@ -389,10 +388,19 @@ impl BrowserNavigationDelegate {
 
         let handle = Rc::new(RefCell::new(Some(download.retain())));
         let handle_for_cancel = handle.clone();
+        let delegate = objc2::rc::Weak::new(self);
         let item = self.ivars().download_manager.add(move || {
-            if let Some(download) = handle_for_cancel.borrow().as_ref() {
+            let download = handle_for_cancel.borrow().clone();
+            if let Some(download) = download {
+                let delegate = delegate.clone();
+                // WKDownload cancellation completes here, not through its failure delegate.
+                let completion = block2::RcBlock::new(move |_: *mut objc2_foundation::NSData| {
+                    if let Some(delegate) = delegate.load() {
+                        delegate.finish_download(key, None);
+                    }
+                });
                 unsafe {
-                    download.cancel(None);
+                    download.cancel(Some(&completion));
                 }
             }
         });
@@ -413,13 +421,8 @@ impl BrowserNavigationDelegate {
             .insert(key, DownloadUi { item, handle });
     }
 
-    fn finish_download(&self, download: &WKDownload, error: Option<String>) {
-        let Some(ui) = self
-            .ivars()
-            .downloads
-            .borrow_mut()
-            .remove(&download_key(download))
-        else {
+    fn finish_download(&self, key: usize, error: Option<String>) {
+        let Some(ui) = self.ivars().downloads.borrow_mut().remove(&key) else {
             return;
         };
         ui.handle.borrow_mut().take();
@@ -629,6 +632,17 @@ pub fn ref_scope_for_surface(surface_id: SurfaceId) -> RefScope {
 }
 
 impl BrowserPane {
+    pub fn download(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserDownloadAction,
+    ) -> Result<String, String> {
+        self.native
+            ._navigation_delegate
+            .ivars()
+            .download_manager
+            .control(action)
+    }
+
     pub fn new(
         id: PaneId,
         surface_id: SurfaceId,
@@ -1502,7 +1516,6 @@ fn install_navigation_delegate(
             refs,
             ref_scope,
             download_manager,
-            download_directory: download_directory(),
             downloads: RefCell::new(HashMap::new()),
         }));
     let delegate: Retained<BrowserNavigationDelegate> = unsafe { msg_send![super(delegate), init] };
@@ -1514,12 +1527,6 @@ fn install_navigation_delegate(
 
 fn download_key(download: &WKDownload) -> usize {
     std::ptr::from_ref(download).addr()
-}
-
-fn download_directory() -> PathBuf {
-    glib::user_special_dir(glib::UserDirectory::Downloads)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Downloads")))
-        .unwrap_or_else(std::env::temp_dir)
 }
 
 fn available_download_path(directory: &Path, suggested: &str) -> PathBuf {

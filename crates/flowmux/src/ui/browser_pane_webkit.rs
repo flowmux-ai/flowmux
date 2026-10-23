@@ -67,6 +67,13 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub fn download(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserDownloadAction,
+    ) -> Result<String, String> {
+        self._downloads.control(action)
+    }
+
     pub fn new(
         id: PaneId,
         surface_id: SurfaceId,
@@ -371,7 +378,6 @@ impl BrowserPane {
         let download_signal = {
             let downloads = downloads.downgrade();
             let source_web_view = web_view.downgrade();
-            let download_directory = download_directory();
             let handler = network_session.connect_download_started(move |_, download| {
                 let Some(downloads) = downloads.upgrade() else {
                     return;
@@ -385,7 +391,7 @@ impl BrowserPane {
                 let native_for_cancel = download.clone();
                 let item = downloads.add(move || native_for_cancel.cancel());
                 {
-                    let directory = download_directory.clone();
+                    let directory = downloads.directory();
                     let item = item.clone();
                     download.connect_decide_destination(move |download, suggested| {
                         if let Err(error) = std::fs::create_dir_all(&directory) {
@@ -927,14 +933,6 @@ fn set_webkit_zoom(
     zoom.set(level);
     label.set_label(&format!("{:.0}%", level * 100.0));
     web_view.set_zoom_level(level);
-}
-
-fn download_directory() -> std::path::PathBuf {
-    gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Downloads"))
-        })
-        .unwrap_or_else(std::env::temp_dir)
 }
 
 fn permission_name(request: &webkit6::PermissionRequest) -> String {

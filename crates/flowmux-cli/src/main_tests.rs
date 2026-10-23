@@ -238,6 +238,31 @@ fn async_browser_body_and_timeout_are_preserved() {
 }
 
 #[test]
+fn download_directory_uses_the_callers_working_directory() {
+    let pane = PaneId::new().to_string();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "download",
+        &pane,
+        "directory",
+        "downloads",
+    ])
+    .unwrap();
+    let Request::BrowserDownload {
+        action: flowmux_ipc::protocol::BrowserDownloadAction::Directory { path },
+        ..
+    } = build_request(cli.cmd).unwrap()
+    else {
+        panic!("expected download directory");
+    };
+    assert_eq!(path, std::path::absolute("downloads").unwrap());
+    assert!(
+        Cli::try_parse_from(["flowmuxctl", "browser", "download", &pane, "cancel", "-1"]).is_err()
+    );
+}
+
+#[test]
 fn media_actions_preserve_refs_and_reject_invalid_seek_times() {
     let pane = PaneId::new().to_string();
     let parse = |args: &[&str]| {

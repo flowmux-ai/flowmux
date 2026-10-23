@@ -185,6 +185,7 @@ cannot be combined.
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
+| Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Scrolling | `scroll PANE REF X Y` |
 | Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
@@ -203,12 +204,26 @@ and timeout errors instead of bypassing browser restrictions. After a timeout,
 inspect `status` before retrying. Linux playback needs the GStreamer codecs
 described in `docs/setup.md`.
 
+`download` returns JSON with the tab's `directory` and ordered `downloads`.
+Each item has an `id`, `state` (`in_progress`, `cancelling`, `complete`,
+`cancelled`, or `failed`), destination `path` (null until selected), `progress`
+from 0 to 1, and `error` (null unless failed). Poll `list` for a terminal state;
+a successful `cancel` request alone does not mean cancellation has completed.
+IDs and directory settings belong to that browser tab; use `--surface` to keep
+commands on it when the active tab changes. `directory` resolves relative paths
+against the CLI's working directory and requires an existing folder. It affects
+subsequent downloads until the tab closes, without changing other tabs or the
+system default. Existing files are not overwritten. Cancelling does not promise
+to remove partial files; only `complete` means a successful download. The UI and
+CLI share the same history; cleared or evicted entries are no longer listed.
+
 Refs belong to the latest snapshot of one browser tab. After navigation, reload,
 tab switches or page changes, wait and take a fresh snapshot before using refs.
 A ref-not-found error also requires a fresh snapshot. Never add tracking
 attributes to the DOM; Flowmux resolves refs without modifying the page.
 
-Screenshots cover the visible viewport. WebKitGTK/WKWebView do not expose CDP:
+Screenshots cover the visible viewport unless `--full-page` or `--element REF`
+is specified. WebKitGTK/WKWebView do not expose CDP:
 no device viewport emulation, network mocking, full-page tracing or screencast.
 When a task requires those, explain the need for external tooling and keep the
 user-visible URL/results in Flowmux. Cookie import currently extracts/counts
