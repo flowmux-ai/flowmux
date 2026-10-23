@@ -583,6 +583,16 @@ enum BrowserOp {
     Url { pane: PaneId },
     /// Print the current page title of a browser pane.
     Title { pane: PaneId },
+    /// Send native pointer input at CSS viewport coordinates (click, dblclick, hover).
+    Pointer {
+        pane: PaneId,
+        #[arg(value_parser = ["click", "dblclick", "hover"])]
+        action: String,
+        #[arg(allow_hyphen_values = true)]
+        x: f64,
+        #[arg(allow_hyphen_values = true)]
+        y: f64,
+    },
     /// Click an element by ref id (from a snapshot).
     Click { pane: PaneId, target: String },
     /// Fill an input/textarea by ref id with `value`.

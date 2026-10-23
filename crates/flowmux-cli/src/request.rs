@@ -8,6 +8,19 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Pointer { pane, action, x, y } => {
+            if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+                anyhow::bail!("pointer coordinates must be finite and nonnegative");
+            }
+            use flowmux_ipc::protocol::BrowserPointerAction as Action;
+            let action = match action.as_str() {
+                "click" => Action::Click,
+                "dblclick" => Action::Dblclick,
+                "hover" => Action::Hover,
+                _ => anyhow::bail!("unknown pointer action"),
+            };
+            Request::BrowserPointer { pane, action, x, y }
+        }
         BrowserOp::FileChooser { pane, action } => {
             use flowmux_ipc::protocol::BrowserFileChooserAction as Action;
             let action = match action {

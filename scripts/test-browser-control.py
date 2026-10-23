@@ -90,7 +90,12 @@ class Fixture(BaseHTTPRequestHandler):
         for (const root of [document.documentElement,outer,inner])
           new MutationObserver(xs=>mutations.push(...xs)).observe(root,
             {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
-        if self.path == "/popup":
+        if self.path == "/canvas":
+            body = b"""<!doctype html><title>Canvas input</title>
+            <style>body{height:1600px}canvas{position:absolute;left:31.5px;top:420.5px;width:240px;height:120px;background:blue}canvas:hover{outline:3px solid green}</style>
+            <canvas id=canvas width=480 height=240></canvas>
+            <script>window.events=[];for(const name of ['pointerdown','pointerup','click','dblclick','pointermove'])canvas.addEventListener(name,e=>events.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));</script>"""
+        elif self.path == "/popup":
             body = b"""<!doctype html><title>Popup destination</title>
             <input aria-label="Popup destination">
             <script>if(opener)opener.postMessage('navigated', location.origin)</script>"""
@@ -174,6 +179,29 @@ def exercise(cli, url, root):
 
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    coordinate_parent = snapshot()["page"]["surface_id"]
+    cli("browser", "open", url + "canvas", pane_context=terminal)
+    assert browser("wait", "--url", url + "canvas")["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    evaluate("scrollTo(0,300);'scrolled'")
+    assert browser("wait", "--js", "scrollY === 300")["browser_bool_result"]["value"]
+    point = json.loads(evaluate("JSON.stringify([canvas.getBoundingClientRect().x+33.5,canvas.getBoundingClientRect().y+27.5])"))
+    browser("pointer", "click", *map(str, point))
+    event = json.loads(evaluate("JSON.stringify(events.find(e=>e.type==='click'))"))
+    assert event["trusted"] and abs(event["x"]-point[0])<1.5 and abs(event["y"]-point[1])<1.5, (event, point)
+    event_count = evaluate("String(events.length)")
+    browser("pointer", "click", "999999", "0", error=True)
+    assert evaluate("String(events.length)") == event_count
+    browser("pointer", "hover", *map(str, point))
+    assert evaluate("String(canvas.matches(':scope:hover'))") == "true"
+    browser("pointer", "dblclick", *map(str, point))
+    assert evaluate("String(events.some(e=>e.type==='dblclick'&&e.trusted))") == "true"
+    coordinate_surface = snapshot()["page"]["surface_id"]
+    cli("focus-tab", coordinate_parent, "--pane", pane)
+    browser("pointer", "click", *map(str, point), "--surface", coordinate_surface, error=True)
+    cli("close-tab", coordinate_surface, "--pane", pane)
+    assert snapshot()["page"]["surface_id"] == coordinate_parent
+    print("PASS: viewport coordinates deliver trusted canvas input and reject invalid or hidden targets", flush=True)
     parent_surface = snapshot()["page"]["surface_id"]
     def wait_surface(predicate):
         deadline = time.monotonic() + 5

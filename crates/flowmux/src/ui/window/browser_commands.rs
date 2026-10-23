@@ -35,14 +35,11 @@ impl WindowController {
         browser: &crate::ui::browser_pane::BrowserPane,
         pane: PaneId,
         surface: Option<SurfaceId>,
-        target: &str,
+        geometry: Result<String, String>,
         action: flowmux_browser::input::PointerAction,
         ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
     ) {
-        use flowmux_browser::{
-            input::{PointerAction, PointerTarget},
-            scripts,
-        };
+        use flowmux_browser::{input::PointerTarget, scripts};
         let registry = self.pane_registry.clone();
         let expected = surface.or_else(|| registry.borrow().active_surface(pane));
         if registry.borrow().active_surface(pane) != expected {
@@ -51,9 +48,7 @@ impl WindowController {
             ));
             return;
         }
-        let geometry = match ref_script(browser, target, |selector| {
-            scripts::pointer_target(selector, matches!(action, PointerAction::Hover))
-        }) {
+        let geometry = match geometry {
             Ok(geometry) => geometry,
             Err(error) => {
                 let _ = ack.send(Err(error));
@@ -281,11 +276,34 @@ impl WindowController {
                         let value = browser.current_title();
                         let _ = ack.send(Ok(BrowserActionResult::String(value)));
                     }
+                    BrowserOp::Pointer { action, x, y } => {
+                        use flowmux_browser::input::PointerAction;
+                        use flowmux_ipc::protocol::BrowserPointerAction;
+                        let action = match action {
+                            BrowserPointerAction::Click => PointerAction::Click,
+                            BrowserPointerAction::Dblclick => PointerAction::DoubleClick,
+                            BrowserPointerAction::Hover => PointerAction::Hover,
+                        };
+                        self.pointer_action(
+                            &browser,
+                            pane,
+                            surface,
+                            Ok(flowmux_browser::scripts::coordinate_target(
+                                x,
+                                y,
+                                matches!(action, PointerAction::Hover),
+                            )),
+                            action,
+                            ack,
+                        );
+                    }
                     BrowserOp::Click { target } => self.pointer_action(
                         &browser,
                         pane,
                         surface,
-                        &target,
+                        ref_script(&browser, &target, |selector| {
+                            flowmux_browser::scripts::pointer_target(selector, false)
+                        }),
                         flowmux_browser::input::PointerAction::Click,
                         ack,
                     ),
@@ -434,7 +452,9 @@ impl WindowController {
                         &browser,
                         pane,
                         surface,
-                        &target,
+                        ref_script(&browser, &target, |selector| {
+                            flowmux_browser::scripts::pointer_target(selector, false)
+                        }),
                         flowmux_browser::input::PointerAction::DoubleClick,
                         ack,
                     ),
@@ -442,7 +462,9 @@ impl WindowController {
                         &browser,
                         pane,
                         surface,
-                        &target,
+                        ref_script(&browser, &target, |selector| {
+                            flowmux_browser::scripts::pointer_target(selector, true)
+                        }),
                         flowmux_browser::input::PointerAction::Hover,
                         ack,
                     ),

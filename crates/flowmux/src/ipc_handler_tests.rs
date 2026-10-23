@@ -3117,3 +3117,25 @@ async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_call
         Response::Error(_)
     ));
 }
+
+#[tokio::test]
+async fn browser_pointer_rejects_invalid_coordinates_before_dispatch() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    for value in [-1.0, f64::NAN, f64::INFINITY] {
+        for (x, y) in [(value, 0.0), (0.0, value)] {
+            let response = handler
+                .handle(Request::BrowserPointer {
+                    pane,
+                    action: flowmux_ipc::protocol::BrowserPointerAction::Click,
+                    x,
+                    y,
+                })
+                .await;
+            assert!(matches!(
+                response,
+                Response::Error(RpcError::InvalidArgument(_))
+            ));
+            assert!(rx.try_recv().is_err());
+        }
+    }
+}

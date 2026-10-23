@@ -2433,3 +2433,27 @@ fn parses_tmux_compat_with_raw_tmux_argv() {
     };
     assert_eq!(args, vec!["-V".to_string()]);
 }
+
+#[test]
+fn pointer_actions_preserve_coordinates_and_reject_nonfinite_values() {
+    let pane = PaneId::new().to_string();
+    let parse = |action: &str, x: &str, y: &str| {
+        build_request(
+            Cli::try_parse_from(["flowmuxctl", "browser", "pointer", &pane, action, x, y])
+                .unwrap()
+                .cmd,
+        )
+    };
+    for action in ["click", "dblclick", "hover"] {
+        let request = parse(action, "12.5", "0.25").unwrap();
+        let wire = serde_json::to_value(request).unwrap();
+        assert_eq!(wire["verb"], "browser_pointer");
+        assert_eq!(wire["action"], action);
+        assert_eq!(wire["x"], 12.5);
+        assert_eq!(wire["y"], 0.25);
+    }
+    for value in ["NaN", "inf", "-1"] {
+        assert!(parse("click", value, "0").is_err());
+        assert!(parse("click", "0", value).is_err());
+    }
+}

@@ -218,6 +218,13 @@ These commands handle page JavaScript dialogs, not permission requests or
 before-unload confirmation. The visible panel still accepts normal user input.
 
 Activate a file input with `click REF`, or `focus REF` then `press Enter`.
+`pointer PANE click|dblclick|hover X Y` uses CSS pixels from the top-left of the
+visible browser viewport, without scrolling. It supports canvases, open shadow
+roots and accessible frames, and requires the active tab. Invalid coordinates,
+inert/hidden targets and inaccessible cross-origin frames are rejected before
+input. Use `--surface` to pin the tab, and inspect the page again after scrolling
+or resizing before choosing new coordinates.
+
 Page-created popups open as browser tabs in the source pane. They retain their
 engine-created window context, including `opener`, named-window reuse and
 `postMessage`; `noopener` still isolates the child. Use a fresh snapshot and

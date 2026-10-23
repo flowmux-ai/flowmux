@@ -106,6 +106,13 @@ async fn browser_action(
             "async timeout must be positive".into(),
         ));
     }
+    if let BrowserOp::Pointer { x, y, .. } = &op {
+        if !x.is_finite() || !y.is_finite() || *x < 0.0 || *y < 0.0 {
+            return Response::Error(RpcError::InvalidArgument(
+                "pointer coordinates must be finite and nonnegative".into(),
+            ));
+        }
+    }
     if let BrowserOp::Media {
         action: flowmux_ipc::protocol::BrowserMediaAction::Seek(seconds),
         ..
@@ -153,6 +160,9 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserPointer { pane, action, x, y } => {
+                (pane, BrowserOp::Pointer { action, x, y })
+            }
             Request::BrowserFileChooser { pane, action } => {
                 (pane, BrowserOp::FileChooser { action })
             }
@@ -436,6 +446,7 @@ impl Handler for GuiHandler {
                 Request::BrowserEvalAsync { .. }
                 | Request::BrowserMedia { .. }
                 | Request::BrowserFileChooser { .. }
+                | Request::BrowserPointer { .. }
                 | Request::BrowserDialog { .. }
                 | Request::BrowserDownload { .. } => self.handle_browser_verb(req).await,
                 Request::ClaudeTeams { .. }

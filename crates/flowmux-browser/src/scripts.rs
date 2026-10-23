@@ -354,6 +354,45 @@ pub fn pointer_target(selector: &str, hover: bool) -> String {
     )
 }
 
+/// Coordinates are CSS pixels in the top-level viewport; no implicit scrolling.
+pub fn coordinate_target(x: f64, y: f64, hover: bool) -> String {
+    format!(
+        r#"(() => {{
+        {FRAME_TRANSFORM_JS}
+        let x = {x}, y = {y}, view = window, el;
+        if (![x,y].every(Number.isFinite) || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight)
+            return 'error: pointer is outside the browser viewport';
+        for (;;) {{
+            el = view.document.elementFromPoint(x,y);
+            while (el?.shadowRoot) {{
+                const next = el.shadowRoot.elementFromPoint(x,y);
+                if (!next || next === el) break;
+                el = next;
+            }}
+            if (!el) return 'error: no element at pointer coordinates';
+            if (!el.matches('iframe,frame')) break;
+            if (!el.contentDocument) return 'error: cross-origin frame pointer completion is unavailable';
+            const transform = frameTransform(el);
+            x = (x-transform.x)/transform.sx;
+            y = (y-transform.y)/transform.sy;
+            view = el.contentWindow;
+            if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight)
+                return 'error: pointer is outside the frame content';
+        }}
+        if (!{hover} && el.matches(':disabled')) return 'error: element is disabled';
+        for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
+            if (parent.hasAttribute('inert') || (!{hover} && parent.getAttribute('aria-disabled') === 'true'))
+                return 'error: element is disabled or inert';
+            const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
+            if (Number(style.opacity) === 0 || style.display === 'none' || style.visibility !== 'visible')
+                return 'error: element is not visible';
+        }}
+        globalThis.__flowmuxInput.el = el;
+        return JSON.stringify({{x:{x},y:{y},width:innerWidth,height:innerHeight}});
+    }})()"#
+    )
+}
+
 pub fn element_capture(selector: &str) -> String {
     element_action(
         selector,
@@ -397,13 +436,14 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
         try {{
             const before = {geometry};
             if (before.startsWith('error:')) throw new Error(before);
+            const element = state.el;
             for (let frame = 0; frame < 2; frame++) {{
                 await new Promise((resolve, reject) => {{
                     const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 1000);
                     requestAnimationFrame(() => {{clearTimeout(timeout); resolve();}});
                 }});
                 const after = {geometry};
-                if (before !== after) throw new Error('pointer target moved; inspect the page before retrying');
+                if (before !== after || element !== state.el) throw new Error('pointer target moved; inspect the page before retrying');
             }}
             state.listener = event => {{
                 if (event.isTrusted && event.composedPath().includes(state.el)) {{

@@ -614,3 +614,45 @@ async fn navigation_tracks_history_reload_and_invalidates_snapshot_refs() {
         "navigating after back must discard forward history"
     );
 }
+
+#[gtk::test]
+async fn coordinate_pointer_reaches_shadow_content_in_a_scaled_frame() {
+    let page = Page::new("<iframe id=frame style='margin:40px;border:5px solid;padding:3px;transform:scale(.8);transform-origin:top left' srcdoc='<div id=host></div>'></iframe>").await;
+    page.wait("!!frame.contentDocument?.getElementById('host')")
+        .await;
+    page.eval("frame.contentDocument.getElementById('host').attachShadow({mode:'open'}).innerHTML='<button style=width:100px;height:50px>Canvas</button>';window.clicked=false;frame.contentDocument.getElementById('host').shadowRoot.querySelector('button').onclick=e=>window.clicked=e.isTrusted;'ready'").await;
+    let point: Vec<f64> = serde_json::from_str(&page.eval("(()=>{const f=frame.getBoundingClientRect(),r=frame.contentDocument.getElementById('host').shadowRoot.querySelector('button').getBoundingClientRect();return JSON.stringify([f.left+(8+r.x+20)*.8,f.top+(8+r.y+20)*.8])})()").await).unwrap();
+    let geometry = coordinate_target(point[0], point[1], false);
+    let prepared = page
+        .eval_async(&prepare_pointer_input(&geometry, PointerAction::Click))
+        .await
+        .unwrap();
+    page.pane
+        .pointer(
+            PointerAction::Click,
+            &serde_json::from_str(&prepared).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        page.eval_async(FINISH_POINTER_INPUT_JS).await.unwrap(),
+        "ok"
+    );
+    assert_eq!(page.eval("clicked").await, "true");
+}
+
+#[gtk::test]
+async fn coordinate_pointer_rejects_replaced_elements_at_the_same_position() {
+    let page = Page::new("<button id=target style='position:fixed;left:10px;top:10px;width:100px;height:100px'>Target</button>").await;
+    let geometry = coordinate_target(30.0, 30.0, false);
+    let result = page
+        .eval_async(&format!(
+            "requestAnimationFrame(()=>target.replaceWith(target.cloneNode(true)));{}",
+            prepare_pointer_input(&geometry, PointerAction::Click)
+        ))
+        .await;
+    assert!(result.unwrap_err().contains("pointer target moved"));
+    assert_eq!(
+        page.eval("String(globalThis.__flowmuxInput)").await,
+        "undefined"
+    );
+}
