@@ -119,7 +119,6 @@ fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
             .home_variables()
             .iter()
             .copied()
-            .chain(["PATH"])
             .filter_map(|key| {
                 std::env::var(key)
                     .ok()
@@ -538,6 +537,19 @@ impl WindowController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_agent_resume_keeps_the_new_shell_path() {
+        let home = session_home(&SessionTarget {
+            agent: SessionAgent::Codex,
+            focused: None,
+        })
+        .unwrap();
+        assert!(
+            !home.environment.contains_key("PATH"),
+            "the GUI process PATH must not replace the initialized shell PATH"
+        );
+    }
 
     #[test]
     fn cline_options_preserve_absolute_paths_and_override_environment() {

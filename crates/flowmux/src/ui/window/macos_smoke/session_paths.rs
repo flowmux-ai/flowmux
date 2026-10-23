@@ -29,7 +29,7 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
     std::fs::write(
         &fake,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$CODEX_HOME\" \"$PWD\" \"$@\" > {0}.tmp && mv {0}.tmp {0}\n",
+            "#!/bin/sh\n[ \"$1\" = --help ] && exit 0\nprintf '%s\\n' \"$CODEX_HOME\" \"$PWD\" \"$@\" > {0}.tmp && mv {0}.tmp {0}\n",
             shell_quote(marker.to_str().unwrap())
         ),
     )
@@ -127,7 +127,7 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
             active.widget.text_format(vte::Format::Text)
         );
     }
-    let output = std::fs::read_to_string(marker).unwrap();
+    let output = std::fs::read_to_string(&marker).unwrap();
     let lines = output.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 5);
     assert_eq!(lines[0], custom.to_str().unwrap());
@@ -140,5 +140,53 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
         &["resume", id, "--dangerously-bypass-approvals-and-sandbox"]
     );
     terminal.widget.feed_child(b"\x03");
+
+    // Finder's PATH lacks tools installed by the user's login startup files.
+    let startup = root.join("zsh-startup");
+    std::fs::create_dir(&startup).unwrap();
+    std::fs::write(
+        startup.join(".zprofile"),
+        format!("export PATH={}:$PATH\n", shell_quote(bin.to_str().unwrap())),
+    )
+    .unwrap();
+    std::env::set_var("SHELL", "/bin/zsh");
+    std::env::set_var("ZDOTDIR", &startup);
+    std::env::set_var("FLOWMUX_REAL_ZDOTDIR", &startup);
+    std::env::set_var("CODEX_HOME", &custom);
+    std::env::set_var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    std::fs::remove_file(&marker).unwrap();
+    controller
+        .dispatch_session_panel(SessionPanelAction::ToggleAgent(SessionAgent::Codex))
+        .await;
+    wait_until("selected agent sessions listed", || {
+        controller
+            .sessions
+            .panel
+            .status
+            .text()
+            .contains("Codex · 1 sessions")
+    })
+    .await;
+    let session = list_sessions(SessionAgent::Codex, &custom)
+        .unwrap()
+        .remove(0);
+    let generation = controller.sessions.panel.generation.get();
+    controller
+        .dispatch_session_panel(SessionPanelAction::Resume {
+            session,
+            generation,
+            yolo: false,
+        })
+        .await;
+    wait_until("selected session uses login shell PATH", || marker.exists()).await;
+    let output = std::fs::read_to_string(&marker).unwrap();
+    let lines = output.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], custom.to_str().unwrap());
+    assert_eq!(
+        std::fs::canonicalize(lines[1]).unwrap(),
+        project.canonicalize().unwrap()
+    );
+    assert_eq!(&lines[2..], &["resume", id]);
+    println!("MACOS_SELECTED_SESSION_PATH_OK");
     println!("MACOS_SESSION_PATHS_OK");
 }
