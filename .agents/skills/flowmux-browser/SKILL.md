@@ -148,6 +148,10 @@ for Unicode text or characters missing from the current keyboard layout.
 X11. They wait for two stable rendering frames, reject covered targets and send
 native pointer events. `hover` activates CSS hover; double-click includes its
 two clicks. A blocked or moving target returns an error without retrying.
+Key and pointer completion waits for synchronous event handlers and native
+default actions. If an input opens a page dialog, the command returns once the
+dialog is available; answer it with `dialog` before checking the page result.
+Use `wait` for later network responses or other asynchronous page changes.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

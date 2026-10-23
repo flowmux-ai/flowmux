@@ -731,8 +731,10 @@ pub const FINISH_KEY_INPUT_JS: &str = r#"
 const state = globalThis.__flowmuxInput;
 if (!state) throw new Error('page changed during native key input');
 return await new Promise(resolve => {
+    let completionTimer;
     const finish = result => {
         clearTimeout(timer);
+        clearTimeout(completionTimer);
         for (const view of state.windows) {
             view.removeEventListener('keyup', state.listener, true);
             view.removeEventListener('keydown', state.keydown, true);
@@ -741,7 +743,9 @@ return await new Promise(resolve => {
         resolve(result);
     };
     const timer = setTimeout(() => finish('error: native key input completion timed out'), 10000);
-    state.done = () => finish(state.down?.defaultPrevented ? 'prevented' : 'ok');
+    state.done = () => {
+        completionTimer ??= setTimeout(() => finish(state.down?.defaultPrevented ? 'prevented' : 'ok'), 0);
+    };
     if (state.received) state.done();
 });
 "#;

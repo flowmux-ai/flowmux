@@ -250,6 +250,26 @@ async fn pointer_completion_waits_for_the_target_event_handler() {
 }
 
 #[gtk::test]
+async fn key_completion_waits_for_the_target_event_handler() {
+    let page = Page::new(
+        "<input id=target onkeyup='window.released=true'><script>window.released=false</script>",
+    )
+    .await;
+    page.ok(focus_by_selector("#target")).await;
+    let stroke = flowmux_browser::input::KeyStroke::parse("Enter").unwrap();
+    page.ok(prepare_key_input(&stroke)).await;
+    let pane = page.pane.clone();
+    glib::timeout_add_local_once(Duration::from_millis(50), move || {
+        pane.press_key(&stroke).unwrap();
+    });
+    let result = page.eval_async(&format!("const completion=await (async()=>{{{FINISH_KEY_INPUT_JS}}})(); return JSON.stringify({{completion,released}});")).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+        serde_json::json!({"completion":"ok","released":true})
+    );
+}
+
+#[gtk::test]
 async fn native_input_stays_in_its_window_after_resize_and_focus_changes() {
     let html = "<input id=field value=safe style='margin:40px;width:60%'><script>window.hits=0;field.onclick=()=>hits++</script>";
     let first = Page::new(html).await;

@@ -80,35 +80,17 @@ impl WindowController {
                     });
                     return;
                 }
-                let reply = Rc::new(RefCell::new(Some(ack)));
-                let dialog_reply = reply.clone();
-                let pending_input = input.clone();
-                // A page dialog pauses JavaScript; its native presentation also completes the action.
-                glib::timeout_add_local(Duration::from_millis(10), move || {
-                    let mut reply = dialog_reply.borrow_mut();
-                    if pending_input.has_pending_dialog() {
-                        if let Some(ack) = reply.take() {
-                            let _ = ack.send(Ok(BrowserActionResult::Ok));
-                        }
-                    }
-                    if reply.is_some() {
-                        glib::ControlFlow::Continue
-                    } else {
-                        glib::ControlFlow::Break
-                    }
-                });
+                let reply = native_input_reply(&input, ack);
                 input.evaluate_automation_async_js(
                     scripts::FINISH_POINTER_INPUT_JS,
                     move |result| {
-                        if let Some(ack) = reply.borrow_mut().take() {
-                            let _ = ack.send(result.and_then(|value| {
-                                if value == "ok" {
-                                    Ok(BrowserActionResult::Ok)
-                                } else {
-                                    Err(value)
-                                }
-                            }));
-                        }
+                        reply(result.and_then(|value| {
+                            if value == "ok" {
+                                Ok(BrowserActionResult::Ok)
+                            } else {
+                                Err(value)
+                            }
+                        }));
                     },
                 );
             },
@@ -428,6 +410,7 @@ impl WindowController {
                             }
                             #[cfg(target_os = "macos")]
                             let finished = target.clone();
+                            let reply = native_input_reply(&target, ack);
                             target.evaluate_automation_async_js(flowmux_browser::scripts::FINISH_KEY_INPUT_JS, move |result| {
                                 let result = result.and_then(|value| {
                                     if value != "ok" && value != "prevented" { return Err(value); }
@@ -435,7 +418,7 @@ impl WindowController {
                                     if value == "ok" { finished.finish_key_input(&stroke)?; }
                                     Ok(BrowserActionResult::Ok)
                                 });
-                                let _ = ack.send(result);
+                                reply(result);
                             });
                         });
                     }
@@ -731,6 +714,34 @@ impl WindowController {
                 let _ = ack.send(result);
             }
             other => unreachable!("browser router got a non-browser command: {other:?}"),
+        }
+    }
+}
+
+fn native_input_reply(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    ack: oneshot::Sender<Result<BrowserActionResult, String>>,
+) -> impl FnOnce(Result<BrowserActionResult, String>) {
+    let reply = Rc::new(RefCell::new(Some(ack)));
+    let dialog_reply = reply.clone();
+    let pending_input = browser.clone();
+    // A page dialog pauses JavaScript; its native presentation also completes the action.
+    glib::timeout_add_local(Duration::from_millis(10), move || {
+        let mut reply = dialog_reply.borrow_mut();
+        if pending_input.has_pending_dialog() {
+            if let Some(ack) = reply.take() {
+                let _ = ack.send(Ok(BrowserActionResult::Ok));
+            }
+        }
+        if reply.is_some() {
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Break
+        }
+    });
+    move |result| {
+        if let Some(ack) = reply.borrow_mut().take() {
+            let _ = ack.send(result);
         }
     }
 }
