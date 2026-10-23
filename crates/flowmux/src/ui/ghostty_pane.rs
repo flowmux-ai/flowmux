@@ -4843,7 +4843,15 @@ mod tests {
             .map(|row| format!("\x1b[{row};1HROW_{row:03}_{}X", ".".repeat(91)))
             .collect::<String>();
         pane.widget.feed(format!("{frame}\x1b[H").as_bytes());
-        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        for _ in 0..100 {
+            if pane
+                .screen_text()
+                .is_some_and(|text| text.contains("ROW_100_"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
         assert!(!pane.widget.is_mapped());
         let text = pane.screen_text().unwrap();
         let status = pane.agent_status_text().unwrap();
