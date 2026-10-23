@@ -223,18 +223,23 @@ def exercise(cli, url, root):
     assert browser("wait", "--url", url + "layers")["browser_bool_result"]["value"]
     assert browser("wait", "--js", "window.gl && clip.readyState>=2")["browser_bool_result"]["value"]
     clip = reference(snapshot(), "Clip")
+    previous_video = None
     for second in (1, 2):
         browser("media", clip, "seek", str(second))
-        expected = json.loads(evaluate("JSON.stringify((()=>{const c=document.createElement('canvas');c.width=96;c.height=64;const x=c.getContext('2d');x.drawImage(clip,0,0);return [...x.getImageData(30,30,1,1).data].slice(0,3)})())"))
+        expected = json.loads(evaluate("JSON.stringify((()=>{const c=document.createElement('canvas');c.width=96;c.height=64;const x=c.getContext('2d');x.drawImage(clip,0,0);return [...x.getImageData(24,21,1,1).data].slice(0,3)})())"))
         assert max(expected) > 32, expected
-        width = int(evaluate("innerWidth"))
+        if previous_video:
+            assert sum(abs(a-b) for a,b in zip(expected,previous_video)) > 64, (previous_video,expected)
+        previous_video = expected
+        viewport_width, document_width = json.loads(evaluate("JSON.stringify([innerWidth,document.documentElement.scrollWidth])"))
         for mode in ((), ("--full-page",), ("--element", clip)):
             capture = root / "layers.png"
             browser("screenshot", str(capture), *mode)
             pixels = struct.unpack(">II", capture.read_bytes()[16:24])
             element = mode and mode[0] == "--element"
+            width = document_width if mode == ("--full-page",) else viewport_width
             scale = pixels[0] / (96 if element else width)
-            x, y = (30, 30) if element else (180, 40)
+            x, y = (24, 21) if element else (174, 31)
             actual = png_pixel(capture, round(x * scale), round(y * scale))
             assert all(abs(a-b) <= 8 for a,b in zip(actual,expected)), (mode, actual, expected)
             if not element:
