@@ -230,6 +230,31 @@ async fn native_pointer_coordinates_include_window_decoration_offsets() {
 }
 
 #[gtk::test]
+async fn pointer_preparation_waits_for_slow_rendering_before_sending_input() {
+    let page = Page::new("<button id=target onclick='window.clicked=true'>Click</button><script>window.clicked=false</script>").await;
+    page.eval("const nextFrame=window.requestAnimationFrame.bind(window);window.requestAnimationFrame=callback=>{window.requestAnimationFrame=nextFrame;return setTimeout(()=>nextFrame(callback),1100)};'slow first frame'").await;
+    let prepared = page
+        .eval_async(&prepare_pointer_input(
+            &pointer_target("#target", false),
+            PointerAction::Click,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(page.eval("clicked").await, "false");
+    page.pane
+        .pointer(
+            PointerAction::Click,
+            &serde_json::from_str(&prepared).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        page.eval_async(FINISH_POINTER_INPUT_JS).await.unwrap(),
+        "ok"
+    );
+    assert_eq!(page.eval("clicked").await, "true");
+}
+
+#[gtk::test]
 async fn pointer_completion_waits_for_the_target_event_handler() {
     let page = Page::new("<button id=target onclick='window.clicked=true'>Click</button><script>window.clicked=false</script>").await;
     let geometry = pointer_target("#target", false);

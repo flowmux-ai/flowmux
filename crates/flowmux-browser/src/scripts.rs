@@ -456,7 +456,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
             const element = state.el, dragSource = state.dragSource;
             for (let frame = 0; frame < 2; frame++) {{
                 await new Promise((resolve, reject) => {{
-                    const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 1000);
+                    const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 5000);
                     requestAnimationFrame(() => {{clearTimeout(timeout); resolve();}});
                 }});
                 const after = {geometry};
