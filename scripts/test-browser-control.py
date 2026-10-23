@@ -90,7 +90,11 @@ class Fixture(BaseHTTPRequestHandler):
         for (const root of [document.documentElement,outer,inner])
           new MutationObserver(xs=>mutations.push(...xs)).observe(root,
             {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
-        if self.path.split('?')[0] == "/frame":
+        if self.path == "/popup":
+            body = b"""<!doctype html><title>Popup destination</title>
+            <input aria-label="Popup destination">
+            <script>if(opener)opener.postMessage('navigated', location.origin)</script>"""
+        elif self.path.split('?')[0] == "/frame":
             body = b"""<!doctype html><title>Frame form</title>
             <form onsubmit="event.preventDefault();window.submissions++">
               <label for=field>Frame field</label><input id=field><button>Frame submit</button>
@@ -170,6 +174,50 @@ def exercise(cli, url, root):
 
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    parent_surface = snapshot()["page"]["surface_id"]
+    def wait_surface(predicate):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            current = snapshot()["page"]["surface_id"]
+            if predicate(current):
+                return current
+            time.sleep(.02)
+        raise AssertionError("popup surface did not change")
+
+    assert evaluate("window.popupMessage=null;window.addEventListener('message',e=>{if(e.source===window.popup)window.popupMessage=e.data});window.popup=window.open('about:blank','flowmux-popup');String(!!popup)") == "true", "window.open lost its WindowProxy"
+    child_surface = wait_surface(lambda current: current != parent_surface)
+    assert evaluate("String(opener !== null)") == "true", "popup lost its opener"
+    browser("eval", "popup.document.body.innerHTML='<input aria-label=Popup>';popup.document.title='Connected popup';'written'", "--surface", parent_surface)
+    assert browser("wait", "--js", "document.title === 'Connected popup'")["browser_bool_result"]["value"]
+    browser("focus", reference(snapshot(), "Popup"))
+    browser("type", "한글 popup")
+    assert evaluate("document.querySelector('input').value") == "한글 popup"
+    assert browser("eval", "String(window.open('about:blank','flowmux-popup') === popup)", "--surface", parent_surface)["browser_result"]["value"] == "true"
+    assert snapshot()["page"]["surface_id"] == child_surface
+    evaluate("opener.postMessage('connected', opener.location.origin);'sent'")
+    assert browser("wait", "--js", "popupMessage === 'connected'", "--surface", parent_surface)["browser_bool_result"]["value"]
+    evaluate("setTimeout(()=>close(), 0);'closing'")
+    assert wait_surface(lambda current: current == parent_surface) == parent_surface
+    assert evaluate("String(popup.closed)") == "true"
+    evaluate("window.popupMessage=null;window.popup=window.open('/popup','loaded-popup');'opening'")
+    wait_surface(lambda current: current != parent_surface)
+    assert browser("wait", "--url", url + "popup")["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    assert evaluate("document.title") == "Popup destination"
+    assert browser("wait", "--js", "popupMessage === 'navigated'", "--surface", parent_surface)["browser_bool_result"]["value"]
+    cli("close-tab", snapshot()["page"]["surface_id"], "--pane", pane)
+    assert snapshot()["page"]["surface_id"] == parent_surface
+    assert evaluate("popupMessage") == "navigated", "closing popup reset its opener"
+    evaluate("window.open('/popup','isolated-popup','noopener');'opening'")
+    wait_surface(lambda current: current != parent_surface)
+    assert browser("wait", "--url", url + "popup")["browser_bool_result"]["value"]
+    assert evaluate("String(opener === null)") == "true", "noopener relationship was restored"
+    cli("close-tab", snapshot()["page"]["surface_id"], "--pane", pane)
+    assert snapshot()["page"]["surface_id"] == parent_surface
+    # A popup can close during the engine's creation handshake.
+    evaluate("window.open('about:blank','short-lived').close();'closed'")
+    assert browser("wait", "--js", "typeof mutations !== 'undefined'")["browser_bool_result"]["value"]
+    print("PASS: native popups preserve opener, WindowProxy, input, messaging and close", flush=True)
     def downloads(*args, **kwargs):
         result = browser("download", *(args or ("list",)), **kwargs)
         return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])

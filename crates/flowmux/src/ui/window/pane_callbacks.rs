@@ -409,6 +409,23 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::OpenUrlInBrowserTab { pane, url });
                 }))
             },
+            on_open_browser_popup: {
+                let bridge = bridge.clone();
+                let registry = Rc::downgrade(&pane_registry);
+                Rc::new(RefCell::new(
+                    move |pane, surface, browser: crate::ui::browser_pane::BrowserPane| {
+                        let Some(registry) = registry.upgrade() else {
+                            browser.prepare_for_close();
+                            return;
+                        };
+                        registry
+                            .borrow_mut()
+                            .pending_browser_popups
+                            .insert(surface, browser);
+                        dispatch_detached(&bridge, GtkCommand::OpenBrowserPopup { pane, surface });
+                    },
+                ))
+            },
             on_open_image: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, path| {

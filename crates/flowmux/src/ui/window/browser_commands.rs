@@ -637,6 +637,43 @@ impl WindowController {
                     }
                 }
             }
+            GtkCommand::OpenBrowserPopup { pane, surface } => {
+                let browser = self
+                    .pane_registry
+                    .borrow_mut()
+                    .pending_browser_popups
+                    .remove(&surface);
+                if let Some(browser) = browser {
+                    let url = browser.current_url();
+                    if let Some((workspace, _)) = self
+                        .store
+                        .add_browser_surface_to_pane_with_id(pane, url, surface)
+                        .await
+                    {
+                        self.pane_registry
+                            .borrow_mut()
+                            .pending_browser_reuse
+                            .insert(surface, browser);
+                        if let Err(error) = self
+                            .attach_or_rerender_surface(workspace, pane, surface, None)
+                            .await
+                        {
+                            if let Some(browser) = self
+                                .pane_registry
+                                .borrow_mut()
+                                .pending_browser_reuse
+                                .remove(&surface)
+                            {
+                                browser.prepare_for_close();
+                            }
+                            self.store.close_surface(pane, surface).await;
+                            self.clipboard_toast.show_with_message(&error);
+                        }
+                    } else {
+                        browser.prepare_for_close();
+                    }
+                }
+            }
             GtkCommand::InjectCookies { cookies, ack } => {
                 let result = inject_cookies_into_webkit(&cookies);
                 let _ = ack.send(result);

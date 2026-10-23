@@ -1747,10 +1747,28 @@ impl StateStore {
         pane: PaneId,
         url: String,
     ) -> Option<(WorkspaceId, SurfaceId)> {
+        self.add_browser_surface_to_pane_with_id(pane, url, SurfaceId::new())
+            .await
+    }
+
+    /// Preserve the identity already bound to a live popup's callbacks.
+    pub async fn add_browser_surface_to_pane_with_id(
+        &self,
+        pane: PaneId,
+        url: String,
+        id: SurfaceId,
+    ) -> Option<(WorkspaceId, SurfaceId)> {
         let mut s = self.inner.lock().await;
+        if s.workspaces
+            .iter()
+            .any(|ws| workspace_pane_surface_ids(ws).contains(&id))
+        {
+            return None;
+        }
         for ws in s.workspaces.iter_mut() {
             for surface in ws.surfaces.iter_mut() {
-                let tab = PaneSurface::browser("Browser", url.clone());
+                let mut tab = PaneSurface::browser("Browser", url.clone());
+                tab.id = id;
                 if let Some(surface_id) = surface.root_pane.add_surface_to_leaf(pane, tab) {
                     let ws_id = ws.id;
                     drop(s);
@@ -8522,6 +8540,38 @@ Do you want to continue?";
             &added.kind,
             SurfaceKind::Browser { initial_url: Some(u) } if u == "about:blank"
         ));
+    }
+
+    #[tokio::test]
+    async fn browser_popup_keeps_its_id_and_rejects_duplicates() {
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store
+            .create_workspace(Some("popup".into()), "/tmp/demo".into())
+            .await;
+        let pane = first_pane(&store.get_workspace(workspace).await.unwrap());
+        let id = SurfaceId::new();
+        assert_eq!(
+            store
+                .add_browser_surface_to_pane_with_id(pane, "about:blank".into(), id)
+                .await,
+            Some((workspace, id))
+        );
+        assert!(store
+            .add_browser_surface_to_pane_with_id(pane, "about:blank".into(), id)
+            .await
+            .is_none());
+        assert!(store
+            .add_browser_surface_to_pane_with_id(
+                PaneId::new(),
+                "about:blank".into(),
+                SurfaceId::new()
+            )
+            .await
+            .is_none());
+        assert_eq!(
+            first_pane_tab_count(&store.get_workspace(workspace).await.unwrap()),
+            2
+        );
     }
 
     #[tokio::test]

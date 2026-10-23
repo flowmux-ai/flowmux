@@ -408,6 +408,11 @@ pub enum GtkCommand {
         pane: PaneId,
         url: String,
     },
+    /// Adopt a live engine-created popup retained by the GTK pane registry.
+    OpenBrowserPopup {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Open a Ctrl-clicked terminal image path in a dedicated viewer window.
     OpenImageViewer {
         pane: PaneId,

@@ -151,6 +151,9 @@ pub struct PaneCallbacks {
     /// (GtkCommand::OpenUrlInBrowserTab). The URL arrives with trailing
     /// punctuation already trimmed.
     pub on_open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
+    /// Adopt the engine-created popup without replacing its browsing context.
+    pub on_open_browser_popup:
+        Rc<RefCell<dyn FnMut(PaneId, SurfaceId, super::browser_pane::BrowserPane)>>,
     /// Called when Ctrl+click selects a readable image path inside the
     /// terminal. The caller opens it in a dedicated image viewer window.
     pub on_open_image: Rc<RefCell<dyn FnMut(PaneId, PathBuf)>>,
@@ -204,6 +207,7 @@ impl PaneCallbacks {
             #[cfg(target_os = "macos")]
             tab_at_root_point: Rc::new(|_, _, _| None),
             on_open_url: Rc::new(RefCell::new(|_, _| {})),
+            on_open_browser_popup: Rc::new(RefCell::new(|_, _, _| {})),
             on_open_image: Rc::new(RefCell::new(|_, _| {})),
             on_open_editor: Rc::new(RefCell::new(|_, _| {})),
             on_open_markdown: Rc::new(RefCell::new(|_, _| {})),

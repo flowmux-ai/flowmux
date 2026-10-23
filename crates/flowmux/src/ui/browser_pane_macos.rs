@@ -110,7 +110,9 @@ struct BrowserUIDelegateIvars {
     file_choosers: FileChoosers,
     navigation_enabled: Rc<Cell<bool>>,
     pane_id: Rc<Cell<PaneId>>,
-    open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
+    callbacks: PaneCallbacks,
+    profile: BrowserProfile,
+    surface_id: SurfaceId,
     placeholder: glib::WeakRef<gtk::Widget>,
 }
 
@@ -130,20 +132,46 @@ define_class!(
         fn webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures(
             &self,
             _web_view: &WKWebView,
-            _configuration: &WKWebViewConfiguration,
-            navigation_action: &WKNavigationAction,
+            configuration: &WKWebViewConfiguration,
+            _navigation_action: &WKNavigationAction,
             _window_features: &WKWindowFeatures,
         ) -> Option<Retained<WKWebView>> {
-            let request = unsafe { navigation_action.request() };
-            let url = request
-                .URL()
-                .and_then(|url| url.absoluteString())
-                .map(|url| url.to_string());
-            if let Some(url) = url.filter(|_| self.ivars().navigation_enabled.get()) {
-                let ivars = self.ivars();
-                (ivars.open_url.borrow_mut())(ivars.pane_id.get(), url);
+            let ivars = self.ivars();
+            if !ivars.navigation_enabled.get() {
+                None
+            } else {
+                let mtm = self.mtm();
+                let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
+                let view = unsafe {
+                    WKWebView::initWithFrame_configuration(
+                        WKWebView::alloc(mtm),
+                        frame,
+                        configuration,
+                    )
+                };
+                let surface = SurfaceId::new();
+                let browser = BrowserPane::with_web_view(
+                    ivars.pane_id.get(),
+                    surface,
+                    None,
+                    ivars.callbacks.clone(),
+                    view.clone(),
+                    ivars.profile.clone(),
+                );
+                (ivars.callbacks.on_open_browser_popup.borrow_mut())(
+                    ivars.pane_id.get(),
+                    surface,
+                    browser,
+                );
+                Some(view)
             }
-            None
+        }
+
+        #[unsafe(method(webViewDidClose:))]
+        #[allow(non_snake_case)]
+        fn webViewDidClose(&self, _web_view: &WKWebView) {
+            let ivars = self.ivars();
+            (ivars.callbacks.on_close_surface.borrow_mut())(ivars.pane_id.get(), ivars.surface_id);
         }
 
         #[unsafe(method(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:))]
@@ -729,7 +757,6 @@ impl BrowserPane {
         engine: BrowserEngine,
         persist_session: bool,
     ) -> Self {
-        let pane_id = Rc::new(Cell::new(id));
         let profile = engine_to_profile(&engine);
         tracing::debug!(
             engine = ?engine,
@@ -740,6 +767,32 @@ impl BrowserPane {
 
         let mtm = MainThreadMarker::new().expect("WKWebView must be created on the main thread");
         let web_view = create_web_view(mtm, &profile, persist_session);
+        Self::with_web_view(
+            id,
+            surface_id,
+            initial_url.or(Some("about:blank")),
+            callbacks,
+            web_view,
+            profile,
+        )
+    }
+
+    fn with_web_view(
+        id: PaneId,
+        surface_id: SurfaceId,
+        initial_url: Option<&str>,
+        callbacks: PaneCallbacks,
+        web_view: Retained<WKWebView>,
+        profile: BrowserProfile,
+    ) -> Self {
+        let pane_id = Rc::new(Cell::new(id));
+        let mtm = MainThreadMarker::new().expect("WKWebView must be configured on the main thread");
+        let persist_session = unsafe { web_view.configuration().websiteDataStore().isPersistent() };
+        unsafe {
+            web_view.setInspectable(true);
+            web_view.setAllowsBackForwardNavigationGestures(true);
+            web_view.setPageZoom(1.0);
+        }
 
         let back = gtk::Button::from_icon_name("go-previous-symbolic");
         let forward = gtk::Button::from_icon_name("go-next-symbolic");
@@ -844,10 +897,16 @@ impl BrowserPane {
             _ui_delegate: install_ui_delegate(
                 mtm,
                 &web_view,
-                pane_id.clone(),
-                callbacks.on_open_url.clone(),
-                web_widget.downgrade(),
-                navigation_enabled.clone(),
+                BrowserUIDelegateIvars {
+                    dialogs: PageDialogs::default(),
+                    file_choosers: FileChoosers::default(),
+                    navigation_enabled: navigation_enabled.clone(),
+                    pane_id: pane_id.clone(),
+                    callbacks: callbacks.clone(),
+                    profile: profile.clone(),
+                    surface_id,
+                    placeholder: web_widget.downgrade(),
+                },
             ),
             _navigation_delegate: install_navigation_delegate(
                 mtm,
@@ -1020,11 +1079,10 @@ impl BrowserPane {
             });
         }
 
-        let initial = initial_url
-            .map(normalize_uri)
-            .unwrap_or_else(|| "about:blank".into());
-        address.set_text(&initial);
-        load_uri_native(&native.web_view, &initial);
+        if let Some(initial) = initial_url.map(normalize_uri) {
+            address.set_text(&initial);
+            load_uri_native(&native.web_view, &initial);
+        }
 
         Self {
             pane_id,
@@ -1549,32 +1607,15 @@ fn create_web_view(
     }
 
     let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
-    let web_view =
-        unsafe { WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config) };
-    unsafe {
-        web_view.setInspectable(true);
-        web_view.setAllowsBackForwardNavigationGestures(true);
-        web_view.setPageZoom(1.0);
-    }
-    web_view
+    unsafe { WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config) }
 }
 
 fn install_ui_delegate(
     mtm: MainThreadMarker,
     web_view: &WKWebView,
-    pane_id: Rc<Cell<PaneId>>,
-    open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
-    placeholder: glib::WeakRef<gtk::Widget>,
-    navigation_enabled: Rc<Cell<bool>>,
+    ivars: BrowserUIDelegateIvars,
 ) -> Retained<BrowserUIDelegate> {
-    let delegate = BrowserUIDelegate::alloc(mtm).set_ivars(BrowserUIDelegateIvars {
-        dialogs: PageDialogs::default(),
-        file_choosers: FileChoosers::default(),
-        navigation_enabled,
-        pane_id,
-        open_url,
-        placeholder,
-    });
+    let delegate = BrowserUIDelegate::alloc(mtm).set_ivars(ivars);
     let delegate: Retained<BrowserUIDelegate> = unsafe { msg_send![super(delegate), init] };
     unsafe {
         web_view.setUIDelegate(Some(ProtocolObject::from_ref(&*delegate)));

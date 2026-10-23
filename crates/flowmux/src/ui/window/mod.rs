@@ -102,6 +102,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ResizePane { .. }
             | GtkCommand::BrowserOpenSplit { .. }
             | GtkCommand::OpenUrlInBrowserTab { .. }
+            | GtkCommand::OpenBrowserPopup { .. }
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ToggleAgentOffice
             | GtkCommand::ShowCommandPalette
@@ -2922,6 +2923,7 @@ impl WindowController {
             | GtkCommand::BrowserAction { .. }
             | GtkCommand::BrowserOpenSplit { .. }
             | GtkCommand::OpenUrlInBrowserTab { .. }
+            | GtkCommand::OpenBrowserPopup { .. }
             | GtkCommand::InjectCookies { .. }) => {
                 self.dispatch_browser_command(command).await;
             }

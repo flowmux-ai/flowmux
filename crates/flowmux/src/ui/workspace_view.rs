@@ -205,7 +205,8 @@ pub struct PaneRegistry {
     // macOS canonical PTYs truncate long resume commands typed after spawn.
     #[cfg(target_os = "macos")]
     pub(crate) pending_terminal_commands: HashMap<SurfaceId, String>,
-    pending_browser_reuse: HashMap<SurfaceId, BrowserPane>,
+    pub(crate) pending_browser_reuse: HashMap<SurfaceId, BrowserPane>,
+    pub(crate) pending_browser_popups: HashMap<SurfaceId, BrowserPane>,
     /// Focus controller per surface, so re-adoption can swap in a
     /// controller bound to the new pane frame.
     surface_focus_controllers: HashMap<SurfaceId, gtk::EventControllerFocus>,

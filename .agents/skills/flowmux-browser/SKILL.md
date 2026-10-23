@@ -218,6 +218,12 @@ These commands handle page JavaScript dialogs, not permission requests or
 before-unload confirmation. The visible panel still accepts normal user input.
 
 Activate a file input with `click REF`, or `focus REF` then `press Enter`.
+Page-created popups open as browser tabs in the source pane. They retain their
+engine-created window context, including `opener`, named-window reuse and
+`postMessage`; `noopener` still isolates the child. Use a fresh snapshot and
+`--surface` to address the parent or child explicitly. `window.close()` closes
+the child tab, and closing a child preserves the parent's page state.
+
 `file-chooser status` returns `{"file_chooser": null}` when none is pending;
 otherwise it returns an `id`, `multiple`, and `directories` flag. Use that ID
 with `select` to provide existing readable paths, or `cancel` to preserve the

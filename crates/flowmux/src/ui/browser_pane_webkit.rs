@@ -234,54 +234,50 @@ impl BrowserPane {
 
         if !web_view.is_controlled_by_automation() {
             let pane_id = pane_id.clone();
-            let open_url = callbacks.on_open_url.clone();
+            let callbacks = callbacks.clone();
+            let profile = profile.clone();
             let navigation_enabled = navigation_enabled.clone();
-            web_view.connect_create(move |parent, navigation_action| {
-                let url = navigation_action
-                    .clone()
-                    .request()
-                    .and_then(|request| request.uri())
-                    .map(|uri| uri.to_string());
-                if let Some(url) = url.filter(|_| navigation_enabled.get()) {
-                    (open_url.borrow_mut())(pane_id.get(), url);
-                }
-
-                // WebKit requires a related WebView return value before it
-                // completes window.open(). The real destination is routed to
-                // a flowmux browser tab above, so keep this contract-only view
-                // hidden and block its duplicate navigation.
-                //
-                // Tearing the view down on the next main-loop turn is NOT
-                // safe: disposing a WebKitWebViewBase whose web process is
-                // still handshaking nulls its AcceleratedBackingStore while
-                // an accelerated-compositing update is in flight, and the
-                // unguarded update() call segfaults the whole GUI process
-                // (WebKitGTK 2.52, UIProcess/gtk — release-build ASSERT).
-                // Instead, ask the view to close only once WebKit reports it
-                // ready (or after a grace period), and drop the last strong
-                // ref only from the `close` signal so dispose always runs on
-                // a page that finished the close handshake.
-                let placeholder = webkit6::WebView::builder().related_view(parent).build();
-                placeholder.connect_decide_policy(|_, decision, _| {
-                    decision.ignore();
-                    true
-                });
-                let keep_alive = Rc::new(RefCell::new(Some(placeholder.clone())));
-                {
-                    let keep_alive = keep_alive.clone();
-                    placeholder.connect_close(move |_| {
-                        keep_alive.borrow_mut().take();
-                    });
-                }
-                placeholder.connect_ready_to_show(|view| view.try_close());
-                let weak = placeholder.downgrade();
+            web_view.connect_create(move |parent, _| {
+                let view = webkit6::WebView::builder().related_view(parent).build();
+                // Keep the related view alive until WebKit completes its creation handshake.
+                let keep_alive = Rc::new(RefCell::new(Some(view.clone())));
+                let pending = Rc::downgrade(&keep_alive);
                 gtk::glib::timeout_add_local_once(std::time::Duration::from_secs(10), move || {
-                    if let Some(view) = weak.upgrade() {
+                    if let Some(view) = pending
+                        .upgrade()
+                        .and_then(|pending| pending.borrow().clone())
+                    {
                         view.try_close();
                     }
                 });
-                placeholder.upcast()
+                let ready = keep_alive.clone();
+                view.connect_ready_to_show(move |_| {
+                    ready.borrow_mut().take();
+                });
+                view.connect_close(move |_| {
+                    keep_alive.borrow_mut().take();
+                });
+                let surface = SurfaceId::new();
+                let browser = Self::with_web_view(
+                    pane_id.get(),
+                    surface,
+                    None,
+                    callbacks.clone(),
+                    view.clone(),
+                    profile.clone(),
+                );
+                if navigation_enabled.get() {
+                    (callbacks.on_open_browser_popup.borrow_mut())(pane_id.get(), surface, browser);
+                } else {
+                    browser.prepare_for_close();
+                }
+                view.upcast()
             });
+        }
+        {
+            let pane_id = pane_id.clone();
+            let close = callbacks.on_close_surface.clone();
+            web_view.connect_close(move |_| (close.borrow_mut())(pane_id.get(), surface_id));
         }
         web_view.connect_permission_request(move |web_view, request| {
             let Some(parent) = web_view.root() else {
@@ -831,7 +827,8 @@ impl BrowserPane {
 
     pub fn prepare_for_close(&self) {
         self.stop_loading();
-        self.web_view.terminate_web_process();
+        // Related popup views share a process with their opener.
+        self.navigation_enabled.set(false);
     }
 
     pub fn grab_focus(&self) {
