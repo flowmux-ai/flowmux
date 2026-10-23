@@ -238,6 +238,39 @@ fn async_browser_body_and_timeout_are_preserved() {
 }
 
 #[test]
+fn media_actions_preserve_refs_and_reject_invalid_seek_times() {
+    let pane = PaneId::new().to_string();
+    let parse = |args: &[&str]| {
+        let mut argv = vec!["flowmuxctl", "browser", "media", &pane, "e1-snapshot"];
+        argv.extend_from_slice(args);
+        build_request(Cli::try_parse_from(argv).unwrap().cmd)
+    };
+    for (verb, expected) in [
+        ("status", "status"),
+        ("play", "play"),
+        ("pause", "pause"),
+        ("mute", "mute"),
+        ("unmute", "unmute"),
+    ] {
+        let Request::BrowserMedia { target, action, .. } = parse(&[verb]).unwrap() else {
+            panic!("expected media request");
+        };
+        assert_eq!(target, "e1-snapshot");
+        assert_eq!(serde_json::to_value(action).unwrap()["op"], expected);
+    }
+    assert!(matches!(
+        parse(&["seek", "1.5"]).unwrap(),
+        Request::BrowserMedia {
+            action: flowmux_ipc::protocol::BrowserMediaAction::Seek(1.5),
+            ..
+        }
+    ));
+    for seconds in ["NaN", "inf", "-0.5"] {
+        assert!(parse(&["seek", "--", seconds]).is_err());
+    }
+}
+
+#[test]
 fn browser_surface_target_is_preserved_and_open_rejects_it() {
     let pane = PaneId::new();
     let surface = SurfaceId::new();

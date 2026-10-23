@@ -70,6 +70,7 @@ jobs:
             build-essential pkg-config \
             libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
             libwebkitgtk-6.0-dev libssl-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-libav \
             libssh2-1-dev libdbus-1-dev \
             meson ninja-build \
             dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \

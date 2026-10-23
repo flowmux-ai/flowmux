@@ -138,6 +138,23 @@ impl WindowController {
                     }
                 };
                 match op {
+                    BrowserOp::Media { target, action } => {
+                        let action =
+                            serde_json::to_string(&action).expect("validated media action");
+                        match ref_script(&browser, &target, |selector| {
+                            flowmux_browser::scripts::media(selector, &action)
+                        }) {
+                            Ok(script) => browser.evaluate_automation_async_js(
+                                &format!("return await {script};"),
+                                move |result| {
+                                    let _ = ack.send(result.map(BrowserActionResult::String));
+                                },
+                            ),
+                            Err(error) => {
+                                let _ = ack.send(Err(error));
+                            }
+                        }
+                    }
                     BrowserOp::EvalAsync { body, timeout_ms } => {
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         browser.evaluate_async_js(&body, move |result| {

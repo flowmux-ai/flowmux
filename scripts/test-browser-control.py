@@ -15,6 +15,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/clip.mp4":
+            data = (Path(__file__).parent / "fixtures/browser-control.mp4").read_bytes()
+            start, end = 0, len(data) - 1
+            partial = self.headers.get("Range", "").startswith("bytes=")
+            if partial:
+                first, last = self.headers["Range"][6:].split("-")
+                start, end = int(first or 0), min(int(last or end), end)
+            self.send_response(206 if partial else 200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Accept-Ranges", "bytes")
+            if partial:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.end_headers()
+            self.wfile.write(data[start:end + 1])
+            return
         body = b"""<!doctype html><title>Browser control fixture</title>
         <button id=target onclick="window.clicks++">Original</button>
         <input id=field aria-label=Field><input type=checkbox id=check>
@@ -30,6 +46,8 @@ class Fixture(BaseHTTPRequestHandler):
         <textarea title="Message title" placeholder=Wrong>existing message</textarea>
         <label for=multi>First label</label><label for=multi>Second label</label><input id=multi>
         <input type=password value=secret aria-label=Password></p>
+        <video id=clip controls muted playsinline preload=auto width=96 height=64
+          aria-label=Clip src=/clip.mp4></video>
         <script>window.clicks=0;window.mutations=[];
         new MutationObserver(xs=>mutations.push(...xs)).observe(document.documentElement,
           {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
@@ -78,6 +96,34 @@ def exercise(cli, url, root):
     browser("fill", reference(first, "Contact email"), "agent@example.test")
     assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
     print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)
+    clip = reference(first, "Clip")
+
+    def media(action, *args):
+        return json.loads(browser("media", clip, action, *args)["browser_result"]["value"])
+
+    assert browser("wait", "--js", "clip.readyState >= 2")["browser_bool_result"]["value"], media("status")
+    initial = media("status")
+    assert initial["paused"] and initial["muted"] and 3.9 <= initial["duration"] <= 4.1, initial
+    playing = media("play")
+    assert not playing["paused"] and playing["current_time"] > 0, playing
+    assert evaluate("String(clip.videoWidth) + 'x' + clip.videoHeight") == "96x64"
+    paused = media("pause")
+    assert paused["paused"], paused
+    sought = media("seek", "2")
+    assert not sought["seeking"] and abs(sought["current_time"] - 2) < .1, sought
+    assert not media("unmute")["muted"]
+    assert media("mute")["muted"]
+    browser("media", clip, "seek", "100", error=True)
+    assert abs(media("status")["current_time"] - 2) < .1
+    browser("media", reference(first, "Field"), "play", error=True)
+    evaluate("clip.src='/broken'; clip.load(); 'invalid media'")
+    assert browser("wait", "--js", "clip.error !== null")["browser_bool_result"]["value"]
+    assert media("status")["error"]["code"] in (3, 4)
+    browser("media", clip, "play", error=True)
+    evaluate("clip.outerHTML=clip.outerHTML; 'replaced media element'")
+    browser("media", clip, "play", error=True)
+    assert evaluate("String(clip.paused)") == "true"
+    print("PASS: media playback advances, pause/seek/mute report actual state", flush=True)
     original = reference(first, "Original")
     browser("click", "@" + original)
     assert evaluate("String(clicks)") == "1"

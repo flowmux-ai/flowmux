@@ -27,7 +27,7 @@ pub const SNAPSHOT_JS: &str = r#"
     'slider','spinbutton','switch','tab','treeitem'
   ]);
   const CONTENT_ROLES = new Set([
-    'heading','cell','listitem','article','region','main','navigation'
+    'heading','cell','listitem','article','region','main','navigation','audio','video'
   ]);
 
   function implicitRole(el) {
@@ -124,7 +124,7 @@ pub const SNAPSHOT_JS: &str = r#"
   let counter = 0;
 
   document.querySelectorAll(
-    'a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main'
+    'a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video'
   ).forEach((el) => {
     if (!visible(el)) return;
     const role = implicitRole(el);
@@ -170,6 +170,73 @@ pub fn with_ref(ref_id: &str, selector: &str, script: &str) -> String {
         }})()"#,
         reference = js_string(ref_id.strip_prefix('@').unwrap_or(ref_id)),
         selector = js_string(selector),
+    )
+}
+
+/// `action_json` is a serialized IPC BrowserMediaAction, not page-supplied JS.
+pub fn media(selector: &str, action_json: &str) -> String {
+    format!(
+        r#"(async function() {{
+        const el = document.querySelector("{selector}");
+        if (!(el instanceof HTMLMediaElement)) throw new Error('target is not an audio/video element');
+        const action = {action_json};
+        const deadline = performance.now() + 10000;
+        const timeoutMessage = 'media action timed out; playback may still complete';
+        function check() {{
+            if (!el.isConnected) throw new Error('media element was detached');
+            if (el.error) throw new Error('media error ' + el.error.code + ': ' + el.error.message);
+            if (performance.now() >= deadline) throw new Error(timeoutMessage);
+        }}
+        async function wait(predicate) {{
+            for (;;) {{
+                check();
+                if (predicate()) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }}
+        }}
+        switch (action.op) {{
+            case 'status': break;
+            case 'play': {{
+                check();
+                let timer;
+                try {{
+                    await Promise.race([el.play(), new Promise((_, reject) => {{
+                        timer = setTimeout(() => reject(new Error(timeoutMessage)), 10000);
+                    }})]);
+                }} finally {{ clearTimeout(timer); }}
+                const start = el.currentTime;
+                await wait(() => (!el.paused && el.currentTime > start) || el.ended);
+                break;
+            }}
+            case 'pause':
+                el.pause();
+                await wait(() => el.paused);
+                break;
+            case 'seek': {{
+                check();
+                const seconds = action.seconds;
+                if (!Number.isFinite(seconds) || seconds < 0 || el.readyState === 0 ||
+                    !Array.from({{length: el.seekable.length}}, (_, i) =>
+                        seconds >= el.seekable.start(i) && seconds <= el.seekable.end(i)).some(Boolean))
+                    throw new Error('seek time is outside the available media range');
+                el.currentTime = seconds;
+                await wait(() => !el.seeking && Math.abs(el.currentTime - seconds) < 0.25);
+                break;
+            }}
+            case 'mute': case 'unmute':
+                el.muted = action.op === 'mute';
+                await wait(() => el.muted === (action.op === 'mute'));
+                break;
+            default: throw new Error('unknown media action');
+        }}
+        return JSON.stringify({{
+            paused: el.paused, ended: el.ended, seeking: el.seeking, muted: el.muted,
+            current_time: el.currentTime, duration: Number.isFinite(el.duration) ? el.duration : null,
+            ready_state: el.readyState, network_state: el.networkState,
+            error: el.error ? {{code: el.error.code, message: el.error.message}} : null
+        }});
+    }})()"#,
+        selector = js_string(selector)
     )
 }
 

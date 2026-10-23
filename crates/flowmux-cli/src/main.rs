@@ -486,6 +486,13 @@ enum NotificationOp {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Control an audio/video element by snapshot ref and return its state.
+    Media {
+        pane: PaneId,
+        target: String,
+        #[command(subcommand)]
+        action: MediaAction,
+    },
     /// Open URL in an in-app browser tab, reusing a right-sibling browser
     /// pane when available. Otherwise split beside the calling pane (or the
     /// focused pane outside flowmux); the default split direction is right.
@@ -608,6 +615,16 @@ enum BrowserOp {
     Screenshot { pane: PaneId, path: PathBuf },
     /// Count elements matching a CSS selector.
     Count { pane: PaneId, selector: String },
+}
+
+#[derive(Subcommand)]
+enum MediaAction {
+    Status,
+    Play,
+    Pause,
+    Seek { seconds: f64 },
+    Mute,
+    Unmute,
 }
 
 #[derive(Subcommand)]

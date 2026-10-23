@@ -8,6 +8,31 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Media {
+            pane,
+            target,
+            action,
+        } => {
+            use flowmux_ipc::protocol::BrowserMediaAction as Action;
+            let action = match action {
+                MediaAction::Status => Action::Status,
+                MediaAction::Play => Action::Play,
+                MediaAction::Pause => Action::Pause,
+                MediaAction::Seek { seconds } => {
+                    if !seconds.is_finite() || seconds < 0.0 {
+                        anyhow::bail!("seek seconds must be finite and nonnegative");
+                    }
+                    Action::Seek(seconds)
+                }
+                MediaAction::Mute => Action::Mute,
+                MediaAction::Unmute => Action::Unmute,
+            };
+            Request::BrowserMedia {
+                pane,
+                target,
+                action,
+            }
+        }
         BrowserOp::Open {
             url,
             right: _,

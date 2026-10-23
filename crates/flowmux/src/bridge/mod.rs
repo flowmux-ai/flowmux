@@ -32,6 +32,10 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    Media {
+        target: String,
+        action: flowmux_ipc::protocol::BrowserMediaAction,
+    },
     EvalAsync {
         body: String,
         timeout_ms: u32,
@@ -127,6 +131,7 @@ impl BrowserOp {
     /// cannot silently omit its agent-facing name.
     pub fn capability_name(&self) -> &'static str {
         match self {
+            Self::Media { .. } => "media",
             Self::EvalAsync { .. } => "eval-async",
             Self::Snapshot => "snapshot",
             Self::Navigate { .. } => "navigate",
@@ -165,6 +170,10 @@ impl BrowserOp {
         matches!(
             self,
             Self::Snapshot
+                | Self::Media {
+                    action: flowmux_ipc::protocol::BrowserMediaAction::Status,
+                    ..
+                }
                 | Self::Url
                 | Self::Title
                 | Self::Text { .. }

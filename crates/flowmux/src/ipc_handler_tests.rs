@@ -2512,6 +2512,25 @@ async fn browser_async_rejects_zero_timeout_before_dispatch() {
 }
 
 #[tokio::test]
+async fn browser_media_rejects_invalid_seek_before_dispatch() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    for seconds in [-1.0, f64::NAN, f64::INFINITY] {
+        let response = handler
+            .handle(Request::BrowserMedia {
+                pane,
+                target: "e1-test".into(),
+                action: flowmux_ipc::protocol::BrowserMediaAction::Seek(seconds),
+            })
+            .await;
+        assert!(matches!(
+            response,
+            Response::Error(RpcError::InvalidArgument(_))
+        ));
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[tokio::test]
 async fn browser_surface_target_rejects_non_browser_open_and_nested_requests() {
     let (handler, rx, pane, surface) = single_pane_handler().await;
     for request in [

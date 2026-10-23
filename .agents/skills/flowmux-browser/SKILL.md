@@ -159,6 +159,7 @@ for the current page; these are independent examples, not a script to run blindl
 | Page metadata | `url PANE`, `title PANE` |
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |
+| Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Scrolling | `scroll PANE REF X Y` |
 | Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
@@ -167,6 +168,15 @@ for the current page; these are independent examples, not a script to run blindl
 `eval-async` waits for the returned Promise and reports rejection or timeout.
 A timeout stops waiting, but cannot cancel page effects; inspect state before
 retrying a command that changes the page.
+
+Audio and video elements with visible bounds appear in snapshots. `media`
+returns JSON with `paused`, `ended`, `seeking`, `muted`, `current_time`,
+`duration` (null if unknown or unbounded), `ready_state`, `network_state`, and
+`error`. Play waits for playback time to advance; seek rejects unavailable
+ranges and waits for seeking to finish. Commands report codec, playback-policy
+and timeout errors instead of bypassing browser restrictions. After a timeout,
+inspect `status` before retrying. Linux playback needs the GStreamer codecs
+described in `docs/setup.md`.
 
 Refs belong to the latest snapshot of one browser tab. After navigation, reload,
 tab switches or page changes, wait and take a fresh snapshot before using refs.

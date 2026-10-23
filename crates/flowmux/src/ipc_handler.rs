@@ -106,6 +106,17 @@ async fn browser_action(
             "async timeout must be positive".into(),
         ));
     }
+    if let BrowserOp::Media {
+        action: flowmux_ipc::protocol::BrowserMediaAction::Seek(seconds),
+        ..
+    } = &op
+    {
+        if !seconds.is_finite() || *seconds < 0.0 {
+            return Response::Error(RpcError::InvalidArgument(
+                "seek seconds must be finite and nonnegative".into(),
+            ));
+        }
+    }
     tracing::debug!(
         %pane,
         verb = op.capability_name(),
@@ -142,6 +153,11 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserMedia {
+                pane,
+                target,
+                action,
+            } => (pane, BrowserOp::Media { target, action }),
             Request::BrowserEvalAsync {
                 pane,
                 body,
@@ -400,7 +416,9 @@ impl Handler for GuiHandler {
                 | Request::BrowserSnapshot { .. }
                 | Request::ImportCookies { .. }
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
-                Request::BrowserEvalAsync { .. } => self.handle_browser_verb(req).await,
+                Request::BrowserEvalAsync { .. } | Request::BrowserMedia { .. } => {
+                    self.handle_browser_verb(req).await
+                }
                 Request::ClaudeTeams { .. }
                 | Request::TmuxCompat { .. }
                 | Request::AgentSessionUpdate { .. }

@@ -41,6 +41,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "eval-async",
     "wait",
     "screenshot",
+    "media",
 ];
 
 /// Browser features that are intentionally unsupported and return a
@@ -764,6 +765,11 @@ pub enum Request {
         body: String,
         timeout_ms: u32,
     },
+    BrowserMedia {
+        pane: PaneId,
+        target: String,
+        action: BrowserMediaAction,
+    },
 
     /// `flowmux import-cookies --from firefox [--domain example.com]`
     /// Extract host cookies and return their count. Chromium extraction and
@@ -803,6 +809,17 @@ pub enum BrowserWaitCondition {
     Url(String),
     ReadyState(String),
     Js(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", content = "seconds", rename_all = "snake_case")]
+pub enum BrowserMediaAction {
+    Status,
+    Play,
+    Pause,
+    Seek(f64),
+    Mute,
+    Unmute,
 }
 
 impl Request {
