@@ -3940,23 +3940,43 @@ fn run_browser_screenshot(
     browser: &crate::ui::browser_pane::BrowserPane,
     path: PathBuf,
     full_page: bool,
+    element: Option<String>,
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
 ) {
     let finish = move |result: Result<String, String>| {
         let _ = ack.send(result.map(BrowserActionResult::String));
     };
-    if full_page {
+    if full_page && element.is_some() {
+        finish(Err(
+            "full-page and element capture cannot be combined".into()
+        ));
+        return;
+    }
+    if full_page || element.is_some() {
         let capture = browser.clone();
-        browser.evaluate_automation_js(
-            "JSON.stringify({width:Math.max(innerWidth,document.documentElement.scrollWidth,document.body?.scrollWidth||0),height:Math.max(innerHeight,document.documentElement.scrollHeight,document.body?.scrollHeight||0)})",
-            move |result| match result.and_then(|json| {
+        let geometry = if let Some(target) = element {
+            match ref_script(browser, &target, flowmux_browser::scripts::element_capture) {
+                Ok(script) => script,
+                Err(error) => {
+                    finish(Err(error));
+                    return;
+                }
+            }
+        } else {
+            "JSON.stringify({width:Math.max(document.documentElement.clientWidth,document.documentElement.scrollWidth,document.body?.scrollWidth||0),height:Math.max(document.documentElement.clientHeight,document.documentElement.scrollHeight,document.body?.scrollHeight||0)})".into()
+        };
+        browser.evaluate_automation_js(&geometry, move |result| {
+            match result.and_then(|json| {
+                if json.starts_with("error:") {
+                    return Err(json);
+                }
                 serde_json::from_str::<flowmux_browser::snapshot::CaptureSize>(&json)
                     .map_err(|error| error.to_string())
             }) {
                 Ok(size) => capture.snapshot_to_png(path, Some(size), finish),
                 Err(error) => finish(Err(error)),
-            },
-        );
+            }
+        });
     } else {
         browser.snapshot_to_png(path, None, finish);
     }

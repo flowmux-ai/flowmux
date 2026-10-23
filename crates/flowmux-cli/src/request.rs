@@ -134,10 +134,12 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             pane,
             path,
             full_page,
+            element,
         } => Request::BrowserScreenshot {
             pane,
             path: std::path::absolute(path)?,
             full_page,
+            element,
         },
         BrowserOp::Count { pane, selector } => Request::BrowserCount { pane, selector },
     };

@@ -92,6 +92,7 @@ pub enum BrowserOp {
     Screenshot {
         path: PathBuf,
         full_page: bool,
+        element: Option<String>,
     },
 
     DblClick {

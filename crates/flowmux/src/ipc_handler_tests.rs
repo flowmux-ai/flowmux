@@ -2080,9 +2080,15 @@ async fn browser_actions_dispatch_form_read_and_phase5_ops() {
             pane,
             path: std::path::PathBuf::from("/tmp/page.png"),
             full_page: true,
+            element: None,
         },
         |op| match op {
-            BrowserOp::Screenshot { path, full_page } => {
+            BrowserOp::Screenshot {
+                path,
+                full_page,
+                element,
+            } => {
+                assert!(element.is_none());
                 assert!(full_page);
                 assert_eq!(path, std::path::PathBuf::from("/tmp/page.png"));
             }

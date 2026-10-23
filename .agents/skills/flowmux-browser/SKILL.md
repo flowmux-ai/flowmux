@@ -164,6 +164,7 @@ for the current page; these are independent examples, not a script to run blindl
 "$FLOWMUX_CLI" browser count "pane:$PANE" ".result-row"
 "$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-page.png
 "$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-document.png --full-page
+"$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-element.png --element e3
 ```
 
 Screenshots default to the visible viewport. `--full-page` captures the document
@@ -171,6 +172,11 @@ without scrolling or resizing the page and rejects bitmaps above 64 MiB at the
 current zoom and display scale. On macOS it requires WebKit's content-rectangle
 snapshot support (macOS 15 or newer). Native document snapshots may omit video
 and WebGL layers; they are not a recording of the composited screen.
+`--element REF` crops a document capture to that element's bounds, including
+open Shadow DOM and accessible nested frames. It uses the same capture limits,
+validates the ref, and does not change scrolling. If the element is clipped by
+its frame, scroll it into view before capturing. `--element` and `--full-page`
+cannot be combined.
 
 | Command family | Usage after `browser` |
 |---|---|

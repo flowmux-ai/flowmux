@@ -261,18 +261,43 @@ pub fn media(selector: &str, action_json: &str) -> String {
     )
 }
 
+const FRAME_TRANSFORM_JS: &str = r#"function frameTransform(frame) {
+for (let node = frame; node; node = node.parentElement || node.getRootNode().host) {
+    const style = node.ownerDocument.defaultView.getComputedStyle(node);
+    if (style.transform !== 'none') {
+        const matrix = new DOMMatrixReadOnly(style.transform);
+        if (!matrix.is2D || matrix.b !== 0 || matrix.c !== 0 || matrix.a <= 0 || matrix.d <= 0)
+            throw new Error('rotated or skewed frames are not supported');
+    }
+    if ((style.rotate !== 'none' && style.rotate !== '0deg') || style.perspective !== 'none' || style.offsetPath !== 'none' ||
+        (style.scale !== 'none' && style.scale.split(/\s+/).some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)))
+        throw new Error('rotated or perspective frames are not supported');
+}
+const bounds = frame.getBoundingClientRect();
+const box = frame.ownerDocument.defaultView.getComputedStyle(frame);
+const leftInset = parseFloat(box.borderLeftWidth) + parseFloat(box.paddingLeft);
+const topInset = parseFloat(box.borderTopWidth) + parseFloat(box.paddingTop);
+const width = parseFloat(box.width) + (box.boxSizing === 'border-box' ? 0 :
+    leftInset + parseFloat(box.borderRightWidth) + parseFloat(box.paddingRight));
+const height = parseFloat(box.height) + (box.boxSizing === 'border-box' ? 0 :
+    topInset + parseFloat(box.borderBottomWidth) + parseFloat(box.paddingBottom));
+if (!(width > 0 && height > 0)) throw new Error('frame is not visible');
+return {x: bounds.left + leftInset * bounds.width / width, y: bounds.top + topInset * bounds.height / height, sx: bounds.width / width, sy: bounds.height / height};
+}"#;
+
 fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) -> String {
     format!(
         r#"(function() {{
+            {FRAME_TRANSFORM_JS}
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
-            if (el.closest('[inert]') || ({enabled} && (el.matches(':disabled') || el.closest('[aria-disabled="true"]'))))
+            if ((({pointer} || {enabled}) && el.closest('[inert]')) || ({enabled} && (el.matches(':disabled') || el.closest('[aria-disabled="true"]'))))
                 return "error: element is disabled or inert";
             const style = getComputedStyle(el);
             if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || style.visibility !== 'visible')
                 return "error: element is not visible";
             for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
-                if (parent.hasAttribute('inert') || ({enabled} && parent.getAttribute('aria-disabled') === 'true'))
+                if ((({pointer} || {enabled}) && parent.hasAttribute('inert')) || ({enabled} && parent.getAttribute('aria-disabled') === 'true'))
                     return "error: element is disabled or inert";
                 const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
                 if (Number(style.opacity) === 0 || style.display === 'none' ||
@@ -303,28 +328,9 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                     if (!hit) return "error: element is covered or cannot receive pointer input";
                     const frame = view.frameElement;
                     if (!frame) break;
-                    for (let node = frame; node; node = node.parentElement || node.getRootNode().host) {{
-                        const style = node.ownerDocument.defaultView.getComputedStyle(node);
-                        if (style.transform !== 'none') {{
-                            const matrix = new DOMMatrixReadOnly(style.transform);
-                            if (!matrix.is2D || matrix.b !== 0 || matrix.c !== 0 || matrix.a <= 0 || matrix.d <= 0)
-                                return "error: rotated or skewed frame pointer targets are not supported";
-                        }}
-                        if ((style.rotate !== 'none' && style.rotate !== '0deg') || style.perspective !== 'none' || style.offsetPath !== 'none' ||
-                            (style.scale !== 'none' && style.scale.split(/\s+/).some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)))
-                            return "error: rotated or perspective frame pointer targets are not supported";
-                    }}
-                    const bounds = frame.getBoundingClientRect();
-                    const box = frame.ownerDocument.defaultView.getComputedStyle(frame);
-                    const leftInset = parseFloat(box.borderLeftWidth) + parseFloat(box.paddingLeft);
-                    const topInset = parseFloat(box.borderTopWidth) + parseFloat(box.paddingTop);
-                    const width = parseFloat(box.width) + (box.boxSizing === 'border-box' ? 0 :
-                        leftInset + parseFloat(box.borderRightWidth) + parseFloat(box.paddingRight));
-                    const height = parseFloat(box.height) + (box.boxSizing === 'border-box' ? 0 :
-                        topInset + parseFloat(box.borderBottomWidth) + parseFloat(box.paddingBottom));
-                    if (!(width > 0 && height > 0)) return "error: frame is not visible";
-                    x = bounds.left + (leftInset + x) * bounds.width / width;
-                    y = bounds.top + (topInset + y) * bounds.height / height;
+                    const transform = frameTransform(frame);
+                    x = transform.x + x * transform.sx;
+                    y = transform.y + y * transform.sy;
                     target = frame;
                     view = frame.ownerDocument.defaultView;
                 }}
@@ -344,6 +350,34 @@ pub fn pointer_target(selector: &str, hover: bool) -> String {
         r#"
         globalThis.__flowmuxInput.el = el;
         return JSON.stringify(pointerPosition);
+    "#,
+    )
+}
+
+pub fn element_capture(selector: &str) -> String {
+    element_action(
+        selector,
+        false,
+        false,
+        r#"
+        const rect = el.getBoundingClientRect();
+        let {x, y, width, height} = rect;
+        let view = el.ownerDocument.defaultView;
+        while (view.frameElement) {
+            if (x < 0 || y < 0 || x + width > view.innerWidth || y + height > view.innerHeight)
+                return 'error: element is clipped by its frame; scroll it into view first';
+            const transform = frameTransform(view.frameElement);
+            x = transform.x + x * transform.sx;
+            y = transform.y + y * transform.sy;
+            width *= transform.sx;
+            height *= transform.sy;
+            view = view.frameElement.ownerDocument.defaultView;
+        }
+        return JSON.stringify({
+            width: Math.max(view.document.documentElement.clientWidth,view.document.documentElement.scrollWidth,view.document.body?.scrollWidth||0),
+            height: Math.max(view.document.documentElement.clientHeight,view.document.documentElement.scrollHeight,view.document.body?.scrollHeight||0),
+            clip: {x: x + view.scrollX, y: y + view.scrollY, width, height}
+        });
     "#,
     )
 }

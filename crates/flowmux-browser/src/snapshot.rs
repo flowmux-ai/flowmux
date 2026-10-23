@@ -19,10 +19,34 @@ use std::collections::BTreeMap;
 pub struct CaptureSize {
     pub width: f64,
     pub height: f64,
+    #[serde(default)]
+    pub clip: Option<CaptureRect>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct CaptureRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 impl CaptureSize {
     pub fn check(self, scale: f64) -> Result<(), String> {
+        if let Some(rect) = self.clip {
+            if ![rect.x, rect.y, rect.width, rect.height]
+                .iter()
+                .all(|v| v.is_finite())
+                || rect.x < 0.0
+                || rect.y < 0.0
+                || rect.width <= 0.0
+                || rect.height <= 0.0
+                || rect.x + rect.width > self.width
+                || rect.y + rect.height > self.height
+            {
+                return Err("element capture is outside the document".into());
+            }
+        }
         // Bound the uncompressed bitmap to 64 MiB before asking WebKit to allocate it.
         if ![self.width, self.height, scale]
             .iter()
@@ -129,19 +153,22 @@ mod tests {
         let size = CaptureSize {
             width: 2048.0,
             height: 2048.0,
+            clip: None,
         };
         assert!(size.check(2.0).is_ok());
         assert!(size.check(2.01).is_err());
         assert!(size.check(f64::NAN).is_err());
         assert!(CaptureSize {
             width: -1.0,
-            height: 5.0
+            height: 5.0,
+            clip: None,
         }
         .check(1.0)
         .is_err());
         assert!(CaptureSize {
             width: f64::INFINITY,
-            height: 5.0
+            height: 5.0,
+            clip: None,
         }
         .check(1.0)
         .is_err());

@@ -1254,7 +1254,7 @@ impl BrowserPane {
                 } else if image.is_null() {
                     Err("WKWebView snapshot returned no image".into())
                 } else {
-                    unsafe { save_nsimage_to_png(&*image, &path_for_block) }
+                    unsafe { save_nsimage_to_png(&*image, &path_for_block, document) }
                 };
                 if let Some(callback) = callback.borrow_mut().take() {
                     callback(result);
@@ -1847,6 +1847,7 @@ fn load_uri_native(web_view: &WKWebView, url: &str) {
 unsafe fn save_nsimage_to_png(
     image: &objc2_app_kit::NSImage,
     path: &Path,
+    capture: Option<flowmux_browser::snapshot::CaptureSize>,
 ) -> Result<String, String> {
     let tiff = image
         .TIFFRepresentation()
@@ -1857,6 +1858,12 @@ unsafe fn save_nsimage_to_png(
     let png = bitmap
         .representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)
         .ok_or_else(|| "snapshot bitmap could not be encoded as PNG".to_string())?;
+    let png = if let Some(size) = capture.filter(|size| size.clip.is_some()) {
+        let cropped = crate::ui::browser_capture::crop_png(png.as_bytes_unchecked(), size)?;
+        objc2_foundation::NSData::with_bytes(&cropped)
+    } else {
+        png
+    };
     let path_string = NSString::from_str(&path.to_string_lossy());
     if png.writeToFile_atomically(&path_string, true) {
         Ok(path.display().to_string())

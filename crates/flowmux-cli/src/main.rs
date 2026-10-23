@@ -618,6 +618,9 @@ enum BrowserOp {
         /// Capture the entire document without scrolling the page.
         #[arg(long)]
         full_page: bool,
+        /// Capture the bounds of an element from the latest snapshot.
+        #[arg(long, conflicts_with = "full_page")]
+        element: Option<String>,
     },
     /// Count elements matching a CSS selector.
     Count { pane: PaneId, selector: String },

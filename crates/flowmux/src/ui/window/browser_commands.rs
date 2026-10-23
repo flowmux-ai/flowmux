@@ -401,9 +401,11 @@ impl WindowController {
                         timeout_ms,
                         poll_ms,
                     } => run_browser_wait(browser.clone(), condition, timeout_ms, poll_ms, ack),
-                    BrowserOp::Screenshot { path, full_page } => {
-                        run_browser_screenshot(&browser, path, full_page, ack)
-                    }
+                    BrowserOp::Screenshot {
+                        path,
+                        full_page,
+                        element,
+                    } => run_browser_screenshot(&browser, path, full_page, element, ack),
                     BrowserOp::DblClick { target } => self.pointer_action(
                         &browser,
                         pane,

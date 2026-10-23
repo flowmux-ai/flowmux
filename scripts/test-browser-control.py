@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -75,7 +76,7 @@ class Fixture(BaseHTTPRequestHandler):
         elif self.path == "/inner":
             body = b"""<!doctype html><title>Frame inner</title>
             <label for=field>Nested frame field</label><input id=field>
-            <button onclick="window.clicks++;window.lastPoint=[event.clientX,event.clientY]">Nested frame button</button>
+            <button style="background:blue;color:transparent;appearance:none;border:0" onclick="window.clicks++;window.lastPoint=[event.clientX,event.clientY]">Nested frame button</button>
             <script>window.clicks=0</script>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -85,6 +86,43 @@ class Fixture(BaseHTTPRequestHandler):
 
     def log_message(self, *_args):
         pass
+
+
+def png_pixel(path, x, y):
+    png = path.read_bytes()
+    width, height, depth, color, compression, filtering, interlace = struct.unpack(">IIBBBBB", png[16:29])
+    assert depth == 8 and color in (2, 6) and compression == filtering == interlace == 0
+    assert 0 <= x < width and 0 <= y < height
+    channels = 3 if color == 2 else 4
+    chunks, offset = [], 8
+    while offset < len(png):
+        length = int.from_bytes(png[offset:offset + 4], "big")
+        if png[offset + 4:offset + 8] == b"IDAT":
+            chunks.append(png[offset + 8:offset + 8 + length])
+        offset += length + 12
+    data = zlib.decompress(b"".join(chunks))
+    stride, previous = width * channels, bytes(width * channels)
+    for row in range(y + 1):
+        offset = row * (stride + 1)
+        method, current = data[offset], bytearray(data[offset + 1:offset + 1 + stride])
+        assert method <= 4
+        if method == 0:
+            previous = current
+            continue
+        if method in (2, 4) and not any(current):
+            continue
+        for i in range(stride):
+            left = current[i - channels] if i >= channels else 0
+            up = previous[i]
+            corner = previous[i - channels] if i >= channels else 0
+            if method == 4:
+                estimate = left + up - corner
+                predictor = min((left, up, corner), key=lambda value: abs(estimate - value))
+            else:
+                predictor = (0, left, up, (left + up) // 2)[method]
+            current[i] = (current[i] + predictor) & 255
+        previous = current
+    return tuple(previous[x * channels:x * channels + 3])
 
 
 def exercise(cli, url, root):
@@ -133,12 +171,29 @@ def exercise(cli, url, root):
     width, height = struct.unpack(">II", full_png[16:24])
     assert height > viewport_height
     assert abs(width / size["width"] - height / size["height"]) < .01, (width, height, size)
+    assert png_pixel(full_path, width // 2, height - round(20 * width / size["width"])) == (255, 0, 0)
     assert evaluate("JSON.stringify([scrollX,scrollY])") == json.dumps([size["x"], size["y"]], separators=(",", ":"))
     evaluate("captureBox.style.height='10000000px'; 'oversized document'")
     browser("screenshot", str(root / "oversized.png"), "--full-page", error=True)
     assert not (root / "oversized.png").exists()
     evaluate("captureBox.remove(); window.scrollTo(0,0); 'capture fixture removed'")
     print("PASS: full-document PNG covers offscreen content and preserves scrolling", flush=True)
+    def capture_element(ref, rect, scale=1):
+        path = root / "element.png"
+        browser("screenshot", str(path), "--element", ref)
+        width, height = struct.unpack(">II", path.read_bytes()[16:24])
+        device_scale = viewport_width / float(evaluate("String(innerWidth)"))
+        assert abs(width - rect["width"] * scale * device_scale) <= 2, (width, rect, scale)
+        assert abs(height - rect["height"] * scale * device_scale) <= 2, (height, rect, scale)
+        return path, width, height
+
+    evaluate("target.disabled=true; target.inert=true; 'disabled capture target'")
+    capture_element(reference(first, "Original"), json.loads(evaluate("JSON.stringify(target.getBoundingClientRect())")))
+    evaluate("target.disabled=false; target.inert=false; 'restored capture target'")
+    capture_element(reference(first, "Shadow button"), json.loads(evaluate("JSON.stringify(shadowHost.shadowRoot.querySelector('#inner').shadowRoot.querySelector('button').getBoundingClientRect())")))
+    browser("screenshot", str(root / "invalid.png"), "--element", "e999-invalid", error=True)
+    assert not (root / "invalid.png").exists()
+    print("PASS: element capture includes disabled and shadow targets and rejects unknown refs", flush=True)
     frame_field = reference(first, "Frame field")
     nested_field = reference(first, "Nested frame field")
     assert [entry["selector"] for entry in first["refs"][nested_field]["frame_path"]] == ["#frame", "#nested"]
@@ -162,6 +217,12 @@ def exercise(cli, url, root):
     print("PASS: nested iframe names and native input stay in the intended document", flush=True)
     nested_button = reference(first, "Nested frame button")
     evaluate("frame.style.padding='20px'; frame.style.width='380.5px'; 'frame box'")
+    for scale in [1, .8, 1.25]:
+        evaluate(f"frame.style.transform='scale({scale})'; frame.style.transformOrigin='0 0'; 'scale'")
+        path, width, height = capture_element(nested_button, json.loads(evaluate("JSON.stringify(frame.contentDocument.querySelector('#nested').contentDocument.querySelector('button').getBoundingClientRect())")), scale)
+        assert png_pixel(path, width // 2, height // 8) == (0, 0, 255), scale
+        assert png_pixel(path, width // 2, height * 7 // 8) == (0, 0, 255), scale
+    print("PASS: nested frame element captures account for padding and scale", flush=True)
     for index, scale in enumerate([1, .8, 1.25], 1):
         evaluate(f"frame.style.transform='scale({scale})'; frame.style.transformOrigin='0 0'; 'scale'")
         browser("click", nested_button)
@@ -169,6 +230,7 @@ def exercise(cli, url, root):
         assert evaluate("String((()=>{const w=frame.contentDocument.querySelector('#nested').contentWindow;const r=w.document.querySelector('button').getBoundingClientRect();return Math.abs(w.lastPoint[0]-(r.left+r.width/2))<1.5 && Math.abs(w.lastPoint[1]-(r.top+r.height/2))<1.5})())") == "true", evaluate("JSON.stringify({point:frame.contentDocument.querySelector('#nested').contentWindow.lastPoint,button:frame.contentDocument.querySelector('#nested').contentDocument.querySelector('button').getBoundingClientRect(),frame:frame.getBoundingClientRect(),nested:frame.contentDocument.querySelector('#nested').getBoundingClientRect(),scale:getComputedStyle(frame).transform})")
     evaluate("frame.style.transform='rotate(10deg)'; 'rotate'")
     browser("click", nested_button, error=True)
+    browser("screenshot", str(root / "rotated.png"), "--element", nested_button, error=True)
     evaluate("frame.style.transform=''; frame.style.opacity='0'; 'hidden frame'")
     assert not browser("is-visible", nested_field)["browser_bool_result"]["value"]
     browser("fill", nested_field, "hidden", error=True)
@@ -182,6 +244,7 @@ def exercise(cli, url, root):
     evaluate("frame.src='/frame?reloaded'; 'navigate frame'")
     assert browser("wait", "--js", "frame.contentDocument?.title === 'Frame form' && frame.contentWindow.submissions === 0 && frame.contentDocument.querySelector('#nested')?.contentDocument?.title === 'Frame inner'")["browser_bool_result"]["value"]
     browser("fill", frame_field, "stale", error=True)
+    browser("screenshot", str(root / "stale.png"), "--element", nested_button, error=True)
     browser("fill", nested_field, "stale", error=True)
     first = snapshot()
     browser("fill", reference(first, "Frame field"), "fresh")

@@ -389,6 +389,7 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
             pane,
             path: screenshot.clone(),
             full_page: false,
+            element: None,
         },
     )
     .await;

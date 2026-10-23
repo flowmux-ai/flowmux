@@ -578,6 +578,7 @@ mod tests {
                 pane,
                 path: "/tmp/screenshot.png".into(),
                 full_page: false,
+                element: None,
             },
         ] {
             assert_eq!(query_timeout(&request), None);

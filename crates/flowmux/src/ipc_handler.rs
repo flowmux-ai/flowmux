@@ -205,7 +205,15 @@ impl TryFrom<Request> for BrowserActionRequest {
                 pane,
                 path,
                 full_page,
-            } => (pane, BrowserOp::Screenshot { path, full_page }),
+                element,
+            } => (
+                pane,
+                BrowserOp::Screenshot {
+                    path,
+                    full_page,
+                    element,
+                },
+            ),
             Request::BrowserDblClick { pane, target } => (pane, BrowserOp::DblClick { target }),
             Request::BrowserHover { pane, target } => (pane, BrowserOp::Hover { target }),
             Request::BrowserFocus { pane, target } => (pane, BrowserOp::Focus { target }),

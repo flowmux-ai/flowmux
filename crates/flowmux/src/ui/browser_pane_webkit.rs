@@ -765,6 +765,16 @@ impl BrowserPane {
             gtk::gio::Cancellable::NONE,
             move |result| {
                 let mapped = match result {
+                    Ok(texture) if document.is_some_and(|size| size.clip.is_some()) => {
+                        crate::ui::browser_capture::crop_png(
+                            &texture.save_to_png_bytes(),
+                            document.unwrap(),
+                        )
+                        .and_then(|png| {
+                            std::fs::write(&path, png).map_err(|error| error.to_string())
+                        })
+                        .map(|_| path.display().to_string())
+                    }
                     Ok(texture) => texture
                         .save_to_png(&path)
                         .map(|_| path.display().to_string())

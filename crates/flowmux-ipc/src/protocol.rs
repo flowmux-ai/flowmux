@@ -598,6 +598,8 @@ pub enum Request {
         path: PathBuf,
         #[serde(default)]
         full_page: bool,
+        #[serde(default)]
+        element: Option<String>,
     },
 
     // Element targets resolve through the latest browser snapshot's RefStore.
@@ -1002,6 +1004,7 @@ mod tests {
             request,
             Request::BrowserScreenshot {
                 full_page: false,
+                element: None,
                 ..
             }
         ));
