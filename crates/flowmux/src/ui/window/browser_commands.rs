@@ -313,7 +313,7 @@ impl WindowController {
                                 }
                                 let inserted = target.insert_text(&text);
                                 target.evaluate_automation_js(
-                                    flowmux_browser::scripts::FINISH_TEXT_INPUT_JS,
+                                    &flowmux_browser::scripts::finish_text_input(),
                                     move |result| {
                                         let result = inserted.and(result).and_then(|value| {
                                             if value == "ok" {

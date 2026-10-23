@@ -51,6 +51,19 @@ pub struct RefMeta {
     /// Outer-to-inner CSS selectors for open shadow hosts; absent for light DOM.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shadow_path: Vec<String>,
+    /// Outer-to-inner frame locators, each relative to its parent document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frame_path: Vec<FrameLocator>,
+    /// Present on frame elements; false when DOM access is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_accessible: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FrameLocator {
+    pub selector: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_path: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,6 +113,8 @@ mod tests {
                 name: "Email".into(),
                 selector: "form#login > input:nth-of-type(1)".into(),
                 shadow_path: Vec::new(),
+                frame_path: Vec::new(),
+                frame_accessible: None,
             },
         );
         refs.insert(
@@ -109,6 +124,8 @@ mod tests {
                 name: "Sign in".into(),
                 selector: "form#login > button:nth-of-type(1)".into(),
                 shadow_path: Vec::new(),
+                frame_path: Vec::new(),
+                frame_accessible: None,
             },
         );
         DomSnapshot {

@@ -46,6 +46,8 @@ class Fixture(BaseHTTPRequestHandler):
         <textarea title="Message title" placeholder=Wrong>existing message</textarea>
         <label for=multi>First label</label><label for=multi>Second label</label><input id=multi>
         <input type=password value=secret aria-label=Password></p>
+        <iframe id=frame src=/frame title="Form frame" width=380 height=220 style="margin:20px;border:5px solid"></iframe>
+        <iframe id=restricted sandbox src=/inner title="Restricted frame" width=150 height=60></iframe>
         <video id=clip controls muted playsinline preload=auto width=96 height=64
           aria-label=Clip src=/clip.mp4></video>
         <div id=shadowHost></div>
@@ -63,6 +65,17 @@ class Fixture(BaseHTTPRequestHandler):
         for (const root of [document.documentElement,outer,inner])
           new MutationObserver(xs=>mutations.push(...xs)).observe(root,
             {subtree:true,childList:true,attributes:true,characterData:true});</script>"""
+        if self.path.split('?')[0] == "/frame":
+            body = b"""<!doctype html><title>Frame form</title>
+            <form onsubmit="event.preventDefault();window.submissions++">
+              <label for=field>Frame field</label><input id=field><button>Frame submit</button>
+            </form><iframe id=nested src=/inner width=300 height=120 style="border:3px solid"></iframe>
+            <script>window.submissions=0</script>"""
+        elif self.path == "/inner":
+            body = b"""<!doctype html><title>Frame inner</title>
+            <label for=field>Nested frame field</label><input id=field>
+            <button onclick="window.clicks++;window.lastPoint=[event.clientX,event.clientY]">Nested frame button</button>
+            <script>window.clicks=0</script>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -108,6 +121,54 @@ def exercise(cli, url, root):
     browser("fill", reference(first, "Contact email"), "agent@example.test")
     assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
     print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)
+    frame_field = reference(first, "Frame field")
+    nested_field = reference(first, "Nested frame field")
+    assert [entry["selector"] for entry in first["refs"][nested_field]["frame_path"]] == ["#frame", "#nested"]
+    assert not first["refs"][reference(first, "Restricted frame")]["frame_accessible"]
+    browser("click", reference(first, "Restricted frame"), error=True)
+    browser("fill", frame_field, "frame")
+    browser("focus", frame_field)
+    browser("type", " input")
+    browser("press", "Backspace")
+    assert browser("value", frame_field)["browser_result"]["value"] == "frame inpu"
+    browser("press", "Enter")
+    assert evaluate("String(frame.contentWindow.submissions)") == "1"
+    browser("press", "Tab")
+    browser("press", "Tab")
+    assert evaluate("frame.contentDocument.querySelector('#nested').contentDocument.activeElement.id") == "field"
+    browser("press", "Shift+Tab")
+    assert evaluate("frame.contentDocument.activeElement.tagName") == "BUTTON"
+    browser("fill", nested_field, "nested")
+    assert browser("value", nested_field)["browser_result"]["value"] == "nested"
+    assert browser("value", reference(first, "Field"))["browser_result"]["value"] == ""
+    print("PASS: nested iframe names and native input stay in the intended document", flush=True)
+    nested_button = reference(first, "Nested frame button")
+    evaluate("frame.style.padding='20px'; frame.style.width='380.5px'; 'frame box'")
+    for index, scale in enumerate([1, .8, 1.25], 1):
+        evaluate(f"frame.style.transform='scale({scale})'; frame.style.transformOrigin='0 0'; 'scale'")
+        browser("click", nested_button)
+        assert evaluate("String(frame.contentDocument.querySelector('#nested').contentWindow.clicks)") == str(index)
+        assert evaluate("String((()=>{const w=frame.contentDocument.querySelector('#nested').contentWindow;const r=w.document.querySelector('button').getBoundingClientRect();return Math.abs(w.lastPoint[0]-(r.left+r.width/2))<1.5 && Math.abs(w.lastPoint[1]-(r.top+r.height/2))<1.5})())") == "true", evaluate("JSON.stringify({point:frame.contentDocument.querySelector('#nested').contentWindow.lastPoint,button:frame.contentDocument.querySelector('#nested').contentDocument.querySelector('button').getBoundingClientRect(),frame:frame.getBoundingClientRect(),nested:frame.contentDocument.querySelector('#nested').getBoundingClientRect(),scale:getComputedStyle(frame).transform})")
+    evaluate("frame.style.transform='rotate(10deg)'; 'rotate'")
+    browser("click", nested_button, error=True)
+    evaluate("frame.style.transform=''; frame.style.opacity='0'; 'hidden frame'")
+    assert not browser("is-visible", nested_field)["browser_bool_result"]["value"]
+    browser("fill", nested_field, "hidden", error=True)
+    evaluate("frame.style.opacity='1'; frame.inert=true; 'inert frame'")
+    assert not browser("is-enabled", nested_field)["browser_bool_result"]["value"]
+    browser("fill", nested_field, "inert", error=True)
+    evaluate("frame.inert=false; window.frameCover=document.createElement('div'); frameCover.style='position:fixed;inset:0;z-index:99999'; document.body.append(frameCover); 'covered frame'")
+    browser("click", nested_button, error=True)
+    evaluate("frameCover.remove(); 'uncovered frame'")
+    assert evaluate("String(frame.contentDocument.querySelector('#nested').contentWindow.clicks)") == "3"
+    evaluate("frame.src='/frame?reloaded'; 'navigate frame'")
+    assert browser("wait", "--js", "frame.contentDocument?.title === 'Frame form' && frame.contentWindow.submissions === 0 && frame.contentDocument.querySelector('#nested')?.contentDocument?.title === 'Frame inner'")["browser_bool_result"]["value"]
+    browser("fill", frame_field, "stale", error=True)
+    browser("fill", nested_field, "stale", error=True)
+    first = snapshot()
+    browser("fill", reference(first, "Frame field"), "fresh")
+    assert browser("value", reference(first, "Frame field"))["browser_result"]["value"] == "fresh"
+    print("PASS: native iframe clicks and child-navigation ref invalidation", flush=True)
     shadow_field = reference(first, "Shadow field")
     assert first["refs"][shadow_field]["shadow_path"] == ["#shadowHost", "#inner"]
     browser("fill", shadow_field, "inside")

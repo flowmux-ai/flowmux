@@ -121,6 +121,14 @@ Snapshots include nested open Shadow DOM. For those refs, `shadow_path` lists
 host selectors from outermost to innermost; `selector` is relative to the last
 shadow root. Use the ref for actions, which validate the original node and root.
 Closed shadow roots are not exposed.
+Same-origin iframe contents are included, with `frame_path` listing each frame's
+selector and optional shadow-host path. Child navigation or frame replacement
+invalidates its refs. Native input follows the focused document; pointer targets
+account for frame borders, scrolling and positive axis-aligned scaling. Rotated,
+skewed or perspective-transformed frames reject pointer actions.
+Frame elements expose `frame_accessible`; false means their contents cannot be
+read in the current document (including cross-origin and opaque sandboxed
+frames). Use refs inside accessible frames, not a click on the frame container.
 Snapshot JSON includes `page.surface_id`. Pass `browser --surface UUID` before
 any browser command except `open` to keep targeting that tab after another tab
 becomes active. A closed tab or a surface outside the given pane returns an error.

@@ -27,7 +27,7 @@ pub const SNAPSHOT_JS: &str = r#"
     'slider','spinbutton','switch','tab','treeitem'
   ]);
   const CONTENT_ROLES = new Set([
-    'heading','cell','listitem','article','region','main','navigation','audio','video'
+    'heading','cell','listitem','article','region','main','navigation','audio','video','iframe','frame'
   ]);
 
   function implicitRole(el) {
@@ -54,10 +54,12 @@ pub const SNAPSHOT_JS: &str = r#"
   function visible(el) {
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) return false;
-    const cs = window.getComputedStyle(el);
+    const cs = el.ownerDocument.defaultView.getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none') return false;
-    for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {
-      if (Number(getComputedStyle(parent).opacity) === 0) return false;
+    for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {
+      const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
+      if (Number(style.opacity) === 0 || style.display === 'none' ||
+          (parent.matches('iframe,frame') && style.visibility !== 'visible')) return false;
     }
     return true;
   }
@@ -126,10 +128,15 @@ pub const SNAPSHOT_JS: &str = r#"
   const lines = [];
   let counter = 0;
 
-  function walk(root, shadowPath) {
+  function walk(root, shadowPath, framePath, frames) {
     root.querySelectorAll('*').forEach((el) => {
-      if (el.shadowRoot) walk(el.shadowRoot, [...shadowPath, cssPath(el)]);
-      if (!el.matches('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video') || !visible(el)) return;
+      if (el.shadowRoot) walk(el.shadowRoot, [...shadowPath, cssPath(el)], framePath, frames);
+      // shortcut: inaccessible frames need native frame contexts for cross-origin control.
+      if (el.matches('iframe,frame') && el.contentDocument && visible(el)) {
+        walk(el.contentDocument, [], [...framePath, {selector: cssPath(el), shadow_path: shadowPath}],
+          [...frames, {el, document: el.contentDocument}]);
+      }
+      if (!el.matches('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video,iframe,frame') || !visible(el)) return;
       const role = implicitRole(el);
       if (!INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
       counter += 1;
@@ -138,12 +145,14 @@ pub const SNAPSHOT_JS: &str = r#"
       const nm = name(el).slice(0, 120);
       refs[token] = { role: role, name: nm, selector: sel };
       if (shadowPath.length) refs[token].shadow_path = shadowPath;
-      nodes.set(token, { el, root });
+      if (framePath.length) refs[token].frame_path = framePath;
+      if (el.matches('iframe,frame')) refs[token].frame_accessible = !!el.contentDocument;
+      nodes.set(token, { el, root, frames });
       const safe = nm.split(String.fromCharCode(34)).join('\\"');
       lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
     });
   }
-  walk(document, []);
+  walk(document, [], [], []);
 
   const text = (document.body && document.body.innerText
     ? document.body.innerText : '').slice(0, 4000);
@@ -172,8 +181,12 @@ pub fn with_ref(ref_id: &str, selector: &str, script: &str) -> String {
             const record = globalThis.__flowmuxRefs?.get("{reference}");
             const el = record?.el;
             const document = record?.root;
-            if (!el || !el.isConnected || el.getRootNode() !== document || document.querySelector("{selector}") !== el)
+            if (!el || !el.isConnected || el.getRootNode() !== document || document.querySelector("{selector}") !== el ||
+                record.frames.some(frame => !frame.el.isConnected || frame.el.contentDocument !== frame.document))
                 throw new Error("stale element ref: take a fresh snapshot");
+            const window = el.ownerDocument.defaultView;
+            const {{innerWidth, innerHeight, Event, HTMLMediaElement}} = window;
+            const getComputedStyle = window.getComputedStyle.bind(window);
             return {script};
         }})()"#,
         reference = js_string(ref_id.strip_prefix('@').unwrap_or(ref_id)),
@@ -258,28 +271,64 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
             const style = getComputedStyle(el);
             if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || style.visibility !== 'visible')
                 return "error: element is not visible";
-            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
                 if (parent.hasAttribute('inert') || ({enabled} && parent.getAttribute('aria-disabled') === 'true'))
                     return "error: element is disabled or inert";
-                if (Number(getComputedStyle(parent).opacity) === 0)
+                const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
+                if (Number(style.opacity) === 0 || style.display === 'none' ||
+                    (parent.matches('iframe,frame') && style.visibility !== 'visible'))
                     return "error: element is not visible";
             }}
+            let pointerPosition;
             if ({pointer}) {{
+                if (el.matches('iframe,frame')) return "error: target is a frame; use an element ref inside it";
                 el.scrollIntoView({{block:'center', inline:'nearest', behavior:'instant'}});
                 const rect = el.getClientRects()[0];
                 const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
                 const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
                 if (right <= left || bottom <= top) return "error: element is outside the viewport";
-                const x = (left + right) / 2, y = (top + bottom) / 2;
-                let hit = el.ownerDocument.elementFromPoint(x, y);
-                while (hit?.shadowRoot) {{
-                    const next = hit.shadowRoot.elementFromPoint(x, y);
-                    if (!next || next === hit) break;
-                    hit = next;
+                let x = (left + right) / 2, y = (top + bottom) / 2;
+                let target = el, view = el.ownerDocument.defaultView;
+                for (;;) {{
+                    if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight)
+                        return "error: element is outside the viewport";
+                    let hit = view.document.elementFromPoint(x, y);
+                    while (hit?.shadowRoot) {{
+                        const next = hit.shadowRoot.elementFromPoint(x, y);
+                        if (!next || next === hit) break;
+                        hit = next;
+                    }}
+                    while (hit && hit !== target)
+                        hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
+                    if (!hit) return "error: element is covered or cannot receive pointer input";
+                    const frame = view.frameElement;
+                    if (!frame) break;
+                    for (let node = frame; node; node = node.parentElement || node.getRootNode().host) {{
+                        const style = node.ownerDocument.defaultView.getComputedStyle(node);
+                        if (style.transform !== 'none') {{
+                            const matrix = new DOMMatrixReadOnly(style.transform);
+                            if (!matrix.is2D || matrix.b !== 0 || matrix.c !== 0 || matrix.a <= 0 || matrix.d <= 0)
+                                return "error: rotated or skewed frame pointer targets are not supported";
+                        }}
+                        if ((style.rotate !== 'none' && style.rotate !== '0deg') || style.perspective !== 'none' || style.offsetPath !== 'none' ||
+                            (style.scale !== 'none' && style.scale.split(/\s+/).some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)))
+                            return "error: rotated or perspective frame pointer targets are not supported";
+                    }}
+                    const bounds = frame.getBoundingClientRect();
+                    const box = frame.ownerDocument.defaultView.getComputedStyle(frame);
+                    const leftInset = parseFloat(box.borderLeftWidth) + parseFloat(box.paddingLeft);
+                    const topInset = parseFloat(box.borderTopWidth) + parseFloat(box.paddingTop);
+                    const width = parseFloat(box.width) + (box.boxSizing === 'border-box' ? 0 :
+                        leftInset + parseFloat(box.borderRightWidth) + parseFloat(box.paddingRight));
+                    const height = parseFloat(box.height) + (box.boxSizing === 'border-box' ? 0 :
+                        topInset + parseFloat(box.borderBottomWidth) + parseFloat(box.paddingBottom));
+                    if (!(width > 0 && height > 0)) return "error: frame is not visible";
+                    x = bounds.left + (leftInset + x) * bounds.width / width;
+                    y = bounds.top + (topInset + y) * bounds.height / height;
+                    target = frame;
+                    view = frame.ownerDocument.defaultView;
                 }}
-                while (hit && hit !== el)
-                    hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
-                if (!hit) return "error: element is covered or cannot receive pointer input";
+                pointerPosition = {{x, y, width: view.innerWidth, height: view.innerHeight}};
             }}
             {action}
         }})()"#,
@@ -293,13 +342,8 @@ pub fn pointer_target(selector: &str, hover: bool) -> String {
         true,
         !hover,
         r#"
-        const rect = el.getClientRects()[0];
         globalThis.__flowmuxInput.el = el;
-        return JSON.stringify({
-            x: (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2,
-            y: (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2,
-            width: innerWidth, height: innerHeight
-        });
+        return JSON.stringify(pointerPosition);
     "#,
     )
 }
@@ -333,7 +377,8 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
                     if (state.done) queueMicrotask(state.done);
                 }}
             }};
-            window.addEventListener(state.event, state.listener, true);
+            state.window = state.el.ownerDocument.defaultView;
+            state.window.addEventListener(state.event, state.listener, true);
             return before;
         }} catch (error) {{
             delete globalThis.__flowmuxInput;
@@ -345,7 +390,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
 
 pub const CANCEL_POINTER_INPUT_JS: &str = r#"(function() {
     const state = globalThis.__flowmuxInput;
-    if (state) window.removeEventListener(state.event, state.listener, true);
+    if (state?.window) state.window.removeEventListener(state.event, state.listener, true);
     delete globalThis.__flowmuxInput;
     return 'ok';
 })()"#;
@@ -357,7 +402,7 @@ return await new Promise(resolve => {
     const finish = result => {
         clearTimeout(timer);
         clearInterval(hoverPoll);
-        window.removeEventListener(state.event, state.listener, true);
+        state.window.removeEventListener(state.event, state.listener, true);
         delete globalThis.__flowmuxInput;
         resolve(result);
     };
@@ -481,22 +526,37 @@ pub fn attr_of_selector(selector: &str, name: &str) -> String {
 }
 
 /// Observe the focused editor before a native insertion; serialize pending input.
+const ACTIVE_ELEMENT_JS: &str = r#"(function() {
+    let el = document.activeElement;
+    while (el) {
+        if (el.shadowRoot?.activeElement) { el = el.shadowRoot.activeElement; continue; }
+        if (el.matches('iframe,frame')) {
+            if (!el.contentDocument) throw new Error('focused frame is not accessible from this document');
+            el = el.contentDocument.activeElement;
+            continue;
+        }
+        break;
+    }
+    return el;
+})()"#;
+
 pub fn prepare_text_input(text: &str) -> String {
     format!(
         r#"(function() {{
         if (globalThis.__flowmuxInput) return "error: browser input is already pending";
-        let el = document.activeElement;
-        while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+        const el = {ACTIVE_ELEMENT_JS};
         const field = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
         if (!el || (!field && !el.isContentEditable)) return "error: focused element is not editable";
         if (el.matches(':disabled') || el.readOnly || el.closest('[inert],[aria-disabled="true"]'))
             return "error: focused element is disabled or readonly";
         if (![...el.getClientRects()].some(r => r.width > 0 && r.height > 0) || getComputedStyle(el).visibility !== 'visible')
             return "error: focused element is not visible";
-        for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+        for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
             if (parent.matches('[inert],[aria-disabled="true"]'))
                 return "error: focused element is disabled or readonly";
-            if (Number(getComputedStyle(parent).opacity) === 0)
+            const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
+            if (Number(style.opacity) === 0 || style.display === 'none' ||
+                (parent.matches('iframe,frame') && style.visibility !== 'visible'))
                 return "error: focused element is not visible";
         }}
         const text = "{text}";
@@ -513,13 +573,16 @@ pub fn prepare_text_input(text: &str) -> String {
 }
 
 /// Read the native edit result and always release the pending-input observation.
-pub const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
+pub fn finish_text_input() -> String {
+    format!("(function() {{ const activeElement = () => {ACTIVE_ELEMENT_JS}; return {FINISH_TEXT_INPUT_JS}; }})()")
+}
+
+const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
     const state = globalThis.__flowmuxInput;
     delete globalThis.__flowmuxInput;
     if (!state) return "error: page changed during native input";
     state.el.removeEventListener('input', state.listener);
-    let active = document.activeElement;
-    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    const active = activeElement();
     if (!state.el.isConnected || active !== state.el)
         return "error: input target changed";
     if (!state.received) return "error: native input was not applied";
@@ -530,7 +593,7 @@ pub const FINISH_TEXT_INPUT_JS: &str = r#"(function() {
 
 pub fn prepare_key_input(stroke: &crate::input::KeyStroke) -> String {
     format!(
-        "(function() {{ const expectedKey={}; return {}; }})()",
+        "(function() {{ const activeElement = {ACTIVE_ELEMENT_JS}; const expectedKey={}; return {}; }})()",
         serde_json::to_string(&stroke.event_key()).unwrap(),
         PREPARE_KEY_INPUT_JS
     )
@@ -538,7 +601,16 @@ pub fn prepare_key_input(stroke: &crate::input::KeyStroke) -> String {
 
 const PREPARE_KEY_INPUT_JS: &str = r#"(function() {
     if (globalThis.__flowmuxInput) return "error: browser input is already pending";
-    const state = { received: false, down: null };
+    const state = { received: false, down: null, windows: new Set() };
+    // Tab can send keyup to a different frame from keydown.
+    function visit(root) {
+        if (root.defaultView) state.windows.add(root.defaultView);
+        for (const el of root.querySelectorAll('*')) {
+            if (el.shadowRoot) visit(el.shadowRoot);
+            if (el.matches('iframe,frame') && el.contentDocument) visit(el.contentDocument);
+        }
+    }
+    visit(document);
     // WebKitGTK reports ISO_Left_Tab as Unidentified but preserves its physical code.
     const matches = event => event.key === expectedKey ||
         (expectedKey === 'Tab' && event.key === 'Unidentified' && event.code === 'Tab');
@@ -551,8 +623,10 @@ const PREPARE_KEY_INPUT_JS: &str = r#"(function() {
             if (state.done) queueMicrotask(state.done);
         }
     };
-    window.addEventListener('keyup', state.listener, true);
-    window.addEventListener('keydown', state.keydown, true);
+    for (const view of state.windows) {
+        view.addEventListener('keyup', state.listener, true);
+        view.addEventListener('keydown', state.keydown, true);
+    }
     globalThis.__flowmuxInput = state;
     return "ok";
 })()"#;
@@ -563,8 +637,10 @@ if (!state) throw new Error('page changed during native key input');
 return await new Promise(resolve => {
     const finish = result => {
         clearTimeout(timer);
-        window.removeEventListener('keyup', state.listener, true);
-        window.removeEventListener('keydown', state.keydown, true);
+        for (const view of state.windows) {
+            view.removeEventListener('keyup', state.listener, true);
+            view.removeEventListener('keydown', state.keydown, true);
+        }
         delete globalThis.__flowmuxInput;
         resolve(result);
     };
@@ -651,8 +727,10 @@ pub fn is_visible_selector(selector: &str) -> String {
             if (r.width < 1 || r.height < 1) return "false";
             const cs = window.getComputedStyle(el);
             if (cs.visibility === 'hidden' || cs.display === 'none') return "false";
-            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
-                if (Number(getComputedStyle(parent).opacity) === 0) return "false";
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
+                const style = parent.ownerDocument.defaultView.getComputedStyle(parent);
+                if (Number(style.opacity) === 0 || style.display === 'none' ||
+                    (parent.matches('iframe,frame') && style.visibility !== 'visible')) return "false";
             }}
             return "true";
         }})()"#,
@@ -668,7 +746,7 @@ pub fn is_enabled_selector(selector: &str) -> String {
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
             if (el.matches(':disabled')) return "false";
-            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host) {{
+            for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {{
                 if (parent.matches('[inert],[aria-disabled="true"]')) return "false";
             }}
             return "true";

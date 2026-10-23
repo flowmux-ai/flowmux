@@ -226,6 +226,8 @@ mod tests {
             name: String::new(),
             selector: selector.into(),
             shadow_path: Vec::new(),
+            frame_path: Vec::new(),
+            frame_accessible: None,
         }
     }
 
