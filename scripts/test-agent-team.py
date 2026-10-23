@@ -1007,6 +1007,142 @@ class ManagedTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
+    def test_worker_exception_preserves_recovery_diagnostics_and_history(self):
+        for outcome in ('blocked', 'pending'):
+            with self.subTest(outcome=outcome):
+                (self.job / 'started-2').unlink(missing_ok=True)
+                assignment = self.job / 'turns/turn-1'
+                assignment.mkdir(parents=True, exist_ok=True)
+                team.write_json(self.job / 'job.json', dict(generation=2, assignment=str(assignment)))
+                state = dict(state=outcome, attempts=[dict(pane='failed-worker')],
+                             closed_panes=['failed-worker'], pane='failed-worker', generation=2)
+                if outcome == 'blocked':
+                    state.update(blocker_kind='recovery_failed', error='Lost spawn acknowledgement')
+                team.write_json(assignment / 'status.json', state)
+                with patch.object(team, 'run_worker', side_effect=RuntimeError('Worker assignment was not confirmed')):
+                    with self.assertRaisesRegex(RuntimeError, 'assignment was not confirmed'):
+                        team.worker(self.job, 2)
+                saved = json.loads((assignment / 'status.json').read_text())
+                for key in ('attempts', 'closed_panes', 'pane', 'generation'):
+                    self.assertEqual(saved[key], state[key])
+                if outcome == 'blocked':
+                    self.assertEqual({key: saved[key] for key in state}, state)
+                    self.assertEqual(saved['worker_error'], 'Worker assignment was not confirmed')
+                else:
+                    self.assertEqual(saved['state'], 'failed')
+                    self.assertEqual(saved['error'], 'Worker assignment was not confirmed')
+
+    def test_recovery_requires_live_start_identity_and_generation(self):
+        team.write_json(self.job / 'job.json', dict(generation=1))
+        started = self.job / 'started-1'
+        started.write_text('lock-v1\n')
+        identity = dict(pid=os.getpid(), started='original start', generation=1, assignment=str(self.job))
+        for phase in ('recovering', 'closing_failed_pane'):
+            for case in ('live', 'reused', 'zombie', 'dead', 'missing-start', 'missing-pid',
+                         'generation', 'assignment', 'missing-record', 'malformed-record', 'unavailable'):
+                with self.subTest(phase=phase, case=case):
+                    state = dict(state=phase, attempts=[dict(pane='old')], closed_panes=['old'])
+                    team.write_json(self.job / 'status.json', state)
+                    saved = dict(identity)
+                    snapshot = {os.getpid(): (1, 1, 'original start', 'S')}
+                    if case in ('reused', 'zombie'):
+                        snapshot[os.getpid()] = (1, 1, 'different start' if case == 'reused' else 'original start',
+                                                'Z' if case == 'zombie' else 'S')
+                    elif case == 'dead':
+                        snapshot = {}
+                    elif case == 'missing-start':
+                        saved['started'] = None
+                    elif case == 'missing-pid':
+                        saved.pop('pid')
+                    elif case == 'generation':
+                        saved['generation'] = 2
+                    elif case == 'assignment':
+                        saved['assignment'] = str(self.job / 'another-turn')
+                    recovery = self.job / 'recovery.json'
+                    team.write_json(recovery, saved)
+                    if case == 'missing-record':
+                        recovery.unlink()
+                    elif case == 'malformed-record':
+                        recovery.write_text('{')
+                    with patch.object(team, 'process_snapshot', return_value=snapshot,
+                                      side_effect=PermissionError('ps unavailable') if case == 'unavailable' else None), \
+                            patch.object(team.os, 'kill', side_effect=AssertionError('PID alone is not identity')):
+                        observed = team.reconcile_stopped_worker(self.job)
+                    if case == 'live':
+                        self.assertEqual(observed, state)
+                    else:
+                        self.assertEqual(observed['state'], 'failed')
+                        self.assertEqual(observed['blocker_kind'], 'interrupted')
+                        self.assertEqual(observed['attempts'], state['attempts'])
+                        self.assertEqual(observed['closed_panes'], state['closed_panes'])
+        # Missing identity cannot prove that a pre-lock helper has died.
+        started.write_text('')
+        team.write_json(self.job / 'status.json', dict(state='recovering'))
+        (self.job / 'recovery.json').unlink()
+        self.assertEqual(team.reconcile_stopped_worker(self.job), dict(state='recovering'))
+
+    def test_legacy_recovery_without_start_identity_keeps_live_handoff(self):
+        team.write_json(self.job / 'job.json', dict(generation=1))
+        (self.job / 'started-1').write_text('lock-v1\n')
+        team.write_json(self.job / 'recovery.json', dict(pid=123, generation=1, assignment=str(self.job)))
+        for process in ((1, 123, 'observed start', 'S'), (1, 123, 'observed start', 'Z'), None):
+            with self.subTest(process=process):
+                team.write_json(self.job / 'status.json', dict(state='recovering'))
+                with patch.object(team, 'process_snapshot', return_value={123: process} if process else {}), \
+                        patch.object(team.os, 'kill', side_effect=AssertionError('Use process evidence')):
+                    state = team.reconcile_stopped_worker(self.job)
+                self.assertEqual(state['state'], 'recovering' if process and process[3] == 'S' else 'failed')
+                self.assertNotIn('started', json.loads((self.job / 'recovery.json').read_text()),
+                                 'A current PID observation cannot reconstruct historical identity')
+
+    def test_worker_exception_reports_failure_without_readable_status(self):
+        team.write_json(self.job / 'job.json', dict(generation=1))
+        for content in (None, '{', 'null', '[]', '{}', '{"state": []}'):
+            with self.subTest(content=content):
+                (self.job / 'started-1').unlink(missing_ok=True)
+                status = self.job / 'status.json'
+                if content is None:
+                    status.unlink(missing_ok=True)
+                else:
+                    status.write_text(content)
+                with patch.object(team, 'run_worker', side_effect=RuntimeError('Original worker failure')):
+                    with self.assertRaisesRegex(RuntimeError, 'Original worker failure'):
+                        team.worker(self.job)
+                self.assertEqual(json.loads(status.read_text()), dict(state='failed', error='Original worker failure'))
+
+    def test_recovery_identity_is_persisted_before_worker_lock_handoff(self):
+        manifest = dict(generation=1, assignment=str(self.job), pane='worker', socket=str(self.job / 'socket'),
+                        agent='codex', model='sol', effort=None, provider_env={}, token='token', role='test',
+                        allow_edits=False, executable='/codex', cwd=str(self.job), cli='/flowmux')
+        team.write_json(self.job / 'job.json', manifest)
+        team.write_json(self.job / 'status.json', dict(state='pending'))
+        (self.job / 'task.txt').write_text('test')
+        child = unittest.mock.Mock(pid=123)
+        def spawn(*args, **kwargs):
+            with (self.job / 'worker.lock').open('a') as lock:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if '_recover' in args[0]:
+                saved = json.loads((self.job / 'recovery.json').read_text())
+                self.assertEqual(saved['generation'], 1)
+                self.assertEqual(saved['state']['state'], 'recovering')
+                self.assertIn('started', saved, 'New handoffs must never use legacy PID-only liveness')
+                self.assertIsNone(saved['started'])
+            return child
+        with patch.dict(os.environ, FLOWMUX_PANE_ID='worker', FLOWMUX_SOCKET_PATH=manifest['socket']), \
+                patch.object(team, 'process_snapshot', return_value={os.getpid(): (1, 1, 'worker start', 'S'),
+                                                                    123: (os.getpid(), 123, 'recovery start', 'S')}), \
+                patch.object(team.subprocess, 'Popen', side_effect=spawn), \
+                patch.object(team, 'monitor_managed', return_value=dict(state='failed', blocker_kind='stalled')), \
+                patch.object(team, 'managed_pane'), patch.object(team, 'flowmux', return_value={}), \
+                patch.object(team, 'stop_owned'), patch.object(team, 'next_route', return_value=None):
+            self.assertEqual(team.worker(self.job), 0)
+        recovery = json.loads((self.job / 'recovery.json').read_text())
+        self.assertEqual(recovery['pid'], 123)
+        self.assertEqual(recovery['started'], 'recovery start')
+        self.assertEqual(recovery['generation'], 1)
+        self.assertEqual(recovery['assignment'], str(self.job))
+
     def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400, tool=False):
         attempt = self.job / 'attempt-1'
         attempt.mkdir()
@@ -1437,6 +1573,38 @@ class UsageRoutingTests(unittest.TestCase):
         self.assertEqual(team.usage_status(dict(agent='claude', model='opus'))['status'], 'available')
         self.snapshot('claude', [dict(scope=None, used_percent=100, resets_at=11000)])
         self.assertEqual(team.usage_status(dict(agent='claude', model='opus'))['status'], 'exhausted')
+
+    def test_claude_scope_aliases_include_new_families_and_cli_surface_ids(self):
+        for scope, model in [('Fable', 'fable'), ('Fable', 'claude-fable-5-20261001'),
+                             ('claude-fable', 'fable'), ('Claude Fable 5.5', 'claude-5-5-fable-latest'),
+                             ('Claude_Fable', 'FABLE'), ('Sonnet', 'sonnet[1m]'), ('Haiku', 'haiku[200k]'),
+                             ('Opus', 'opusplan'), ('Sonnet', 'opusplan'),
+                             ('Sonnet', 'claude-sonnet-4-5@20250929'),
+                             ('Sonnet', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'),
+                             ('Sonnet', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'),
+                             ('Future Family', 'claude-future-family-6'),
+                             ('Sonnet · code', 'claude-sonnet-4-5'), ('code', 'fable')]:
+            with self.subTest(scope=scope, model=model):
+                self.snapshot('claude', [dict(scope=scope, used_percent=100, resets_at=11000),
+                                         dict(scope=None, used_percent=20, resets_at=12000)])
+                state = team.route_status(dict(agent='claude', model=model))
+                self.assertEqual(state['status'], 'exhausted')
+                self.assertEqual(state['remaining_percent'], 0)
+        for scope, model in [('Fable · Claude.ai', 'fable'), ('Fable · web', 'fable'),
+                             ('Claude.ai', 'fable'), ('Fable', 'sonnet'), ('Sonnet', 'not-sonnet'),
+                             ('Fable', 'unrelated-fable'), ('Fable Search', 'fable'),
+                             ('Fable', 'opusplan'), ('Opus · Claude.ai', 'opusplan'),
+                             ('Sonnet · web', 'claude-sonnet-4-5@20250929'),
+                             ('Opus', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'),
+                             ('Sonnet', 'unrelated.anthropic.claude-sonnet-4-5-20250929-v1:0'),
+                             ('Sonnet · code', 'opus'), ('code', 'sonnet')]:
+            with self.subTest(scope=scope, model=model):
+                agent = 'codex' if scope == 'code' else 'claude'
+                self.snapshot(agent, [dict(scope=scope, used_percent=100, resets_at=11000),
+                                      dict(scope=None, used_percent=20, resets_at=12000)])
+                state = team.route_status(dict(agent=agent, model=model))
+                self.assertEqual(state['status'], 'available')
+                self.assertEqual(state['remaining_percent'], 80)
 
     def test_expired_or_nonfinite_windows_are_not_current_exhaustion(self):
         for window in [dict(scope=None, used_percent=100, resets_at=9999),

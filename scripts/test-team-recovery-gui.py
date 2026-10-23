@@ -165,8 +165,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gui', default=str(REPO / 'target/debug/flowmux'))
     parser.add_argument('--cli', default=str(REPO / 'target/debug/flowmuxctl'))
+    parser.add_argument('--protected-pid', type=int, action='append', default=[])
     args = parser.parse_args()
-    args.protected_pid = []
     h = fixture.Harness(args)
     for key in list(h.env):
         if key.startswith('CODEX_'):
@@ -237,6 +237,55 @@ def main():
         def stopped(pid):
             stat = Path(f'/proc/{pid}/stat')
             return not stat.exists() or stat.read_text().split(') ', 1)[1].startswith('Z')
+
+        wrapper = h.root / 'lost-ack-cli'
+        wrapper.write_text('#!' + sys.executable + '\n' + f'''
+import subprocess, sys
+from pathlib import Path
+root = Path(__file__).parent
+result = subprocess.run([{args.cli!r}, *sys.argv[1:]], capture_output=True, text=True)
+if 'team-spawn' in sys.argv:
+    counter = root / 'spawn-count'
+    count = int(counter.read_text()) + 1 if counter.exists() else 1
+    counter.write_text(str(count))
+    if count == 2 and result.returncode == 0:
+        (root / 'lost-ack.json').write_text(result.stdout)
+        sys.exit('Simulated IPC response loss after successful pane creation')
+print(result.stdout, end='')
+print(result.stderr, end='', file=sys.stderr)
+sys.exit(result.returncode)
+''')
+        wrapper.chmod(0o700)
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'quota'}))
+        receipt = start('codex', '--cli', str(wrapper))
+        state = finished(receipt)
+        assert state['blocker_kind'] == 'recovery_failed', state
+        root = Path(receipt['job'])
+        (h.root / 'lost-ack-before.json').write_text(json.dumps(state, indent=2))
+        def replacement_exited():
+            path = root / 'supervisor.json'
+            supervisor = json.loads(path.read_text()) if path.exists() else {}
+            return supervisor.get('generation') == 2 and stopped(supervisor['pid'])
+        fixture.wait_for(replacement_exited, 'unconfirmed replacement worker exits', timeout=30)
+        saved = json.loads((root / 'status.json').read_text())
+        (h.root / 'lost-ack-after.json').write_text(json.dumps(saved, indent=2))
+        assert {key: saved[key] for key in state} == state, saved
+        assert saved['worker_error'] == 'Worker assignment was not confirmed', saved
+        assert len(saved['attempts']) == 1 and saved['closed_panes'] == [receipt['pane']], saved
+        for operation in (['status'], ['wait', '--timeout', '1'], ['_worker', '--generation', '2'],
+                          ['_recover', '--generation', '1']):
+            result = subprocess.run([sys.executable, str(HELPER), operation[0], str(root), *operation[1:]],
+                                    env=env, capture_output=True, text=True, timeout=10)
+            assert result.returncode == 1, result
+            assert json.loads((root / 'status.json').read_text()) == saved
+        assert (h.root / 'spawn-count').read_text() == '2'
+        replacement = json.loads((h.root / 'lost-ack.json').read_text())['surface_created']['pane']
+        panes = [p['id'] for p in h.workspace(socket, workspace)['panes']]
+        assert receipt['pane'] not in panes and source in panes and replacement in panes
+        assert not (root / 'attempt-2').exists(), 'Unconfirmed replacement must not run the task'
+        assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+        h.pass_check('Lost recovery-spawn acknowledgement preserves diagnostics and history without replay')
+        h.rpc(socket, 'pane_close', pane=replacement)
 
         for agent in ('codex', 'claude', 'gemini', 'agy'):
             (h.root / 'behavior.json').write_text(json.dumps({agent: 'auth'}))

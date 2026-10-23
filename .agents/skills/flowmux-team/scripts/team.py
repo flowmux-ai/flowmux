@@ -81,12 +81,22 @@ def matching_scope(scope, agent, model):
     scope = scope.lower().strip().replace("_", " ")
     if agent == "claude" and "·" in scope:
         scope, surface = (part.strip() for part in scope.split("·", 1))
-        if surface not in ("claude code", "cli"):
+        if surface not in ("claude code", "cli", "code"):
             return False
     if scope in ("", "all", "all models", "codex", "claude code", "cli", "individual"):
         return True
     if agent == "claude":
-        return any(name in scope and name in model.lower() for name in ("opus", "sonnet", "haiku"))
+        if scope == "code":
+            return True
+        def family(name):
+            name = re.sub(r"\[(?:1m|200k)\]$", "", name.lower().strip())
+            name = re.sub(r"^(?:[a-z]{2,6}\.)?anthropic\.", "", name)
+            parts = re.split(r"[-_.@:\s]+", name)
+            if parts[0] == "claude":
+                parts = parts[1:]
+            return [part for part in parts if part and not re.fullmatch(r"v?\d+|latest", part)]
+        scoped, selected = family(scope), family(model)
+        return bool(scoped) and (scoped == selected or selected == ["opusplan"] and scoped in (["opus"], ["sonnet"]))
     return scope == model.lower()
 
 
@@ -745,13 +755,18 @@ def reconcile_stopped_worker(job):
     generation = manifest.get("generation")
     started = root / (f"started-{generation}" if generation else "started")
     if generation and state["state"] in ("recovering", "closing_failed_pane"):
-        recovery = json.loads((root / "recovery.json").read_text())
-        if recovery.get("pid"):
-            try:
-                os.kill(recovery["pid"], 0)
-                return state
-            except ProcessLookupError:
-                pass
+        try:
+            recovery = json.loads((root / "recovery.json").read_text())
+            if (isinstance(recovery, dict) and recovery.get("generation") == generation
+                    and recovery.get("assignment") == str(job)
+                    and type(recovery.get("pid")) is int):
+                process = process_snapshot().get(recovery["pid"])
+                # shortcut: legacy records prove only PID liveness until an updated helper creates their next handoff.
+                if (process and not process[3].startswith("Z")
+                        and ("started" not in recovery or process[2] == recovery["started"])):
+                    return state
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
     # Older workers did not hold a lock, so absence of a lock cannot prove their death.
     observation_failed = state.get("blocker_kind") == "observation_error" and not state.get("task_status")
     if ((state["state"] not in TERMINAL or observation_failed) and started.exists()
@@ -792,7 +807,17 @@ def worker(job, generation=1):
         except Exception as error:
             manifest = json.loads((job / "job.json").read_text())
             assignment = Path(manifest.get("assignment", job))
-            write_json(assignment / "status.json", {"state": "failed", "error": str(error)})
+            try:
+                state = json.loads((assignment / "status.json").read_text())
+            except (OSError, ValueError):
+                state = {}
+            if not isinstance(state, dict):
+                state = {}
+            if isinstance(state.get("state"), str) and state["state"] in TERMINAL:
+                state["worker_error"] = str(error)
+            else:
+                state.update(state="failed", error=str(error))
+            write_json(assignment / "status.json", state)
             raise
 
 
@@ -1236,7 +1261,7 @@ def managed_worker(job):
                     stop_owned(process, owned)
                 state.update(state="recovering", failed_state=state["state"])
                 write_json(assignment / "status.json", state)
-                handoff = {"generation": manifest["generation"], "assignment": str(assignment),
+                handoff = {"generation": manifest["generation"], "assignment": str(assignment), "started": None,
                            "next": None if state["blocker_kind"] == "time_budget" else next_route(manifest, attempts),
                            "state": state}
                 write_json(job / "recovery.json", handoff)
@@ -1244,7 +1269,11 @@ def managed_worker(job):
                     recovery_process = subprocess.Popen([sys.executable, str(job / "worker.py"), "_recover", str(job),
                                       "--generation", str(manifest["generation"])],
                                      start_new_session=True, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-                write_json(job / "recovery.json", {**handoff, "pid": recovery_process.pid})
+                identity = process_snapshot().get(recovery_process.pid)
+                if not identity or identity[3].startswith("Z"):
+                    raise RuntimeError("Recovery process identity could not be confirmed")
+                # The child waits for worker.lock until its identity is durable.
+                write_json(job / "recovery.json", {**handoff, "pid": recovery_process.pid, "started": identity[2]})
                 return 0
             except Exception as error:
                 state.update(state="blocked", blocker_kind="cleanup_failed", error=str(error))
