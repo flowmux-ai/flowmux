@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise pane browser controls through the real CLI in a private GUI process."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -241,7 +242,15 @@ def exercise(cli, url, root):
             scale = pixels[0] / (96 if element else width)
             x, y = (24, 21) if element else (174, 31)
             actual = png_pixel(capture, round(x * scale), round(y * scale))
-            assert all(abs(a-b) <= 8 for a,b in zip(actual,expected)), (mode, actual, expected)
+            if not all(abs(a-b) <= 8 for a,b in zip(actual,expected)):
+                evidence = Path(os.environ.get("CARGO_TARGET_DIR", "target")) / "ci" / ("macos" if sys.platform == "darwin" else "linux")
+                evidence.mkdir(parents=True, exist_ok=True)
+                (evidence / "video-capture.png").write_bytes(capture.read_bytes())
+                canvas = evaluate("(()=>{const c=document.createElement('canvas');c.width=96;c.height=64;c.getContext('2d').drawImage(clip,0,0);return c.toDataURL('image/png').split(',')[1]})()")
+                (evidence / "video-canvas.png").write_bytes(base64.b64decode(canvas))
+                state = json.loads(evaluate("JSON.stringify({time:clip.currentTime,paused:clip.paused,seeking:clip.seeking,ready:clip.readyState,rect:clip.getBoundingClientRect(),ratio:devicePixelRatio,p3:matchMedia('(color-gamut: p3)').matches})"))
+                raise AssertionError({"mode":mode,"second":second,"actual":actual,"expected":expected,
+                                      "pixels":pixels,"scale":scale,"state":state,"evidence":str(evidence)})
             if not element:
                 assert png_pixel(capture, round(20 * scale), round(20 * scale)) == (0, 255, 0)
     browser("navigate", url)
