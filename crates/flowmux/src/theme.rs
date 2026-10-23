@@ -599,7 +599,7 @@ paned > separator {{
     border: none;
 }}
 .flowmux-usage-bar progressbar trough {{
-    min-width: 95px;
+    min-width: 143px;
     background-color: {border};
 }}
 .flowmux-usage-bar progressbar.claude progress {{

@@ -30,7 +30,7 @@ impl Meter {
         };
         meter.progress.add_css_class(["claude", "codex"][provider]);
         meter.progress.set_valign(gtk::Align::Center);
-        meter.progress.set_width_request(95);
+        meter.progress.set_width_request(143);
         meter.percent.add_css_class("numeric");
         meter
             .percent
