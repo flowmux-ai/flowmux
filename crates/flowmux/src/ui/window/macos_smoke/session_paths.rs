@@ -105,6 +105,7 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
         .dispatch_session_panel(SessionPanelAction::Resume {
             session,
             generation,
+            yolo: true,
         })
         .await;
     let resumed = glib::future_with_timeout(Duration::from_secs(30), async {
@@ -128,13 +129,16 @@ pub(super) async fn check(controller: &WindowController, pane: PaneId, root: &st
     }
     let output = std::fs::read_to_string(marker).unwrap();
     let lines = output.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines.len(), 5);
     assert_eq!(lines[0], custom.to_str().unwrap());
     assert_eq!(
         std::fs::canonicalize(lines[1]).unwrap(),
         project.canonicalize().unwrap()
     );
-    assert_eq!(&lines[2..], &["resume", id]);
+    assert_eq!(
+        &lines[2..],
+        &["resume", id, "--dangerously-bypass-approvals-and-sandbox"]
+    );
     terminal.widget.feed_child(b"\x03");
     println!("MACOS_SESSION_PATHS_OK");
 }

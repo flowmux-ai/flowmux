@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Focus-bound session browsing and native resume commands.
+//! Selected-agent or focus-bound session browsing and native resume commands.
 
 use super::*;
 use crate::ui::session_panel::{SessionPanel, SessionPanelAction};
@@ -14,7 +14,11 @@ struct SessionHome {
     arguments: Vec<String>,
 }
 
-fn resume_shell_line(session: &HistorySession, home: &SessionHome) -> Result<String, String> {
+fn resume_shell_line(
+    session: &HistorySession,
+    home: &SessionHome,
+    yolo: bool,
+) -> Result<String, String> {
     let cwd = session
         .cwd
         .to_str()
@@ -58,8 +62,21 @@ fn resume_shell_line(session: &HistorySession, home: &SessionHome) -> Result<Str
         .map(|arg| shell_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
+    let permissions = if yolo {
+        match session.agent {
+            SessionAgent::Claude => {
+                "--allow-dangerously-skip-permissions --permission-mode bypassPermissions"
+            }
+            SessionAgent::Codex => "--dangerously-bypass-approvals-and-sandbox",
+            SessionAgent::OpenCode => "--auto",
+            SessionAgent::Antigravity => "--dangerously-skip-permissions",
+            SessionAgent::Cline | SessionAgent::Gemini => "--yolo",
+        }
+    } else {
+        ""
+    };
     Ok(format!(
-        "cd {} && env {unset} {environment} {} {arguments}",
+        "cd {} && env {unset} {environment} {} {arguments} {permissions}",
         shell_quote(cwd),
         session.resume_command().map_err(|e| e.to_string())?
     ))
@@ -67,9 +84,14 @@ fn resume_shell_line(session: &HistorySession, home: &SessionHome) -> Result<Str
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SessionTarget {
+    agent: SessionAgent,
+    focused: Option<FocusedSession>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FocusedSession {
     pane: PaneId,
     surface: SurfaceId,
-    agent: SessionAgent,
     root_pid: u32,
     session_id: Option<String>,
 }
@@ -91,7 +113,30 @@ impl SessionPanelState {
 
 /// Resolve the actual agent's home, including overrides set inside the shell.
 fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
-    let pids = flowmux_procmon::descendants(target.root_pid).map_err(|e| e.to_string())?;
+    let Some(focused) = &target.focused else {
+        let environment: std::collections::BTreeMap<_, _> = target
+            .agent
+            .home_variables()
+            .iter()
+            .copied()
+            .chain(["PATH"])
+            .filter_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| (key.to_string(), value))
+            })
+            .collect();
+        let path = target
+            .agent
+            .history_home(|key| environment.get(key).map(PathBuf::from))
+            .ok_or("Agent home directory is unavailable")?;
+        return Ok(SessionHome {
+            path,
+            environment,
+            arguments: Vec::new(),
+        });
+    };
+    let pids = flowmux_procmon::descendants(focused.root_pid).map_err(|e| e.to_string())?;
     let pid = pids
         .into_iter()
         .filter(|pid| {
@@ -199,25 +244,39 @@ fn cline_arguments(
 }
 
 impl WindowController {
-    async fn session_target(&self) -> Option<SessionTarget> {
+    fn session_resume_pane(&self) -> Option<(PaneId, SurfaceId)> {
         let pane = self.focused_pane.get()?;
-        let (surface, root_pid) = {
-            let registry = self.pane_registry.borrow();
-            if registry.is_ssh_pane(pane) {
-                return None;
-            }
-            (
-                registry.active_surface(pane)?,
-                registry.active_terminal(pane)?.pid.get()? as u32,
-            )
-        };
+        let registry = self.pane_registry.borrow();
+        if registry.is_ssh_pane(pane) {
+            return None;
+        }
+        registry.active_terminal(pane)?;
+        Some((pane, registry.active_surface(pane)?))
+    }
+
+    async fn session_target(&self) -> Option<SessionTarget> {
+        if let Some(agent) = self.sessions.panel.selected_agent.get() {
+            return Some(SessionTarget {
+                agent,
+                focused: None,
+            });
+        }
+        let (pane, surface) = self.session_resume_pane()?;
+        let root_pid = self
+            .pane_registry
+            .borrow()
+            .active_terminal(pane)?
+            .pid
+            .get()? as u32;
         let presence = self.store.located_agent_presence(surface).await?.presence;
         Some(SessionTarget {
-            pane,
-            surface,
-            root_pid,
             agent: SessionAgent::from_name(&presence.name)?,
-            session_id: presence.session_id,
+            focused: Some(FocusedSession {
+                pane,
+                surface,
+                root_pid,
+                session_id: presence.session_id,
+            }),
         })
     }
 
@@ -233,9 +292,9 @@ impl WindowController {
         *self.sessions.target.borrow_mut() = target.clone();
         let generation = panel.clear("Loading sessions…");
         let Some(target) = target else {
-            panel
-                .status
-                .set_text("Focus a local Claude, Codex, OpenCode, Antigravity, Cline, or Gemini terminal tab to browse sessions.");
+            panel.status.set_text(
+                "Select an agent above or focus a local agent terminal tab to browse sessions.",
+            );
             return;
         };
         let controller = self.clone();
@@ -290,6 +349,10 @@ impl WindowController {
             }
             SessionPanelAction::Close => self.close_session_panel(),
             SessionPanelAction::Refresh => self.refresh_session_panel(true).await,
+            SessionPanelAction::ToggleAgent(agent) => {
+                panel.toggle_agent(agent);
+                self.refresh_session_panel(true).await;
+            }
             SessionPanelAction::Select {
                 session,
                 generation,
@@ -335,8 +398,9 @@ impl WindowController {
             SessionPanelAction::Resume {
                 session,
                 generation,
+                yolo,
             } => {
-                self.resume_history_session(session, generation).await;
+                self.resume_history_session(session, generation, yolo).await;
             }
         }
     }
@@ -350,7 +414,7 @@ impl WindowController {
         }
     }
 
-    async fn resume_history_session(&self, session: HistorySession, generation: u64) {
+    async fn resume_history_session(&self, session: HistorySession, generation: u64, yolo: bool) {
         let panel = &self.sessions.panel;
         if panel.generation.get() != generation {
             return;
@@ -362,7 +426,21 @@ impl WindowController {
         {
             return;
         }
-        if target.session_id.as_deref() == Some(&session.id) {
+        let Some((pane, surface)) = self.session_resume_pane() else {
+            panel
+                .status
+                .set_text("Focus a local terminal tab to resume this session.");
+            return;
+        };
+        if self
+            .store
+            .located_agent_presence(surface)
+            .await
+            .is_some_and(|located| {
+                SessionAgent::from_name(&located.presence.name) == Some(session.agent)
+                    && located.presence.session_id.as_deref() == Some(&session.id)
+            })
+        {
             panel
                 .status
                 .set_text("This session is already active in the focused tab.");
@@ -390,11 +468,12 @@ impl WindowController {
         };
         if self.session_target().await.as_ref() != Some(&target)
             || panel.generation.get() != generation
+            || self.session_resume_pane() != Some((pane, surface))
         {
             return;
         }
         // Start the native CLI in its own tab; never write into the existing agent.
-        let line = match resume_shell_line(&session, &home) {
+        let line = match resume_shell_line(&session, &home, yolo) {
             Ok(line) => line,
             Err(error) => {
                 panel.status.set_text(&error);
@@ -404,7 +483,7 @@ impl WindowController {
         let Some((workspace, surface)) = self
             .store
             // Keep the normal configured shell and prompt after the agent exits.
-            .add_terminal_surface_to_pane(target.pane, Some(session.cwd))
+            .add_terminal_surface_to_pane(pane, Some(session.cwd))
             .await
         else {
             panel
@@ -418,7 +497,7 @@ impl WindowController {
             .pending_terminal_commands
             .insert(surface, line.clone());
         if let Err(error) = self
-            .attach_or_rerender_surface(workspace, target.pane, surface, None)
+            .attach_or_rerender_surface(workspace, pane, surface, None)
             .await
         {
             #[cfg(target_os = "macos")]
@@ -426,7 +505,7 @@ impl WindowController {
                 .borrow_mut()
                 .pending_terminal_commands
                 .remove(&surface);
-            self.store.close_surface(target.pane, surface).await;
+            self.store.close_surface(pane, surface).await;
             self.clipboard_toast.show_with_message(&error);
             return;
         }
@@ -446,7 +525,7 @@ impl WindowController {
                         "Opening {} in a new tab in the session's project directory.",
                         session.agent.name()
                     ));
-                    self.focus_pane(target.pane);
+                    self.focus_pane(pane);
                 }
                 Err(error) => panel
                     .status
@@ -494,13 +573,14 @@ mod tests {
 
     #[test]
     fn native_resume_uses_selected_project_and_config_without_shell_expansion() {
-        for (agent, binary, variable, flag, directory) in [
+        for (agent, binary, variable, flag, directory, yolo_arguments) in [
             (
                 SessionAgent::Claude,
                 "claude",
                 "CLAUDE_CONFIG_DIR",
                 "--resume",
                 ".claude",
+                "--allow-dangerously-skip-permissions\n--permission-mode\nbypassPermissions\n",
             ),
             (
                 SessionAgent::Codex,
@@ -508,6 +588,7 @@ mod tests {
                 "CODEX_HOME",
                 "resume",
                 ".codex",
+                "--dangerously-bypass-approvals-and-sandbox\n",
             ),
             (
                 SessionAgent::OpenCode,
@@ -515,6 +596,7 @@ mod tests {
                 "XDG_DATA_HOME",
                 "--session",
                 ".local/share",
+                "--auto\n",
             ),
             (
                 SessionAgent::Antigravity,
@@ -522,6 +604,7 @@ mod tests {
                 "HOME",
                 "--conversation",
                 ".gemini",
+                "--dangerously-skip-permissions\n",
             ),
             (
                 SessionAgent::Cline,
@@ -529,6 +612,7 @@ mod tests {
                 "CLINE_DATA_DIR",
                 "--id",
                 ".cline",
+                "--yolo\n",
             ),
             (
                 SessionAgent::Gemini,
@@ -536,6 +620,7 @@ mod tests {
                 "GEMINI_CLI_HOME",
                 "--resume",
                 ".gemini",
+                "--yolo\n",
             ),
         ] {
             let root = tempfile::tempdir().unwrap();
@@ -583,28 +668,31 @@ mod tests {
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
             home.environment
                 .insert("PATH".into(), "/usr/bin:/bin".into());
-            let output = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg(resume_shell_line(&session, &home).unwrap())
-                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-                .env("FLOWMUX_AGENT_SHIM_DIR", &bin)
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            assert_eq!(
-                String::from_utf8(output.stdout).unwrap(),
-                format!(
-                    "{}\n{}\n{flag}\n{}\n{}",
-                    cwd.display(),
-                    home.path.display(),
-                    session.id,
-                    if agent == SessionAgent::Cline {
-                        "--tui\n--data-dir\ndata ' $(exit 7)\n"
-                    } else {
-                        ""
-                    }
-                )
-            );
+            for yolo in [false, true] {
+                let output = std::process::Command::new("/bin/sh")
+                    .arg("-c")
+                    .arg(resume_shell_line(&session, &home, yolo).unwrap())
+                    .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                    .env("FLOWMUX_AGENT_SHIM_DIR", &bin)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert_eq!(
+                    String::from_utf8(output.stdout).unwrap(),
+                    format!(
+                        "{}\n{}\n{flag}\n{}\n{}{}",
+                        cwd.display(),
+                        home.path.display(),
+                        session.id,
+                        if agent == SessionAgent::Cline {
+                            "--tui\n--data-dir\ndata ' $(exit 7)\n"
+                        } else {
+                            ""
+                        },
+                        if yolo { yolo_arguments } else { "" }
+                    )
+                );
+            }
             let default_home = SessionHome {
                 path: root.path().join(directory),
                 environment: [("HOME".into(), root.path().to_string_lossy().into_owned())].into(),
@@ -617,7 +705,7 @@ mod tests {
             .unwrap();
             let output = std::process::Command::new("/bin/sh")
                 .arg("-c")
-                .arg(resume_shell_line(&session, &default_home).unwrap())
+                .arg(resume_shell_line(&session, &default_home, false).unwrap())
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
                 .env(variable, "/wrong/inherited/config")
                 .output()
@@ -632,10 +720,10 @@ mod tests {
                 }
             );
             session.cwd = "/tmp/unsafe\ncommand".into();
-            assert!(resume_shell_line(&session, &home).is_err());
+            assert!(resume_shell_line(&session, &home, false).is_err());
             session.cwd = cwd;
             session.id = "bad\rcommand".into();
-            assert!(resume_shell_line(&session, &home).is_err());
+            assert!(resume_shell_line(&session, &home, false).is_err());
         }
     }
 
@@ -660,7 +748,32 @@ mod tests {
             .panel
             .status
             .text()
-            .contains("Focus a local"));
+            .contains("Select an agent"));
+        controller.focused_pane.set(None);
+        for agent in [
+            SessionAgent::Claude,
+            SessionAgent::Codex,
+            SessionAgent::OpenCode,
+            SessionAgent::Antigravity,
+            SessionAgent::Cline,
+            SessionAgent::Gemini,
+        ] {
+            controller
+                .dispatch_session_panel(SessionPanelAction::ToggleAgent(agent))
+                .await;
+            let target = controller.session_target().await.unwrap();
+            assert_eq!(target.agent, agent);
+            assert!(target.focused.is_none());
+            assert_eq!(
+                session_home(&target).unwrap().path,
+                agent.env_history_home().unwrap()
+            );
+        }
+        controller
+            .dispatch_session_panel(SessionPanelAction::ToggleAgent(SessionAgent::Gemini))
+            .await;
+        assert!(controller.session_target().await.is_none());
+        controller.focused_pane.set(Some(pane));
         controller
             .dispatch_session_panel(SessionPanelAction::Close)
             .await;
@@ -713,13 +826,26 @@ mod tests {
             *controller.sessions.target.borrow_mut() = controller.session_target().await;
             let generation = panel.clear("before");
             controller
-                .resume_history_session(session.clone(), generation.wrapping_sub(1))
+                .resume_history_session(session.clone(), generation.wrapping_sub(1), false)
                 .await;
             assert_eq!(panel.status.text(), "before");
             controller
-                .resume_history_session(session.clone(), generation)
+                .resume_history_session(session.clone(), generation, false)
                 .await;
             assert!(panel.status.text().contains("already active"));
+            controller
+                .dispatch_session_panel(SessionPanelAction::ToggleAgent(SessionAgent::Codex))
+                .await;
+            controller
+                .resume_history_session(session.clone(), panel.generation.get(), false)
+                .await;
+            assert!(panel.status.text().contains("already active"));
+            controller
+                .dispatch_session_panel(SessionPanelAction::ToggleAgent(SessionAgent::Codex))
+                .await;
+            let target = controller.session_target().await.unwrap();
+            assert_eq!(target.agent, SessionAgent::Codex);
+            assert_eq!(target.focused.unwrap().surface, surface);
         }
         let directory = tempfile::tempdir().unwrap();
         let mut missing = session.clone();
@@ -728,7 +854,7 @@ mod tests {
         let tab_count = controller.pane_registry.borrow().terminals.len();
         let generation = controller.sessions.panel.generation.get();
         controller
-            .resume_history_session(missing.clone(), generation)
+            .resume_history_session(missing.clone(), generation, false)
             .await;
         for _ in 0..100 {
             if controller.window.visible_dialog().is_some() {
@@ -749,7 +875,9 @@ mod tests {
         controller.focused_pane.set(None);
         let panel = &controller.sessions.panel;
         let generation = panel.clear("focus moved");
-        controller.resume_history_session(session, generation).await;
+        controller
+            .resume_history_session(session, generation, false)
+            .await;
         assert_eq!(panel.status.text(), "focus moved");
         controller.window.close();
     }

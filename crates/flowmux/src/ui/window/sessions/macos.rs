@@ -47,11 +47,13 @@ mod tests {
         let mut ready = String::new();
         output.read_line(&mut ready).unwrap();
         let result = session_home(&SessionTarget {
-            pane: PaneId::new(),
-            surface: SurfaceId::new(),
             agent,
-            root_pid: child.id(),
-            session_id: None,
+            focused: Some(FocusedSession {
+                pane: PaneId::new(),
+                surface: SurfaceId::new(),
+                root_pid: child.id(),
+                session_id: None,
+            }),
         });
         drop(child.stdin.take());
         assert!(child.wait().unwrap().success());

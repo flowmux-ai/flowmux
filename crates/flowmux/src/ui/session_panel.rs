@@ -3,7 +3,7 @@
 
 use crate::bridge::{Bridge, GtkCommand};
 use adw::prelude::*;
-use flowmux_state::session_history::HistorySession;
+use flowmux_state::session_history::{HistorySession, SessionAgent};
 use gtk::glib;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -15,6 +15,7 @@ pub enum SessionPanelAction {
     Toggle,
     Refresh,
     Close,
+    ToggleAgent(SessionAgent),
     Select {
         session: HistorySession,
         generation: u64,
@@ -22,6 +23,7 @@ pub enum SessionPanelAction {
     Resume {
         session: HistorySession,
         generation: u64,
+        yolo: bool,
     },
 }
 
@@ -40,6 +42,8 @@ pub struct SessionPanel {
     pub resume: gtk::Button,
     pub generation: Rc<Cell<u64>>,
     pub selection: Rc<RefCell<Option<String>>>,
+    pub selected_agent: Rc<Cell<Option<SessionAgent>>>,
+    agent_buttons: Vec<(SessionAgent, gtk::ToggleButton)>,
     rows: Rc<RefCell<Vec<HistorySession>>>,
     list: gtk::ListBox,
     search: gtk::SearchEntry,
@@ -66,6 +70,33 @@ impl SessionPanel {
         title.set_hexpand(true);
         title.set_xalign(0.0);
         header.append(&title);
+        let agents = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        agents.set_margin_start(8);
+        agents.set_margin_end(8);
+        let agent_buttons = [
+            SessionAgent::Claude,
+            SessionAgent::Codex,
+            SessionAgent::OpenCode,
+            SessionAgent::Antigravity,
+            SessionAgent::Cline,
+            SessionAgent::Gemini,
+        ]
+        .into_iter()
+        .map(|agent| {
+            let button = gtk::ToggleButton::new();
+            button.set_icon_name(crate::builtin_icons::agent_icon_name(agent.name()));
+            button.add_css_class("flat");
+            let label = format!("{} sessions", agent.name());
+            button.set_tooltip_text(Some(&format!(
+                "{label} · Click again to follow the focused pane"
+            )));
+            button.update_property(&[gtk::accessible::Property::Label(&label)]);
+            let bridge = bridge.clone();
+            button.connect_clicked(move |_| send(&bridge, SessionPanelAction::ToggleAgent(agent)));
+            agents.append(&button);
+            (agent, button)
+        })
+        .collect();
         for (icon, label, action) in [
             (
                 "view-refresh-symbolic",
@@ -87,6 +118,7 @@ impl SessionPanel {
             header.append(&button);
         }
         root.append(&header);
+        root.append(&agents);
         let status = gtk::Label::new(None);
         status.set_margin_start(8);
         status.set_margin_end(8);
@@ -142,7 +174,17 @@ impl SessionPanel {
             "Open the selected session in its project directory in a new terminal tab.",
         ));
         resume.set_sensitive(false);
-        root.append(&resume);
+        resume.set_hexpand(true);
+        let yolo = gtk::CheckButton::with_label("YOLO");
+        yolo.set_widget_name("flowmux-session-yolo");
+        yolo.set_tooltip_text(Some(
+            "Automatically approve agent actions for the resumed session.",
+        ));
+        yolo.set_active(true);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        actions.append(&resume);
+        actions.append(&yolo);
+        root.append(&actions);
         let generation = Rc::new(Cell::new(0));
         let rows = Rc::new(RefCell::new(Vec::<HistorySession>::new()));
         let rows_for_selection = rows.clone();
@@ -178,6 +220,7 @@ impl SessionPanel {
                     SessionPanelAction::Resume {
                         session,
                         generation: generation_for_resume.get(),
+                        yolo: yolo.is_active(),
                     },
                 );
             }
@@ -216,7 +259,17 @@ impl SessionPanel {
             generation,
             rows,
             selection: Rc::new(RefCell::new(None)),
+            selected_agent: Rc::new(Cell::new(None)),
+            agent_buttons,
             colors: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+
+    pub fn toggle_agent(&self, agent: SessionAgent) {
+        let selected = (self.selected_agent.get() != Some(agent)).then_some(agent);
+        self.selected_agent.set(selected);
+        for (agent, button) in &self.agent_buttons {
+            button.set_active(selected == Some(*agent));
         }
     }
 
@@ -308,7 +361,55 @@ impl SessionPanel {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
-    use flowmux_state::session_history::SessionAgent;
+
+    #[gtk::test]
+    async fn agent_buttons_select_one_provider_and_toggle_back_to_following_focus() {
+        let (bridge, rx) = Bridge::new();
+        let panel = SessionPanel::new(bridge);
+        assert_eq!(panel.selected_agent.get(), None);
+        for (agent, button) in &panel.agent_buttons {
+            let icon = button.child().unwrap().downcast::<gtk::Image>().unwrap();
+            assert_eq!(
+                icon.icon_name().as_deref(),
+                Some(crate::builtin_icons::agent_icon_name(agent.name()))
+            );
+            button.emit_clicked();
+            match rx.recv().await.unwrap() {
+                GtkCommand::SessionPanel(SessionPanelAction::ToggleAgent(received)) => {
+                    assert_eq!(received, *agent);
+                    panel.toggle_agent(received);
+                }
+                other => panic!("Unexpected command: {other:?}"),
+            }
+            assert_eq!(panel.selected_agent.get(), Some(*agent));
+            assert_eq!(
+                panel
+                    .agent_buttons
+                    .iter()
+                    .filter(|(_, b)| b.is_active())
+                    .count(),
+                1
+            );
+        }
+        let (agent, button) = panel.agent_buttons.last().unwrap();
+        button.emit_clicked();
+        match rx.recv().await.unwrap() {
+            GtkCommand::SessionPanel(SessionPanelAction::ToggleAgent(received)) => {
+                assert_eq!(received, *agent);
+                panel.toggle_agent(received);
+            }
+            other => panic!("Unexpected command: {other:?}"),
+        }
+        assert_eq!(panel.selected_agent.get(), None);
+        assert!(panel
+            .agent_buttons
+            .iter()
+            .all(|(_, button)| !button.is_active()));
+        assert!(
+            rx.try_recv().is_err(),
+            "synchronizing buttons must not emit actions"
+        );
+    }
 
     #[gtk::test]
     async fn selection_search_and_refresh_keep_native_rows_consistent() {
@@ -327,7 +428,7 @@ mod tests {
             modified: std::time::SystemTime::now(),
         };
         panel.set_rows(vec![item.clone()], generation);
-        assert!(panel.root.measure(gtk::Orientation::Horizontal, -1).0 <= 236);
+        assert!(panel.root.measure(gtk::Orientation::Horizontal, -1).0 <= 360);
         let row = panel.list.row_at_index(0).unwrap();
         panel.list.select_row(Some(&row));
         match rx.recv().await.unwrap() {
@@ -339,6 +440,31 @@ mod tests {
                 assert_eq!(received, generation);
             }
             other => panic!("Unexpected command: {other:?}"),
+        }
+        let yolo = panel
+            .resume
+            .next_sibling()
+            .unwrap()
+            .downcast::<gtk::CheckButton>()
+            .unwrap();
+        assert!(yolo.is_active(), "YOLO must be checked by default");
+        panel.resume.set_sensitive(true);
+        for enabled in [true, false] {
+            yolo.set_active(enabled);
+            panel.resume.emit_clicked();
+            yolo.set_active(!enabled);
+            match rx.recv().await.unwrap() {
+                GtkCommand::SessionPanel(SessionPanelAction::Resume {
+                    session,
+                    generation: received,
+                    yolo,
+                }) => {
+                    assert_eq!(session.id, item.id);
+                    assert_eq!(received, generation);
+                    assert_eq!(yolo, enabled, "capture the mode when Resume is clicked");
+                }
+                other => panic!("Unexpected command: {other:?}"),
+            }
         }
         panel.search.set_text("spaces");
         panel.search.emit_by_name::<()>("search-changed", &[]);
