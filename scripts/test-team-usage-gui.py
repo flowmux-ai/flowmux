@@ -119,7 +119,35 @@ def main():
         finish(receipt)
         h.pass_check('A native quota failure is shared with the next job and avoids another exhausted Codex launch')
 
-        for path in (h.root / 'state/flowmux/team-quota').glob('codex-*.json'):
+        quotas = h.root / 'state/flowmux/team-quota'
+        usage.write_text(json.dumps(dict(used=30, reset=int(time.time()) + 3600)))
+        fixture.wait_for(lambda: observed(30), 'fresh usage releases the old hold', timeout=95)
+        (h.root / 'behavior.json').write_text('{}')
+        receipt = launch()
+        assert receipt['agent'] == 'codex' and receipt['routing_usage'][0]['status'] == 'available', receipt
+        finish(receipt)
+        assert not list(quotas.glob('codex-*.json')), 'released hold must not survive in the shared cache'
+        usage.write_text(json.dumps(dict(error=True)))
+        for path in directory.glob('codex-*.json'):
+            saved = json.loads(path.read_text())
+            saved['collected_at'] = time.time() - 400
+            path.write_text(json.dumps(saved))
+        receipt = launch()
+        assert receipt['agent'] == 'codex', receipt
+        finish(receipt)
+        h.pass_check('A released quota hold stays released when its usage observation becomes stale')
+
+        # A new native failure must still establish a fresh hold after release.
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'quota'}))
+        state = finish(launch())
+        assert state['agent'] == 'claude' and state['attempts'][0]['blocker_kind'] == 'quota', state
+        assert list(quotas.glob('codex-*.json'))
+        receipt = launch()
+        assert receipt['agent'] == 'claude', receipt
+        finish(receipt)
+        h.pass_check('A new native quota error after release is shared with subsequent jobs')
+
+        for path in quotas.glob('codex-*.json'):
             saved = json.loads(path.read_text())
             saved['until'] = time.time() - 1
             path.write_text(json.dumps(saved))

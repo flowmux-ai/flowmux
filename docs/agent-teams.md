@@ -261,7 +261,10 @@ When fallback is enabled, known exhaustion can replace an explicit provider befo
 launch. With `--no-fallback`, it returns a diagnostic without creating a pane.
 Native quota errors also create a locked, atomic hold in `team-quota/` shared by
 jobs using the same provider configuration root. A known reset ends the hold;
-unknown resets use five minutes. A newer available observation releases it early.
+unknown resets use five minutes. A newer available observation releases it early
+under the same lock, preserving any newer native failure. Released holds stay
+released after the observation expires or refresh fails; a new native quota
+error can establish a new hold.
 These are observations, not quota reservations; simultaneous provider work can
 still exhaust an account after selection.
 
@@ -273,8 +276,9 @@ account limits are enforced by the provider, not inferred from CLI installation.
 `--stall-timeout` defaults to 180 seconds without native progress. There is no
 total deadline by default (`--timeout 0`). A positive `--timeout` is an explicit
 attempt budget: expiry stops and closes the owned worker with `time_budget`,
-without automatic replacement or a false `stalled` diagnosis. Verified input waits
-pause both deadlines. Increase the stall interval for expected quiet tools or
+without automatic replacement or a false `stalled` diagnosis, even when both
+deadlines expire together. Verified input waits pause the total budget while
+preserving time already spent; they do not count as stalled work. Increase the stall interval for expected quiet tools or
 reasoning. `followup` accepts both limits as overrides for updated-helper jobs;
 older jobs retain their copied policy. `--no-fallback` disables substitution,
 while retaining failed-worker cleanup.
@@ -293,6 +297,10 @@ and task-level blocked panes remain open. When no alternative remains, the faile
 pane is closed and its artifacts/failure are retained. A substituted review using
 the researcher's provider is independent-session review, not cross-provider review.
 Jobs created by older helpers retain their copied implementation.
+
+Native authentication/permission error codes take priority over quota or model
+wording in messages. These errors retain their pane and diagnostics for inspection;
+they do not trigger substitution, automatic cleanup or a shared quota hold.
 
 `python3 scripts/test-team-recovery-gui.py` checks quota/capacity, stalled or
 crashed processes, malformed reports, descendant shutdown, pane replacement,

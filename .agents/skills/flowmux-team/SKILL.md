@@ -189,7 +189,9 @@ Gemini/agy currently have no preflight usage collector.
 
 Native quota errors are shared across jobs under `team-quota/`, scoped to the
 provider's configuration root. The hold lasts until a known reset, or five minutes
-when no reset is known. A newer available observation releases it early. Concurrent
+when no reset is known. A newer available observation releases it early; the old
+hold stays released if that observation later expires or refresh fails. A new
+native quota error can establish a new hold. Concurrent
 jobs update the record under a lock; profiles never borrow each other's limits.
 This reduces repeated failed launches, but cannot reserve quota against concurrent
 provider usage. Successful work and the native provider remain authoritative.
@@ -199,8 +201,10 @@ provider usage. Successful work and the native provider remain authoritative.
 no total time limit by default (`--timeout 0`), so continued progress can outlive
 five minutes. An explicit positive `--timeout` bounds an attempt; expiry is
 `time_budget`, closes the owned worker and stops without a replacement. It is
-distinct from `stalled` recovery. Verified native input waits pause the deadlines.
-Authentication, trust/permission prompts, changed session identity,
+distinct from `stalled` recovery and takes priority when both deadlines expire.
+Verified native input waits pause the total budget without resetting time already spent.
+Native authentication/permission error codes take priority over quota or model
+wording in their messages. Authentication, trust/permission prompts, changed session identity,
 extra/user-owned tabs and uncertain IPC delivery require inspection, not a retry.
 
 Before replacement, the helper saves evidence, stops its owned process tree,

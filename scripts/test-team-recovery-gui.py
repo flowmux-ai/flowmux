@@ -56,7 +56,7 @@ while True:
     token = re.search(r'FLOWMUX_TEAM_JOB:([^\s]+)', prompt)[1]
     behavior = json.loads((root / 'behavior.json').read_text())
     failure = behavior.get(agent)
-    evidence = {'argv': sys.argv, 'pid': os.getpid(), 'session': session, 'token': token}
+    evidence = {'argv': sys.argv, 'pid': os.getpid(), 'session': session, 'token': token, 'started': time.monotonic()}
     if failure in ('quota', 'stalled', 'crash', 'invalid_report', 'provider_error'):
         child = subprocess.Popen([sys.executable, '-c', 'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(120)'])
         evidence['child'] = child.pid
@@ -74,8 +74,8 @@ while True:
             time.sleep(120)
         if failure == 'crash':
             os._exit(7)
-        if failure == 'progress':
-            for step in range(8):
+        if failure in ('progress', 'long_progress'):
+            for step in range(40 if failure == 'long_progress' else 8):
                 save({'type': 'progress', 'step': step})
                 time.sleep(.5)
         if failure == 'invalid_report':
@@ -84,15 +84,25 @@ while True:
             final = {'type': 'task_complete', 'last_agent_message': answer}
             if failure in ('quota', 'provider_error'):
                 final = {'type': 'error', 'codex_error_info': 'usage_limit_exceeded' if failure == 'quota' else 'server_overloaded', 'message': failure}
+            if failure == 'auth':
+                final = {'type': 'error', 'codex_error_info': 'permission_denied', 'message': 'Usage limit reached; model_not_found'}
             save({'type': 'event_msg', 'payload': final})
         else:
-            save({'type': 'assistant', 'message': {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': answer}]}})
+            final = {'type': 'assistant', 'message': {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': answer}]}}
+            if failure == 'auth':
+                final.update(isApiErrorMessage=True, error='authentication_error')
+                final['message']['content'][0]['text'] = 'Usage limit reached; model_not_found'
+            save(final)
         print('READY ' + answer, flush=True)
         prompt = sys.stdin.readline()
         if not prompt:
             break
     elif agent == 'gemini':
         emit({'type': 'init', 'session_id': session})
+        if failure == 'auth':
+            emit({'type': 'error', 'code': 'permission_denied', 'message': 'Usage limit reached; model_not_found'})
+            emit({'type': 'result', 'status': 'error'})
+            break
         emit({'type': 'message', 'role': 'assistant', 'content': answer})
         # An answer alone must not be accepted before the official final event.
         time.sleep(1)
@@ -100,6 +110,10 @@ while True:
         break
     else:
         emit({'event': 'init', 'conversation_id': session})
+        if failure == 'auth':
+            emit({'event': 'result', 'result': {'status': 'ERROR', 'code': 'invalid_api_key',
+                  'conversation_id': session, 'response': 'Usage limit reached; model_not_found'}})
+            break
         emit({'event': 'step_update', 'step_update': {'state': 'DONE', 'text_delta': answer}})
         time.sleep(1)
         emit({'event': 'result', 'result': {'status': 'SUCCESS', 'conversation_id': session, 'response': answer}})
@@ -181,6 +195,24 @@ def main():
         def stopped(pid):
             stat = Path(f'/proc/{pid}/stat')
             return not stat.exists() or stat.read_text().split(') ', 1)[1].startswith('Z')
+
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            (h.root / 'behavior.json').write_text(json.dumps({agent: 'auth'}))
+            receipt = start(agent)
+            state = finished(receipt)
+            assert state['state'] == 'blocked' and state['blocker_kind'] == 'input_required', state
+            assert len(state['attempts']) == 1 and not state['fallback_used'], state
+            assert not state['closed_panes'] and state['pane'] == receipt['pane'], state
+            assert receipt['pane'] in [p['id'] for p in h.workspace(socket, workspace)['panes']]
+            assert not list((h.root / 'state/flowmux/team-quota').glob('*.json'))
+            if agent in ('codex', 'claude'):
+                assert not stopped(state['pid']), 'auth diagnostics must retain the live TUI'
+            assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+            type_native('a')
+            typed += 'a'
+            fixture.wait_for(lambda: typed in h.screen(socket, foreground_pane), 'native input after auth failure')
+            h.pass_check(f'{agent}: native auth code prevents quota holds, substitution and automatic pane closure')
+            h.rpc(socket, 'pane_close', pane=receipt['pane'])
 
         for failure in ('quota', 'provider_error', 'stalled', 'crash', 'invalid_report'):
             (h.root / 'behavior.json').write_text(json.dumps({'codex': failure}))
@@ -269,6 +301,34 @@ def main():
         assert len(limited['attempts']) == 1 and limited['recovery_exhausted'], limited
         assert state['pane'] not in [p['id'] for p in h.workspace(socket, workspace)['panes']]
         h.pass_check('Explicit time budget closes the owned worker without labeling progress stalled or starting a replacement')
+
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'stalled'}))
+        receipt = start('codex', '--timeout', '1', '--stall-timeout', '1')
+        limited = finished(receipt)
+        assert limited['blocker_kind'] == 'time_budget' and len(limited['attempts']) == 1, limited
+        assert receipt['pane'] in limited['closed_panes'] and limited['recovery_exhausted'], limited
+        h.pass_check('Equal time and stall limits stop without substitution')
+
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'long_progress'}))
+        receipt = start('codex', '--timeout', '6')
+        root = Path(receipt['job'])
+        evidence_path = h.root / (receipt['token'] + '-process.json')
+        evidence = fixture.wait_for(lambda: json.loads(evidence_path.read_text()) if evidence_path.exists() else None,
+                                    'provider begins timed work')
+        fixture.wait_for(lambda: time.monotonic() - evidence['started'] >= 4, 'four seconds of active work')
+        identity = dict(pane=receipt['pane'], surface=receipt['surface'], agent='codex',
+                        session_id=evidence['session'], source='flowmux:hook')
+        h.rpc(socket, 'agent_activity_update', **identity, activity='needs_input')
+        fixture.wait_for(lambda: json.loads((root / 'status.json').read_text())['state'] == 'waiting_input', 'input wait pauses budget')
+        time.sleep(3)
+        assert json.loads((root / 'status.json').read_text())['state'] == 'waiting_input'
+        resumed = time.monotonic()
+        h.rpc(socket, 'agent_activity_update', **identity, activity='running')
+        limited = fixture.wait_for(lambda: (s if (s := json.loads((root / 'status.json').read_text()))['state'] == 'timed_out' else None),
+                                   'remaining budget expires without resetting six seconds', timeout=4)
+        assert time.monotonic() - resumed < 4 and limited['blocker_kind'] == 'time_budget', limited
+        assert len(limited['attempts']) == 1 and receipt['pane'] in limited['closed_panes'], limited
+        h.pass_check('Input waits preserve consumed budget and close the worker after only its remaining time')
 
         (h.root / 'behavior.json').write_text('{}')
         for agent in ('codex', 'claude'):

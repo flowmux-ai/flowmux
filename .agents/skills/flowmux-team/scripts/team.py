@@ -87,7 +87,7 @@ def matching_scope(scope, agent, model):
     return scope == model.lower()
 
 
-def usage_status(route, env=None):
+def usage_status(route, env=None, *, release_hold=True):
     agent, model = route["agent"], route["model"]
     profile, key = usage_identity(agent, env)
     now = time.time()
@@ -108,7 +108,17 @@ def usage_status(route, env=None):
                 status["until"] = max(w.get("resets_at") or now + UNKNOWN_QUOTA_BACKOFF for w in exhausted)
     elif finite_number(collected) and now - collected > USAGE_MAX_AGE:
         status = {"status": "stale", "reason": "Usage observation is older than five minutes", "collected_at": collected}
-    cooldown = observation(state_directory() / "team-quota" / (key + ".json"), agent, profile)
+    quota_path = state_directory() / "team-quota" / (key + ".json")
+    cooldown = observation(quota_path, agent, profile)
+    if (release_hold and status["status"] == "available" and finite_number(cooldown.get("recorded_at"))
+            and collected > cooldown["recorded_at"]):
+        with quota_path.with_suffix(".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # Re-read under the writer's lock so a newer native failure survives.
+            cooldown = observation(quota_path, agent, profile)
+            if finite_number(cooldown.get("recorded_at")) and collected > cooldown["recorded_at"]:
+                quota_path.unlink(missing_ok=True)
+                cooldown = {}
     if (finite_number(cooldown.get("until")) and cooldown["until"] > now
             and finite_number(cooldown.get("recorded_at")) and cooldown["recorded_at"] <= now
             and not (status["status"] == "available" and collected > cooldown["recorded_at"])):
@@ -127,7 +137,8 @@ def remember_quota(manifest):
     with (directory / (key + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         now = time.time()
-        until = usage_status(manifest, env).get("until", now + UNKNOWN_QUOTA_BACKOFF)
+        # This write replaces the old hold while already holding its lock.
+        until = usage_status(manifest, env, release_hold=False).get("until", now + UNKNOWN_QUOTA_BACKOFF)
         write_json(path, {"schema": 1, "agent": agent, "profile": profile,
                           "recorded_at": now, "until": until})
 
@@ -423,7 +434,7 @@ def transcript_report(path, manifest):
                     if error.get("will_retry"):
                         continue
                     text = str(error.get("message") or "Provider error")
-                    blocker = "quota" if quota_error(error.get("codex_error_info"), text) else "provider_error"
+                    blocker = native_failure(error)
                     answer = json.dumps({"task_status": "blocked", "report": text})
                 else:
                     answer = payload.get("last_agent_message")
@@ -443,7 +454,7 @@ def transcript_report(path, manifest):
                 message = event.get("message", {})
                 text = "\n".join(b.get("text", "") for b in message.get("content", []) if b.get("type") == "text")
                 if event.get("isApiErrorMessage"):
-                    blocker = "quota" if quota_error(event.get("error"), text) else "provider_error"
+                    blocker = native_failure({"code": event.get("error"), "message": text})
                     answer = json.dumps({"task_status": "blocked", "report": text or str(event.get("error", "Provider API error"))})
                     break
                 # Claude saves thinking and text as separate records with the same stop reason.
@@ -930,13 +941,18 @@ def managed_pane(manifest):
 
 def native_failure(error):
     text = json.dumps(error, ensure_ascii=False) if not isinstance(error, str) else error
-    lower = text.lower()
-    if any(word in lower for word in ("unsupported_client", "no longer supported", "model_not_found", "model not found")):
-        return "unavailable"
-    if any(word in lower for word in ("authenticat", "not trusted", "permission", "forbidden", "unauthorized")):
-        return "input_required"
-    if quota_error(text, text) or any(word in lower for word in ("quota", "resource_exhausted", "rate_limit", "rate limit")):
-        return "quota"
+    codes = json.dumps({key: error[key] for key in ("codex_error_info", "code", "error", "status") if key in error}) \
+            if isinstance(error, dict) else ""
+    # Recognized native codes outrank wording in the diagnostic message.
+    for detail in (codes, text):
+        lower = detail.lower()
+        if any(word in lower for word in ("authenticat", "not trusted", "permission", "forbidden", "unauthorized",
+                                          "invalid_api_key", "invalid api key", "access_denied", "access denied")):
+            return "input_required"
+        if any(word in lower for word in ("unsupported_client", "no longer supported", "model_not_found", "model not found")):
+            return "unavailable"
+        if quota_error(detail, detail) or any(word in lower for word in ("quota", "resource_exhausted", "rate_limit", "rate limit")):
+            return "quota"
     return "provider_error"
 
 
@@ -947,6 +963,7 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
              **{k: manifest[k] for k in ("agent", "model", "effort", "pane", "surface", "generation")},
              "pid": process.pid}
     deadline = time.monotonic() + manifest["timeout"] if manifest["timeout"] else None
+    paused_at = None
     last_progress, signature, bound = time.monotonic(), None, manifest.get("transcript")
     offsets = {"stdout.jsonl": 0, "stderr.txt": 0}
     while True:
@@ -991,8 +1008,6 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
                     state["received"] = True
                 evidence = Path(bound).stat() if bound else None
                 progress = (evidence.st_size, evidence.st_mtime_ns) if evidence else None
-                if blocker == "provider_error":
-                    blocker = native_failure(answer)
             if bound:
                 state["transcript"] = bound
             if session:
@@ -1012,22 +1027,28 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
                 signature, last_progress = progress, time.monotonic()
             tab = managed_pane(manifest)
             agent = tab.get("agent") or {}
+            now = time.monotonic()
             if agent.get("activity") == "needs_input" or agent.get("status") == "blocked":
                 state.update(state="waiting_input", message=agent.get("message"))
-                # Human input waits are not stalled reasoning.
-                deadline = time.monotonic() + manifest["timeout"] if manifest["timeout"] else None
-                last_progress = time.monotonic()
+                if paused_at is None:
+                    paused_at = now
+                last_progress = now
             else:
+                if paused_at is not None:
+                    if deadline is not None:
+                        deadline += now - paused_at
+                    last_progress, paused_at = now, None
                 state["state"] = "running"
                 if process.poll() is not None:
                     state.update(state="failed", blocker_kind="exited", error=f"Agent exited with code {process.returncode}")
                     break
-                stalled = time.monotonic() - last_progress >= manifest["stall_timeout"]
-                if stalled or (deadline is not None and time.monotonic() >= deadline):
+                stalled = now - last_progress >= manifest["stall_timeout"]
+                budget_expired = deadline is not None and now >= deadline
+                if stalled or budget_expired:
                     state.update(state="timed_out", blocker_kind="interference" if manifest.get("root_job")
-                                 and not state.get("received") and not streamed else "stalled" if stalled else "time_budget",
-                                 error="No native progress within the stall deadline" if stalled
-                                 else "Explicit task time budget exhausted; no automatic retry")
+                                 and not state.get("received") and not streamed else "time_budget" if budget_expired else "stalled",
+                                 error="Explicit task time budget exhausted; no automatic retry" if budget_expired
+                                 else "No native progress within the stall deadline")
                     break
             write_json(assignment / "status.json", state)
             time.sleep(.5)

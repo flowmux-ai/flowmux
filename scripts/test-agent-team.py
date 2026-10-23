@@ -646,7 +646,7 @@ time.sleep(30 if primary else .8)
             for code, message, kind in (
                 ('usage_limit_exceeded', 'You’ve hit your usage limit.', 'quota'),
                 ('server_overloaded', 'Selected model is at capacity.', 'provider_error'),
-                ('permission_denied', 'Usage limit reached', 'provider_error'),
+                ('permission_denied', 'Usage limit reached', 'input_required'),
             ):
                 with self.subTest(nested=nested, code=code):
                     error = {'codex_error_info': code, 'message': message}
@@ -985,7 +985,7 @@ class ManagedTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def monitor_clock(self, *, timeout=0, progress=True, waiting=False):
+    def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400):
         attempt = self.job / 'attempt-1'
         attempt.mkdir()
         path = self.job / 'native.jsonl'
@@ -998,11 +998,11 @@ class ManagedTests(unittest.TestCase):
             if progress:
                 with path.open('a') as stream:
                     stream.write('native progress\n')
-            return True, 'exact', json.dumps(dict(task_status='completed', report='verified')) if clock[0] >= 400 else None, None
+            return True, 'exact', json.dumps(dict(task_status='completed', report='verified')) if clock[0] >= complete_at else None, None
         def advance(seconds):
             clock[0] += 100
         def pane(manifest):
-            return dict(agent=dict(status='blocked' if waiting and clock[0] < 300 else 'working'))
+            return dict(agent=dict(status='blocked' if waiting and waiting[0] <= clock[0] < waiting[1] else 'working'))
         process = type('Process', (), dict(pid=123, poll=lambda self: None))()
         with patch.object(team, 'owned_processes', return_value={}), \
                 patch.object(team, 'transcript_report', side_effect=native), \
@@ -1025,7 +1025,52 @@ class ManagedTests(unittest.TestCase):
         self.assertIn(state['blocker_kind'], team.RECOVERABLE)
 
     def test_input_wait_pauses_time_budget_and_stall_deadline(self):
-        self.assertEqual(self.monitor_clock(timeout=200, waiting=True)['state'], 'completed')
+        self.assertEqual(self.monitor_clock(timeout=200, waiting=(0, 300))['state'], 'completed')
+
+    def test_explicit_budget_wins_when_both_deadlines_expire(self):
+        state = self.monitor_clock(timeout=180, progress=False)
+        self.assertEqual(state['blocker_kind'], 'time_budget')
+        self.assertNotIn(state['blocker_kind'], team.RECOVERABLE)
+
+    def test_input_wait_preserves_time_already_spent(self):
+        state = self.monitor_clock(timeout=250, waiting=(200, 300), complete_at=500)
+        self.assertEqual((state['state'], state['blocker_kind']), ('timed_out', 'time_budget'))
+
+    def test_native_auth_codes_reach_monitor_without_becoming_recoverable(self):
+        path = self.job / 'native.jsonl'
+        attempt = self.job / 'attempt-1'
+        attempt.mkdir()
+        process = type('Process', (), dict(pid=123, poll=lambda self: None))()
+        for agent in ('codex', 'claude'):
+            for code in ('permission_denied', 'authentication_error', 'invalid_api_key'):
+                with self.subTest(agent=agent, code=code):
+                    message = 'Usage limit reached; model_not_found'
+                    if agent == 'codex':
+                        user = dict(type='response_item', payload=dict(role='user', content='FLOWMUX_TEAM_JOB:mine'))
+                        final = dict(type='event_msg', payload=dict(type='error', codex_error_info=code, message=message))
+                    else:
+                        user = dict(type='user', sessionId='exact', message=dict(content='FLOWMUX_TEAM_JOB:mine'))
+                        final = dict(type='assistant', isApiErrorMessage=True, error=code,
+                                     message=dict(content=[dict(type='text', text=message)]))
+                    path.write_text(json.dumps(user) + '\n' + json.dumps(final))
+                    team.write_json(self.job / 'status.json', dict(state='pending'))
+                    manifest = dict(agent=agent, model='chosen', effort=None, pane='worker', surface='tab',
+                                    token='mine', generation=1, timeout=0, stall_timeout=180, transcript=str(path))
+                    with patch.object(team, 'owned_processes', return_value={}):
+                        state = team.monitor_managed(self.job, attempt, manifest, process, {}, False)
+                    self.assertEqual(state['blocker_kind'], 'input_required')
+                    self.assertNotIn(state['blocker_kind'], team.RECOVERABLE)
+                    self.assertEqual((attempt / 'result.md').read_text(), message)
+
+    def test_streamed_auth_errors_take_priority_over_quota_and_unavailable_text(self):
+        for error in [dict(code='permission_denied', message='quota model_not_found'),
+                      dict(error=dict(code='invalid_api_key'), message='unsupported_client'),
+                      dict(status='UNAUTHENTICATED', response='Usage limit reached')]:
+            self.assertEqual(team.native_failure(error), 'input_required')
+        self.assertEqual(team.native_failure(dict(code='model_not_found')), 'unavailable')
+        self.assertEqual(team.native_failure(dict(code='resource_exhausted')), 'quota')
+        self.assertEqual(team.native_failure(dict(code='usage_limit_exceeded', message='Contact authentication support')), 'quota')
+        self.assertEqual(team.native_failure(dict(code='model_not_found', message='Check account permissions')), 'unavailable')
 
     def test_model_aliases_and_available_alternatives(self):
         for alias, (provider, model) in team.MODEL_ALIASES.items():
@@ -1292,6 +1337,37 @@ class UsageRoutingTests(unittest.TestCase):
         team.remember_quota(self.route)
         self.now.return_value = 10400
         self.assertEqual(team.usage_status(self.route)['until'], 11000)
+
+    def test_released_hold_stays_released_after_usage_expires_or_refresh_fails(self):
+        self.snapshot()
+        team.remember_quota(self.route)
+        self.now.return_value = 10002
+        self.snapshot(windows=[dict(scope=None, used_percent=25, resets_at=11000)], collected_at=10001)
+        self.assertEqual(team.usage_status(self.route)['status'], 'available')
+        self.now.return_value = 10400
+        self.assertEqual(team.usage_status(self.route)['status'], 'stale')
+        self.snapshot(collected_at=10400, error='offline')
+        self.assertEqual(team.usage_status(self.route)['status'], 'unknown')
+        team.remember_quota(self.route)
+        self.assertEqual(team.usage_status(self.route)['until'], 10700)
+
+    def test_releasing_an_old_hold_cannot_erase_a_concurrent_new_quota(self):
+        self.snapshot()
+        team.remember_quota(self.route)
+        self.now.return_value = 10002
+        self.snapshot(windows=[dict(scope=None, used_percent=25, resets_at=11000)], collected_at=10001)
+        read = team.observation
+        injected = False
+        def concurrent_quota(path, agent, profile):
+            nonlocal injected
+            value = read(path, agent, profile)
+            if path.parent.name == 'team-quota' and not injected:
+                injected = True
+                team.remember_quota(self.route)
+            return value
+        with patch.object(team, 'observation', side_effect=concurrent_quota):
+            self.assertEqual(team.usage_status(self.route)['status'], 'exhausted')
+        self.assertEqual(team.usage_status(self.route)['until'], 10302)
 
 
 if __name__ == '__main__':
