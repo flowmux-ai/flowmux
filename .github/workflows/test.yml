@@ -65,6 +65,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          # Prefer the runner's Ubuntu HTTPS fallback when Azure downloads trickle.
+          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|s/priority:1/priority:4/' /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config \
