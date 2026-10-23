@@ -356,11 +356,16 @@ if (!state) throw new Error('page changed during native pointer input');
 return await new Promise(resolve => {
     const finish = result => {
         clearTimeout(timer);
+        clearInterval(hoverPoll);
         window.removeEventListener(state.event, state.listener, true);
         delete globalThis.__flowmuxInput;
         resolve(result);
     };
     const timer = setTimeout(() => finish('error: native pointer input completion timed out'), 10000);
+    // Disabled controls and page handlers can suppress the pointer event while CSS still changes.
+    const hoverPoll = state.event === 'pointermove' ? setInterval(() => {
+        if (state.el.isConnected && state.el.matches(':hover')) finish('ok');
+    }, 25) : null;
     state.done = () => finish('ok');
     if (state.received || (state.event === 'pointermove' && state.el.matches(':hover'))) state.done();
 });

@@ -226,7 +226,11 @@ def exercise(cli, url, root):
     evaluate("document.querySelector('#cover').remove(); 'uncovered'")
     evaluate("document.querySelector('#target').disabled=true; 'disabled'")
     browser("click", button, error=True)
-    browser("hover", button)
+    try:
+        browser("hover", button)
+    except AssertionError:
+        print("HOVER_FAILURE_STATE=" + evaluate("JSON.stringify({hover:target.matches(':hover'),disabled:target.disabled,focus:document.hasFocus(),rect:target.getBoundingClientRect().toJSON(),viewport:[innerWidth,innerHeight]})"), flush=True)
+        raise
     assert evaluate("String(document.querySelector('#target').matches(':hover'))") == "true", "disabled controls still support hover"
     evaluate("document.querySelector('#target').disabled=false; 'enabled'")
     for attribute in ["aria-disabled", "inert"]:

@@ -187,6 +187,45 @@ async fn snapshot_resolves_real_elements_without_mutating_the_document() {
 }
 
 #[gtk::test]
+async fn hover_completion_observes_css_when_the_page_stops_pointer_events() {
+    let page = Page::new("<button id='target' disabled style='margin:80px'>Hover</button>").await;
+    page.pane
+        .pointer(
+            PointerAction::Hover,
+            &PointerTarget {
+                x: 790.0,
+                y: 590.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        )
+        .unwrap();
+    page.wait("!target.matches(':hover')").await;
+    page.eval("window.addEventListener('pointermove', e => e.stopImmediatePropagation(), true)")
+        .await;
+    let prepared = page
+        .eval_async(&prepare_pointer_input(
+            &pointer_target("#target", true),
+            PointerAction::Hover,
+        ))
+        .await
+        .unwrap();
+    let target: PointerTarget = serde_json::from_str(&prepared).unwrap();
+    let pane = page.pane.clone();
+    glib::spawn_future_local(async move {
+        glib::timeout_future(Duration::from_millis(100)).await;
+        pane.pointer(PointerAction::Hover, &target).unwrap();
+    });
+    let result = page.eval_async(FINISH_POINTER_INPUT_JS).await.unwrap();
+    assert_eq!(
+        result,
+        "ok",
+        "CSS hover: {}",
+        page.eval("target.matches(':hover')").await
+    );
+}
+
+#[gtk::test]
 async fn snapshot_selectors_stay_unique_in_deeply_repeated_markup() {
     // Identical subtrees deeper than any fixed ancestor limit, with no ids.
     let nested = "<div><div><div><div><div><div><div><span><button>Go</button></span></div></div></div></div></div></div></div>";
