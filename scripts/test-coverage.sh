@@ -27,6 +27,9 @@ python3 scripts/test-team-pingpong-gui.py \
 python3 scripts/test-team-recovery-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
+python3 scripts/test-team-reuse-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-team-usage-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"

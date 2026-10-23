@@ -49,7 +49,7 @@ class Examples:
             command = ["followup", str(root), "--task-file", str(assignment), "--cli", self.args.cli]
         else:
             agent = self.args.review_agent if role == "reviewer" else self.args.agent
-            command = ["start", "--agent", agent, "--complexity", "simple", "--role", role,
+            command = ["start", "--fresh-session", "--agent", agent, "--complexity", "simple", "--role", role,
                        "--cwd", str(self.root if edits else self.args.cwd),
                        "--task-file", str(assignment), "--cli", self.args.cli,
                        "--timeout", str(self.args.timeout), "--no-fallback"]

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise team launch, interactive sessions, result validation and routing without an API account."""
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import importlib.util
 import io
@@ -793,6 +794,12 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(len(list((self.root / 'turns').iterdir())), 3)
         self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 3)
 
+    def test_explicit_followup_receipt_remains_compact(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            team.followup(self.args)
+        self.assertEqual(set(json.loads(out.getvalue())),
+                         {'job', 'root_job', 'pane', 'surface', 'workspace', 'socket', 'session_id'})
+
     def test_other_lead_workspace_or_window_cannot_followup(self):
         for key in ('pane', 'workspace', 'socket', 'mode'):
             with self.subTest(key=key), patch.dict(self.origin, {key: 'other'}):
@@ -998,6 +1005,225 @@ class FollowupTests(unittest.TestCase):
             team.transcript_report(self.transcript, manifest)
 
 
+class AutomaticStartTests(unittest.TestCase):
+    managed = FollowupTests.managed
+    answer = FollowupTests.answer
+
+    def setUp(self):
+        FollowupTests.setUp(self)
+        self.state = self.root
+        self.root = self.state / 'team-jobs/job-existing'
+        self.root.mkdir(parents=True)
+        self.manifest.update(cwd=str(self.state), provider_env={}, reuse_policy=1,
+                             executable='/codex', executables={'codex': '/codex'})
+        team.write_json(self.root / 'status.json', dict(state='completed', task_status='completed',
+                        session_id='session', transcript=str(self.transcript)))
+        (self.root / 'result.md').write_text('original result')
+        self.managed()
+        self.args = team.argparse.Namespace(task_file=self.task, cli=sys.executable,
+                    cwd=self.state, role='implementer', agent='codex', complexity='standard',
+                    model='fixture', effort='high', allow_edits=False, timeout=23,
+                    stall_timeout=37, max_attempts=2, no_fallback=True)
+        for patcher in (patch.object(team, 'state_directory', return_value=self.state),
+                        patch.object(team.shutil, 'which', return_value='/bin/true')):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.extra_tabs = []
+
+    def rpc(self, cli, socket, *args):
+        if args[0] == 'tree':
+            self.calls.append(args)
+            return {'tree': {'workspaces': [dict(id='team', location={'type': 'team'},
+                    panes=[dict(id='lead', tabs=[]), dict(id='worker', tabs=[self.tab, *self.extra_tabs])])]}}
+        if args[0] == 'team-spawn':
+            self.calls.append(args)
+            return {'surface_created': {'pane': 'new-worker', 'id': 'new-tab'}}
+        return FollowupTests.rpc(self, cli, socket, *args)
+
+    def launch(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(team.start(self.args), 0)
+        return json.loads(out.getvalue())
+
+    def test_start_reuses_completed_worker_with_new_role_and_request_policies(self):
+        receipt = self.launch()
+        self.assertEqual(receipt['root_job'], str(self.root))
+        self.assertEqual(receipt['pane'], 'worker')
+        turn = Path(receipt['job'])
+        manifest = json.loads((turn / 'job.json').read_text())
+        for key in ('agent', 'model', 'effort', 'complexity', 'routing_usage', 'source_pane',
+                    'role', 'allow_edits', 'timeout', 'stall_timeout', 'max_attempts', 'routes', 'fallback_on_quota'):
+            self.assertEqual(receipt[key], manifest[key], key)
+        self.assertEqual(receipt['assignment'], str(turn))
+        self.assertTrue(receipt['reused'])
+        for key in ('role', 'timeout', 'stall_timeout', 'max_attempts'):
+            self.assertEqual(manifest[key], getattr(self.args, key))
+        self.assertFalse(manifest['fallback_on_quota'])
+        self.assertEqual(manifest['routes'], team.route_plan(self.args))
+        self.assertEqual((self.root / 'result.md').read_text(), 'original result')
+        self.assertFalse(any(c[0] in ('team-spawn', 'close-tab') for c in self.calls))
+        self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 1)
+        # An idle UI alone cannot allow a second start to take an unresolved turn.
+        self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 1)
+
+    def test_start_preserves_unsafe_and_other_scope_workers(self):
+        original = json.loads((self.root / 'job.json').read_text())
+        for key, value in [('source_pane', 'other'), ('socket', '/other'), ('workspace', 'other'),
+                           ('cwd', '/other'), ('provider_env', {'CODEX_HOME': '/other'}),
+                           ('generation', 2)]:
+            with self.subTest(key=key):
+                team.write_json(self.root / 'job.json', dict(original, **{key: value}))
+                self.assertEqual(self.launch()['pane'], 'new-worker')
+        team.write_json(self.root / 'job.json', original)
+        for field, value in [('active', False), ('agent', {}),
+                             ('agent', dict(self.tab['agent'], session_id='other')),
+                             ('agent', dict(self.tab['agent'], activity='running', status='working')),
+                             ('agent', dict(self.tab['agent'], activity='needs_input', status='blocked'))]:
+            with self.subTest(field=field, value=value), patch.dict(self.tab, {field: value}):
+                self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.extra_tabs.append(dict(id='user-tab', kind='terminal'))
+        self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertFalse(any(c[0] in ('send-keys', 'send-key', 'close-tab') for c in self.calls))
+
+    def test_uncertain_reuse_dispatch_does_not_launch_replacement(self):
+        def uncertain(cli, socket, *args):
+            if args[0] == 'send-key':
+                raise RuntimeError('Lost acknowledgement')
+            return self.rpc(cli, socket, *args)
+        with patch.object(team, 'flowmux', side_effect=uncertain):
+            with self.assertRaisesRegex(RuntimeError, 'Do not resend'):
+                self.launch()
+        self.assertFalse(any(c[0] == 'team-spawn' for c in self.calls))
+        self.assertTrue((self.root / 'turns/0001/dispatch-error.json').exists())
+
+    def test_fresh_session_explicitly_keeps_independent_worker(self):
+        self.args.fresh_session = True
+        self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertFalse(any(c[0] in ('send-keys', 'close-tab') for c in self.calls))
+
+    def test_concurrent_starts_dispatch_only_one_turn_to_idle_worker(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out, ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(lambda _: team.start(self.args), range(2)))
+        self.assertEqual(results, [0, 0])
+        receipts = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(sorted(r['pane'] for r in receipts), ['new-worker', 'worker'])
+        self.assertEqual(sum(c[0] == 'send-key' for c in self.calls), 1)
+        self.assertEqual(len(list((self.root / 'turns').iterdir())), 1)
+
+    def test_incompatible_worker_is_stopped_and_closed_before_replacement(self):
+        self.args.model = 'different'
+        closed = False
+        def acknowledge(_):
+            path = self.root / 'retirement.json'
+            if not path.exists():
+                return
+            request = json.loads(path.read_text())
+            if request['state'] == 'stopped':
+                self.owner.close()
+                return
+            self.assertEqual(request['state'], 'requested')
+            self.assertFalse(any(c[0] in ('close-tab', 'team-spawn') for c in self.calls))
+            # Simulate the owned supervisor's stop acknowledgement and exit.
+            team.write_json(path, dict(request, state='stopped'))
+        def rpc(cli, socket, *args):
+            nonlocal closed
+            if args[0] == 'close-tab':
+                self.assertEqual(args, ('close-tab', 'tab', '--pane', 'worker'))
+                self.assertEqual(json.loads((self.root / 'retirement.json').read_text())['state'], 'closing')
+                closed = True
+            if args[0] == 'tree' and closed:
+                self.calls.append(args)
+                return {'tree': {'workspaces': []}}
+            if args[0] == 'team-spawn':
+                self.assertTrue(closed)
+            return self.rpc(cli, socket, *args)
+        with patch.object(team.time, 'sleep', side_effect=acknowledge), patch.object(team, 'flowmux', side_effect=rpc):
+            receipt = self.launch()
+        self.assertEqual(receipt['retired_job'], str(self.root))
+        self.assertEqual(json.loads((self.root / 'retirement.json').read_text())['state'], 'closed')
+        self.assertEqual((self.root / 'result.md').read_text(), 'original result')
+        self.assertFalse(any(c[0].startswith('send-') for c in self.calls))
+
+    def test_uncertain_retirement_preserves_pane_and_prevents_launch(self):
+        self.args.model = 'different'
+        def reject(_):
+            path = self.root / 'retirement.json'
+            if not path.exists():
+                return
+            request = json.loads(path.read_text())
+            team.write_json(path, dict(request, state='blocked', error='Identity changed'))
+        with patch.object(team.time, 'sleep', side_effect=reject):
+            with self.assertRaisesRegex(RuntimeError, 'Retirement unconfirmed'):
+                self.launch()
+        self.assertFalse(any(c[0] in ('team-spawn', 'close-tab') for c in self.calls))
+        self.args.job = self.root
+        with self.assertRaisesRegex(ValueError, 'retirement already requested'):
+            team.followup(self.args)
+
+    def test_old_helper_reuses_compatible_session_but_cannot_retire_it(self):
+        manifest = json.loads((self.root / 'job.json').read_text())
+        manifest.pop('reuse_policy')
+        team.write_json(self.root / 'job.json', manifest)
+        self.args.model = 'different'
+        self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertFalse((self.root / 'retirement.json').exists())
+        self.args.model = 'fixture'
+        self.assertEqual(self.launch()['pane'], 'worker')
+
+    def test_latest_completed_followup_can_be_reused_repeatedly(self):
+        for number in range(1, 4):
+            receipt = self.launch()
+            turn = Path(receipt['job'])
+            self.assertEqual(turn.name, f'{number:04d}')
+            team.write_json(turn / 'status.json', dict(state='completed', task_status='completed',
+                            received=True, session_id='session', transcript=str(self.transcript)))
+        self.assertFalse(any(c[0] == 'team-spawn' for c in self.calls))
+
+    def test_unconfirmed_reports_and_missing_supervisor_never_allow_reuse(self):
+        original = json.loads((self.root / 'status.json').read_text())
+        for change in [dict(state='waiting_input'), dict(state='dispatch_unknown'),
+                       dict(state='running'), dict(task_status='blocked'), dict(received=False),
+                       dict(session_id=None), dict(transcript=None), dict(blocker_kind='quota')]:
+            with self.subTest(change=change):
+                team.write_json(self.root / 'status.json', dict(original, **change))
+                self.assertEqual(self.launch()['pane'], 'new-worker')
+        team.write_json(self.root / 'status.json', original)
+        (self.root / 'supervisor.json').unlink()
+        self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertFalse(any(c[0] in ('send-keys', 'close-tab') for c in self.calls))
+
+    def test_completed_stream_workers_resume_without_inventing_live_session(self):
+        for agent, binding in [('gemini', None), ('agy', None),
+                               ('gemini', dict(name='gemini', status='idle', activity='idle', source='flowmux:proc'))]:
+            with self.subTest(agent=agent, binding=binding):
+                shutil.rmtree(self.root / 'turns', ignore_errors=True)
+                manifest = json.loads((self.root / 'job.json').read_text())
+                manifest.update(agent=agent, model='fixture', effort=None)
+                team.write_json(self.root / 'job.json', manifest)
+                self.args.agent, self.args.effort = agent, None
+                self.tab['agent'] = binding
+                receipt = self.launch()
+                self.assertEqual(receipt['pane'], 'worker')
+                self.assertEqual(receipt['agent'], agent)
+                self.assertEqual(receipt['source_pane'], 'lead')
+                self.assertTrue(receipt['reused'])
+                turn = json.loads((Path(receipt['job']) / 'job.json').read_text())
+                self.assertTrue(turn['resume_session'])
+                self.assertEqual(turn['session_id'], 'session')
+        self.assertFalse(any(c[0] in ('send-keys', 'send-key', 'team-spawn') for c in self.calls))
+
+    def test_native_stream_completion_does_not_override_busy_or_changed_ui(self):
+        manifest = json.loads((self.root / 'job.json').read_text())
+        manifest.update(agent='gemini', model='fixture', effort=None)
+        team.write_json(self.root / 'job.json', manifest)
+        self.args.agent, self.args.effort = 'gemini', None
+        for activity, session in [('running', None), ('needs_input', None), ('idle', 'other-session')]:
+            self.tab['agent'] = dict(name='gemini', activity=activity, status='idle', session_id=session)
+            self.assertEqual(self.launch()['pane'], 'new-worker')
+        self.assertFalse(any(c[0] in ('send-keys', 'close-tab') for c in self.calls))
+
+
 class ManagedTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='fm-managed-test-')
@@ -1006,6 +1232,50 @@ class ManagedTests(unittest.TestCase):
         environment = patch.dict(os.environ, XDG_STATE_HOME=str(self.job / 'state'))
         environment.start()
         self.addCleanup(environment.stop)
+
+    def test_retirement_uses_supervisors_owned_process_and_rechecks_identity(self):
+        manifest = dict(generation=1, assignment=str(self.job), pane='worker', surface='tab',
+                        socket=str(self.job / 'socket'), agent='codex', model='fixture', effort=None,
+                        provider_env={}, token='token', role='test', allow_edits=False,
+                        executable='/codex', cwd=str(self.job), cli='/flowmux')
+        (self.job / 'task.txt').write_text('test')
+        process = unittest.mock.Mock(pid=123)
+        for scenario in ('stopped', 'changed-session', 'busy', 'shutdown-failed', 'stream-pid-reused', 'stream-child-alive'):
+            with self.subTest(scenario=scenario):
+                streamed = scenario.startswith('stream-')
+                manifest['agent'] = 'gemini' if streamed else 'codex'
+                process.poll.return_value = 0 if streamed else None
+                shutil.rmtree(self.job / 'attempt-1', ignore_errors=True)
+                team.write_json(self.job / 'job.json', manifest)
+                team.write_json(self.job / 'status.json', dict(state='pending'))
+                def complete(*args):
+                    if streamed:
+                        args[4].update({123: 'original start', 456: 'owned start'})
+                    request = {key: manifest[key] for key in ('generation', 'pane', 'surface')}
+                    request.update(state='requested', session_id='wrong' if scenario == 'changed-session' else 'exact')
+                    team.write_json(self.job / 'retirement.json', request)
+                    return dict(state='completed', task_status='completed', session_id='exact')
+                with patch.dict(os.environ, FLOWMUX_PANE_ID='worker', FLOWMUX_SOCKET_PATH=manifest['socket']), \
+                        patch.object(team.subprocess, 'Popen', return_value=process), \
+                        patch.object(team, 'monitor_managed', side_effect=complete), \
+                        patch.object(team, 'managed_pane', return_value=dict(active=True, agent=None)), \
+                        patch.object(team, 'process_snapshot', return_value={123: (1, 123, 'reused start', 'S'),
+                                     456: (123, 123, 'owned start' if scenario == 'stream-child-alive' else 'reused child', 'S')}), \
+                        patch.object(team, 'idle_worker', side_effect=ValueError('busy') if scenario == 'busy' else None), \
+                        patch.object(team, 'stop_owned', side_effect=RuntimeError('alive') if scenario == 'shutdown-failed' else None) as stop:
+                    if scenario in ('stopped', 'stream-pid-reused'):
+                        self.assertEqual(team.managed_worker(self.job), 0)
+                        if streamed:
+                            stop.assert_not_called()
+                        else:
+                            stop.assert_called_once_with(process, {})
+                    else:
+                        with self.assertRaises((ValueError, RuntimeError)):
+                            team.managed_worker(self.job)
+                        if scenario in ('busy', 'changed-session'):
+                            stop.assert_not_called()
+                self.assertEqual(json.loads((self.job / 'retirement.json').read_text())['state'],
+                                 'stopped' if scenario in ('stopped', 'stream-pid-reused') else 'blocked')
 
     def test_worker_exception_preserves_recovery_diagnostics_and_history(self):
         for outcome in ('blocked', 'pending'):

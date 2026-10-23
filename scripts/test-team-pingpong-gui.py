@@ -214,7 +214,7 @@ def main():
                 env.update(CODEX_THREAD_ID=session, FLOWMUX_PANE_ID=other_before['panes'][0]['id'])
                 task = h.root / f'{agent}-approval.txt'
                 task.write_text('Show approval fixture and wait for a human. Do not complete.')
-                started = subprocess.run([sys.executable, str(helper), 'start', '--agent', agent,
+                started = subprocess.run([sys.executable, str(helper), 'start', '--fresh-session', '--agent', agent,
                     '--complexity', 'simple', '--role', 'approval fixture', '--cwd', str(REPO),
                     '--task-file', str(task), '--cli', args.cli, '--timeout', '300', '--no-fallback'],
                     env=env, capture_output=True, text=True, timeout=30)

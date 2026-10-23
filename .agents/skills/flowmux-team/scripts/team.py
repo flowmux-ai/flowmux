@@ -290,6 +290,15 @@ def start(args):
     origin = context(args)
     if origin["mode"] != "team":
         raise ValueError("Worker creation requires a Team workspace; complete the task in the current agent without delegation")
+    jobs = state_directory() / "team-jobs"
+    jobs.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Selection and dispatch are one transaction across concurrent automatic starts.
+    with (jobs / "start.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return start_locked(args, origin, jobs)
+
+
+def start_locked(args, origin, jobs):
     cli = shutil.which(args.cli)
     socket, pane = origin["socket"], origin["pane"]
     cwd = args.cwd.resolve(strict=True)
@@ -303,13 +312,7 @@ def start(args):
     executable = shutil.which(selection["agent"])
     if executable is None:
         raise ValueError(f"{selection['agent']} is not installed/on PATH")
-    jobs = state_directory() / "team-jobs"
-    jobs.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # The saved terminal shell points here, so tmp cleanup must not remove it.
-    job = Path(tempfile.mkdtemp(prefix="job-", dir=jobs))
-    print(f"Job artifacts: {job}", file=sys.stderr, flush=True)
     token = str(uuid.uuid4())
-    (job / "task.txt").write_text(task + "\n")
     manifest = {"executable": executable, "cwd": str(cwd),
                 "role": args.role, "allow_edits": args.allow_edits,
                 "timeout": args.timeout, "timeout_policy": "progress", "socket": socket, "cli": cli,
@@ -322,9 +325,35 @@ def start(args):
                                                          ("GEMINI_CLI_HOME", "."))}},
                 "executables": {agent: shutil.which(agent) for agent in MODEL_ROUTES},
                 "fallback_on_quota": not args.no_fallback,
-                "routes": route_plan(args), "routing_usage": usage, "generation": 1, "assignment": str(job),
+                "routes": route_plan(args), "routing_usage": usage, "generation": 1, "reuse_policy": 1,
                 "max_attempts": getattr(args, "max_attempts", 4),
                 "stall_timeout": getattr(args, "stall_timeout", 180)}
+    if not getattr(args, "fresh_session", False):
+        retired = None
+        for root in sorted(jobs.glob("job-*")):
+            try:
+                saved = json.loads((root / "job.json").read_text())
+                if not isinstance(saved, dict):
+                    continue
+                if any(saved.get(key) != manifest[key] for key in ("socket", "workspace", "source_pane", "cwd")):
+                    continue
+                saved = completed_worker(root, saved)
+                if usage_identity(saved["agent"], saved.get("provider_env")) != usage_identity(saved["agent"]):
+                    continue
+            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
+                continue
+            if all(saved.get(key) == manifest[key] for key in ("agent", "model", "effort", "allow_edits")):
+                return followup(argparse.Namespace(**{**vars(args), "job": root}), reuse=manifest)
+            if saved.get("reuse_policy") == 1 and retired is None:
+                retired = root
+        if retired is not None:
+            retire_worker(retired)
+            manifest["retired_job"] = str(retired)
+    # The saved terminal shell points here, so tmp cleanup must not remove it.
+    job = Path(tempfile.mkdtemp(prefix="job-", dir=jobs))
+    print(f"Job artifacts: {job}", file=sys.stderr, flush=True)
+    manifest["assignment"] = str(job)
+    (job / "task.txt").write_text(task + "\n")
     (job / "prompt.txt").write_text(worker_prompt(job, manifest))
     write_json(job / "status.json", {"state": "pending"})
     try:
@@ -342,6 +371,73 @@ def start(args):
     print(json.dumps({"job": str(job), **manifest}, ensure_ascii=False))
     return 0
 
+
+
+def completed_worker(root, manifest):
+    if (not manifest.get("generation") or manifest.get("timeout_policy") != "progress"
+            or (root / "launch-error.json").exists() or (root / "retirement.json").exists()):
+        raise ValueError("Worker is not available for automatic reuse")
+    require_supervisor(root, manifest)
+    turns = sorted((root / "turns").glob("[0-9]*"))
+    previous = json.loads(((turns[-1] if turns else root) / "status.json").read_text())
+    if (not isinstance(previous, dict) or previous.get("state") != "completed" or previous.get("task_status") != "completed"
+            or previous.get("blocker_kind") or previous.get("worker_error") or previous.get("received") is False
+            or not previous.get("session_id") or not previous.get("transcript")):
+        raise ValueError("Worker has no confirmed completed assignment")
+    manifest = {**manifest, **{key: previous[key] for key in
+                ("agent", "model", "effort", "pane", "surface", "session_id", "transcript") if key in previous}}
+    completed_worker_tab(manifest)
+    return manifest
+
+
+def completed_worker_tab(manifest):
+    tab = managed_pane(manifest)
+    # Stream completion already proves native final result and successful process exit.
+    if manifest["agent"] in ("gemini", "agy"):
+        agent = tab.get("agent") or {}
+        if not tab["active"]:
+            raise ValueError("Recorded worker surface is inactive")
+        if agent and (agent.get("activity") != "idle" or agent.get("status") not in ("idle", "done")):
+            raise ValueError("Stream worker is busy or needs input; inspect its pane")
+    else:
+        idle_worker(manifest["cli"], manifest)
+
+
+def retire_worker(root):
+    with (root / "followup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        manifest = completed_worker(root, json.loads((root / "job.json").read_text()))
+        if manifest.get("reuse_policy") != 1:
+            raise ValueError("Worker helper cannot confirm retirement; no pane was changed")
+        request = {key: manifest[key] for key in ("generation", "session_id", "pane", "surface")}
+        request["state"] = "requested"
+        path = root / "retirement.json"
+        write_json(path, request)
+        deadline = time.monotonic() + 10
+        while True:
+            result = json.loads(path.read_text())
+            if result.get("state") == "stopped":
+                break
+            if result.get("state") != "requested" or time.monotonic() >= deadline:
+                raise RuntimeError(f"Retirement unconfirmed; inspect {root}. No replacement started")
+            time.sleep(.1)
+        # The supervisor proves shutdown using its existing owned process tree.
+        with (root / "worker.lock").open("a") as owner:
+            while True:
+                try:
+                    fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Worker supervisor did not exit; no pane was changed")
+                    time.sleep(.1)
+            managed_pane(manifest)
+            write_json(path, {**request, "state": "closing"})
+            flowmux(manifest["cli"], manifest["socket"], "close-tab", manifest["surface"], "--pane", manifest["pane"])
+            tree = flowmux(manifest["cli"], manifest["socket"], "tree")["tree"]["workspaces"]
+            if any(p["id"] == manifest["pane"] for w in tree for p in w["panes"]):
+                raise RuntimeError("Retired pane did not close; no replacement started")
+            write_json(path, {**request, "state": "closed"})
 
 
 def write_launcher(job, manifest, generation):
@@ -600,7 +696,7 @@ def collect_turn(job):
         return state
 
 
-def followup(args):
+def followup(args, *, reuse=None):
     root = args.job
     manifest = json.loads((root / "job.json").read_text())
     if "root_job" in manifest and Path(manifest["root_job"]) != root:
@@ -616,11 +712,22 @@ def followup(args):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("Another followup is being dispatched; do not retry blindly") from error
+        manifest = json.loads((root / "job.json").read_text())
+        if (root / "retirement.json").exists():
+            raise ValueError("Worker retirement already requested; no follow-up sent")
         origin = context(args)
         if (origin["socket"], origin["workspace"], origin["pane"], origin["mode"]) != (
                 manifest["socket"], manifest["workspace"], manifest["source_pane"], "team"):
             raise ValueError("Followup must come from the original lead pane and Team workspace; no input sent")
         require_supervisor(root, manifest)
+        if reuse is not None:
+            manifest = completed_worker(root, manifest)
+            if any(manifest.get(key) != reuse[key] for key in
+                   ("socket", "workspace", "source_pane", "cwd", "agent", "model", "effort", "allow_edits")) or (
+                    usage_identity(manifest["agent"], manifest.get("provider_env")) != usage_identity(reuse["agent"], reuse["provider_env"])):
+                raise ValueError("Worker changed during automatic selection; no follow-up sent")
+            manifest.update({key: reuse[key] for key in ("role", "complexity", "timeout", "stall_timeout",
+                            "max_attempts", "fallback_on_quota", "routes", "routing_usage", "executables", "provider_env")})
         overrides = {key: getattr(args, key, None) for key in ("timeout", "stall_timeout")}
         overrides = {key: value for key, value in overrides.items() if value is not None}
         if overrides and manifest.get("timeout_policy") != "progress":
@@ -649,6 +756,8 @@ def followup(args):
         write_json(turn / "job.json", manifest)
         receipt = {"job": str(turn), "root_job": str(root),
                    **{key: manifest[key] for key in ("pane", "surface", "workspace", "socket", "session_id")}}
+        if reuse is not None:
+            receipt = {**manifest, **receipt, "assignment": str(turn), "reused": True}
         # Persist uncertainty before any input; status can recover a received reply.
         write_json(turn / "status.json", {"state": "dispatch_unknown", "received": False,
                    **{key: manifest[key] for key in ("agent", "model", "effort", "session_id", "transcript") if key in manifest}})
@@ -1280,6 +1389,29 @@ def managed_worker(job):
         write_json(assignment / "status.json", state)
         # Keep a successful TUI, or the official stream output, available for follow-ups.
         while True:
+            retirement = job / "retirement.json"
+            if retirement.exists():
+                request = json.loads(retirement.read_text())
+                try:
+                    if (request.get("state") != "requested" or state.get("state") != "completed"
+                            or state.get("task_status") != "completed" or state.get("blocker_kind")
+                            or any(request.get(key) != manifest.get(key) for key in
+                                   ("generation", "session_id", "pane", "surface"))):
+                        raise ValueError("Retirement assignment or identity changed")
+                    completed_worker_tab(manifest)
+                    if streamed:
+                        # Never rediscover ownership through an exited stream's reusable PID/PGID.
+                        snapshot = process_snapshot()
+                        if process.poll() is None or any(pid in owned and info[2] == owned[pid]
+                                and not info[3].startswith("Z") for pid, info in snapshot.items()):
+                            raise ValueError("Stream worker still has live owned processes; inspect its pane")
+                    else:
+                        stop_owned(process, owned)
+                    write_json(retirement, {**request, "state": "stopped"})
+                    return 0
+                except Exception as error:
+                    write_json(retirement, {**request, "state": "blocked", "error": str(error)})
+                    raise
             request = job / "active-turn.json"
             if request.exists():
                 turn = Path(json.loads(request.read_text())["job"])
@@ -1289,6 +1421,7 @@ def managed_worker(job):
                     assignment = turn
                     manifest = json.loads((turn / "job.json").read_text())
                     manifest["assignment"] = str(turn)
+                    env.update(manifest["provider_env"])
                     write_json(job / "job.json", {k: v for k, v in manifest.items() if k != "root_job"})
                     break
             if not streamed and process.poll() is not None:
@@ -1413,7 +1546,7 @@ def budget(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    launch = commands.add_parser("start", help="Launch one role/task in a fresh pane")
+    launch = commands.add_parser("start", help="Reuse an idle worker or launch one role/task in a new pane")
     route = commands.add_parser("route", help="Preview per-session model selection without starting an agent")
     for command in (launch, route):
         command.add_argument("--agent", choices=("auto", *MODEL_ROUTES), default="auto")
@@ -1421,6 +1554,7 @@ def main():
         command.add_argument("--model", help="Explicit provider model; overrides complexity routing")
         command.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
     launch.add_argument("--role", required=True)
+    launch.add_argument("--fresh-session", action="store_true", help="Keep a separate session for an independent assignment")
     launch.add_argument("--task-file", type=Path, required=True)
     launch.add_argument("--cwd", type=Path, required=True)
     probe = commands.add_parser("context", help="Resolve the lead and select inline or Team execution")

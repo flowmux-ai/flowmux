@@ -105,7 +105,7 @@ time.sleep(120)
     env['TMPDIR'] = str(transient)
 
     def start(agent):
-        result = subprocess.run([sys.executable, str(helper), 'start', '--agent', agent,
+        result = subprocess.run([sys.executable, str(helper), 'start', '--fresh-session', '--agent', agent,
                                  '--role', 'Lifecycle ' + agent, '--cwd', str(h.root),
                                  '--task-file', str(task), '--cli', h.args.cli],
                                 env=env, capture_output=True, text=True, timeout=20)
@@ -452,7 +452,7 @@ sys.stdin.readline()
         receipt = h.root / 'routing-receipt.json'
         errors = h.root / 'routing-errors.log'
         runner = h.root / 'routing-launch.sh'
-        command = [sys.executable, str(team / 'scripts/team.py'), 'start', '--agent', 'claude',
+        command = [sys.executable, str(team / 'scripts/team.py'), 'start', '--fresh-session', '--agent', 'claude',
                    '--role', 'Window routing fixture', '--cwd', str(h.root), '--task-file', str(task)]
         stale_env = dict(env, FLOWMUX_SOCKET_PATH=str(other_socket), FLOWMUX_PANE_ID=other_pane,
                          CODEX_THREAD_ID=session)

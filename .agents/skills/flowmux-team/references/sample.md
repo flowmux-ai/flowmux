@@ -5,6 +5,8 @@
 Run from a Flowmux terminal in a **Team workspace** in a trusted repository.
 The ordinary-workspace flow performs both tasks inside the lead without this sample.
 Create it via **New Team Workspace** and start the lead agent there first. Both tasks are read-only.
+This example uses `--fresh-session` for independent researcher/reviewer conversations.
+Ordinary `start` calls reuse suitable idle workers or retire completed workers before replacement.
 Workers read relevant README.md sections directly; the reviewer reads the actual
 research report by path. The selected agents must be installed and authenticated.
 This focused task uses the `simple` model tier per session; provider defaults
@@ -38,7 +40,7 @@ def run(role, task):
     if role == 'reviewer':
         agent = os.environ.get('TEAM_REVIEW_AGENT', 'claude' if agent == 'codex' else 'codex')
     receipt = subprocess.run([
-        sys.executable, str(helper), 'start', '--agent', agent, '--complexity', 'simple',
+        sys.executable, str(helper), 'start', '--fresh-session', '--agent', agent, '--complexity', 'simple',
         '--role', role, '--cwd', str(root), '--task-file', str(prompt),
     ], capture_output=True, text=True)
     (sample / f'{role}-launch.log').write_text(receipt.stdout + receipt.stderr)

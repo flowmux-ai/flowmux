@@ -225,7 +225,7 @@ def main():
                 for directory in ('team-quota', 'team-unavailable'):
                     for cached in (h.root / 'state/flowmux' / directory).glob('*.json'):
                         cached.unlink()
-            return command('start', '--agent', agent, '--role', 'recovery fixture', '--cwd', str(h.root),
+            return command('start', '--fresh-session', '--agent', agent, '--role', 'recovery fixture', '--cwd', str(h.root),
                            '--task-file', str(task), '--cli', args.cli, '--stall-timeout', '3', '--timeout', '15', *extra)
 
         def finished(receipt):

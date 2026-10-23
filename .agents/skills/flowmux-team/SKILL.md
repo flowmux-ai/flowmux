@@ -125,8 +125,25 @@ python3 /path/to/flowmux-team/scripts/team.py start \
   --task-file /absolute/research-task.txt
 ```
 
-The helper uses the Flowmux CLI's `team-spawn` to split the **lead's** pane.
-The split's first and only tab launches the provider with the task prompt.
+`start` first looks for a completed, idle worker from the same lead, Team workspace,
+working directory and provider profile. A compatible provider, model, effort and
+edit policy continues through a tracked follow-up in the existing pane and conversation.
+The new assignment gets its own report and requested limits; earlier reports remain intact.
+If an owned completed worker needs a different configuration, the helper retires
+that worker before opening its replacement. Busy workers, input waits, changed
+sessions and panes with extra tabs are preserved. Concurrent work can still need
+more than one worker; repeated sequential assignments should not keep adding panes.
+Older compatible managed workers can still be reused. Automatic retirement requires
+a worker started with this helper version; older helpers cannot acknowledge shutdown
+and their panes are preserved.
+
+Use `--fresh-session` only when the task needs an independent conversation, such
+as a separate reviewer. It explicitly keeps existing workers and opens another pane.
+The sample and multi-role examples use this option to keep their reviewers independent.
+For a related follow-up to a known worker, continue to use `followup` directly.
+
+When a new worker is needed, the helper uses the Flowmux CLI's `team-spawn` to split
+the **lead's** pane. The split's first and only tab launches the provider with the task prompt.
 Claude/Codex stay interactive after their answer. Gemini/agy display their native
 stream and resume the exact conversation on `followup`. Creating or replacing a
 worker preserves the user's active workspace and keyboard focus. Codex workers use a dedicated local
@@ -142,7 +159,8 @@ Jobs retain provider paths and profiles for collection and restoration;
 credentials are not copied. Restoration resumes the conversation, not the task.
 
 Retain the JSON receipt: `job`, `pane`, `surface`, `workspace`, `socket` and
-`source_pane`. Launch subsequent workers from the lead's origin, never a prior
+`root_job` when present. An automatically reused assignment returns a turn's
+`job`; use `root_job` for later explicit `followup` calls. Launch subsequent workers from the lead's origin, never a prior
 worker. Explicit pane IDs keep routing independent of focus. Working directory
 changes do not change the workspace that receives the split.
 
@@ -336,7 +354,8 @@ For runnable multi-turn examples, expected evidence and troubleshooting, read th
 [communication cookbook](references/cookbook.md). The examples cover review and
 revision, missing input, and a real failing-check → correction → passing-check loop.
 
-Retain successful panes and all artifacts for review. Failed managed workers and
-panes are cleaned up automatically under the recovery policy above; never close
+Keep reports and artifacts for review. Completed worker panes are available for
+reuse or retirement on a later `start`; do not request a fresh pane for every task.
+Failed managed workers and panes are cleaned up automatically under the recovery policy above; never close
 the lead or another user's session. Restoring a launcher does not rerun its
 assignment. No automatic merge or push.
