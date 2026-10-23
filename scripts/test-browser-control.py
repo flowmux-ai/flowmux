@@ -290,7 +290,7 @@ def exercise(cli, url, root):
     bounds = json.loads(evaluate("JSON.stringify(slider.getBoundingClientRect())"))
     browser("drag", str(bounds["x"] + 8), str(bounds["y"] + bounds["height"] / 2),
             str(bounds["right"] - 12), str(bounds["y"] + bounds["height"] / 2))
-    assert evaluate("slider.valueAsNumber>90 && rangeEvents.length>0 && rangeEvents.every(Boolean)") == "true", evaluate("JSON.stringify({value:slider.value,events:rangeEvents,pointer:rangePointer,rect:slider.getBoundingClientRect()})")
+    assert evaluate("String(slider.valueAsNumber>90 && rangeEvents.length>0 && rangeEvents.every(Boolean))") == "true", evaluate("JSON.stringify({value:slider.value,events:rangeEvents,pointer:rangePointer,rect:slider.getBoundingClientRect()})")
     evaluate("slider.remove();'range removed'")
     browser("pointer", "click", *map(str, point))
     coordinate_surface = snapshot()["page"]["surface_id"]
