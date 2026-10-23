@@ -485,6 +485,19 @@ enum NotificationOp {
 }
 
 #[derive(Subcommand)]
+enum DialogAction {
+    Status,
+    Accept {
+        id: String,
+        #[arg(long)]
+        text: Option<String>,
+    },
+    Dismiss {
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum DownloadAction {
     List,
     Cancel {
@@ -498,6 +511,12 @@ enum DownloadAction {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Inspect or answer the current page alert, confirm, or prompt.
+    Dialog {
+        pane: PaneId,
+        #[command(subcommand)]
+        action: DialogAction,
+    },
     /// Inspect downloads, cancel one, or choose this tab's download directory.
     Download {
         pane: PaneId,

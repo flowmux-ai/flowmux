@@ -138,6 +138,16 @@ impl WindowController {
                     }
                 };
                 match op {
+                    BrowserOp::Dialog { action } => {
+                        glib::spawn_future_local(async move {
+                            let _ = ack.send(
+                                browser
+                                    .dialog(&action)
+                                    .await
+                                    .map(BrowserActionResult::String),
+                            );
+                        });
+                    }
                     BrowserOp::Download { action } => {
                         let _ =
                             ack.send(browser.download(&action).map(BrowserActionResult::String));

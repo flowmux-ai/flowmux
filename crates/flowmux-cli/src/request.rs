@@ -8,6 +8,15 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Dialog { pane, action } => {
+            use flowmux_ipc::protocol::BrowserDialogAction as Action;
+            let action = match action {
+                DialogAction::Status => Action::Status,
+                DialogAction::Accept { id, text } => Action::Accept { id, text },
+                DialogAction::Dismiss { id } => Action::Dismiss { id },
+            };
+            Request::BrowserDialog { pane, action }
+        }
         BrowserOp::Download { pane, action } => {
             use flowmux_ipc::protocol::BrowserDownloadAction as Action;
             let action = match action {

@@ -43,6 +43,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "screenshot",
     "media",
     "download",
+    "dialog",
 ];
 
 /// Browser features that are intentionally unsupported and return a
@@ -770,6 +771,10 @@ pub enum Request {
         body: String,
         timeout_ms: u32,
     },
+    BrowserDialog {
+        pane: PaneId,
+        action: BrowserDialogAction,
+    },
     BrowserDownload {
         pane: PaneId,
         action: BrowserDownloadAction,
@@ -837,6 +842,14 @@ pub enum BrowserDownloadAction {
     List,
     Cancel { id: u64 },
     Directory { path: PathBuf },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum BrowserDialogAction {
+    Status,
+    Accept { id: String, text: Option<String> },
+    Dismiss { id: String },
 }
 
 impl Request {

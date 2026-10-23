@@ -2,6 +2,7 @@
 //! macOS in-app browser pane backed by the system WebKit `WKWebView`.
 
 use crate::ui::browser_bookmarks::BookmarkMenu;
+use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::{DownloadItem, DownloadManager};
 use crate::ui::pane_terminal::PaneCallbacks;
 use adw::prelude::*;
@@ -104,6 +105,7 @@ struct BrowserNavigationDelegateIvars {
 }
 
 struct BrowserUIDelegateIvars {
+    dialogs: PageDialogs,
     navigation_enabled: Rc<Cell<bool>>,
     pane_id: Rc<Cell<PaneId>>,
     open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
@@ -632,6 +634,18 @@ pub fn ref_scope_for_surface(surface_id: SurfaceId) -> RefScope {
 }
 
 impl BrowserPane {
+    pub async fn dialog(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserDialogAction,
+    ) -> Result<String, String> {
+        self.native
+            ._ui_delegate
+            .ivars()
+            .dialogs
+            .control(action)
+            .await
+    }
+
     pub fn download(
         &self,
         action: &flowmux_ipc::protocol::BrowserDownloadAction,
@@ -1490,6 +1504,7 @@ fn install_ui_delegate(
     navigation_enabled: Rc<Cell<bool>>,
 ) -> Retained<BrowserUIDelegate> {
     let delegate = BrowserUIDelegate::alloc(mtm).set_ivars(BrowserUIDelegateIvars {
+        dialogs: PageDialogs::default(),
         navigation_enabled,
         pane_id,
         open_url,
@@ -1604,31 +1619,6 @@ fn present_web_permission_dialog(
     dialog.present(Some(parent));
 }
 
-enum PageDialog {
-    Alert,
-    Confirm,
-    Prompt(String),
-}
-
-/// One-shot answer to a page dialog: `Some` for OK (with prompt text), `None`
-/// for cancel. WebKit raises an exception when a panel completion handler is
-/// released uncalled, so dropping an unanswered reply cancels the dialog.
-struct PageDialogReply(Option<Box<dyn FnOnce(Option<String>)>>);
-
-impl PageDialogReply {
-    fn send(&mut self, reply: Option<String>) {
-        if let Some(send) = self.0.take() {
-            send(reply);
-        }
-    }
-}
-
-impl Drop for PageDialogReply {
-    fn drop(&mut self) {
-        self.send(None);
-    }
-}
-
 fn present_page_dialog(
     ivars: &BrowserUIDelegateIvars,
     frame: &WKFrameInfo,
@@ -1650,49 +1640,19 @@ fn present_page_dialog(
     } else {
         format!("{site} says")
     };
-    let dialog = adw::AlertDialog::new(Some(&heading), Some(&message.to_string()));
-    if !matches!(kind, PageDialog::Alert) {
-        dialog.add_response("cancel", "Cancel");
-    }
-    dialog.add_response("ok", "OK");
-    dialog.set_default_response(Some("ok"));
-    dialog.set_close_response(if matches!(kind, PageDialog::Alert) {
-        "ok"
-    } else {
-        "cancel"
-    });
-    let entry = match kind {
-        PageDialog::Prompt(default_text) => {
-            let entry = gtk::Entry::builder()
-                .text(default_text)
-                .activates_default(true)
-                .build();
-            dialog.set_extra_child(Some(&entry));
-            Some(entry)
-        }
-        _ => None,
-    };
-
     // A pending JavaScript dialog blocks WebKit's snapshot completion.
     let native_browser_suspend = suspend_native_browser_views(&parent, false);
-    let pending = Rc::new(RefCell::new(Some((reply, native_browser_suspend))));
-    let pending_on_unmap = pending.clone();
-    dialog.connect_unmap(move |_| {
-        // Window teardown can unmap a panel without sending a response.
-        pending_on_unmap.borrow_mut().take();
-    });
-    dialog.connect_response(None, move |_dialog, response| {
-        if let Some((mut reply, native_browser_suspend)) = pending.borrow_mut().take() {
-            reply.send((response == "ok").then(|| {
-                entry
-                    .as_ref()
-                    .map(|entry| entry.text().to_string())
-                    .unwrap_or_default()
-            }));
+    let mut reply = reply;
+    ivars.dialogs.present(
+        &parent,
+        &heading,
+        &message.to_string(),
+        kind,
+        PageDialogReply(Some(Box::new(move |answer| {
+            reply.send(answer);
             drop(native_browser_suspend);
-        }
-    });
-    dialog.present(Some(&parent));
+        }))),
+    );
 }
 
 fn website_data_store(
@@ -1999,26 +1959,6 @@ fn uuid_for_profile_slug(slug: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn page_dialog_reply_cancels_on_drop_and_answers_only_once() {
-        let replies = Rc::new(RefCell::new(Vec::new()));
-        {
-            let replies = replies.clone();
-            let _reply = PageDialogReply(Some(Box::new(move |value| {
-                replies.borrow_mut().push(value);
-            })));
-        }
-        {
-            let replies = replies.clone();
-            let mut reply = PageDialogReply(Some(Box::new(move |value| {
-                replies.borrow_mut().push(value);
-            })));
-            reply.send(Some("edited".into()));
-            reply.send(None);
-        }
-        assert_eq!(*replies.borrow(), [None, Some("edited".into())]);
-    }
 
     #[test]
     fn navigation_delegate_class_registers_with_native_ivar_alignment() {

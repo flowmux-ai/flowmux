@@ -153,6 +153,7 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserDialog { pane, action } => (pane, BrowserOp::Dialog { action }),
             Request::BrowserDownload { pane, action } => (pane, BrowserOp::Download { action }),
             Request::BrowserMedia {
                 pane,
@@ -431,6 +432,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
                 Request::BrowserEvalAsync { .. }
                 | Request::BrowserMedia { .. }
+                | Request::BrowserDialog { .. }
                 | Request::BrowserDownload { .. } => self.handle_browser_verb(req).await,
                 Request::ClaudeTeams { .. }
                 | Request::TmuxCompat { .. }

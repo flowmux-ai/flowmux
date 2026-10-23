@@ -127,6 +127,7 @@ This option applies to every browser command except `open`.
 | screenshot | yes | viewport PNG, or `--full-page` for a document PNG; see the CLI skill for platform limits |
 | media | yes | audio/video ref: status, play, pause, seek seconds, mute, unmute; returns playback state |
 | download | yes | tab-scoped list, cancel ID, directory EXISTING_PATH; poll terminal state before using a file |
+| dialog | yes | page alert/confirm/prompt: status, accept ID [--text TEXT], dismiss ID |
 | wait | yes | polls for selector / text / url / ready-state / JS predicate (timeout + poll interval) |
 | viewport / network mocking / screencast | no | CDP-only; WebKitGTK 6 / WKWebView do not expose CDP |
 

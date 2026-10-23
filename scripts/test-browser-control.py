@@ -206,6 +206,48 @@ def exercise(cli, url, root):
     assert downloads()["downloads"][0]["state"] == "complete"
     evaluate("mutations.length=0; 'reset observations'")
     print("PASS: native downloads save exact content without overwrite and expose cancellation", flush=True)
+    def dialog(*args, **kwargs):
+        result = browser("dialog", *(args or ("status",)), **kwargs)
+        return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["dialog"]
+
+    def open_dialog(expression, kind, message):
+        evaluate(f"window.dialogResult='pending'; setTimeout(()=>{{window.dialogResult={expression}}},0); 'scheduled'")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            pending = dialog()
+            if pending:
+                assert pending["kind"] == kind and pending["message"] == message, pending
+                return pending
+            time.sleep(.02)
+        raise AssertionError("page dialog did not appear")
+
+    assert dialog() is None
+    pending = open_dialog("confirm('Proceed?')", "confirm", "Proceed?")
+    dialog("accept", "stale-id", error=True)
+    dialog("accept", pending["id"], "--text", "wrong kind", error=True)
+    assert dialog()["id"] == pending["id"]
+    dialog("accept", pending["id"])
+    assert browser("wait", "--js", "dialogResult === true")["browser_bool_result"]["value"]
+    assert dialog() is None
+    next_pending = open_dialog("prompt('Name?', 'initial')", "prompt", "Name?")
+    assert next_pending["default_text"] == "initial"
+    dialog("dismiss", pending["id"], error=True)
+    dialog("accept", next_pending["id"], "--text", "한글🙂")
+    assert browser("wait", "--js", "dialogResult === '한글🙂'")["browser_bool_result"]["value"]
+    pending = open_dialog("prompt('Cancel?', 'initial')", "prompt", "Cancel?")
+    dialog("dismiss", pending["id"])
+    assert browser("wait", "--js", "dialogResult === null")["browser_bool_result"]["value"]
+    pending = open_dialog("prompt('Default?', 'initial')", "prompt", "Default?")
+    dialog("accept", pending["id"])
+    assert browser("wait", "--js", "dialogResult === 'initial'")["browser_bool_result"]["value"]
+    pending = open_dialog("confirm('Cancel confirm?')", "confirm", "Cancel confirm?")
+    dialog("dismiss", pending["id"])
+    assert browser("wait", "--js", "dialogResult === false")["browser_bool_result"]["value"]
+    pending = open_dialog("alert('Done')", "alert", "Done")
+    dialog("dismiss", pending["id"])
+    assert browser("wait", "--js", "dialogResult === undefined")["browser_bool_result"]["value"]
+    assert dialog() is None
+    print("PASS: page dialogs require matching IDs and preserve confirm/prompt/alert replies", flush=True)
     before = evaluate("document.documentElement.outerHTML")
     first = snapshot()
     assert evaluate("document.documentElement.outerHTML") == before
@@ -409,6 +451,17 @@ def exercise(cli, url, root):
     assert evaluate("String(clicks)") == "1"
     print("PASS: stale nodes, snapshots and tabs rejected; live actions and non-mutating snapshots preserved", flush=True)
     assert first_surface, "snapshot must identify its browser tab"
+    browser("eval", "setTimeout(()=>{window.pinnedDialog=confirm('Pinned tab?')},0); 'scheduled'", "--surface", first_surface)
+    deadline = time.monotonic() + 5
+    pending = None
+    while not pending and time.monotonic() < deadline:
+        pending = dialog("status", "--surface", first_surface)
+        time.sleep(.02)
+    assert pending and pending["message"] == "Pinned tab?", pending
+    assert dialog() is None, "inactive tab dialog leaked into active tab state"
+    dialog("accept", pending["id"], error=True)
+    dialog("accept", pending["id"], "--surface", first_surface)
+    assert browser("wait", "--js", "pinnedDialog === true", "--surface", first_surface)["browser_bool_result"]["value"]
     browser("click", reference(third, "Original"), "--surface", first_surface, error=True)
     assert browser("eval", "String(clicks)", "--surface", first_surface)["browser_result"]["value"] == "3"
     assert evaluate("String(clicks)") == "1", "pinned action changed the active tab"

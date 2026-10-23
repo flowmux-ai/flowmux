@@ -3,6 +3,7 @@ pub mod agent_bar;
 pub(crate) mod agent_office;
 mod browser_bookmarks;
 mod browser_capture;
+mod browser_dialogs;
 mod browser_downloads;
 pub mod browser_pane;
 pub mod editor_pane;

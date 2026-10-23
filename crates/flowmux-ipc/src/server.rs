@@ -48,6 +48,10 @@ fn query_timeout(request: &Request) -> Option<Duration> {
             request: SshRequest::Status { .. },
         }
         | Request::BrowserSnapshot { .. }
+        | Request::BrowserDialog {
+            action: crate::protocol::BrowserDialogAction::Status,
+            ..
+        }
         | Request::BrowserDownload {
             action: crate::protocol::BrowserDownloadAction::List,
             ..

@@ -3,6 +3,7 @@
 //! isolated [`BrowserProfile`] storage; every profile uses the same renderer.
 
 use crate::ui::browser_bookmarks::BookmarkMenu;
+use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::DownloadManager;
 use crate::ui::pane_terminal::PaneCallbacks;
 use adw::prelude::*;
@@ -33,6 +34,7 @@ pub struct BrowserPane {
     zoom: Rc<Cell<f64>>,
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
+    dialogs: PageDialogs,
     _downloads: DownloadManager,
     _download_signal: Rc<NetworkSessionSignal>,
     pub refs: Rc<RefCell<RefStore>>,
@@ -67,6 +69,13 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub async fn dialog(
+        &self,
+        action: &flowmux_ipc::protocol::BrowserDialogAction,
+    ) -> Result<String, String> {
+        self.dialogs.control(action).await
+    }
+
     pub fn download(
         &self,
         action: &flowmux_ipc::protocol::BrowserDownloadAction,
@@ -321,6 +330,53 @@ impl BrowserPane {
         let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
         inspector.add_css_class("flat");
         inspector.set_tooltip_text(Some("Open Web Inspector"));
+        let dialogs = PageDialogs::default();
+        {
+            let dialogs = dialogs.clone();
+            web_view.connect_script_dialog(move |view, script_dialog| {
+                let kind = match script_dialog.dialog_type() {
+                    webkit6::ScriptDialogType::Alert => PageDialog::Alert,
+                    webkit6::ScriptDialogType::Confirm => PageDialog::Confirm,
+                    webkit6::ScriptDialogType::Prompt => PageDialog::Prompt(
+                        script_dialog
+                            .prompt_get_default_text()
+                            .unwrap_or_default()
+                            .to_string(),
+                    ),
+                    // Leave before-unload confirmation to WebKit's existing close flow.
+                    _ => return false,
+                };
+                let Some(parent) = view
+                    .root()
+                    .and_then(|root| root.downcast::<gtk::Window>().ok())
+                else {
+                    return false;
+                };
+                let native = script_dialog.clone();
+                let reply = PageDialogReply(Some(Box::new(move |reply| {
+                    match native.dialog_type() {
+                        webkit6::ScriptDialogType::Confirm => {
+                            native.confirm_set_confirmed(reply.is_some())
+                        }
+                        webkit6::ScriptDialogType::Prompt => {
+                            if let Some(text) = reply {
+                                native.prompt_set_text(&text);
+                            }
+                        }
+                        _ => {}
+                    }
+                    native.close();
+                })));
+                dialogs.present(
+                    &parent,
+                    "This page says",
+                    &script_dialog.message().unwrap_or_default(),
+                    kind,
+                    reply,
+                );
+                true
+            });
+        }
         let downloads = DownloadManager::new();
         let bookmarks = BookmarkMenu::new(
             &profile,
@@ -648,6 +704,7 @@ impl BrowserPane {
             zoom,
             zoom_label,
             find_entry,
+            dialogs,
             _downloads: downloads,
             _download_signal: download_signal,
             refs,

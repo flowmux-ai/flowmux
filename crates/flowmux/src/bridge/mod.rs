@@ -32,6 +32,9 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    Dialog {
+        action: flowmux_ipc::protocol::BrowserDialogAction,
+    },
     Download {
         action: flowmux_ipc::protocol::BrowserDownloadAction,
     },
@@ -136,6 +139,7 @@ impl BrowserOp {
     /// cannot silently omit its agent-facing name.
     pub fn capability_name(&self) -> &'static str {
         match self {
+            Self::Dialog { .. } => "dialog",
             Self::Download { .. } => "download",
             Self::Media { .. } => "media",
             Self::EvalAsync { .. } => "eval-async",
@@ -176,6 +180,9 @@ impl BrowserOp {
         matches!(
             self,
             Self::Snapshot
+                | Self::Dialog {
+                    action: flowmux_ipc::protocol::BrowserDialogAction::Status,
+                }
                 | Self::Download {
                     action: flowmux_ipc::protocol::BrowserDownloadAction::List,
                 }
