@@ -202,14 +202,14 @@ def exercise(cli, url, root):
     browser("record", str(recording), "--seconds", "1", error=True)
     assert recording.read_bytes() == saved, "recording replaced an existing file"
     resized_recording = root / "resized.mp4"
-    width = int(evaluate("innerWidth"))
+    height = int(evaluate("innerHeight"))
     with ThreadPoolExecutor(max_workers=1) as workers:
         capture = workers.submit(browser, "record", str(resized_recording), "--seconds", "3", "--fps", "5")
         time.sleep(.6)
-        cli("resize-pane", pane, "--ratio", ".7")
-        assert browser("wait", "--js", f"innerWidth < {width}")["browser_bool_result"]["value"]
+        temporary = cli("split", pane, "--down")["pane_split_done"]["new_pane"]
+        assert browser("wait", "--js", f"innerHeight < {height}")["browser_bool_result"]["value"]
         time.sleep(.8)
-        cli("resize-pane", pane, "--ratio", ".5")
+        cli("close-pane", temporary)
         capture.result()
     resized_duration = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                                 "-of", "default=nw=1:nk=1", str(resized_recording)])
