@@ -1,6 +1,41 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One physical key with optional modifiers for native browser input.
 
+#[derive(Clone, Copy)]
+pub enum PointerAction {
+    Click,
+    DoubleClick,
+    Hover,
+}
+
+#[derive(serde::Deserialize)]
+pub struct PointerTarget {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl PointerTarget {
+    pub fn scale(&self, width: f64, height: f64) -> Result<(f64, f64), String> {
+        if ![self.x, self.y, self.width, self.height, width, height]
+            .iter()
+            .all(|v| v.is_finite())
+            || self.width <= 0.0
+            || self.height <= 0.0
+            || width <= 0.0
+            || height <= 0.0
+            || self.x < 0.0
+            || self.y < 0.0
+            || self.x >= self.width
+            || self.y >= self.height
+        {
+            return Err("pointer is outside the browser viewport".into());
+        }
+        Ok((self.x / self.width * width, self.y / self.height * height))
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct KeyStroke {
     pub key: String,
@@ -90,6 +125,22 @@ impl KeyStroke {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_coordinates_scale_only_within_finite_viewports() {
+        let mut target = PointerTarget {
+            x: 30.0,
+            y: 20.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        assert_eq!(target.scale(200.0, 100.0).unwrap(), (60.0, 40.0));
+        assert!(target.scale(0.0, 100.0).is_err());
+        target.x = 100.0;
+        assert!(target.scale(200.0, 100.0).is_err());
+        target.x = f64::NAN;
+        assert!(target.scale(200.0, 100.0).is_err());
+    }
 
     #[test]
     fn parses_native_shortcuts_and_rejects_ambiguous_chords() {

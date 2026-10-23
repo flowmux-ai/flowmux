@@ -1320,6 +1320,19 @@ impl BrowserPane {
         Ok(())
     }
 
+    pub fn pointer(
+        &self,
+        action: flowmux_browser::input::PointerAction,
+        target: &flowmux_browser::input::PointerTarget,
+    ) -> Result<(), String> {
+        if !self.native.navigation_enabled.get() || !self.web_view.is_mapped() {
+            return Err("native pointer input requires a visible browser tab".into());
+        }
+        let bounds = self.native.web_view.as_super().bounds();
+        let (x, y) = target.scale(bounds.size.width, bounds.size.height)?;
+        crate::macos_input::pointer(&self.native.web_view, action, NSPoint::new(x, y))
+    }
+
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,

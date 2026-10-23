@@ -128,6 +128,10 @@ Tab, Shift+Tab and Control+a (macOS: Meta+a). Page key handlers can cancel their
 default action. Completion confirms delivery, so still check the expected page
 state. Wayland native keys are not enabled yet and return an error. Use `type`
 for Unicode text or characters missing from the current keyboard layout.
+`click`, `dblclick` and `hover` also require the visible active tab on macOS or
+X11. They wait for two stable rendering frames, reject covered targets and send
+native pointer events. `hover` activates CSS hover; double-click includes its
+two clicks. A blocked or moving target returns an error without retrying.
 Use only refs actually returned
 for the current page; these are independent examples, not a script to run blindly:
 

@@ -162,6 +162,14 @@ impl BrowserPane {
         Err(UNSUPPORTED.into())
     }
 
+    pub fn pointer(
+        &self,
+        _action: flowmux_browser::input::PointerAction,
+        _target: &flowmux_browser::input::PointerTarget,
+    ) -> Result<(), String> {
+        Err(UNSUPPORTED.into())
+    }
+
     pub fn evaluate_js<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         _source: &str,

@@ -91,8 +91,8 @@ def exercise(cli, url, root):
     assert evaluate("String(clicks)") == "1"
     print("PASS: stale nodes, snapshots and tabs rejected; live actions and non-mutating snapshots preserved", flush=True)
     assert first_surface, "snapshot must identify its browser tab"
-    browser("click", reference(third, "Original"), "--surface", first_surface)
-    assert browser("eval", "String(clicks)", "--surface", first_surface)["browser_result"]["value"] == "4"
+    browser("click", reference(third, "Original"), "--surface", first_surface, error=True)
+    assert browser("eval", "String(clicks)", "--surface", first_surface)["browser_result"]["value"] == "3"
     assert evaluate("String(clicks)") == "1", "pinned action changed the active tab"
     browser("fill", reference(third, "Field"), "pinned", "--surface", first_surface)
     assert browser("value", reference(third, "Field"), "--surface", first_surface)["browser_result"]["value"] == "pinned"
@@ -118,9 +118,8 @@ def exercise(cli, url, root):
     evaluate("document.querySelector('#cover').remove(); 'uncovered'")
     evaluate("document.querySelector('#target').disabled=true; 'disabled'")
     browser("click", button, error=True)
-    evaluate("window.hovers=0; document.querySelector('#target').onmouseover=()=>hovers++; 'listen'")
     browser("hover", button)
-    assert evaluate("String(hovers)") == "1", "disabled controls still support hover"
+    assert evaluate("String(document.querySelector('#target').matches(':hover'))") == "true", "disabled controls still support hover"
     evaluate("document.querySelector('#target').disabled=false; 'enabled'")
     for attribute in ["aria-disabled", "inert"]:
         evaluate(f"document.body.setAttribute('{attribute}', 'true'); 'blocked'")
@@ -137,7 +136,7 @@ def exercise(cli, url, root):
         assert evaluate("document.querySelector('#field').value") == ""
         evaluate(f"document.querySelector('#field').removeAttribute('{attribute}'); 'unlocked'")
     browser("fill", button, "must not change button", error=True)
-    evaluate("document.querySelector('#target').onfocus=()=>document.querySelector('#target').blur(); 'refuse focus'")
+    evaluate("document.querySelector('#target').blur(); document.querySelector('#target').onfocus=()=>document.querySelector('#target').blur(); 'refuse focus'")
     browser("focus", button, error=True)
     evaluate("document.querySelector('#target').onfocus=null; 'allow focus'")
     browser("focus", field)
@@ -221,6 +220,26 @@ def exercise(cli, url, root):
     browser("press", "Delete")
     assert evaluate("keyfield.value") == "relaced"
     print("PASS: native Enter, Tab, reverse Tab, select-all and canceled keys", flush=True)
+
+    evaluate("document.body.insertAdjacentHTML('beforeend', '<button id=pointer>Native pointer</button>'); window.pointerEvents=[]; for(const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick']) pointer.addEventListener(type,e=>pointerEvents.push([e.type,e.isTrusted])); 'pointer'")
+    pointer = reference(snapshot(), "Native pointer")
+    browser("click", pointer)
+    assert json.loads(evaluate("JSON.stringify(pointerEvents)")) == [[name, True] for name in ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]], "click did not use native pointer events"
+    browser("hover", pointer)
+    assert evaluate("String(document.querySelector('#pointer').matches(':hover'))") == "true", "hover did not activate CSS hover"
+    evaluate("pointerEvents=[]; 'clear'")
+    browser("dblclick", pointer)
+    assert evaluate("String(pointerEvents.filter(e=>e[0]==='click').length)") == "2"
+    assert evaluate("String(pointerEvents.some(e=>e[0]==='dblclick' && e[1]))") == "true"
+    evaluate("document.body.insertAdjacentHTML('beforeend','<button id=moving>Moving</button>'); window.movingClicks=0; moving.onclick=()=>movingClicks++; 'moving'")
+    current = snapshot()
+    moving = reference(current, "Moving")
+    evaluate("window.keepMoving=true; window.position=0; requestAnimationFrame(function move(){moving.style.transform='translateX('+(++position%4*20)+'px)'; if(keepMoving)requestAnimationFrame(move)}); 'animate'")
+    browser("click", moving, error=True)
+    evaluate("keepMoving=false; 'stop'")
+    assert evaluate("String(movingClicks)") == "0", "a moving target was clicked"
+    browser("click", reference(current, "Native pointer"))
+    print("PASS: native click sequence, CSS hover and double-click", flush=True)
 
 
 def main():

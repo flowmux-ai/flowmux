@@ -127,6 +127,53 @@ pub(crate) fn insert_text(web: &WKWebView, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn pointer(
+    web: &WKWebView,
+    action: flowmux_browser::input::PointerAction,
+    mut point: NSPoint,
+) -> Result<(), String> {
+    use flowmux_browser::input::{PointerAction, PointerTarget};
+    let view = web.as_super();
+    let bounds = view.bounds();
+    PointerTarget {
+        x: point.x,
+        y: point.y,
+        width: bounds.size.width,
+        height: bounds.size.height,
+    }
+    .scale(bounds.size.width, bounds.size.height)?;
+    let window = view.window().ok_or("browser view is not attached")?;
+    if !view.isFlipped() {
+        point.y = bounds.size.height - point.y;
+    }
+    let content = window
+        .contentView()
+        .ok_or("browser has no native content view")?;
+    let hit = content.hitTest(view.convertPoint_toView(point, Some(&content)));
+    if !hit.is_some_and(|hit| hit.isDescendantOf(view)) {
+        return Err("browser pointer target is covered by a native view".into());
+    }
+    let point = view.convertPoint_toView(point, None);
+    let event = |kind, count| {
+        NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            kind, point, Flags::empty(), gtk::glib::monotonic_time() as f64 / 1_000_000.0,
+            window.windowNumber(), None, 0, count, 1.0,
+        ).ok_or("could not create pointer event")
+    };
+    web.mouseMoved(&*event(NSEventType::MouseMoved, 0)?);
+    let count = match action {
+        PointerAction::Hover => 0,
+        PointerAction::Click => 1,
+        PointerAction::DoubleClick => 2,
+    };
+    for count in 1..=count {
+        for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
+            window.sendEvent(&*event(kind, count)?);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

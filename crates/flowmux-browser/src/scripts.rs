@@ -186,10 +186,84 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
     )
 }
 
-/// Click only when the element can receive pointer input.
-pub fn click_by_selector(selector: &str) -> String {
-    element_action(selector, true, true, "el.click(); return 'ok';")
+pub fn pointer_target(selector: &str, hover: bool) -> String {
+    element_action(
+        selector,
+        true,
+        !hover,
+        r#"
+        const rect = el.getClientRects()[0];
+        globalThis.__flowmuxInput.el = el;
+        return JSON.stringify({
+            x: (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2,
+            y: (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2,
+            width: innerWidth, height: innerHeight
+        });
+    "#,
+    )
 }
+
+pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction) -> String {
+    use crate::input::PointerAction;
+    let event = match action {
+        PointerAction::Click => "click",
+        PointerAction::DoubleClick => "dblclick",
+        PointerAction::Hover => "pointermove",
+    };
+    format!(
+        r#"
+        if (globalThis.__flowmuxInput) throw new Error('browser input is already pending');
+        const state = {{ received: false, event: '{event}' }};
+        globalThis.__flowmuxInput = state;
+        try {{
+            const before = {geometry};
+            if (before.startsWith('error:')) throw new Error(before);
+            for (let frame = 0; frame < 2; frame++) {{
+                await new Promise((resolve, reject) => {{
+                    const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 1000);
+                    requestAnimationFrame(() => {{clearTimeout(timeout); resolve();}});
+                }});
+                const after = {geometry};
+                if (before !== after) throw new Error('pointer target moved; inspect the page before retrying');
+            }}
+            state.listener = event => {{
+                if (event.isTrusted && state.el.contains(event.target)) {{
+                    state.received = true;
+                    if (state.done) queueMicrotask(state.done);
+                }}
+            }};
+            window.addEventListener(state.event, state.listener, true);
+            return before;
+        }} catch (error) {{
+            delete globalThis.__flowmuxInput;
+            throw error;
+        }}
+    "#
+    )
+}
+
+pub const CANCEL_POINTER_INPUT_JS: &str = r#"(function() {
+    const state = globalThis.__flowmuxInput;
+    if (state) window.removeEventListener(state.event, state.listener, true);
+    delete globalThis.__flowmuxInput;
+    return 'ok';
+})()"#;
+
+pub const FINISH_POINTER_INPUT_JS: &str = r#"
+const state = globalThis.__flowmuxInput;
+if (!state) throw new Error('page changed during native pointer input');
+return await new Promise(resolve => {
+    const finish = result => {
+        clearTimeout(timer);
+        window.removeEventListener(state.event, state.listener, true);
+        delete globalThis.__flowmuxInput;
+        resolve(result);
+    };
+    const timer = setTimeout(() => finish('error: native pointer input completion timed out'), 10000);
+    state.done = () => finish('ok');
+    if (state.received || (state.event === 'pointermove' && state.el.matches(':hover'))) state.done();
+});
+"#;
 
 /// Set `value` on an input/textarea (`<select>` should use
 /// [`select_option_by_selector`] instead) and dispatch the standard
@@ -388,33 +462,6 @@ return await new Promise(resolve => {
     if (state.received) state.done();
 });
 "#;
-
-/// Double-click the element matched by `selector`.
-pub fn dblclick_by_selector(selector: &str) -> String {
-    element_action(
-        selector,
-        true,
-        true,
-        r#"
-            el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
-            return "ok";
-        "#,
-    )
-}
-
-/// Hover (mouseenter + mouseover) over the element matched by `selector`.
-pub fn hover_by_selector(selector: &str) -> String {
-    element_action(
-        selector,
-        true,
-        false,
-        r#"
-            el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
-            el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-            return "ok";
-        "#,
-    )
-}
 
 /// Focus the element matched by `selector` (uses `HTMLElement.focus()`).
 pub fn focus_by_selector(selector: &str) -> String {

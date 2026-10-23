@@ -4,6 +4,7 @@
 //! still contains the expected method names. No network or persistent profile.
 
 use super::*;
+use flowmux_browser::input::{PointerAction, PointerTarget};
 use flowmux_browser::{scripts::*, DomSnapshot};
 use gtk::glib;
 use std::time::{Duration, Instant};
@@ -65,6 +66,33 @@ impl Page {
     async fn events(&self) -> Vec<String> {
         serde_json::from_str(&self.eval("JSON.stringify(events.splice(0))").await).unwrap()
     }
+
+    async fn eval_async(&self, script: &str) -> Result<String, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.pane.evaluate_async_js(script, move |result| {
+            let _ = tx.send(result);
+        });
+        glib::future_with_timeout(Duration::from_secs(15), rx)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    async fn pointer(&self, selector: &str, action: PointerAction) -> Result<(), String> {
+        let geometry = pointer_target(selector, matches!(action, PointerAction::Hover));
+        let prepared = self
+            .eval_async(&prepare_pointer_input(&geometry, action))
+            .await?;
+        let target: PointerTarget = serde_json::from_str(&prepared).unwrap();
+        if let Err(error) = self.pane.pointer(action, &target) {
+            self.eval(CANCEL_POINTER_INPUT_JS).await;
+            return Err(error);
+        }
+        match self.eval_async(FINISH_POINTER_INPUT_JS).await?.as_str() {
+            "ok" => Ok(()),
+            error => Err(error.into()),
+        }
+    }
 }
 
 impl Drop for Page {
@@ -94,6 +122,16 @@ async fn native_keys_do_not_bypass_modal_dialogs() {
         .press_key(&flowmux_browser::input::KeyStroke::parse("Backspace").unwrap())
         .is_err());
     assert_eq!(page.eval("field.value").await, "safe");
+    let target = flowmux_browser::input::PointerTarget {
+        x: 5.0,
+        y: 5.0,
+        width: 100.0,
+        height: 100.0,
+    };
+    assert!(page
+        .pane
+        .pointer(flowmux_browser::input::PointerAction::Click, &target)
+        .is_err());
     dialog.close();
     window.destroy();
 }
@@ -142,7 +180,9 @@ async fn snapshot_resolves_real_elements_without_mutating_the_document() {
     // Use a snapshot selector to act on the intended duplicate-ID button.
     let second = snapshot.refs.values().find(|r| r.name == "Second").unwrap();
     page.eval("window.clicked = ''; document.addEventListener('click', e => clicked = e.target.textContent)").await;
-    page.ok(click_by_selector(&second.selector)).await;
+    page.pointer(&second.selector, PointerAction::Click)
+        .await
+        .unwrap();
     assert_eq!(page.eval("clicked").await, "Second");
 }
 
@@ -165,7 +205,9 @@ async fn snapshot_selectors_stay_unique_in_deeply_repeated_markup() {
         );
     }
     page.eval("window.clicked = -1; document.addEventListener('click', e => clicked = [...document.querySelectorAll('button')].indexOf(e.target))").await;
-    page.ok(click_by_selector(&selectors[1])).await;
+    page.pointer(&selectors[1], PointerAction::Click)
+        .await
+        .unwrap();
     assert_eq!(page.eval("clicked").await, "1");
 }
 
@@ -349,12 +391,18 @@ async fn pointer_actions_queries_and_missing_targets_use_the_real_dom() {
     "#,
     )
     .await;
-    page.ok(click_by_selector("#button")).await;
-    page.ok(dblclick_by_selector("#button")).await;
-    page.ok(hover_by_selector("#button")).await;
+    page.pointer("#button", PointerAction::Click).await.unwrap();
+    page.pointer("#button", PointerAction::DoubleClick)
+        .await
+        .unwrap();
+    page.pointer("#button", PointerAction::Hover).await.unwrap();
+    let events = page.events().await;
+    assert_eq!(events.iter().filter(|event| *event == "click").count(), 3);
+    assert!(events.iter().any(|event| event == "dblclick"));
     assert_eq!(
-        page.events().await,
-        ["click", "dblclick", "mouseenter", "mouseover"]
+        page.eval("document.querySelector('#button').matches(':hover')")
+            .await,
+        "true"
     );
     assert_eq!(page.eval(&text_of_selector("#button")).await, "Go");
     assert_eq!(
@@ -378,9 +426,6 @@ async fn pointer_actions_queries_and_missing_targets_use_the_real_dom() {
     page.wait("scrollY > 0 && document.querySelector('#bottom').getBoundingClientRect().top < innerHeight").await;
 
     for script in [
-        click_by_selector("#missing"),
-        dblclick_by_selector("#missing"),
-        hover_by_selector("#missing"),
         focus_by_selector("#missing"),
         blur_by_selector("#missing"),
         fill_by_selector("#missing", "x"),
@@ -396,6 +441,17 @@ async fn pointer_actions_queries_and_missing_targets_use_the_real_dom() {
         is_checked_selector("#missing"),
     ] {
         assert_eq!(page.eval(&script).await, "error: not found", "{script}");
+    }
+    for action in [
+        PointerAction::Click,
+        PointerAction::DoubleClick,
+        PointerAction::Hover,
+    ] {
+        assert!(page
+            .pointer("#missing", action)
+            .await
+            .unwrap_err()
+            .contains("not found"));
     }
 }
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! XInput2 grabs keep injected keys confined to this browser's native window.
-use flowmux_browser::input::KeyStroke;
+//! XInput2 grabs keep native input confined to this browser's native window.
+use flowmux_browser::input::{KeyStroke, PointerAction, PointerTarget};
 use gtk::{glib::translate::*, prelude::*};
 use libloading::Library;
 use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
@@ -46,8 +46,10 @@ type DisplayCall = unsafe extern "C" fn(*mut c_void) -> c_int;
 
 struct Grab {
     display: *mut c_void,
-    keyboard: Option<c_int>,
+    device: Option<c_int>,
     pressed: Vec<u32>,
+    button_down: bool,
+    fake_button: FakeKey,
     fake: FakeKey,
     ungrab: Ungrab,
     release_server: DisplayCall,
@@ -59,7 +61,10 @@ impl Drop for Grab {
             for code in self.pressed.iter().rev() {
                 (self.fake)(self.display, *code, 0, 0);
             }
-            if let Some(keyboard) = self.keyboard {
+            if self.button_down {
+                (self.fake_button)(self.display, 1, 0, 0);
+            }
+            if let Some(keyboard) = self.device {
                 (self.ungrab)(self.display, keyboard, 0);
             }
             (self.release_server)(self.display);
@@ -77,15 +82,30 @@ unsafe fn symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, String> {
     }
 }
 
+enum Input<'a> {
+    Key(&'a KeyStroke),
+    Pointer(PointerAction, &'a PointerTarget),
+}
+
 pub(super) fn press(view: &webkit6::WebView, stroke: &KeyStroke) -> Result<(), String> {
+    send(view, Input::Key(stroke))
+}
+
+pub(super) fn pointer(
+    view: &webkit6::WebView,
+    action: PointerAction,
+    target: &PointerTarget,
+) -> Result<(), String> {
+    send(view, Input::Pointer(action, target))
+}
+
+fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
     if !view.is_mapped() {
-        return Err("native key input requires a visible browser tab".into());
+        return Err("native input requires a visible browser tab".into());
     }
     let display = view.display();
     if display.type_().name() != "GdkX11Display" {
-        return Err(
-            "native key input requires an X11 display; Wayland input is not enabled".into(),
-        );
+        return Err("native input requires an X11 display; Wayland input is not enabled".into());
     }
     let surface = view
         .native()
@@ -124,6 +144,21 @@ pub(super) fn press(view: &webkit6::WebView, stroke: &KeyStroke) -> Result<(), S
         let focus: unsafe extern "C" fn(*mut c_void, c_ulong, c_int, c_ulong) -> c_int =
             symbol(&xlib, b"XSetInputFocus\0")?;
         let fake: FakeKey = symbol(&xtest, b"XTestFakeKeyEvent\0")?;
+        let fake_button: FakeKey = symbol(&xtest, b"XTestFakeButtonEvent\0")?;
+        let motion: unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_ulong) -> c_int =
+            symbol(&xtest, b"XTestFakeMotionEvent\0")?;
+        let root_window: unsafe extern "C" fn(*mut c_void) -> c_ulong =
+            symbol(&xlib, b"XDefaultRootWindow\0")?;
+        let translate: unsafe extern "C" fn(
+            *mut c_void,
+            c_ulong,
+            c_ulong,
+            c_int,
+            c_int,
+            *mut c_int,
+            *mut c_int,
+            *mut c_ulong,
+        ) -> c_int = symbol(&xlib, b"XTranslateCoordinates\0")?;
         let ungrab: Ungrab = symbol(&xi, b"XIUngrabDevice\0")?;
         let release_server: DisplayCall = symbol(&xlib, b"XUngrabServer\0")?;
         let flush: DisplayCall = symbol(&xlib, b"XFlush\0")?;
@@ -138,47 +173,53 @@ pub(super) fn press(view: &webkit6::WebView, stroke: &KeyStroke) -> Result<(), S
         if keyboard_state.base_mods != 0 || keyboard_state.latched_mods != 0 {
             return Err("release held keyboard modifiers before native input".into());
         }
-        let name = match stroke.key.as_str() {
-            "Enter" => "Return",
-            "Backspace" => "BackSpace",
-            "ArrowLeft" => "Left",
-            "ArrowRight" => "Right",
-            "ArrowUp" => "Up",
-            "ArrowDown" => "Down",
-            name => name,
-        };
-        let key = if name.chars().count() == 1 {
-            from_glib(gtk::gdk::ffi::gdk_unicode_to_keyval(
-                name.chars().next().unwrap() as u32,
-            ))
-        } else {
-            gtk::gdk::Key::from_name(name).ok_or("unknown native key")?
-        };
-        let mapping = display
-            .map_keyval(key)
-            .and_then(|keys| {
-                keys.into_iter()
-                    .find(|key| key.group() == i32::from(keyboard_state.group) && key.level() <= 1)
-            })
-            .ok_or("key is not available in the current keyboard layout; use type for text")?;
-        let mut codes = Vec::new();
-        for (enabled, name) in [
-            (stroke.shift || mapping.level() == 1, "Shift_L"),
-            (stroke.control, "Control_L"),
-            (stroke.alt, "Alt_L"),
-            (stroke.meta, "Super_L"),
-        ] {
-            if enabled {
-                let key = gtk::gdk::Key::from_name(name).unwrap();
-                codes.push(
-                    display
-                        .map_keyval(key)
-                        .and_then(|keys| keys.first().map(|key| key.keycode()))
-                        .ok_or("modifier is not mapped")?,
-                );
-            }
+        if keyboard_state.pointer_buttons != 0 {
+            return Err("release held pointer buttons before native input".into());
         }
-        codes.push(mapping.keycode());
+        let mut codes = Vec::new();
+        if let Input::Key(stroke) = &input {
+            let name = match stroke.key.as_str() {
+                "Enter" => "Return",
+                "Backspace" => "BackSpace",
+                "ArrowLeft" => "Left",
+                "ArrowRight" => "Right",
+                "ArrowUp" => "Up",
+                "ArrowDown" => "Down",
+                name => name,
+            };
+            let key = if name.chars().count() == 1 {
+                from_glib(gtk::gdk::ffi::gdk_unicode_to_keyval(
+                    name.chars().next().unwrap() as u32,
+                ))
+            } else {
+                gtk::gdk::Key::from_name(name).ok_or("unknown native key")?
+            };
+            let mapping = display
+                .map_keyval(key)
+                .and_then(|keys| {
+                    keys.into_iter().find(|key| {
+                        key.group() == i32::from(keyboard_state.group) && key.level() <= 1
+                    })
+                })
+                .ok_or("key is not available in the current keyboard layout; use type for text")?;
+            for (enabled, name) in [
+                (stroke.shift || mapping.level() == 1, "Shift_L"),
+                (stroke.control, "Control_L"),
+                (stroke.alt, "Alt_L"),
+                (stroke.meta, "Super_L"),
+            ] {
+                if enabled {
+                    let key = gtk::gdk::Key::from_name(name).unwrap();
+                    codes.push(
+                        display
+                            .map_keyval(key)
+                            .and_then(|keys| keys.first().map(|key| key.keycode()))
+                            .ok_or("modifier is not mapped")?,
+                    );
+                }
+            }
+            codes.push(mapping.keycode());
+        }
         let mut down = [0u8; 32];
         keymap(dpy, down.as_mut_ptr());
         if codes
@@ -191,42 +232,116 @@ pub(super) fn press(view: &webkit6::WebView, stroke: &KeyStroke) -> Result<(), S
         if client_pointer(dpy, 0, &mut pointer) == 0 {
             return Err("XInput client pointer is unavailable".into());
         }
-        let mut count = 0;
-        let devices = query(dpy, 1, &mut count);
-        if devices.is_null() {
-            return Err("XInput devices are unavailable".into());
-        }
-        let keyboard = std::slice::from_raw_parts(devices, count.max(0) as usize)
-            .iter()
-            .find(|device| device.usage == 2 && device.attachment == pointer && device.enabled != 0)
-            .map(|device| device.id);
-        free(devices);
-        let keyboard = keyboard.ok_or("XInput keyboard is unavailable")?;
-        if !view.grab_focus() {
+        let device = if matches!(input, Input::Key(_)) {
+            let mut count = 0;
+            let devices = query(dpy, 1, &mut count);
+            if devices.is_null() {
+                return Err("XInput devices are unavailable".into());
+            }
+            let keyboard = std::slice::from_raw_parts(devices, count.max(0) as usize)
+                .iter()
+                .find(|device| {
+                    device.usage == 2 && device.attachment == pointer && device.enabled != 0
+                })
+                .map(|device| device.id);
+            free(devices);
+            keyboard.ok_or("XInput keyboard is unavailable")?
+        } else {
+            pointer
+        };
+        if matches!(input, Input::Key(_)) && !view.grab_focus() {
             return Err("browser could not acquire keyboard focus".into());
         }
         let window = get_window(surface.to_glib_none().0);
         grab_server(dpy);
         let mut guard = Grab {
             display: dpy,
-            keyboard: None,
+            device: None,
             pressed: Vec::new(),
+            button_down: false,
+            fake_button,
             fake,
             ungrab,
             release_server,
             flush,
         };
-        let mut bits = [12u8, 0, 0, 0]; // XI_KeyPress and XI_KeyRelease.
+        let mut bits = [
+            if matches!(input, Input::Key(_)) {
+                12u8
+            } else {
+                112u8
+            },
+            0,
+            0,
+            0,
+        ]; // Keys, or pointer buttons and motion.
         let mut mask = EventMask {
-            device: keyboard,
+            device,
             length: bits.len() as c_int,
             mask: bits.as_mut_ptr(),
         };
-        if grab_device(dpy, keyboard, window, 0, 0, 1, 1, 0, &mut mask) != 0 {
-            return Err("keyboard is busy or the browser window is not viewable".into());
+        if grab_device(dpy, device, window, 0, 0, 1, 1, 0, &mut mask) != 0 {
+            return Err("input device is busy or the browser window is not viewable".into());
         }
-        guard.keyboard = Some(keyboard);
+        guard.device = Some(device);
         focus(dpy, window, 2, 0);
+        if let Input::Pointer(action, target) = input {
+            let (x, y) = target.scale(f64::from(view.width()), f64::from(view.height()))?;
+            let native = view.native().ok_or("browser has no native widget")?;
+            let point = view
+                .compute_point(
+                    native.upcast_ref::<gtk::Widget>(),
+                    &gtk::graphene::Point::new(x as f32, y as f32),
+                )
+                .ok_or("could not map browser pointer coordinates")?;
+            if !native
+                .upcast_ref::<gtk::Widget>()
+                .pick(
+                    f64::from(point.x()),
+                    f64::from(point.y()),
+                    gtk::PickFlags::DEFAULT,
+                )
+                .is_some_and(|hit| {
+                    hit == *view.upcast_ref::<gtk::Widget>() || hit.is_ancestor(view)
+                })
+            {
+                return Err("browser pointer target is covered by a native widget".into());
+            }
+            let scale = f64::from(surface.scale_factor());
+            let (mut root_x, mut root_y, mut child) = (0, 0, 0);
+            if translate(
+                dpy,
+                window,
+                root_window(dpy),
+                (f64::from(point.x()) * scale).round() as c_int,
+                (f64::from(point.y()) * scale).round() as c_int,
+                &mut root_x,
+                &mut root_y,
+                &mut child,
+            ) == 0
+            {
+                return Err("could not locate the browser window".into());
+            }
+            if motion(dpy, -1, root_x, root_y, 0) == 0 {
+                return Err("native pointer motion failed".into());
+            }
+            let count = match action {
+                PointerAction::Hover => 0,
+                PointerAction::Click => 1,
+                PointerAction::DoubleClick => 2,
+            };
+            for _ in 0..count {
+                if fake_button(dpy, 1, 1, 0) == 0 {
+                    return Err("native pointer press failed".into());
+                }
+                guard.button_down = true;
+                if fake_button(dpy, 1, 0, 0) == 0 {
+                    return Err("native pointer release failed".into());
+                }
+                guard.button_down = false;
+            }
+            return Ok(());
+        }
         for code in codes {
             if fake(dpy, code, 1, 0) == 0 {
                 return Err("native key injection failed".into());

@@ -30,6 +30,77 @@ impl WindowController {
             .ok_or_else(|| format!("browser surface not found: {surface} in {pane}"))
     }
 
+    fn pointer_action(
+        &self,
+        browser: &crate::ui::browser_pane::BrowserPane,
+        pane: PaneId,
+        surface: Option<SurfaceId>,
+        target: &str,
+        action: flowmux_browser::input::PointerAction,
+        ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
+    ) {
+        use flowmux_browser::{
+            input::{PointerAction, PointerTarget},
+            scripts,
+        };
+        let registry = self.pane_registry.clone();
+        let expected = surface.or_else(|| registry.borrow().active_surface(pane));
+        if registry.borrow().active_surface(pane) != expected {
+            let _ = ack.send(Err(
+                "native pointer input requires the active browser tab".into()
+            ));
+            return;
+        }
+        let geometry = match ref_script(browser, target, |selector| {
+            scripts::pointer_target(selector, matches!(action, PointerAction::Hover))
+        }) {
+            Ok(geometry) => geometry,
+            Err(error) => {
+                let _ = ack.send(Err(error));
+                return;
+            }
+        };
+        let input = browser.clone();
+        browser.evaluate_automation_async_js(
+            &scripts::prepare_pointer_input(&geometry, action),
+            move |prepared| {
+                let prepared = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        let _ = ack.send(Err(error));
+                        return;
+                    }
+                };
+                let sent = (|| {
+                    if registry.borrow().active_surface(pane) != expected {
+                        return Err("browser tab changed before pointer input".into());
+                    }
+                    let point: PointerTarget =
+                        serde_json::from_str(&prepared).map_err(|error| error.to_string())?;
+                    input.pointer(action, &point)
+                })();
+                if let Err(error) = sent {
+                    input.evaluate_automation_js(scripts::CANCEL_POINTER_INPUT_JS, move |_| {
+                        let _ = ack.send(Err(error));
+                    });
+                    return;
+                }
+                input.evaluate_automation_async_js(
+                    scripts::FINISH_POINTER_INPUT_JS,
+                    move |result| {
+                        let _ = ack.send(result.and_then(|value| {
+                            if value == "ok" {
+                                Ok(BrowserActionResult::Ok)
+                            } else {
+                                Err(value)
+                            }
+                        }));
+                    },
+                );
+            },
+        );
+    }
+
     pub(super) async fn dispatch_browser_command(&self, cmd: GtkCommand) {
         match cmd {
             GtkCommand::BrowserEval {
@@ -169,16 +240,14 @@ impl WindowController {
                         let value = browser.current_title();
                         let _ = ack.send(Ok(BrowserActionResult::String(value)));
                     }
-                    BrowserOp::Click { target } => match ref_script(
+                    BrowserOp::Click { target } => self.pointer_action(
                         &browser,
+                        pane,
+                        surface,
                         &target,
-                        flowmux_browser::scripts::click_by_selector,
-                    ) {
-                        Ok(js) => run_browser_js(&browser, &js, ack, true),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
-                        }
-                    },
+                        flowmux_browser::input::PointerAction::Click,
+                        ack,
+                    ),
                     BrowserOp::Fill { target, value } => {
                         match ref_script(&browser, &target, |sel| {
                             flowmux_browser::scripts::fill_by_selector(sel, &value)
@@ -316,26 +385,22 @@ impl WindowController {
                         poll_ms,
                     } => run_browser_wait(browser.clone(), condition, timeout_ms, poll_ms, ack),
                     BrowserOp::Screenshot { path } => run_browser_screenshot(&browser, path, ack),
-                    BrowserOp::DblClick { target } => match ref_script(
+                    BrowserOp::DblClick { target } => self.pointer_action(
                         &browser,
+                        pane,
+                        surface,
                         &target,
-                        flowmux_browser::scripts::dblclick_by_selector,
-                    ) {
-                        Ok(js) => run_browser_js(&browser, &js, ack, true),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
-                        }
-                    },
-                    BrowserOp::Hover { target } => match ref_script(
+                        flowmux_browser::input::PointerAction::DoubleClick,
+                        ack,
+                    ),
+                    BrowserOp::Hover { target } => self.pointer_action(
                         &browser,
+                        pane,
+                        surface,
                         &target,
-                        flowmux_browser::scripts::hover_by_selector,
-                    ) {
-                        Ok(js) => run_browser_js(&browser, &js, ack, true),
-                        Err(e) => {
-                            let _ = ack.send(Err(e));
-                        }
-                    },
+                        flowmux_browser::input::PointerAction::Hover,
+                        ack,
+                    ),
                     BrowserOp::Focus { target } => match ref_script(
                         &browser,
                         &target,

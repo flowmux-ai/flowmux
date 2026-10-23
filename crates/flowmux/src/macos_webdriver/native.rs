@@ -148,31 +148,21 @@ impl Window {
         Ok(())
     }
 
-    pub fn click(&self, mut point: NSPoint) -> Result<(), String> {
-        let view = self.web.as_super();
-        let bounds = view.bounds();
-        if !point.x.is_finite()
-            || !point.y.is_finite()
-            || point.x < 0.0
-            || point.y < 0.0
-            || point.x >= bounds.size.width
-            || point.y >= bounds.size.height
-        {
-            return Err("pointer is outside the browser viewport".into());
+    pub fn click(&self, point: NSPoint) -> Result<(), String> {
+        let bounds = self.web.as_super().bounds();
+        flowmux_browser::input::PointerTarget {
+            x: point.x,
+            y: point.y,
+            width: bounds.size.width,
+            height: bounds.size.height,
         }
+        .scale(bounds.size.width, bounds.size.height)?;
         self.activate()?;
-        if !view.isFlipped() {
-            point.y = bounds.size.height - point.y;
-        }
-        let point = view.convertPoint_toView(point, None);
-
-        for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
-            let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-                kind, point, NSEventModifierFlags::empty(), timestamp(), self.window.windowNumber(), None, 0, 1, 1.0,
-            ).ok_or("could not create pointer event")?;
-            self.window.sendEvent(&event);
-        }
-        Ok(())
+        crate::macos_input::pointer(
+            &self.web,
+            flowmux_browser::input::PointerAction::Click,
+            point,
+        )
     }
 
     pub fn text(&self, text: &str) -> Result<(), String> {

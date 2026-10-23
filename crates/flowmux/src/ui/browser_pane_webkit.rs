@@ -814,6 +814,17 @@ impl BrowserPane {
         input::press(&self.web_view, stroke)
     }
 
+    pub fn pointer(
+        &self,
+        action: flowmux_browser::input::PointerAction,
+        target: &flowmux_browser::input::PointerTarget,
+    ) -> Result<(), String> {
+        if !self.navigation_enabled.get() {
+            return Err("browser is closed".into());
+        }
+        input::pointer(&self.web_view, action, target)
+    }
+
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(
         &self,
         source: &str,
