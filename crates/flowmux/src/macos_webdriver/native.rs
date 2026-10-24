@@ -162,7 +162,16 @@ impl Window {
             &self.web,
             flowmux_browser::input::PointerAction::Click,
             point,
-        )
+            || true,
+        )?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while crate::macos_input::pointer_pending() {
+            if Instant::now() >= deadline {
+                return Err("native pointer input timed out".into());
+            }
+            pump();
+        }
+        Ok(())
     }
 
     pub fn text(&self, text: &str) -> Result<(), String> {
@@ -263,6 +272,7 @@ pub(crate) fn smoke() {
         &browser.web,
         flowmux_browser::input::PointerAction::Hover,
         NSPoint::new(5.0, 5.0),
+        || true,
     )
     .expect("hit testing must use the content view's parent coordinates");
     view.setFrame(original_frame);
@@ -297,6 +307,7 @@ pub(crate) fn smoke() {
         &browser.web,
         flowmux_browser::input::PointerAction::Hover,
         NSPoint::new(30.0, 15.0),
+        || true,
     )
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -350,6 +361,40 @@ pub(crate) fn smoke() {
         );
     }
     assert!(events.iter().all(|(_, trusted)| *trusted));
+    browser
+        .evaluate("(()=>{window.releases=0;field.onpointerup=()=>releases++;return true})()")
+        .unwrap();
+    let input_context = objc2::runtime::AnyClass::get(c"NSTextInputContext")
+        .unwrap()
+        .instance_method(sel!(handleEvent:completionHandler:))
+        .unwrap();
+    let original = input_context.implementation() as usize;
+    let steps = Cell::new(0);
+    crate::macos_input::pointer(
+        &browser.web,
+        flowmux_browser::input::PointerAction::Drag {
+            to_x: 100.0,
+            to_y: 15.0,
+        },
+        NSPoint::new(30.0, 15.0),
+        move || {
+            steps.set(steps.get() + 1);
+            steps.get() <= 2
+        },
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while crate::macos_input::pointer_pending() {
+        assert!(
+            Instant::now() < deadline,
+            "cancelled pointer input did not settle"
+        );
+        pump();
+    }
+    assert_eq!(browser.evaluate("releases").unwrap(), 1);
+    assert_eq!(input_context.implementation() as usize, original);
+    assert_eq!(NSEvent::pressedMouseButtons(), 0);
+    println!("MACOS_POINTER_CANCEL_RELEASE_OK");
     let other = Window::new(&config);
     unsafe {
         other.web.loadHTMLString_baseURL(&NSString::from_str(
@@ -373,11 +418,14 @@ pub(crate) fn smoke() {
         &browser.web,
         flowmux_browser::input::PointerAction::Click,
         NSPoint::new(30.0, 15.0),
+        || true,
     )
     .unwrap();
     assert!(browser.window.isKeyWindow());
     let deadline = Instant::now() + Duration::from_secs(5);
-    while browser.evaluate("document.activeElement.id").unwrap() != "field" {
+    while crate::macos_input::pointer_pending()
+        || browser.evaluate("document.activeElement.id").unwrap() != "field"
+    {
         assert!(
             Instant::now() < deadline,
             "pointer did not focus its own window"

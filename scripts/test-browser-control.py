@@ -283,6 +283,16 @@ def exercise_regressions(cli, url, root):
 
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    evaluate("document.body.innerHTML='<input id=editing><div id=host></div>';window.clickEvents=[];const shadow=host.attachShadow({mode:'open'});shadow.innerHTML='<button>Ordered click</button>';for(const kind of ['pointerdown','pointerup','click'])shadow.querySelector('button').addEventListener(kind,e=>clickEvents.push([e.type,e.isTrusted,e.buttons]));'ready'")
+    for attempt in range(8):
+        evaluate("editing.focus();clickEvents=[];'ready'")
+        browser("type", "x")
+        snap = json.loads(browser("snapshot")["browser_result"]["value"])
+        ref = next(key for key, meta in snap["refs"].items() if meta["name"] == "Ordered click")
+        browser("click", ref)
+        events = json.loads(evaluate("JSON.stringify(clickEvents)"))
+        assert events == [["pointerdown", True, 1], ["pointerup", True, 0], ["click", True, 0]], (attempt, events)
+    print("BROWSER_POINTER_ORDER_OK", flush=True)
     failures = []
     evaluate("document.body.innerHTML='<input id=f aria-label=Dialog>';f.oninput=()=>window.answer=confirm('input?');f.focus();'ready'")
     with ThreadPoolExecutor(max_workers=1) as workers:
@@ -535,7 +545,7 @@ def exercise(cli, url, root):
     assert snapshot()["page"]["surface_id"] == parent_surface
     # A popup can close during the engine's creation handshake.
     evaluate("window.open('about:blank','short-lived').close();'closed'")
-    assert browser("wait", "--js", "typeof mutations !== 'undefined'")["browser_bool_result"]["value"]
+    assert browser("wait", "--js", "typeof mutations !== 'undefined'", "--surface", parent_surface)["browser_bool_result"]["value"]
     print("PASS: native popups preserve opener, WindowProxy, input, messaging and close", flush=True)
     def downloads(*args, **kwargs):
         result = browser("download", *(args or ("list",)), **kwargs)

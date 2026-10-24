@@ -1557,7 +1557,14 @@ impl BrowserPane {
         } else {
             action
         };
-        crate::macos_input::pointer(&self.native.web_view, action, NSPoint::new(x, y))
+        let control = self.control.clone();
+        let revision = control.revision();
+        crate::macos_input::pointer(
+            &self.native.web_view,
+            action,
+            NSPoint::new(x, y),
+            move || control.check_revision(revision).is_ok(),
+        )
     }
 
     fn evaluate_in_world<F: FnOnce(Result<String, String>) + 'static>(

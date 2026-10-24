@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Native editing confined to a process-owned WKWebView.
-use objc2::runtime::{AnyClass, Bool, Imp, Method, Sel};
-use objc2::{msg_send, sel, ClassType};
+use objc2::rc::Retained;
+use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Method, Sel};
+use objc2::{msg_send, sel, ClassType, Message};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags as Flags, NSEventType, NSView};
 use objc2_foundation::{NSNotFound, NSPoint, NSRange, NSString};
 use objc2_web_kit::WKWebView;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 pub(crate) fn physical_key(key: &str) -> Option<(&str, u16)> {
@@ -55,6 +57,9 @@ pub(crate) fn press_key(
     web: &WKWebView,
     stroke: &flowmux_browser::input::KeyStroke,
 ) -> Result<(), String> {
+    if POINTER_SEQUENCE_ACTIVE.with(Cell::get) {
+        return Err("native pointer input is still pending".into());
+    }
     let (text, code) =
         physical_key(&stroke.key).ok_or("key is not available; use type for text")?;
     let window = web
@@ -107,6 +112,9 @@ pub(crate) fn press_key(
 }
 
 pub(crate) fn insert_text(web: &WKWebView, text: &str) -> Result<(), String> {
+    if POINTER_SEQUENCE_ACTIVE.with(Cell::get) {
+        return Err("native pointer input is still pending".into());
+    }
     let responder = web
         .as_super()
         .window()
@@ -180,6 +188,183 @@ fn with_pointer_buttons(buttons: usize, send: impl FnOnce()) -> Result<(), Strin
     Ok(())
 }
 
+// WebKit sends mouse events through NSTextInputContext asynchronously while an
+// editor is focused. Enqueue the next event only after that completion forwarded
+// the current event to WebKit; otherwise an immediate mouse-up can overtake down.
+type InputCompletion = block2::DynBlock<dyn Fn(Bool)>;
+type InputContextImp = unsafe extern "C-unwind" fn(&AnyObject, Sel, &NSEvent, &InputCompletion);
+static ORIGINAL_INPUT_CONTEXT: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+fn after_native_input(next: Box<dyn FnOnce()>) {
+    let next = RefCell::new(Some(next));
+    let block = block2::RcBlock::new(move || {
+        if let Some(next) = next.borrow_mut().take() {
+            next();
+        }
+    });
+    // The WebDriver process runs AppKit without a GLib loop. This queue is always
+    // on the AppKit thread and also works in the embedded GTK browser.
+    unsafe {
+        let queue: Retained<AnyObject> = msg_send![objc2::class!(NSOperationQueue), mainQueue];
+        let _: () = msg_send![&*queue, addOperationWithBlock: &*block];
+    }
+}
+
+struct PendingMouseEvent {
+    event: Retained<NSEvent>,
+    next: Box<dyn FnOnce()>,
+}
+thread_local! {
+    static PENDING_MOUSE_EVENT: RefCell<Option<PendingMouseEvent>> = const { RefCell::new(None) };
+    static POINTER_SEQUENCE_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn pointer_pending() -> bool {
+    POINTER_SEQUENCE_ACTIVE.with(Cell::get)
+}
+
+unsafe extern "C-unwind" fn input_context_event(
+    context: &AnyObject,
+    selector: Sel,
+    event: &NSEvent,
+    completion: &InputCompletion,
+) {
+    let original: InputContextImp =
+        unsafe { std::mem::transmute(ORIGINAL_INPUT_CONTEXT.load(Ordering::Acquire)) };
+    let pending = PENDING_MOUSE_EVENT.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.as_ref().is_some_and(|pending| {
+            pending.event.timestamp() == event.timestamp()
+                && pending.event.windowNumber() == event.windowNumber()
+                && pending.event.r#type() == event.r#type()
+        }) {
+            pending.take()
+        } else {
+            None
+        }
+    });
+    let Some(pending) = pending else {
+        unsafe { original(context, selector, event, completion) };
+        return;
+    };
+    let completion = completion.copy();
+    let next = RefCell::new(Some(pending.next));
+    let buttons = usize::from(matches!(
+        event.r#type(),
+        NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
+    ));
+    let observed = block2::RcBlock::new(move |handled: Bool| {
+        // A synchronous completion already runs under the dispatch's button guard.
+        if POINTER_BUTTONS.with(Cell::get).is_some()
+            || with_pointer_buttons(buttons, || completion.call((handled,))).is_err()
+        {
+            completion.call((handled,));
+        }
+        if let Some(next) = next.borrow_mut().take() {
+            after_native_input(next);
+        }
+    });
+    unsafe { original(context, selector, event, &observed) };
+}
+
+struct InputContextGuard {
+    method: &'static Method,
+    original: Imp,
+}
+impl Drop for InputContextGuard {
+    fn drop(&mut self) {
+        unsafe {
+            self.method.set_implementation(self.original);
+        }
+    }
+}
+
+struct PointerSequence {
+    web: Retained<WKWebView>,
+    window: Retained<objc2_app_kit::NSWindow>,
+    events: RefCell<std::vec::IntoIter<Retained<NSEvent>>>,
+    context_method: &'static Method,
+    pressed: Cell<bool>,
+    requires_focus: bool,
+    can_continue: Box<dyn Fn() -> bool>,
+}
+impl Drop for PointerSequence {
+    fn drop(&mut self) {
+        POINTER_SEQUENCE_ACTIVE.with(|active| active.set(false));
+    }
+}
+impl PointerSequence {
+    fn send_next(self: Rc<Self>) {
+        let Some(mut event) = self.events.borrow_mut().next() else {
+            return;
+        };
+        let view = self.web.as_super();
+        if event.r#type() != NSEventType::LeftMouseUp
+            && (!(self.can_continue)()
+                || view.isHiddenOrHasHiddenAncestor()
+                || view.window().as_ref() != Some(&self.window)
+                || (self.requires_focus && !self.window.isKeyWindow()))
+        {
+            // A tab/window switch cancels remaining presses, but must release a held button.
+            let release = self
+                .pressed
+                .get()
+                .then(|| {
+                    self.events
+                        .borrow_mut()
+                        .find(|event| event.r#type() == NSEventType::LeftMouseUp)
+                })
+                .flatten();
+            *self.events.borrow_mut() = Vec::new().into_iter();
+            match release {
+                Some(up) => event = up,
+                None => return,
+            }
+        }
+        let original = self.context_method.implementation();
+        ORIGINAL_INPUT_CONTEXT.store(original as *mut (), Ordering::Release);
+        let next = self.clone();
+        PENDING_MOUSE_EVENT.with(|pending| {
+            *pending.borrow_mut() = Some(PendingMouseEvent {
+                event: event.clone(),
+                next: Box::new(move || next.send_next()),
+            });
+        });
+        let replacement: InputContextImp = input_context_event;
+        unsafe {
+            self.context_method
+                .set_implementation(std::mem::transmute::<InputContextImp, Imp>(replacement));
+        }
+        let restore = InputContextGuard {
+            method: self.context_method,
+            original,
+        };
+        let buttons = usize::from(matches!(
+            event.r#type(),
+            NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
+        ));
+        self.pressed.set(buttons != 0);
+        let result = with_pointer_buttons(buttons, || {
+            if event.r#type() == NSEventType::MouseMoved {
+                unsafe {
+                    let _: () = msg_send![&*self.web, _simulateMouseMove: &*event];
+                }
+            } else {
+                self.window.sendEvent(&event);
+            }
+        });
+        drop(restore);
+        let pending = PENDING_MOUSE_EVENT.with(|pending| pending.borrow_mut().take());
+        if let Err(error) = result {
+            tracing::warn!(%error, "native pointer dispatch failed");
+            return;
+        }
+        // Non-editable content has no input context and forwards synchronously.
+        if let Some(pending) = pending {
+            after_native_input(pending.next);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn check_pointer_button_state() {
     let physical = NSEvent::pressedMouseButtons();
@@ -219,8 +404,15 @@ pub(crate) fn pointer(
     web: &WKWebView,
     action: flowmux_browser::input::PointerAction,
     point: NSPoint,
+    can_continue: impl Fn() -> bool + 'static,
 ) -> Result<(), String> {
     use flowmux_browser::input::{PointerAction, PointerTarget};
+    if POINTER_SEQUENCE_ACTIVE.with(Cell::get) {
+        return Err("native pointer input is still pending".into());
+    }
+    let context_method = AnyClass::get(c"NSTextInputContext")
+        .and_then(|class| class.instance_method(sel!(handleEvent:completionHandler:)))
+        .ok_or("native input context completion is unavailable")?;
     if NSEvent::pressedMouseButtons() != 0 {
         return Err("release held pointer buttons before native input".into());
     }
@@ -281,51 +473,36 @@ pub(crate) fn pointer(
         // Otherwise AppKit can consume the first click to activate the window.
         window.makeKeyAndOrderFront(None);
     }
-    unsafe {
-        let _: () = msg_send![web, _simulateMouseMove: &*motion];
-    }
+    let mut events = vec![motion];
     if let Some(end) = drag_points.last() {
-        let down = event(NSEventType::LeftMouseDown, 1, point)?;
-        let up = event(NSEventType::LeftMouseUp, 1, *end)?;
-        let motions = drag_points
-            .iter()
-            .map(|point| event(NSEventType::LeftMouseDragged, 0, *point))
-            .collect::<Result<Vec<_>, _>>()?;
-        struct Release<'a> {
-            window: &'a objc2_app_kit::NSWindow,
-            event: objc2::rc::Retained<NSEvent>,
+        events.push(event(NSEventType::LeftMouseDown, 1, point)?);
+        for point in &drag_points {
+            events.push(event(NSEventType::LeftMouseDragged, 0, *point)?);
         }
-        impl Drop for Release<'_> {
-            fn drop(&mut self) {
-                if with_pointer_buttons(0, || self.window.sendEvent(&self.event)).is_err() {
-                    self.window.sendEvent(&self.event);
-                }
-            }
-        }
-        with_pointer_buttons(1, || window.sendEvent(&down))?;
-        let _release = Release {
-            window: &window,
-            event: up,
+        events.push(event(NSEventType::LeftMouseUp, 1, *end)?);
+    } else {
+        let count = match action {
+            PointerAction::Hover => 0,
+            PointerAction::Click => 1,
+            PointerAction::DoubleClick => 2,
+            PointerAction::Drag { .. } => unreachable!(),
         };
-        for motion in motions {
-            with_pointer_buttons(1, || window.sendEvent(&motion))?;
-        }
-        return Ok(());
-    }
-    let count = match action {
-        PointerAction::Hover => 0,
-        PointerAction::Click => 1,
-        PointerAction::DoubleClick => 2,
-        PointerAction::Drag { .. } => unreachable!(),
-    };
-    for count in 1..=count {
-        for kind in [NSEventType::LeftMouseDown, NSEventType::LeftMouseUp] {
-            let event = event(kind, count, point)?;
-            with_pointer_buttons(usize::from(kind == NSEventType::LeftMouseDown), || {
-                window.sendEvent(&event);
-            })?;
+        for count in 1..=count {
+            events.push(event(NSEventType::LeftMouseDown, count, point)?);
+            events.push(event(NSEventType::LeftMouseUp, count, point)?);
         }
     }
+    POINTER_SEQUENCE_ACTIVE.with(|active| active.set(true));
+    Rc::new(PointerSequence {
+        web: web.retain(),
+        window,
+        events: RefCell::new(events.into_iter()),
+        context_method,
+        pressed: Cell::new(false),
+        requires_focus: !matches!(action, PointerAction::Hover),
+        can_continue: Box::new(can_continue),
+    })
+    .send_next();
     Ok(())
 }
 
