@@ -252,3 +252,84 @@ session with a visible warning and `diagnose.storage_ephemeral=true`; it never
 uses the global default session. Cookie import returns `unimplemented` before
 reading host cookies, because WebView insertion is not implemented. Sign in
 inside the intended Flowmux profile.
+
+## Task progress and result cards
+
+After `control start`, describe the owning task with its ID:
+
+```sh
+flowmux browser --task "$TASK" --surface "$SURFACE" task "$PANE" \
+  --name 'Contact report' --step 'Fill the form' \
+  --waiting '' --user-action 'Review before submitting'
+```
+
+All four fields are optional; an empty string clears one field. Each is limited
+to 500 characters. These are descriptions supplied by the task, not inferred
+progress or proof of completion. Updating details requires the owning task ID
+and does not resume a paused task. Use `control handoff` when the user must act.
+
+The task bar shows these details. **Results** lists up to 20 recent action
+results, related popup tabs, screenshots, uploads and tracked downloads. Related
+tabs keep their own ownership. File buttons open saved captures and completed
+downloads or their containing folders. Missing files cannot be opened. Results
+and details are also returned by `control status`; they are runtime-only and
+are cleared with **Clear task**. Finishing the task does not mark an unverified
+website action successful.
+
+A selected upload is shown as **Files selected — upload unconfirmed**. To observe
+a site's completion condition, use `file-chooser select --receipt --expect JSON`.
+The result card then says **Upload condition observed** only if that condition
+was met; it retains the selected filenames and request source. File selection
+alone is not proof of a server upload. A page may upload immediately on selection.
+Downloads update from native callbacks and only expose an open-file action after
+completion. No command input values or raw receipt values are copied into cards.
+
+## Form fields without a submit command
+
+Use current, unambiguous snapshot refs from `find`/`snapshot`:
+
+```sh
+flowmux browser --task "$TASK" --surface "$SURFACE" form "$PANE" \
+  '[{"target":"e1-SNAPSHOT","action":{"fill":"person@example.test"}},
+    {"target":"e2-SNAPSHOT","action":{"select":"Work"}},
+    {"target":"e3-SNAPSHOT","action":{"check":true}}]'
+```
+
+Replace the example refs with actual returned tokens. A form accepts 1–20 unique
+targets, with `fill`, `select`, or `check` actions. Each field uses the existing
+preparation and ref validation, executes once and checks its retained value and
+HTML/ARIA validity. `select` accepts an option value or label, as the individual
+command does. `fill` supports text inputs and textareas; native rich-editor
+editing remains a separate `type` operation. Password fields require a separate
+manual or explicitly chosen secret-input workflow and are rejected by `form`.
+
+The response contains a `fields` array with `verified`, `invalid`, `failed`, or
+`not_run` for each target and `submit_command_sent: false`. Failed fields do not
+undo earlier changes. Ordinary field failures allow later fields to run; handoff,
+navigation, a pending dialog, an input timeout, or the 20-second batch deadline
+stops remaining fields. Correct
+only the failed/unexecuted fields using fresh refs if the page changed. There is
+no automatic retry or submit step. Page input/change handlers can themselves send
+requests, so this is not a transaction or a promise of no site-side effects.
+
+## Outcomes inside frames and open shadow roots
+
+Use `Element` to bind an expectation to a current ref rather than a top-level
+CSS selector:
+
+```sh
+flowmux browser wait "$PANE" --condition \
+  '{"Element":{"target":"e4-SNAPSHOT","expect":{"Value":"updated"}}}'
+flowmux browser --receipt --expect \
+  '{"Element":{"target":"e4-SNAPSHOT","expect":{"ValueChanged":{}}}}' \
+  fill "$PANE" e4-SNAPSHOT updated
+```
+
+`expect` accepts `State`, `Value`, `Text` (exact text), `ValueChanged`, or
+`TextChanged`. State names match the existing `ElementState` conditions. Change
+baselines are captured before the action/wait; caller-supplied baselines are
+replaced. The target's original node, root and frame documents must remain valid
+on every poll. Frame navigation, node replacement or a new snapshot invalidates
+the ref even when its old selector matches another node. Conditions run in the
+same isolated world as the snapshot. Closed shadow roots and inaccessible frames
+remain unsupported. Existing selector conditions retain their top-level behavior.

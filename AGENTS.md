@@ -121,6 +121,8 @@ This option applies to every browser command except `open`.
 | --receipt / --expect-text / --expect-url | yes | Observed action results; timeout never repeats the action |
 | click / dblclick / hover / focus / blur | yes | by ref token |
 | fill / select / type / press | yes | type & press act on the active element |
+| form | yes | bounded ref-based field list; per-field verification, no submit command |
+| task | yes | owning task name, step, wait reason and user action; results in the task bar |
 | check / uncheck | yes | radios cannot be unchecked individually |
 | is-visible / is-enabled / is-checked / count | yes | return strings or ints |
 | text / value / attr | yes | read by ref |

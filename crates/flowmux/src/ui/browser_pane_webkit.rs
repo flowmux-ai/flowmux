@@ -371,7 +371,7 @@ impl BrowserPane {
         let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
         inspector.add_css_class("flat");
         inspector.set_tooltip_text(Some("Open Web Inspector"));
-        let file_choosers = FileChoosers::default();
+        let file_choosers = FileChoosers::with_control(control.clone());
         {
             let file_choosers = file_choosers.clone();
             web_view.connect_run_file_chooser(move |view, request| {
@@ -472,6 +472,7 @@ impl BrowserPane {
             });
         }
         let downloads = DownloadManager::new();
+        downloads.observe(control.clone());
         let bookmarks = BookmarkMenu::new(
             &profile,
             {

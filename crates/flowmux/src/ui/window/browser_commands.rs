@@ -114,6 +114,24 @@ impl WindowController {
                         return;
                     }
                 };
+                let registry = Rc::downgrade(&self.pane_registry);
+                let bridge = self.bridge.clone();
+                browser.control.set_tab_opener(Rc::new(move |id| {
+                    let surface = SurfaceId(id);
+                    if let Some(registry) = registry.upgrade() {
+                        if let Some(pane) = registry.borrow().pane_for_surface(surface) {
+                            return bridge
+                                .tx
+                                .try_send(GtkCommand::ActivateSurface {
+                                    pane,
+                                    surface,
+                                    ack: None,
+                                })
+                                .is_ok();
+                        }
+                    }
+                    false
+                }));
                 let (task, op) = match op {
                     BrowserOp::WithTask { task, op } => (Some(task), *op),
                     op => (None, op),
@@ -133,6 +151,14 @@ impl WindowController {
                                 .or_else(|| self.pane_registry.borrow().active_surface(pane)));
                         BrowserActionResult::String(value.to_string())
                     });
+                    let _ = ack.send(result);
+                    return;
+                }
+                if let BrowserOp::Task(details) = &op {
+                    let result = browser
+                        .control
+                        .update_task(task, details.clone())
+                        .map(|value| BrowserActionResult::String(value.to_string()));
                     let _ = ack.send(result);
                     return;
                 }
@@ -178,7 +204,24 @@ impl WindowController {
                         }
                     }
                 }
-                let ack = if operation.is_some() || receipt.is_some() {
+                let publish_action = (!read_only
+                    && !matches!(op, BrowserOp::Snapshot | BrowserOp::Inspect(_)))
+                    || receipt.is_some();
+                let action_name = op.capability_name();
+                let capture_path = if let BrowserOp::Screenshot { path, .. } = &op {
+                    Some(path.clone())
+                } else {
+                    None
+                };
+                let upload = match &op {
+                    BrowserOp::FileChooser {
+                        action: flowmux_ipc::protocol::BrowserFileChooserAction::Select { id, .. },
+                    } => Some(id.clone()),
+                    _ => None,
+                };
+                let is_form = matches!(op, BrowserOp::Form(_));
+                let publish = browser.control.status()["task_id"].clone();
+                let ack = if operation.is_some() || receipt.is_some() || capture_path.is_some() {
                     let (tx, rx) = oneshot::channel();
                     let observed = browser.clone();
                     let receipt = receipt.map(|(condition, timeout_ms)| ActionReceipt {
@@ -197,12 +240,68 @@ impl WindowController {
                         let result = rx
                             .await
                             .unwrap_or_else(|_| Err("browser action callback closed".into()));
+                        let action_succeeded = result.is_ok();
                         let result = if let Some(receipt) = receipt {
-                            Ok(receipt.finish(observed, result, operation).await)
+                            Ok(receipt.finish(observed.clone(), result, operation).await)
                         } else {
                             drop(operation);
                             result
                         };
+                        if observed.control.status()["task_id"] == publish && !publish.is_null() {
+                            let (status, detail) = match &result {
+                                _ if !action_succeeded => (
+                                    "Action failed",
+                                    "Inspect the command error before continuing".to_string(),
+                                ),
+                                Ok(BrowserActionResult::String(value)) if is_form => {
+                                    let data: serde_json::Value =
+                                        serde_json::from_str(value).unwrap_or_default();
+                                    let data = if data["value"].is_string() {
+                                        serde_json::from_str(data["value"].as_str().unwrap())
+                                            .unwrap_or_default()
+                                    } else {
+                                        data
+                                    };
+                                    let rows = data["fields"].as_array();
+                                    let count = rows.map_or(0, |rows| {
+                                        rows.iter()
+                                            .filter(|row| row["status"] == "verified")
+                                            .count()
+                                    });
+                                    ("Form checked", format!("{count}/{} fields verified. No submit command was sent.", rows.map_or(0, Vec::len)))
+                                }
+                                Ok(BrowserActionResult::String(value)) => {
+                                    let data: serde_json::Value =
+                                        serde_json::from_str(value).unwrap_or_default();
+                                    match data["status"].as_str() {
+                                        Some("input_delivered") => ("Input delivered", "No business outcome was verified.".into()),
+                                        Some("outcome_confirmed") => ("Result confirmed", "The requested page condition was observed; server persistence is not independently verified.".into()),
+                                        Some("outcome_unknown") => ("Result unconfirmed", "Input may have completed. Inspect the page before retrying.".into()),
+                                        Some("control_changed") => ("Control changed", "No further input will be sent by this action.".into()),
+                                        Some("dialog_pending") => ("Waiting for dialog", "Inspect the page dialog or take control.".into()),
+                                        _ => ("Action returned", "No business outcome was verified.".into()),
+                                    }
+                                }
+                                Err(_) => unreachable!("failed action handled above"),
+                                _ => (
+                                    "Input delivered",
+                                    "No business outcome was verified.".into(),
+                                ),
+                            };
+                            if publish_action {
+                                observed.control.result(serde_json::json!({"key":format!("action:{}",uuid::Uuid::new_v4()),"title":format!("{action_name}: {status}"),"detail":detail}));
+                            }
+                            if let Some(id) = upload {
+                                if status == "Result confirmed" {
+                                    observed.control.upload_observed(&id);
+                                }
+                            }
+                            if action_succeeded {
+                                if let Some(path) = capture_path {
+                                    observed.control.result(serde_json::json!({"key":format!("capture:{}",path.display()),"title":"Screenshot saved","detail":path.display().to_string(),"path":path}));
+                                }
+                            }
+                        }
                         let _ = ack.send(result);
                     });
                     tx
@@ -212,7 +311,14 @@ impl WindowController {
                 match op {
                     BrowserOp::WithTask { .. }
                     | BrowserOp::Receipt { .. }
-                    | BrowserOp::Control { .. } => unreachable!("unwrapped browser control"),
+                    | BrowserOp::Control { .. }
+                    | BrowserOp::Task(_) => unreachable!("unwrapped browser control"),
+                    BrowserOp::Form(fields) => {
+                        glib::spawn_future_local(async move {
+                            let result = run_browser_form(&browser, fields, revision).await;
+                            let _ = ack.send(result);
+                        });
+                    }
                     BrowserOp::Eval { source } => {
                         browser.evaluate_js(&source, move |result| {
                             let _ = ack.send(result.map(BrowserActionResult::String));
@@ -616,8 +722,11 @@ impl WindowController {
                             let _ = ack.send(Err(error));
                             return;
                         }
-                        let cancellation =
-                            matches!(condition, BrowserWaitCondition::Js(_)).then_some(revision);
+                        let cancellation = matches!(
+                            condition,
+                            BrowserWaitCondition::Js(_) | BrowserWaitCondition::Element { .. }
+                        )
+                        .then_some(revision);
                         run_browser_wait(
                             browser.clone(),
                             self.pane_registry.clone(),
@@ -971,6 +1080,9 @@ fn run_prepared_element_action(
             let _ = ack.send(Err(error));
             return;
         }
+        if ack.is_closed() {
+            return;
+        }
         // The action still validates the original ref and executes exactly once.
         run_browser_js(&browser, &action, ack, true);
     });
@@ -980,6 +1092,28 @@ async fn capture_change_baseline(
     browser: &crate::ui::browser_pane::BrowserPane,
     condition: &mut BrowserWaitCondition,
 ) -> Result<(), String> {
+    if let BrowserWaitCondition::Element { target, expect } = condition {
+        use flowmux_ipc::protocol::BrowserElementExpectation as Expect;
+        let (property, before) = match expect {
+            Expect::TextChanged { before } => ("innerText", before),
+            Expect::ValueChanged { before } => ("value", before),
+            _ => return element_expectation_js(browser, target, expect).map(|_| ()),
+        };
+        let js = ref_script(browser, target, |_| {
+            format!("(() => {{ if (el.matches('input[type=password]')) throw new Error('password values are redacted'); if (typeof el.{property} !== 'string') throw new Error('change target has no text value'); return el.{property}; }})()")
+        })?;
+        let (tx, rx) = oneshot::channel();
+        browser.evaluate_automation_js(&js, move |result| {
+            let _ = tx.send(result);
+        });
+        *before = Some(
+            glib::future_with_timeout(Duration::from_secs(5), rx)
+                .await
+                .map_err(|_| "change baseline timed out")?
+                .map_err(|_| "change baseline closed")??,
+        );
+        return Ok(());
+    }
     if let BrowserWaitCondition::PopupReady { after_sequence, .. } = condition {
         *after_sequence = browser.control.observation()["event_sequence"].as_u64();
     }
@@ -1115,4 +1249,131 @@ impl ActionReceipt {
             "control":browser.control.status(),
         }).to_string())
     }
+}
+
+async fn run_browser_form(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    fields: Vec<flowmux_ipc::protocol::BrowserFormField>,
+    revision: u64,
+) -> Result<BrowserActionResult, String> {
+    use flowmux_ipc::protocol::BrowserFormAction as Action;
+    if fields.is_empty() || fields.len() > 20 {
+        return Err("form requires between 1 and 20 fields".into());
+    }
+    let mut targets = std::collections::HashSet::new();
+    for field in &fields {
+        if !targets.insert(field.target.trim_start_matches('@')) {
+            return Err("form targets must be unique".into());
+        }
+        ref_script(browser, &field.target, |_| "true".into())?;
+    }
+    let generation = browser.control.observation()["document_generation"].clone();
+    let mut results = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut stopped = false;
+    for field in fields {
+        if stopped
+            || Instant::now() >= deadline
+            || browser.control.check_revision(revision).is_err()
+            || browser.control.observation()["document_generation"] != generation
+            || browser.has_pending_dialog()
+        {
+            stopped = true;
+            results.push(serde_json::json!({"target":field.target,"status":"not_run"}));
+            continue;
+        }
+        let script = ref_script(browser, &field.target, |selector| {
+            let action = match &field.action {
+                Action::Fill(value) => flowmux_browser::scripts::fill_by_selector(selector, value),
+                Action::Select(value) => {
+                    flowmux_browser::scripts::select_option_by_selector(selector, value)
+                }
+                Action::Check(checked) => {
+                    if *checked {
+                        flowmux_browser::scripts::check_by_selector(selector)
+                    } else {
+                        flowmux_browser::scripts::uncheck_by_selector(selector)
+                    }
+                }
+            };
+            format!("(() => {{ if (el.matches('input[type=password]')) throw new Error('use manual password entry'); return {action}; }})()")
+        });
+        let script = match script {
+            Ok(script) => script,
+            Err(error) => {
+                results.push(
+                    serde_json::json!({"target":field.target,"status":"failed","error":error}),
+                );
+                continue;
+            }
+        };
+        let (tx, rx) = oneshot::channel();
+        run_prepared_element_action(
+            browser,
+            &field.target,
+            matches!(field.action, Action::Fill(_)),
+            script,
+            tx,
+        );
+        let result = match glib::future_with_timeout(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_secs(8)),
+            rx,
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            _ => {
+                stopped = true;
+                Err(
+                    "form input timed out; input may still complete, remaining fields were not run"
+                        .into(),
+                )
+            }
+        };
+        let validation = match result {
+            Err(error) => Err(error),
+            Ok(_) => async {
+                let script = ref_script(browser, &field.target, |_| {
+                    let expected = match &field.action {
+                        Action::Fill(value) => format!("(el.isContentEditable ? el.textContent : el.value) === {}", serde_json::to_string(value).unwrap()),
+                        Action::Select(value) => format!("el.value === {0} || Array.from(el.selectedOptions).some(option => option.textContent.trim() === {0})", serde_json::to_string(value).unwrap()),
+                        Action::Check(value) => format!("el.checked === {value}"),
+                    };
+                    format!("JSON.stringify({{matched: {expected}, valid: !el.matches(':invalid') && el.getAttribute('aria-invalid') !== 'true', message: el.validationMessage || ''}})")
+                })?;
+                let (tx, rx) = oneshot::channel();
+                browser.evaluate_automation_js(&script, move |result| {
+                    let _ = tx.send(result);
+                });
+                match glib::future_with_timeout(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_secs(5)),
+                    rx,
+                )
+                .await
+                {
+                    Ok(Ok(Ok(value))) => serde_json::from_str::<serde_json::Value>(&value)
+                        .map_err(|error| error.to_string()),
+                    Ok(Ok(Err(error))) => Err(error),
+                    _ => Err("form validation timed out; input may have completed".into()),
+                }
+            }.await
+        };
+        let row = match validation {
+            Ok(value) => {
+                serde_json::json!({"target":field.target,"status":if value["matched"] == true && value["valid"] == true {"verified"}else{"invalid"},"validation":value})
+            }
+            Err(error) => {
+                serde_json::json!({"target":field.target,"status":"failed","error":error})
+            }
+        };
+        results.push(row);
+    }
+    Ok(BrowserActionResult::String(
+        serde_json::json!({"fields":results,"submit_command_sent":false,"automatic_retry":false})
+            .to_string(),
+    ))
 }

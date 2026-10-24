@@ -2709,3 +2709,46 @@ fn semantic_filters_typed_outcomes_and_file_scope_reach_the_server() {
         }
     ));
 }
+
+#[test]
+fn browser_task_form_and_ref_expectations_parse() {
+    let pane = PaneId::new().to_string();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "task",
+        &pane,
+        "--name",
+        "업무",
+        "--step",
+        "Upload",
+        "--user-action",
+        "Review",
+    ])
+    .unwrap();
+    assert!(
+        matches!(build_request(cli.cmd).unwrap(), Request::BrowserTask { details, .. } if details.name.as_deref() == Some("업무") && details.user_action.as_deref() == Some("Review"))
+    );
+    let fields = r#"[{"target":"e1-snapshot","action":{"fill":"한글"}}]"#;
+    let cli = Cli::try_parse_from(["flowmuxctl", "browser", "form", &pane, fields]).unwrap();
+    assert!(
+        matches!(build_request(cli.cmd).unwrap(), Request::BrowserForm { fields, .. } if fields.len() == 1 && fields[0].target == "e1-snapshot")
+    );
+    let condition = r#"{"Element":{"target":"e1-snapshot","expect":{"Value":"한글"}}}"#;
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "wait",
+        &pane,
+        "--condition",
+        condition,
+    ])
+    .unwrap();
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::BrowserWait {
+            condition: BrowserWaitCondition::Element { .. },
+            ..
+        }
+    ));
+}

@@ -205,6 +205,137 @@ def exercise_diagnostics(cli, url, root):
     print("BROWSER_DIAGNOSTICS_OK", flush=True)
 
 
+def exercise_task_workflow(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Browser task workflow", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--url", url)["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--selector", "#field")["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--js", "!!document.querySelector('#frame')?.contentDocument?.querySelector('input')")["browser_bool_result"]["value"]
+    started = json.loads(cli("browser", "control", pane, "start")["browser_result"]["value"])
+    task, surface = started["task_id"], started["surface_id"]
+
+    def owned(op, *args, **kwargs):
+        return cli("browser", "--task", task, "--surface", surface, op, pane, *args, **kwargs)
+
+    def value(op, *args, **kwargs):
+        return json.loads(owned(op, *args, **kwargs)["browser_result"]["value"])
+
+    def element(target, expect):
+        return json.dumps({"Element": {"target": target, "expect": expect}})
+
+    cli("browser", "task", pane, "--name", "Unowned", error=True)
+    details = value("task", "--name", "Form and files", "--step", "Fill contact details", "--waiting", "", "--user-action", "Review before submitting")
+    assert details["details"]["name"] == "Form and files", details
+    owned("task", "--name", "x" * 501, error=True)
+    snap = value("snapshot")
+    refs = {meta["name"]: ref for ref, meta in snap["refs"].items() if meta["name"] in ("Field", "Frame field", "Shadow field", "Password")}
+    assert len(refs) == 4, refs
+    assert owned("wait", "--condition", element(refs["Password"], {"State": "visible"}))["browser_bool_result"]["value"]
+    owned("wait", "--condition", element(refs["Password"], {"Value": "secret"}), error=True)
+    fields = [{"target": refs[name], "action": {"fill": text}} for name, text in [("Field", "parent"), ("Frame field", "child"), ("Shadow field", "shadow")]]
+    form = value("form", json.dumps(fields))
+    assert [row["status"] for row in form["fields"]] == ["verified"] * 3, form
+    assert form["submit_command_sent"] is False and form["automatic_retry"] is False
+    for name, text in [("Field", "parent"), ("Frame field", "child"), ("Shadow field", "shadow")]:
+        assert owned("wait", "--condition", element(refs[name], {"Value": text}))["browser_bool_result"]["value"]
+    assert not owned("wait", "--condition", element(refs["Frame field"], {"Value": "parent"}), "--timeout-ms", "100")["browser_bool_result"]["value"]
+    changed = value("fill", refs["Shadow field"], "changed", "--receipt", "--expect", element(refs["Shadow field"], {"ValueChanged": {}}))
+    assert changed["status"] == "outcome_confirmed", changed
+    assert value("eval", "JSON.stringify(frame.contentWindow.submissions)") == 0
+    # Reject duplicate targets before mutating any field.
+    owned("form", json.dumps([fields[0], fields[0]]), error=True)
+    assert owned("value", refs["Field"])["browser_result"]["value"] == "parent"
+    # Per-field failure cannot hide later completion or expose password content.
+    partial = value("form", json.dumps([{"target": refs["Password"], "action": {"fill": "never"}}, fields[0]]))
+    assert [row["status"] for row in partial["fields"]] == ["failed", "verified"], partial
+    assert "secret" not in json.dumps(partial)
+    owned("eval", "contact.type='email';contact.required=true;'ok'")
+    snap = value("snapshot")
+    contact = next(ref for ref, meta in snap["refs"].items() if meta["name"] == "Contact email")
+    invalid = value("form", json.dumps([{"target": contact, "action": {"fill": "invalid"}}]))
+    assert invalid["fields"][0]["status"] == "invalid", invalid
+    corrected = value("form", json.dumps([{"target": contact, "action": {"fill": "person@example.test"}}]))
+    assert corrected["fields"][0]["status"] == "verified", corrected
+    # Keep a current frame ref for the document replacement check.
+    refs["Frame field"] = next(ref for ref, meta in snap["refs"].items() if meta["name"] == "Frame field")
+    # Same CSS path in a replacement frame/document cannot satisfy an old ref.
+    owned("eval", "frame.src='/frame?replaced';'ok'")
+    assert owned("wait", "--js", "frame.contentWindow.location.search==='?replaced' && frame.contentDocument.readyState==='complete'")["browser_bool_result"]["value"]
+    owned("wait", "--condition", element(refs["Frame field"], {"State": "visible"}), error=True)
+    # Task results include real native downloads and saved captures.
+    capture = root / "task-result.png"
+    owned("screenshot", str(capture))
+    assert capture.is_file()
+    assert any(row.get("path") == str(capture) for row in value("control", "status")["results"])
+    missing_capture = root / "missing-directory" / "failed.png"
+    failed = value("screenshot", str(missing_capture), "--receipt")
+    assert failed["error"], failed
+    cards = value("control", "status")["results"]
+    assert not any(row.get("path") == str(missing_capture) for row in cards), cards
+    assert "Action failed" in cards[-1]["title"], cards[-1]
+    value("download", "directory", str(root))
+    owned("eval", "location.href='/download';'ok'")
+    deadline = time.monotonic() + 10
+    while True:
+        downloads = value("download", "list")["downloads"]
+        if downloads and downloads[-1]["state"] == "complete":
+            break
+        assert time.monotonic() < deadline, downloads
+        time.sleep(.05)
+    downloaded = downloads[-1]
+    assert Path(downloaded["path"]).read_text() == "Flowmux download fixture\n"
+    assert any(row.get("download_id") == downloaded["id"] and row.get("status") == "complete" and row.get("path") == downloaded["path"] for row in value("control", "status")["results"])
+    # File selection remains unconfirmed until an explicit site condition is observed.
+    sample = root / "upload.txt"
+    sample.write_text("task upload")
+    owned("eval", "upload.click();'ok'")
+    deadline = time.monotonic() + 5
+    while True:
+        chooser = value("file-chooser", "status")["file_chooser"]
+        if chooser:
+            break
+        assert time.monotonic() < deadline, "file chooser missing"
+        time.sleep(.05)
+    chosen = value("file-chooser", "select", chooser["id"], str(sample), "--root", str(root))
+    assert chosen["file_chooser"] is None
+    card = next(row for row in value("control", "status")["results"] if row.get("chooser_id") == chooser["id"])
+    assert card["status"] == "selected" and "unconfirmed" in card["title"], card
+    assert owned("wait", "--js", "uploadResult?.files[0]?.text==='task upload'")["browser_bool_result"]["value"]
+    owned("eval", "document.body.insertAdjacentHTML('beforeend','<p id=uploadStatus>Waiting</p>');upload.onchange=()=>{uploadStatus.textContent='Received'};upload.value='';upload.click();'ok'")
+    deadline = time.monotonic() + 5
+    while True:
+        chooser = value("file-chooser", "status")["file_chooser"]
+        if chooser:
+            break
+        assert time.monotonic() < deadline
+        time.sleep(.05)
+    receipt = value("file-chooser", "select", chooser["id"], str(sample), "--root", str(root), "--receipt", "--expect", json.dumps({"TextChanged": {"selector": "#uploadStatus"}}))
+    assert receipt["status"] == "outcome_confirmed", receipt
+    card = next(row for row in value("control", "status")["results"] if row.get("chooser_id") == chooser["id"])
+    assert card["status"] == "condition_observed" and "upload.txt" in card["detail"], card
+    # A delayed field must stop when task ownership changes.
+    owned("eval", "field.disabled=true;'ok'")
+    snap = value("snapshot")
+    ref = next(ref for ref, meta in snap["refs"].items() if meta["name"] == "Field")
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        pending = workers.submit(value, "form", json.dumps([{"target": ref, "action": {"fill": "cancelled"}}]))
+        deadline = time.monotonic() + 5
+        while not value("control", "status")["action_in_progress"]:
+            assert time.monotonic() < deadline
+            time.sleep(.02)
+        value("control", "handoff")
+        form = pending.result(timeout=5)
+        assert form["fields"][0]["status"] == "failed", form
+    assert owned("value", ref)["browser_result"]["value"] == "parent"
+    state = value("control", "status")
+    assert state["results"] and state["state"] == "user_needed", state
+    assert state["details"]["user_action"] == "Review before submitting"
+    value("control", "stop")
+    print("BROWSER_TASK_WORKFLOW_OK", flush=True)
+
+
 def exercise_ownership(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Browser task", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1183,10 +1314,12 @@ def main():
                     assert time.monotonic() < deadline, "GUI startup timed out"
                     time.sleep(.05)
                 assert cli("ping") == "pong"
-                exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
-                exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
-                exercise_regressions(cli, f"http://127.0.0.1:{server.server_port}/", root)
-                exercise(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
+                    exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                    exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                    exercise_regressions(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                    exercise(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 assert process.poll() is None, "test GUI exited unexpectedly"
             finally:
                 # Only the process created above is owned by this test.

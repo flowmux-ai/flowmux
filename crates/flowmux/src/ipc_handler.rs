@@ -272,6 +272,8 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserCount { pane, selector } => (pane, BrowserOp::Count { selector }),
             Request::BrowserSnapshot { pane } => (pane, BrowserOp::Snapshot),
             Request::BrowserInspect { pane, options } => (pane, BrowserOp::Inspect(options)),
+            Request::BrowserTask { pane, details } => (pane, BrowserOp::Task(details)),
+            Request::BrowserForm { pane, fields } => (pane, BrowserOp::Form(fields)),
             Request::BrowserControl { pane, action } => (pane, BrowserOp::Control { action }),
             Request::BrowserEval { pane, source } => (pane, BrowserOp::Eval { source }),
             Request::BrowserDiagnose { pane } => (pane, BrowserOp::Diagnose),
@@ -448,6 +450,8 @@ impl Handler for GuiHandler {
                 | Request::PaneClose { .. } => self.handle_pane_verb(req).await,
                 Request::BrowserReceipt { .. }
                 | Request::BrowserWithTask { .. }
+                | Request::BrowserTask { .. }
+                | Request::BrowserForm { .. }
                 | Request::BrowserControl { .. }
                 | Request::BrowserOnSurface { .. }
                 | Request::BrowserOpen { .. }

@@ -41,6 +41,8 @@ pub enum BrowserOp {
         task: uuid::Uuid,
         op: Box<BrowserOp>,
     },
+    Task(flowmux_ipc::protocol::BrowserTaskDetails),
+    Form(Vec<flowmux_ipc::protocol::BrowserFormField>),
     Control {
         action: String,
     },
@@ -170,6 +172,8 @@ impl BrowserOp {
         match self {
             Self::WithTask { op, .. } | Self::Receipt { op, .. } => op.capability_name(),
             Self::Control { .. } => "control",
+            Self::Task(_) => "task",
+            Self::Form(_) => "form",
             Self::Eval { .. } => "eval",
             Self::Drag { .. } => "drag",
             Self::Pointer { .. } => "pointer",

@@ -582,6 +582,20 @@ struct InspectArgs {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Describe the owning task. Empty strings clear individual details.
+    Task {
+        pane: PaneId,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        step: Option<String>,
+        #[arg(long)]
+        waiting: Option<String>,
+        #[arg(long)]
+        user_action: Option<String>,
+    },
+    /// Apply up to 20 ref-based form fields from JSON, without submitting.
+    Form { pane: PaneId, fields: String },
     /// Start, inspect, hand off or end a task in this tab. Continue is a user UI action.
     Control {
         pane: PaneId,

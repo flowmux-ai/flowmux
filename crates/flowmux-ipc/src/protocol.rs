@@ -15,6 +15,8 @@ pub const BROWSER_VERBS: &[&str] = &[
     "find",
     "diagnose",
     "control",
+    "task",
+    "form",
     "navigate",
     "back",
     "forward",
@@ -766,6 +768,14 @@ pub enum Request {
         task: uuid::Uuid,
         request: Box<Request>,
     },
+    BrowserTask {
+        pane: PaneId,
+        details: BrowserTaskDetails,
+    },
+    BrowserForm {
+        pane: PaneId,
+        fields: Vec<BrowserFormField>,
+    },
     BrowserControl {
         pane: PaneId,
         action: String,
@@ -895,6 +905,10 @@ pub struct BrowserInspectOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BrowserWaitCondition {
+    Element {
+        target: String,
+        expect: BrowserElementExpectation,
+    },
     ValueChanged {
         selector: String,
         #[serde(default)]
@@ -927,6 +941,45 @@ pub enum BrowserWaitCondition {
     Url(String),
     ReadyState(String),
     Js(String),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BrowserTaskDetails {
+    pub name: Option<String>,
+    pub step: Option<String>,
+    pub waiting: Option<String>,
+    pub user_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserFormField {
+    pub target: String,
+    pub action: BrowserFormAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserFormAction {
+    Fill(String),
+    Select(String),
+    Check(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BrowserElementExpectation {
+    State(BrowserElementState),
+    Value(String),
+    Text(String),
+    ValueChanged {
+        #[serde(default)]
+        before: Option<String>,
+    },
+    TextChanged {
+        #[serde(default)]
+        before: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

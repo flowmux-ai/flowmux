@@ -198,6 +198,7 @@ struct DownloadManagerInner {
     clear: gtk::Button,
     collection: RefCell<DownloadCollection>,
     rows: RefCell<HashMap<u64, DownloadRow>>,
+    observer: RefCell<Option<Rc<dyn Fn(serde_json::Value)>>>,
 }
 
 struct DownloadRow {
@@ -270,6 +271,7 @@ impl DownloadManager {
             clear,
             collection: RefCell::new(DownloadCollection::default()),
             rows: RefCell::new(HashMap::new()),
+            observer: RefCell::new(None),
         });
         let weak_inner = Rc::downgrade(&inner);
         inner.clear.connect_clicked(move |_| {
@@ -278,6 +280,12 @@ impl DownloadManager {
             }
         });
         Self { inner }
+    }
+
+    pub(crate) fn observe(&self, control: crate::ui::browser_control::BrowserControl) {
+        self.inner
+            .observer
+            .replace(Some(Rc::new(move |value| control.download_result(value))));
     }
 
     pub(crate) fn directory(&self) -> PathBuf {
@@ -511,6 +519,8 @@ impl DownloadItem {
         );
         row.name
             .set_tooltip_text(Some(&destination.display().to_string()));
+        drop(rows);
+        inner.refresh_summary();
     }
 
     pub(crate) fn set_progress(&self, fraction: f64) {
@@ -748,6 +758,23 @@ impl DownloadManagerInner {
     }
 
     fn refresh_summary(&self) {
+        if let Some(observer) = self.observer.borrow().as_ref() {
+            let collection = self.collection.borrow();
+            let rows = self.rows.borrow();
+            for (id, row) in rows.iter() {
+                let state = match collection.phase(*id) {
+                    Some(DownloadPhase::InProgress) => "in_progress",
+                    Some(DownloadPhase::Cancelling) => "cancelling",
+                    Some(DownloadPhase::Complete) => "complete",
+                    Some(DownloadPhase::Cancelled) => "cancelled",
+                    Some(DownloadPhase::Failed(_)) => "failed",
+                    None => continue,
+                };
+                observer(
+                    serde_json::json!({"id":id,"state":state,"path":*row.destination.borrow()}),
+                );
+            }
+        }
         let collection = self.collection.borrow();
         let active = collection.active_count();
         self.empty.set_visible(collection.len() == 0);

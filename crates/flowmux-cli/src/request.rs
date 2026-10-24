@@ -144,6 +144,25 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 Request::BrowserInspect { pane, options }
             }
         }
+        BrowserOp::Task {
+            pane,
+            name,
+            step,
+            waiting,
+            user_action,
+        } => Request::BrowserTask {
+            pane,
+            details: flowmux_ipc::protocol::BrowserTaskDetails {
+                name,
+                step,
+                waiting,
+                user_action,
+            },
+        },
+        BrowserOp::Form { pane, fields } => Request::BrowserForm {
+            pane,
+            fields: serde_json::from_str(&fields).context("invalid form JSON")?,
+        },
         BrowserOp::Control { pane, action } => Request::BrowserControl { pane, action },
         BrowserOp::Diagnose { pane } => Request::BrowserDiagnose { pane },
         BrowserOp::Eval { pane, source } => Request::BrowserEval { pane, source },

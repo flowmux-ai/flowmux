@@ -3821,6 +3821,43 @@ fn run_browser_js(
     });
 }
 
+fn element_expectation_js(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    target: &str,
+    expect: &flowmux_ipc::protocol::BrowserElementExpectation,
+) -> Result<String, String> {
+    use flowmux_ipc::protocol::BrowserElementExpectation as Expect;
+    ref_script(browser, target, |selector| {
+        let condition = match expect {
+            Expect::State(state) => BrowserWaitCondition::ElementState {
+                selector: selector.into(),
+                state: state.clone(),
+            },
+            Expect::Value(value) => BrowserWaitCondition::Value {
+                selector: selector.into(),
+                value: value.clone(),
+            },
+            Expect::ValueChanged { before } => BrowserWaitCondition::ValueChanged {
+                selector: selector.into(),
+                before: before.clone(),
+            },
+            Expect::TextChanged { before } => BrowserWaitCondition::TextChanged {
+                selector: selector.into(),
+                before: before.clone(),
+            },
+            Expect::Text(text) => {
+                return format!("el.innerText === {}", serde_json::to_string(text).unwrap())
+            }
+        };
+        let predicate = browser_wait_js(&condition);
+        if matches!(expect, Expect::Value(_) | Expect::ValueChanged { .. }) {
+            format!("(() => {{ if (el.matches('input[type=password]')) throw new Error('password values are redacted'); return ({predicate}); }})()")
+        } else {
+            predicate
+        }
+    })
+}
+
 /// Spawn the GTK-side dispatch loop. Lives on the main context.
 fn run_browser_wait(
     browser: crate::ui::browser_pane::BrowserPane,
@@ -3938,19 +3975,42 @@ fn run_browser_wait(
         });
         return;
     }
-    let js = Rc::<str>::from(browser_wait_js(&condition));
+    let automation = matches!(condition, BrowserWaitCondition::Element { .. });
+    let script = match &condition {
+        BrowserWaitCondition::Element { target, expect } => {
+            element_expectation_js(&browser, target, expect)
+        }
+        _ => Ok(browser_wait_js(&condition)),
+    };
+    let js = match script {
+        Ok(js) => Rc::<str>::from(js),
+        Err(error) => {
+            let _ = ack.send(Err(error));
+            return;
+        }
+    };
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
     let ack = Rc::new(RefCell::new(Some(ack)));
-    poll_browser_wait(browser, js, deadline, interval, cancellation, ack);
+    poll_browser_wait(
+        browser,
+        js,
+        deadline,
+        interval,
+        cancellation,
+        automation,
+        ack,
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn poll_browser_wait(
     browser: crate::ui::browser_pane::BrowserPane,
     js: Rc<str>,
     deadline: Instant,
     interval: Duration,
     cancellation: Option<u64>,
+    automation: bool,
     ack: Rc<RefCell<Option<tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>>>>,
 ) {
     if ack.borrow().as_ref().is_none_or(|ack| ack.is_closed()) {
@@ -3974,7 +4034,7 @@ fn poll_browser_wait(
     let next_browser = browser.clone();
     let next_js = js.clone();
     let next_ack = ack.clone();
-    browser.evaluate_js(&js, move |result| match result {
+    let callback = move |result: Result<String, String>| match result {
         Ok(value) if browser_js_truthy(&value) => {
             if let Some(ack) = ack.borrow_mut().take() {
                 let _ = ack.send(Ok(BrowserActionResult::Bool(true)));
@@ -3994,6 +4054,7 @@ fn poll_browser_wait(
                     deadline,
                     interval,
                     cancellation,
+                    automation,
                     next_ack,
                 );
             });
@@ -4003,13 +4064,18 @@ fn poll_browser_wait(
                 let _ = ack.send(Err(e));
             }
         }
-    });
+    };
+    if automation {
+        browser.evaluate_automation_js(&js, callback);
+    } else {
+        browser.evaluate_js(&js, callback);
+    }
 }
 
 pub(crate) fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
     let literal = |value: &str| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into());
     match condition {
-        BrowserWaitCondition::PopupReady { .. } => "false".into(),
+        BrowserWaitCondition::Element { .. } | BrowserWaitCondition::PopupReady { .. } => "false".into(),
         BrowserWaitCondition::ValueChanged { selector, before } => format!(
             "(() => {{ const el = document.querySelector({}); return !!el && el.value !== {}; }})()", literal(selector), serde_json::to_string(before).unwrap()),
         BrowserWaitCondition::UrlExact(url) => format!("location.href === {}", literal(url)),

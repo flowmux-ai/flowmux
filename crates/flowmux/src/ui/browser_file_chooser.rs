@@ -8,6 +8,7 @@ use std::rc::Rc;
 #[derive(Clone, Default)]
 pub(crate) struct FileChoosers {
     pending: Rc<RefCell<Option<PendingChooser>>>,
+    control: Option<super::browser_control::BrowserControl>,
 }
 
 struct PendingChooser {
@@ -121,6 +122,13 @@ fn scoped_selection(
 }
 
 impl FileChoosers {
+    pub(crate) fn with_control(control: super::browser_control::BrowserControl) -> Self {
+        Self {
+            pending: Rc::default(),
+            control: Some(control),
+        }
+    }
+
     pub(crate) async fn control(
         &self,
         action: &flowmux_ipc::protocol::BrowserFileChooserAction,
@@ -180,6 +188,39 @@ impl FileChoosers {
         reply: impl FnOnce(Option<Vec<PathBuf>>) + 'static,
     ) {
         let id = uuid::Uuid::new_v4().to_string();
+        let control = self.control.clone();
+        let task = control
+            .as_ref()
+            .map(|control| control.status()["task_id"].clone());
+        let result_id = id.clone();
+        let source = dialog.title().to_string();
+        if let Some(control) = &control {
+            control.result(serde_json::json!({"key":format!("upload:{id}"),"title":"Waiting for file selection","detail":source}));
+        }
+        let reply = move |files: Option<Vec<PathBuf>>| {
+            if let Some(control) = &control {
+                if Some(control.status()["task_id"].clone()) == task {
+                    let names = files
+                        .as_ref()
+                        .map(|paths| {
+                            paths
+                                .iter()
+                                .take(20)
+                                .map(|path| {
+                                    path.file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .into_owned()
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
+                    control.result(serde_json::json!({"key":format!("upload:{result_id}"),"title":if files.is_some(){"Files selected — upload unconfirmed"}else{"File selection cancelled"},"detail":format!("{source}\n{names}"),"chooser_id":result_id,"status":if files.is_some(){"selected"}else{"cancelled"}}));
+                }
+            }
+            reply(files);
+        };
         let cancellable = gio::Cancellable::new();
         let closed = Rc::new(Cell::new(false));
         self.pending.replace(Some(PendingChooser {

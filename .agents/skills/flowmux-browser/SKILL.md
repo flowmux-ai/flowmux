@@ -188,6 +188,8 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Page metadata | `url PANE`, `title PANE` |
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |
+| Task details | `task PANE --name NAME --step STEP --waiting REASON --user-action ACTION` with owning `--task` |
+| Form fields | `form PANE JSON` with 1–20 unique current refs and fill/select/check actions; no submit command |
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |
@@ -275,6 +277,19 @@ system default. Existing files are not overwritten. Cancelling does not promise
 to remove partial files; only `complete` means a successful download. The UI and
 CLI share the same history; cleared or evicted entries are no longer listed.
 
+Task details appear in the control bar; Results contains related tabs, saved
+captures, upload observations and native download completion. `control status`
+returns these bounded runtime-only results. File selection is not upload success;
+use `file-chooser select --receipt --expect JSON` for a site completion condition.
+`form PANE '[{"target":"FULL_REF","action":{"fill":"value"}}]'` returns a
+status for each field without sending a submit command. Page event handlers can
+still have side effects. Retry only failed/unexecuted fields after inspecting the
+page. Password fields are rejected by the form command.
+Use `wait --condition '{"Element":{"target":"FULL_REF","expect":{"Value":"value"}}}'`
+for same-origin iframe/open shadow targets. `State`, `Text`, `ValueChanged` and
+`TextChanged` are also supported. Replaced nodes/frames fail instead of matching
+another node. Existing CSS selector conditions target the top-level document.
+
 Refs belong to the latest snapshot of one browser tab. After navigation, reload,
 tab switches or page changes, wait and take a fresh snapshot before using refs.
 A ref-not-found error also requires a fresh snapshot. Never add tracking
@@ -284,8 +299,8 @@ Screenshots cover the visible viewport unless `--full-page` or `--element REF`
 is specified. WebKitGTK/WKWebView do not expose CDP:
 no device viewport emulation, network mocking, full-page tracing or screencast.
 When a task requires those, explain the need for external tooling and keep the
-user-visible URL/results in Flowmux. Cookie import currently extracts/counts
-cookies; it does not insert them into the WebView.
+user-visible URL/results in Flowmux. Cookie import returns `unimplemented` without reading host cookies; sign in
+inside the intended Flowmux profile.
 
 Linux and macOS offer opt-in WebDriver sessions in separate ephemeral
 Flowmux browser windows. Linux requires a WebKitGTK runtime built with WebDriver

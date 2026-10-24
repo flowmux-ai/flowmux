@@ -863,6 +863,7 @@ impl BrowserPane {
         inspector.add_css_class("flat");
         inspector.set_tooltip_text(Some("Open Web Inspector"));
         let downloads = DownloadManager::new();
+        downloads.observe(control.clone());
         let bookmarks = BookmarkMenu::new(
             &profile,
             {
@@ -950,7 +951,7 @@ impl BrowserPane {
                 BrowserUIDelegateIvars {
                     control: control.clone(),
                     dialogs: PageDialogs::default(),
-                    file_choosers: FileChoosers::default(),
+                    file_choosers: FileChoosers::with_control(control.clone()),
                     navigation_enabled: navigation_enabled.clone(),
                     pane_id: pane_id.clone(),
                     callbacks: callbacks.clone(),
