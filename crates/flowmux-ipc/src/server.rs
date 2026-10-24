@@ -27,11 +27,16 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn query_timeout(request: &Request) -> Option<Duration> {
     match request {
-        Request::BrowserOnSurface { request, .. }
-            if !matches!(request.as_ref(), Request::BrowserOnSurface { .. }) =>
-        {
+        Request::BrowserOnSurface { request, .. } | Request::BrowserWithTask { request, .. } => {
             query_timeout(request)
         }
+        Request::BrowserReceipt {
+            request,
+            timeout_ms,
+            ..
+        } => query_timeout(request)
+            .map(|duration| duration.saturating_add(Duration::from_millis(*timeout_ms))),
+        Request::BrowserControl { action, .. } if action == "status" => Some(QUERY_TIMEOUT),
         Request::BrowserWait { timeout_ms, .. } => {
             Some(Duration::from_millis(*timeout_ms).saturating_add(QUERY_TIMEOUT))
         }
@@ -48,6 +53,7 @@ fn query_timeout(request: &Request) -> Option<Duration> {
             request: SshRequest::Status { .. },
         }
         | Request::BrowserSnapshot { .. }
+        | Request::BrowserDiagnose { .. }
         | Request::BrowserFileChooser {
             action: crate::protocol::BrowserFileChooserAction::Status,
             ..

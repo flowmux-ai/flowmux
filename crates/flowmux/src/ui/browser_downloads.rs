@@ -491,6 +491,9 @@ impl WeakDownloadManager {
 
 #[cfg_attr(all(test, target_os = "macos"), allow(dead_code))]
 impl DownloadItem {
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
     pub(crate) fn set_destination(&self, destination: &std::path::Path) {
         let Some(inner) = self.inner.upgrade() else {
             return;

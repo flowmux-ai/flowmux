@@ -273,6 +273,11 @@ enum Cmd {
         /// Pin the operation to this browser tab, even when another tab is active.
         #[arg(long, global = true)]
         surface: Option<SurfaceId>,
+        /// Owning task ID returned by browser control start.
+        #[arg(long, global = true)]
+        task: Option<uuid::Uuid>,
+        #[command(flatten)]
+        receipt: ReceiptArgs,
         #[command(subcommand)]
         op: BrowserOp,
     },
@@ -523,8 +528,32 @@ enum DownloadAction {
     },
 }
 
+#[derive(clap::Args, Default)]
+struct ReceiptArgs {
+    /// Return observed events and distinguish delivered input from a confirmed outcome.
+    #[arg(long = "receipt", global = true)]
+    enabled: bool,
+    #[arg(
+        long,
+        global = true,
+        requires = "enabled",
+        conflicts_with = "expect_url"
+    )]
+    expect_text: Option<String>,
+    #[arg(long, global = true, requires = "enabled")]
+    expect_url: Option<String>,
+    #[arg(long, global = true, default_value_t = 5000, value_parser = clap::value_parser!(u64).range(1..=60000))]
+    outcome_timeout_ms: u64,
+}
+
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Start, inspect, hand off or end a task in this tab. Continue is a user UI action.
+    Control {
+        pane: PaneId,
+        #[arg(value_parser = ["start", "status", "handoff", "pause", "stop", "finish"])]
+        action: String,
+    },
     /// Record sampled viewport frames to an MP4 (requires ffmpeg).
     Record {
         pane: PaneId,
@@ -572,6 +601,8 @@ enum BrowserOp {
     /// Take a JSON snapshot of the page. Markdown tree + refs map; the
     /// live DOM is never modified.
     Snapshot { pane: PaneId },
+    /// Diagnose this live tab's native input, capture, media and recording support.
+    Diagnose { pane: PaneId },
     /// Run JS in a browser pane and print the result.
     Eval { pane: PaneId, source: String },
     /// Run an async JS function body (use return for its result).
@@ -1183,6 +1214,8 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
 
     if let Cmd::Browser {
         surface,
+        task,
+        receipt,
         op:
             BrowserOp::Record {
                 pane,
@@ -1192,6 +1225,10 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             },
     } = cmd
     {
+        anyhow::ensure!(
+            task.is_none() && !receipt.enabled,
+            "record does not accept --task or --receipt; it returns its own capture result"
+        );
         let result = tokio::select! {
             result = recording::record(&client, pane, surface, path, seconds, fps) => result,
             _ = tokio::signal::ctrl_c() => anyhow::bail!("browser recording cancelled"),
@@ -1204,6 +1241,13 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         );
     }
 
+    let diagnose = matches!(
+        cmd,
+        Cmd::Browser {
+            op: BrowserOp::Diagnose { .. },
+            ..
+        }
+    );
     let mut req = build_request(cmd)?;
     if let Request::SurfaceCreate {
         workspace,
@@ -1225,7 +1269,14 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             }
         }
     }
-    let resp = client.call(req).await?;
+    let mut resp = client.call(req).await?;
+    if diagnose {
+        if let Response::BrowserResult { value } = &mut resp {
+            let mut report: serde_json::Value = serde_json::from_str(value)?;
+            report["recording"] = recording::diagnose().await;
+            *value = report.to_string();
+        }
+    }
     print_response(&resp, json_mode)?;
     Ok(())
 }

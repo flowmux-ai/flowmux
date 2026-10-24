@@ -14,6 +14,7 @@ const UNSUPPORTED: &str =
 
 #[derive(Clone)]
 pub struct BrowserPane {
+    pub(crate) control: crate::ui::browser_control::BrowserControl,
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
     pub web_view: gtk::Widget,
@@ -32,6 +33,16 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub(crate) fn diagnostics(&self) -> serde_json::Value {
+        serde_json::json!({
+            "engine": "unavailable", "display_backend": "unsupported",
+            "native_input_supported": false, "native_input_reason": "backend_unavailable",
+            "native_text_requires_visible_tab": true,
+            "document_capture_supported": false, "navigation_enabled": false,
+            "media_requirements": "No browser backend is available on this platform",
+        })
+    }
+
     pub(crate) fn has_pending_dialog(&self) -> bool {
         false
     }
@@ -96,10 +107,13 @@ impl BrowserPane {
         message.set_vexpand(true);
         message.add_css_class("dim-label");
 
+        let control = crate::ui::browser_control::BrowserControl::new();
         root.append(&chrome);
+        root.append(&control.bar);
         root.append(&message);
 
         Self {
+            control,
             pane_id,
             root,
             web_view: message.upcast::<gtk::Widget>(),
@@ -130,7 +144,9 @@ impl BrowserPane {
 
     pub fn stop_loading(&self) {}
 
-    pub fn prepare_for_close(&self) {}
+    pub fn prepare_for_close(&self) {
+        self.control.close();
+    }
 
     pub fn grab_focus(&self) {
         self.web_view.grab_focus();

@@ -40,6 +40,7 @@ impl WindowController {
         ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
     ) {
         use flowmux_browser::{input::PointerTarget, scripts};
+        let revision = browser.control.revision();
         let registry = self.pane_registry.clone();
         let expected = surface.or_else(|| registry.borrow().active_surface(pane));
         if registry.borrow().active_surface(pane) != expected {
@@ -67,6 +68,7 @@ impl WindowController {
                     }
                 };
                 let sent = (|| {
+                    input.control.check_revision(revision)?;
                     if registry.borrow().active_surface(pane) != expected {
                         return Err("browser tab changed before pointer input".into());
                     }
@@ -99,27 +101,6 @@ impl WindowController {
 
     pub(super) async fn dispatch_browser_command(&self, cmd: GtkCommand) {
         match cmd {
-            GtkCommand::BrowserEval {
-                pane,
-                surface,
-                source,
-                ack,
-            } => {
-                match self.browser_target(pane, surface) {
-                    Err(error) => {
-                        let _ = ack.send(Err(error));
-                    }
-                    Ok(browser) => {
-                        // evaluate_js is callback-style; bridge it to the ack.
-                        let cell = std::cell::Cell::new(Some(ack));
-                        browser.evaluate_js(&source, move |result| {
-                            if let Some(ack) = cell.take() {
-                                let _ = ack.send(result);
-                            }
-                        });
-                    }
-                }
-            }
             GtkCommand::BrowserAction {
                 pane,
                 surface,
@@ -133,7 +114,153 @@ impl WindowController {
                         return;
                     }
                 };
+                let (task, op) = match op {
+                    BrowserOp::WithTask { task, op } => (Some(task), *op),
+                    op => (None, op),
+                };
+                let (receipt, op) = match op {
+                    BrowserOp::Receipt {
+                        op,
+                        condition,
+                        timeout_ms,
+                    } => (Some((condition, timeout_ms)), *op),
+                    op => (None, op),
+                };
+                if let BrowserOp::Control { action } = &op {
+                    let result = browser.control.control(action, task).map(|mut value| {
+                        value["surface_id"] =
+                            serde_json::json!(surface
+                                .or_else(|| self.pane_registry.borrow().active_surface(pane)));
+                        BrowserActionResult::String(value.to_string())
+                    });
+                    let _ = ack.send(result);
+                    return;
+                }
+                // Snapshot changes the ref registry; JS predicates can mutate the page.
+                let read_only = (op.is_query()
+                    && !matches!(
+                        op,
+                        BrowserOp::Snapshot
+                            | BrowserOp::Wait {
+                                condition: BrowserWaitCondition::Js(_),
+                                ..
+                            }
+                    ))
+                    || matches!(op, BrowserOp::Screenshot { .. });
+                let (operation, revision) = if read_only {
+                    (None, browser.control.revision())
+                } else {
+                    match browser
+                        .control
+                        .admit(task, !matches!(op, BrowserOp::Snapshot))
+                    {
+                        Ok((operation, revision)) => (Some(operation), revision),
+                        Err(error) => {
+                            let _ = ack.send(Err(error));
+                            return;
+                        }
+                    }
+                };
+                let ack = if operation.is_some() || receipt.is_some() {
+                    let (tx, rx) = oneshot::channel();
+                    let observed = browser.clone();
+                    let receipt = receipt.map(|(condition, timeout_ms)| ActionReceipt {
+                        before: browser.control.observation(),
+                        started: Instant::now(),
+                        id: uuid::Uuid::new_v4(),
+                        surface: surface
+                            .or_else(|| self.pane_registry.borrow().active_surface(pane)),
+                        condition,
+                        timeout_ms,
+                        revision,
+                        mutation: !read_only,
+                    });
+                    glib::spawn_future_local(async move {
+                        let result = rx
+                            .await
+                            .unwrap_or_else(|_| Err("browser action callback closed".into()));
+                        let result = if let Some(receipt) = receipt {
+                            Ok(receipt.finish(observed, result, operation).await)
+                        } else {
+                            drop(operation);
+                            result
+                        };
+                        let _ = ack.send(result);
+                    });
+                    tx
+                } else {
+                    ack
+                };
                 match op {
+                    BrowserOp::WithTask { .. }
+                    | BrowserOp::Receipt { .. }
+                    | BrowserOp::Control { .. } => unreachable!("unwrapped browser control"),
+                    BrowserOp::Eval { source } => {
+                        browser.evaluate_js(&source, move |result| {
+                            let _ = ack.send(result.map(BrowserActionResult::String));
+                        });
+                    }
+                    BrowserOp::Diagnose => {
+                        let active = self.pane_registry.borrow().active_surface(pane);
+                        let target = surface.or(active);
+                        let mut report = browser.diagnostics();
+                        let supported = report["native_input_supported"] == true;
+                        let visible = browser.focus_widget().is_mapped();
+                        let enabled = report["navigation_enabled"] == true;
+                        let pending_dialog = browser.has_pending_dialog();
+                        let reason = if !supported {
+                            report["native_input_reason"].as_str()
+                        } else if !enabled {
+                            Some("navigation_disabled")
+                        } else if target != active {
+                            Some("inactive_tab")
+                        } else if !visible {
+                            Some("tab_not_visible")
+                        } else if pending_dialog {
+                            Some("dialog_pending")
+                        } else {
+                            None
+                        };
+                        let next_action = match reason {
+                            Some("requires_x11") => Some("Native keys and pointer input require X11; this session cannot send them"),
+                            Some("native_libraries_missing") => Some("Install the X11, XInput and XTest runtime libraries"),
+                            Some("navigation_disabled") => Some("Open a new browser or reconnect the expired preview"),
+                            Some("inactive_tab" | "tab_not_visible") => Some("Show the target workspace and browser tab before native input"),
+                            Some("dialog_pending") => Some("Inspect and answer the pending browser dialog"),
+                            Some(_) => Some("Use a platform with a supported browser backend"),
+                            None => None,
+                        };
+                        report["native_input"] = serde_json::json!({
+                            "supported": supported, "environment_ready": reason.is_none(),
+                            "reason": reason, "next_action": next_action,
+                            "requires_visible_active_tab": true,
+                            "commands": ["press", "click", "dblclick", "hover", "pointer", "drag"],
+                        });
+                        report["native_text"] = serde_json::json!({
+                            "supported": report["engine"] != "unavailable",
+                            "environment_ready": report["engine"] != "unavailable" && enabled && !pending_dialog &&
+                                (report["native_text_requires_visible_tab"] != true || (visible && target == active)),
+                            "requires_focused_editable_element": true,
+                            "requires_visible_active_tab": report["native_text_requires_visible_tab"],
+                        });
+                        report["control"] = browser.control.status();
+                        report["observation"] = browser.control.observation();
+                        report["surface_id"] = serde_json::json!(target);
+                        report["active"] = serde_json::json!(target == active);
+                        report["visible"] = serde_json::json!(visible);
+                        report["pending_dialog"] = serde_json::json!(pending_dialog);
+                        report["document_capture"] = serde_json::json!({
+                            "supported": report["document_capture_supported"],
+                            "max_bitmap_bytes": 64 * 1024 * 1024,
+                            "may_omit_accelerated_layers": true,
+                            "next_action": if report["document_capture_supported"] == true { None }
+                                else { Some("Use viewport capture; full-document capture needs macOS 15 or newer WebKit") },
+                        });
+                        report["cross_origin_frames"] = serde_json::json!(false);
+                        report["cookie_import"] = serde_json::json!({"supported":false,
+                            "next_action":"Sign in inside the selected Flowmux profile; host cookie insertion is not implemented"});
+                        let _ = ack.send(Ok(BrowserActionResult::String(report.to_string())));
+                    }
                     BrowserOp::FileChooser { action } => {
                         glib::spawn_future_local(async move {
                             let _ = ack.send(
@@ -365,7 +492,11 @@ impl WindowController {
                                         return;
                                     }
                                 }
-                                let inserted = target.insert_text(&text);
+                                let reply = native_input_reply(&target, ack);
+                                let inserted = target
+                                    .control
+                                    .check_revision(revision)
+                                    .and_then(|_| target.insert_text(&text));
                                 target.evaluate_automation_js(
                                     &flowmux_browser::scripts::finish_text_input(),
                                     move |result| {
@@ -376,7 +507,7 @@ impl WindowController {
                                                 Err(value)
                                             }
                                         });
-                                        let _ = ack.send(result);
+                                        reply(result);
                                     },
                                 );
                             },
@@ -399,7 +530,9 @@ impl WindowController {
                                 Ok(value) if value == "ok" => {}
                                 result => { let _ = ack.send(Err(result.unwrap_or_else(|error| error))); return; }
                             }
-                            let sent = if registry.borrow().active_surface(pane) != expected_surface {
+                            let sent = if let Err(error) = target.control.check_revision(revision) {
+                                Err(error)
+                            } else if registry.borrow().active_surface(pane) != expected_surface {
                                 Err("native key input requires the active browser tab".into())
                             } else {
                                 target.press_key(&stroke)
@@ -455,7 +588,18 @@ impl WindowController {
                         condition,
                         timeout_ms,
                         poll_ms,
-                    } => run_browser_wait(browser.clone(), condition, timeout_ms, poll_ms, ack),
+                    } => {
+                        let cancellation =
+                            matches!(condition, BrowserWaitCondition::Js(_)).then_some(revision);
+                        run_browser_wait(
+                            browser.clone(),
+                            condition,
+                            timeout_ms,
+                            poll_ms,
+                            cancellation,
+                            ack,
+                        );
+                    }
                     BrowserOp::Screenshot {
                         path,
                         full_page,
@@ -743,5 +887,114 @@ fn native_input_reply(
         if let Some(ack) = reply.borrow_mut().take() {
             let _ = ack.send(result);
         }
+    }
+}
+
+struct ActionReceipt {
+    before: serde_json::Value,
+    started: Instant,
+    id: uuid::Uuid,
+    surface: Option<SurfaceId>,
+    condition: Option<BrowserWaitCondition>,
+    timeout_ms: u64,
+    revision: u64,
+    mutation: bool,
+}
+
+impl ActionReceipt {
+    async fn finish(
+        self,
+        browser: crate::ui::browser_pane::BrowserPane,
+        result: Result<BrowserActionResult, String>,
+        operation: Option<crate::ui::browser_control::Operation>,
+    ) -> BrowserActionResult {
+        let mut outcome_met = None;
+        let mut outcome_error = None;
+        if result.is_ok() && !browser.has_pending_dialog() {
+            if let Some(condition) = self.condition {
+                let (tx, mut rx) = oneshot::channel();
+                run_browser_wait(
+                    browser.clone(),
+                    condition,
+                    self.timeout_ms,
+                    50,
+                    Some(self.revision),
+                    tx,
+                );
+                let deadline = Instant::now() + Duration::from_millis(self.timeout_ms);
+                loop {
+                    if browser.has_pending_dialog() {
+                        break;
+                    }
+                    if let Err(error) = browser.control.check_revision(self.revision) {
+                        outcome_error = Some(error);
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        outcome_met = Some(false);
+                        break;
+                    }
+                    match glib::future_with_timeout(Duration::from_millis(50), &mut rx).await {
+                        Ok(Ok(Ok(BrowserActionResult::Bool(value)))) => {
+                            outcome_met = Some(value);
+                            break;
+                        }
+                        Ok(Ok(Err(error))) => {
+                            outcome_error = Some(error);
+                            break;
+                        }
+                        Ok(_) => {
+                            outcome_error = Some("outcome observation closed".into());
+                            break;
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+        let after = browser.control.observation();
+        let sequence = self.before["event_sequence"].as_u64().unwrap_or(0);
+        let events: Vec<_> = after["events"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|event| event["sequence"].as_u64().unwrap_or(0) > sequence)
+            .cloned()
+            .collect();
+        let pending_dialog = browser.has_pending_dialog();
+        let control_changed = browser.control.check_revision(self.revision).is_err();
+        let status = if pending_dialog {
+            "dialog_pending"
+        } else if control_changed {
+            "control_changed"
+        } else if result.is_err() || outcome_error.is_some() || outcome_met == Some(false) {
+            "outcome_unknown"
+        } else if outcome_met == Some(true) {
+            "outcome_confirmed"
+        } else if events.iter().any(|event| event["kind"] == "download") {
+            "download_started"
+        } else if events.iter().any(|event| event["kind"] == "popup") {
+            "popup_created"
+        } else if self.mutation {
+            "input_delivered"
+        } else {
+            "action_returned"
+        };
+        let (value, error) = match result {
+            Ok(BrowserActionResult::Ok) => (serde_json::Value::Null, None),
+            Ok(BrowserActionResult::Bool(value)) => (serde_json::json!(value), None),
+            Ok(BrowserActionResult::String(value)) => (serde_json::json!(value), None),
+            Err(error) => (serde_json::Value::Null, Some(error)),
+        };
+        drop(operation);
+        BrowserActionResult::String(serde_json::json!({
+            "action_id":self.id,"surface_id":self.surface,"status":status,
+            "document_before":self.before["document_generation"],"document_after":after["document_generation"],
+            "events":events,"events_truncated":after["event_sequence"].as_u64().unwrap_or(0).saturating_sub(sequence)>64,
+            "elapsed_ms":self.started.elapsed().as_millis(),"outcome_met":outcome_met,
+            "value":value,"error":error,"outcome_error":outcome_error,
+            "side_effects_possible":self.mutation,"automatic_retry":false,
+            "control":browser.control.status(),
+        }).to_string())
     }
 }

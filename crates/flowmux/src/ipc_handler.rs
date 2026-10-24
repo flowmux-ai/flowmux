@@ -11,7 +11,7 @@ use crate::activity::ActivityEntry;
 use crate::bridge::{Bridge, BrowserActionResult, BrowserOp, GtkCommand};
 use flowmux_core::{AgentStatusReport, SplitDirection};
 use flowmux_daemon::{tmux_compat::TmuxCompatUi, DaemonHandler};
-use flowmux_ipc::protocol::{Request, Response, RpcError};
+use flowmux_ipc::protocol::{BrowserWaitCondition, Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
 use flowmux_state::session_history::{codex_thread_names, SessionAgent};
 use std::future::Future;
@@ -101,12 +101,20 @@ async fn browser_action(
     surface: Option<flowmux_core::SurfaceId>,
     op: BrowserOp,
 ) -> Response {
-    if matches!(op, BrowserOp::EvalAsync { timeout_ms: 0, .. }) {
+    let validated = match &op {
+        BrowserOp::WithTask { op, .. } => op.as_ref(),
+        op => op,
+    };
+    let validated = match validated {
+        BrowserOp::Receipt { op, .. } => op.as_ref(),
+        op => op,
+    };
+    if matches!(validated, BrowserOp::EvalAsync { timeout_ms: 0, .. }) {
         return Response::Error(RpcError::InvalidArgument(
             "async timeout must be positive".into(),
         ));
     }
-    if let BrowserOp::Drag { from, to } = &op {
+    if let BrowserOp::Drag { from, to } = validated {
         if from
             .iter()
             .chain(to)
@@ -117,7 +125,7 @@ async fn browser_action(
             ));
         }
     }
-    if let BrowserOp::Pointer { x, y, .. } = &op {
+    if let BrowserOp::Pointer { x, y, .. } = validated {
         if !x.is_finite() || !y.is_finite() || *x < 0.0 || *y < 0.0 {
             return Response::Error(RpcError::InvalidArgument(
                 "pointer coordinates must be finite and nonnegative".into(),
@@ -127,7 +135,7 @@ async fn browser_action(
     if let BrowserOp::Media {
         action: flowmux_ipc::protocol::BrowserMediaAction::Seek(seconds),
         ..
-    } = &op
+    } = validated
     {
         if !seconds.is_finite() || *seconds < 0.0 {
             return Response::Error(RpcError::InvalidArgument(
@@ -160,7 +168,7 @@ async fn browser_action(
 }
 
 /// Browser requests that map directly to the shared GTK browser action path.
-/// Open, cookie import, and raw eval keep their dedicated response contracts.
+/// Open and cookie import keep their dedicated response contracts.
 struct BrowserActionRequest {
     pane: flowmux_core::PaneId,
     op: BrowserOp,
@@ -252,6 +260,9 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserIsChecked { pane, target } => (pane, BrowserOp::IsChecked { target }),
             Request::BrowserCount { pane, selector } => (pane, BrowserOp::Count { selector }),
             Request::BrowserSnapshot { pane } => (pane, BrowserOp::Snapshot),
+            Request::BrowserControl { pane, action } => (pane, BrowserOp::Control { action }),
+            Request::BrowserEval { pane, source } => (pane, BrowserOp::Eval { source }),
+            Request::BrowserDiagnose { pane } => (pane, BrowserOp::Diagnose),
             other => return Err(other),
         };
         Ok(Self { pane, op })
@@ -423,7 +434,10 @@ impl Handler for GuiHandler {
                 | Request::PaneFocus { .. }
                 | Request::PaneResize { .. }
                 | Request::PaneClose { .. } => self.handle_pane_verb(req).await,
-                Request::BrowserOnSurface { .. }
+                Request::BrowserReceipt { .. }
+                | Request::BrowserWithTask { .. }
+                | Request::BrowserControl { .. }
+                | Request::BrowserOnSurface { .. }
                 | Request::BrowserOpen { .. }
                 | Request::BrowserNavigate { .. }
                 | Request::BrowserBack { .. }
@@ -453,6 +467,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserIsChecked { .. }
                 | Request::BrowserCount { .. }
                 | Request::BrowserSnapshot { .. }
+                | Request::BrowserDiagnose { .. }
                 | Request::ImportCookies { .. }
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
                 Request::BrowserEvalAsync { .. }
@@ -811,13 +826,55 @@ impl GuiHandler {
             Request::BrowserOnSurface { surface, request } => (Some(surface), *request),
             req => (None, req),
         };
+        let (task, req) = match req {
+            Request::BrowserWithTask { task, request } => (Some(task), *request),
+            req => (None, req),
+        };
+        let (receipt, req) = match req {
+            Request::BrowserReceipt {
+                request,
+                condition,
+                timeout_ms,
+            } => {
+                if timeout_ms == 0
+                    || timeout_ms > 60_000
+                    || matches!(condition, Some(BrowserWaitCondition::Js(_)))
+                {
+                    return Response::Error(RpcError::InvalidArgument("receipt timeout must be 1..60000 ms and its condition must not execute JavaScript".into()));
+                }
+                (Some((condition, timeout_ms)), *request)
+            }
+            req => (None, req),
+        };
         let req = match BrowserActionRequest::try_from(req) {
             Ok(action) => {
-                return browser_action(&self.bridge, action.pane, surface, action.op).await
+                if receipt.is_some()
+                    && matches!(action.op, BrowserOp::Control { .. } | BrowserOp::Diagnose)
+                {
+                    return Response::Error(RpcError::InvalidArgument(
+                        "receipt requires a browser action".into(),
+                    ));
+                }
+                let action_op = match receipt {
+                    Some((condition, timeout_ms)) => BrowserOp::Receipt {
+                        op: Box::new(action.op),
+                        condition,
+                        timeout_ms,
+                    },
+                    None => action.op,
+                };
+                let op = match task {
+                    Some(task) => BrowserOp::WithTask {
+                        task,
+                        op: Box::new(action_op),
+                    },
+                    None => action_op,
+                };
+                return browser_action(&self.bridge, action.pane, surface, op).await;
             }
             Err(req) => req,
         };
-        if surface.is_some() && !matches!(req, Request::BrowserEval { .. }) {
+        if surface.is_some() || task.is_some() || receipt.is_some() {
             return Response::Error(RpcError::InvalidArgument(
                 "surface targeting requires a browser action or eval".into(),
             ));
@@ -881,25 +938,6 @@ impl GuiHandler {
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }
-            Request::BrowserEval { pane, source } => {
-                let (tx, rx) = oneshot::channel();
-                let _ = self
-                    .bridge
-                    .tx
-                    .send(GtkCommand::BrowserEval {
-                        surface,
-                        pane,
-                        source,
-                        ack: tx,
-                    })
-                    .await;
-                match rx.await {
-                    Ok(Ok(value)) => Response::BrowserResult { value },
-                    Ok(Err(e)) => browser_error_response(e),
-                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
-                }
-            }
-
             other => unreachable!("browser router got a non-browser verb: {other:?}"),
         }
     }

@@ -43,6 +43,7 @@ struct KeyboardState {
 type FakeKey = unsafe extern "C" fn(*mut c_void, c_uint, c_int, c_ulong) -> c_int;
 type Ungrab = unsafe extern "C" fn(*mut c_void, c_int, c_ulong) -> c_int;
 type DisplayCall = unsafe extern "C" fn(*mut c_void) -> c_int;
+type LockModifiers = unsafe extern "C" fn(*mut c_void, c_uint, c_uint, c_uint) -> c_int;
 
 struct Grab {
     display: *mut c_void,
@@ -54,6 +55,8 @@ struct Grab {
     ungrab: Ungrab,
     release_server: DisplayCall,
     flush: DisplayCall,
+    lock_modifiers: LockModifiers,
+    saved_caps_lock: Option<u8>,
 }
 impl Drop for Grab {
     fn drop(&mut self) {
@@ -63,6 +66,9 @@ impl Drop for Grab {
             }
             if self.button_down {
                 (self.fake_button)(self.display, 1, 0, 0);
+            }
+            if let Some(locked) = self.saved_caps_lock {
+                (self.lock_modifiers)(self.display, 0x100, 2, u32::from(locked & 2));
             }
             if let Some(keyboard) = self.device {
                 (self.ungrab)(self.display, keyboard, 0);
@@ -122,6 +128,7 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
             symbol(&gtk_lib, b"gdk_x11_surface_get_xid\0")?;
         let state: unsafe extern "C" fn(*mut c_void, c_uint, *mut KeyboardState) -> c_int =
             symbol(&xlib, b"XkbGetState\0")?;
+        let lock_modifiers: LockModifiers = symbol(&xlib, b"XkbLockModifiers\0")?;
         let keymap: unsafe extern "C" fn(*mut c_void, *mut u8) -> c_int =
             symbol(&xlib, b"XQueryKeymap\0")?;
         let query: unsafe extern "C" fn(*mut c_void, c_int, *mut c_int) -> *mut DeviceInfo =
@@ -264,6 +271,8 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
             ungrab,
             release_server,
             flush,
+            lock_modifiers,
+            saved_caps_lock: None,
         };
         let mut bits = [
             if matches!(input, Input::Key(_)) {
@@ -284,6 +293,18 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
             return Err("input device is busy or the browser window is not viewable".into());
         }
         guard.device = Some(device);
+        if matches!(input, Input::Key(_)) {
+            if state(dpy, 0x100, &mut keyboard_state) != 0 {
+                return Err("could not read the keyboard lock state".into());
+            }
+            if keyboard_state.locked_mods & 2 != 0 {
+                // Keep logical key/Shift semantics; restore Caps Lock before releasing the grab.
+                guard.saved_caps_lock = Some(keyboard_state.locked_mods);
+                if lock_modifiers(dpy, 0x100, 2, 0) == 0 {
+                    return Err("could not preserve native key semantics with Caps Lock".into());
+                }
+            }
+        }
         focus(dpy, window, 2, 0);
         if let Input::Pointer(action, target) = input {
             let to_root = |target: &PointerTarget| -> Result<(c_int, c_int), String> {

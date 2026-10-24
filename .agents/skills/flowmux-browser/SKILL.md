@@ -176,11 +176,11 @@ without scrolling or resizing the page and rejects bitmaps above 64 MiB at the
 current zoom and display scale. On macOS it requires WebKit's content-rectangle
 snapshot support (macOS 15 or newer). Native document snapshots may omit video
 and WebGL layers; they are not a recording of the composited screen.
-`--element REF` crops a document capture to that element's bounds, including
-open Shadow DOM and accessible nested frames. It uses the same capture limits,
-validates the ref, and does not change scrolling. If the element is clipped by
-its frame, scroll it into view before capturing. `--element` and `--full-page`
-cannot be combined.
+`--element REF` crops the current viewport when the element is fully visible,
+including open Shadow DOM and accessible nested frames. Offscreen elements use
+a document capture with the limits above. Fixed or sticky elements, and elements
+clipped by their frame, must be fully in view. Capture validates the ref and
+does not change scrolling. `--element` and `--full-page` cannot be combined.
 
 | Command family | Usage after `browser` |
 |---|---|
@@ -402,3 +402,32 @@ below are defaults and can be customized in Options.
 | Session history | `Ctrl+Alt+J`; saved sessions are distinct from the live agent list. |
 | Workspace overview / pane zoom | `Ctrl+Alt+K` / `Ctrl+Alt+M`. |
 | Preferences | Options controls themes, fonts and keybindings. |
+
+### Runtime browser diagnostics
+
+`flowmux --json browser diagnose PANE` reports the actual backend, visible/active
+surface, pending dialog, native input environment, document capture limits and
+recording encoder availability. Use `--surface UUID` to check a specific tab.
+`environment_ready` checks the environment only; the target must still be
+editable/actionable. Recording checks the CLI's PATH for ffmpeg/libx264. Media
+codec support still requires playing the intended file. `capabilities` remains
+an offline command inventory.
+
+### Task ownership and action receipts
+
+Use `browser control PANE start` to reserve one tab; retain the returned `task_id`
+and `surface_id`. Pass `--task ID --surface UUID` on subsequent mutations and
+snapshots. `control PANE handoff` or `pause` blocks new mutations. The user resumes
+with **Continue** in the browser task bar. `stop` and `finish` preserve the tab;
+**Clear task** releases it. `control PANE status` remains readable without an ID.
+Take a fresh snapshot after the user continues. These controls coordinate local
+clients; they are not a sandbox or credential boundary.
+
+Add `--receipt` to an action, optionally `--expect-text TEXT` or `--expect-url URL`
+and `--outcome-timeout-ms 5000`. Inspect the returned JSON `status` and `error`:
+`input_delivered` is not an application-level outcome; `outcome_confirmed` means
+the condition was observed; `dialog_pending` requires a response; and
+`outcome_unknown` requires inspection before retrying. The command is never
+repeated automatically. Popup/download events include their IDs, but a download
+must separately reach `complete`. See `docs/browser-workflow.md` in the source
+repository for the protocol, event-history limits and handoff semantics.

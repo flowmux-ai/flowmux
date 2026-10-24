@@ -50,6 +50,7 @@ mod tests {
         let mut capture = CaptureSize {
             width: 40.0,
             height: 20.0,
+            viewport: false,
             clip: Some(CaptureRect {
                 x: 10.0,
                 y: 5.0,

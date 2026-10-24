@@ -165,6 +165,199 @@ def png_pixel(path, x, y):
     return tuple(previous[x * channels:x * channels + 3])
 
 
+def exercise_diagnostics(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Browser diagnostics", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--url", url)["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def diagnose(*args, **kwargs):
+        return json.loads(cli("browser", "diagnose", pane, *args, **kwargs)["browser_result"]["value"])
+
+    report = diagnose()
+    surface = report["surface_id"]
+    assert report["engine"] == ("WKWebView" if sys.platform == "darwin" else "WebKitGTK"), report
+    assert report["native_input"]["environment_ready"], report
+    assert report["native_text"]["environment_ready"], report
+    assert report["recording"]["encoder_available"], report
+    assert not report["cookie_import"]["supported"] and not report["cross_origin_frames"]
+    missing = diagnose(env_overrides={"PATH": str(root / "no-encoder")})
+    assert missing["recording"]["reason"] == "ffmpeg_missing", missing
+    cli("browser", "open", url, pane_context=terminal)
+    hidden = diagnose("--surface", surface)
+    assert not hidden["active"] and hidden["native_input"]["reason"] == "inactive_tab", hidden
+    assert not hidden["native_input"]["environment_ready"], hidden
+    cli("focus-tab", surface, "--pane", pane)
+    assert diagnose()["native_input"]["environment_ready"]
+    cli("browser", "eval", pane, "setTimeout(()=>confirm('diagnose'),0);'scheduled'")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        pending = json.loads(cli("browser", "dialog", pane, "status")["browser_result"]["value"])["dialog"]
+        if pending:
+            break
+        time.sleep(.02)
+    assert pending
+    try:
+        assert diagnose()["native_input"]["reason"] == "dialog_pending"
+    finally:
+        cli("browser", "dialog", pane, "dismiss", pending["id"])
+    print("BROWSER_DIAGNOSTICS_OK", flush=True)
+
+
+def exercise_ownership(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Browser task", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--url", url)["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+    started = json.loads(cli("browser", "control", pane, "start")["browser_result"]["value"])
+    task, surface = started["task_id"], started["surface_id"]
+
+    def owned(op, *args, **kwargs):
+        return cli("browser", "--task", task, "--surface", surface, op, pane, *args, **kwargs)
+
+    cli("browser", "eval", pane, "window.wrong=1", error=True)
+    cli("browser", "--task", "00000000-0000-0000-0000-000000000001", "eval", pane, "window.wrong=1", error=True)
+    owned("eval", "document.title='Owned task';'ready'")
+    deadline = time.monotonic() + 5
+    while cli("browser", "title", pane)["browser_result"]["value"] != "Owned task":
+        assert time.monotonic() < deadline, "native title did not update"
+        time.sleep(.02)
+    owned("eval", "window.submissions=0;document.body.innerHTML='<button id=submit>Submit once</button><p id=result></p>';submit.onclick=()=>{submissions++;result.textContent='Complete '+submissions};'ready'")
+    snap = json.loads(owned("snapshot")["browser_result"]["value"])
+    ref = next(key for key, meta in snap["refs"].items() if meta["name"] == "Submit once")
+    confirmed = json.loads(owned("click", ref, "--receipt", "--expect-text", "Complete 1")["browser_result"]["value"])
+    assert confirmed["status"] == "outcome_confirmed" and confirmed["outcome_met"], confirmed
+    assert confirmed["surface_id"] == surface and confirmed["action_id"], confirmed
+    snap = json.loads(owned("snapshot")["browser_result"]["value"])
+    ref = next(key for key, meta in snap["refs"].items() if meta["name"] == "Submit once")
+    unknown = json.loads(owned("click", ref, "--receipt", "--expect-text", "Never appears", "--outcome-timeout-ms", "150")["browser_result"]["value"])
+    assert unknown["status"] == "outcome_unknown" and unknown["side_effects_possible"], unknown
+    assert unknown["automatic_retry"] is False and unknown["action_id"] != confirmed["action_id"]
+    assert owned("eval", "String(submissions)")["browser_result"]["value"] == "2", "timed-out action was repeated"
+    opened = json.loads(owned("eval", "window.open('about:blank','short-lived').close();'opened once'", "--receipt")["browser_result"]["value"])
+    assert any(event["kind"] == "popup" for event in opened["events"]), opened
+    owned("eval", "document.body.innerHTML='<input id=input>';input.oninput=()=>window.answer=confirm('receipt?');input.focus();'ready'")
+    typed = json.loads(owned("type", "x", "--receipt", "--expect-text", "Never appears")["browser_result"]["value"])
+    assert typed["status"] == "dialog_pending", typed
+    assert any(event["kind"] == "dialog" for event in typed["events"]), typed
+    dialog = json.loads(owned("dialog", "status")["browser_result"]["value"])["dialog"]
+    owned("dialog", "accept", dialog["id"])
+    assert owned("wait", "--js", "answer===true")["browser_bool_result"]["value"]
+    print("BROWSER_RECEIPTS_OK", flush=True)
+    # A JS wait can have side effects; handoff must cancel future polling.
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        pending = workers.submit(owned, "wait", "--js", "(window.polls=(window.polls||0)+1,false)", "--timeout-ms", "5000", "--poll-ms", "50", error=True)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            status = json.loads(owned("control", "status")["browser_result"]["value"])
+            if status["action_in_progress"]:
+                break
+            time.sleep(.02)
+        assert status["action_in_progress"]
+        owned("eval", "document.title='overlap'", error=True)
+        handoff = json.loads(owned("control", "handoff")["browser_result"]["value"])
+        assert handoff["state"] == "user_needed"
+        pending.result(timeout=5)
+    owned("eval", "document.title='after handoff'", error=True)
+    owned("fill", "invalid-ref", "blocked", error=True)
+    assert cli("browser", "title", pane)["browser_result"]["value"] == "Owned task"
+    owned("control", "stop")
+    owned("eval", "document.title='after stop'", error=True)
+    cli("browser", "control", pane, "start", error=True)
+    assert any(tab["id"] == surface for ws in cli("tree")["tree"]["workspaces"] for p in ws["panes"] for tab in p["tabs"])
+    print("BROWSER_OWNERSHIP_OK", flush=True)
+
+
+def exercise_regressions(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Browser regressions", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+
+    def browser(op, *args):
+        return cli("browser", op, pane, *args)
+
+    def evaluate(source):
+        return browser("eval", source)["browser_result"]["value"]
+
+    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    failures = []
+    evaluate("document.body.innerHTML='<input id=f aria-label=Dialog>';f.oninput=()=>window.answer=confirm('input?');f.focus();'ready'")
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        typed = workers.submit(browser, "type", "x")
+        dialog = None
+        deadline = time.monotonic() + 5
+        while dialog is None and time.monotonic() < deadline:
+            dialog = json.loads(browser("dialog", "status")["browser_result"]["value"])["dialog"]
+            time.sleep(.02)
+        assert dialog is not None, "native text did not open the dialog"
+        try:
+            typed.result(timeout=2)
+        except TimeoutError:
+            failures.append("type waited for the dialog response")
+        finally:
+            browser("dialog", "accept", dialog["id"])
+            typed.result(timeout=5)
+    assert browser("wait", "--js", "window.answer===true")["browser_bool_result"]["value"]
+    assert evaluate("f.value") == "x"
+    evaluate("f.oninput=null;f.focus();f.setSelectionRange(1,1);'ready'")
+    try:
+        browser("type", "y")
+        assert evaluate("f.value") == "xy", "text cleanup blocked the next input"
+    except AssertionError as error:
+        failures.append(f"input after dialog: {error}; value={evaluate('f.value')}")
+
+    evaluate("document.body.innerHTML='<div id=fixed role=button aria-label=Fixed style=\"position:fixed;left:20px;top:20px;width:80px;height:40px;background:red\"></div><div style=\"height:1800px;background:blue\"></div>';scrollTo(0,500);'ready'")
+    assert browser("wait", "--js", "scrollY===500")["browser_bool_result"]["value"]
+    snap = json.loads(browser("snapshot")["browser_result"]["value"])
+    ref = next(key for key, meta in snap["refs"].items() if meta["name"] == "Fixed")
+    path = root / "fixed.png"
+    browser("screenshot", str(path), "--element", ref)
+    if png_pixel(path, 10, 10) != (255, 0, 0):
+        failures.append("fixed element capture saved the background")
+    assert evaluate("scrollY") == "500", "capture changed scrolling"
+
+    # Lock tests are opt-in and run only on the private Xvfb display in CI.
+    if os.environ.get("FLOWMUX_TEST_X11_LOCKS") == "1":
+        import ctypes
+        xlib = ctypes.CDLL("libX11.so.6")
+        xlib.XOpenDisplay.restype = ctypes.c_void_p
+        xlib.XkbGetState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
+        xlib.XkbLockModifiers.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint]
+        xlib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        display = xlib.XOpenDisplay(None)
+        assert display, "lock regression needs the private X11 display"
+
+        def locked_mods():
+            state = ctypes.create_string_buffer(32)
+            assert xlib.XkbGetState(display, 0x100, state) == 0
+            return state.raw[9]
+
+        original = locked_mods()
+        try:
+            assert xlib.XkbLockModifiers(display, 0x100, 2, 2)
+            xlib.XSync(display, 0)
+            assert locked_mods() & 2
+            evaluate("scrollTo(0,0);document.body.innerHTML='<input id=f>';f.focus();'ready'")
+            for key, expected in [("a", "a"), ("A", "A"), ("Shift+a", "A"), ("1", "1"), ("Shift+1", "!")]:
+                evaluate("f.value='';f.focus();'ready'")
+                try:
+                    browser("press", key)
+                    assert evaluate("f.value") == expected
+                except AssertionError as error:
+                    failures.append(f"Caps Lock key {key}: {error}")
+                assert locked_mods() & 2, "native input changed the user's Caps Lock state"
+        finally:
+            xlib.XkbLockModifiers(display, 0x100, 2, original & 2)
+            xlib.XSync(display, 0)
+            xlib.XCloseDisplay(display)
+    assert not failures, failures
+    print("BROWSER_P1_REGRESSIONS_OK", flush=True)
+
+
 def exercise(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Browser control test", "--root", str(root))
     workspace = workspace["workspace_created"]["id"]
@@ -894,9 +1087,9 @@ def main():
             process = subprocess.Popen([str(binary)], cwd=root, env=env, stdout=log, stderr=log)
             socket_path = root / "run" / f"flowmux-{process.pid}.sock"
 
-            def cli(*args, error=False, pane_context=None):
+            def cli(*args, error=False, pane_context=None, env_overrides=None):
                 result = subprocess.run([str(cli_binary), "--socket", str(socket_path), "--json", *args],
-                                        env={**env, **({"FLOWMUX_PANE_ID": pane_context} if pane_context else {})},
+                                        env={**env, **({"FLOWMUX_PANE_ID": pane_context} if pane_context else {}), **(env_overrides or {})},
                                         capture_output=True, text=True, timeout=30)
                 assert bool(result.returncode) == error, (args, result.stdout, result.stderr)
                 response = json.loads(result.stdout) if result.stdout else {"error": result.stderr}
@@ -911,6 +1104,9 @@ def main():
                     assert time.monotonic() < deadline, "GUI startup timed out"
                     time.sleep(.05)
                 assert cli("ping") == "pong"
+                exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_regressions(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 assert process.poll() is None, "test GUI exited unexpectedly"
             finally:

@@ -1089,6 +1089,8 @@ fn browser_open_no_flags_defaults_to_right_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        receipt: ReceiptArgs::default(),
+        task: None,
         surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
@@ -1117,6 +1119,8 @@ fn browser_open_picks_target_pane_from_flowmux_pane_id_env() {
     }
 
     let req = build_request(Cmd::Browser {
+        receipt: ReceiptArgs::default(),
+        task: None,
         surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
@@ -1144,6 +1148,8 @@ fn browser_open_ignores_invalid_flowmux_pane_id_env() {
     }
 
     let req = build_request(Cmd::Browser {
+        receipt: ReceiptArgs::default(),
+        task: None,
         surface: None,
         op: BrowserOp::Open {
             url: "https://example.com".into(),
@@ -1174,6 +1180,8 @@ fn browser_open_with_right_is_vertical_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        receipt: ReceiptArgs::default(),
+        task: None,
         surface: None,
         op: BrowserOp::Open {
             url: "https://a.test".into(),
@@ -1200,6 +1208,8 @@ fn browser_open_with_down_is_horizontal_split() {
     }
 
     let req = build_request(Cmd::Browser {
+        receipt: ReceiptArgs::default(),
+        task: None,
         surface: None,
         op: BrowserOp::Open {
             url: "https://a.test".into(),
@@ -2517,4 +2527,99 @@ fn recording_limits_duration_and_sampling_rate() {
             ..
         }
     ));
+}
+
+#[test]
+fn browser_task_is_pinned_and_cannot_open_a_tab() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let task = uuid::Uuid::new_v4();
+    let cli = Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "--surface",
+        &surface.to_string(),
+        "--task",
+        &task.to_string(),
+        "control",
+        &pane.to_string(),
+        "handoff",
+    ])
+    .unwrap();
+    let request = build_request(cli.cmd).unwrap();
+    let Request::BrowserOnSurface {
+        surface: actual,
+        request,
+    } = request
+    else {
+        panic!("not pinned")
+    };
+    assert_eq!(actual, surface);
+    let Request::BrowserWithTask {
+        task: actual,
+        request,
+    } = *request
+    else {
+        panic!("no owner")
+    };
+    assert_eq!(actual, task);
+    assert!(matches!(*request, Request::BrowserControl { action, .. } if action == "handoff"));
+    let cli = Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "--task",
+        &task.to_string(),
+        "open",
+        "https://example.com",
+    ])
+    .unwrap();
+    assert!(build_request(cli.cmd).is_err());
+}
+
+#[test]
+fn browser_receipt_validates_options_and_preserves_the_action() {
+    let pane = PaneId::new().to_string();
+    assert!(Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "click",
+        &pane,
+        "e1",
+        "--expect-text",
+        "Done"
+    ])
+    .is_err());
+    assert!(Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "click",
+        &pane,
+        "e1",
+        "--receipt",
+        "--outcome-timeout-ms",
+        "0"
+    ])
+    .is_err());
+    let cli = Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "click",
+        &pane,
+        "e1",
+        "--receipt",
+        "--expect-text",
+        "Done",
+    ])
+    .unwrap();
+    let Request::BrowserReceipt {
+        request,
+        condition,
+        timeout_ms,
+    } = build_request(cli.cmd).unwrap()
+    else {
+        panic!("missing receipt")
+    };
+    assert!(matches!(*request, Request::BrowserClick { target, .. } if target == "e1"));
+    assert_eq!(condition, Some(BrowserWaitCondition::Text("Done".into())));
+    assert_eq!(timeout_ms, 5000);
 }

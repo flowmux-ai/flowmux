@@ -2919,8 +2919,7 @@ impl WindowController {
                 workspace,
                 generation,
             } => self.refresh_ssh(workspace, generation).await,
-            command @ (GtkCommand::BrowserEval { .. }
-            | GtkCommand::BrowserAction { .. }
+            command @ (GtkCommand::BrowserAction { .. }
             | GtkCommand::BrowserOpenSplit { .. }
             | GtkCommand::OpenUrlInBrowserTab { .. }
             | GtkCommand::OpenBrowserPopup { .. }
@@ -3839,13 +3838,14 @@ fn run_browser_wait(
     condition: BrowserWaitCondition,
     timeout_ms: u64,
     poll_ms: u64,
+    cancellation: Option<u64>,
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
 ) {
     let js = Rc::<str>::from(browser_wait_js(&condition));
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
     let ack = Rc::new(RefCell::new(Some(ack)));
-    poll_browser_wait(browser, js, deadline, interval, ack);
+    poll_browser_wait(browser, js, deadline, interval, cancellation, ack);
 }
 
 fn poll_browser_wait(
@@ -3853,10 +3853,19 @@ fn poll_browser_wait(
     js: Rc<str>,
     deadline: Instant,
     interval: Duration,
+    cancellation: Option<u64>,
     ack: Rc<RefCell<Option<tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>>>>,
 ) {
     if ack.borrow().as_ref().is_none_or(|ack| ack.is_closed()) {
         return;
+    }
+    if let Some(revision) = cancellation {
+        if let Err(error) = browser.control.check_revision(revision) {
+            if let Some(ack) = ack.borrow_mut().take() {
+                let _ = ack.send(Err(error));
+            }
+            return;
+        }
     }
     if Instant::now() >= deadline {
         if let Some(ack) = ack.borrow_mut().take() {
@@ -3882,7 +3891,14 @@ fn poll_browser_wait(
                 return;
             }
             glib::timeout_add_local_once(interval, move || {
-                poll_browser_wait(next_browser, next_js, deadline, interval, next_ack);
+                poll_browser_wait(
+                    next_browser,
+                    next_js,
+                    deadline,
+                    interval,
+                    cancellation,
+                    next_ack,
+                );
             });
         }
         Err(e) => {

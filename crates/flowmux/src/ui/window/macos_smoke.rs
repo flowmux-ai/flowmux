@@ -89,6 +89,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    crate::ui::browser_control::check_controls();
+    if std::env::var_os("FLOWMUX_BROWSER_CONTROL_SMOKE_ONLY").is_some() {
+        return;
+    }
     if std::env::var_os("FLOWMUX_IMAGE_VIEWER_SMOKE_ONLY").is_some() {
         crate::ui::image_viewer::macos::check(app, root).await;
         return;

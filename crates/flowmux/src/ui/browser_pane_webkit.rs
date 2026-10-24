@@ -28,6 +28,7 @@ thread_local! {
 
 #[derive(Clone)]
 pub struct BrowserPane {
+    pub(crate) control: crate::ui::browser_control::BrowserControl,
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
     pub web_view: webkit6::WebView,
@@ -71,6 +72,25 @@ pub fn suspend_native_browser_views_for_window(_window: &gtk::Window) -> NativeB
 }
 
 impl BrowserPane {
+    pub(crate) fn diagnostics(&self) -> serde_json::Value {
+        let display = self.web_view.display().type_().name();
+        let libraries = ["libX11.so.6", "libXi.so.6", "libXtst.so.6"]
+            .iter()
+            .all(|name| unsafe { libloading::Library::new(name) }.is_ok());
+        serde_json::json!({
+            "engine": "WebKitGTK",
+            "engine_version": format!("{}.{}.{}", webkit6::functions::major_version(), webkit6::functions::minor_version(), webkit6::functions::micro_version()),
+            "display_backend": display,
+            "native_input_supported": display == "GdkX11Display" && libraries,
+            "native_text_requires_visible_tab": false,
+            "native_input_reason": if display != "GdkX11Display" { Some("requires_x11") }
+                else if !libraries { Some("native_libraries_missing") } else { None },
+            "document_capture_supported": true,
+            "navigation_enabled": self.navigation_enabled.get(),
+            "media_requirements": "Playback depends on installed GStreamer codecs and the page's playback policy",
+        })
+    }
+
     pub(crate) fn has_pending_dialog(&self) -> bool {
         self.dialogs.has_pending()
     }
@@ -143,6 +163,7 @@ impl BrowserPane {
         web_view: webkit6::WebView,
         profile: BrowserProfile,
     ) -> Self {
+        let control = crate::ui::browser_control::BrowserControl::new();
         let pane_id = Rc::new(Cell::new(id));
         let navigation_enabled = Rc::new(Cell::new(true));
         // A retained user script keeps the named world alive between evaluations.
@@ -241,6 +262,7 @@ impl BrowserPane {
             let callbacks = callbacks.clone();
             let profile = profile.clone();
             let navigation_enabled = navigation_enabled.clone();
+            let control = control.clone();
             web_view.connect_create(move |parent, _| {
                 let view = webkit6::WebView::builder().related_view(parent).build();
                 // Keep the related view alive until WebKit completes its creation handshake.
@@ -262,6 +284,7 @@ impl BrowserPane {
                     keep_alive.borrow_mut().take();
                 });
                 let surface = SurfaceId::new();
+                control.record("popup", serde_json::json!(surface));
                 let browser = Self::with_web_view(
                     pane_id.get(),
                     surface,
@@ -388,7 +411,9 @@ impl BrowserPane {
         let dialogs = PageDialogs::default();
         {
             let dialogs = dialogs.clone();
+            let control = control.clone();
             web_view.connect_script_dialog(move |view, script_dialog| {
+                control.record("dialog", serde_json::Value::Null);
                 let kind = match script_dialog.dialog_type() {
                     webkit6::ScriptDialogType::Alert => PageDialog::Alert,
                     webkit6::ScriptDialogType::Confirm => PageDialog::Confirm,
@@ -487,6 +512,7 @@ impl BrowserPane {
         chrome.append(&inspector);
 
         let download_signal = {
+            let control = control.clone();
             let downloads = downloads.downgrade();
             let source_web_view = web_view.downgrade();
             let handler = network_session.connect_download_started(move |_, download| {
@@ -501,6 +527,7 @@ impl BrowserPane {
                 }
                 let native_for_cancel = download.clone();
                 let item = downloads.add(move || native_for_cancel.cancel());
+                control.record("download", serde_json::json!(item.id()));
                 {
                     let directory = downloads.directory();
                     let item = item.clone();
@@ -552,6 +579,7 @@ impl BrowserPane {
         root.set_hexpand(true);
         root.set_vexpand(true);
         root.append(&chrome);
+        root.append(&control.bar);
         root.append(&find_entry);
         root.append(&web_view);
 
@@ -738,9 +766,11 @@ impl BrowserPane {
         let ref_scope = ref_scope_for_surface(surface_id);
         {
             let refs = refs.clone();
+            let control = control.clone();
             web_view.connect_load_changed(move |_, event| {
                 if event == webkit6::LoadEvent::Started {
                     refs.borrow_mut().clear(ref_scope);
+                    control.document_started();
                 }
             });
         }
@@ -752,6 +782,7 @@ impl BrowserPane {
         }
 
         Self {
+            control,
             pane_id,
             root,
             web_view,
@@ -830,6 +861,7 @@ impl BrowserPane {
     }
 
     pub fn prepare_for_close(&self) {
+        self.control.close();
         self.stop_loading();
         // Related popup views share a process with their opener.
         self.navigation_enabled.set(false);
@@ -876,7 +908,7 @@ impl BrowserPane {
             }
         }
         self.web_view.snapshot(
-            if document.is_some() {
+            if document.is_some_and(|size| !size.viewport) {
                 webkit6::SnapshotRegion::FullDocument
             } else {
                 webkit6::SnapshotRegion::Visible

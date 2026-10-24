@@ -5,6 +5,36 @@ use super::*;
 use std::{io::Write, process::Stdio, time::Duration};
 use tokio::time::{timeout, Instant};
 
+pub(crate) async fn diagnose() -> serde_json::Value {
+    let encoder = timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-encoders"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let (supported, reason) = match encoder {
+        Ok(Ok(output)) if output.status.success() => {
+            let available = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.split_whitespace().nth(1) == Some("libx264"));
+            (available, (!available).then_some("libx264_missing"))
+        }
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            (false, Some("ffmpeg_missing"))
+        }
+        Err(_) => (false, Some("encoder_probe_timeout")),
+        _ => (false, Some("encoder_probe_failed")),
+    };
+    serde_json::json!({
+        "encoder_available": supported, "reason": reason, "probe_location": "cli_path",
+        "next_action": if supported { None } else { Some("Provide ffmpeg with libx264 on the CLI's PATH") },
+        "audio": false, "max_seconds": 60, "max_fps": 10,
+        "may_omit_accelerated_layers": true,
+    })
+}
+
 pub(crate) async fn record(
     client: &Client,
     pane: PaneId,

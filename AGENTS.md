@@ -117,6 +117,8 @@ This option applies to every browser command except `open`.
 |---|---|---|
 | navigate / back / forward / reload / url / title | yes | |
 | snapshot (interactive Markdown + refs) | yes | DOM is **not** modified |
+| diagnose / control | yes | Runtime support checks and per-tab task handoff; see [browser tasks](docs/browser-workflow.md) |
+| --receipt / --expect-text / --expect-url | yes | Observed action results; timeout never repeats the action |
 | click / dblclick / hover / focus / blur | yes | by ref token |
 | fill / select / type / press | yes | type & press act on the active element |
 | check / uncheck | yes | radios cannot be unchecked individually |

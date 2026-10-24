@@ -71,6 +71,7 @@ unsafe extern "C" {
 
 #[derive(Clone)]
 pub struct BrowserPane {
+    pub(crate) control: crate::ui::browser_control::BrowserControl,
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
     pub web_view: gtk::Widget,
@@ -98,6 +99,7 @@ struct DownloadUi {
 }
 
 struct BrowserNavigationDelegateIvars {
+    control: crate::ui::browser_control::BrowserControl,
     navigation_enabled: Rc<Cell<bool>>,
     refs: Rc<RefCell<RefStore>>,
     ref_scope: RefScope,
@@ -106,6 +108,7 @@ struct BrowserNavigationDelegateIvars {
 }
 
 struct BrowserUIDelegateIvars {
+    control: crate::ui::browser_control::BrowserControl,
     dialogs: PageDialogs,
     file_choosers: FileChoosers,
     navigation_enabled: Rc<Cell<bool>>,
@@ -150,6 +153,7 @@ define_class!(
                     )
                 };
                 let surface = SurfaceId::new();
+                ivars.control.record("popup", serde_json::json!(surface));
                 let browser = BrowserPane::with_web_view(
                     ivars.pane_id.get(),
                     surface,
@@ -345,6 +349,7 @@ define_class!(
             _navigation: Option<&WKNavigation>,
         ) {
             self.ivars().refs.borrow_mut().clear(self.ivars().ref_scope);
+            self.ivars().control.document_started();
         }
 
         #[unsafe(method(webView:decidePolicyForNavigationAction:decisionHandler:))]
@@ -486,6 +491,9 @@ impl BrowserNavigationDelegate {
                 }
             }
         });
+        self.ivars()
+            .control
+            .record("download", serde_json::json!(item.id()));
         {
             let handle = handle.clone();
             let item = item.clone();
@@ -714,6 +722,22 @@ pub fn ref_scope_for_surface(surface_id: SurfaceId) -> RefScope {
 }
 
 impl BrowserPane {
+    pub(crate) fn diagnostics(&self) -> serde_json::Value {
+        let config = unsafe { WKSnapshotConfiguration::new(MainThreadMarker::new().unwrap()) };
+        let document: Bool =
+            unsafe { msg_send![&*config, respondsToSelector: sel!(_setUsesContentsRect:)] };
+        serde_json::json!({
+            "engine": "WKWebView",
+            "display_backend": "AppKit",
+            "native_input_supported": true,
+            "native_text_requires_visible_tab": true,
+            "native_input_reason": null,
+            "document_capture_supported": document.as_bool(),
+            "navigation_enabled": self.native.navigation_enabled.get(),
+            "media_requirements": "Playback depends on system WebKit codecs and the page's playback policy",
+        })
+    }
+
     pub(crate) fn has_pending_dialog(&self) -> bool {
         self.native._ui_delegate.ivars().dialogs.has_pending()
     }
@@ -789,6 +813,7 @@ impl BrowserPane {
         web_view: Retained<WKWebView>,
         profile: BrowserProfile,
     ) -> Self {
+        let control = crate::ui::browser_control::BrowserControl::new();
         let pane_id = Rc::new(Cell::new(id));
         let mtm = MainThreadMarker::new().expect("WKWebView must be configured on the main thread");
         let persist_session = unsafe { web_view.configuration().websiteDataStore().isPersistent() };
@@ -889,6 +914,7 @@ impl BrowserPane {
         root.set_hexpand(true);
         root.set_vexpand(true);
         root.append(&chrome);
+        root.append(&control.bar);
         root.append(&find_entry);
         root.append(&viewport);
 
@@ -902,6 +928,7 @@ impl BrowserPane {
                 mtm,
                 &web_view,
                 BrowserUIDelegateIvars {
+                    control: control.clone(),
                     dialogs: PageDialogs::default(),
                     file_choosers: FileChoosers::default(),
                     navigation_enabled: navigation_enabled.clone(),
@@ -918,6 +945,7 @@ impl BrowserPane {
                 downloads,
                 refs.clone(),
                 ref_scope,
+                control.clone(),
                 navigation_enabled,
             ),
             last_url: RefCell::new(String::new()),
@@ -1089,6 +1117,7 @@ impl BrowserPane {
         }
 
         Self {
+            control,
             pane_id,
             root,
             web_view: web_widget,
@@ -1332,6 +1361,7 @@ impl BrowserPane {
     }
 
     pub fn prepare_for_close(&self) {
+        self.control.close();
         inspector::close(&self.native.web_view);
         self.stop_loading();
     }
@@ -1368,7 +1398,7 @@ impl BrowserPane {
         document: Option<flowmux_browser::snapshot::CaptureSize>,
         on_done: F,
     ) {
-        let configuration = if let Some(size) = document {
+        if let Some(size) = document {
             let scale = self
                 .native
                 .web_view
@@ -1381,6 +1411,8 @@ impl BrowserPane {
                 on_done(Err(error));
                 return;
             }
+        }
+        let configuration = if document.is_some_and(|size| !size.viewport) {
             let config = unsafe { WKSnapshotConfiguration::new(MainThreadMarker::new().unwrap()) };
             let supported: Bool =
                 unsafe { msg_send![&*config, respondsToSelector: sel!(_setUsesContentsRect:)] };
@@ -1645,10 +1677,12 @@ fn install_navigation_delegate(
     download_manager: DownloadManager,
     refs: Rc<RefCell<RefStore>>,
     ref_scope: RefScope,
+    control: crate::ui::browser_control::BrowserControl,
     navigation_enabled: Rc<Cell<bool>>,
 ) -> Retained<BrowserNavigationDelegate> {
     let delegate =
         BrowserNavigationDelegate::alloc(mtm).set_ivars(Box::new(BrowserNavigationDelegateIvars {
+            control,
             navigation_enabled,
             refs,
             ref_scope,
@@ -1765,6 +1799,7 @@ fn present_page_dialog(
     // A pending JavaScript dialog blocks WebKit's snapshot completion.
     let native_browser_suspend = suspend_native_browser_views(&parent, false);
     let mut reply = reply;
+    ivars.control.record("dialog", serde_json::Value::Null);
     ivars.dialogs.present(
         &parent,
         &heading,

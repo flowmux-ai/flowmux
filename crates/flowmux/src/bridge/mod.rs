@@ -32,6 +32,21 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    Receipt {
+        op: Box<BrowserOp>,
+        condition: Option<BrowserWaitCondition>,
+        timeout_ms: u64,
+    },
+    WithTask {
+        task: uuid::Uuid,
+        op: Box<BrowserOp>,
+    },
+    Control {
+        action: String,
+    },
+    Eval {
+        source: String,
+    },
     Drag {
         from: [f64; 2],
         to: [f64; 2],
@@ -62,6 +77,7 @@ pub enum BrowserOp {
     /// repopulates the pane's `RefStore` from the returned `refs` map,
     /// and returns the snapshot JSON. The live DOM is never stamped.
     Snapshot,
+    Diagnose,
     Navigate {
         url: String,
     },
@@ -151,6 +167,9 @@ impl BrowserOp {
     /// cannot silently omit its agent-facing name.
     pub fn capability_name(&self) -> &'static str {
         match self {
+            Self::WithTask { op, .. } | Self::Receipt { op, .. } => op.capability_name(),
+            Self::Control { .. } => "control",
+            Self::Eval { .. } => "eval",
             Self::Drag { .. } => "drag",
             Self::Pointer { .. } => "pointer",
             Self::FileChooser { .. } => "file-chooser",
@@ -159,6 +178,7 @@ impl BrowserOp {
             Self::Media { .. } => "media",
             Self::EvalAsync { .. } => "eval-async",
             Self::Snapshot => "snapshot",
+            Self::Diagnose => "diagnose",
             Self::Navigate { .. } => "navigate",
             Self::Back => "back",
             Self::Forward => "forward",
@@ -192,9 +212,16 @@ impl BrowserOp {
     /// Whether this operation primarily reads browser state. `wait` is a
     /// query because it observes a condition without mutating the page.
     pub fn is_query(&self) -> bool {
+        if let Self::WithTask { op, .. } | Self::Receipt { op, .. } = self {
+            return op.is_query();
+        }
+        if let Self::Control { .. } = self {
+            return true;
+        }
         matches!(
             self,
             Self::Snapshot
+                | Self::Diagnose
                 | Self::FileChooser {
                     action: flowmux_ipc::protocol::BrowserFileChooserAction::Status,
                 }
@@ -739,13 +766,6 @@ pub enum GtkCommand {
         pane: PaneId,
         surface: SurfaceId,
     },
-    /// Evaluate JavaScript in a browser pane.
-    BrowserEval {
-        surface: Option<SurfaceId>,
-        pane: PaneId,
-        source: String,
-        ack: oneshot::Sender<Result<String, String>>,
-    },
     /// Run a [`BrowserOp`] against a specific browser pane. Used by
     /// the cmux-style scriptable verbs (navigate / click / fill /
     /// snapshot / …) the IPC layer exposes.
@@ -1087,10 +1107,12 @@ mod tests {
         // Raw eval can mutate a page; it must never enter the query lane.
         let (ack, _) = oneshot::channel();
         bridge
-            .send(GtkCommand::BrowserEval {
+            .send(GtkCommand::BrowserAction {
                 surface: None,
                 pane,
-                source: "location.reload()".into(),
+                op: BrowserOp::Eval {
+                    source: "location.reload()".into(),
+                },
                 ack,
             })
             .await
@@ -1098,7 +1120,10 @@ mod tests {
         assert!(rx.control.try_recv().is_err());
         assert!(matches!(
             rx.recv().await.unwrap(),
-            GtkCommand::BrowserEval { .. }
+            GtkCommand::BrowserAction {
+                op: BrowserOp::Eval { .. },
+                ..
+            }
         ));
     }
 }

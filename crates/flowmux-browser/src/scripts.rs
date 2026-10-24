@@ -417,6 +417,11 @@ pub fn element_capture(selector: &str) -> String {
         r#"
         const rect = el.getBoundingClientRect();
         let {x, y, width, height} = rect;
+        let viewportOnly = false;
+        for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {
+            const position = parent.ownerDocument.defaultView.getComputedStyle(parent).position;
+            if (position === 'fixed' || position === 'sticky') viewportOnly = true;
+        }
         let view = el.ownerDocument.defaultView;
         while (view.frameElement) {
             if (x < 0 || y < 0 || x + width > view.innerWidth || y + height > view.innerHeight)
@@ -428,6 +433,11 @@ pub fn element_capture(selector: &str) -> String {
             height *= transform.sy;
             view = view.frameElement.ownerDocument.defaultView;
         }
+        // Document snapshots can lay out fixed/sticky content at a different scroll position.
+        if (x >= 0 && y >= 0 && x + width <= view.innerWidth && y + height <= view.innerHeight)
+            return JSON.stringify({width:view.innerWidth, height:view.innerHeight, viewport:true,
+                clip:{x, y, width, height}});
+        if (viewportOnly) return 'error: fixed or sticky element is clipped; scroll it fully into view first';
         return JSON.stringify({
             width: Math.max(view.document.documentElement.clientWidth,view.document.documentElement.scrollWidth,view.document.body?.scrollWidth||0),
             height: Math.max(view.document.documentElement.clientHeight,view.document.documentElement.scrollHeight,view.document.body?.scrollHeight||0),

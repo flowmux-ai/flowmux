@@ -20,6 +20,8 @@ pub struct CaptureSize {
     pub width: f64,
     pub height: f64,
     #[serde(default)]
+    pub viewport: bool,
+    #[serde(default)]
     pub clip: Option<CaptureRect>,
 }
 
@@ -153,6 +155,7 @@ mod tests {
         let size = CaptureSize {
             width: 2048.0,
             height: 2048.0,
+            viewport: false,
             clip: None,
         };
         assert!(size.check(2.0).is_ok());
@@ -161,6 +164,7 @@ mod tests {
         assert!(CaptureSize {
             width: -1.0,
             height: 5.0,
+            viewport: false,
             clip: None,
         }
         .check(1.0)
@@ -168,6 +172,7 @@ mod tests {
         assert!(CaptureSize {
             width: f64::INFINITY,
             height: 5.0,
+            viewport: false,
             clip: None,
         }
         .check(1.0)

@@ -124,6 +124,8 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             }
         }
         BrowserOp::Snapshot { pane } => Request::BrowserSnapshot { pane },
+        BrowserOp::Control { pane, action } => Request::BrowserControl { pane, action },
+        BrowserOp::Diagnose { pane } => Request::BrowserDiagnose { pane },
         BrowserOp::Eval { pane, source } => Request::BrowserEval { pane, source },
         BrowserOp::EvalAsync {
             pane,
@@ -350,13 +352,48 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             cwd,
             shell,
         },
-        Cmd::Browser { surface, op } => {
+        Cmd::Browser {
+            surface,
+            task,
+            receipt,
+            op,
+        } => {
             if surface.is_some() && matches!(op, BrowserOp::Open { .. }) {
                 anyhow::bail!(
                     "--surface targets an existing browser tab; it cannot be used with open"
                 );
             }
+            if task.is_some() && matches!(op, BrowserOp::Open { .. }) {
+                anyhow::bail!("--task targets an existing tab; it cannot be used with open");
+            }
+            if receipt.enabled
+                && matches!(
+                    op,
+                    BrowserOp::Open { .. } | BrowserOp::Control { .. } | BrowserOp::Diagnose { .. }
+                )
+            {
+                anyhow::bail!("--receipt requires an action on an existing browser tab");
+            }
             let request = browser_op_to_request(op)?;
+            let request = if receipt.enabled {
+                Request::BrowserReceipt {
+                    request: Box::new(request),
+                    condition: receipt
+                        .expect_text
+                        .map(BrowserWaitCondition::Text)
+                        .or_else(|| receipt.expect_url.map(BrowserWaitCondition::Url)),
+                    timeout_ms: receipt.outcome_timeout_ms,
+                }
+            } else {
+                request
+            };
+            let request = match task {
+                Some(task) => Request::BrowserWithTask {
+                    task,
+                    request: Box::new(request),
+                },
+                None => request,
+            };
             match surface {
                 Some(surface) => Request::BrowserOnSurface {
                     surface,

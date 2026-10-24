@@ -1906,10 +1906,10 @@ fn browser_action_request_preserves_non_action_requests() {
         pane: PaneId::new(),
         source: "document.title".into(),
     };
-    let Err(request) = BrowserActionRequest::try_from(request) else {
-        panic!("browser eval must keep its dedicated response contract");
+    let Ok(request) = BrowserActionRequest::try_from(request) else {
+        panic!("browser eval must share task admission with other mutations");
     };
-    assert!(matches!(request, Request::BrowserEval { .. }));
+    assert!(matches!(request.op, BrowserOp::Eval { .. }));
 }
 
 #[test]
@@ -2616,19 +2616,20 @@ async fn browser_eval_dispatches_eval_and_maps_string_result() {
         response = &mut response => panic!("browser eval completed before bridge ack: {response:?}"),
         command = rx.recv() => command.expect("browser eval should dispatch to GTK"),
     };
-    let GtkCommand::BrowserEval {
+    let GtkCommand::BrowserAction {
         surface: None,
         pane: command_pane,
-        source,
+        op: BrowserOp::Eval { source },
         ack,
     } = command
     else {
-        panic!("expected BrowserEval command");
+        panic!("expected BrowserAction eval command");
     };
 
     assert_eq!(command_pane, pane);
     assert_eq!(source, "document.title");
-    ack.send(Ok("Example".into())).unwrap();
+    ack.send(Ok(BrowserActionResult::String("Example".into())))
+        .unwrap();
 
     assert!(matches!(
         response.await,
@@ -2649,14 +2650,14 @@ async fn browser_eval_reports_not_found_for_missing_browser_pane() {
         response = &mut response => panic!("browser eval completed before bridge ack: {response:?}"),
         command = rx.recv() => command.expect("browser eval should dispatch to GTK"),
     };
-    let GtkCommand::BrowserEval {
+    let GtkCommand::BrowserAction {
         surface: None,
         pane: command_pane,
-        source,
+        op: BrowserOp::Eval { source },
         ack,
     } = command
     else {
-        panic!("expected BrowserEval command");
+        panic!("expected BrowserAction eval command");
     };
     assert_eq!(command_pane, pane);
     assert_eq!(source, "document.title");
@@ -3160,5 +3161,47 @@ async fn browser_drag_rejects_invalid_coordinates_before_dispatch() {
             ));
             assert!(rx.try_recv().is_err());
         }
+    }
+}
+
+#[tokio::test]
+async fn browser_wrappers_preserve_validation_and_reject_nested_or_mutating_expectations() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    let task = uuid::Uuid::new_v4();
+    let invalid = [
+        Request::BrowserWithTask {
+            task,
+            request: Box::new(Request::BrowserReceipt {
+                request: Box::new(Request::BrowserEvalAsync {
+                    pane,
+                    body: "sideEffect()".into(),
+                    timeout_ms: 0,
+                }),
+                condition: None,
+                timeout_ms: 1000,
+            }),
+        },
+        Request::BrowserReceipt {
+            request: Box::new(Request::BrowserClick {
+                pane,
+                target: "e1".into(),
+            }),
+            condition: Some(BrowserWaitCondition::Js("sideEffect()".into())),
+            timeout_ms: 1000,
+        },
+        Request::BrowserWithTask {
+            task,
+            request: Box::new(Request::BrowserWithTask {
+                task,
+                request: Box::new(Request::BrowserSnapshot { pane }),
+            }),
+        },
+    ];
+    for request in invalid {
+        assert!(matches!(
+            handler.handle(request).await,
+            Response::Error(RpcError::InvalidArgument(_))
+        ));
+        assert!(rx.try_recv().is_err(), "invalid action reached GTK");
     }
 }

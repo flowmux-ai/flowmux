@@ -12,6 +12,8 @@ use std::path::PathBuf;
 pub const BROWSER_VERBS: &[&str] = &[
     "open",
     "snapshot",
+    "diagnose",
+    "control",
     "navigate",
     "back",
     "forward",
@@ -754,6 +756,19 @@ pub enum Request {
 
     /// Pin a browser command to one tab instead of the pane's active tab.
     /// Only browser actions and eval are accepted; nesting and open are rejected.
+    BrowserReceipt {
+        request: Box<Request>,
+        condition: Option<BrowserWaitCondition>,
+        timeout_ms: u64,
+    },
+    BrowserWithTask {
+        task: uuid::Uuid,
+        request: Box<Request>,
+    },
+    BrowserControl {
+        pane: PaneId,
+        action: String,
+    },
     BrowserOnSurface {
         surface: SurfaceId,
         request: Box<Request>,
@@ -761,6 +776,10 @@ pub enum Request {
     /// `flowmux browser snapshot <pane>` — return a JSON snapshot
     /// of the page DOM/a11y tree (for agent automation).
     BrowserSnapshot {
+        pane: PaneId,
+    },
+    /// Inspect the connected browser backend and the target tab's readiness.
+    BrowserDiagnose {
         pane: PaneId,
     },
 
