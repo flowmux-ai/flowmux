@@ -191,7 +191,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |
-| File selection | `file-chooser PANE status`, `select ID PATH...`, or `cancel ID` |
+| File selection | `file-chooser PANE status`, `select ID PATH... --root DIR`, or `cancel ID` |
 | Scrolling | `scroll PANE REF X Y` |
 | Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
@@ -253,7 +253,8 @@ the child tab, and closing a child preserves the parent's page state.
 
 `file-chooser status` returns `{"file_chooser": null}` when none is pending;
 otherwise it returns an `id`, `multiple`, and `directories` flag. Use that ID
-with `select` to provide existing readable paths, or `cancel` to preserve the
+with `select ID PATH... --root DIR` to provide existing readable paths within
+an explicit directory scope, or `cancel` to preserve the
 page's previous selection. Relative paths are resolved from the CLI's working
 directory. The selection must match the native request's count and file/folder
 type. Invalid paths and stale IDs leave the pending chooser untouched. Selection
@@ -431,3 +432,32 @@ the condition was observed; `dialog_pending` requires a response; and
 repeated automatically. Popup/download events include their IDs, but a download
 must separately reach `complete`. See `docs/browser-workflow.md` in the source
 repository for the protocol, event-history limits and handoff semantics.
+
+
+### Semantic discovery and typed conditions
+
+`find PANE --role button --name Save --exact` returns all matching candidates
+with fresh refs. `snapshot` accepts the same role/name/label/text/placeholder
+filters, `--within REF`, `--interactive`, `--viewport`, `--max-nodes` and `--max-chars`.
+Filters combine with AND. Inspect `truncated` before concluding a target is absent.
+Both commands replace the ref registry. Ref metadata includes element states.
+
+Pointer actions wait up to five seconds for readiness before input; fill/select/
+check/uncheck wait for their applicable element states. Stale nodes still fail.
+An action is never automatically replayed after delivery.
+
+Use `--receipt --expect '{"TextChanged":{"selector":"#result"}}'` to require a
+change from the pre-action baseline. `wait --condition JSON` and `--expect JSON`
+also accept `{"ValueChanged":{"selector":"#email"}}`,
+`{"PopupReady":{"url":"https://example.com/login"}}`, `{"UrlExact":"https://example.com/done"}`,
+`{"ElementState":{"selector":"#submit","state":"enabled"}}`,
+`{"Value":{"selector":"#email","value":"agent@example.test"}}` and
+`{"DownloadComplete":{"id":0}}`. These selectors address the top-level document.
+Use the popup's explicit surface ID and a ready-state wait for child readiness.
+
+File selection requires `--root DIR`; canonical paths must remain inside it.
+Folder uploads reject nested links/special files and trees exceeding 10,000
+entries. `value` and `attr value` redact password fields; raw eval and captures
+remain trusted local-client capabilities. Task IDs are not authentication. IPC
+accepts only the same OS user, and file scope is not a same-user sandbox.
+Cookie import reports unsupported without reading or claiming to inject cookies.

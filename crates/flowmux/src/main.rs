@@ -189,7 +189,12 @@ fn main() -> anyhow::Result<()> {
     // is not auto-created by the runtime, so the IPC server's bind
     // would fail with ENOENT and the GUI would silently lose hooks.
     if let Some(parent) = socket.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        use std::os::unix::fs::DirBuilderExt;
+        if let Err(e) = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+        {
             tracing::warn!(error = %e, path = %parent.display(), "could not create socket parent dir");
         }
     }

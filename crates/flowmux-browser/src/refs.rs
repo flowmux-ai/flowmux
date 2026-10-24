@@ -228,6 +228,8 @@ mod tests {
             shadow_path: Vec::new(),
             frame_path: Vec::new(),
             frame_accessible: None,
+            states: None,
+            description: None,
         }
     }
 

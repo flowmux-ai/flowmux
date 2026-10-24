@@ -77,6 +77,7 @@ pub enum BrowserOp {
     /// repopulates the pane's `RefStore` from the returned `refs` map,
     /// and returns the snapshot JSON. The live DOM is never stamped.
     Snapshot,
+    Inspect(flowmux_ipc::protocol::BrowserInspectOptions),
     Diagnose,
     Navigate {
         url: String,
@@ -177,7 +178,7 @@ impl BrowserOp {
             Self::Download { .. } => "download",
             Self::Media { .. } => "media",
             Self::EvalAsync { .. } => "eval-async",
-            Self::Snapshot => "snapshot",
+            Self::Snapshot | Self::Inspect(_) => "snapshot",
             Self::Diagnose => "diagnose",
             Self::Navigate { .. } => "navigate",
             Self::Back => "back",
@@ -221,6 +222,7 @@ impl BrowserOp {
         matches!(
             self,
             Self::Snapshot
+                | Self::Inspect(_)
                 | Self::Diagnose
                 | Self::FileChooser {
                     action: flowmux_ipc::protocol::BrowserFileChooserAction::Status,
@@ -787,11 +789,6 @@ pub enum GtkCommand {
         url: String,
         direction: SplitDirection,
         ack: oneshot::Sender<Result<BrowserOpenOutcome, String>>,
-    },
-    /// Inject a list of cookies into the WebKit cookie manager.
-    InjectCookies {
-        cookies: Vec<flowmux_cookies::Cookie>,
-        ack: oneshot::Sender<Result<usize, String>>,
     },
     /// Open the system file manager at the cwd of the workspace's
     /// currently-focused pane (or, if no pane in `workspace` is focused,

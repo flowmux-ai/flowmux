@@ -45,7 +45,8 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             use flowmux_ipc::protocol::BrowserFileChooserAction as Action;
             let action = match action {
                 FileChooserAction::Status => Action::Status,
-                FileChooserAction::Select { id, paths } => Action::Select {
+                FileChooserAction::Select { id, paths, root } => Action::Select {
+                    root: Some(std::path::absolute(root)?),
                     id,
                     paths: paths
                         .into_iter()
@@ -123,7 +124,26 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 direction,
             }
         }
-        BrowserOp::Snapshot { pane } => Request::BrowserSnapshot { pane },
+        BrowserOp::Snapshot { pane, options } | BrowserOp::Find { pane, options } => {
+            let options = flowmux_ipc::protocol::BrowserInspectOptions {
+                role: options.role,
+                name: options.name,
+                label: options.label,
+                text: options.text,
+                placeholder: options.placeholder,
+                within: options.within,
+                exact: options.exact,
+                interactive: options.interactive,
+                viewport: options.viewport,
+                max_nodes: options.max_nodes,
+                max_chars: options.max_chars,
+            };
+            if options == Default::default() {
+                Request::BrowserSnapshot { pane }
+            } else {
+                Request::BrowserInspect { pane, options }
+            }
+        }
         BrowserOp::Control { pane, action } => Request::BrowserControl { pane, action },
         BrowserOp::Diagnose { pane } => Request::BrowserDiagnose { pane },
         BrowserOp::Eval { pane, source } => Request::BrowserEval { pane, source },
@@ -178,6 +198,7 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
         BrowserOp::IsChecked { pane, target } => Request::BrowserIsChecked { pane, target },
         BrowserOp::Wait {
             pane,
+            typed,
             selector,
             text,
             url,
@@ -194,7 +215,10 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             }
             Request::BrowserWait {
                 pane,
-                condition: browser_wait_condition(selector, text, url, ready_state, js)?,
+                condition: match typed {
+                    Some(json) => serde_json::from_str(&json)?,
+                    None => browser_wait_condition(selector, text, url, ready_state, js)?,
+                },
                 timeout_ms,
                 poll_ms,
             }
@@ -378,10 +402,13 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             let request = if receipt.enabled {
                 Request::BrowserReceipt {
                     request: Box::new(request),
-                    condition: receipt
-                        .expect_text
-                        .map(BrowserWaitCondition::Text)
-                        .or_else(|| receipt.expect_url.map(BrowserWaitCondition::Url)),
+                    condition: match receipt.expectation {
+                        Some(json) => Some(serde_json::from_str(&json)?),
+                        None => receipt
+                            .expect_text
+                            .map(BrowserWaitCondition::Text)
+                            .or_else(|| receipt.expect_url.map(BrowserWaitCondition::Url)),
+                    },
                     timeout_ms: receipt.outcome_timeout_ms,
                 }
             } else {

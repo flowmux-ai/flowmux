@@ -182,7 +182,7 @@ define_class!(
         #[allow(non_snake_case)]
         fn webView_requestMediaCapturePermissionForOrigin_initiatedByFrame_type_decisionHandler(
             &self,
-            _web_view: &WKWebView,
+            web_view: &WKWebView,
             origin: &WKSecurityOrigin,
             _frame: &WKFrameInfo,
             capture_type: WKMediaCaptureType,
@@ -198,12 +198,22 @@ define_class!(
                 decision_handler.call((WKPermissionDecision::Deny,));
                 return;
             };
-            let site = unsafe { origin.host().to_string() };
-            let site = if site.is_empty() { "This page" } else { &site };
+            let site = unsafe {
+                flowmux_browser::security::display_security_origin(
+                    &origin.protocol().to_string(),
+                    &origin.host().to_string(),
+                    origin.port() as i64,
+                )
+            };
+            let top = unsafe { web_view.URL() }
+                .and_then(|url| url.absoluteString())
+                .map(|url| flowmux_browser::security::display_origin(&url.to_string()))
+                .unwrap_or_else(|| "Unknown".into());
+            let site = format!("Requesting origin: {site}\nTop-level page: {top}");
             present_web_permission_dialog(
                 &parent,
                 media_capture_name(capture_type),
-                site,
+                &site,
                 decision_handler.copy(),
             );
         }
@@ -214,7 +224,7 @@ define_class!(
             &self,
             _web_view: &WKWebView,
             parameters: &objc2_web_kit::WKOpenPanelParameters,
-            _frame: &WKFrameInfo,
+            frame: &WKFrameInfo,
             completion_handler: &block2::DynBlock<dyn Fn(*mut objc2_foundation::NSArray<NSURL>)>,
         ) {
             let Some(parent) = self
@@ -230,7 +240,17 @@ define_class!(
             let native_suspend = suspend_native_browser_views(&parent, false);
             let handler = completion_handler.copy();
             let dialog = gtk::FileDialog::builder()
-                .title("Choose files")
+                .title(unsafe {
+                    let origin = frame.securityOrigin();
+                    format!(
+                        "Choose files — {}",
+                        flowmux_browser::security::display_security_origin(
+                            &origin.protocol().to_string(),
+                            &origin.host().to_string(),
+                            origin.port() as i64
+                        )
+                    )
+                })
                 .modal(true)
                 .build();
             self.ivars().file_choosers.present(
@@ -1752,10 +1772,7 @@ fn present_web_permission_dialog(
     site: &str,
     decision_handler: block2::RcBlock<dyn Fn(WKPermissionDecision)>,
 ) {
-    let dialog = adw::AlertDialog::new(
-        Some(&format!("Allow {permission}?")),
-        Some(&format!("{site} is requesting access.")),
-    );
+    let dialog = adw::AlertDialog::new(Some(&format!("Allow {permission}?")), Some(site));
     dialog.add_response("deny", "Deny");
     dialog.add_response("allow", "Allow");
     dialog.set_default_response(Some("deny"));
@@ -1832,7 +1849,10 @@ fn website_data_store(
     let uuid = NSString::from_str(&uuid_for_profile_slug(&slug));
     match NSUUID::from_string(&uuid) {
         Some(identifier) => unsafe { WKWebsiteDataStore::dataStoreForIdentifier(&identifier, mtm) },
-        None => unsafe { WKWebsiteDataStore::defaultDataStore(mtm) },
+        None => {
+            tracing::warn!("profile identifier unavailable; using isolated ephemeral storage");
+            unsafe { WKWebsiteDataStore::nonPersistentDataStore(mtm) }
+        }
     }
 }
 

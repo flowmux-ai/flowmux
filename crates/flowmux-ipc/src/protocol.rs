@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub const BROWSER_VERBS: &[&str] = &[
     "open",
     "snapshot",
+    "find",
     "diagnose",
     "control",
     "navigate",
@@ -778,6 +779,11 @@ pub enum Request {
     BrowserSnapshot {
         pane: PaneId,
     },
+    /// Filter and bound a snapshot without choosing an action target.
+    BrowserInspect {
+        pane: PaneId,
+        options: BrowserInspectOptions,
+    },
     /// Inspect the connected browser backend and the target tab's readiness.
     BrowserDiagnose {
         pane: PaneId,
@@ -855,7 +861,67 @@ pub enum Request {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserElementState {
+    Visible,
+    Hidden,
+    Enabled,
+    Disabled,
+    Checked,
+    Unchecked,
+    Selected,
+    Expanded,
+    Editable,
+    Focused,
+    Invalid,
+}
+
+/// Semantic filters are combined with AND; matching never chooses an action target.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BrowserInspectOptions {
+    pub role: Option<String>,
+    pub name: Option<String>,
+    pub label: Option<String>,
+    pub text: Option<String>,
+    pub placeholder: Option<String>,
+    pub within: Option<String>,
+    pub exact: bool,
+    pub interactive: bool,
+    pub viewport: bool,
+    pub max_nodes: Option<u32>,
+    pub max_chars: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BrowserWaitCondition {
+    ValueChanged {
+        selector: String,
+        #[serde(default)]
+        before: Option<String>,
+    },
+    PopupReady {
+        url: String,
+        #[serde(default)]
+        after_sequence: Option<u64>,
+    },
+    UrlExact(String),
+    ElementState {
+        selector: String,
+        state: BrowserElementState,
+    },
+    Value {
+        selector: String,
+        value: String,
+    },
+    TextChanged {
+        selector: String,
+        #[serde(default)]
+        before: Option<String>,
+    },
+    DownloadComplete {
+        id: u64,
+    },
     Selector(String),
     Text(String),
     Url(String),
@@ -902,8 +968,15 @@ pub enum BrowserPointerAction {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum BrowserFileChooserAction {
     Status,
-    Select { id: String, paths: Vec<PathBuf> },
-    Cancel { id: String },
+    Select {
+        id: String,
+        paths: Vec<PathBuf>,
+        #[serde(default)]
+        root: Option<PathBuf>,
+    },
+    Cancel {
+        id: String,
+    },
 }
 
 impl Request {

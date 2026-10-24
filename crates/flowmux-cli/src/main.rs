@@ -497,6 +497,9 @@ enum FileChooserAction {
         id: String,
         #[arg(required = true, num_args = 1..)]
         paths: Vec<PathBuf>,
+        /// Explicit directory scope for files provided to the page (symlinks cannot escape it).
+        #[arg(long)]
+        root: PathBuf,
     },
     Cancel {
         id: String,
@@ -529,6 +532,7 @@ enum DownloadAction {
 }
 
 #[derive(clap::Args, Default)]
+#[group(id = "receipt_options", multiple = true)]
 struct ReceiptArgs {
     /// Return observed events and distinguish delivered input from a confirmed outcome.
     #[arg(long = "receipt", global = true)]
@@ -542,8 +546,38 @@ struct ReceiptArgs {
     expect_text: Option<String>,
     #[arg(long, global = true, requires = "enabled")]
     expect_url: Option<String>,
+    /// Typed outcome JSON: UrlExact, ElementState, Value, TextChanged, ValueChanged, PopupReady or DownloadComplete.
+    #[arg(long = "expect", global = true, requires = "enabled", conflicts_with_all = ["expect_text", "expect_url"])]
+    expectation: Option<String>,
     #[arg(long, global = true, default_value_t = 5000, value_parser = clap::value_parser!(u64).range(1..=60000))]
     outcome_timeout_ms: u64,
+}
+
+#[derive(clap::Args, Default)]
+struct InspectArgs {
+    #[arg(long)]
+    role: Option<String>,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    label: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long)]
+    placeholder: Option<String>,
+    /// Restrict to descendants of a ref from the previous snapshot.
+    #[arg(long)]
+    within: Option<String>,
+    #[arg(long)]
+    exact: bool,
+    #[arg(long)]
+    interactive: bool,
+    #[arg(long)]
+    viewport: bool,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=2000))]
+    max_nodes: Option<u32>,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1024..=262144))]
+    max_chars: Option<u32>,
 }
 
 #[derive(Subcommand)]
@@ -600,7 +634,17 @@ enum BrowserOp {
     },
     /// Take a JSON snapshot of the page. Markdown tree + refs map; the
     /// live DOM is never modified.
-    Snapshot { pane: PaneId },
+    Snapshot {
+        pane: PaneId,
+        #[command(flatten)]
+        options: InspectArgs,
+    },
+    /// Find visible candidates by semantic fields. Returns fresh refs, never clicks a first match.
+    Find {
+        pane: PaneId,
+        #[command(flatten)]
+        options: InspectArgs,
+    },
     /// Diagnose this live tab's native input, capture, media and recording support.
     Diagnose { pane: PaneId },
     /// Run JS in a browser pane and print the result.
@@ -704,10 +748,13 @@ enum BrowserOp {
     #[command(group(
         clap::ArgGroup::new("condition")
             .required(true)
-            .args(["selector", "text", "url", "ready_state", "js"])
+            .args(["selector", "text", "url", "ready_state", "js", "typed"])
     ))]
     Wait {
         pane: PaneId,
+        /// Typed condition JSON (same format as --expect).
+        #[arg(long = "condition")]
+        typed: Option<String>,
         /// CSS selector that must resolve to at least one element.
         #[arg(long)]
         selector: Option<String>,

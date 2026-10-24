@@ -104,6 +104,23 @@ impl Drop for Page {
 }
 
 #[gtk::test]
+async fn pointer_preparation_rejects_suspended_animation_callbacks() {
+    let page = Page::new("<button id=target>Ready</button>").await;
+    page.eval("window.requestAnimationFrame = () => 0; window.cancelAnimationFrame = () => {}; 'suspended'").await;
+    let geometry = pointer_target("#target", false);
+    let result = page
+        .eval_async(&prepare_pointer_input(&geometry, PointerAction::Click))
+        .await;
+    assert!(result
+        .unwrap_err()
+        .contains("did not render a stable pointer target"));
+    assert_eq!(
+        page.eval("typeof globalThis.__flowmuxInput").await,
+        "undefined"
+    );
+}
+
+#[gtk::test]
 async fn native_keys_do_not_bypass_modal_dialogs() {
     let page = Page::new("<input id='field' value='safe'>").await;
     page.window.set_child(None::<&gtk::Widget>);

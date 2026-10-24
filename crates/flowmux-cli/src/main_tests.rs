@@ -2623,3 +2623,89 @@ fn browser_receipt_validates_options_and_preserves_the_action() {
     assert_eq!(condition, Some(BrowserWaitCondition::Text("Done".into())));
     assert_eq!(timeout_ms, 5000);
 }
+
+#[test]
+fn semantic_filters_typed_outcomes_and_file_scope_reach_the_server() {
+    let pane = PaneId::new().to_string();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "find",
+        &pane,
+        "--role",
+        "button",
+        "--name",
+        "저장",
+        "--exact",
+        "--max-nodes",
+        "10",
+    ])
+    .unwrap();
+    assert!(
+        matches!(build_request(cli.cmd).unwrap(), Request::BrowserInspect { options, .. } if options.name.as_deref() == Some("저장") && options.exact && options.max_nodes == Some(10))
+    );
+    let condition = r##"{"ElementState":{"selector":"#done","state":"visible"}}"##;
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "wait",
+        &pane,
+        "--condition",
+        condition,
+    ])
+    .unwrap();
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::BrowserWait {
+            condition: BrowserWaitCondition::ElementState { .. },
+            ..
+        }
+    ));
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "--receipt",
+        "--expect",
+        condition,
+        "click",
+        &pane,
+        "e1-test",
+    ])
+    .unwrap();
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::BrowserReceipt {
+            condition: Some(BrowserWaitCondition::ElementState { .. }),
+            ..
+        }
+    ));
+    assert!(Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "file-chooser",
+        &pane,
+        "select",
+        "id",
+        "/tmp/a"
+    ])
+    .is_err());
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "file-chooser",
+        &pane,
+        "select",
+        "id",
+        "/tmp/a",
+        "--root",
+        "/tmp",
+    ])
+    .unwrap();
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::BrowserFileChooser {
+            action: flowmux_ipc::protocol::BrowserFileChooserAction::Select { root: Some(_), .. },
+            ..
+        }
+    ));
+}

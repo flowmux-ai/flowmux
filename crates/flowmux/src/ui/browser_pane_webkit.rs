@@ -79,6 +79,7 @@ impl BrowserPane {
             .all(|name| unsafe { libloading::Library::new(name) }.is_ok());
         serde_json::json!({
             "engine": "WebKitGTK",
+            "storage_ephemeral": self.web_view.network_session().is_some_and(|session| session.is_ephemeral()),
             "engine_version": format!("{}.{}.{}", webkit6::functions::major_version(), webkit6::functions::minor_version(), webkit6::functions::micro_version()),
             "display_backend": display,
             "native_input_supported": display == "GdkX11Display" && libraries,
@@ -144,14 +145,24 @@ impl BrowserPane {
             // more immediately after build.
             .is_muted(false)
             .build();
-        Self::with_web_view(
+        let storage_unavailable = persist_session && network_session.is_ephemeral();
+        let pane = Self::with_web_view(
             id,
             surface_id,
             initial_url.or(Some("about:blank")),
             callbacks,
             web_view,
             profile,
-        )
+        );
+        if storage_unavailable {
+            let warning = gtk::Label::new(Some(
+                "Profile storage is unavailable. This isolated session will not save logins.",
+            ));
+            warning.set_wrap(true);
+            warning.add_css_class("warning");
+            pane.root.prepend(&warning);
+        }
+        pane
     }
 
     /// None leaves a supplied view's pending navigation (such as window.open) intact.
@@ -312,14 +323,12 @@ impl BrowserPane {
                 return true;
             };
             let permission = permission_name(request);
-            let site = web_view
-                .uri()
-                .and_then(|uri| gtk::glib::Uri::parse(&uri, gtk::glib::UriFlags::NONE).ok())
-                .and_then(|uri| uri.host().map(|host| host.to_string()))
-                .unwrap_or_else(|| "This page".into());
+            // WebKitGTK does not expose a requesting frame origin for every permission type.
+            let site = web_view.uri().map(|uri| flowmux_browser::security::display_origin(&uri))
+                .unwrap_or_else(|| "Unknown".into());
             let dialog = adw::AlertDialog::new(
                 Some(&format!("Allow {permission}?")),
-                Some(&format!("{site} is requesting access.")),
+                Some(&format!("Top-level page: {site}\nRequesting frame origin: unavailable. Allow only if you trust this page and its embedded content.")),
             );
             dialog.add_response("deny", "Deny");
             dialog.add_response("allow", "Allow");
@@ -373,7 +382,12 @@ impl BrowserPane {
                     return false;
                 };
                 let dialog = gtk::FileDialog::builder()
-                    .title("Choose files")
+                    .title(format!(
+                        "Choose files — top-level page: {} (requesting frame unknown)",
+                        view.uri()
+                            .map(|uri| flowmux_browser::security::display_origin(&uri))
+                            .unwrap_or_else(|| "Unknown".into())
+                    ))
                     .modal(true)
                     .build();
                 if let Some(filter) = request.mime_types_filter() {
@@ -1194,7 +1208,7 @@ fn engine_to_profile(engine: &BrowserEngine) -> BrowserProfile {
 ///   in memory and are dropped on quit.
 ///
 /// If a persistent profile's data dir cannot be created, fall back to the
-/// global default session so pages still load (with a warning).
+/// isolated ephemeral storage so another account is never exposed.
 fn build_network_session(
     profile: &BrowserProfile,
     persist_session: bool,
@@ -1249,10 +1263,9 @@ fn build_uncached_network_session(
             tracing::warn!(
                 profile = ?profile,
                 error = %e,
-                "browser profile data dir unavailable, falling back to default session"
+                "browser profile data dir unavailable, using isolated ephemeral storage; login state will not be saved"
             );
-            webkit6::NetworkSession::default()
-                .unwrap_or_else(|| webkit6::NetworkSession::new(None, None))
+            webkit6::NetworkSession::new_ephemeral()
         }
     }
 }
@@ -1443,6 +1456,27 @@ mod tests {
             path.file_name().and_then(|n| n.to_str()),
             Some("cookies.sqlite")
         );
+    }
+
+    #[gtk::test]
+    fn failed_profile_storage_never_uses_the_default_or_another_account() {
+        // Exceed the filesystem component limit without changing process environment.
+        let first = build_network_session(
+            &BrowserProfile::Custom {
+                name: "x".repeat(400),
+            },
+            true,
+        );
+        let second = build_network_session(
+            &BrowserProfile::Custom {
+                name: "y".repeat(400),
+            },
+            true,
+        );
+        assert!(first.is_ephemeral());
+        assert!(second.is_ephemeral());
+        assert_ne!(first, second);
+        assert_ne!(Some(first), webkit6::NetworkSession::default());
     }
 
     #[gtk::test]

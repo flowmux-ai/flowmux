@@ -116,7 +116,7 @@ This option applies to every browser command except `open`.
 | Verb family | flowmux supports | Notes |
 |---|---|---|
 | navigate / back / forward / reload / url / title | yes | |
-| snapshot (interactive Markdown + refs) | yes | DOM is **not** modified |
+| snapshot / find (semantic filters + refs) | yes | DOM is **not** modified; bounded/partial output reports `truncated` |
 | diagnose / control | yes | Runtime support checks and per-tab task handoff; see [browser tasks](docs/browser-workflow.md) |
 | --receipt / --expect-text / --expect-url | yes | Observed action results; timeout never repeats the action |
 | click / dblclick / hover / focus / blur | yes | by ref token |
@@ -130,7 +130,7 @@ This option applies to every browser command except `open`.
 | media | yes | audio/video ref: status, play, pause, seek seconds, mute, unmute; returns playback state |
 | download | yes | tab-scoped list, cancel ID, directory EXISTING_PATH; poll terminal state before using a file |
 | dialog | yes | page alert/confirm/prompt: status, accept ID [--text TEXT], dismiss ID |
-| file-chooser | yes | status, select ID PATH..., cancel ID; responds to a pending page file input |
+| file-chooser | yes | status, select ID PATH... --root DIR, cancel ID; responds to a pending page file input |
 | wait | yes | polls for selector / text / url / ready-state / JS predicate (timeout + poll interval) |
 | viewport / network mocking / screencast | no | CDP-only; WebKitGTK 6 / WKWebView do not expose CDP |
 

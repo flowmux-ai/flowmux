@@ -136,3 +136,119 @@ The P1 regressions cover native text opening a confirm dialog and fixed-element
 capture after scrolling on both platforms. Linux CI also enables
 `FLOWMUX_TEST_X11_LOCKS=1` on its private Xvfb display to check logical key case
 and restoration of Caps Lock. Do not enable that lock test on a user's display.
+
+## Find candidates and limit snapshots
+
+`find` and `snapshot` accept `--role`, `--name`, `--label`, `--text`,
+`--placeholder`, `--exact`, `--within REF`, `--interactive`, `--viewport`, `--max-nodes` and
+`--max-chars`. Filters combine with AND. Role is exact; other strings use
+case-sensitive, whitespace-normalized substring matching unless `--exact` is
+set. `--within` uses a still-valid ref from the preceding snapshot. Each call
+replaces the tab's ref registry, including when no candidates match. Multiple
+matches remain multiple candidates; Flowmux never silently clicks the first.
+
+```sh
+flowmux --json browser find "$PANE" --role button --name '저장' --exact
+flowmux --json browser find "$PANE" --label Email --placeholder Address
+flowmux --json browser snapshot "$PANE" --within "$FORM_REF" --interactive --max-nodes 50 --max-chars 16000
+```
+
+Refs include visible, enabled/disabled, readonly, checked, selected, expanded,
+editable, focused and invalid states, plus available ARIA descriptions. These are DOM observations, not a complete accessibility-tree API or a
+promise that the target is unobstructed. Snapshots retain open shadow-root and
+same-origin frame traversal. Closed shadow roots and cross-origin frames remain
+unavailable. Text filters can return ancestor and descendant candidates.
+
+Defaults are 2,000 refs and 262,144 serialized JavaScript character units; the
+limits are 1–2,000 refs and 1,024–262,144 characters. The server adds the surface
+identifier afterward. `truncated` reports omitted refs or summary text; refine
+the scope/filter before concluding that an element is absent. Page URL/title can
+also be shortened when the requested budget cannot fit metadata alone; use the
+separate `url`/`title` commands when complete metadata is required.
+
+## Wait before input and confirm typed outcomes
+
+Click, double-click, hover and drag check visibility, enabled state where
+applicable, hit testing and stable geometry for up to five seconds before native
+input. Fill/select/check/uncheck wait up to two seconds for visibility and enabled state;
+fill also waits for editable state. The original node identity must remain valid.
+A replacement node is rejected even if it has the same selector. Preparation may
+scroll the target into view. Only preparation is polled; an input or submission
+is never automatically repeated. Native focus/platform requirements still apply.
+
+Use `--expect JSON` with `--receipt`, or `wait --condition JSON`, for typed
+observations without page-evaluated predicates:
+
+```sh
+flowmux --json browser --receipt --expect '{"TextChanged":{"selector":"#result"}}' click "$PANE" "$SUBMIT_REF"
+flowmux browser wait "$PANE" --condition '{"UrlExact":"https://example.com/done"}'
+flowmux browser wait "$PANE" --condition '{"ElementState":{"selector":"#submit","state":"enabled"}}'
+flowmux browser wait "$PANE" --condition '{"Value":{"selector":"#email","value":"agent@example.test"}}'
+flowmux browser wait "$PANE" --condition '{"DownloadComplete":{"id":0}}'
+flowmux --json browser --receipt --expect '{"ValueChanged":{"selector":"#email"}}' fill "$PANE" "$EMAIL_REF" "agent@example.test"
+flowmux --json browser --receipt --expect '{"PopupReady":{"url":"https://example.com/login"}}' click "$PANE" "$LOGIN_REF"
+```
+
+Element states are `visible`, `hidden`, `enabled`, `disabled`, `checked`,
+`unchecked`, `selected`, `expanded`, `editable`, `focused`, and `invalid`.
+Selectors in element conditions refer to the top-level document. `TextChanged`
+and `ValueChanged`
+capture the original text/value before the action (or before a standalone wait);
+already-present text cannot satisfy a change. A supplied `before` is replaced by
+the observed baseline. Other conditions intentionally assert current state and
+can already be true. Failed/cancelled downloads return an error; timeout returns
+false. `PopupReady` observes only popups created after the baseline and requires
+the exact expected URL and complete readiness, so an initial blank document
+cannot confirm navigation to a different URL. The receipt includes the new
+surface ID. For an already-created popup, use its surface ID from the receipt and `--surface ID wait PANE
+--ready-state complete` to check that specific child; popup creation alone is
+not readiness. Observations do not prove server-side persistence or causality.
+
+## Local trust, uploads and profile compatibility
+
+Task IDs are public coordination identifiers, not authentication credentials.
+IPC authenticates the OS peer UID in both directions and rejects other users. Socket and lock files
+use mode 0600; lock files must be regular, single-link files and cannot be
+symlinks. Runtime directories must be owned by the current user and not world-writable, or root-owned sticky temporary
+directories. Newly created runtime directories use mode 0700. Group-writable
+user-owned directories remain compatible; peer UID checks also reject a
+substituted server owned by another user. Malformed request bodies
+and parser-provided values are not logged.
+
+File selection explicitly names the directory scope:
+
+```sh
+flowmux browser file-chooser "$PANE" select "$CHOOSER_ID" ./reports/result.csv --root ./reports
+```
+
+The GUI resolves canonical paths and rejects paths outside that root, including
+symlink escapes. Folder uploads reject nested links/special files and trees over
+10,000 entries; the native picker remains available. Invalid selections leave
+the chooser pending. The chooser status includes its source label. macOS uses
+the requesting frame origin; Linux marks that frame origin unavailable and shows
+the top-level origin. Permission dialogs include scheme/host/port when exposed
+by the backend, use a deny default, and omit URL credentials/path/query.
+
+The directory scope is an explicit local-client grant, not a sandbox against
+malicious programs already running as the same user. Such programs can choose a
+broader root, modify files after validation or use raw eval/other OS APIs. No
+capability token or task ID is presented as protection against that threat.
+`value` and `attr value` reject password fields; raw eval, screenshots, arbitrary
+page text and other attributes can still expose sensitive data. Avoid placing
+secrets in command arguments and share captured output deliberately.
+
+Linux profile directories use mode 0700 and reject a symlink as the profile
+store. Custom profile keys now losslessly encode UTF-8 bytes and preserve case and
+punctuation. Built-in profiles and existing canonical lowercase ASCII keys keep
+their locations. Names whose old normalization lost information use new stores;
+old stores/bookmarks are retained, never automatically merged or deleted. Those
+profiles require a new login. Historical shared stores cannot be automatically
+separated or assigned to an account; inspect them explicitly before manual
+recovery. Profile names still determine storage identity, so renaming is not a
+storage-preserving operation. Excessively long keys can exceed filesystem limits.
+
+On Linux, persistent storage failure opens a separately isolated ephemeral
+session with a visible warning and `diagnose.storage_ephemeral=true`; it never
+uses the global default session. Cookie import returns `unimplemented` before
+reading host cookies, because WebView insertion is not implemented. Sign in
+inside the intended Flowmux profile.

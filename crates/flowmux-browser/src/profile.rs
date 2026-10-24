@@ -3,6 +3,7 @@
 //! Selecting a profile does not import host-browser cookies.
 
 use serde::{Deserialize, Serialize};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,7 +33,7 @@ impl BrowserProfile {
             BrowserProfile::Default => "default".into(),
             BrowserProfile::FirefoxImport => "firefox-import".into(),
             BrowserProfile::ChromeImport => "chrome-import".into(),
-            BrowserProfile::Custom { name } => format!("custom-{}", sanitize(name)),
+            BrowserProfile::Custom { name } => format!("custom-{}", encode_name(name)),
         }
     }
 
@@ -50,7 +51,16 @@ impl BrowserProfile {
     pub fn data_dir(&self) -> Result<PathBuf, ProfileError> {
         let base = dirs::data_dir().ok_or(ProfileError::NoDataDir)?;
         let dir = base.join("flowmux").join("browser").join(self.slug());
-        std::fs::create_dir_all(&dir)?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
+        if !std::fs::symlink_metadata(&dir)?.is_dir() {
+            return Err(ProfileError::InvalidName(
+                "profile storage must be a real directory".into(),
+            ));
+        }
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
         Ok(dir)
     }
 
@@ -61,32 +71,68 @@ impl BrowserProfile {
             "chrome-import" => Some(Self::ChromeImport),
             other => other
                 .strip_prefix("custom-")
-                .map(|n| Self::Custom { name: n.into() }),
+                .and_then(decode_name)
+                .map(|name| Self::Custom { name }),
         }
     }
 }
 
-/// Keep a-z, 0-9, '-', '_' only; collapse the rest to '-'.
-fn sanitize(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            out.push(c.to_ascii_lowercase());
-        } else if !out.ends_with('-') {
-            out.push('-');
+// Preserve canonical legacy keys; escape every other UTF-8 byte without collisions.
+fn encode_name(name: &str) -> String {
+    if name.is_empty() {
+        return "~".into();
+    }
+    let mut out = String::new();
+    for byte in name.bytes() {
+        if byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(out, "~{byte:02x}").unwrap();
         }
     }
-    let trimmed = out.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "unnamed".into()
-    } else {
-        trimmed
+    out
+}
+
+fn decode_name(encoded: &str) -> Option<String> {
+    if encoded == "~" {
+        return Some(String::new());
     }
+    let mut bytes = Vec::new();
+    let mut input = encoded.bytes();
+    while let Some(byte) = input.next() {
+        if byte == b'~' {
+            let high = char::from(input.next()?).to_digit(16)?;
+            let low = char::from(input.next()?).to_digit(16)?;
+            bytes.push((high * 16 + low) as u8);
+        } else if byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte) {
+            bytes.push(byte);
+        } else {
+            return None;
+        }
+    }
+    let name = String::from_utf8(bytes).ok()?;
+    (encode_name(&name) == encoded).then_some(name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_names_are_distinct_and_roundtrip() {
+        let names = [
+            "업무", "개인", "Work", "work", "a b", "a-b", "~", "", "unnamed", "../x",
+        ];
+        let mut slugs = std::collections::HashSet::new();
+        for name in names {
+            let profile = BrowserProfile::Custom { name: name.into() };
+            let slug = profile.slug();
+            assert!(slugs.insert(slug.clone()), "collision for {name}");
+            assert_eq!(BrowserProfile::parse_slug(&slug), Some(profile));
+            assert!(!slug.contains('/'));
+        }
+    }
 
     #[test]
     fn slug_is_stable_for_known_variants() {
@@ -96,28 +142,17 @@ mod tests {
     }
 
     #[test]
-    fn custom_slug_sanitizes_unsafe_characters() {
-        let p = BrowserProfile::Custom {
-            name: "Work GitHub!".into(),
-        };
-        assert_eq!(p.slug(), "custom-work-github");
-    }
-
-    #[test]
-    fn custom_slug_collapses_runs_of_specials() {
-        let p = BrowserProfile::Custom {
-            name: "a / b // c".into(),
-        };
-        // runs of "non-allowed" chars collapse to a single '-'
-        assert_eq!(p.slug(), "custom-a-b-c");
-    }
-
-    #[test]
-    fn custom_slug_falls_back_to_unnamed_when_empty() {
-        let p = BrowserProfile::Custom {
-            name: "  / / /  ".into(),
-        };
-        assert_eq!(p.slug(), "custom-unnamed");
+    fn canonical_legacy_keys_are_preserved() {
+        assert_eq!(
+            BrowserProfile::Custom {
+                name: "work-123_test".into()
+            }
+            .slug(),
+            "custom-work-123_test"
+        );
+        for malformed in ["custom-~gg", "custom-~ff", "custom-~61", "custom-../x"] {
+            assert!(BrowserProfile::parse_slug(malformed).is_none());
+        }
     }
 
     #[test]
@@ -161,6 +196,15 @@ mod tests {
         assert!(dir.starts_with(tmp.path()));
         assert!(dir.ends_with("flowmux/browser/default"));
         assert!(dir.is_dir());
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        std::fs::remove_dir(&dir).unwrap();
+        let other = tmp.path().join("other-account");
+        std::fs::create_dir(&other).unwrap();
+        std::os::unix::fs::symlink(&other, &dir).unwrap();
+        assert!(BrowserProfile::Default.data_dir().is_err());
 
         match original {
             Some(v) => std::env::set_var("XDG_DATA_HOME", v),

@@ -390,6 +390,61 @@ def exercise(cli, url, root):
 
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    # Semantic discovery and bounded pre-input waits use the real browser, not a DOM mock.
+    evaluate("document.body.innerHTML='<main aria-label=Panel><button id=go>Save</button><button>Save</button><label for=entry>Email</label><input id=entry placeholder=Address aria-describedby=hint disabled><span id=hint hidden>Work address only</span><input id=password type=password value=private-secret aria-label=Password><p id=result role=status>before</p></main>';window.delivered=0;go.onclick=()=>{delivered++;result.innerText=String(delivered)};'ready'")
+    found = json.loads(browser("find", "--role", "button", "--name", "Save", "--exact")["browser_result"]["value"])
+    assert len(found["refs"]) == 2, found
+    panel = reference(snapshot(), "Panel")
+    partial = json.loads(browser("snapshot", "--within", panel, "--interactive", "--max-nodes", "1")["browser_result"]["value"])
+    assert len(partial["refs"]) == 1 and partial["truncated"], partial
+    found = json.loads(browser("find", "--label", "Email", "--placeholder", "Address")["browser_result"]["value"])
+    entry, metadata = next(iter(found["refs"].items()))
+    assert len(found["refs"]) == 1 and not metadata["states"]["enabled"], found
+    assert metadata["description"] == "Work address only", metadata
+    evaluate("setTimeout(()=>entry.disabled=false,250);'scheduled'")
+    browser("fill", entry, "agent@example.test")
+    typed = lambda condition, **kwargs: browser("wait", "--condition", json.dumps(condition), **kwargs)["browser_bool_result"]["value"]
+    assert typed({"Value": {"selector": "#entry", "value": "agent@example.test"}})
+    assert typed({"ElementState": {"selector": "#entry", "state": "enabled"}})
+    assert typed({"ElementState": {"selector": "#entry", "state": "editable"}})
+    evaluate("document.body.insertAdjacentHTML('beforeend','<input id=notText type=checkbox aria-label=Toggle><fieldset disabled><input id=disabledText aria-label=Unavailable></fieldset>');'state fixtures'")
+    for selector in ("#notText", "#disabledText"):
+        assert not browser("wait", "--condition", json.dumps({"ElementState": {"selector": selector, "state": "editable"}}), "--timeout-ms", "100")["browser_bool_result"]["value"]
+    receipt = json.loads(browser("fill", entry, "changed", "--receipt", "--expect", json.dumps({"ValueChanged": {"selector": "#entry"}}))["browser_result"]["value"])
+    assert receipt["status"] == "outcome_confirmed", receipt
+    assert typed({"UrlExact": url})
+    assert not browser("wait", "--condition", json.dumps({"UrlExact": url + "wrong"}), "--timeout-ms", "100")["browser_bool_result"]["value"]
+    snap = snapshot()
+    password = reference(snap, "Password")
+    for args in [("value", password), ("attr", password, "value")]:
+        rejected = browser(*args, error=True)
+        assert "redacted" in str(rejected) and "private-secret" not in str(rejected), rejected
+    go = next(key for key, meta in snap["refs"].items() if meta["selector"] == "#go")
+    evaluate("window.cover=document.createElement('div');cover.style='position:fixed;inset:0;z-index:999999;background:white';document.body.append(cover);setTimeout(()=>cover.remove(),250);'covered'")
+    receipt = json.loads(browser("click", go, "--receipt", "--expect", json.dumps({"TextChanged": {"selector": "#result"}}))["browser_result"]["value"])
+    assert receipt["status"] == "outcome_confirmed" and evaluate("String(delivered)") == "1", receipt
+    evaluate("go.onclick=()=>delivered++;'no visible change'")
+    receipt = json.loads(browser("click", go, "--receipt", "--expect", json.dumps({"TextChanged": {"selector": "#result"}}), "--outcome-timeout-ms", "150")["browser_result"]["value"])
+    assert receipt["status"] == "outcome_unknown" and evaluate("String(delivered)") == "2", receipt
+    evaluate("entry.disabled=true;setTimeout(()=>{let replacement=entry.cloneNode();replacement.disabled=false;entry.replaceWith(replacement)},100);'replace while waiting'")
+    entry = reference(snapshot(), "Email")
+    browser("fill", entry, "must-not-retarget", error=True)
+    assert evaluate("entry.value") == "changed"
+    evaluate("document.body.insertAdjacentHTML('beforeend','<button id=popupButton>Open popup</button><div style=height:5000px></div><button>Far away</button>');popupButton.onclick=()=>window.open('/popup');window.scrollTo(0,0);'popup ready'")
+    full = browser("snapshot")["browser_result"]["value"]
+    limited = browser("snapshot", "--viewport", "--interactive", "--max-chars", "1024")["browser_result"]["value"]
+    assert "Far away" not in limited and len(limited) <= 1100, limited
+    print("BROWSER_SNAPSHOT_BUDGET=" + json.dumps({"full_bytes": len(full.encode()), "partial_bytes": len(limited.encode())}), flush=True)
+    popup_ref = reference(snapshot(), "Open popup")
+    receipt = json.loads(browser("click", popup_ref, "--receipt", "--expect", json.dumps({"PopupReady": {"url": url + "popup"}}))["browser_result"]["value"])
+    assert receipt["status"] == "outcome_confirmed", receipt
+    child = next(event["identifier"] for event in receipt["events"] if event["kind"] == "popup")
+    assert browser("url", "--surface", child)["browser_result"]["value"] == url + "popup"
+    cli("close-tab", child, "--pane", pane)
+    print("BROWSER_SEMANTIC_WAIT_SECURITY_OK", flush=True)
+    browser("navigate", url)
+    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
     coordinate_parent = snapshot()["page"]["surface_id"]
     evaluate("window.recordTick=0;window.recordTimer=setInterval(()=>{document.body.style.background=++recordTick%2?'red':'blue'},150);'record ready'")
     recording = root / "browser.mp4"
@@ -578,6 +633,7 @@ def exercise(cli, url, root):
     assert Path(finished["path"]).parent == folder.resolve()
     assert Path(finished["path"]).read_bytes() == b"Flowmux download fixture\n"
     assert (folder / "result.txt").read_text() == "keep existing file"
+    assert typed({"DownloadComplete": {"id": finished["id"]}})
     downloads("cancel", str(finished["id"]), error=True)
     downloads("cancel", "999999", error=True)
     trigger_download("/slow-download")
@@ -647,6 +703,8 @@ def exercise(cli, url, root):
     evaluate("mutations.length=0; 'reset fixture changes'")
     print("PASS: page dialogs require matching IDs, complete native clicks/keys and preserve confirm/prompt/alert replies", flush=True)
     def chooser(*args, **kwargs):
+        if args and args[0] == "select":
+            args = (*args, "--root", str(root))
         result = browser("file-chooser", *(args or ("status",)), **kwargs)
         return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["file_chooser"]
 
@@ -672,6 +730,11 @@ def exercise(cli, url, root):
     chooser("select", pending["id"], str(root / "missing"), error=True)
     chooser("select", pending["id"], str(root), error=True)
     chooser("select", pending["id"], str(upload_file), str(another_file), error=True)
+    assert chooser()["id"] == pending["id"]
+    browser("file-chooser", "select", pending["id"], str(upload_file), error=True)
+    escape = root / "escape.txt"
+    escape.symlink_to("/etc/hosts")
+    chooser("select", pending["id"], str(escape), error=True)
     assert chooser()["id"] == pending["id"]
     chooser("select", pending["id"], str(upload_file))
     assert browser("wait", "--js", "window.uploadResult?.files.length === 1")["browser_bool_result"]["value"]
@@ -714,6 +777,12 @@ def exercise(cli, url, root):
             "First label Second label", "Password"} <= names, names
     assert "secret" not in first["markdown"]
     assert first["refs"][reference(first, "Clear")]["role"] == "button"
+    scoped = json.loads(browser("snapshot", "--within", reference(first, "Form frame"))["browser_result"]["value"])
+    assert scoped["refs"] and all(meta.get("frame_path") for meta in scoped["refs"].values()), scoped
+    assert any(len(meta["frame_path"]) == 2 for meta in scoped["refs"].values()), scoped
+    found = json.loads(browser("find", "--label", "Shadow field", "--exact")["browser_result"]["value"])
+    assert len(found["refs"]) == 1 and next(iter(found["refs"].values()))["shadow_path"], found
+    first = snapshot()
     browser("fill", reference(first, "Contact email"), "agent@example.test")
     assert evaluate("document.querySelector('#contact').value") == "agent@example.test"
     print("PASS: snapshot names follow HTML labels and ARIA reference order", flush=True)

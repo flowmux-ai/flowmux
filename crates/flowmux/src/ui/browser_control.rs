@@ -111,7 +111,7 @@ impl BrowserControl {
         for button in [&take, &resume, &stop, &clear] {
             bar.append(button);
         }
-        bar.set_tooltip_text(Some("Stopping prevents new actions. Already dispatched site actions may still complete. The tab is kept open."));
+        bar.set_tooltip_text(Some("Local automation runs as your OS user. Task IDs coordinate actions; they are not authentication. Stopping prevents new actions. Already dispatched site actions may still complete. The tab is kept open."));
         let control = Self {
             state: Rc::default(),
             bar,
@@ -199,7 +199,7 @@ impl BrowserControl {
 
     pub fn status(&self) -> serde_json::Value {
         let state = self.state.borrow();
-        serde_json::json!({"task_id":state.task,"state":if state.task.is_none(){"unmanaged"}else{state.phase},
+        serde_json::json!({"authentication": "same_os_user_ipc", "task_id_is_secret": false, "task_id":state.task,"state":if state.task.is_none(){"unmanaged"}else{state.phase},
             "action_in_progress":state.busy,"revision":state.revision,
             "resume_requires_user":true})
     }

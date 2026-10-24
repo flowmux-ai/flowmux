@@ -77,6 +77,8 @@ impl CaptureSize {
 /// across runs — useful for snapshot test goldens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DomSnapshot {
+    #[serde(default)]
+    pub truncated: bool,
     /// Tree-shaped Markdown the agent reads to plan its next click.
     pub markdown: String,
     /// `ref_token → meta`. Each ref's `selector` is what the server
@@ -103,6 +105,10 @@ pub struct RefMeta {
     /// Present on frame elements; false when DOM access is unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_accessible: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub states: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -132,6 +138,7 @@ pub struct PageMeta {
 impl DomSnapshot {
     pub fn empty(url: impl Into<String>) -> Self {
         Self {
+            truncated: false,
             markdown: String::new(),
             refs: BTreeMap::new(),
             page: PageMeta {
@@ -190,6 +197,8 @@ mod tests {
                 shadow_path: Vec::new(),
                 frame_path: Vec::new(),
                 frame_accessible: None,
+                states: None,
+                description: None,
             },
         );
         refs.insert(
@@ -201,9 +210,12 @@ mod tests {
                 shadow_path: Vec::new(),
                 frame_path: Vec::new(),
                 frame_accessible: None,
+                states: None,
+                description: None,
             },
         );
         DomSnapshot {
+            truncated: false,
             markdown: "- textbox \"Email\" [ref=e1]\n- button \"Sign in\" [ref=e2]\n".into(),
             refs,
             page: PageMeta {

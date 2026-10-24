@@ -109,6 +109,17 @@ async fn browser_action(
         BrowserOp::Receipt { op, .. } => op.as_ref(),
         op => op,
     };
+    if let BrowserOp::Inspect(options) = validated {
+        if options.max_nodes.is_some_and(|n| !(1..=2000).contains(&n))
+            || options
+                .max_chars
+                .is_some_and(|n| !(1024..=262144).contains(&n))
+        {
+            return Response::Error(RpcError::InvalidArgument(
+                "snapshot limits: max_nodes 1..2000, max_chars 1024..262144".into(),
+            ));
+        }
+    }
     if matches!(validated, BrowserOp::EvalAsync { timeout_ms: 0, .. }) {
         return Response::Error(RpcError::InvalidArgument(
             "async timeout must be positive".into(),
@@ -260,6 +271,7 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserIsChecked { pane, target } => (pane, BrowserOp::IsChecked { target }),
             Request::BrowserCount { pane, selector } => (pane, BrowserOp::Count { selector }),
             Request::BrowserSnapshot { pane } => (pane, BrowserOp::Snapshot),
+            Request::BrowserInspect { pane, options } => (pane, BrowserOp::Inspect(options)),
             Request::BrowserControl { pane, action } => (pane, BrowserOp::Control { action }),
             Request::BrowserEval { pane, source } => (pane, BrowserOp::Eval { source }),
             Request::BrowserDiagnose { pane } => (pane, BrowserOp::Diagnose),
@@ -467,6 +479,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserIsChecked { .. }
                 | Request::BrowserCount { .. }
                 | Request::BrowserSnapshot { .. }
+                | Request::BrowserInspect { .. }
                 | Request::BrowserDiagnose { .. }
                 | Request::ImportCookies { .. }
                 | Request::BrowserEval { .. } => self.handle_browser_verb(req).await,
@@ -905,39 +918,9 @@ impl GuiHandler {
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }
-            Request::ImportCookies { source, domain } => {
-                // Read cookies inside an inner scope so the !Send
-                // `Box<dyn Source>` is dropped before any `.await`.
-                let cookies = {
-                    let sources = flowmux_cookies::discover_sources();
-                    let s = match sources.into_iter().find(|s| s.id().slug() == source) {
-                        Some(s) => s,
-                        None => {
-                            return Response::Error(RpcError::InvalidArgument(format!(
-                                "unknown browser source: {source}"
-                            )))
-                        }
-                    };
-                    match s.list_cookies(domain.as_deref()) {
-                        Ok(c) => c,
-                        Err(e @ flowmux_cookies::source::Error::EncryptedValuesUnsupported) => {
-                            return Response::Error(RpcError::Unimplemented(e.to_string()))
-                        }
-                        Err(e) => return Response::Error(RpcError::Internal(e.to_string())),
-                    }
-                };
-                let (tx, rx) = oneshot::channel();
-                let _ = self
-                    .bridge
-                    .tx
-                    .send(GtkCommand::InjectCookies { cookies, ack: tx })
-                    .await;
-                match rx.await {
-                    Ok(Ok(count)) => Response::CookiesImported { count },
-                    Ok(Err(e)) => Response::Error(RpcError::Internal(e)),
-                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
-                }
-            }
+            Request::ImportCookies { .. } => Response::Error(RpcError::Unimplemented(
+                "Cookie insertion into browser profiles is not implemented; no cookies were read or imported".into(),
+            )),
             other => unreachable!("browser router got a non-browser verb: {other:?}"),
         }
     }

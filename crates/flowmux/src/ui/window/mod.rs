@@ -2922,8 +2922,7 @@ impl WindowController {
             command @ (GtkCommand::BrowserAction { .. }
             | GtkCommand::BrowserOpenSplit { .. }
             | GtkCommand::OpenUrlInBrowserTab { .. }
-            | GtkCommand::OpenBrowserPopup { .. }
-            | GtkCommand::InjectCookies { .. }) => {
+            | GtkCommand::OpenBrowserPopup { .. }) => {
                 self.dispatch_browser_command(command).await;
             }
             command @ (GtkCommand::AddNotification { .. }
@@ -3447,16 +3446,6 @@ pub(crate) fn shorten_cwd_path(path: &std::path::Path) -> String {
     format!(".../{}", last3.join("/"))
 }
 
-/// Placeholder: log cookie metadata and return the count without injecting cookies.
-fn inject_cookies_into_webkit(cookies: &[flowmux_cookies::Cookie]) -> Result<usize, String> {
-    let mut count = 0;
-    for c in cookies {
-        tracing::debug!(host = %c.host, name = %c.name, "would inject cookie");
-        count += 1;
-    }
-    Ok(count)
-}
-
 /// Per-workspace context-menu actions. These accept a workspace UUID
 /// string as their target value so a single action handler serves
 /// every sidebar row's context menu.
@@ -3835,12 +3824,120 @@ fn run_browser_js(
 /// Spawn the GTK-side dispatch loop. Lives on the main context.
 fn run_browser_wait(
     browser: crate::ui::browser_pane::BrowserPane,
+    registry: Rc<RefCell<PaneRegistry>>,
     condition: BrowserWaitCondition,
     timeout_ms: u64,
     poll_ms: u64,
     cancellation: Option<u64>,
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
 ) {
+    if let BrowserWaitCondition::PopupReady {
+        url,
+        after_sequence,
+    } = condition
+    {
+        glib::spawn_future_local(async move {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            loop {
+                if ack.is_closed() {
+                    return;
+                }
+                if let Some(revision) = cancellation {
+                    if let Err(error) = browser.control.check_revision(revision) {
+                        let _ = ack.send(Err(error));
+                        return;
+                    }
+                }
+                let observed = browser.control.observation();
+                let surfaces: Vec<SurfaceId> = observed["events"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|event| {
+                        event["kind"] == "popup"
+                            && event["sequence"].as_u64().unwrap_or(0)
+                                > after_sequence.unwrap_or(u64::MAX)
+                    })
+                    .filter_map(|event| serde_json::from_value(event["identifier"].clone()).ok())
+                    .collect();
+                for surface in surfaces {
+                    let child = registry.borrow().browsers.get(&surface).cloned();
+                    if let Some(child) = child {
+                        let js = format!(
+                            "document.readyState === 'complete' && location.href === {}",
+                            serde_json::to_string(&url).unwrap()
+                        );
+                        let (tx, rx) = oneshot::channel();
+                        child.evaluate_automation_js(&js, move |result| {
+                            let _ = tx.send(result);
+                        });
+                        if let Ok(Ok(Ok(value))) = glib::future_with_timeout(
+                            deadline
+                                .saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(250)),
+                            rx,
+                        )
+                        .await
+                        {
+                            if browser_js_truthy(&value) {
+                                let _ = ack.send(Ok(BrowserActionResult::Bool(true)));
+                                return;
+                            }
+                        }
+                    }
+                }
+                if Instant::now() >= deadline {
+                    let _ = ack.send(Ok(BrowserActionResult::Bool(false)));
+                    return;
+                }
+                glib::timeout_future(Duration::from_millis(poll_ms.max(1))).await;
+            }
+        });
+        return;
+    }
+    if let BrowserWaitCondition::DownloadComplete { id } = condition {
+        glib::spawn_future_local(async move {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            let result = loop {
+                if ack.is_closed() {
+                    return;
+                }
+                if let Some(revision) = cancellation {
+                    if let Err(error) = browser.control.check_revision(revision) {
+                        break Err(error);
+                    }
+                }
+                let status = browser
+                    .download(&flowmux_ipc::protocol::BrowserDownloadAction::List)
+                    .and_then(|json| {
+                        serde_json::from_str::<serde_json::Value>(&json)
+                            .map_err(|error| error.to_string())
+                    });
+                match status {
+                    Ok(status) => {
+                        let download = status["downloads"].as_array().and_then(|items| {
+                            items.iter().find(|item| item["id"].as_u64() == Some(id))
+                        });
+                        match download.and_then(|item| item["state"].as_str()) {
+                            Some("complete") => break Ok(BrowserActionResult::Bool(true)),
+                            Some("failed" | "cancelled") => {
+                                break Err("download failed or was cancelled".into())
+                            }
+                            None => break Err("download ID not found in this tab".into()),
+                            _ => {}
+                        }
+                    }
+                    Err(error) => break Err(error),
+                }
+                if Instant::now() >= deadline {
+                    break Ok(BrowserActionResult::Bool(false));
+                }
+                glib::timeout_future(Duration::from_millis(poll_ms.max(1))).await;
+            };
+            let _ = ack.send(result);
+        });
+        return;
+    }
     let js = Rc::<str>::from(browser_wait_js(&condition));
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
@@ -3912,6 +4009,38 @@ fn poll_browser_wait(
 pub(crate) fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
     let literal = |value: &str| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into());
     match condition {
+        BrowserWaitCondition::PopupReady { .. } => "false".into(),
+        BrowserWaitCondition::ValueChanged { selector, before } => format!(
+            "(() => {{ const el = document.querySelector({}); return !!el && el.value !== {}; }})()", literal(selector), serde_json::to_string(before).unwrap()),
+        BrowserWaitCondition::UrlExact(url) => format!("location.href === {}", literal(url)),
+        BrowserWaitCondition::Value { selector, value } => format!(
+            "(() => {{ const el = document.querySelector({}); return !!el && el.value === {}; }})()", literal(selector), literal(value)),
+        BrowserWaitCondition::TextChanged { selector, before } => format!(
+            "(() => {{ const el = document.querySelector({}); return !!el && el.innerText !== {}; }})()", literal(selector), serde_json::to_string(before).unwrap()),
+        BrowserWaitCondition::ElementState { selector, state } => {
+            use flowmux_ipc::protocol::BrowserElementState as State;
+            if matches!(state, State::Visible | State::Hidden) {
+                let visible = flowmux_browser::scripts::is_visible_selector(selector);
+                return format!("({visible}) {} 'true'", if matches!(state, State::Visible) { "===" } else { "!==" });
+            }
+            if matches!(state, State::Enabled | State::Disabled) {
+                let enabled = flowmux_browser::scripts::is_enabled_selector(selector);
+                return format!("({enabled}) === '{}'", if matches!(state, State::Enabled) { "true" } else { "false" });
+            }
+            let predicate = match state {
+                State::Visible | State::Hidden | State::Enabled | State::Disabled => unreachable!(),
+                State::Checked => "!!el && (el.checked === true || el.getAttribute('aria-checked') === 'true')",
+                State::Unchecked => "!!el && (el.checked === false || el.getAttribute('aria-checked') === 'false')",
+                State::Selected => "!!el && (el.selected === true || el.getAttribute('aria-selected') === 'true')",
+                State::Expanded => "!!el && el.getAttribute('aria-expanded') === 'true'",
+                State::Editable => "!!el && !el.matches(':disabled') && !el.closest('[inert],[aria-disabled=true]') && (el.isContentEditable || (el.matches('input,textarea') && !['button','checkbox','color','file','hidden','image','radio','range','reset','submit'].includes(el.type) && !el.readOnly))",
+                State::Focused => "!!el && document.activeElement === el",
+                State::Invalid => "!!el && (el.matches(':invalid') || el.getAttribute('aria-invalid') === 'true')",
+            };
+            format!("(() => {{ const el = document.querySelector({}); return {}; }})()", literal(selector), predicate)
+        }
+        BrowserWaitCondition::DownloadComplete { .. } => "false".into(),
+
         BrowserWaitCondition::Selector(selector) => {
             format!("Boolean(document.querySelector({}))", literal(selector))
         }

@@ -21,13 +21,36 @@
 /// is never modified.
 pub const SNAPSHOT_JS: &str = r#"
 (function() {
+  const options = /*FLOWMUX_OPTIONS*/ {};
+  const maxNodes = Math.max(1, Math.min(options.max_nodes || 2000, 2000));
+  const maxChars = Math.max(1024, Math.min(options.max_chars || 262144, 262144));
+  let truncated = false, usedChars = 512;
+  const matches = (actual, expected) => expected == null || (options.exact ? flat(actual) === flat(expected) : flat(actual).includes(flat(expected)));
+  let scope = document, scopeRecord;
+  if (options.within) {
+    scopeRecord = globalThis.__flowmuxRefs?.get(options.within);
+    scope = scopeRecord?.el;
+    if (!scope || !scope.isConnected || scope.getRootNode() !== scopeRecord.root ||
+        scopeRecord.frames.some(frame => !frame.el.isConnected || frame.el.contentDocument !== frame.document))
+      throw new Error('stale scope ref: take a fresh snapshot');
+  }
+  if (scope.matches?.('iframe,frame')) {
+    const frame = scope;
+    if (!frame.contentDocument) throw new Error('scope frame is not accessible');
+    scope = frame.contentDocument;
+    scopeRecord = {
+      shadowPath: [],
+      framePath: [...scopeRecord.framePath, {selector: cssPath(frame), shadow_path: scopeRecord.shadowPath}],
+      frames: [...scopeRecord.frames, {el: frame, document: scope}]
+    };
+  }
   const INTERACTIVE_ROLES = new Set([
     'button','link','textbox','checkbox','radio','combobox','listbox',
     'menuitem','menuitemcheckbox','menuitemradio','option','searchbox',
     'slider','spinbutton','switch','tab','treeitem'
   ]);
   const CONTENT_ROLES = new Set([
-    'heading','cell','listitem','article','region','main','navigation','audio','video','iframe','frame'
+    'heading','cell','listitem','article','region','main','navigation','audio','video','iframe','frame','status','alert','dialog','form','table','row','columnheader','rowheader'
   ]);
 
   function implicitRole(el) {
@@ -37,7 +60,10 @@ pub const SNAPSHOT_JS: &str = r#"
     if (t === 'a' && el.hasAttribute('href')) return 'link';
     if (t === 'button') return 'button';
     if (t === 'select') return 'combobox';
-    if (t === 'textarea') return 'textbox';
+    if (t === 'textarea' || el.isContentEditable) return 'textbox';
+    if (t === 'nav') return 'navigation';
+    if (t === 'summary') return 'button';
+    if (t === 'output') return 'status';
     if (t === 'input') {
       const ty = (el.getAttribute('type') || 'text').toLowerCase();
       if (ty === 'checkbox') return 'checkbox';
@@ -62,6 +88,22 @@ pub const SNAPSHOT_JS: &str = r#"
           (parent.matches('iframe,frame') && style.visibility !== 'visible')) return false;
     }
     return true;
+  }
+
+  function inViewport(el) {
+    let {left, top, right, bottom} = el.getBoundingClientRect();
+    for (let view = el.ownerDocument.defaultView;;) {
+      left = Math.max(left, 0); top = Math.max(top, 0);
+      right = Math.min(right, view.innerWidth); bottom = Math.min(bottom, view.innerHeight);
+      if (right <= left || bottom <= top) return false;
+      if (!view.frameElement) return true;
+      try {
+        const frame = frameTransform(view.frameElement);
+        left = frame.x + left * frame.sx; right = frame.x + right * frame.sx;
+        top = frame.y + top * frame.sy; bottom = frame.y + bottom * frame.sy;
+      } catch (_) { return false; }
+      view = view.frameElement.ownerDocument.defaultView;
+    }
   }
 
   function flat(text) {
@@ -136,26 +178,57 @@ pub const SNAPSHOT_JS: &str = r#"
         walk(el.contentDocument, [], [...framePath, {selector: cssPath(el), shadow_path: shadowPath}],
           [...frames, {el, document: el.contentDocument}]);
       }
-      if (!el.matches('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video,iframe,frame') || !visible(el)) return;
+      if ((options.text == null && !el.matches('a,button,input,textarea,select,[role],h1,h2,h3,h4,h5,h6,label,summary,li,article,nav,main,audio,video,iframe,frame,dialog,form,output,[contenteditable]')) || !visible(el)) return;
       const role = implicitRole(el);
-      if (!INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
+      if (options.text == null && options.role == null && !INTERACTIVE_ROLES.has(role) && !CONTENT_ROLES.has(role)) return;
+      if (options.viewport && !inViewport(el)) return;
+      const fullName = name(el);
+      const label = Array.from(el.labels || [], label => name(label, true)).join(' ');
+      if ((options.interactive && !INTERACTIVE_ROLES.has(role)) ||
+          (options.role != null && role !== options.role) || !matches(fullName, options.name) ||
+          !matches(label, options.label) || !matches(el.innerText, options.text) ||
+          !matches(el.getAttribute('placeholder'), options.placeholder)) return;
+      if (counter >= maxNodes || usedChars >= maxChars) { truncated = true; return; }
       counter += 1;
       const token = 'e' + counter + '-' + nonce;
       const sel = cssPath(el);
-      const nm = name(el).slice(0, 120);
+      const nm = fullName.slice(0, 120);
       refs[token] = { role: role, name: nm, selector: sel };
       if (shadowPath.length) refs[token].shadow_path = shadowPath;
       if (framePath.length) refs[token].frame_path = framePath;
       if (el.matches('iframe,frame')) refs[token].frame_accessible = !!el.contentDocument;
-      nodes.set(token, { el, root, frames });
+      let enabled = !el.matches(':disabled');
+      for (let parent = el; parent; parent = parent.assignedSlot || parent.parentElement || parent.getRootNode().host || parent.ownerDocument.defaultView.frameElement) {
+        if (parent.hasAttribute('inert') || parent.getAttribute('aria-disabled') === 'true') enabled = false;
+      }
+      const description = flat(el.getAttribute('aria-description')) || flat(
+        flat(el.getAttribute('aria-describedby')).split(' ').map(id => el.getRootNode().getElementById(id)?.textContent || '').join(' '));
+      if (description) refs[token].description = description.slice(0, 240);
+      refs[token].states = {
+        visible: true, disabled: !enabled, readonly: !!el.readOnly, enabled,
+        checked: !!el.checked || el.getAttribute('aria-checked') === 'true',
+        selected: !!el.selected || el.getAttribute('aria-selected') === 'true',
+        expanded: el.getAttribute('aria-expanded') === 'true',
+        editable: enabled && ((el.matches('input,textarea') && !['button','checkbox','color','file','hidden','image','radio','range','reset','submit'].includes(el.type) && !el.readOnly) || el.isContentEditable),
+        focused: el.getRootNode().activeElement === el,
+        invalid: el.getAttribute('aria-invalid') === 'true' || el.matches(':invalid'),
+      };
+      const cost = JSON.stringify(refs[token]).length + nm.length + token.length * 2 + 64;
+      if (usedChars + cost > maxChars) { delete refs[token]; truncated = true; return; }
+      usedChars += cost;
+      nodes.set(token, { el, root: el.getRootNode(), frames, shadowPath, framePath });
       const safe = nm.split(String.fromCharCode(34)).join('\\"');
       lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
     });
   }
-  walk(document, [], [], []);
+  if (scope.shadowRoot) walk(scope.shadowRoot, [...(scopeRecord?.shadowPath || []), cssPath(scope)], scopeRecord?.framePath || [], scopeRecord?.frames || []);
+  walk(scope, scopeRecord?.shadowPath || [], scopeRecord?.framePath || [], scopeRecord?.frames || []);
 
-  const text = (document.body && document.body.innerText
-    ? document.body.innerText : '').slice(0, 4000);
+  const filtered = options.viewport || options.interactive ||
+    ['role', 'name', 'label', 'text', 'placeholder'].some(key => options[key] != null);
+  const sourceText = filtered ? Object.values(refs).map(meta => meta.name).join('\n') : (scope.body || scope)?.innerText || '';
+  const text = sourceText.slice(0, Math.min(4000, Math.max(0, maxChars - usedChars)));
+  if (text.length < sourceText.length) truncated = true;
   const page = {
     url: location.href,
     title: document.title,
@@ -163,15 +236,32 @@ pub const SNAPSHOT_JS: &str = r#"
     text: text
   };
 
+  const result = {truncated, markdown: lines.join('\n') + (lines.length ? '\n' : ''), refs, page};
+  let json = JSON.stringify(result);
+  // Budget the serialized payload, including escaped labels and selector paths.
+  while (json.length > maxChars && nodes.size) {
+    const token = Array.from(nodes.keys()).pop();
+    nodes.delete(token); delete refs[token]; lines.pop();
+    result.truncated = true;
+    result.markdown = lines.join('\n') + (lines.length ? '\n' : '');
+    json = JSON.stringify(result);
+  }
+  if (json.length > maxChars) {
+    page.text = ''; page.url = page.url.slice(0, 96); page.title = page.title.slice(0, 32);
+    result.truncated = true;
+    json = JSON.stringify(result);
+  }
   // Kept in the application script world, never in page attributes.
   globalThis.__flowmuxRefs = nodes;
-  return JSON.stringify({
-    markdown: lines.join('\n') + (lines.length ? '\n' : ''),
-    refs: refs,
-    page: page
-  });
+  return json;
 })()
 "#;
+
+/// Options are encoded as data, never interpolated as executable selectors.
+pub fn snapshot_with_options(options: &serde_json::Value) -> String {
+    let script = SNAPSHOT_JS.replacen("/*FLOWMUX_OPTIONS*/ {}", &options.to_string(), 1);
+    format!("(function() {{ {FRAME_TRANSFORM_JS} return ({script}); }})()")
+}
 
 /// Validate node identity and execute the action in the same script turn.
 /// The caller must use the same isolated script world as the snapshot.
@@ -461,16 +551,31 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
         const state = {{ received: false, event: '{event}' }};
         globalThis.__flowmuxInput = state;
         try {{
-            const before = {geometry};
-            if (before.startsWith('error:')) throw new Error(before);
-            const element = state.el, dragSource = state.dragSource;
-            for (let frame = 0; frame < 2; frame++) {{
-                await new Promise((resolve, reject) => {{
-                    const timeout = setTimeout(() => reject(new Error('browser did not render a stable pointer target')), 5000);
-                    requestAnimationFrame(() => {{clearTimeout(timeout); resolve();}});
-                }});
-                const after = {geometry};
-                if (before !== after || element !== state.el || dragSource !== state.dragSource) throw new Error('pointer target moved; inspect the page before retrying');
+            const deadline = performance.now() + 5000;
+            let before, targetElement, targetDragSource;
+            while (true) {{
+                try {{
+                    before = {geometry};
+                    if (before.startsWith('error:')) throw new Error(before);
+                    if (targetElement && (targetElement !== state.el || targetDragSource !== state.dragSource))
+                        throw new Error('stale pointer target moved or was replaced; inspect the page before retrying');
+                    targetElement = state.el; targetDragSource = state.dragSource;
+                    for (let frame = 0; frame < 2; frame++) {{
+                        await new Promise((resolve, reject) => {{
+                            const frame = requestAnimationFrame(() => {{clearTimeout(timer); resolve();}});
+                            const timer = setTimeout(() => {{cancelAnimationFrame(frame); reject(new Error('browser did not render a stable pointer target'));}}, Math.max(1, deadline - performance.now()));
+                        }});
+                        const after = {geometry};
+                        if (targetElement !== state.el || targetDragSource !== state.dragSource)
+                            throw new Error('stale pointer target moved or was replaced; inspect the page before retrying');
+                        if (before !== after)
+                            throw new Error('pointer target moved; inspect the page before retrying');
+                    }}
+                    break;
+                }} catch (error) {{
+                    if (performance.now() >= deadline || String(error).includes('stale')) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }}
             }}
             state.listener = event => {{
                 if (event.isTrusted && (event.composedPath().includes(state.el) || event.composedPath().includes(state.dragSource))) {{
@@ -522,9 +627,21 @@ return await new Promise(resolve => {
 });
 "#;
 
-/// Set `value` on an input/textarea (`<select>` should use
-/// [`select_option_by_selector`] instead) and dispatch the standard
-/// `input` + `change` events so framework listeners fire.
+/// Check readiness without delivering input.
+pub fn input_readiness(selector: &str, editable: bool) -> String {
+    element_action(
+        selector,
+        false,
+        true,
+        if editable {
+            "if (el.readOnly) return 'error: element is readonly'; return 'ok';"
+        } else {
+            "return 'ok';"
+        },
+    )
+}
+
+/// Set a text field value and dispatch input/change events.
 pub fn fill_by_selector(selector: &str, value: &str) -> String {
     element_action(
         selector,
@@ -611,6 +728,7 @@ pub fn value_of_selector(selector: &str) -> String {
         r#"(function() {{
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
+            if (el.matches('input[type=password]')) throw new Error('password values are redacted');
             return (el.value || "").toString();
         }})()"#,
         s = js_string(selector)
@@ -624,6 +742,7 @@ pub fn attr_of_selector(selector: &str, name: &str) -> String {
         r#"(function() {{
             const el = document.querySelector("{s}");
             if (!el) return "error: not found";
+            if (el.matches('input[type=password]') && "{n}".toLowerCase() === 'value') throw new Error('password values are redacted');
             return (el.getAttribute("{n}") || "").toString();
         }})()"#,
         s = js_string(selector),

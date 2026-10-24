@@ -22,6 +22,10 @@ impl Client {
         let stream = UnixStream::connect(socket)
             .await
             .with_context(|| format!("connecting to flowmux socket at {}", socket.display()))?;
+        anyhow::ensure!(
+            stream.peer_cred()?.uid() == unsafe { libc::geteuid() },
+            "IPC server belongs to another user"
+        );
         let (r, w) = stream.into_split();
         Ok(Self {
             inner: Mutex::new(Inner {
@@ -45,6 +49,10 @@ impl Client {
         if req.uses_control_socket() {
             match UnixStream::connect(crate::control_socket_path(&self.socket)).await {
                 Ok(stream) => {
+                    anyhow::ensure!(
+                        stream.peer_cred()?.uid() == unsafe { libc::geteuid() },
+                        "IPC control server belongs to another user"
+                    );
                     let (r, w) = stream.into_split();
                     return Inner {
                         reader: BufReader::new(r),

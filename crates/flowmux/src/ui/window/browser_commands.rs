@@ -118,7 +118,7 @@ impl WindowController {
                     BrowserOp::WithTask { task, op } => (Some(task), *op),
                     op => (None, op),
                 };
-                let (receipt, op) = match op {
+                let (mut receipt, op) = match op {
                     BrowserOp::Receipt {
                         op,
                         condition,
@@ -141,6 +141,7 @@ impl WindowController {
                     && !matches!(
                         op,
                         BrowserOp::Snapshot
+                            | BrowserOp::Inspect(_)
                             | BrowserOp::Wait {
                                 condition: BrowserWaitCondition::Js(_),
                                 ..
@@ -150,10 +151,10 @@ impl WindowController {
                 let (operation, revision) = if read_only {
                     (None, browser.control.revision())
                 } else {
-                    match browser
-                        .control
-                        .admit(task, !matches!(op, BrowserOp::Snapshot))
-                    {
+                    match browser.control.admit(
+                        task,
+                        !matches!(op, BrowserOp::Snapshot | BrowserOp::Inspect(_)),
+                    ) {
                         Ok((operation, revision)) => (Some(operation), revision),
                         Err(error) => {
                             let _ = ack.send(Err(error));
@@ -161,10 +162,27 @@ impl WindowController {
                         }
                     }
                 };
+                if let Some((condition, _)) = &mut receipt {
+                    if matches!(condition, Some(BrowserWaitCondition::Js(_))) {
+                        let _ = ack.send(Err("receipts require a read-only typed outcome; use wait --js explicitly for scripts".into()));
+                        return;
+                    }
+                    if let Some(condition) = condition {
+                        if let Err(error) = capture_change_baseline(&browser, condition).await {
+                            let _ = ack.send(Err(error));
+                            return;
+                        }
+                        if let Err(error) = browser.control.check_revision(revision) {
+                            let _ = ack.send(Err(error));
+                            return;
+                        }
+                    }
+                }
                 let ack = if operation.is_some() || receipt.is_some() {
                     let (tx, rx) = oneshot::channel();
                     let observed = browser.clone();
                     let receipt = receipt.map(|(condition, timeout_ms)| ActionReceipt {
+                        registry: self.pane_registry.clone(),
                         before: browser.control.observation(),
                         started: Instant::now(),
                         id: uuid::Uuid::new_v4(),
@@ -324,50 +342,52 @@ impl WindowController {
                             let _ = ack.send(result);
                         });
                     }
-                    BrowserOp::Snapshot => {
+                    BrowserOp::Snapshot | BrowserOp::Inspect(_) => {
+                        let options = match op {
+                            BrowserOp::Inspect(options) => serde_json::to_value(options).unwrap(),
+                            _ => serde_json::json!({}),
+                        };
+                        let script = flowmux_browser::scripts::snapshot_with_options(&options);
                         // Run the non-mutating snapshot script, then mirror
                         // its `refs` map into the pane's server-side
                         // `RefStore` so subsequent `click e3` / `text e3`
                         // calls resolve. The page DOM is never stamped.
                         let browser2 = browser.clone();
                         let cell = std::cell::Cell::new(Some(ack));
-                        browser.evaluate_automation_js(
-                            flowmux_browser::scripts::SNAPSHOT_JS,
-                            move |result| {
-                                if let Some(ack) = cell.take() {
-                                    // An expired query must not replace a newer
-                                    // snapshot's references when its callback arrives.
-                                    if ack.is_closed() {
-                                        return;
-                                    }
-                                    let mapped = match result {
-                                        Ok(json) => {
-                                            if let Ok(mut snap) = serde_json::from_str::<
-                                                flowmux_browser::DomSnapshot,
-                                            >(
-                                                &json
-                                            ) {
-                                                snap.page.surface_id = Some(
-                                                    uuid::Uuid::from_u128(browser2.ref_scope.0)
-                                                        .to_string(),
-                                                );
-                                                browser2.refs.borrow_mut().populate_from_snapshot(
-                                                    browser2.ref_scope,
-                                                    &snap,
-                                                );
-                                                serde_json::to_string(&snap)
-                                                    .map(BrowserActionResult::String)
-                                                    .map_err(|error| error.to_string())
-                                            } else {
-                                                Err("browser snapshot could not be decoded".into())
-                                            }
-                                        }
-                                        Err(e) => Err(e),
-                                    };
-                                    let _ = ack.send(mapped);
+                        browser.evaluate_automation_js(&script, move |result| {
+                            if let Some(ack) = cell.take() {
+                                // An expired query must not replace a newer
+                                // snapshot's references when its callback arrives.
+                                if ack.is_closed() {
+                                    return;
                                 }
-                            },
-                        );
+                                let mapped = match result {
+                                    Ok(json) => {
+                                        if let Ok(mut snap) =
+                                            serde_json::from_str::<flowmux_browser::DomSnapshot>(
+                                                &json,
+                                            )
+                                        {
+                                            snap.page.surface_id = Some(
+                                                uuid::Uuid::from_u128(browser2.ref_scope.0)
+                                                    .to_string(),
+                                            );
+                                            browser2
+                                                .refs
+                                                .borrow_mut()
+                                                .populate_from_snapshot(browser2.ref_scope, &snap);
+                                            serde_json::to_string(&snap)
+                                                .map(BrowserActionResult::String)
+                                                .map_err(|error| error.to_string())
+                                        } else {
+                                            Err("browser snapshot could not be decoded".into())
+                                        }
+                                    }
+                                    Err(e) => Err(e),
+                                };
+                                let _ = ack.send(mapped);
+                            }
+                        });
                     }
                     BrowserOp::Navigate { url } => {
                         // Any navigation invalidates the current snapshot's
@@ -450,7 +470,7 @@ impl WindowController {
                         match ref_script(&browser, &target, |sel| {
                             flowmux_browser::scripts::fill_by_selector(sel, &value)
                         }) {
-                            Ok(js) => run_browser_js(&browser, &js, ack, true),
+                            Ok(js) => run_prepared_element_action(&browser, &target, true, js, ack),
                             Err(e) => {
                                 let _ = ack.send(Err(e));
                             }
@@ -460,7 +480,9 @@ impl WindowController {
                         match ref_script(&browser, &target, |sel| {
                             flowmux_browser::scripts::select_option_by_selector(sel, &value)
                         }) {
-                            Ok(js) => run_browser_js(&browser, &js, ack, true),
+                            Ok(js) => {
+                                run_prepared_element_action(&browser, &target, false, js, ack)
+                            }
                             Err(e) => {
                                 let _ = ack.send(Err(e));
                             }
@@ -585,14 +607,20 @@ impl WindowController {
                     },
 
                     BrowserOp::Wait {
-                        condition,
+                        mut condition,
                         timeout_ms,
                         poll_ms,
                     } => {
+                        if let Err(error) = capture_change_baseline(&browser, &mut condition).await
+                        {
+                            let _ = ack.send(Err(error));
+                            return;
+                        }
                         let cancellation =
                             matches!(condition, BrowserWaitCondition::Js(_)).then_some(revision);
                         run_browser_wait(
                             browser.clone(),
+                            self.pane_registry.clone(),
                             condition,
                             timeout_ms,
                             poll_ms,
@@ -650,7 +678,7 @@ impl WindowController {
                         &target,
                         flowmux_browser::scripts::check_by_selector,
                     ) {
-                        Ok(js) => run_browser_js(&browser, &js, ack, true),
+                        Ok(js) => run_prepared_element_action(&browser, &target, false, js, ack),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
@@ -660,7 +688,7 @@ impl WindowController {
                         &target,
                         flowmux_browser::scripts::uncheck_by_selector,
                     ) {
-                        Ok(js) => run_browser_js(&browser, &js, ack, true),
+                        Ok(js) => run_prepared_element_action(&browser, &target, false, js, ack),
                         Err(e) => {
                             let _ = ack.send(Err(e));
                         }
@@ -853,10 +881,7 @@ impl WindowController {
                     }
                 }
             }
-            GtkCommand::InjectCookies { cookies, ack } => {
-                let result = inject_cookies_into_webkit(&cookies);
-                let _ = ack.send(result);
-            }
+
             other => unreachable!("browser router got a non-browser command: {other:?}"),
         }
     }
@@ -890,7 +915,99 @@ fn native_input_reply(
     }
 }
 
+fn run_prepared_element_action(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    target: &str,
+    editable: bool,
+    action: String,
+    ack: oneshot::Sender<Result<BrowserActionResult, String>>,
+) {
+    let readiness = match ref_script(browser, target, |selector| {
+        flowmux_browser::scripts::input_readiness(selector, editable)
+    }) {
+        Ok(script) => script,
+        Err(error) => {
+            let _ = ack.send(Err(error));
+            return;
+        }
+    };
+    let browser = browser.clone();
+    let revision = browser.control.revision();
+    glib::spawn_future_local(async move {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if ack.is_closed() {
+                return;
+            }
+            if let Err(error) = browser.control.check_revision(revision) {
+                let _ = ack.send(Err(error));
+                return;
+            }
+            let (tx, rx) = oneshot::channel();
+            browser.evaluate_automation_js(&readiness, move |result| {
+                let _ = tx.send(result);
+            });
+            let result =
+                glib::future_with_timeout(deadline.saturating_duration_since(Instant::now()), rx)
+                    .await;
+            match result {
+                Ok(Ok(Ok(value))) if value == "ok" => break,
+                Ok(Ok(Err(error))) => {
+                    let _ = ack.send(Err(error));
+                    return;
+                }
+                Ok(Ok(Ok(value))) if Instant::now() >= deadline => {
+                    let _ = ack.send(Err(value));
+                    return;
+                }
+                Ok(Ok(Ok(_))) => glib::timeout_future(Duration::from_millis(50)).await,
+                _ => {
+                    let _ = ack.send(Err("element readiness timed out before input".into()));
+                    return;
+                }
+            }
+        }
+        if let Err(error) = browser.control.check_revision(revision) {
+            let _ = ack.send(Err(error));
+            return;
+        }
+        // The action still validates the original ref and executes exactly once.
+        run_browser_js(&browser, &action, ack, true);
+    });
+}
+
+async fn capture_change_baseline(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    condition: &mut BrowserWaitCondition,
+) -> Result<(), String> {
+    if let BrowserWaitCondition::PopupReady { after_sequence, .. } = condition {
+        *after_sequence = browser.control.observation()["event_sequence"].as_u64();
+    }
+    let property = if matches!(condition, BrowserWaitCondition::ValueChanged { .. }) {
+        "value"
+    } else {
+        "innerText"
+    };
+    if let BrowserWaitCondition::TextChanged { selector, before }
+    | BrowserWaitCondition::ValueChanged { selector, before } = condition
+    {
+        let (tx, rx) = oneshot::channel();
+        let js = format!("(() => {{ const el = document.querySelector({}); if (!el) throw new Error('change target not found'); if ('{property}' === 'value' && el.matches('input[type=password]')) throw new Error('password values are redacted'); if (typeof el.{property} !== 'string') throw new Error('change target has no text value'); return el.{property}; }})()", serde_json::to_string(selector).unwrap());
+        browser.evaluate_automation_js(&js, move |result| {
+            let _ = tx.send(result);
+        });
+        *before = Some(
+            glib::future_with_timeout(Duration::from_secs(5), rx)
+                .await
+                .map_err(|_| "change baseline timed out")?
+                .map_err(|_| "change baseline closed")??,
+        );
+    }
+    Ok(())
+}
+
 struct ActionReceipt {
+    registry: Rc<RefCell<PaneRegistry>>,
     before: serde_json::Value,
     started: Instant,
     id: uuid::Uuid,
@@ -915,6 +1032,7 @@ impl ActionReceipt {
                 let (tx, mut rx) = oneshot::channel();
                 run_browser_wait(
                     browser.clone(),
+                    self.registry.clone(),
                     condition,
                     self.timeout_ms,
                     50,

@@ -15,3 +15,5 @@ pub use controller::{BrowserController, BrowserError};
 pub use profile::{BrowserProfile, ProfileError};
 pub use refs::{RefScope, RefStore};
 pub use snapshot::{DomSnapshot, PageMeta, RefMeta};
+
+pub mod security;

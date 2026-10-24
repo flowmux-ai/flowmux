@@ -3,7 +3,7 @@
 
 use crate::protocol::{Envelope, Payload, Request, Response, RpcError, SshRequest};
 use std::future::Future;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -53,6 +53,7 @@ fn query_timeout(request: &Request) -> Option<Duration> {
             request: SshRequest::Status { .. },
         }
         | Request::BrowserSnapshot { .. }
+        | Request::BrowserInspect { .. }
         | Request::BrowserDiagnose { .. }
         | Request::BrowserFileChooser {
             action: crate::protocol::BrowserFileChooserAction::Status,
@@ -105,6 +106,15 @@ struct SocketOwner {
 
 impl SocketOwner {
     fn acquire(socket: &Path) -> anyhow::Result<Self> {
+        let parent = socket
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let parent = std::fs::metadata(parent)?;
+        let private = parent.uid() == unsafe { libc::geteuid() } && parent.mode() & 0o002 == 0;
+        let shared_temp = parent.uid() == 0 && parent.mode() & 0o1000 != 0;
+        anyhow::ensure!(parent.is_dir() && (private || shared_temp),
+            "IPC directory must be owned by this user and not world-writable, or a root-owned sticky temporary directory");
         let mut path = socket.as_os_str().to_os_string();
         path.push(".lock");
         // Keep the lock file: unlinking it would let later owners lock a
@@ -112,9 +122,19 @@ impl SocketOwner {
         let lock = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .read(true)
             .write(true)
             .open(path)?;
+        let metadata = lock.metadata()?;
+        anyhow::ensure!(
+            metadata.is_file()
+                && metadata.uid() == unsafe { libc::geteuid() }
+                && metadata.nlink() == 1,
+            "IPC lock must be a regular file owned by this user"
+        );
+        lock.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         lock.try_lock()?;
         Ok(Self {
             _lock: lock,
@@ -127,6 +147,7 @@ impl SocketOwner {
         let metadata = std::fs::symlink_metadata(path)?;
         self.paths
             .push((path.to_owned(), metadata.dev(), metadata.ino()));
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         Ok(listener)
     }
 }
@@ -155,7 +176,7 @@ async fn remove_stale_socket(path: &Path) -> std::io::Result<()> {
             format!("IPC path is in use: {}", path.display()),
         )
     };
-    if !metadata.file_type().is_socket() {
+    if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(in_use());
     }
     match timeout(Duration::from_millis(250), UnixStream::connect(path)).await {
@@ -245,10 +266,13 @@ async fn serve_connection<H: Handler>(
     control: bool,
     mutations: Arc<Semaphore>,
 ) -> anyhow::Result<()> {
-    let peer_pid = stream
-        .peer_cred()
-        .ok()
-        .and_then(|cred| cred.pid())
+    let credentials = stream.peer_cred()?;
+    anyhow::ensure!(
+        credentials.uid() == unsafe { libc::geteuid() },
+        "IPC peer belongs to another user"
+    );
+    let peer_pid = credentials
+        .pid()
         .and_then(|pid| u32::try_from(pid).ok())
         .filter(|pid| *pid > 0);
     let (r, mut w) = stream.into_split();
@@ -275,7 +299,7 @@ async fn serve_connection<H: Handler>(
         let env: Envelope = match serde_json::from_str(buf.trim_end()) {
             Ok(e) => e,
             Err(e) => {
-                warn!(error = %e, raw = %buf, "malformed envelope");
+                warn!(line = e.line(), column = e.column(), "malformed envelope");
                 // A newer client can send a verb this build predates. Reply
                 // when the id is readable so it fails now, not at IO_TIMEOUT.
                 if let Ok(RequestId { id }) = serde_json::from_str(buf.trim_end()) {
@@ -421,6 +445,34 @@ async fn read_line_bounded<R: AsyncBufRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writable_shared_ipc_directories_are_rejected() {
+        let root = tempfile::tempdir_in("/tmp").unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(SocketOwner::acquire(&root.path().join("ipc.sock")).is_err());
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(SocketOwner::acquire(&root.path().join("ipc.sock")).is_ok());
+    }
+
+    #[tokio::test]
+    async fn socket_and_lock_are_private_and_symlink_locks_are_rejected() {
+        let root = tempfile::tempdir_in("/tmp").unwrap();
+        let socket = root.path().join("ipc.sock");
+        let lock = root.path().join("ipc.sock.lock");
+        let mut owner = SocketOwner::acquire(&socket).unwrap();
+        let _listener = owner.bind(&socket).unwrap();
+        for path in [&socket, &lock] {
+            assert_eq!(std::fs::metadata(path).unwrap().mode() & 0o777, 0o600);
+        }
+        drop(owner);
+        std::fs::remove_file(&lock).unwrap();
+        let victim = root.path().join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        std::os::unix::fs::symlink(&victim, &lock).unwrap();
+        assert!(SocketOwner::acquire(&socket).is_err());
+        assert_eq!(std::fs::read_to_string(victim).unwrap(), "keep");
+    }
 
     #[tokio::test]
     async fn duplicate_server_preserves_both_live_endpoints() {

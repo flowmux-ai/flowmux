@@ -14,6 +14,7 @@ struct PendingChooser {
     id: String,
     multiple: bool,
     directories: bool,
+    source: String,
     cancellable: gio::Cancellable,
     closed: Rc<Cell<bool>>,
     reply: Option<Box<dyn FnOnce(Option<Vec<PathBuf>>)>>,
@@ -62,6 +63,63 @@ fn validate_selection(paths: &[PathBuf], multiple: bool, directories: bool) -> R
     Ok(())
 }
 
+fn scoped_selection(
+    paths: &[PathBuf],
+    root: Option<&std::path::Path>,
+    directories: bool,
+) -> Result<Vec<PathBuf>, String> {
+    if paths
+        .iter()
+        .any(|path| !path.is_absolute() || path.to_str().is_none())
+    {
+        return Err("file chooser paths must be absolute UTF-8 paths".into());
+    }
+    let root =
+        root.ok_or("automated file selection requires an explicit --root directory scope")?;
+    if !root.is_absolute() {
+        return Err("file scope must be absolute".into());
+    }
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    if !root.is_dir() {
+        return Err("file scope must be a directory".into());
+    }
+    paths
+        .iter()
+        .map(|path| {
+            let path = path.canonicalize().map_err(|error| error.to_string())?;
+            if !path.starts_with(&root) {
+                return Err("selected file is outside the explicit directory scope".into());
+            }
+            if directories {
+                let mut pending = vec![path.clone()];
+                let mut entries = 0;
+                while let Some(directory) = pending.pop() {
+                    for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
+                        let entry = entry.map_err(|error| error.to_string())?;
+                        entries += 1;
+                        if entries > 10_000 {
+                            return Err(
+                                "folder scope exceeds 10000 entries; use the native picker".into(),
+                            );
+                        }
+                        let kind = entry.file_type().map_err(|error| error.to_string())?;
+                        if kind.is_symlink() || (!kind.is_dir() && !kind.is_file()) {
+                            return Err(
+                                "automated folder uploads cannot contain links or special files"
+                                    .into(),
+                            );
+                        }
+                        if kind.is_dir() {
+                            pending.push(entry.path());
+                        }
+                    }
+                }
+            }
+            Ok(path)
+        })
+        .collect()
+}
+
 impl FileChoosers {
     pub(crate) async fn control(
         &self,
@@ -78,9 +136,11 @@ impl FileChoosers {
                         .filter(|pending| pending.id == *id)
                         .ok_or("file chooser not found or its ID is stale")?;
                     match action {
-                        Action::Select { paths, .. } => {
-                            validate_selection(paths, pending.multiple, pending.directories)?;
-                            Some(paths.clone())
+                        Action::Select { paths, root, .. } => {
+                            let files =
+                                scoped_selection(paths, root.as_deref(), pending.directories)?;
+                            validate_selection(&files, pending.multiple, pending.directories)?;
+                            Some(files)
                         }
                         _ => None,
                     }
@@ -105,6 +165,7 @@ impl FileChoosers {
         let chooser = pending.as_ref().map(|pending| {
             serde_json::json!({
                 "id": pending.id, "multiple": pending.multiple, "directories": pending.directories,
+                "source": pending.source, "selection_requires_scope": true,
             })
         });
         Ok(serde_json::json!({"file_chooser": chooser}).to_string())
@@ -125,6 +186,7 @@ impl FileChoosers {
             id: id.clone(),
             multiple,
             directories,
+            source: dialog.title().to_string(),
             cancellable: cancellable.clone(),
             closed: closed.clone(),
             reply: Some(Box::new(reply)),
@@ -184,6 +246,7 @@ mod tests {
         let captured = replies.clone();
         let pending = PendingChooser {
             id: "test".into(),
+            source: "test".into(),
             multiple: false,
             directories: false,
             cancellable: cancellable.clone(),
@@ -193,6 +256,27 @@ mod tests {
         drop(pending);
         assert!(cancellable.is_cancelled());
         assert_eq!(*replies.borrow(), [None]);
+    }
+
+    #[test]
+    fn file_scope_rejects_escapes_and_implicit_grants() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let link = root.path().join("escape");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        assert!(scoped_selection(&[link], Some(root.path()), false).is_err());
+        assert!(scoped_selection(&[outside.path().into()], None, false).is_err());
+        let file = root.path().join("safe.txt");
+        std::fs::write(&file, "fixture").unwrap();
+        assert_eq!(
+            scoped_selection(std::slice::from_ref(&file), Some(root.path()), false).unwrap(),
+            [file.canonicalize().unwrap()]
+        );
+        assert!(scoped_selection(&[root.path().into()], Some(root.path()), true).is_err());
+        let folder = root.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("nested.txt"), "fixture").unwrap();
+        assert!(scoped_selection(&[folder], Some(root.path()), true).is_ok());
     }
 
     #[test]
