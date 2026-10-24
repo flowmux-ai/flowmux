@@ -634,13 +634,8 @@ enum BrowserOp {
     },
     /// Take a JSON snapshot of the page. Markdown tree + refs map; the
     /// live DOM is never modified.
+    #[command(visible_alias = "find")]
     Snapshot {
-        pane: PaneId,
-        #[command(flatten)]
-        options: InspectArgs,
-    },
-    /// Find visible candidates by semantic fields. Returns fresh refs, never clicks a first match.
-    Find {
         pane: PaneId,
         #[command(flatten)]
         options: InspectArgs,

@@ -391,13 +391,13 @@ def exercise(cli, url, root):
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
     assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
     # Semantic discovery and bounded pre-input waits use the real browser, not a DOM mock.
-    evaluate("document.body.innerHTML='<main aria-label=Panel><button id=go>Save</button><button>Save</button><label for=entry>Email</label><input id=entry placeholder=Address aria-describedby=hint disabled><span id=hint hidden>Work address only</span><input id=password type=password value=private-secret aria-label=Password><p id=result role=status>before</p></main>';window.delivered=0;go.onclick=()=>{delivered++;result.innerText=String(delivered)};'ready'")
+    evaluate("document.body.innerHTML='<main aria-label=Panel><button id=go>Save</button><button>Save</button><label for=entry>이메일</label><input id=entry placeholder=주소 aria-describedby=hint disabled><span id=hint hidden>Work address only</span><input id=password type=password value=private-secret aria-label=Password><p id=result role=status>before</p></main>';window.delivered=0;go.onclick=()=>{delivered++;result.innerText=String(delivered)};'ready'")
     found = json.loads(browser("find", "--role", "button", "--name", "Save", "--exact")["browser_result"]["value"])
     assert len(found["refs"]) == 2, found
     panel = reference(snapshot(), "Panel")
     partial = json.loads(browser("snapshot", "--within", panel, "--interactive", "--max-nodes", "1")["browser_result"]["value"])
     assert len(partial["refs"]) == 1 and partial["truncated"], partial
-    found = json.loads(browser("find", "--label", "Email", "--placeholder", "Address")["browser_result"]["value"])
+    found = json.loads(browser("find", "--label", "이메일", "--placeholder", "주소")["browser_result"]["value"])
     entry, metadata = next(iter(found["refs"].items()))
     assert len(found["refs"]) == 1 and not metadata["states"]["enabled"], found
     assert metadata["description"] == "Work address only", metadata
@@ -427,7 +427,7 @@ def exercise(cli, url, root):
     receipt = json.loads(browser("click", go, "--receipt", "--expect", json.dumps({"TextChanged": {"selector": "#result"}}), "--outcome-timeout-ms", "150")["browser_result"]["value"])
     assert receipt["status"] == "outcome_unknown" and evaluate("String(delivered)") == "2", receipt
     evaluate("entry.disabled=true;setTimeout(()=>{let replacement=entry.cloneNode();replacement.disabled=false;entry.replaceWith(replacement)},100);'replace while waiting'")
-    entry = reference(snapshot(), "Email")
+    entry = reference(snapshot(), "이메일")
     browser("fill", entry, "must-not-retarget", error=True)
     assert evaluate("entry.value") == "changed"
     evaluate("document.body.insertAdjacentHTML('beforeend','<button id=popupButton>Open popup</button><div style=height:5000px></div><button>Far away</button>');popupButton.onclick=()=>window.open('/popup');window.scrollTo(0,0);'popup ready'")

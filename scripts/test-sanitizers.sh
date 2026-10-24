@@ -18,6 +18,8 @@ target=x86_64-unknown-linux-gnu
 export CARGO_TARGET_DIR="$PWD/target/sanitizers"
 export CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-2}
 export CARGO_PROFILE_DEV_DEBUG=1 CARGO_PROFILE_TEST_DEBUG=1
+# ASan expands clap's generated builder frames beyond libtest's 2 MiB worker stack.
+export RUST_MIN_STACK=8388608
 export RUSTFLAGS='-Zsanitizer=address -Cforce-frame-pointers=yes'
 export RUSTDOCFLAGS="$RUSTFLAGS"
 export ASAN_OPTIONS="detect_leaks=$detect_leaks:halt_on_error=1:exitcode=99"

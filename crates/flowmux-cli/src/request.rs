@@ -124,7 +124,7 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 direction,
             }
         }
-        BrowserOp::Snapshot { pane, options } | BrowserOp::Find { pane, options } => {
+        BrowserOp::Snapshot { pane, options } => {
             let options = flowmux_ipc::protocol::BrowserInspectOptions {
                 role: options.role,
                 name: options.name,

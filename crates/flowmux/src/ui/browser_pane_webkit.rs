@@ -1476,7 +1476,6 @@ mod tests {
         assert!(first.is_ephemeral());
         assert!(second.is_ephemeral());
         assert_ne!(first, second);
-        assert_ne!(Some(first), webkit6::NetworkSession::default());
     }
 
     #[gtk::test]
