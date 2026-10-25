@@ -457,6 +457,38 @@ paned > separator {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
 }}
+headerbar.flowmux-window-header {{
+    min-height: 40px;
+}}
+headerbar.flowmux-window-header > windowhandle > box {{
+    padding: 3px 6px;
+}}
+headerbar.flowmux-window-header windowcontrols {{
+    border-spacing: 4px;
+}}
+headerbar.flowmux-window-header windowcontrols > button {{
+    min-width: 32px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    background: transparent;
+}}
+headerbar.flowmux-window-header windowcontrols > button > image {{
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+}}
+headerbar.flowmux-window-header windowcontrols > button:hover {{
+    background-color: alpha(currentColor, 0.10);
+}}
+headerbar.flowmux-window-header windowcontrols > button:active {{
+    background-color: alpha(currentColor, 0.16);
+}}
+headerbar.flowmux-window-header windowcontrols > button.close:hover,
+headerbar.flowmux-window-header windowcontrols > button.close:active {{
+    background-color: @destructive_bg_color;
+    color: @destructive_fg_color;
+}}
 .flowmux-workspace-creation-buttons button {{
     min-width: 16px;
     padding-left: 4px;

@@ -790,12 +790,14 @@ fn build_split_window_shell(
     sidebar_position: i32,
 ) -> gtk::Paned {
     let sidebar_view = adw::ToolbarView::new();
+    sidebar.header.add_css_class("flowmux-window-header");
     sidebar_view.add_css_class("flowmux-sidebar-shell");
     sidebar_view.add_top_bar(&sidebar.header);
     sidebar_view.set_content(Some(&sidebar.root));
     sidebar_view.set_size_request(160, -1);
 
     let content_header = adw::HeaderBar::new();
+    content_header.add_css_class("flowmux-window-header");
     content_header.set_show_start_title_buttons(false);
     content_header.set_show_end_title_buttons(true);
     let content_view = adw::ToolbarView::new();
