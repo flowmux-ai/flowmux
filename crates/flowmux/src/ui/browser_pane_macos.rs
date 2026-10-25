@@ -1418,6 +1418,16 @@ impl BrowserPane {
     }
 
     #[cfg(test)]
+    pub(crate) fn resize_native_test_window(&self, width: i32, height: i32) {
+        self.native
+            .web_view
+            .as_super()
+            .window()
+            .expect("mapped native browser window")
+            .setContentSize(NSSize::new(f64::from(width), f64::from(height)));
+    }
+
+    #[cfg(test)]
     pub(crate) fn check_native_chrome_focus(&self, address: &gtk::Entry) {
         for entry in [
             address.clone().upcast::<gtk::Widget>(),

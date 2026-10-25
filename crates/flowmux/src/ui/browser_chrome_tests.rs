@@ -218,7 +218,23 @@ pub(crate) async fn check() {
         );
         for width in [wide_width, 720, 480] {
             window.set_default_size(width, 720);
-            wait(&format!("resize to {width}"), || window.width() == width).await;
+            #[cfg(target_os = "macos")]
+            pane.resize_native_test_window(width, 720);
+            let resized = gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+                while !window.is_mapped() || window.width() != width {
+                    gtk::glib::timeout_future(Duration::from_millis(25)).await;
+                }
+            })
+            .await;
+            assert!(
+                resized.is_ok(),
+                "resize to {width}: actual {}, default {:?}, minimum {:?}, pane {}",
+                window.width(),
+                window.default_size(),
+                window.measure(gtk::Orientation::Horizontal, -1),
+                pane.root.width()
+            );
+            assert!(window.measure(gtk::Orientation::Horizontal, -1).0 <= width);
             gtk::glib::timeout_future(Duration::from_millis(150)).await;
             let body = panel.parent().unwrap().downcast::<gtk::Box>().unwrap();
             assert_eq!(
