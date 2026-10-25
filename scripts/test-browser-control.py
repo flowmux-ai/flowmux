@@ -336,6 +336,39 @@ def exercise_task_workflow(cli, url, root):
     print("BROWSER_TASK_WORKFLOW_OK", flush=True)
 
 
+def exercise_compact_snapshot(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--url", url)["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args):
+        return cli("browser", op, pane, *args)["browser_result"]["value"]
+
+    before = value("eval", "document.documentElement.outerHTML")
+    full = json.loads(value("snapshot"))
+    compact = json.loads(value("snapshot", "--compact"))
+    assert "markdown" not in compact and compact["page"] == full["page"]
+    assert compact["truncated"] == full["truncated"]
+    assert len(compact["refs"]) == len(full["refs"])
+    assert all("selector" not in meta and "states" in meta for meta in compact["refs"].values())
+    assert any(meta.get("shadow_path") for meta in compact["refs"].values())
+    assert any(meta.get("frame_path") for meta in compact["refs"].values())
+    assert "secret" not in json.dumps(compact)
+    assert value("eval", "document.documentElement.outerHTML") == before
+    ref = next(k for k, v in compact["refs"].items() if v["name"] == "Contact email")
+    cli("browser", "fill", pane, ref, "compact@example.test")
+    assert value("value", ref) == "compact@example.test"
+    restored = json.loads(value("snapshot"))
+    assert "markdown" in restored and all("selector" in meta for meta in restored["refs"].values())
+    cli("browser", "fill", pane, ref, "stale", error=True)
+    assert value("eval", "contact.value") == "compact@example.test"
+    found = json.loads(value("find", "--compact", "--role", "textbox", "--name", "Contact email", "--exact"))
+    assert len(found["refs"]) == 1 and "markdown" not in found
+    print("BROWSER_COMPACT_SNAPSHOT_OK", flush=True)
+
+
 def exercise_ownership(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Browser task", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1315,6 +1348,7 @@ def main():
                     time.sleep(.05)
                 assert cli("ping") == "pong"
                 exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_compact_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)

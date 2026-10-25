@@ -2752,3 +2752,40 @@ fn browser_task_form_and_ref_expectations_parse() {
         }
     ));
 }
+
+#[test]
+fn compact_snapshot_preserves_request_scope_and_rejects_receipts() {
+    let pane = PaneId::new();
+    for verb in ["snapshot", "find"] {
+        let cli = Cli::try_parse_from([
+            "flowmuxctl",
+            "browser",
+            verb,
+            &pane.to_string(),
+            "--compact",
+            "--role",
+            "button",
+            "--max-chars",
+            "6000",
+        ])
+        .unwrap();
+        assert!(
+            matches!(&cli.cmd, Cmd::Browser { op: BrowserOp::Snapshot { options, .. }, .. } if options.compact)
+        );
+        let Request::BrowserInspect { pane: got, options } = build_request(cli.cmd).unwrap() else {
+            panic!("expected inspection")
+        };
+        assert_eq!(got, pane);
+        assert_eq!(options.role.as_deref(), Some("button"));
+        assert_eq!(options.max_chars, Some(6000));
+    }
+    assert!(Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "snapshot",
+        &pane.to_string(),
+        "--compact",
+        "--receipt",
+    ])
+    .is_err());
+}

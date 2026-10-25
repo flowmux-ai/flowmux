@@ -102,7 +102,7 @@ OPEN=$("$FLOWMUX_CLI" --json browser open https://example.com) || exit 1
 PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
-"$FLOWMUX_CLI" browser snapshot "pane:$PANE" --viewport --max-nodes 40 --max-chars 12000
+"$FLOWMUX_CLI" browser snapshot "pane:$PANE" --compact --viewport --max-nodes 40 --max-chars 12000
 ```
 
 Open reuses a right-sibling browser pane as a new tab, or splits beside the
@@ -112,8 +112,8 @@ URL and readiness before taking a snapshot. Wait prints `true` or `false`;
 
 Choose the smallest observation that answers the next question:
 
-- Known target: `find PANE --role button --name Save --exact --max-chars 6000`.
-- Visible controls: `snapshot PANE --viewport --interactive --max-nodes 40 --max-chars 12000`.
+- Known target: `find PANE --role button --name Save --exact --compact --max-chars 6000`.
+- Visible controls: `snapshot PANE --compact --viewport --interactive --max-nodes 40 --max-chars 12000`.
 - Reading content: omit `--interactive`; it excludes document prose. Scope with
   `--within REF`, then read the required element with `text PANE REF`.
 - Completion: use a typed `wait` or action `--receipt --expect` instead of
@@ -128,7 +128,12 @@ return only relevant fields to the model, retaining complete refs and scope.
 After navigation, node replacement or handoff, refresh the necessary scope;
 never reuse an old ref just to save tokens. Every snapshot/find replaces refs.
 
-A snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
+Use `--compact` on `snapshot`/`find` to omit the duplicate Markdown and element
+selectors from model-facing JSON. Complete refs, page text, states, descriptions
+and frame/shadow paths remain. Actions still use the full server-side registry.
+Omit it when a script needs the full format; `--receipt` cannot be combined with it.
+
+A full snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
 Copy the entire returned ref; short names such as `e1` are not aliases.
 Refs expire when their element is replaced, even if its selector stays the same.
 Snapshot names prefer valid `aria-labelledby` references, then `aria-label`,

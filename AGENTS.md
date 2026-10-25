@@ -79,11 +79,11 @@ flowmux browser wait pane:$PANE --ready-state complete
 # Each wait prints true on success and false on timeout. Do not continue
 # when it prints false.
 
-# 3. Observe the visible page with a bounded snapshot. The result has a Markdown tree with
-#    opaque ref tokens (e.g. `e1-<snapshot-id>`) plus a selector map. Refs belong to
+# 3. Observe the visible page with a bounded snapshot. Compact JSON retains
+#    opaque ref tokens (e.g. `e1-<snapshot-id>`), states and page metadata. Refs belong to
 #    the active browser tab. Take a fresh snapshot after switching tabs,
 #    navigation, page changes, or another snapshot.
-flowmux browser snapshot pane:$PANE --viewport --max-nodes 40 --max-chars 12000
+flowmux browser snapshot pane:$PANE --compact --viewport --max-nodes 40 --max-chars 12000
 
 # 4. Act on the page using complete returned ref tokens (e3/e1 below are placeholders).
 flowmux browser click pane:$PANE e3

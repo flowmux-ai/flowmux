@@ -66,6 +66,27 @@ pub(crate) fn print_response(r: &Response, json_mode: bool) -> anyhow::Result<()
     Ok(())
 }
 
+pub(crate) fn compact_browser_snapshot(response: &mut Response) -> anyhow::Result<()> {
+    if let Response::BrowserResult { value } = response {
+        let mut snapshot: serde_json::Value = serde_json::from_str(value)?;
+        let object = snapshot
+            .as_object_mut()
+            .context("expected a snapshot object")?;
+        let refs = object
+            .get_mut("refs")
+            .and_then(serde_json::Value::as_object_mut)
+            .context("expected snapshot refs")?;
+        for meta in refs.values_mut() {
+            meta.as_object_mut()
+                .context("expected element metadata")?
+                .remove("selector");
+        }
+        object.remove("markdown");
+        *value = serde_json::to_string(&snapshot)?;
+    }
+    Ok(())
+}
+
 fn plain_browser_response(response: &Response) -> Option<String> {
     match response {
         Response::BrowserResult { value } => Some(value.clone()),
@@ -192,6 +213,46 @@ mod tests {
             plain_browser_response(&Response::BrowserOk),
             Some("ok".into())
         );
+    }
+
+    #[test]
+    fn compact_snapshot_keeps_identity_states_and_document_context() {
+        let original = serde_json::json!({
+            "truncated": true,
+            "markdown": "- button Save [ref=e1-opaque]",
+            "page": {"surface_id":"tab-1", "url":"https://example.test", "text":"Article prose"},
+            "refs": {"e1-opaque": {
+                "role":"button", "name":"Save", "selector":"button:nth-of-type(2)",
+                "states":{"enabled":false,"checked":false,"invalid":true},
+                "description":"Requires a valid email",
+                "frame_path":[{"selector":"#frame", "shadow_path":["#host"]}],
+                "shadow_path":["#inner"], "frame_accessible":false
+            }}
+        });
+        let mut response = Response::BrowserResult {
+            value: original.to_string(),
+        };
+        compact_browser_snapshot(&mut response).unwrap();
+        let Response::BrowserResult { value } = response else {
+            unreachable!()
+        };
+        let compact: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(compact["page"], original["page"]);
+        assert_eq!(compact["truncated"], true);
+        assert!(compact.get("markdown").is_none());
+        let mut expected = original["refs"].clone();
+        expected["e1-opaque"]
+            .as_object_mut()
+            .unwrap()
+            .remove("selector");
+        assert_eq!(compact["refs"], expected);
+        assert!(value.len() < original.to_string().len());
+
+        let mut error = Response::Error(flowmux_ipc::protocol::RpcError::NotFound(
+            "closed tab".into(),
+        ));
+        compact_browser_snapshot(&mut error).unwrap();
+        assert!(matches!(error, Response::Error(_)));
     }
 
     #[test]

@@ -7,13 +7,21 @@ These features use the existing Linux WebKitGTK and macOS WKWebView panes.
 
 ## Choose an observation scope
 
-For a known target, use `find PANE --role button --name Save --exact --max-chars 6000`.
+For a known target, use `find PANE --role button --name Save --exact --compact --max-chars 6000`.
 For an unfamiliar visible page, start with
-`snapshot PANE --viewport --max-nodes 40 --max-chars 12000`. Add `--interactive`
+`snapshot PANE --compact --viewport --max-nodes 40 --max-chars 12000`. Add `--interactive`
 only when looking for controls; omit it for reading prose. Use `--within REF`
 to inspect a known region. A filtered snapshot does not represent the whole page.
 Check `truncated` before assuming there are no more matches, and enlarge the
 scope or budget only when necessary. Every snapshot/find replaces the ref set.
+
+`snapshot` and `find` accept `--compact` for model-facing JSON. It omits the
+repeated Markdown tree and each element's selector, while retaining complete ref
+tokens, page text, surface identity, truncation, states, descriptions and frame/
+shadow paths. Selectors remain in the GUI's ref registry; actions and stale-ref
+checks are unchanged. Omit `--compact` for the existing full format. `--json`
+still wraps either format in `browser_result.value`. Compact output cannot be
+combined with `--receipt`; it does not change snapshot limits or scope.
 
 Prefer typed waits or an action's expected outcome to repeated full snapshots.
 Wait polling runs inside Flowmux and returns one result. Use `form` for a known

@@ -555,6 +555,10 @@ struct ReceiptArgs {
 
 #[derive(clap::Args, Default)]
 struct InspectArgs {
+    /// Omit duplicate Markdown and per-element selectors from the returned JSON.
+    /// Complete refs, page text, states and frame/shadow paths are retained.
+    #[arg(long, conflicts_with = "enabled")]
+    compact: bool,
     #[arg(long)]
     role: Option<String>,
     #[arg(long)]
@@ -1304,6 +1308,9 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             ..
         }
     );
+    let compact_snapshot = matches!(&cmd, Cmd::Browser {
+        op: BrowserOp::Snapshot { options, .. }, ..
+    } if options.compact);
     let mut req = build_request(cmd)?;
     if let Request::SurfaceCreate {
         workspace,
@@ -1326,6 +1333,9 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         }
     }
     let mut resp = client.call(req).await?;
+    if compact_snapshot {
+        output::compact_browser_snapshot(&mut resp)?;
+    }
     if diagnose {
         if let Response::BrowserResult { value } = &mut resp {
             let mut report: serde_json::Value = serde_json::from_str(value)?;
