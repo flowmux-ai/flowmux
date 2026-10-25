@@ -80,7 +80,7 @@ impl Store {
                     && c.value() == cookie.value()
                     && c.isSecure() == cookie.isSecure()
                     && c.isHTTPOnly() == cookie.isHTTPOnly()
-                    && c.sameSitePolicy() == cookie.sameSitePolicy()
+                    && same_site(c) == same_site(cookie)
                     && c.expiresDate() == cookie.expiresDate()
                     && c.isSessionOnly() == cookie.isSessionOnly()
             }) {
@@ -104,6 +104,14 @@ fn identity(cookie: &NSHTTPCookie) -> (String, String, String) {
         cookie.path().to_string(),
         cookie.name().to_string(),
     )
+}
+
+fn same_site(cookie: &NSHTTPCookie) -> String {
+    // Older Foundation returns nil for None; WebKit treats both forms as None.
+    cookie
+        .sameSitePolicy()
+        .map(|policy| policy.to_string().to_ascii_lowercase())
+        .unwrap_or_else(|| "none".into())
 }
 
 fn native(cookie: &Cookie) -> Result<Retained<NSHTTPCookie>, String> {
@@ -149,10 +157,7 @@ fn native(cookie: &Cookie) -> Result<Retained<NSHTTPCookie>, String> {
     }
     let parsed = unsafe { NSHTTPCookie::cookieWithProperties(&properties) }
         .ok_or("native cookie conversion failed")?;
-    let actual_policy = parsed
-        .sameSitePolicy()
-        .map(|p| p.to_string().to_ascii_lowercase());
-    let policy_matches = actual_policy.as_deref() == policy;
+    let policy_matches = same_site(&parsed) == policy.unwrap_or("none");
     for (preserved, attribute) in [
         (policy_matches, "SameSite"),
         (parsed.domain().to_string() == cookie.host, "domain"),
@@ -196,14 +201,18 @@ mod tests {
         let parsed = native(&cookie).unwrap();
         assert!(!parsed.isSecure() && !parsed.isHTTPOnly());
         assert!(parsed.isSessionOnly());
-        let unsupported_expiry = Cookie {
+        let long_expiry = Cookie {
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1000)),
             ..cookie
         };
-        assert!(
-            native(&unsupported_expiry).is_err(),
-            "Foundation clamps expiration to its maximum cookie lifetime"
-        );
+        // Foundation versions that clamp long lifetimes must reject the conversion.
+        match native(&long_expiry) {
+            Ok(parsed) => assert_eq!(
+                parsed.expiresDate().unwrap().timeIntervalSince1970() as i64,
+                long_expiry.expires_at.unwrap().timestamp()
+            ),
+            Err(error) => assert_eq!(error, "native cookie conversion cannot preserve expiry"),
+        }
     }
     #[test]
     fn native_conversion_preserves_security_scope_and_expiry() {
