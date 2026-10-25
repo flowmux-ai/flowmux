@@ -1176,13 +1176,35 @@ fn build_quit_dialog() -> (adw::AlertDialog, oneshot::Receiver<bool>) {
     let (tx, rx) = oneshot::channel::<bool>();
     let tx_cell: Rc<Cell<Option<oneshot::Sender<bool>>>> = Rc::new(Cell::new(Some(tx)));
     let tx_for_resp = tx_cell.clone();
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_, response| {
         if let Some(tx) = tx_for_resp.take() {
             let _ = tx.send(response == "quit");
         }
-        dialog.close();
     });
     (dialog, rx)
+}
+
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) async fn check_quit_dialog(app: &adw::Application) {
+    for response in ["quit", "cancel"] {
+        let (dialog, rx) = build_quit_dialog();
+        dialog.emit_by_name::<()>("response", &[&response]);
+        assert_eq!(rx.await.unwrap(), response == "quit");
+    }
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .default_width(400)
+        .default_height(300)
+        .build();
+    window.present();
+    let (dialog, rx) = build_quit_dialog();
+    dialog.present(Some(&window));
+    gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+    assert!(dialog.close());
+    assert!(!rx.await.unwrap(), "dismissing the dialog cancels quitting");
+    assert!(window.is_visible());
+    window.destroy();
+    println!("MACOS_QUIT_DIALOG_RESPONSE_OK");
 }
 
 fn make_copy_action(

@@ -91,6 +91,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
     crate::ui::browser_control::check_controls();
+    crate::keybindings::check_quit_dialog(app).await;
+    if std::env::var_os("FLOWMUX_QUIT_DIALOG_SMOKE_ONLY").is_some() {
+        return;
+    }
     if std::env::var_os("FLOWMUX_BROWSER_CHROME_SMOKE_ONLY").is_some() {
         crate::ui::browser_chrome::tests::check().await;
         return;

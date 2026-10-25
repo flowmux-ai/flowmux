@@ -26,7 +26,8 @@ jobs:
   build:
     name: Build linux-x86_64
     needs: license-audit
-    runs-on: ubuntu-latest
+    # Keep distributed binaries compatible with the oldest supported native Ubuntu.
+    runs-on: ubuntu-24.04
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
@@ -168,7 +169,7 @@ jobs:
             cargo-release-macos-${{ runner.arch }}-
 
       - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja
+        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja ffmpeg
 
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
