@@ -472,6 +472,10 @@ pub(crate) fn pointer(
     if !matches!(action, PointerAction::Hover) && !window.isKeyWindow() {
         // Otherwise AppKit can consume the first click to activate the window.
         window.makeKeyAndOrderFront(None);
+        let mtm = objc2::MainThreadMarker::new().ok_or("pointer input requires the main thread")?;
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
     }
     let mut events = vec![motion];
     if let Some(end) = drag_points.last() {
@@ -493,7 +497,7 @@ pub(crate) fn pointer(
         }
     }
     POINTER_SEQUENCE_ACTIVE.with(|active| active.set(true));
-    Rc::new(PointerSequence {
+    let sequence = Rc::new(PointerSequence {
         web: web.retain(),
         window,
         events: RefCell::new(events.into_iter()),
@@ -501,8 +505,9 @@ pub(crate) fn pointer(
         pressed: Cell::new(false),
         requires_focus: !matches!(action, PointerAction::Hover),
         can_continue: Box::new(can_continue),
-    })
-    .send_next();
+    });
+    // Give AppKit's activation request a turn before checking native window focus.
+    after_native_input(Box::new(move || sequence.send_next()));
     Ok(())
 }
 

@@ -413,14 +413,23 @@ pub(crate) fn smoke() {
     other.activate().unwrap();
     assert!(other.window.isKeyWindow());
     assert!(!browser.window.isKeyWindow());
+    let dispatch_started = Rc::new(Cell::new(false));
+    let dispatched = dispatch_started.clone();
     // The production pointer path addresses its own NSWindow while another is key.
     crate::macos_input::pointer(
         &browser.web,
         flowmux_browser::input::PointerAction::Click,
         NSPoint::new(30.0, 15.0),
-        || true,
+        move || {
+            dispatched.set(true);
+            true
+        },
     )
     .unwrap();
+    assert!(
+        !dispatch_started.get(),
+        "pointer dispatch must let AppKit settle window activation first"
+    );
     assert!(browser.window.isKeyWindow());
     let deadline = Instant::now() + Duration::from_secs(5);
     while crate::macos_input::pointer_pending()
@@ -432,6 +441,7 @@ pub(crate) fn smoke() {
         );
         pump();
     }
+    assert!(dispatch_started.get());
     crate::macos_input::press_key(
         &browser.web,
         &flowmux_browser::input::KeyStroke::parse("End").unwrap(),
