@@ -83,7 +83,9 @@ Opt-in Linux WebKitWebDriver and macOS native WebDriver sessions use separate
 ephemeral browser windows;
 see [WebKit automation](docs/webkit-automation.md) for runtime requirements and
 the native-input smoke test. Pane CLI `type` uses native editing; key and pointer
-commands use native input on macOS and X11 and require the visible active tab.
+commands use native input on macOS and X11, or the consent-based RemoteDesktop
+portal on Wayland, and require the visible active tab. Wayland also requires
+window focus and, for pointer commands, the pointer over that window.
 
 The image viewer loads ThorVG dynamically through `ui/thorvg.rs`; missing
 ThorVG affects the viewer, not the application build. The helper script builds

@@ -88,7 +88,7 @@ unsafe fn symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, String> {
     }
 }
 
-enum Input<'a> {
+pub(super) enum Input<'a> {
     Key(&'a KeyStroke),
     Pointer(PointerAction, &'a PointerTarget),
 }
@@ -110,8 +110,11 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
         return Err("native input requires a visible browser tab".into());
     }
     let display = view.display();
+    if display.type_().name() == "GdkWaylandDisplay" {
+        return super::portal_input::send(view, input);
+    }
     if display.type_().name() != "GdkX11Display" {
-        return Err("native input requires an X11 display; Wayland input is not enabled".into());
+        return Err("native input requires an X11 or Wayland display".into());
     }
     let surface = view
         .native()
@@ -150,6 +153,8 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
         let grab_server: DisplayCall = symbol(&xlib, b"XGrabServer\0")?;
         let focus: unsafe extern "C" fn(*mut c_void, c_ulong, c_int, c_ulong) -> c_int =
             symbol(&xlib, b"XSetInputFocus\0")?;
+        let raise: unsafe extern "C" fn(*mut c_void, c_ulong) -> c_int =
+            symbol(&xlib, b"XRaiseWindow\0")?;
         let fake: FakeKey = symbol(&xtest, b"XTestFakeKeyEvent\0")?;
         let fake_button: FakeKey = symbol(&xtest, b"XTestFakeButtonEvent\0")?;
         let motion: unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_ulong) -> c_int =
@@ -192,6 +197,8 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
                 "ArrowRight" => "Right",
                 "ArrowUp" => "Up",
                 "ArrowDown" => "Down",
+                "PageUp" => "Page_Up",
+                "PageDown" => "Page_Down",
                 name => name,
             };
             let key = if name.chars().count() == 1 {
@@ -305,6 +312,8 @@ fn send(view: &webkit6::WebView, input: Input<'_>) -> Result<(), String> {
                 }
             }
         }
+        // A grab can deliver events to an obscured window without activating CSS hover.
+        raise(dpy, window);
         focus(dpy, window, 2, 0);
         if let Input::Pointer(action, target) = input {
             let to_root = |target: &PointerTarget| -> Result<(c_int, c_int), String> {

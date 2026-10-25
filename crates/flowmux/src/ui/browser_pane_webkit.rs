@@ -11,6 +11,8 @@ use adw::prelude::*;
 use flowmux_browser::{BrowserProfile, RefScope, RefStore};
 #[path = "browser_pane_webkit/input.rs"]
 mod input;
+#[path = "browser_pane_webkit/portal_input.rs"]
+mod portal_input;
 use flowmux_config::options::BrowserEngine;
 use flowmux_core::{PaneId, SurfaceId};
 use std::cell::{Cell, RefCell};
@@ -77,14 +79,20 @@ impl BrowserPane {
         let libraries = ["libX11.so.6", "libXi.so.6", "libXtst.so.6"]
             .iter()
             .all(|name| unsafe { libloading::Library::new(name) }.is_ok());
+        let wayland_reason = (display == "GdkWaylandDisplay")
+            .then(portal_input::reason)
+            .flatten();
         serde_json::json!({
             "engine": "WebKitGTK",
             "storage_ephemeral": self.web_view.network_session().is_some_and(|session| session.is_ephemeral()),
             "engine_version": format!("{}.{}.{}", webkit6::functions::major_version(), webkit6::functions::minor_version(), webkit6::functions::micro_version()),
             "display_backend": display,
-            "native_input_supported": display == "GdkX11Display" && libraries,
+            "native_input_supported": (display == "GdkWaylandDisplay" && portal_input::supported()) || (display == "GdkX11Display" && libraries),
             "native_text_requires_visible_tab": false,
-            "native_input_reason": if display != "GdkX11Display" { Some("requires_x11") }
+            "native_input_error": if display == "GdkWaylandDisplay" { portal_input::error() } else { None },
+            "native_input_permission_scope": if display == "GdkWaylandDisplay" { Some("desktop") } else { None },
+            "native_input_reason": if display == "GdkWaylandDisplay" { wayland_reason }
+                else if display != "GdkX11Display" { Some("unsupported_display") }
                 else if !libraries { Some("native_libraries_missing") } else { None },
             "document_capture_supported": true,
             "navigation_enabled": self.navigation_enabled.get(),

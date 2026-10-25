@@ -3799,25 +3799,29 @@ fn run_browser_js(
     ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
     ok_string_required: bool,
 ) {
-    let cell = std::cell::Cell::new(Some(ack));
+    let reply: Box<dyn FnOnce(Result<BrowserActionResult, String>)> = if ok_string_required {
+        Box::new(browser_commands::native_input_reply(browser, ack))
+    } else {
+        Box::new(move |result| {
+            let _ = ack.send(result);
+        })
+    };
     browser.evaluate_automation_js(js, move |result| {
-        if let Some(ack) = cell.take() {
-            let mapped = match result {
-                Ok(s) => {
-                    if ok_string_required {
-                        if s == "ok" {
-                            Ok(BrowserActionResult::Ok)
-                        } else {
-                            Err(s)
-                        }
+        let mapped = match result {
+            Ok(s) => {
+                if ok_string_required {
+                    if s == "ok" {
+                        Ok(BrowserActionResult::Ok)
                     } else {
-                        Ok(BrowserActionResult::String(s))
+                        Err(s)
                     }
+                } else {
+                    Ok(BrowserActionResult::String(s))
                 }
-                Err(e) => Err(e),
-            };
-            let _ = ack.send(mapped);
-        }
+            }
+            Err(e) => Err(e),
+        };
+        reply(mapped);
     });
 }
 
@@ -4099,7 +4103,10 @@ pub(crate) fn browser_wait_js(condition: &BrowserWaitCondition) -> String {
                 State::Unchecked => "!!el && (el.checked === false || el.getAttribute('aria-checked') === 'false')",
                 State::Selected => "!!el && (el.selected === true || el.getAttribute('aria-selected') === 'true')",
                 State::Expanded => "!!el && el.getAttribute('aria-expanded') === 'true'",
-                State::Editable => "!!el && !el.matches(':disabled') && !el.closest('[inert],[aria-disabled=true]') && (el.isContentEditable || (el.matches('input,textarea') && !['button','checkbox','color','file','hidden','image','radio','range','reset','submit'].includes(el.type) && !el.readOnly))",
+                State::Editable => {
+                    let enabled = flowmux_browser::scripts::is_enabled_selector(selector);
+                    return format!("(({enabled}) === 'true') && (() => {{ const el = document.querySelector({}); return el.isContentEditable || (el.matches('input,textarea') && !['button','checkbox','color','file','hidden','image','radio','range','reset','submit'].includes(el.type) && !el.readOnly); }})()", literal(selector));
+                }
                 State::Focused => "!!el && document.activeElement === el",
                 State::Invalid => "!!el && (el.matches(':invalid') || el.getAttribute('aria-invalid') === 'true')",
             };

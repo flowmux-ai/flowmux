@@ -547,6 +547,23 @@ def exercise_regressions(cli, url, root):
             xlib.XSync(display, 0)
             xlib.XCloseDisplay(display)
     assert not failures, failures
+    # DOM actions must finish delivery when a modal pauses their JavaScript.
+    evaluate("document.body.innerHTML='<input id=f aria-label=Dialog><input id=next aria-label=Next>';f.oninput=()=>window.answer=confirm('fill?');'ready'")
+    snap = json.loads(browser("snapshot")["browser_result"]["value"])
+    refs = {meta["name"]: ref for ref, meta in snap["refs"].items()}
+    for operation in [("fill", refs["Dialog"], "first"), ("form", json.dumps([
+            {"target": refs["Dialog"], "action": {"fill": "second"}},
+            {"target": refs["Next"], "action": {"fill": "must not run"}}]))]:
+        result = browser(*operation)
+        pending = json.loads(browser("dialog", "status")["browser_result"]["value"])["dialog"]
+        assert pending and pending["message"] == "fill?", result
+        if operation[0] == "form":
+            rows = json.loads(result["browser_result"]["value"])["fields"]
+            assert [row["status"] for row in rows] == ["dialog_pending", "not_run"], rows
+        accept = operation[0] == "form"
+        browser("dialog", "accept" if accept else "dismiss", pending["id"])
+        assert browser("wait", "--js", "window.answer===" + str(accept).lower())["browser_bool_result"]["value"]
+        assert evaluate("next.value") == ""
     print("BROWSER_P1_REGRESSIONS_OK", flush=True)
 
 
@@ -623,6 +640,10 @@ def exercise(cli, url, root):
     child = next(event["identifier"] for event in receipt["events"] if event["kind"] == "popup")
     assert browser("url", "--surface", child)["browser_result"]["value"] == url + "popup"
     cli("close-tab", child, "--pane", pane)
+    evaluate("document.body.insertAdjacentHTML('beforeend','<input type=range aria-label=Volume><input type=number aria-label=Quantity>');'roles'")
+    for role, name in [("slider", "Volume"), ("spinbutton", "Quantity")]:
+        found = json.loads(browser("find", "--role", role, "--name", name, "--exact")["browser_result"]["value"])
+        assert len(found["refs"]) == 1, found
     print("BROWSER_SEMANTIC_WAIT_SECURITY_OK", flush=True)
     browser("navigate", url)
     assert browser("wait", "--url", url)["browser_bool_result"]["value"]
@@ -868,7 +889,7 @@ def exercise(cli, url, root):
     dialog("dismiss", pending["id"])
     assert browser("wait", "--js", "dialogResult === undefined")["browser_bool_result"]["value"]
     assert dialog() is None
-    evaluate("document.body.insertAdjacentHTML('beforeend','<button id=dialogButton>Click dialog</button>'); dialogButton.onclick=()=>{window.dialogResult=confirm('Clicked?')}; 'ready'")
+    evaluate("document.body.insertAdjacentHTML('beforeend','<button id=dialogButton>Click dialog</button>'); dialogButton.onclick=()=>{window.dialogResult=confirm('Clicked?')}; window.blockDialogKeyUp=e=>{if(e.key==='Enter')e.stopImmediatePropagation()}; window.addEventListener('keyup',blockDialogKeyUp,true); 'ready'")
     dialog_button = reference(snapshot(), "Click dialog")
     for action in ("click", "press"):
         for accept in (True, False):
@@ -881,7 +902,9 @@ def exercise(cli, url, root):
             assert pending and pending["kind"] == "confirm" and pending["message"] == "Clicked?", pending
             dialog("accept" if accept else "dismiss", pending["id"])
             assert browser("wait", "--js", f"dialogResult === {str(accept).lower()}")["browser_bool_result"]["value"]
-    evaluate("dialogButton.remove(); 'removed'")
+            if action == "press":
+                browser("press", "Tab")
+    evaluate("window.removeEventListener('keyup',blockDialogKeyUp,true); dialogButton.remove(); 'removed'")
     evaluate("mutations.length=0; 'reset fixture changes'")
     print("PASS: page dialogs require matching IDs, complete native clicks/keys and preserve confirm/prompt/alert replies", flush=True)
     def chooser(*args, **kwargs):
@@ -1044,6 +1067,7 @@ def exercise(cli, url, root):
     browser("fill", nested_field, "hidden", error=True)
     evaluate("frame.style.opacity='1'; frame.inert=true; 'inert frame'")
     assert not browser("is-enabled", nested_field)["browser_bool_result"]["value"]
+    assert not browser("wait", "--condition", json.dumps({"Element": {"target": nested_field, "expect": {"State": "editable"}}}), "--timeout-ms", "100")["browser_bool_result"]["value"]
     browser("fill", nested_field, "inert", error=True)
     evaluate("frame.inert=false; window.frameCover=document.createElement('div'); frameCover.style='position:fixed;inset:0;z-index:99999'; document.body.append(frameCover); 'covered frame'")
     browser("click", nested_button, error=True)
@@ -1071,6 +1095,7 @@ def exercise(cli, url, root):
     assert browser("value", shadow_field)["browser_result"]["value"] == "inside shado"
     evaluate("shadowHost.inert=true; 'inert host'")
     assert not browser("is-enabled", shadow_field)["browser_bool_result"]["value"]
+    assert not browser("wait", "--condition", json.dumps({"Element": {"target": shadow_field, "expect": {"State": "editable"}}}), "--timeout-ms", "100")["browser_bool_result"]["value"]
     browser("fill", shadow_field, "blocked", error=True)
     evaluate("shadowHost.inert=false; shadowHost.style.opacity='0'; 'hidden host'")
     assert not browser("is-visible", shadow_field)["browser_bool_result"]["value"]
@@ -1301,6 +1326,9 @@ def exercise(cli, url, root):
     assert evaluate("String(keyfield.selectionStart)+':'+keyfield.selectionEnd") == "2:3"
     browser("press", "Delete")
     assert evaluate("keyfield.value") == "relaced"
+    for key in ("PageUp", "PageDown"):
+        browser("press", key)
+        assert json.loads(evaluate("JSON.stringify(keyEvents.at(-1).slice(0,2))")) == [key, True]
     print("PASS: native Enter, Tab, reverse Tab, select-all and canceled keys", flush=True)
 
     evaluate("document.body.insertAdjacentHTML('beforeend', '<button id=pointer>Native pointer</button>'); window.pointerEvents=[]; for(const type of ['pointerdown','pointerup','mousedown','mouseup','click','dblclick']) pointer.addEventListener(type,e=>pointerEvents.push([e.type,e.isTrusted,e.buttons])); 'pointer'")

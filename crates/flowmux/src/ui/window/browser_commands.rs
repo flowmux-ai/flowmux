@@ -343,10 +343,14 @@ impl WindowController {
                         } else if pending_dialog {
                             Some("dialog_pending")
                         } else {
-                            None
+                            report["native_input_reason"].as_str()
                         };
                         let next_action = match reason {
-                            Some("requires_x11") => Some("Native keys and pointer input require X11; this session cannot send them"),
+                            Some("wayland_portal_checking") => Some("Wait for the RemoteDesktop support check, then run diagnose again; no permission dialog has been opened"),
+                            Some("wayland_portal_unavailable") => Some("Install or enable a RemoteDesktop portal backend for this desktop, then retry an input command. Native text input remains available"),
+                            Some("wayland_permission_pending") => Some("Answer the pending desktop permission dialog, then explicitly retry the input command; no input is queued"),
+                            Some("wayland_permission_required") => Some("Run an input command to request desktop permission, approve the Flowmux remote input dialog, then retry. Focus Flowmux and place the pointer over its window."),
+                            Some("wayland_portal_failed") => Some("Inspect the input error and RemoteDesktop portal availability; retry explicitly to request permission again"),
                             Some("native_libraries_missing") => Some("Install the X11, XInput and XTest runtime libraries"),
                             Some("navigation_disabled") => Some("Open a new browser or reconnect the expired preview"),
                             Some("inactive_tab" | "tab_not_visible") => Some("Show the target workspace and browser tab before native input"),
@@ -996,7 +1000,7 @@ impl WindowController {
     }
 }
 
-fn native_input_reply(
+pub(super) fn native_input_reply(
     browser: &crate::ui::browser_pane::BrowserPane,
     ack: oneshot::Sender<Result<BrowserActionResult, String>>,
 ) -> impl FnOnce(Result<BrowserActionResult, String>) {
@@ -1008,6 +1012,10 @@ fn native_input_reply(
         let mut reply = dialog_reply.borrow_mut();
         if pending_input.has_pending_dialog() {
             if let Some(ack) = reply.take() {
+                pending_input.evaluate_automation_js(
+                    flowmux_browser::scripts::DIALOG_INPUT_COMPLETE_JS,
+                    |_| {},
+                );
                 let _ = ack.send(Ok(BrowserActionResult::Ok));
             }
         }
@@ -1334,6 +1342,11 @@ async fn run_browser_form(
         };
         let validation = match result {
             Err(error) => Err(error),
+            Ok(_) if browser.has_pending_dialog() => {
+                stopped = true;
+                results.push(serde_json::json!({"target":field.target,"status":"dialog_pending"}));
+                continue;
+            }
             Ok(_) => async {
                 let script = ref_script(browser, &field.target, |_| {
                     let expected = match &field.action {

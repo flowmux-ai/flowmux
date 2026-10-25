@@ -43,9 +43,27 @@ availability, task state and recent native events. `environment_ready` only
 checks environment prerequisites. Input still needs an actionable target or a
 focused editable element.
 
-- Linux key/pointer injection requires X11 and the X11/XInput/XTest libraries.
-  Wayland reports `requires_x11`. Native text editing remains available on
-  Wayland, but this does not enable key or pointer injection.
+- X11 key/pointer injection requires the X11/XInput/XTest libraries.
+- Wayland key/pointer injection uses the desktop's RemoteDesktop portal. The
+  support check runs without opening a permission dialog. `wayland_portal_checking`
+  means the check is pending; `wayland_portal_unavailable` means the desktop does
+  not expose both keyboard and pointer control. `native_input_error` includes the
+  cause. Once `wayland_permission_required` appears, run an input command to
+  request permission, approve remote interaction in the desktop dialog and retry.
+  `wayland_permission_pending` means answer the existing dialog;
+  `wayland_portal_failed` reports denial, revocation or a disconnected portal.
+  An explicit input retry rechecks an unavailable backend. A denied request
+  never replays the original input. No permission or restore token is persisted.
+  This permission covers desktop control, not just one browser tab. Flowmux
+  checks that its window has focus; pointer commands also require the pointer
+  to be over that window. Keep the window focused and avoid simultaneous manual
+  input until the command finishes. The portal backend must support keyboard
+  and pointer notifications (for example, xdg-desktop-portal-gnome).
+  xdg-desktop-portal-wlr alone does not provide RemoteDesktop. Installing a
+  file-chooser or screen-sharing portal does not imply native input support.
+  Release held modifiers/buttons and turn off Caps Lock before key input;
+  Flowmux rejects these conditions without changing the user's lock state.
+  `type` uses native text editing and does not need this permission.
 - macOS native input requires the visible active browser tab. Document capture
   depends on the installed WebKit snapshot API; older systems can use viewport
   capture.
@@ -162,10 +180,21 @@ runtime path. It verifies ownership, handoff cancellation, receipts, timeout
 non-repetition, popup/dialog events, active/inactive diagnostics and missing
 ffmpeg, followed by existing browser-control scenarios.
 
-The P1 regressions cover native text opening a confirm dialog and fixed-element
-capture after scrolling on both platforms. Linux CI also enables
+The P1 regressions cover native text opening a confirm dialog, subsequent input
+when a modal consumes keyup, and fixed-element capture after scrolling on both
+platforms. Linux CI also enables
 `FLOWMUX_TEST_X11_LOCKS=1` on its private Xvfb display to check logical key case
 and restoration of Caps Lock. Do not enable that lock test on a user's display.
+
+On Linux with GNOME Shell, xdg-desktop-portal-gnome, Xvfb, xwininfo, xdotool and
+ffmpeg installed, run `python3 -B scripts/test-browser-wayland.py target/debug/flowmux`.
+It creates its own nested compositor, D-Bus session and state directories,
+declines and grants permission in that test desktop, checks trusted input, and
+runs the browser-control scenarios without a post-picker refocus workaround.
+It checks native picker selection/cancel, early CLI completion, backend request
+cleanup and a portal configured without RemoteDesktop. It never clicks consent
+on the user's desktop. This runner covers GNOME; KDE, wlroots and macOS need
+separate native runs on those platforms.
 
 ## Find candidates and limit snapshots
 
@@ -259,6 +288,13 @@ the requesting frame origin; Linux marks that frame origin unavailable and shows
 the top-level origin. Permission dialogs include scheme/host/port when exposed
 by the backend, use a deny default, and omit URL credentials/path/query.
 
+On Linux, Flowmux owns the file-chooser portal request and waits for its Close
+acknowledgement before completing a CLI selection or cancellation. This handles
+the GTK 4.14/GNOME race where cancellation reaches a backend before it exports the
+picker request. Only that failed Close is retried; selecting files is not replayed.
+A close failure returns an error instead of delivering the automated selection.
+When no file-chooser portal is available, the GTK picker remains the fallback.
+
 The directory scope is an explicit local-client grant, not a sandbox against
 malicious programs already running as the same user. Such programs can choose a
 broader root, modify files after validation or use raw eval/other OS APIs. No
@@ -334,7 +370,7 @@ command does. `fill` supports text inputs and textareas; native rich-editor
 editing remains a separate `type` operation. Password fields require a separate
 manual or explicitly chosen secret-input workflow and are rejected by `form`.
 
-The response contains a `fields` array with `verified`, `invalid`, `failed`, or
+The response contains a `fields` array with `verified`, `invalid`, `failed`, `dialog_pending`, or
 `not_run` for each target and `submit_command_sent: false`. Failed fields do not
 undo earlier changes. Ordinary field failures allow later fields to run; handoff,
 navigation, a pending dialog, an input timeout, or the 20-second batch deadline
@@ -342,6 +378,10 @@ stops remaining fields. Correct
 only the failed/unexecuted fields using fresh refs if the page changed. There is
 no automatic retry or submit step. Page input/change handlers can themselves send
 requests, so this is not a transaction or a promise of no site-side effects.
+
+A `dialog_pending` field has received input but has not been verified. Answer
+the dialog with `browser dialog`, inspect the field's resulting value, and then
+continue any `not_run` fields. Do not automatically repeat the pending field.
 
 ## Outcomes inside frames and open shadow roots
 

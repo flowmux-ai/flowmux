@@ -162,13 +162,22 @@ the required state before retrying; commands do not retry side effects.
 `type` uses native editing at the current selection, including contenteditable,
 and reports canceled input. It emits native input events without artificial
 per-character key events. On macOS the target tab must be visible.
-`press` sends native keys to a visible tab on macOS and X11, including Enter,
+`press` sends native keys to a visible tab on macOS, X11 and Wayland, including Enter,
 Tab, Shift+Tab and Control+a (macOS: Meta+a). Page key handlers can cancel their
 default action. Completion confirms delivery, so still check the expected page
-state. Wayland native keys are not enabled yet and return an error. Use `type`
+state. Wayland first checks whether the desktop RemoteDesktop portal supports
+keyboard and pointer input. Run `diagnose` until the check completes, then run an
+input command to request permission. Approve remote interaction and explicitly retry.
+The grant covers desktop control, not just this tab. Keep Flowmux focused and
+the pointer over its window for pointer commands; avoid concurrent manual input.
+Release held modifiers/buttons and turn off Caps Lock before Wayland key input.
+Use `diagnose` to distinguish checking/unavailable portal support from required,
+pending or failed permission; `native_input_error` gives the cause. Pending means
+answer the existing desktop dialog. xdg-desktop-portal-wlr alone does not implement
+RemoteDesktop; a file-chooser or screen-sharing portal is not sufficient. Use `type`
 for Unicode text or characters missing from the current keyboard layout.
-`click`, `dblclick` and `hover` also require the visible active tab on macOS or
-X11. They wait for two stable rendering frames, reject covered targets and send
+`click`, `dblclick` and `hover` also require the visible active tab. They wait
+for two stable rendering frames, reject covered targets and send
 native pointer events. `hover` activates CSS hover; double-click includes its
 two clicks. A blocked or moving target returns an error without retrying.
 Key and pointer completion waits for synchronous event handlers and native

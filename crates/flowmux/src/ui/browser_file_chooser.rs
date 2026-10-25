@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use gtk::{gio, glib, prelude::*};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+
+#[cfg(target_os = "linux")]
+mod portal;
 
 #[derive(Clone, Default)]
 pub(crate) struct FileChoosers {
@@ -17,7 +20,7 @@ struct PendingChooser {
     directories: bool,
     source: String,
     cancellable: gio::Cancellable,
-    closed: Rc<Cell<bool>>,
+    closed: Rc<RefCell<Option<Result<(), String>>>>,
     reply: Option<Box<dyn FnOnce(Option<Vec<PathBuf>>)>>,
 }
 
@@ -159,13 +162,19 @@ impl FileChoosers {
                     .take()
                     .expect("validated file chooser");
                 pending.cancellable.cancel();
-                glib::future_with_timeout(std::time::Duration::from_secs(5), async {
-                    while !pending.closed.get() {
+                glib::future_with_timeout(std::time::Duration::from_secs(15), async {
+                    while pending.closed.borrow().is_none() {
                         glib::timeout_future(std::time::Duration::from_millis(10)).await;
                     }
                 })
                 .await
                 .map_err(|_| "file chooser UI did not finish closing")?;
+                pending
+                    .closed
+                    .borrow()
+                    .as_ref()
+                    .expect("closed chooser")
+                    .clone()?;
                 pending.finish(files);
             }
         }
@@ -222,7 +231,7 @@ impl FileChoosers {
             reply(files);
         };
         let cancellable = gio::Cancellable::new();
-        let closed = Rc::new(Cell::new(false));
+        let closed = Rc::new(RefCell::new(None));
         self.pending.replace(Some(PendingChooser {
             id: id.clone(),
             multiple,
@@ -233,8 +242,12 @@ impl FileChoosers {
             reply: Some(Box::new(reply)),
         }));
         let state = Rc::downgrade(&self.pending);
-        let complete = move |files: Option<Vec<PathBuf>>| {
-            closed.set(true);
+        let complete = move |result: Result<Option<Vec<PathBuf>>, String>| {
+            closed.replace(Some(result.as_ref().map(|_| ()).map_err(Clone::clone)));
+            if let Err(error) = &result {
+                tracing::warn!(%error, "browser file chooser failed");
+            }
+            let files = result.ok().flatten();
             if let Some(state) = state.upgrade() {
                 let pending = state.borrow_mut().take_if(|pending| pending.id == id);
                 if let Some(pending) = pending {
@@ -244,6 +257,47 @@ impl FileChoosers {
                 }
             }
         };
+        let parent = parent.clone();
+        let dialog = dialog.clone();
+        glib::spawn_future_local(async move {
+            #[cfg(target_os = "linux")]
+            match portal::connection().await {
+                Ok(Some(bus)) => {
+                    complete(
+                        portal::open(&bus, &parent, &dialog, multiple, directories, &cancellable)
+                            .await,
+                    );
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    complete(Err(error));
+                    return;
+                }
+            }
+            Self::present_gtk(
+                &parent,
+                &dialog,
+                multiple,
+                directories,
+                &cancellable,
+                move |files| complete(Ok(files)),
+            );
+        });
+    }
+
+    fn present_gtk(
+        parent: &gtk::Window,
+        dialog: &gtk::FileDialog,
+        multiple: bool,
+        directories: bool,
+        cancellable: &gio::Cancellable,
+        complete: impl FnOnce(Option<Vec<PathBuf>>) + 'static,
+    ) {
+        if cancellable.is_cancelled() {
+            complete(None);
+            return;
+        }
         if multiple {
             let callback = move |result: Result<gio::ListModel, glib::Error>| {
                 complete(result.ok().and_then(|files| {
@@ -254,9 +308,9 @@ impl FileChoosers {
                 }));
             };
             if directories {
-                dialog.select_multiple_folders(Some(parent), Some(&cancellable), callback);
+                dialog.select_multiple_folders(Some(parent), Some(cancellable), callback);
             } else {
-                dialog.open_multiple(Some(parent), Some(&cancellable), callback);
+                dialog.open_multiple(Some(parent), Some(cancellable), callback);
             }
         } else {
             let callback = move |result: Result<gio::File, glib::Error>| {
@@ -268,9 +322,9 @@ impl FileChoosers {
                 );
             };
             if directories {
-                dialog.select_folder(Some(parent), Some(&cancellable), callback);
+                dialog.select_folder(Some(parent), Some(cancellable), callback);
             } else {
-                dialog.open(Some(parent), Some(&cancellable), callback);
+                dialog.open(Some(parent), Some(cancellable), callback);
             }
         }
     }
@@ -291,11 +345,38 @@ mod tests {
             multiple: false,
             directories: false,
             cancellable: cancellable.clone(),
-            closed: Rc::new(Cell::new(false)),
+            closed: Rc::new(RefCell::new(None)),
             reply: Some(Box::new(move |files| captured.borrow_mut().push(files))),
         };
         drop(pending);
         assert!(cancellable.is_cancelled());
+        assert_eq!(*replies.borrow(), [None]);
+    }
+
+    #[test]
+    fn close_failure_never_delivers_automated_files() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("upload.txt");
+        std::fs::write(&file, "fixture").unwrap();
+        let replies = Rc::new(RefCell::new(Vec::new()));
+        let captured = replies.clone();
+        let choosers = FileChoosers::default();
+        choosers.pending.replace(Some(PendingChooser {
+            id: "test".into(),
+            source: "test".into(),
+            multiple: false,
+            directories: false,
+            cancellable: gio::Cancellable::new(),
+            closed: Rc::new(RefCell::new(Some(Err("portal close failed".into())))),
+            reply: Some(Box::new(move |files| captured.borrow_mut().push(files))),
+        }));
+        let action = flowmux_ipc::protocol::BrowserFileChooserAction::Select {
+            id: "test".into(),
+            paths: vec![file],
+            root: Some(root.path().into()),
+        };
+        let result = glib::MainContext::new().block_on(choosers.control(&action));
+        assert_eq!(result.unwrap_err(), "portal close failed");
         assert_eq!(*replies.borrow(), [None]);
     }
 

@@ -70,6 +70,8 @@ pub const SNAPSHOT_JS: &str = r#"
       if (ty === 'radio') return 'radio';
       if (ty === 'submit' || ty === 'button' || ty === 'reset') return 'button';
       if (ty === 'search') return 'searchbox';
+      if (ty === 'range') return 'slider';
+      if (ty === 'number') return 'spinbutton';
       return 'textbox';
     }
     if (/^h[1-6]$/.test(t)) return 'heading';
@@ -612,7 +614,7 @@ return await new Promise(resolve => {
         clearTimeout(completionTimer);
         clearInterval(hoverPoll);
         for (const view of state.windows) view.removeEventListener(state.event, state.listener, true);
-        delete globalThis.__flowmuxInput;
+        if (globalThis.__flowmuxInput === state) delete globalThis.__flowmuxInput;
         resolve(result);
     };
     const timer = setTimeout(() => finish('error: native pointer input completion timed out'), 10000);
@@ -622,8 +624,13 @@ return await new Promise(resolve => {
         if (state.el.isConnected && state.el.matches(':scope:hover')) finish('ok');
     }, 25) : null;
     // Capture listeners run before target handlers and native default actions.
-    state.done = () => { completionTimer ??= setTimeout(() => finish('ok'), 0); };
-    if (state.received || (state.event === 'pointermove' && state.el.matches(':scope:hover'))) state.done();
+    state.done = () => {
+        if (state.event !== 'pointermove' || state.el.matches(':scope:hover'))
+            completionTimer ??= setTimeout(() => finish('ok'), 0);
+    };
+    state.finishAfterDialog = () => finish('ok');
+    if (state.dialogObserved) state.finishAfterDialog();
+    else if (state.received || (state.event === 'pointermove' && state.el.matches(':scope:hover'))) state.done();
 });
 "#;
 
@@ -856,6 +863,16 @@ const PREPARE_KEY_INPUT_JS: &str = r#"(function() {
     return "ok";
 })()"#;
 
+/// Queued while a native page dialog is open; runs after its page handler resumes.
+pub const DIALOG_INPUT_COMPLETE_JS: &str = r#"(() => {
+    const state = globalThis.__flowmuxInput;
+    if (state) {
+        state.dialogObserved = true;
+        state.finishAfterDialog?.();
+    }
+    return 'ok';
+})()"#;
+
 pub const FINISH_KEY_INPUT_JS: &str = r#"
 const state = globalThis.__flowmuxInput;
 if (!state) throw new Error('page changed during native key input');
@@ -868,14 +885,17 @@ return await new Promise(resolve => {
             view.removeEventListener('keyup', state.listener, true);
             view.removeEventListener('keydown', state.keydown, true);
         }
-        delete globalThis.__flowmuxInput;
+        if (globalThis.__flowmuxInput === state) delete globalThis.__flowmuxInput;
         resolve(result);
     };
     const timer = setTimeout(() => finish('error: native key input completion timed out'), 10000);
     state.done = () => {
         completionTimer ??= setTimeout(() => finish(state.down?.defaultPrevented ? 'prevented' : 'ok'), 0);
     };
-    if (state.received) state.done();
+    // A modal dialog can receive keyup instead of the page; its presentation proves delivery.
+    state.finishAfterDialog = () => finish('prevented');
+    if (state.dialogObserved) state.finishAfterDialog();
+    else if (state.received) state.done();
 });
 "#;
 

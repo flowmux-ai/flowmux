@@ -9,7 +9,8 @@ This uses WebKitGTK on Linux and WKWebView on macOS, like the normal browser.
 
 This is an opt-in connection. It does not attach to existing pane
 tabs. The pane CLI has its own controls: `type` uses native editing; `press`,
-`click`, `dblclick` and `hover` use native input on macOS and X11.
+`click`, `dblclick` and `hover` use native input on macOS and X11, and the
+consent-based RemoteDesktop portal on Wayland (see [browser tasks](browser-workflow.md)).
 WebDriver owns separate windows labelled **Flowmux · WebDriver**; they are not
 CLI pane targets and are not restored with workspaces. Both `window` and `tab`
 requests create separate windows. Popups remain in the same automation session.
