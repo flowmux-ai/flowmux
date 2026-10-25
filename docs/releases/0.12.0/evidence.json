@@ -1,0 +1,64 @@
+{
+  "capture_date": "2026-10-25",
+  "platform": "macOS Apple Silicon",
+  "before": "Published v0.11.4 DMG, checksum verified",
+  "after": "0.12.0 candidate built from a87e047a plus version and release documentation changes",
+  "method": "Unedited native window captures and Flowmux browser full-document capture; isolated app profiles; local demo.html with fictional data",
+  "form": {
+    "verified_fields": 3,
+    "submit_command_sent": false,
+    "page_result": "outcome_confirmed"
+  },
+  "download": {
+    "filename": "launch-checklist.csv",
+    "state": "complete",
+    "progress": 1.0,
+    "original_bytes_match": true
+  },
+  "canvas": "Three native browser drag commands; page confirmed native pointer drag received",
+  "images": [
+    {
+      "file": "browser-after.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "5d4e6962b42c34a206384fc09b126dcd02ed3fa65d856471ba3a88d4622ca447"
+    },
+    {
+      "file": "browser-before.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "28af13d55d82d486f3d3cbfaa787665698d7b7599055962086563ad42f9bbc73"
+    },
+    {
+      "file": "browser-files-canvas.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "c4dbd84871e84aa8db6616c0804c00c06c51845ff89898f6d879e30049ea97ca"
+    },
+    {
+      "file": "browser-form.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "02bb7819de12b953a50480af90d2efc18f58903520ae55f09b6b382153ae0fbe"
+    },
+    {
+      "file": "demo-full-page.png",
+      "width": 1388,
+      "height": 2752,
+      "sha256": "b0233a2549a5a04d61aa22381c805d94cf0d8cfb514dc920ebd100eb750330fd"
+    },
+    {
+      "file": "skills-after.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "f83c6e57802769fe318a2a16c2c656e03acd4e94fa527ec3b0c3a55c2a2dfe2f"
+    },
+    {
+      "file": "skills-before.jpg",
+      "width": 72,
+      "height": 72,
+      "sha256": "8fbfd45152657e670fd7a49c168d57e59eb3d8e304bbd937791aa7eb804b611f"
+    }
+  ],
+  "license": "GPL-3.0-or-later"
+}

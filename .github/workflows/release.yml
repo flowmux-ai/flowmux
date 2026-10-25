@@ -280,6 +280,12 @@ jobs:
           tag  = os.environ["TAG"]
           repo = os.environ["REPO"]
 
+          from pathlib import Path
+          curated = Path("docs/releases") / f"{tag.removeprefix('v')}.md"
+          if curated.is_file():
+              print(curated.read_text().rstrip() + "\n")
+              raise SystemExit(0)
+
           # Compare against the selected tag, or use all reachable history if none exists.
           rev_range = f"{prev}..{tag}" if prev else tag
           log = subprocess.check_output(

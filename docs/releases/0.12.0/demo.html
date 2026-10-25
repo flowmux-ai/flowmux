@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch review · Flowmux demo</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5fa;color:#1c2844;font:15px/1.5 -apple-system,BlinkMacSystemFont,sans-serif}main{max-width:900px;margin:auto;padding:32px}header{border-bottom:1px solid #d6ddeb;margin-bottom:24px;padding-bottom:20px}.eyebrow{color:#6650bd;text-transform:uppercase;font-size:11px;letter-spacing:2px;font-weight:700}h1{font-size:34px;letter-spacing:-1px;margin:10px 0 4px}h2{font-size:18px;margin:0 0 14px}p{margin:6px 0;color:#58647c}.card{background:white;padding:24px;border:1px solid #dce2ef;border-radius:16px;margin-top:18px;box-shadow:0 8px 24px #25324a05}.number{font-size:12px;background:#eee9ff;color:#6145b4;border-radius:7px;padding:5px 8px;margin-right:8px}label{display:block;font-size:12px;font-weight:600;margin:12px 0 5px}input,select{font:inherit;width:100%;padding:10px 12px;border:1px solid #c7cfdf;border-radius:8px;background:#fcfdff;color:#23324f}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}button,a.download{display:inline-block;background:#694ad1;border:0;border-radius:8px;color:white;font:600 13px/1.4 -apple-system,sans-serif;padding:12px 16px;margin-top:16px;text-decoration:none;cursor:pointer}button:hover,a.download:hover{background:#5133b0}.result{padding:12px 14px;border-radius:8px;background:#edf8f3;color:#186849;margin-top:16px;font-size:13px;white-space:pre-line}.hint{font-size:12px;color:#69758d}canvas{display:block;width:100%;height:150px;background:#f5f1ff;border:1px dashed #b3a6d6;border-radius:10px;touch-action:none}footer{font-size:11px;color:#748099;margin:24px 0}.hidden{display:none}
+</style>
+<main>
+<header><div class="eyebrow">Flowmux 0.12 · Interactive example</div><h1>Launch review</h1><p>A small local website. Real browser actions, visible results.</p></header>
+<section class="card" id="review"><h2><span class="number">01</span> Prepare a review</h2>
+<form id="form"><label for="project">Project</label><input id="project" required placeholder="Project name">
+<div class="grid"><div><label for="email">Reviewer email</label><input id="email" type="email" required placeholder="reviewer@example.test"></div><div><label for="track">Release track</label><select id="track"><option value="preview">Preview</option><option value="stable">Stable</option></select></div></div>
+<button type="submit">Prepare summary</button><p class="hint">This example stays on your computer. No account or submission to a service.</p></form>
+<div id="summary" class="result hidden" role="status"></div></section>
+<section class="card" id="files"><h2><span class="number">02</span> Import &amp; export files</h2><p>Choose a sample CSV, then save a review checklist.</p><label for="upload">Sample CSV</label><input id="upload" type="file" accept=".csv"><div id="imported" class="result hidden" role="status"></div><a class="download" href="checklist.csv" download="launch-checklist.csv">Download checklist</a></section>
+<section class="card" id="canvas-card"><h2><span class="number">03</span> Draw with native input</h2><p class="hint">Drag across the canvas. The page receives the pointer movement.</p><canvas id="route" width="760" height="150" aria-label="Route canvas"></canvas><div id="drawn" class="result hidden" role="status"></div></section>
+<footer>Local demonstration page · Fictional project and contact details · No external requests</footer>
+</main>
+<script>
+document.querySelector('#form').onsubmit=e=>{e.preventDefault();const out=document.querySelector('#summary');out.textContent='Ready to review\n'+document.querySelector('#project').value+' · '+document.querySelector('#track').value+'\n'+document.querySelector('#email').value;out.classList.remove('hidden')};
+document.querySelector('#upload').onchange=async e=>{const f=e.target.files[0];if(!f)return;const rows=(await f.text()).trim().split(/\r?\n/).length-1;const out=document.querySelector('#imported');out.textContent=f.name+' · '+rows+' data rows loaded';out.classList.remove('hidden')};
+const canvas=document.querySelector('#route'),ctx=canvas.getContext('2d');let drawing=false;
+function point(e){const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height]}
+canvas.onpointerdown=e=>{drawing=true;canvas.setPointerCapture(e.pointerId);ctx.beginPath();ctx.moveTo(...point(e));ctx.strokeStyle='#7655cf';ctx.lineWidth=5;ctx.lineCap='round'};
+canvas.onpointermove=e=>{if(drawing){ctx.lineTo(...point(e));ctx.stroke()}};
+canvas.onpointerup=e=>{if(!drawing)return;drawing=false;const out=document.querySelector('#drawn');out.textContent='Route drawn · native pointer drag received';out.classList.remove('hidden')};
+</script>
+</html>
