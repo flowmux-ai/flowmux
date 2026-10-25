@@ -2,7 +2,8 @@
 use crate::Cookie;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BrowserId {
     Firefox,
     Chrome,
@@ -13,6 +14,14 @@ pub enum BrowserId {
 }
 
 impl BrowserId {
+    pub fn parse(value: &str) -> Result<Self, Error> {
+        discover_sources()
+            .into_iter()
+            .map(|s| s.id())
+            .find(|id| id.slug() == value)
+            .ok_or_else(|| Error::Import("unknown source browser".into()))
+    }
+
     pub fn slug(self) -> &'static str {
         match self {
             BrowserId::Firefox => "firefox",
@@ -27,6 +36,8 @@ impl BrowserId {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    Import(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("sqlite: {0}")]
@@ -35,9 +46,7 @@ pub enum Error {
     NoHome,
     #[error("profile not found: {0}")]
     ProfileNotFound(PathBuf),
-    #[error(
-        "Chromium-family encrypted values are not supported until libsecret integration lands"
-    )]
+    #[error("unsupported Chromium cookie encryption version")]
     EncryptedValuesUnsupported,
 }
 

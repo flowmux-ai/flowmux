@@ -741,7 +741,7 @@ fn host_browser_entries() -> Vec<Entry> {
         .collect();
 
     let detected_summary = if detected.is_empty() {
-        "none — `flowmux import-cookies` will have nothing to read".into()
+        "none — no browser cookie databases detected".into()
     } else {
         detected.join(", ")
     };

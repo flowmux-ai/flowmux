@@ -313,6 +313,14 @@ impl WindowController {
                     | BrowserOp::Receipt { .. }
                     | BrowserOp::Control { .. }
                     | BrowserOp::Task(_) => unreachable!("unwrapped browser control"),
+                    BrowserOp::Import(options) => {
+                        let result = browser
+                            .importer
+                            .apply(options, &browser.control, revision)
+                            .await
+                            .map(|report| BrowserActionResult::String(report.to_string()));
+                        let _ = ack.send(result);
+                    }
                     BrowserOp::Form(fields) => {
                         glib::spawn_future_local(async move {
                             let result = run_browser_form(&browser, fields, revision).await;
@@ -385,8 +393,8 @@ impl WindowController {
                                 else { Some("Use viewport capture; full-document capture needs macOS 15 or newer WebKit") },
                         });
                         report["cross_origin_frames"] = serde_json::json!(false);
-                        report["cookie_import"] = serde_json::json!({"supported":false,
-                            "next_action":"Sign in inside the selected Flowmux profile; host cookie insertion is not implemented"});
+                        report["cookie_import"] = serde_json::json!({"supported":true,
+                            "next_action":"Use browser import with an explicit source and target profile"});
                         let _ = ack.send(Ok(BrowserActionResult::String(report.to_string())));
                     }
                     BrowserOp::FileChooser { action } => {

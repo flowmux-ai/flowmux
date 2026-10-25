@@ -156,9 +156,11 @@ sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
 
 flowmux checks agent hooks, agent SKILL files, the browser data dir,
 host-browser profile detection, and the daemon socket. Detection of a
-host profile does not mean its session can be imported. Firefox cookie
-extraction exists, but insertion into the embedded browser is not implemented;
-Chromium-family encrypted cookie extraction is also unavailable.
+host profile does not guarantee its login can be transferred. Use **Bookmarks →
+Import browser data…** or `flowmux browser import` to select a source profile.
+Chromium cookies require access to macOS Keychain or Linux Secret Service; newer
+unsupported encryption and KWallet-only keys report an error. See
+[browser import](browser-workflow.md#import-browser-data).
 
 ```bash
 flowmux doctor   # read-only audit; non-zero exit if anything needs fixing

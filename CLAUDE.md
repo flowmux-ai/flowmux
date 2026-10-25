@@ -76,8 +76,9 @@ text extraction. PTY and input-mode helpers are headless.
 
 Browser and editor views use WebKitGTK on Linux and WKWebView in the macOS
 sources. Neither exposes CDP. Browser engine labels select profiles; they do
-not switch to Chrome or Firefox. Host-cookie extraction is separate from
-WebView insertion, which is not implemented.
+not switch to Chrome or Firefox. Browser data import reads source profiles off the GTK thread, then inserts
+cookies into the selected WebView store and verifies them. Existing entries are
+preserved; partitioned/container cookies are skipped with reported counts.
 
 Opt-in Linux WebKitWebDriver and macOS native WebDriver sessions use separate
 ephemeral browser windows;

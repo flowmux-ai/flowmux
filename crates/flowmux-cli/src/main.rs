@@ -410,11 +410,9 @@ enum Cmd {
         name: String,
     },
 
-    /// Extract and count host-browser cookies. Firefox extraction is supported;
-    /// cookies are not yet inserted into the in-app browser session.
+    /// Legacy command. Use `browser import PANE --from SOURCE --cookies` instead.
     ImportCookies {
-        /// Browser slug. Firefox supports extraction; Chromium-family sources
-        /// currently support profile detection only.
+        /// Source browser slug for the legacy compatibility request.
         #[arg(long)]
         from: String,
         /// Optional domain substring filter.
@@ -586,6 +584,22 @@ struct InspectArgs {
 
 #[derive(Subcommand)]
 enum BrowserOp {
+    /// Import bookmarks/cookies into this tab's Flowmux profile (source stays unchanged).
+    Import {
+        pane: PaneId,
+        #[arg(long = "from", value_parser = ["chrome", "chromium", "brave", "edge", "arc", "firefox"])]
+        source: String,
+        /// Source browser profile directory; required when multiple profiles exist.
+        #[arg(long)]
+        source_profile: Option<PathBuf>,
+        #[arg(long)]
+        bookmarks: bool,
+        #[arg(long)]
+        cookies: bool,
+        /// Exact cookie domain and its subdomains.
+        #[arg(long)]
+        domain: Option<String>,
+    },
     /// Describe the owning task. Empty strings clear individual details.
     Task {
         pane: PaneId,
@@ -1215,9 +1229,18 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     match &cmd {
         Cmd::Theme { op } => return run_theme_op(op),
         Cmd::ListBrowsers => {
-            for s in flowmux_cookies::discover_sources() {
-                let detected = s.detect().is_some();
-                println!("{:8}  detected={}", s.id().slug(), detected);
+            let profiles = flowmux_cookies::profiles::discover()?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&profiles)?);
+            } else {
+                for profile in profiles {
+                    println!(
+                        "{}  {}  {}",
+                        profile.browser.slug(),
+                        profile.name,
+                        profile.path.display()
+                    );
+                }
             }
             return Ok(());
         }

@@ -370,8 +370,25 @@ mocking, full-page tracing and CDP screencast are unavailable; `record` provides
 sampled MP4 capture, and `screenshot --full-page` provides a document PNG. Use
 those supported commands when they meet the task. For a strict CDP requirement,
 explain the missing capability and keep user-visible URLs/results in Flowmux
-alongside the external tool. Cookie import returns `unimplemented` without
-reading host cookies; sign in inside the intended Flowmux profile.
+alongside the external tool.
+
+Use **Bookmarks → Import browser data…** or the targeted import command:
+
+```bash
+"$FLOWMUX_CLI" --json list-browsers
+"$FLOWMUX_CLI" browser --surface "$SURFACE" import "pane:$PANE" --from chrome \
+  --source-profile "/path/to/Chrome/Profile 1" --bookmarks --cookies --domain example.com
+```
+
+Select bookmarks and/or cookies. Source profile paths are directories; omission
+requires exactly one detected source profile. Cookie domains match exact domains
+and subdomains. Existing destination entries and source files are preserved.
+Inspect added/existing/skipped counts; expired and partitioned/container cookies
+are skipped. Chromium cookies may require OS key-store access; unsupported
+formats fail explicitly. A partial write failure is not rolled back. Imports
+honor task ownership and the selected tab's persistent/ephemeral store. The old
+untargeted `import-cookies` command only returns guidance. Some sites still need
+login because other site storage is not imported.
 
 Linux and macOS offer opt-in WebDriver sessions in separate ephemeral
 Flowmux browser windows. Linux requires a WebKitGTK runtime built with WebDriver
@@ -470,7 +487,8 @@ Folder uploads reject nested links/special files and trees exceeding 10,000
 entries. `value` and `attr value` reject password fields; raw eval and captures
 remain trusted local-client capabilities. Task IDs are not authentication. IPC
 accepts only the same OS user, and file scope is not a same-user sandbox.
-Cookie import reports unsupported without reading or claiming to inject cookies.
+Cookie import requires an explicit data selection and targets one Flowmux profile;
+never print cookie values or key-store secrets.
 
 ## SSH
 

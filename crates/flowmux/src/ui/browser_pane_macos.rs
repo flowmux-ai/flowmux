@@ -71,6 +71,7 @@ unsafe extern "C" {
 
 #[derive(Clone)]
 pub struct BrowserPane {
+    pub(crate) importer: crate::ui::browser_import::BrowserImport,
     pub(crate) control: crate::ui::browser_control::BrowserControl,
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
@@ -878,6 +879,8 @@ impl BrowserPane {
                 Rc::new(move |url| load_uri_native(&web_view, url))
             },
         );
+        let importer = crate::ui::browser_import::BrowserImport::new(profile.clone(), &web_view);
+        importer.connect(&bookmarks.import, &control);
         bookmarks.button.set_tooltip_text(Some(&format!(
             "Bookmarks\nProfile: {}\n{}",
             profile.display_name(),
@@ -1162,6 +1165,7 @@ impl BrowserPane {
         }
 
         Self {
+            importer,
             control,
             pane_id,
             root,

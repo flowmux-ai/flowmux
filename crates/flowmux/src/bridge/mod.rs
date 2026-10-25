@@ -32,6 +32,7 @@ pub struct BrowserOpenOutcome {
 /// "browser" arm regardless of how many verbs there are.
 #[derive(Debug, Clone)]
 pub enum BrowserOp {
+    Import(flowmux_ipc::protocol::BrowserImportOptions),
     Receipt {
         op: Box<BrowserOp>,
         condition: Option<BrowserWaitCondition>,
@@ -174,6 +175,7 @@ impl BrowserOp {
             Self::Control { .. } => "control",
             Self::Task(_) => "task",
             Self::Form(_) => "form",
+            Self::Import(_) => "import",
             Self::Eval { .. } => "eval",
             Self::Drag { .. } => "drag",
             Self::Pointer { .. } => "pointer",

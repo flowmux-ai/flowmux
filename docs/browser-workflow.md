@@ -70,8 +70,9 @@ focused editable element.
 - Recording checks the CLI's PATH for ffmpeg with libx264. Captures are silent
   and can omit accelerated layers. Playback of a particular media format must
   still be tested with that media file.
-- Cookie extraction is separate from insertion into a WebView. Host-cookie
-  insertion is not implemented; sign in inside the selected Flowmux profile.
+- Browser import supports bookmarks and cookies from local source profiles.
+  Key-store access and source encryption determine cookie availability; see
+  [Import browser data](#import-browser-data).
 
 `flowmux capabilities` remains an offline command inventory.
 
@@ -315,9 +316,8 @@ storage-preserving operation. Excessively long keys can exceed filesystem limits
 
 On Linux, persistent storage failure opens a separately isolated ephemeral
 session with a visible warning and `diagnose.storage_ephemeral=true`; it never
-uses the global default session. Cookie import returns `unimplemented` before
-reading host cookies, because WebView insertion is not implemented. Sign in
-inside the intended Flowmux profile.
+uses the global default session. Import targets the selected tab's actual cookie
+store, including an ephemeral store when persistence is disabled.
 
 ## Task progress and result cards
 
@@ -427,3 +427,48 @@ Task details open to the right in wide panes and below the page in narrow panes.
 Closing this panel keeps the task and results; **Clear task display** clears an
 ended task's display without deleting downloaded files. New results never open
 the panel automatically. Results remain session-only; this is not an archive.
+
+## Import browser data
+
+Open **Bookmarks → Import browser data…**, choose the browser/profile and data,
+and click **Import**. Bookmarks are selected by default; cookie access is opt-in.
+The dialog identifies the destination Flowmux profile and reports the result.
+Profile labels such as Chrome do not import anything automatically.
+
+```bash
+flowmux --json list-browsers
+flowmux browser --surface "$SURFACE" import "pane:$PANE" --from chrome \
+  --source-profile "/path/to/Chrome/Profile 1" --bookmarks --cookies \
+  --domain example.com
+```
+
+Select at least one of `--bookmarks` / `--cookies`. `--source-profile` is a source
+profile **directory**, not a database; it is required when discovery finds zero
+or multiple profiles for that browser. `--domain` applies only to cookies and
+matches the domain and its subdomains, never arbitrary substrings. The old
+untargeted `import-cookies` command returns guidance without reading cookies.
+Task ownership, `--task` and `--surface` work as for other browser mutations.
+
+- Chrome, Chromium, Brave, Edge, Arc and Firefox profiles are discovered on
+  macOS/Linux. Original databases are opened read-only, including their live WAL.
+- Chromium `Bookmarks` and Firefox `places.sqlite` provide web bookmarks.
+  Folders are flattened; only HTTP(S) links are imported. Existing URL/title
+  pairs stay unchanged. Repeating an import adds no duplicate URLs.
+- macOS Chromium v10 encryption uses the browser's Safe Storage key in Keychain;
+  the system may ask for access. Linux supports v10 and v11 with an unlocked
+  Secret Service key. KWallet-only keys and unsupported encryption versions fail
+  explicitly, without pretending to import the cookies.
+- Existing cookies with the same domain/path/name are preserved. New cookies
+  retain Secure, HttpOnly, SameSite and expiry attributes where supported by the
+  destination API, and are read back from the native store before success.
+- Expired cookies and partitioned/container cookies are skipped and counted.
+  Partition isolation cannot be transferred to the destination store safely.
+  Invalid data or conversion/decryption failures produce an error, including
+  expirations beyond the native store's supported lifetime. A failure
+  after writes reports partial progress; do not assume rollback or retry blindly.
+- The JSON result reports `bookmarks_added`, `bookmarks_existing`,
+  `cookies_added`, `cookies_existing`, `cookies_skipped_isolated` and
+  `cookies_skipped_expired`. Cookie values and key-store secrets are not printed.
+- Import is a one-time copy, not synchronization. Passwords, history, extensions,
+  localStorage and other site data are not imported. Some sites require a fresh
+  login even after cookie import. Ephemeral profiles discard cookies on close.

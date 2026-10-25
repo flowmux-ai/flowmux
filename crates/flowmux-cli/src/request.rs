@@ -8,6 +8,28 @@ use super::*;
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
     let request = match op {
+        BrowserOp::Import {
+            pane,
+            source,
+            source_profile,
+            bookmarks,
+            cookies,
+            domain,
+        } => {
+            anyhow::ensure!(bookmarks || cookies, "select --bookmarks and/or --cookies");
+            anyhow::ensure!(cookies || domain.is_none(), "--domain requires --cookies");
+            let source_profile = source_profile.map(|path| path.canonicalize()).transpose()?;
+            Request::BrowserImport {
+                pane,
+                options: flowmux_ipc::protocol::BrowserImportOptions {
+                    source,
+                    source_profile,
+                    bookmarks,
+                    cookies,
+                    domain,
+                },
+            }
+        }
         BrowserOp::Record { .. } => anyhow::bail!("recording requires the CLI capture loop"),
         BrowserOp::Drag {
             pane,

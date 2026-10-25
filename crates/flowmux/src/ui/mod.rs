@@ -8,6 +8,7 @@ mod browser_control;
 mod browser_dialogs;
 mod browser_downloads;
 mod browser_file_chooser;
+mod browser_import;
 pub mod browser_pane;
 pub mod editor_pane;
 pub mod file_browser;

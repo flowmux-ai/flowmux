@@ -2789,3 +2789,38 @@ fn compact_snapshot_preserves_request_scope_and_rejects_receipts() {
     ])
     .is_err());
 }
+
+#[test]
+fn browser_import_requires_selection_and_preserves_explicit_surface() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let args = [
+        "flowmux",
+        "browser",
+        "--surface",
+        &surface.to_string(),
+        "import",
+        &pane.to_string(),
+        "--from",
+        "chrome",
+    ];
+    assert!(build_request(Cli::try_parse_from(args).unwrap().cmd).is_err());
+    let cli = Cli::try_parse_from(args.into_iter().chain([
+        "--bookmarks",
+        "--cookies",
+        "--domain",
+        "example.com",
+    ]))
+    .unwrap();
+    let Request::BrowserOnSurface {
+        surface: selected,
+        request,
+    } = build_request(cli.cmd).unwrap()
+    else {
+        panic!("missing surface wrapper")
+    };
+    assert_eq!(selected, surface);
+    assert!(
+        matches!(*request, Request::BrowserImport { pane: target, options } if target == pane && options.bookmarks && options.cookies && options.domain.as_deref() == Some("example.com"))
+    );
+}

@@ -17,6 +17,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "control",
     "task",
     "form",
+    "import",
     "navigate",
     "back",
     "forward",
@@ -60,8 +61,7 @@ pub const BROWSER_VERBS: &[&str] = &[
 /// Protocol, which WebKitGTK 6.0 does not expose (see `AGENTS.md`).
 pub const UNSUPPORTED_FEATURES: &[&str] = &["viewport", "network-mock", "screencast"];
 
-/// Recognized host-browser source names. This is not a working-import list:
-/// Chromium extraction and insertion into the WebView are not implemented.
+/// Recognized source browsers; encryption support depends on the OS and key store.
 pub const COOKIE_IMPORT_BROWSERS: &[&str] =
     &["firefox", "chrome", "chromium", "brave", "edge", "arc"];
 
@@ -772,6 +772,10 @@ pub enum Request {
         pane: PaneId,
         details: BrowserTaskDetails,
     },
+    BrowserImport {
+        pane: PaneId,
+        options: BrowserImportOptions,
+    },
     BrowserForm {
         pane: PaneId,
         fields: Vec<BrowserFormField>,
@@ -840,8 +844,7 @@ pub enum Request {
     },
 
     /// `flowmux import-cookies --from firefox [--domain example.com]`
-    /// Extract host cookies and return their count. Chromium extraction and
-    /// WebView insertion are not implemented.
+    /// Legacy untargeted command; use BrowserImport with an explicit target.
     ImportCookies {
         source: String,
         domain: Option<String>,
@@ -950,6 +953,17 @@ pub struct BrowserTaskDetails {
     pub step: Option<String>,
     pub waiting: Option<String>,
     pub user_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserImportOptions {
+    pub source: String,
+    pub source_profile: Option<PathBuf>,
+    #[serde(default)]
+    pub bookmarks: bool,
+    #[serde(default)]
+    pub cookies: bool,
+    pub domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

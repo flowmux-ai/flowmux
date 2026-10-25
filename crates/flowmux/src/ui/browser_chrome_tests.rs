@@ -130,6 +130,42 @@ pub(crate) async fn check() {
         pane.current_url() == "about:blank" && pane.root.is_mapped()
     })
     .await;
+    let bookmarks = find(&pane.root, &|w| {
+        w.downcast_ref::<gtk::MenuButton>()
+            .is_some_and(|b| b.icon_name().as_deref() == Some("user-bookmarks-symbolic"))
+    })
+    .unwrap()
+    .downcast::<gtk::MenuButton>()
+    .unwrap();
+    bookmarks.popup();
+    wait("bookmark import menu", || {
+        bookmarks.popover().unwrap().is_mapped()
+    })
+    .await;
+    button(&bookmarks.popover().unwrap(), "Import browser data…").emit_clicked();
+    let dialog = gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Window>().ok())
+        .find(|w| w.title().as_deref() == Some("Import browser data"))
+        .expect("import dialog");
+    assert!(find(&dialog, &|w| w
+        .downcast_ref::<gtk::CheckButton>()
+        .is_some_and(|b| b
+            .label()
+            .is_some_and(|label| label.starts_with("Bookmarks"))
+            && b.is_active()))
+    .is_some());
+    assert!(find(&dialog, &|w| w
+        .downcast_ref::<gtk::CheckButton>()
+        .is_some_and(|b| b
+            .label()
+            .is_some_and(|label| label.starts_with("Cookies"))
+            && !b.is_active()))
+    .is_some());
+    wait("import dialog mapped", || dialog.is_mapped()).await;
+    gtk::glib::timeout_future(Duration::from_millis(100)).await;
+    capture(&dialog, "browser-import-dialog");
+    dialog.destroy();
     let toolbar = find(&pane.root, &|w| w.has_css_class("browser-toolbar")).unwrap();
     let address = find(&toolbar, &|w| w.is::<gtk::Entry>())
         .unwrap()

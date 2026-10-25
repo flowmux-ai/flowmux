@@ -11,6 +11,7 @@ type OpenBookmark = Rc<dyn Fn(&str)>;
 #[derive(Clone)]
 pub struct BookmarkMenu {
     pub button: gtk::MenuButton,
+    pub import: gtk::Button,
 }
 
 impl BookmarkMenu {
@@ -27,12 +28,45 @@ impl BookmarkMenu {
         list.set_size_request(320, -1);
         let popover = gtk::Popover::new();
         popover.add_css_class("browser-popover");
-        popover.set_child(Some(&list));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let import = gtk::Button::with_label("Import browser data…");
+        content.append(&import);
+        let scroll = gtk::ScrolledWindow::builder()
+            .max_content_height(480)
+            .propagate_natural_height(true)
+            .child(&list)
+            .build();
+        content.append(&scroll);
+        popover.set_child(Some(&content));
+        let weak_popover = popover.downgrade();
+        import.connect_clicked(move |_| {
+            if let Some(p) = weak_popover.upgrade() {
+                p.popdown();
+            }
+        });
         crate::ui::popover_pos::set_menu_popover(&button, &popover);
 
         let repository = BookmarkRepository::for_profile(profile).ok();
-        request_reload(repository, &list, &popover, current, open);
-        Self { button }
+        request_reload(
+            repository.clone(),
+            &list,
+            &popover,
+            current.clone(),
+            open.clone(),
+        );
+        let list = list.downgrade();
+        popover.connect_show(move |popover| {
+            if let Some(list) = list.upgrade() {
+                request_reload(
+                    repository.clone(),
+                    &list,
+                    popover,
+                    current.clone(),
+                    open.clone(),
+                );
+            }
+        });
+        Self { button, import }
     }
 }
 

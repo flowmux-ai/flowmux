@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise pane browser controls through the real CLI in a private GUI process."""
+import browser_import_fixture
 import base64
 import json
 import os
@@ -20,6 +21,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/import-auth":
+            cookies = self.headers.get("Cookie", "")
+            body = ("<!doctype html><title>Import authentication</title>" +
+                    ("IMPORT_AUTHENTICATED" if "fm_import_session=authenticated" in cookies else "NO_SESSION") +
+                    (" FIREFOX_AUTHENTICATED" if "fm_firefox=imported" in cookies else "") +
+                    (" REAL_CHROME_AUTHENTICATED" if "fm_real_chrome=verified" in cookies else "")).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if self.path in ("/download", "/slow-download"):
             slow = self.path == "/slow-download"
             data = b"Flowmux download fixture\n"
@@ -181,7 +196,7 @@ def exercise_diagnostics(cli, url, root):
     assert report["native_input"]["environment_ready"], report
     assert report["native_text"]["environment_ready"], report
     assert report["recording"]["encoder_available"], report
-    assert not report["cookie_import"]["supported"] and not report["cross_origin_frames"]
+    assert report["cookie_import"]["supported"] and not report["cross_origin_frames"]
     missing = diagnose(env_overrides={"PATH": str(root / "no-encoder")})
     assert missing["recording"]["reason"] == "ffmpeg_missing", missing
     cli("browser", "open", url, pane_context=terminal)
@@ -1363,6 +1378,10 @@ def main():
                            ("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache")]:
             (root / child).mkdir(mode=0o700, exist_ok=True)
             env[key] = str(root / child)
+        profile_name = root.name.lower()
+        options = root / "config/flowmux/options.json"
+        options.parent.mkdir(parents=True, exist_ok=True)
+        options.write_text(json.dumps({"default_browser_engine": {"kind": "custom", "name": profile_name}, "persist_browser_session": False}))
         env["SHELL"] = "/bin/sh"
         marker = root / "state/flowmux/welcome-seen"
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -1379,7 +1398,7 @@ def main():
             def cli(*args, error=False, pane_context=None, env_overrides=None):
                 result = subprocess.run([str(cli_binary), "--socket", str(socket_path), "--json", *args],
                                         env={**env, **({"FLOWMUX_PANE_ID": pane_context} if pane_context else {}), **(env_overrides or {})},
-                                        capture_output=True, text=True, timeout=30)
+                                        capture_output=True, text=True, timeout=120 if "import" in args else 30)
                 assert bool(result.returncode) == error, (args, result.stdout, result.stderr)
                 response = json.loads(result.stdout) if result.stdout else {"error": result.stderr}
                 if error:
@@ -1393,6 +1412,10 @@ def main():
                     assert time.monotonic() < deadline, "GUI startup timed out"
                     time.sleep(.05)
                 assert cli("ping") == "pong"
+                browser_import_fixture.exercise(cli, f"http://127.0.0.1:{server.server_port}/", root, profile_name)
+                if os.environ.get("FLOWMUX_BROWSER_IMPORT_ONLY"):
+                    print("BROWSER_IMPORT_RUNTIME_OK", flush=True)
+                    return
                 exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_compact_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
@@ -1414,6 +1437,9 @@ def main():
                     server.shutdown()
                     server.server_close()
                     thread.join()
+                    if sys.platform == "darwin":
+                        import shutil
+                        shutil.rmtree(Path.home() / "Library/Application Support/flowmux/browser" / ("custom-" + profile_name), ignore_errors=True)
                     if sys.exc_info()[0] is not None:
                         log.seek(0)
                         print(log.read())

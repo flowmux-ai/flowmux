@@ -190,6 +190,7 @@ impl TryFrom<Request> for BrowserActionRequest {
 
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let (pane, op) = match request {
+            Request::BrowserImport { pane, options } => (pane, BrowserOp::Import(options)),
             Request::BrowserDrag { pane, from, to } => (pane, BrowserOp::Drag { from, to }),
             Request::BrowserPointer { pane, action, x, y } => {
                 (pane, BrowserOp::Pointer { action, x, y })
@@ -451,6 +452,7 @@ impl Handler for GuiHandler {
                 Request::BrowserReceipt { .. }
                 | Request::BrowserWithTask { .. }
                 | Request::BrowserTask { .. }
+                | Request::BrowserImport { .. }
                 | Request::BrowserForm { .. }
                 | Request::BrowserControl { .. }
                 | Request::BrowserOnSurface { .. }
@@ -923,7 +925,7 @@ impl GuiHandler {
                 }
             }
             Request::ImportCookies { .. } => Response::Error(RpcError::Unimplemented(
-                "Cookie insertion into browser profiles is not implemented; no cookies were read or imported".into(),
+                "Use browser import PANE --from SOURCE --cookies to select the destination profile; no cookies were read or imported".into(),
             )),
             other => unreachable!("browser router got a non-browser verb: {other:?}"),
         }

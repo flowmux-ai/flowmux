@@ -465,7 +465,7 @@ async fn notify_dispatches_add_notification_before_desktop_delivery() {
 }
 
 #[tokio::test]
-async fn cookie_import_reports_unsupported_without_reading_or_dispatching() {
+async fn legacy_cookie_import_requires_a_target_without_reading_or_dispatching() {
     let (handler, rx, _pane, _tab) = single_pane_handler().await;
     for source in ["firefox", "chrome", "unknown-browser"] {
         let response = handler
@@ -3069,4 +3069,42 @@ async fn browser_wrappers_preserve_validation_and_reject_nested_or_mutating_expe
         ));
         assert!(rx.try_recv().is_err(), "invalid action reached GTK");
     }
+}
+
+#[tokio::test]
+async fn browser_import_reaches_targeted_gtk_dispatch() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let request = Request::BrowserOnSurface {
+        surface,
+        request: Box::new(Request::BrowserImport {
+            pane,
+            options: flowmux_ipc::protocol::BrowserImportOptions {
+                source: "chrome".into(),
+                source_profile: Some("/tmp/fixture-profile".into()),
+                bookmarks: true,
+                cookies: true,
+                domain: Some("example.com".into()),
+            },
+        }),
+    };
+    let response = handler.handle(request);
+    tokio::pin!(response);
+    let command = tokio::select! { command = rx.recv() => command.unwrap(), response = &mut response => panic!("import did not dispatch: {response:?}") };
+    let GtkCommand::BrowserAction {
+        pane: target,
+        surface: selected,
+        op: BrowserOp::Import(options),
+        ack,
+    } = command
+    else {
+        panic!("wrong bridge command")
+    };
+    assert_eq!(target, pane);
+    assert_eq!(selected, Some(surface));
+    assert!(options.bookmarks && options.cookies);
+    ack.send(Ok(BrowserActionResult::String(
+        "{\"status\":\"complete\"}".into(),
+    )))
+    .unwrap();
+    assert!(matches!(response.await, Response::BrowserResult { .. }));
 }
