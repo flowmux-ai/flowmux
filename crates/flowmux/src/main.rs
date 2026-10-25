@@ -95,6 +95,9 @@ fn main() -> anyhow::Result<()> {
     if delegate_to_cli_if_needed()? {
         return Ok(());
     }
+    if let Err(error) = update::skills::refresh_installed() {
+        tracing::error!(%error, "automatic skill update failed; check Options → Skills");
+    }
     let webkit_automation = browser_automation::requested()?;
     let first_screen = is_first_screen(&std::env::args_os().skip(1).collect::<Vec<_>>());
 

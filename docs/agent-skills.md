@@ -39,7 +39,10 @@ Open **Options → Skills → Flowmux CLI** and click **Install** beside the age
 (Codex, Claude Code, OpenCode, Gemini CLI, Antigravity CLI, or Cline). Each row shows whether the
 Flowmux CLI skill is missing, installed, or different from the bundled version.
 Click **Update** to replace a different version while keeping a backup; the row
-shows the backup location. **Refresh status** checks changes made outside Flowmux.
+shows the backup location. **Up to date** means the installed files match the
+version bundled with the running app; click it to check again. This checks file
+contents, not whether a newer app release is available. **Refresh status** checks
+all rows for changes made outside Flowmux.
 Each row displays its destination path. **Check Team setup** checks Python 3.9+,
 the agent executable and lifecycle hooks without changing settings or signing in.
 It does not prove that authentication or task execution will succeed. Expand **View skill
@@ -59,6 +62,15 @@ install the agent itself, change its hooks/settings, or restart running sessions
 Check the agent's skill list or open a new session to load the updated guide.
 User-managed symlinks and filesystem errors are explained in the affected row.
 Special files such as named pipes are rejected without waiting or modifying them.
+
+On the first launch of a new app version (including in-app updates), Flowmux automatically refreshes existing
+Flowmux CLI and Team skills in the known user installation paths, including existing
+legacy Codex/shared copies. Missing entrypoints stay missing, even when helper files
+remain after removal. Changes are backed up using the same rules as **Update**;
+project skills, agent settings and hooks are untouched. Subsequent launches of the
+same or an older version do not repeat a successful update. A pending macOS update
+does not use the old running app's skill payload. Failed copies are retried on a later
+launch and reported in the app log; check **Options → Skills** for their status.
 
 ## CLI installation
 

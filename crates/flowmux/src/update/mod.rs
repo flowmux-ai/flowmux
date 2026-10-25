@@ -10,6 +10,7 @@
 pub mod check;
 pub mod install;
 pub mod origin;
+pub(crate) mod skills;
 
 use check::Version;
 use std::path::{Path, PathBuf};

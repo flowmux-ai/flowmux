@@ -282,9 +282,9 @@ def main():
         gemini_team = gemini_skills / 'flowmux-team'
         gemini_browser = gemini_skills / 'flowmux-browser/SKILL.md'
         click(button('Install', gemini_cli_row))
-        button('Installed', gemini_cli_row)
+        button('Up to date', gemini_cli_row)
         click(button('Install', gemini_row))
-        button('Installed', gemini_row)
+        button('Up to date', gemini_row)
         assert gemini_browser.exists()
         for name in files:
             assert (gemini_team / name).read_bytes() == (source / name).read_bytes(), name
@@ -299,7 +299,7 @@ def main():
         (gemini_team / 'scripts/team.py').write_text('modified Gemini helper')
         click(button('Refresh status'))
         click(button('Update', gemini_row))
-        button('Installed', gemini_row)
+        button('Up to date', gemini_row)
         assert any(p.read_text() == 'modified Gemini helper' for p in (gemini_team / 'scripts').glob('*.flowmux-backup-*'))
         click(button('Remove', gemini_row))
         button('Install', gemini_row)
@@ -312,7 +312,7 @@ def main():
         click(button('Install', cli_row))
         fixture.wait_for(browser.exists, 'CLI installed')
         click(button('Install', row))
-        button('Installed', row)
+        button('Up to date', row)
         for name in files:
             assert (team / name).read_bytes() == (source / name).read_bytes(), name
         scroll_to_team()
@@ -323,7 +323,7 @@ def main():
         (team / 'references/sample.md').unlink()
         click(button('Refresh status'))
         click(button('Update', row))
-        button('Installed', row)
+        button('Up to date', row)
         for name in files:
             assert (team / name).read_bytes() == (source / name).read_bytes(), name
         backups = list((team / 'scripts').glob('*.flowmux-backup-*'))
@@ -388,7 +388,7 @@ time.sleep(1)
         assert browser.exists(), 'Team removal must preserve CLI skill'
         assert any(p.read_text() == 'custom instructions' for p in team.glob('*.flowmux-backup-*'))
         click(button('Install', row))
-        button('Installed', row)
+        button('Up to date', row)
         h.pass_check('Remove preserves custom files/backups and other skills; reinstall works')
         click(button('Close', find('Options', Atspi.Role.FRAME)))
         fixture.wait_for(lambda: find('Options', Atspi.Role.FRAME) is None, 'Options closed')
@@ -396,7 +396,7 @@ time.sleep(1)
         click(fixture.wait_for(lambda: find('Skills', Atspi.Role.PAGE_TAB), 'Skills tab'))
         group = fixture.wait_for(lambda: find('Flowmux Team', Atspi.Role.LIST), 'Team group reopened')
         row = find('Claude Code', Atspi.Role.LIST_ITEM, group)
-        button('Installed', row)
+        button('Up to date', row)
         scroll_to_team()
         screenshot('skills-reopened.png')
         h.pass_check('Reopened Settings shows persisted installation status')

@@ -74,7 +74,7 @@ pub(super) fn build() -> gtk::ScrolledWindow {
     });
     content.append(&refresh);
     let note = gtk::Label::new(Some(
-        "Installed means the files match this Flowmux version. Your agent may load another project or shared copy. Check its skill list and reload skills or start a new session if needed. Sign-in and active-session loading are not checked.",
+        "Up to date means the files match this Flowmux version. Click it to check again. App updates refresh existing skills when the new version first opens. Your agent may load another project or shared copy; reload skills or start a new session if needed. Sign-in and active-session loading are not checked.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
@@ -136,6 +136,7 @@ struct SkillRow {
     skill: Skill,
     busy: Cell<bool>,
     update: Cell<bool>,
+    current: Cell<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -183,11 +184,16 @@ impl SkillRow {
             skill,
             busy: Cell::new(false),
             update: Cell::new(false),
+            current: Cell::new(false),
         });
         let weak = Rc::downgrade(&row);
         row.button.connect_clicked(move |_| {
             if let Some(row) = weak.upgrade() {
-                row.run(Action::Install);
+                row.run(if row.current.get() {
+                    Action::Refresh
+                } else {
+                    Action::Install
+                });
             }
         });
         let weak = Rc::downgrade(&row);
@@ -311,8 +317,21 @@ impl SkillRow {
 
     fn show_status(&self, status: &DoctorStatus) {
         self.update.set(matches!(status, DoctorStatus::Drift));
+        self.current.set(matches!(status, DoctorStatus::Ok));
+        self.button.set_tooltip_text(Some(concat!(
+            "Check against skills bundled with Flowmux ",
+            env!("CARGO_PKG_VERSION")
+        )));
         let (subtitle, button, enabled) = match status {
-            DoctorStatus::Ok => ("Installed and up to date", "Installed", false),
+            DoctorStatus::Ok => (
+                concat!(
+                    "Up to date · Flowmux ",
+                    env!("CARGO_PKG_VERSION"),
+                    " · Click to check again"
+                ),
+                "Up to date",
+                true,
+            ),
             DoctorStatus::Missing => ("Not installed", "Install", true),
             DoctorStatus::Drift => (
                 "Different or older version · Update keeps a backup",

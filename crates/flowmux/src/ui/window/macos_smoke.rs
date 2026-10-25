@@ -40,6 +40,7 @@ pub(crate) fn run() {
             ("HOME", "home"),
             ("CLAUDE_CONFIG_DIR", "home/.claude"),
             ("CODEX_HOME", "home/.codex"),
+            ("GEMINI_CLI_HOME", "home"),
         ] {
             let path = isolated.path().join(directory);
             std::fs::create_dir_all(&path).unwrap();
@@ -1261,6 +1262,41 @@ fn save_theme_snapshot(widget: &gtk::Widget, name: &str) {
 
 async fn check_skills(controller: &WindowController) {
     use flowmux_cli::agent::{self, Skill, SkillOverrides, Target};
+    let home = agent::resolved_home().unwrap();
+    let overrides = SkillOverrides::from_env();
+    let existing = Skill::Browser.path(Target::ClaudeCode, &home, None, &overrides);
+    std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+    std::fs::write(&existing, "older bundled skill").unwrap();
+    let applied = flowmux_config::paths::state_dir()
+        .unwrap()
+        .join("installed-skill-version");
+    std::fs::create_dir_all(applied.parent().unwrap()).unwrap();
+    std::fs::write(&applied, "999.0.0").unwrap();
+    crate::update::skills::refresh_installed().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&existing).unwrap(),
+        "older bundled skill"
+    );
+    std::fs::remove_file(&applied).unwrap();
+    crate::update::skills::refresh_installed().unwrap();
+    assert_eq!(Skill::Browser.doctor(&existing), agent::DoctorStatus::Ok);
+    assert_eq!(
+        std::fs::read_to_string(&applied).unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(!Skill::Browser
+        .path(Target::Codex, &home, None, &overrides)
+        .exists());
+    assert!(std::fs::read_dir(existing.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .any(|entry| entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("SKILL.md.flowmux-backup-")
+            && std::fs::read_to_string(entry.path()).unwrap() == "older bundled skill"));
+    std::fs::remove_dir_all(existing.parent().unwrap()).unwrap();
+    println!("MACOS_NATIVE_SKILLS_AUTO_UPDATE_OK");
     let legacy = agent::resolved_codex_home()
         .unwrap()
         .join("skills/flowmux-browser/SKILL.md");
@@ -1317,7 +1353,7 @@ async fn check_skills(controller: &WindowController) {
         assert!(!path.exists());
         button.emit_clicked();
         wait_until("team bundle installed", || {
-            button.label().as_deref() == Some("Installed")
+            button.label().as_deref() == Some("Up to date")
         })
         .await;
         assert_eq!(Skill::Team.doctor(&path), agent::DoctorStatus::Ok);
@@ -1331,7 +1367,7 @@ async fn check_skills(controller: &WindowController) {
         .await;
         button.emit_clicked();
         wait_until("team repaired", || {
-            button.label().as_deref() == Some("Installed")
+            button.label().as_deref() == Some("Up to date")
         })
         .await;
         assert_eq!(Skill::Team.doctor(&path), agent::DoctorStatus::Ok);
@@ -1385,10 +1421,10 @@ async fn check_skills(controller: &WindowController) {
         button.emit_clicked();
         button.emit_clicked(); // in-flight guard also protects programmatic repeat activation
         wait_until("skill installed", || {
-            button.label().as_deref() == Some("Installed")
+            button.label().as_deref() == Some("Up to date")
         })
         .await;
-        assert!(!button.is_sensitive());
+        assert!(button.is_sensitive());
         assert!(remove.is_sensitive());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), Target::payload());
         assert_eq!(
@@ -1437,15 +1473,20 @@ async fn check_skills(controller: &WindowController) {
         .find(|(target, _, _)| *target == Target::Codex)
         .unwrap();
     std::fs::write(path, "custom skill notes").unwrap();
-    refresh.emit_clicked();
+    button.emit_clicked();
     wait_until("skill update offered", || {
         button.label().as_deref() == Some("Update")
     })
     .await;
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "custom skill notes",
+        "checking status must not overwrite external edits"
+    );
     button.emit_clicked();
     button.emit_clicked();
     wait_until("skill updated", || {
-        button.label().as_deref() == Some("Installed")
+        button.label().as_deref() == Some("Up to date")
     })
     .await;
     let backups = std::fs::read_dir(path.parent().unwrap())
@@ -1619,11 +1660,11 @@ async fn check_skills(controller: &WindowController) {
     .await;
     installed.emit_clicked();
     wait_until("removed skill reinstalled", || {
-        installed.label().as_deref() == Some("Installed")
+        installed.label().as_deref() == Some("Up to date")
     })
     .await;
     assert_eq!(std::fs::read_to_string(path).unwrap(), Target::payload());
-    assert!(!installed.is_sensitive());
+    assert!(installed.is_sensitive());
     println!("MACOS_NATIVE_SKILLS_REMOVE_REINSTALL_OK");
     reopened.close();
     println!("MACOS_NATIVE_SKILLS_INSTALL_UPDATE_OK");

@@ -555,6 +555,10 @@ This user guide retains the
 the CLI's bundled guide; no external skill catalog or browser download is needed.
 Identical content is unchanged. `--force` backs up modified content before update;
 `--skills-only` removal preserves wrappers/hooks and backs up modified text.
+After an in-app update, the new version's first launch refreshes only existing
+user skill entrypoints (including known legacy/shared copies), with backups.
+Missing or removed skills stay absent. Options → Skills shows **Up to date**
+when files match the running app's bundled version; click it to check again.
 User-managed symlinks are not overwritten. `agent doctor` checks installed bytes,
 not whether a running agent has loaded/enabled the skill. Use the agent's own
 skill controls and reload at a convenient session boundary if needed.
