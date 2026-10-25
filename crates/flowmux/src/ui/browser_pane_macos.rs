@@ -129,6 +129,14 @@ define_class!(
 
     unsafe impl NSObjectProtocol for BrowserUIDelegate {}
 
+    impl BrowserUIDelegate {
+        #[unsafe(method(_webView:didAttachLocalInspector:))]
+        fn did_attach_local_inspector(&self, view: &WKWebView, inspector: &AnyObject) {
+            // GTK owns the pane layout; native docking would cover the whole window.
+            inspector::detach(inspector, view);
+        }
+    }
+
     unsafe impl WKUIDelegate for BrowserUIDelegate {
         #[unsafe(method_id(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:))]
         #[allow(non_snake_case)]
@@ -1938,6 +1946,10 @@ fn sync_native_view_frame(web_view: &WKWebView, placeholder: &gtk::Widget) {
     };
     let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
     let view = web_view.as_super();
+    // The inspector's own docking controls can resize this view again.
+    if view.frame() != frame {
+        inspector::detach_if_visible(web_view);
+    }
     view.setFrame(frame);
     if unsafe { view.superview() }.is_none() {
         content_view.addSubview(view);
