@@ -10,7 +10,7 @@ The **Flowmux CLI** skill is a user guide for operating Flowmux, organized by ta
 |---|---|
 | Context | Connection checks, window/socket selection, pane and tab IDs |
 | Workspaces and terminals | Workspace selection, splits, tabs, terminal input/output |
-| Browser | Open, snapshot, interact, wait, inspect and screenshot |
+| Browser | Scoped/compact snapshots, native input, forms and typed outcomes, task handoff/results, files, media, screenshots and sampled recording |
 | SSH | Connect, inspect status, reconnect, forward ports and preview |
 | Agents and notifications | Live agent list, session names and completion notifications |
 | Settings and integrations | Themes, skill installation, diagnostics and removal |
@@ -29,6 +29,9 @@ All four can lead teams; worker sessions currently use Claude Code or Codex.
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
 After changing the source, rebuild the CLI before updating installed copies.
+The guide distinguishes CLI help/capabilities from live `browser diagnose` support,
+pane IDs from browser surface IDs, and delivered input from verified outcomes.
+Examples use complete snapshot refs and pin subsequent actions to the browser tab.
 
 ## Install from Settings
 
@@ -150,6 +153,12 @@ Some agents also discover compatible agents' skill directories. Removing one
 copy may leave another discoverable copy. Codex can show duplicate names rather
 than merging them; Flowmux reports an existing `$CODEX_HOME/skills/flowmux-browser`
 copy without modifying it. Inspect user and project copies before removing any.
+When upgrading the guide, inspect these reported copies too: an old duplicate
+can retain obsolete ref-token rules or omit supported browser commands. Updating
+the managed copy does not update the duplicate. If its owner requests that copy's
+update, back it up and synchronize it explicitly; preserve unrelated custom text
+and user-managed links. Compare against the rebuilt CLI's payload, not an older
+running app's bundled guide. Do not restart an active session to refresh discovery.
 
 For persistent activation controls, use the agent's own settings:
 [Codex `skills.config`](https://learn.chatgpt.com/docs/build-skills),

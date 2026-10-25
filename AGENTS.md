@@ -72,7 +72,8 @@ OPEN=$(flowmux --json browser open https://example.com)
 PANE=$(printf '%s' "$OPEN" | jq -r '.browser_pane_opened.pane')
 # → {"browser_pane_opened":{"pane":"<uuid>","placement_strategy":"split_right"|"reuse_right_sibling"}}
 
-# 2. A new WebView starts at about:blank. Wait for the requested URL first,
+# 2. The themed start page has a blank address field and centered Flowmux icon,
+#    but its internal URL remains about:blank. Wait for the requested URL first,
 #    then for that document to finish loading.
 flowmux browser wait pane:$PANE --url example.com
 flowmux browser wait pane:$PANE --ready-state complete
@@ -85,23 +86,24 @@ flowmux browser wait pane:$PANE --ready-state complete
 #    navigation, page changes, or another snapshot.
 flowmux browser snapshot pane:$PANE --compact --viewport --max-nodes 40 --max-chars 12000
 
-# 4. Act on the page using complete returned ref tokens (e3/e1 below are placeholders).
-flowmux browser click pane:$PANE e3
-flowmux browser fill  pane:$PANE e1 "user@example.com"
-flowmux browser type  pane:$PANE "password"     # active element
+# 4. Assign BUTTON_REF / FIELD_REF / CHECK_REF from the current snapshot's
+#    complete tokens (for example e3-<snapshot-id>), not short names such as e3.
+flowmux browser click pane:$PANE "$BUTTON_REF"
+flowmux browser fill  pane:$PANE "$FIELD_REF" "user@example.com"
+flowmux browser type  pane:$PANE "search terms" # active element
 flowmux browser press pane:$PANE Enter
 
 # 5. Probe state. All of these stream stdout as `true` / `false` /
 #    integer for easy bash parsing.
-flowmux browser is-visible pane:$PANE e3
-flowmux browser is-enabled pane:$PANE e3
-flowmux browser is-checked pane:$PANE e7
+flowmux browser is-visible pane:$PANE "$BUTTON_REF"
+flowmux browser is-enabled pane:$PANE "$BUTTON_REF"
+flowmux browser is-checked pane:$PANE "$CHECK_REF"
 flowmux browser count      pane:$PANE ".result-row"
 
 # 6. Read content.
-flowmux browser text  pane:$PANE e3
-flowmux browser value pane:$PANE e1
-flowmux browser attr  pane:$PANE e3 href
+flowmux browser text  pane:$PANE "$BUTTON_REF"
+flowmux browser value pane:$PANE "$FIELD_REF"
+flowmux browser attr  pane:$PANE "$BUTTON_REF" href
 flowmux browser url   pane:$PANE
 flowmux browser title pane:$PANE
 ```
@@ -128,6 +130,7 @@ This option applies to every browser command except `open`.
 | diagnose / control | yes | Runtime support checks and per-tab task handoff; see [browser tasks](docs/browser-workflow.md) |
 | --receipt / --expect-text / --expect-url | yes | Observed action results; timeout never repeats the action |
 | click / dblclick / hover / focus / blur | yes | by ref token |
+| pointer / drag | yes | CSS viewport coordinates; verify the resulting page state |
 | fill / select / type / press | yes | type & press act on the active element |
 | form | yes | bounded ref-based field list; per-field verification, no submit command |
 | task | yes | owning task name, step, wait reason and user action; results in the task bar |
@@ -137,12 +140,13 @@ This option applies to every browser command except `open`.
 | eval (low-level JS) | yes | escape hatch only |
 | eval-async | yes | async function body; waits for the returned Promise with `--timeout-ms` |
 | screenshot | yes | viewport PNG, or `--full-page` for a document PNG; see the CLI skill for platform limits |
+| record | yes | sampled silent MP4 via ffmpeg/libx264; 1–60 seconds, 1–10 fps |
 | media | yes | audio/video ref: status, play, pause, seek seconds, mute, unmute; returns playback state |
 | download | yes | tab-scoped list, cancel ID, directory EXISTING_PATH; poll terminal state before using a file |
 | dialog | yes | page alert/confirm/prompt: status, accept ID [--text TEXT], dismiss ID |
 | file-chooser | yes | status, select ID PATH... --root DIR, cancel ID; responds to a pending page file input |
 | wait | yes | polls for selector / text / url / ready-state / JS predicate (timeout + poll interval) |
-| viewport / network mocking / screencast | no | CDP-only; WebKitGTK 6 / WKWebView do not expose CDP |
+| viewport / network mocking / CDP screencast | no | WebKitGTK 6 / WKWebView do not expose CDP; use `record` for sampled video |
 
 ## When the task really needs Playwright / Puppeteer
 

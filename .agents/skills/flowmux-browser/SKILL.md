@@ -1,6 +1,6 @@
 ---
 name: flowmux-browser
-description: Operate Flowmux workspaces, terminal panes, in-app browser, SSH connections and notifications through its CLI. Use for Flowmux feature guidance or automation inside a Flowmux pane or with an explicitly supplied socket and pane.
+description: Operate Flowmux's in-app browser, verify page actions, manage file transfers and captures, and control workspaces, terminals and SSH through its CLI. Use for Flowmux feature guidance or automation inside a Flowmux pane or with an explicitly supplied socket and pane.
 ---
 
 # Flowmux CLI
@@ -12,7 +12,7 @@ it does not install development tools or prescribe a software development proces
 |---|---|
 | [Context](#context) | Connect to the intended window; identify panes and tabs |
 | [Workspaces and terminals](#workspaces-and-terminals) | Split, focus, resize, send input and read output |
-| [Browser](#browser) | Open pages, snapshot, interact, wait and capture |
+| [Browser](#browser) | Inspect pages, interact, verify forms/results, transfer files and capture |
 | [SSH](#ssh) | Connect, reconnect, forward ports and preview |
 | [Agents and notifications](#agents-and-notifications) | Inspect live agents and report task completion |
 | [Settings and integrations](#settings-and-integrations) | Themes, skills and diagnostics |
@@ -42,8 +42,21 @@ another window. Outside Flowmux, use the user's supplied socket with the global
 
 Read `tree` to select targets. In examples, `$PANE`, `$WORKSPACE`, `$SURFACE`
 and `$FORWARD` are IDs from the corresponding command responses, not names.
-`--json` gives structured responses. `capabilities` describes browser automation
-support; use `--help` and `<command> --help` for the full command inventory.
+Pane and surface IDs are not interchangeable: `PANE` is the containing pane;
+`--surface UUID` selects one of its tabs. Do not use the calling terminal's
+`FLOWMUX_SURFACE_ID` as a browser tab ID.
+
+`--json` gives structured responses. `--version`, `capabilities` and command
+`--help` describe the selected CLI, which may differ from the running GUI.
+Use `browser diagnose PANE` for live backend support. If an option is unknown,
+check that binary's help before choosing a supported equivalent; a new skill
+does not upgrade the app, and an unsupported operation is not a reason to restart
+the user's session.
+
+When targeting another authorized window with `--socket`, inherited pane IDs
+still refer to the original window. Read the target window's `tree` and use its
+IDs. `browser open` has no pane argument: set `FLOWMUX_PANE_ID` to the chosen
+source pane for that invocation, or unset it to use that window's focused pane.
 
 ## Workspaces and terminals
 
@@ -102,13 +115,23 @@ OPEN=$("$FLOWMUX_CLI" --json browser open https://example.com) || exit 1
 PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
-"$FLOWMUX_CLI" browser snapshot "pane:$PANE" --compact --viewport --max-nodes 40 --max-chars 12000
+SNAPSHOT=$("$FLOWMUX_CLI" browser snapshot "pane:$PANE" --compact --viewport --max-nodes 40 --max-chars 12000) || exit 1
+SURFACE=$(printf '%s' "$SNAPSHOT" | jq -er '.page.surface_id') || exit 1
+printf '%s\n' "$SNAPSHOT"
+# Pin subsequent operations to this browser tab.
+# "$FLOWMUX_CLI" browser --surface "$SURFACE" ...
 ```
 
 Open reuses a right-sibling browser pane as a new tab, or splits beside the
-calling pane. A new WebView initially shows `about:blank`. Wait for the requested
-URL and readiness before taking a snapshot. Wait prints `true` or `false`;
-**check the value**, not just the exit code. Stop on timeout.
+calling pane. The default start page has an empty address field, the pane theme's
+background and a centered Flowmux icon; its internal URL is still `about:blank`.
+Older builds may show a plain blank page and the literal address. Neither proves
+the requested site loaded. Wait for the requested URL and readiness before taking
+a snapshot. Wait prints `true` or `false`; **check the value**, not just the exit
+code. Stop dependent actions on timeout and inspect the current URL/diagnostics.
+`--url` matches a substring; use `--condition '{"UrlExact":"https://example.com/"}'`
+when the exact URL matters. `complete` is document readiness, not completion of
+later application requests; wait for the result that the task actually needs.
 
 Choose the smallest observation that answers the next question:
 
@@ -123,7 +146,9 @@ Choose the smallest observation that answers the next question:
 Check `truncated` before deciding something is absent. A viewport/filter also
 excludes content even when `truncated` is false. Expand the scope or budget only
 when needed. Plain browser output is already JSON for snapshots; `--json` adds
-an outer response envelope for scripts. Keep large responses in local files and
+an outer response envelope whose `browser_result.value` is a JSON-encoded string
+(`jq '.browser_result.value | fromjson'`). Do not add `--json` when parsing the
+plain snapshot's `.page` or `.refs`. Keep large responses in local files and
 return only relevant fields to the model, retaining complete refs and scope.
 After navigation, node replacement or handoff, refresh the necessary scope;
 never reuse an old ref just to save tokens. Every snapshot/find replaces refs.
@@ -184,24 +209,27 @@ Key and pointer completion waits for synchronous event handlers and native
 default actions. If an input opens a page dialog, the command returns once the
 dialog is available; answer it with `dialog` before checking the page result.
 Use `wait` for later network responses or other asynchronous page changes.
-Use only refs actually returned
-for the current page; these are independent examples, not a script to run blindly:
+Set `$BUTTON_REF`, `$FIELD_REF` and `$SELECT_REF` from the current snapshot's
+complete tokens, such as `e3-<snapshot-id>`. These are independent examples;
+refresh refs if an earlier action changed the page:
 
 ```bash
-"$FLOWMUX_CLI" browser click "pane:$PANE" e3
-"$FLOWMUX_CLI" browser fill "pane:$PANE" e1 "search terms"
-"$FLOWMUX_CLI" browser select "pane:$PANE" e2 "option value"
-"$FLOWMUX_CLI" browser type "pane:$PANE" "text for the focused field"
-"$FLOWMUX_CLI" browser press "pane:$PANE" Enter
-"$FLOWMUX_CLI" browser is-visible "pane:$PANE" e3
-"$FLOWMUX_CLI" browser text "pane:$PANE" e3
-"$FLOWMUX_CLI" browser value "pane:$PANE" e1
-"$FLOWMUX_CLI" browser attr "pane:$PANE" e3 href
-"$FLOWMUX_CLI" browser count "pane:$PANE" ".result-row"
-"$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-page.png
-"$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-document.png --full-page
-"$FLOWMUX_CLI" browser screenshot "pane:$PANE" /tmp/flowmux-element.png --element e3
+"$FLOWMUX_CLI" browser --surface "$SURFACE" click "pane:$PANE" "$BUTTON_REF"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" fill "pane:$PANE" "$FIELD_REF" "search terms"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" select "pane:$PANE" "$SELECT_REF" "option value"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" type "pane:$PANE" "text for the focused field"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" press "pane:$PANE" Enter
+"$FLOWMUX_CLI" browser --surface "$SURFACE" is-visible "pane:$PANE" "$BUTTON_REF"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" text "pane:$PANE" "$BUTTON_REF"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" value "pane:$PANE" "$FIELD_REF"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" attr "pane:$PANE" "$BUTTON_REF" href
+"$FLOWMUX_CLI" browser --surface "$SURFACE" count "pane:$PANE" ".result-row"
+"$FLOWMUX_CLI" browser --surface "$SURFACE" screenshot "pane:$PANE" /tmp/flowmux-page.png
+"$FLOWMUX_CLI" browser --surface "$SURFACE" screenshot "pane:$PANE" /tmp/flowmux-document.png --full-page
+"$FLOWMUX_CLI" browser --surface "$SURFACE" screenshot "pane:$PANE" /tmp/flowmux-element.png --element "$BUTTON_REF"
 ```
+
+### Captures and command reference
 
 Screenshots default to the visible viewport. `--full-page` captures the document
 without scrolling or resizing the page and rejects bitmaps above 64 MiB at the
@@ -220,20 +248,26 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Page metadata | `url PANE`, `title PANE` |
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |
+| Live diagnostics | `diagnose PANE` |
+| Task control | `control PANE start`, `status`, `handoff`, `pause`, `stop`, or `finish`; Continue is a user UI action |
 | Task details | `task PANE --name NAME --step STEP --waiting REASON --user-action ACTION` with owning `--task` |
 | Form fields | `form PANE JSON` with 1–20 unique current refs and fill/select/check actions; no submit command |
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |
 | File selection | `file-chooser PANE status`, `select ID PATH... --root DIR`, or `cancel ID` |
-| Scrolling | `scroll PANE REF X Y` |
-| Wait | `wait PANE --selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms` |
+| Coordinates | `pointer PANE click\|dblclick\|hover X Y`, `drag PANE FROM_X FROM_Y TO_X TO_Y` |
+| Scrolling | `scroll PANE REF X Y`: bring the element into view, then offset the viewport |
+| Wait | `wait PANE --condition JSON`, `--selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms`; no network-idle wait |
+| Video capture | `record PANE output.mp4 --seconds 5 --fps 5` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
 | Async completion | `eval-async PANE BODY --timeout-ms 10000`; BODY is a function body, e.g. `return await fetch('/status').then(r => r.text())` |
 
 `eval-async` waits for the returned Promise and reports rejection or timeout.
 A timeout stops waiting, but cannot cancel page effects; inspect state before
 retrying a command that changes the page.
+
+### Media, files and popups
 
 Audio and video elements with visible bounds appear in snapshots. `media`
 returns JSON with `paused`, `ended`, `seeking`, `muted`, `current_time`,
@@ -309,31 +343,35 @@ system default. Existing files are not overwritten. Cancelling does not promise
 to remove partial files; only `complete` means a successful download. The UI and
 CLI share the same history; cleared or evicted entries are no longer listed.
 
+### Forms and result verification
+
 The control bar shows a one-line task summary. Details / Results opens a
 collapsible panel containing the full description, related tabs, saved
 captures, upload observations and native download completion. `control status`
 returns these bounded runtime-only results. File selection is not upload success;
 use `file-chooser select --receipt --expect JSON` for a site completion condition.
 `form PANE '[{"target":"FULL_REF","action":{"fill":"value"}}]'` returns a
-status for each field without sending a submit command. Page event handlers can
-still have side effects. Retry only failed/unexecuted fields after inspecting the
-page. Password fields are rejected by the form command.
+`fields` array whose statuses are `verified`, `invalid`, `failed`, or `not_run`,
+and `submit_command_sent: false`. Actions are `{"fill":"value"}`,
+`{"select":"option value or label"}`, or `{"check":true}` / `{"check":false}`.
+Inspect every field: returning JSON does not mean all fields passed. Earlier
+changes are not rolled back when a later field fails, and page input/change
+handlers can themselves send requests. Retry only failed/unexecuted fields after
+inspecting the page. Password fields are rejected by the form command; `type`
+is the native editing path for a focused rich editor.
 Use `wait --condition '{"Element":{"target":"FULL_REF","expect":{"Value":"value"}}}'`
 for same-origin iframe/open shadow targets. `State`, `Text`, `ValueChanged` and
 `TextChanged` are also supported. Replaced nodes/frames fail instead of matching
 another node. Existing CSS selector conditions target the top-level document.
 
-Refs belong to the latest snapshot of one browser tab. After navigation, reload,
-tab switches or page changes, wait and take a fresh snapshot before using refs.
-A ref-not-found error also requires a fresh snapshot. Never add tracking
-attributes to the DOM; Flowmux resolves refs without modifying the page.
-
-Screenshots cover the visible viewport unless `--full-page` or `--element REF`
-is specified. WebKitGTK/WKWebView do not expose CDP:
-no device viewport emulation, network mocking, full-page tracing or screencast.
-When a task requires those, explain the need for external tooling and keep the
-user-visible URL/results in Flowmux. Cookie import returns `unimplemented` without reading host cookies; sign in
-inside the intended Flowmux profile.
+Never add tracking attributes to the DOM; Flowmux resolves refs without modifying
+the page. WebKitGTK/WKWebView do not expose CDP. Device viewport emulation, network
+mocking, full-page tracing and CDP screencast are unavailable; `record` provides
+sampled MP4 capture, and `screenshot --full-page` provides a document PNG. Use
+those supported commands when they meet the task. For a strict CDP requirement,
+explain the missing capability and keep user-visible URLs/results in Flowmux
+alongside the external tool. Cookie import returns `unimplemented` without
+reading host cookies; sign in inside the intended Flowmux profile.
 
 Linux and macOS offer opt-in WebDriver sessions in separate ephemeral
 Flowmux browser windows. Linux requires a WebKitGTK runtime built with WebDriver
@@ -341,6 +379,98 @@ input enabled; macOS starts with `FLOWMUX_WEBDRIVER_SERVER=127.0.0.1:4444 flowmu
 tabs and CLI input commands are unchanged. See `docs/webkit-automation.md` in the
 Flowmux repository for setup and the native-input smoke test. There is no CDP
 attachment. The macOS endpoint supports a documented subset of WebDriver.
+
+### Runtime browser diagnostics
+
+`flowmux --json browser diagnose PANE` reports the actual backend, visible/active
+surface, pending dialog, native input environment, document capture limits and
+recording encoder availability. Use `--surface UUID` to check a specific tab.
+`environment_ready` checks the environment only; the target must still be
+editable/actionable. Recording checks the CLI's PATH for ffmpeg/libx264. Media
+codec support still requires playing the intended file. `capabilities` remains
+an offline command inventory.
+
+### Task ownership and action receipts
+
+Use `browser control PANE start` to reserve one tab; retain the returned `task_id`
+and `surface_id`. Pass `--task ID --surface UUID` on subsequent mutations and
+snapshots/finds (they replace refs). Raw eval and JS waits also require ownership.
+Read-only status, text/value queries and screenshots remain available.
+`control PANE handoff` or `pause` blocks new mutations. The user resumes
+with **Continue** in the browser task bar. `stop` and `finish` preserve the tab;
+**Clear task display** releases it. `control PANE status` remains readable without an ID.
+Take a fresh snapshot after the user continues. These controls coordinate local
+clients; they are not a sandbox or credential boundary.
+
+```bash
+CONTROL=$("$FLOWMUX_CLI" browser --surface "$SURFACE" control "pane:$PANE" start) || exit 1
+TASK=$(printf '%s' "$CONTROL" | jq -er '.task_id') || exit 1
+"$FLOWMUX_CLI" browser --surface "$SURFACE" --task "$TASK" task "pane:$PANE" \
+  --name "Requested task" --step "Inspect the page"
+# All later mutations and snapshots/finds include the owning task ID.
+"$FLOWMUX_CLI" browser --surface "$SURFACE" --task "$TASK" find "pane:$PANE" \
+  --role button --name Save --exact --compact --max-chars 6000
+# After verifying the requested result:
+"$FLOWMUX_CLI" browser --surface "$SURFACE" --task "$TASK" control "pane:$PANE" finish
+```
+
+`finish` requires a running task with no action in progress; it declares completion
+and does not verify the website. A new task cannot start until the ended task's
+display is cleared in the UI. Popup tabs have independent ownership. Handoff or
+stop can cancel pending preparation but cannot undo an already-delivered action.
+
+Add `--receipt` to an action, optionally `--expect-text TEXT` or `--expect-url URL`
+or `--expect JSON`, and `--outcome-timeout-ms 5000`. Choose one expectation form.
+Inspect the returned JSON `status` and `error`, even when the CLI exits zero:
+`input_delivered` is not an application-level outcome; `outcome_confirmed` means
+the condition was observed; `dialog_pending` requires a response; and
+`outcome_unknown` requires inspection before retrying. The command is never
+repeated automatically. Receipt `control` is a task summary without the `results`
+history; use `control PANE status` when the result cards are needed, rather than
+after every action. Popup/download events include their IDs, but a download
+must separately reach `complete`. `popup_created` and `download_started` are
+intermediate outcomes; `control_changed` requires inspecting the task state.
+`--outcome-timeout-ms` bounds the outcome wait, not the underlying command.
+See `docs/browser-workflow.md` in the source
+repository for the protocol, event-history limits and handoff semantics.
+
+
+### Semantic discovery and typed conditions
+
+`find` is an alias of `snapshot`, not a click or a unique-element assertion.
+The role/name/label/text/placeholder filters combine with AND. Role is exact;
+other text uses case-sensitive, whitespace-normalized substring matching unless
+`--exact` is set. Multiple candidates require choosing the intended match.
+Even zero matches replace the ref registry. `--within REF` must come from the
+preceding still-valid snapshot; read returned refs before the next action.
+
+Pointer actions wait up to five seconds for readiness before input; fill/select/
+check/uncheck wait for their applicable element states. Stale nodes still fail.
+An action is never automatically replayed after delivery.
+
+Use `--receipt --expect '{"TextChanged":{"selector":"#result"}}'` to require a
+change from the pre-action baseline. `wait --condition JSON` and `--expect JSON`
+also accept `{"ValueChanged":{"selector":"#email"}}`,
+`{"PopupReady":{"url":"https://example.com/login"}}`, `{"UrlExact":"https://example.com/done"}`,
+`{"ElementState":{"selector":"#submit","state":"enabled"}}`,
+`{"Value":{"selector":"#email","value":"agent@example.test"}}` and
+`{"DownloadComplete":{"id":0}}`. These selectors address the top-level document.
+Use the popup's explicit surface ID and a ready-state wait for child readiness.
+
+`TextChanged` and `ValueChanged` capture their baseline before dispatch (or at the
+start of a standalone wait); supplied `before` values are replaced. Attach them
+to the action's receipt to detect that action's change. Starting a change wait
+after the update can instead wait for a future update. `PopupReady` likewise
+observes only newly created popups, requiring the exact URL and complete readiness.
+For an existing child, wait on its explicit surface. Current-state conditions
+can already be true; none of these checks alone proves server-side persistence.
+
+File selection requires `--root DIR`; canonical paths must remain inside it.
+Folder uploads reject nested links/special files and trees exceeding 10,000
+entries. `value` and `attr value` reject password fields; raw eval and captures
+remain trusted local-client capabilities. Task IDs are not authentication. IPC
+accepts only the same OS user, and file scope is not a same-user sandbox.
+Cookie import reports unsupported without reading or claiming to inject cookies.
 
 ## SSH
 
@@ -451,63 +581,3 @@ below are defaults and can be customized in Options.
 | Session history | `Ctrl+Alt+J`; saved sessions are distinct from the live agent list. |
 | Workspace overview / pane zoom | `Ctrl+Alt+K` / `Ctrl+Alt+M`. |
 | Preferences | Options controls themes, fonts and keybindings. |
-
-### Runtime browser diagnostics
-
-`flowmux --json browser diagnose PANE` reports the actual backend, visible/active
-surface, pending dialog, native input environment, document capture limits and
-recording encoder availability. Use `--surface UUID` to check a specific tab.
-`environment_ready` checks the environment only; the target must still be
-editable/actionable. Recording checks the CLI's PATH for ffmpeg/libx264. Media
-codec support still requires playing the intended file. `capabilities` remains
-an offline command inventory.
-
-### Task ownership and action receipts
-
-Use `browser control PANE start` to reserve one tab; retain the returned `task_id`
-and `surface_id`. Pass `--task ID --surface UUID` on subsequent mutations and
-snapshots. `control PANE handoff` or `pause` blocks new mutations. The user resumes
-with **Continue** in the browser task bar. `stop` and `finish` preserve the tab;
-**Clear task display** releases it. `control PANE status` remains readable without an ID.
-Take a fresh snapshot after the user continues. These controls coordinate local
-clients; they are not a sandbox or credential boundary.
-
-Add `--receipt` to an action, optionally `--expect-text TEXT` or `--expect-url URL`
-and `--outcome-timeout-ms 5000`. Inspect the returned JSON `status` and `error`:
-`input_delivered` is not an application-level outcome; `outcome_confirmed` means
-the condition was observed; `dialog_pending` requires a response; and
-`outcome_unknown` requires inspection before retrying. The command is never
-repeated automatically. Receipt `control` is a task summary without the `results`
-history; use `control PANE status` when the result cards are needed, rather than
-after every action. Popup/download events include their IDs, but a download
-must separately reach `complete`. See `docs/browser-workflow.md` in the source
-repository for the protocol, event-history limits and handoff semantics.
-
-
-### Semantic discovery and typed conditions
-
-`find PANE --role button --name Save --exact` returns all matching candidates
-with fresh refs. `snapshot` accepts the same role/name/label/text/placeholder
-filters, `--within REF`, `--interactive`, `--viewport`, `--max-nodes` and `--max-chars`.
-Filters combine with AND. Inspect `truncated` before concluding a target is absent.
-Both commands replace the ref registry. Ref metadata includes element states.
-
-Pointer actions wait up to five seconds for readiness before input; fill/select/
-check/uncheck wait for their applicable element states. Stale nodes still fail.
-An action is never automatically replayed after delivery.
-
-Use `--receipt --expect '{"TextChanged":{"selector":"#result"}}'` to require a
-change from the pre-action baseline. `wait --condition JSON` and `--expect JSON`
-also accept `{"ValueChanged":{"selector":"#email"}}`,
-`{"PopupReady":{"url":"https://example.com/login"}}`, `{"UrlExact":"https://example.com/done"}`,
-`{"ElementState":{"selector":"#submit","state":"enabled"}}`,
-`{"Value":{"selector":"#email","value":"agent@example.test"}}` and
-`{"DownloadComplete":{"id":0}}`. These selectors address the top-level document.
-Use the popup's explicit surface ID and a ready-state wait for child readiness.
-
-File selection requires `--root DIR`; canonical paths must remain inside it.
-Folder uploads reject nested links/special files and trees exceeding 10,000
-entries. `value` and `attr value` redact password fields; raw eval and captures
-remain trusted local-client capabilities. Task IDs are not authentication. IPC
-accepts only the same OS user, and file scope is not a same-user sandbox.
-Cookie import reports unsupported without reading or claiming to inject cookies.
