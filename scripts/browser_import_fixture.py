@@ -85,10 +85,13 @@ def exercise(cli, url, root, profile_name):
     firefox = root / "firefox-source"
     firefox.mkdir()
     db = sqlite3.connect(firefox / "cookies.sqlite")
-    db.executescript("""CREATE TABLE moz_cookies(host TEXT,name TEXT,value TEXT,path TEXT,expiry INTEGER,
-        isSecure INTEGER,isHttpOnly INTEGER,sameSite INTEGER,originAttributes TEXT);
-        INSERT INTO moz_cookies VALUES('127.0.0.1','fm_firefox','imported','/',0,0,1,1,''),
-        ('127.0.0.1','fm_container','excluded','/',0,0,0,1,'^userContextId=1');""")
+    db.executescript("""PRAGMA user_version=17;
+        CREATE TABLE moz_cookies(host TEXT,name TEXT,value TEXT,path TEXT,expiry INTEGER,
+        isSecure INTEGER,isHttpOnly INTEGER,sameSite INTEGER,originAttributes TEXT,isPartitionedAttributeSet INTEGER);
+        INSERT INTO moz_cookies VALUES('127.0.0.1','fm_firefox','imported','/',0,0,1,256,'',0),
+        ('127.0.0.1','fm_container','excluded','/',0,0,0,1,'^userContextId=1',0),
+        ('127.0.0.1','fm_partitioned','excluded','/',0,1,0,1,'',1);""")
+    db.execute("UPDATE moz_cookies SET expiry=? WHERE name='fm_firefox'", ((int(time.time()) + 3600) * 1000,))
     db.commit()
     db.close()
     db = sqlite3.connect(firefox / "places.sqlite")
@@ -100,7 +103,7 @@ def exercise(cli, url, root, profile_name):
     db.close()
     response = cli("browser", "import", other, "--from", "firefox", "--source-profile", str(firefox), "--cookies", "--bookmarks")
     report = json.loads(response["browser_result"]["value"])
-    assert report["cookies_added"] == 1 and report["bookmarks_added"] == 1 and report["cookies_skipped_isolated"] == 1, report
+    assert report["cookies_added"] == 1 and report["bookmarks_added"] == 1 and report["cookies_skipped_isolated"] == 2, report
     cli("browser", "reload", other)
     assert cli("browser", "wait", other, "--text", "FIREFOX_AUTHENTICATED")["browser_bool_result"]["value"]
     print("BROWSER_IMPORT_FIREFOX_HTTP_OK", flush=True)
