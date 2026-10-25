@@ -96,7 +96,9 @@ impl BrowserPane {
         let address = gtk::Entry::new();
         address.set_hexpand(true);
         address.set_sensitive(false);
-        address.set_text(initial_url.unwrap_or("about:blank"));
+        address.set_text(crate::ui::browser_chrome::address_text(
+            initial_url.unwrap_or(""),
+        ));
         chrome.append(&address);
 
         let message = gtk::Label::new(Some(UNSUPPORTED));

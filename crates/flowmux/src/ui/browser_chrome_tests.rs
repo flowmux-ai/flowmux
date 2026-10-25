@@ -55,6 +55,16 @@ async fn eval(pane: &BrowserPane, script: &str) -> String {
         .unwrap()
 }
 
+async fn wait_js(pane: &BrowserPane, script: &str) {
+    gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+        while eval(pane, script).await != "true" {
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("blank page background and centered icon");
+}
+
 fn capture(window: &gtk::Window, name: &str) {
     let Some(directory) = std::env::var_os("FLOWMUX_BROWSER_UI_SNAPSHOTS") else {
         return;
@@ -101,7 +111,7 @@ pub(crate) async fn check() {
     let pane = BrowserPane::new(
         flowmux_core::PaneId::new(),
         flowmux_core::SurfaceId::new(),
-        Some(&format!("file://{}", first.display())),
+        None,
         PaneCallbacks::noop_for_test(),
         flowmux_config::options::BrowserEngine::Webkit,
         false,
@@ -116,8 +126,8 @@ pub(crate) async fn check() {
         .child(&stack)
         .build();
     window.present();
-    wait("page ready", || {
-        pane.current_title() == "Browser layout" && pane.root.is_mapped()
+    wait("blank page ready", || {
+        pane.current_url() == "about:blank" && pane.root.is_mapped()
     })
     .await;
     let toolbar = find(&pane.root, &|w| w.has_css_class("browser-toolbar")).unwrap();
@@ -125,6 +135,24 @@ pub(crate) async fn check() {
         .unwrap()
         .downcast::<gtk::Entry>()
         .unwrap();
+    pane.focus_widget().grab_focus();
+    gtk::glib::timeout_future(Duration::from_millis(300)).await;
+    assert!(
+        address.text().is_empty(),
+        "blank tab address: {}",
+        address.text()
+    );
+    let blank_check = format!(
+        "String((()=>{{const icon=document.querySelector('[aria-label=Flowmux]');if(!icon)return false;const r=icon.getBoundingClientRect();return getComputedStyle(document.body).backgroundColor.replaceAll(\" \",\"\")==={} && Math.abs(r.x+r.width/2-innerWidth/2)<1 && Math.abs(r.y+r.height/2-innerHeight/2)<1 && r.width>0}})())",
+        serde_json::to_string(&crate::theme::ResolvedTheme::load().bg.to_string().replace(' ', "")).unwrap()
+    );
+    wait_js(&pane, &blank_check).await;
+    button(&toolbar, "Reload page").emit_clicked();
+    gtk::glib::timeout_future(Duration::from_millis(300)).await;
+    wait_js(&pane, &blank_check).await;
+    pane.load_uri(&format!("file://{}", first.display()));
+    wait("page ready", || pane.current_title() == "Browser layout").await;
+    wait("page address", || address.text().starts_with("file://")).await;
     #[cfg(target_os = "macos")]
     pane.check_native_chrome_focus(&address);
     // A redirect/state refresh must not replace text being edited in the omnibox.
@@ -378,6 +406,14 @@ pub(crate) async fn check() {
     button(&pane.root, "Clear task display").emit_clicked();
     assert!(!panel.is_visible());
     assert!(pane.control.status()["task_id"].is_null());
+    pane.focus_widget().grab_focus();
+    pane.load_uri("about:blank");
+    wait("return to blank page", || {
+        pane.current_url() == "about:blank"
+    })
+    .await;
+    wait("blank address restored", || address.text().is_empty()).await;
+    wait_js(&pane, &blank_check).await;
     pane.prepare_for_close();
     window.destroy();
     println!("BROWSER_CHROME_LAYOUT_OK");

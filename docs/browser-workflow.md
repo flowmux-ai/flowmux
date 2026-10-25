@@ -407,6 +407,11 @@ remain unsupported. Existing selector conditions retain their top-level behavior
 
 ## Browser toolbar
 
+The default start page uses the pane theme's background with a centered Flowmux
+icon. The address field is empty; the internal URL returned by `url` and snapshots
+remains `about:blank`. Wait for the intended URL and page result before treating
+navigation as complete. The start page is also retained when reloaded.
+
 The toolbar keeps navigation, the address, bookmarks and downloads within reach.
 **Browser tools** (the three-dot menu) contains **Find in page**, page zoom,
 **Developer tools**, and the current profile/storage information. At narrow pane

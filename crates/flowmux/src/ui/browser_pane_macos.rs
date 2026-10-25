@@ -1003,8 +1003,8 @@ impl BrowserPane {
         }
         {
             let native = native.clone();
-            reload.connect_clicked(move |_| unsafe {
-                native.web_view.reload();
+            reload.connect_clicked(move |_| {
+                reload_native(&native.web_view);
             });
         }
         {
@@ -1157,7 +1157,7 @@ impl BrowserPane {
         }
 
         if let Some(initial) = initial_url.map(normalize_uri) {
-            address.set_text(&initial);
+            address.set_text(crate::ui::browser_chrome::address_text(&initial));
             load_uri_native(&native.web_view, &initial);
         }
 
@@ -1346,7 +1346,8 @@ impl BrowserPane {
         }
         let normalized = normalize_uri(url);
         if !crate::ui::browser_chrome::address_is_editing(&self.address) {
-            self.address.set_text(&normalized);
+            self.address
+                .set_text(crate::ui::browser_chrome::address_text(&normalized));
         }
         load_uri_native(&self.native.web_view, &normalized);
     }
@@ -1377,9 +1378,7 @@ impl BrowserPane {
         if !self.native.navigation_enabled.get() {
             return;
         }
-        unsafe {
-            self.native.web_view.reload();
-        }
+        reload_native(&self.native.web_view);
     }
 
     pub fn stop_loading(&self) {
@@ -2030,11 +2029,12 @@ fn sync_browser_state(
     title_cb: &Rc<RefCell<dyn FnMut(PaneId, SurfaceId, String)>>,
 ) {
     let url = current_url_native(&native.web_view);
+    let display_url = crate::ui::browser_chrome::address_text(&url);
     if !url.is_empty()
         && !crate::ui::browser_chrome::address_is_editing(address)
-        && address.text().as_str() != url
+        && address.text().as_str() != display_url
     {
-        address.set_text(&url);
+        address.set_text(display_url);
     }
     if !url.is_empty() && *native.last_url.borrow() != url {
         *native.last_url.borrow_mut() = url.clone();
@@ -2062,9 +2062,19 @@ fn current_title_native(web_view: &WKWebView) -> String {
     unsafe { web_view.title().map(|title| title.to_string()) }.unwrap_or_default()
 }
 
+fn reload_native(web_view: &WKWebView) {
+    if current_url_native(web_view) == "about:blank" {
+        load_uri_native(web_view, "about:blank");
+    } else {
+        unsafe {
+            web_view.reload();
+        }
+    }
+}
+
 fn load_uri_native(web_view: &WKWebView, url: &str) {
     if url == "about:blank" {
-        let html = NSString::from_str("<!doctype html><meta charset=\"utf-8\"><title></title>");
+        let html = NSString::from_str(&crate::ui::browser_chrome::blank_page_html());
         unsafe {
             web_view.loadHTMLString_baseURL(&html, None);
         }

@@ -3,6 +3,26 @@
 use gtk::prelude::*;
 use std::cell::Cell;
 
+pub(super) fn address_text(url: &str) -> &str {
+    if url == "about:blank" {
+        ""
+    } else {
+        url
+    }
+}
+
+pub(super) fn blank_page_html() -> String {
+    let background = crate::theme::ResolvedTheme::load().bg;
+    let icon = include_str!("../../../../resources/icons/flowmux.svg");
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title></title>
+<style>html,body{{margin:0;width:100%;height:100%;overflow:hidden}}
+body{{display:grid;place-items:center;background:{background}}}
+svg{{display:block;width:96px;height:96px;max-width:50vw;max-height:50vh}}</style>
+</head><body><div role="img" aria-label="Flowmux">{icon}</div></body></html>"#
+    )
+}
+
 pub(super) fn address_is_editing(address: &gtk::Entry) -> bool {
     address
         .root()

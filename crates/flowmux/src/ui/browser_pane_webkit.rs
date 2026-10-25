@@ -478,7 +478,7 @@ impl BrowserPane {
                 let web_view = web_view.downgrade();
                 Rc::new(move |url| {
                     if let Some(web_view) = web_view.upgrade() {
-                        web_view.load_uri(url);
+                        load_uri(&web_view, url);
                     }
                 })
             },
@@ -619,7 +619,7 @@ impl BrowserPane {
             let v = web_view.downgrade();
             reload.connect_clicked(move |_| {
                 if let Some(v) = v.upgrade() {
-                    v.reload();
+                    reload_web_view(&v);
                 }
             });
         }
@@ -735,7 +735,7 @@ impl BrowserPane {
                     return;
                 };
                 let uri = normalize_uri(&address.text());
-                v.load_uri(&uri);
+                load_uri(&v, &uri);
                 v.grab_focus();
             });
         }
@@ -747,7 +747,7 @@ impl BrowserPane {
             focus.connect_leave(move |_| {
                 if let (Some(address), Some(view)) = (entry.upgrade(), view.upgrade()) {
                     if let Some(uri) = view.uri() {
-                        address.set_text(&uri);
+                        address.set_text(crate::ui::browser_chrome::address_text(&uri));
                     }
                 }
             });
@@ -764,7 +764,7 @@ impl BrowserPane {
                     let uri = uri.to_string();
                     if let Some(address) = address.upgrade() {
                         if !crate::ui::browser_chrome::address_is_editing(&address) {
-                            address.set_text(&uri);
+                            address.set_text(crate::ui::browser_chrome::address_text(&uri));
                         }
                     }
                     (uri_cb.borrow_mut())(pane_id.get(), surface_id, uri);
@@ -802,8 +802,8 @@ impl BrowserPane {
 
         if let Some(url) = initial_url {
             let normalized = normalize_uri(url);
-            address.set_text(&normalized);
-            web_view.load_uri(&normalized);
+            address.set_text(crate::ui::browser_chrome::address_text(&normalized));
+            load_uri(&web_view, &normalized);
         }
 
         Self {
@@ -840,7 +840,7 @@ impl BrowserPane {
 
     pub fn load_uri(&self, url: &str) {
         if self.navigation_enabled.get() {
-            self.web_view.load_uri(url);
+            load_uri(&self.web_view, url);
         }
     }
 
@@ -862,7 +862,7 @@ impl BrowserPane {
 
     pub fn reload(&self) {
         if self.navigation_enabled.get() {
-            self.web_view.reload();
+            reload_web_view(&self.web_view);
         }
     }
 
@@ -1070,6 +1070,25 @@ impl BrowserPane {
                 callback,
             );
         }
+    }
+}
+
+fn reload_web_view(web_view: &webkit6::WebView) {
+    if web_view.uri().as_deref() == Some("about:blank") {
+        load_uri(web_view, "about:blank");
+    } else {
+        web_view.reload();
+    }
+}
+
+fn load_uri(web_view: &webkit6::WebView, url: &str) {
+    if url == "about:blank" {
+        web_view.load_html(
+            &crate::ui::browser_chrome::blank_page_html(),
+            Some("about:blank"),
+        );
+    } else {
+        web_view.load_uri(url);
     }
 }
 
