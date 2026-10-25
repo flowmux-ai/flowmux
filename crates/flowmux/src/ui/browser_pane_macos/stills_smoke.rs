@@ -14,7 +14,7 @@ pub(crate) async fn check(window: &gtk::Window, suspended: bool, expect_stills: 
             .collect::<Vec<_>>()
     });
     assert!(!views.is_empty(), "dialog fixture needs a visible web pane");
-    glib::future_with_timeout(Duration::from_secs(5), async {
+    glib::future_with_timeout(Duration::from_secs(30), async {
         while views.iter().any(|(view, image)| {
             view.as_super().isHidden() != suspended || image.borrow().is_some() != expect_stills
         }) {

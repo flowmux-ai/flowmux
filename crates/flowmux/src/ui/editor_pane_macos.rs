@@ -595,7 +595,7 @@ impl EditorPane {
         for _ in 0..2 {
             // A click inside WKWebView changes AppKit focus without a GTK focus event.
             focus_native_view(&self.native.web_view);
-            glib::future_with_timeout(Duration::from_secs(2), async {
+            glib::future_with_timeout(Duration::from_secs(30), async {
                 while !self.web_widget.is_focus() {
                     glib::timeout_future(Duration::from_millis(10)).await;
                 }

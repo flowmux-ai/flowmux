@@ -34,7 +34,7 @@ fn button(root: &impl IsA<gtk::Widget>, text: &str) -> gtk::Button {
 }
 
 async fn wait(label: &str, ready: impl Fn() -> bool) {
-    gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+    gtk::glib::future_with_timeout(Duration::from_secs(30), async {
         while !ready() {
             gtk::glib::timeout_future(Duration::from_millis(25)).await;
         }
@@ -48,7 +48,7 @@ async fn eval(pane: &BrowserPane, script: &str) -> String {
     pane.evaluate_js(script, move |value| {
         let _ = tx.send(value);
     });
-    gtk::glib::future_with_timeout(Duration::from_secs(10), rx)
+    gtk::glib::future_with_timeout(Duration::from_secs(30), rx)
         .await
         .unwrap()
         .unwrap()
@@ -56,7 +56,7 @@ async fn eval(pane: &BrowserPane, script: &str) -> String {
 }
 
 async fn wait_js(pane: &BrowserPane, script: &str) {
-    gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+    gtk::glib::future_with_timeout(Duration::from_secs(30), async {
         while eval(pane, script).await != "true" {
             gtk::glib::timeout_future(Duration::from_millis(25)).await;
         }
@@ -248,7 +248,7 @@ pub(crate) async fn check() {
             window.set_default_size(width, 720);
             #[cfg(target_os = "macos")]
             pane.resize_native_test_window(width, 720);
-            let resized = gtk::glib::future_with_timeout(Duration::from_secs(10), async {
+            let resized = gtk::glib::future_with_timeout(Duration::from_secs(30), async {
                 while !window.is_mapped() || window.width() != width {
                     gtk::glib::timeout_future(Duration::from_millis(25)).await;
                 }

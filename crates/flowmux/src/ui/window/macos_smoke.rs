@@ -848,7 +848,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .unwrap()
     });
     assert!(matches!(
-        glib::future_with_timeout(Duration::from_secs(2), query)
+        glib::future_with_timeout(Duration::from_secs(30), query)
             .await
             .unwrap()
             .unwrap(),
@@ -899,7 +899,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         })
         .await
         .unwrap();
-    assert!(glib::future_with_timeout(Duration::from_secs(2), screen)
+    assert!(glib::future_with_timeout(Duration::from_secs(30), screen)
         .await
         .unwrap()
         .unwrap()

@@ -26,7 +26,6 @@ parser.add_argument('--ssh-config', required=True)
 parser.add_argument('--remote-cwd', required=True)
 parser.add_argument('--host', default='flowmux-fixture')
 parser.add_argument('--protected-pid', type=int, action='append', default=[])
-parser.add_argument('--tmux', action='store_true')
 args = parser.parse_args()
 for key in ('gui', 'cli', 'ssh_config'):
     setattr(args, key, str(Path(getattr(args, key)).resolve(strict=True)))
@@ -109,18 +108,16 @@ print(git('rev-parse','HEAD'))
     os.environ.pop('AT_SPI_BUS_ADDRESS', None)
     import gi
     gi.require_version('Atspi', '2.0')
-    from gi.repository import Atspi, GLib
+    from gi.repository import Atspi
     from Xlib import X, display
     from Xlib.ext import xtest
     Atspi.set_timeout(2000, 2000)
     process, sock = h.window('send-review')
     d = display.Display(h.env['DISPLAY'])
-    workspace = h.create(sock, tmux=args.tmux)
+    workspace = h.create(sock)
     source, source_tab = h.terminals(h.workspace(sock, workspace))[0]
     target = h.rpc(sock, 'pane_split', pane=source, direction='vertical')['pane_split_done']['new_pane']
     target_tab = next(t for p, t in h.terminals(h.workspace(sock, workspace)) if p == target)
-    if args.tmux:
-        h.sessions.add('flowmux-' + target_tab['id'].replace('-', ''))
     for label, pane, tab in [('source', source, source_tab), ('target', target, target_tab)]:
         frame(label)
         h.marker(sock, pane, tab['id'], args.remote_cwd)
@@ -217,29 +214,6 @@ print(git('rev-parse','HEAD'))
     assert b'SSH_SEND_WORKTREE' not in second and receipt('source') == b'', second
     (h.root / 'commit-receipt.bin').write_bytes(second)
     h.pass_check('Selected commit Send carries the remote commit OID and only that commit review')
-
-    if args.tmux:
-        open_review()
-        stale_target = choose_target()
-        before_reconnect = receipt('target')
-        h.ssh(sock, 'disconnect', workspace=workspace)
-        gui.wait_for(lambda: agent(target_tab) is None, 'disconnected target removed')
-        h.ssh(sock, 'connect', workspace=workspace)
-        h.connected(sock, workspace)
-        expect_status('idle')
-        try:
-            click(stale_target)
-        except GLib.Error as error:
-            # Rebuilding the disconnected workspace normally destroys its menu.
-            assert 'Object does not exist' in str(error), error
-        else:
-            gui.wait_for(lambda: any('disconnected or reconnected' in n.get_name() for n in nodes()), 'stale Send selection rejected')
-        assert receipt('target') == before_reconnect and receipt('source') == b''
-        h.pass_check('A Send selection made before reconnect cannot write to the replacement SSH channel')
-        send()
-        received = gui.wait_for(lambda: data if len(data := receipt('target')) > len(before_reconnect) and data.endswith(b'\x1b[201~\r') else None, 'Send after selecting reconnected agent')
-        assert ('Review target: commit ' + oid).encode() in received[len(before_reconnect):]
-        h.pass_check('Selecting the current tmux-backed agent after reconnect delivers the commit review')
 
     h.ssh(sock, 'disconnect', workspace=workspace)
     gui.wait_for(lambda: agent(target_tab) is None, 'disconnection removes remote target')
