@@ -462,7 +462,8 @@ Task ownership, `--task` and `--surface` work as for other browser mutations.
   explicitly, without pretending to import the cookies.
 - Existing cookies with the same domain/path/name are preserved. New cookies
   retain Secure, HttpOnly, SameSite and expiry attributes where supported by the
-  destination API, and are read back from the native store before success.
+  destination API; unspecified Chromium SameSite policies use the Lax default.
+  Cookies are read back from the native store before success.
 - Expired cookies and partitioned/container cookies are skipped and counted.
   Partition isolation cannot be transferred to the destination store safely.
   Invalid data or conversion/decryption failures produce an error, including

@@ -103,7 +103,13 @@ pub(crate) fn read_batch(
                     1 => SameSite::Lax,
                     2 => SameSite::Strict,
                     0 => SameSite::None,
-                    _ => SameSite::NoRestriction,
+                    _ => {
+                        return Err(rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Integer,
+                            "unknown cookie SameSite policy".into(),
+                        ))
+                    }
                 },
             },
             row.get(8)?,
@@ -205,5 +211,17 @@ mod tests {
         assert_eq!(cookies[0].expires_at, None);
         assert!(!cookies[0].secure);
         assert!(cookies[0].http_only);
+    }
+
+    #[test]
+    fn rejects_unknown_same_site_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("cookies.sqlite");
+        fixture_db(&db);
+        Connection::open(&db)
+            .unwrap()
+            .execute("UPDATE moz_cookies SET sameSite = 99", [])
+            .unwrap();
+        assert!(list_cookies_from_path(&db, None).is_err());
     }
 }

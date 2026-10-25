@@ -28,6 +28,8 @@ def exercise(cli, url, root, profile_name):
     rows = [
         ("127.0.0.1", "fm_import_session", "authenticated", b"", "/", expiry, 0, 1, 1, ""),
         ("127.0.0.1", "fm_import_pref", "dark", b"", "/", 0, 0, 0, 2, ""),
+        ("127.0.0.1", "fm_import_default", "default", b"", "/", 0, 0, 0, -1, ""),
+        ("127.0.0.1", "fm_import_secure", "secure", b"", "/", expiry, 1, 1, 0, ""),
         ("127.0.0.1", "fm_import_partition", "excluded", b"", "/", expiry, 0, 0, 1, "https://other.test"),
         ("127.0.0.1", "fm_import_expired", "excluded", b"", "/", 11644473601000000, 0, 0, 1, ""),
         ("not127.0.0.1", "fm_import_other", "excluded", b"", "/", expiry, 0, 0, 1, ""),
@@ -43,7 +45,7 @@ def exercise(cli, url, root, profile_name):
 
     report = run("--cookies", "--bookmarks", "--domain", "127.0.0.1")
     assert report == {"status": "complete", "profile": "custom-" + profile_name,
-                      "bookmarks_added": 1, "bookmarks_existing": 1, "cookies_added": 2,
+                      "bookmarks_added": 1, "bookmarks_existing": 1, "cookies_added": 4,
                       "cookies_existing": 0, "cookies_skipped_isolated": 1, "cookies_skipped_expired": 1}, report
     assert originals == {p.name: p.read_bytes() for p in source.iterdir()}
     cli("browser", "reload", pane)
@@ -53,7 +55,7 @@ def exercise(cli, url, root, profile_name):
     assert "excluded" not in visible, visible
     repeat = run("--cookies", "--bookmarks", "--domain", "127.0.0.1")
     assert repeat["cookies_added"] == repeat["bookmarks_added"] == 0, repeat
-    assert repeat["cookies_existing"] == 2, repeat
+    assert repeat["cookies_existing"] == 4, repeat
     # Existing authentication must survive a conflicting import.
     db = sqlite3.connect(source / "Cookies")
     db.execute("UPDATE cookies SET value='must-not-replace' WHERE name='fm_import_session'")
@@ -69,7 +71,7 @@ def exercise(cli, url, root, profile_name):
     run(error=True)
     # Import into an inactive, explicitly selected tab, preserving the active one.
     cli("browser", "open", url, pane_context=terminal)
-    assert run("--cookies", "--domain", "127.0.0.1")["cookies_existing"] == 2
+    assert run("--cookies", "--domain", "127.0.0.1")["cookies_existing"] == 4
     cli("focus-tab", surface, "--pane", pane)
     # An owned/paused tab must not admit imports from another caller.
     task = json.loads(cli("browser", "control", pane, "start")["browser_result"]["value"])["task_id"]

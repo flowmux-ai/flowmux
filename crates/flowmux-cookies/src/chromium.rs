@@ -133,9 +133,9 @@ fn read_with_password(
             secure: row.get::<_, i64>(6)? != 0,
             http_only: row.get::<_, i64>(7)? != 0,
             same_site: match row.get::<_, i64>(8)? {
-                -1 => SameSite::NoRestriction,
+                // Chromium applies Lax when the source cookie has no explicit policy.
+                -1 | 1 => SameSite::Lax,
                 0 => SameSite::None,
-                1 => SameSite::Lax,
                 2 => SameSite::Strict,
                 _ => return Err(Error::Import("unknown cookie SameSite policy".into())),
             },
@@ -192,7 +192,7 @@ fn password(browser: BrowserId) -> Result<Vec<u8>, Error> {
 
 #[cfg(target_os = "linux")]
 fn password(browser: BrowserId) -> Result<Vec<u8>, Error> {
-    use dbus_secret_service::{SecretService, EncryptionType};
+    use dbus_secret_service::{EncryptionType, SecretService};
     let application = match browser {
         BrowserId::Chrome => "chrome",
         BrowserId::Chromium => "chromium",
