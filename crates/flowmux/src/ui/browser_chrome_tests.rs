@@ -190,6 +190,12 @@ pub(crate) async fn check() {
     assert_eq!(pane.control.status()["state"], "paused");
     button(&pane.root, "Continue").emit_clicked();
     assert_eq!(pane.control.status()["state"], "running");
+    // macOS constrains the initial window to the hosted runner's display width.
+    let wide_width = window.width();
+    assert!(
+        wide_width >= 900,
+        "display must support the wide task panel"
+    );
     for preset in ["github-dark", "github-light"] {
         let options = flowmux_config::options::Options {
             theme: Some(preset.into()),
@@ -210,9 +216,9 @@ pub(crate) async fn check() {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
         );
-        for width in [1200, 720, 480] {
+        for width in [wide_width, 720, 480] {
             window.set_default_size(width, 720);
-            wait("resize", || window.width() == width).await;
+            wait(&format!("resize to {width}"), || window.width() == width).await;
             gtk::glib::timeout_future(Duration::from_millis(150)).await;
             let body = panel.parent().unwrap().downcast::<gtk::Box>().unwrap();
             assert_eq!(
