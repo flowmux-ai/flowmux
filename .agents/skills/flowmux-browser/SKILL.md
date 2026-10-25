@@ -277,7 +277,8 @@ system default. Existing files are not overwritten. Cancelling does not promise
 to remove partial files; only `complete` means a successful download. The UI and
 CLI share the same history; cleared or evicted entries are no longer listed.
 
-Task details appear in the control bar; Results contains related tabs, saved
+The control bar shows a one-line task summary. Details / Results opens a
+collapsible panel containing the full description, related tabs, saved
 captures, upload observations and native download completion. `control status`
 returns these bounded runtime-only results. File selection is not upload success;
 use `file-chooser select --receipt --expect JSON` for a site completion condition.
@@ -435,7 +436,7 @@ Use `browser control PANE start` to reserve one tab; retain the returned `task_i
 and `surface_id`. Pass `--task ID --surface UUID` on subsequent mutations and
 snapshots. `control PANE handoff` or `pause` blocks new mutations. The user resumes
 with **Continue** in the browser task bar. `stop` and `finish` preserve the tab;
-**Clear task** releases it. `control PANE status` remains readable without an ID.
+**Clear task display** releases it. `control PANE status` remains readable without an ID.
 Take a fresh snapshot after the user continues. These controls coordinate local
 clients; they are not a sandbox or credential boundary.
 

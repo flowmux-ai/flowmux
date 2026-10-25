@@ -44,8 +44,8 @@ flowmux browser --surface "$SURFACE" --task "$TASK" fill "$PANE" "$REF" "value"
 flowmux --json browser --surface "$SURFACE" --task "$TASK" control "$PANE" handoff
 ```
 
-The browser displays the task state and **Take control**, **Continue**,
-**Stop task**, and **Clear task** buttons. Handoff shows that user input is
+The browser displays the task state and the applicable **Take control**, **Continue**,
+and **Stop** buttons. **Clear task display** is available in the details panel after the task ends. Handoff shows that user input is
 needed. **Take control** pauses automation so the user can log in or edit the
 page. Only the user-facing **Continue** button resumes the task; a client cannot
 resume it through the control command. Take a fresh snapshot after continuing.
@@ -53,7 +53,7 @@ resume it through the control command. Take a fresh snapshot after continuing.
 `control PANE status` is available without a task ID. The owning task can request
 `handoff`, `pause`, `stop`, or `finish`. `finish` requires a running task with no
 action in progress; it is an explicit completion declaration, not a site-result
-check. Confirm the intended outcome before finishing. After stopping or finishing, **Clear task** releases the tab
+check. Confirm the intended outcome before finishing. After stopping or finishing, **Clear task display** releases the tab
 for another task. Old task IDs remain invalid. Ending a task never closes its tab.
 
 While a task owns a tab, modifications and snapshots require its task ID. A
@@ -268,12 +268,13 @@ to 500 characters. These are descriptions supplied by the task, not inferred
 progress or proof of completion. Updating details requires the owning task ID
 and does not resume a paused task. Use `control handoff` when the user must act.
 
-The task bar shows these details. **Results** lists up to 20 recent action
+The task bar shows a one-line summary and state-specific controls. **Details** /
+**Results** opens a collapsible panel with the full task description and up to 20 recent action
 results, related popup tabs, screenshots, uploads and tracked downloads. Related
 tabs keep their own ownership. File buttons open saved captures and completed
 downloads or their containing folders. Missing files cannot be opened. Results
 and details are also returned by `control status`; they are runtime-only and
-are cleared with **Clear task**. Finishing the task does not mark an unverified
+are cleared with **Clear task display**. Finishing the task does not mark an unverified
 website action successful.
 
 A selected upload is shown as **Files selected — upload unconfirmed**. To observe
@@ -333,3 +334,21 @@ on every poll. Frame navigation, node replacement or a new snapshot invalidates
 the ref even when its old selector matches another node. Conditions run in the
 same isolated world as the snapshot. Closed shadow roots and inaccessible frames
 remain unsupported. Existing selector conditions retain their top-level behavior.
+
+## Browser toolbar
+
+The toolbar keeps navigation, the address, bookmarks and downloads within reach.
+**Browser tools** (the three-dot menu) contains **Find in page**, page zoom,
+**Developer tools**, and the current profile/storage information. At narrow pane
+widths, Bookmarks and Downloads move into this menu. Back, Forward and Reload
+remain beside the address field. A non-default zoom
+appears beside the address; click it to reset to 100%.
+
+**Developer tools** opens Web Inspector in a separate window. On macOS, this keeps
+the native inspector from resizing the GTK workspace and covering other panes.
+Docking requests in the macOS inspector return it to the separate window.
+
+Task details open to the right in wide panes and below the page in narrow panes.
+Closing this panel keeps the task and results; **Clear task display** clears an
+ended task's display without deleting downloaded files. New results never open
+the panel automatically. Results remain session-only; this is not an archive.
