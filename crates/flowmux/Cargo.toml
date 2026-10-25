@@ -104,7 +104,7 @@ libc = { workspace = true }
 libloading = "0.8"
 zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit6 = "0.4"
+webkit6 = { version = "0.4", features = ["v2_42"] }
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

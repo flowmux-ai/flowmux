@@ -430,6 +430,8 @@ the panel automatically. Results remain session-only; this is not an archive.
 
 ## Import browser data
 
+Linux builds require WebKitGTK 2.42 or newer (the `webkitgtk-6.0` API).
+
 Open **Bookmarks → Import browser data…**, choose the browser/profile and data,
 and click **Import**. Bookmarks are selected by default; cookie access is opt-in.
 The dialog identifies the destination Flowmux profile and reports the result.

@@ -192,7 +192,7 @@ fn password(browser: BrowserId) -> Result<Vec<u8>, Error> {
 
 #[cfg(target_os = "linux")]
 fn password(browser: BrowserId) -> Result<Vec<u8>, Error> {
-    use secret_service::{blocking::SecretService, EncryptionType};
+    use dbus_secret_service::{SecretService, EncryptionType};
     let application = match browser {
         BrowserId::Chrome => "chrome",
         BrowserId::Chromium => "chromium",

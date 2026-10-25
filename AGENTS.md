@@ -142,6 +142,7 @@ This option applies to every browser command except `open`.
 | screenshot | yes | viewport PNG, or `--full-page` for a document PNG; see the CLI skill for platform limits |
 | record | yes | sampled silent MP4 via ffmpeg/libx264; 1–60 seconds, 1–10 fps |
 | media | yes | audio/video ref: status, play, pause, seek seconds, mute, unmute; returns playback state |
+| import | yes | source browser/profile, bookmarks and/or cookies; preserves existing entries |
 | download | yes | tab-scoped list, cancel ID, directory EXISTING_PATH; poll terminal state before using a file |
 | dialog | yes | page alert/confirm/prompt: status, accept ID [--text TEXT], dismiss ID |
 | file-chooser | yes | status, select ID PATH... --root DIR, cancel ID; responds to a pending page file input |

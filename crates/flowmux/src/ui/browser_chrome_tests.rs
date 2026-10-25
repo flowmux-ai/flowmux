@@ -165,7 +165,8 @@ pub(crate) async fn check() {
     wait("import dialog mapped", || dialog.is_mapped()).await;
     gtk::glib::timeout_future(Duration::from_millis(100)).await;
     capture(&dialog, "browser-import-dialog");
-    dialog.destroy();
+    dialog.close();
+    wait("import dialog closed", || !dialog.is_mapped()).await;
     let toolbar = find(&pane.root, &|w| w.has_css_class("browser-toolbar")).unwrap();
     let address = find(&toolbar, &|w| w.is::<gtk::Entry>())
         .unwrap()

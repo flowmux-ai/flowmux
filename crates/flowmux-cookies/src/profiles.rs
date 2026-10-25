@@ -38,12 +38,17 @@ pub fn discover() -> Result<Vec<Profile>, Error> {
 
 fn discover_in(home: &Path) -> Result<Vec<Profile>, Error> {
     let mut profiles = Vec::new();
+    let mut inaccessible = false;
     for source in crate::discover_sources() {
         let browser = source.id();
         let base = base(browser, home);
         let entries = match std::fs::read_dir(&base) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                inaccessible = true;
+                continue;
+            }
             Err(e) => return Err(e.into()),
         };
         for entry in entries {
@@ -65,6 +70,9 @@ fn discover_in(home: &Path) -> Result<Vec<Profile>, Error> {
                 });
             }
         }
+    }
+    if profiles.is_empty() && inaccessible {
+        return Err(Error::Import("No readable browser profiles found. Check permission to access browser profile folders.".into()));
     }
     profiles.sort_by(|a, b| (a.browser.slug(), &a.name).cmp(&(b.browser.slug(), &b.name)));
     Ok(profiles)
@@ -161,6 +169,22 @@ pub(crate) fn domain_matches(host: &str, domain: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inaccessible_browser_does_not_hide_other_profiles() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let blocked = base(BrowserId::Firefox, home.path());
+        std::fs::create_dir_all(&blocked).unwrap();
+        let readable = base(BrowserId::Chrome, home.path()).join("Default");
+        std::fs::create_dir_all(&readable).unwrap();
+        std::fs::write(readable.join("Bookmarks"), "{}").unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let result = discover_in(home.path());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let profiles = result.unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].browser, BrowserId::Chrome);
+    }
     #[test]
     fn discovery_lists_multiple_profiles_without_reading_secrets() {
         let home = tempfile::tempdir().unwrap();

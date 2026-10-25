@@ -127,7 +127,9 @@ impl BrowserImport {
         explanation.set_wrap(true);
         explanation.set_xalign(0.0);
         let sources = gtk::DropDown::from_strings(&[]);
-        sources.set_tooltip_text(Some("Source browser profile"));
+        sources.set_tooltip_text(Some(
+            "Source browser profile (only readable profiles are listed)",
+        ));
         let bookmarks =
             gtk::CheckButton::with_label("Bookmarks (web links; folders are flattened)");
         bookmarks.set_active(true);
