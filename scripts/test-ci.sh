@@ -147,3 +147,7 @@ run_phase webdriver-native 180 cargo test -p flowmux --test macos_webdriver --fe
 run_phase webdriver 180 python3 scripts/test-macos-webdriver.py "$CARGO_TARGET_DIR/debug/flowmux" \
     2>&1 | tee "$report_dir/webdriver.log"
 grep -q '^MACOS_WEBDRIVER_OK$' "$report_dir/webdriver.log"
+
+FLOWMUX_BROWSER_CHROME_SMOKE_ONLY=1 run_phase browser-chrome 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/browser-chrome.log"
+grep -q '^BROWSER_CHROME_LAYOUT_OK$' "$report_dir/browser-chrome.log"

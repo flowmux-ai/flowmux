@@ -26,6 +26,7 @@ impl BookmarkMenu {
         list.set_margin_end(8);
         list.set_size_request(320, -1);
         let popover = gtk::Popover::new();
+        popover.add_css_class("browser-popover");
         popover.set_child(Some(&list));
         crate::ui::popover_pos::set_menu_popover(&button, &popover);
 

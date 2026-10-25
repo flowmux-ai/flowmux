@@ -74,14 +74,30 @@ thread_local! {
 }
 
 #[derive(Clone)]
-pub(crate) struct BrowserControl {
+pub(crate) struct BrowserControl(Rc<BrowserControlInner>);
+
+impl std::ops::Deref for BrowserControl {
+    type Target = BrowserControlInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub(crate) struct BrowserControlInner {
     state: Rc<RefCell<State>>,
     pub bar: gtk::Box,
     label: gtk::Label,
     resume: gtk::Button,
+    take: gtk::Button,
+    stop: gtk::Button,
+    results: gtk::ToggleButton,
+    panel: gtk::Box,
+    panel_close: gtk::Button,
+    scroll: gtk::ScrolledWindow,
     clear: gtk::Button,
     detail_label: gtk::Label,
     result_list: gtk::Box,
+    rendered: Rc<RefCell<std::collections::HashMap<String, serde_json::Value>>>,
     tab_opener: Rc<RefCell<Option<Rc<dyn Fn(Uuid) -> bool>>>>,
 }
 
@@ -103,101 +119,156 @@ impl Drop for Operation {
 impl BrowserControl {
     pub fn new() -> Self {
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        text.set_hexpand(true);
+        bar.add_css_class("browser-task-bar");
         let detail_label = gtk::Label::new(None);
         detail_label.set_xalign(0.0);
         detail_label.set_wrap(true);
-        detail_label.set_max_width_chars(60);
+        detail_label.set_max_width_chars(36);
         detail_label.set_selectable(true);
         let result_list = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        result_list.set_margin_top(8);
-        result_list.set_margin_bottom(8);
-        result_list.set_margin_start(8);
-        result_list.set_margin_end(8);
+        let contents = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        contents.add_css_class("browser-detail-content");
+        contents.append(&detail_label);
+        let heading = gtk::Label::new(Some("Results"));
+        heading.set_xalign(0.0);
+        heading.add_css_class("heading");
+        contents.append(&heading);
+        contents.append(&result_list);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .max_content_height(360)
-            .propagate_natural_height(true)
-            .min_content_width(320)
-            .child(&result_list)
+            .vexpand(true)
+            .child(&contents)
             .build();
-        let popover = gtk::Popover::builder().child(&scroll).build();
-        let results = gtk::MenuButton::builder().label("Results").build();
-        crate::ui::popover_pos::set_menu_popover(&results, &popover);
-        bar.set_margin_start(6);
-        bar.set_margin_end(6);
+        let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        panel.add_css_class("browser-detail");
+        panel.set_hexpand(false);
+        panel.set_visible(false);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.add_css_class("browser-detail-header");
+        let title = gtk::Label::new(Some("Task details"));
+        title.set_hexpand(true);
+        title.set_xalign(0.0);
+        title.add_css_class("heading");
+        let panel_close =
+            super::browser_chrome::icon_button("window-close-symbolic", "Close task details");
+        header.append(&title);
+        header.append(&panel_close);
+        panel.append(&header);
+        panel.append(&scroll);
+        let results = gtk::ToggleButton::with_label("Details");
+        results.add_css_class("browser-details-toggle");
+        results.set_tooltip_text(Some("Show task details and results"));
+        {
+            let panel = panel.downgrade();
+            results.connect_toggled(move |button| {
+                if let Some(panel) = panel.upgrade() {
+                    panel.set_visible(button.is_active());
+                }
+            });
+            let results = results.downgrade();
+            panel_close.connect_clicked(move |_| {
+                if let Some(results) = results.upgrade() {
+                    results.set_active(false);
+                    results.grab_focus();
+                }
+            });
+        }
         let label = gtk::Label::new(None);
         label.set_hexpand(true);
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(24);
+        label.set_width_chars(1);
+        label.add_css_class("browser-task-summary");
         let take = gtk::Button::with_label("Take control");
         let resume = gtk::Button::with_label("Continue");
-        let stop = gtk::Button::with_label("Stop task");
-        let clear = gtk::Button::with_label("Clear task");
-        text.append(&label);
-        text.append(&detail_label);
-        bar.append(&text);
+        let stop = gtk::Button::with_label("Stop");
+        stop.add_css_class("browser-stop");
+        let clear = gtk::Button::with_label("Clear task display");
+        clear.set_tooltip_text(Some(
+            "Remove this ended task and its result display. Downloaded files are kept.",
+        ));
+        take.add_css_class("browser-primary");
+        resume.add_css_class("browser-primary");
+        bar.append(&label);
+        bar.append(&take);
+        bar.append(&resume);
+        bar.append(&stop);
         bar.append(&results);
-        for button in [&take, &resume, &stop, &clear] {
-            bar.append(button);
-        }
+        contents.append(&clear);
         bar.set_tooltip_text(Some("Local automation runs as your OS user. Task IDs coordinate actions; they are not authentication. Stopping prevents new actions. Already dispatched site actions may still complete. The tab is kept open."));
-        let control = Self {
+        let control = Self(Rc::new(BrowserControlInner {
             state: Rc::default(),
             bar,
             label,
             resume,
+            take,
+            stop,
+            results,
+            panel,
+            panel_close,
+            scroll,
             clear,
             detail_label,
             result_list,
+            rendered: Rc::default(),
             tab_opener: Rc::default(),
-        };
-        // Weak widgets prevent the button closures from retaining their own bar.
+        }));
+        // The widgets belong to this state; their handlers must not retain it.
         for (button, action) in [
-            (&take, "pause"),
+            (&control.take, "pause"),
             (&control.resume, "resume"),
-            (&stop, "stop"),
+            (&control.stop, "stop"),
             (&control.clear, "clear"),
         ] {
-            let state = control.state.clone();
-            let bar = control.bar.downgrade();
-            let label = control.label.downgrade();
-            let resume = control.resume.downgrade();
-            let clear = control.clear.downgrade();
-            let detail_label = control.detail_label.downgrade();
-            let result_list = control.result_list.downgrade();
-            let tab_opener = control.tab_opener.clone();
+            let weak = Rc::downgrade(&control.0);
             button.connect_clicked(move |_| {
-                let (Some(bar), Some(label), Some(resume), Some(clear)) = (
-                    bar.upgrade(),
-                    label.upgrade(),
-                    resume.upgrade(),
-                    clear.upgrade(),
-                ) else {
-                    return;
-                };
-                let (Some(detail_label), Some(result_list)) =
-                    (detail_label.upgrade(), result_list.upgrade())
-                else {
-                    return;
-                };
-                let control = Self {
-                    state: state.clone(),
-                    bar,
-                    label,
-                    resume,
-                    clear,
-                    detail_label,
-                    result_list,
-                    tab_opener: tab_opener.clone(),
-                };
-                control.user_action(action);
+                if let Some(inner) = weak.upgrade() {
+                    Self(inner).user_action(action);
+                }
             });
         }
         control.refresh();
         control
+    }
+
+    pub fn content(&self, page: &impl IsA<gtk::Widget>) -> gtk::Box {
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        body.set_vexpand(true);
+        body.set_hexpand(true);
+        page.set_hexpand(true);
+        page.set_vexpand(true);
+        body.append(page);
+        body.append(&self.panel);
+        let panel = self.panel.downgrade();
+        let scroll = self.scroll.downgrade();
+        let size = Cell::new((0, 0));
+        body.add_tick_callback(move |body, _| {
+            let next = (body.width(), body.height());
+            if next != size.replace(next) {
+                if let (Some(panel), Some(scroll)) = (panel.upgrade(), scroll.upgrade()) {
+                    let wide = next.0 >= 900;
+                    body.set_orientation(if wide {
+                        gtk::Orientation::Horizontal
+                    } else {
+                        gtk::Orientation::Vertical
+                    });
+                    panel.set_size_request(if wide { 320 } else { -1 }, -1);
+                    panel.set_vexpand(wide);
+                    scroll.set_vexpand(wide);
+                    scroll.set_propagate_natural_height(!wide);
+                    // Reset the old bound before increasing the viewport's minimum.
+                    scroll.set_min_content_height(-1);
+                    scroll.set_max_content_height(if wide { -1 } else { (next.1 * 2 / 5).max(80) });
+                    scroll.set_min_content_height(if wide {
+                        -1
+                    } else {
+                        (next.1 * 2 / 5).clamp(80, 240)
+                    });
+                }
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+        body
     }
 
     fn user_action(&self, action: &str) {
@@ -232,18 +303,62 @@ impl BrowserControl {
         let state = self.state.borrow();
         self.bar.set_visible(state.task.is_some());
         if state.results.is_empty() {
+            self.rendered.borrow_mut().clear();
             while let Some(child) = self.result_list.first_child() {
                 self.result_list.remove(&child);
             }
         }
-        self.label.set_text(match state.phase {
-            "running" => "Browser task running",
-            "user_needed" => "Browser task needs your input",
-            "paused" => "Browser task paused — you have control",
-            "stopped" => "Browser task stopped",
-            "completed" => "Browser task completed",
+        let phase = match state.phase {
+            "running" => "Running",
+            "user_needed" => "Your input needed",
+            "paused" => "You have control",
+            "stopped" => "Stopped",
+            "completed" => "Completed",
             _ => "",
+        };
+        let mut summary = vec![phase.to_string()];
+        if let Some(name) = state.details.name.as_ref().filter(|s| !s.is_empty()) {
+            summary.push(name.clone());
+        }
+        if let Some(step) = state
+            .details
+            .waiting
+            .as_ref()
+            .or(state.details.step.as_ref())
+            .filter(|s| !s.is_empty())
+        {
+            summary.push(step.clone());
+        }
+        self.label.set_text(&summary.join(" · "));
+        self.label.set_tooltip_text(Some(&summary.join(" · ")));
+        let ended = matches!(state.phase, "stopped" | "completed");
+        self.take.set_visible(state.phase == "running");
+        self.resume
+            .set_visible(matches!(state.phase, "paused" | "user_needed"));
+        self.stop.set_visible(!ended);
+        self.clear.set_visible(ended);
+        self.results.set_label(&if state.results.is_empty() {
+            "Details".into()
+        } else {
+            format!("Results {}", state.results.len())
         });
+        self.results.set_sensitive(!state.busy);
+        self.panel_close.set_sensitive(!state.busy);
+        for class in ["running", "user-needed", "paused", "ended"] {
+            self.bar.remove_css_class(class);
+        }
+        self.bar.add_css_class(if ended {
+            "ended"
+        } else if state.phase == "user_needed" {
+            "user-needed"
+        } else if state.phase == "paused" {
+            "paused"
+        } else {
+            "running"
+        });
+        if state.task.is_none() {
+            self.results.set_active(false);
+        }
         let mut details = Vec::new();
         for (label, value) in [
             ("Task", &state.details.name),
@@ -368,22 +483,87 @@ impl BrowserControl {
         state.results.push_back(value);
         let results = state.results.clone();
         drop(state);
-        while let Some(child) = self.result_list.first_child() {
-            self.result_list.remove(&child);
+        let mut child = self.result_list.first_child();
+        while let Some(row) = child {
+            child = row.next_sibling();
+            if !results
+                .iter()
+                .any(|r| r["key"].as_str() == Some(row.widget_name().as_str()))
+            {
+                self.rendered
+                    .borrow_mut()
+                    .remove(row.widget_name().as_str());
+                self.result_list.remove(&row);
+            }
         }
-        for result in results.iter().rev() {
-            let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
-            card.add_css_class("card");
+        for result in &results {
+            let key = result["key"].as_str().unwrap_or_default();
+            let mut existing = self.result_list.first_child();
+            while let Some(row) = existing.clone() {
+                if row.widget_name() == key {
+                    break;
+                }
+                existing = row.next_sibling();
+            }
+            if let Some(row) = existing {
+                if self.rendered.borrow().get(key) == Some(result) {
+                    continue;
+                }
+                self.result_list.remove(&row);
+            }
+            let card = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            card.set_widget_name(key);
+            self.rendered
+                .borrow_mut()
+                .insert(key.to_string(), result.clone());
+            card.add_css_class("browser-result");
             let title = gtk::Label::new(result["title"].as_str());
+            title.add_css_class("heading");
             title.set_xalign(0.0);
             title.set_wrap(true);
-            card.append(&title);
+            title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            title.set_hexpand(true);
+            let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let icon = gtk::Image::from_icon_name(if key.starts_with("download:") {
+                "folder-download-symbolic"
+            } else if result.get("surface_id").is_some() {
+                "web-browser-symbolic"
+            } else {
+                "text-x-generic-symbolic"
+            });
+            icon.set_valign(gtk::Align::Start);
+            heading.append(&icon);
+            heading.append(&title);
+            card.append(&heading);
             let detail = gtk::Label::new(result["detail"].as_str());
             detail.set_xalign(0.0);
             detail.set_wrap(true);
+            detail.set_wrap_mode(gtk::pango::WrapMode::WordChar);
             detail.set_max_width_chars(60);
             detail.set_selectable(true);
-            card.append(&detail);
+            let disclosure = gtk::Expander::builder()
+                .label("Details")
+                .child(&detail)
+                .build();
+            card.append(&disclosure);
+            if let Some(status) = result["status"].as_str() {
+                let text = match status {
+                    "complete" => "Download complete",
+                    "in_progress" => "Downloading",
+                    "cancelled" => "Cancelled",
+                    "cancelling" => "Cancelling",
+                    "failed" => "Failed",
+                    "condition_observed" => "Upload condition checked",
+                    "outcome_confirmed" => "Result checked",
+                    "input_dispatched" => "Input sent · result not checked",
+                    other => other,
+                };
+                let status = gtk::Label::new(Some(text));
+                status.set_xalign(0.0);
+                status.set_wrap(true);
+                status.add_css_class("dim-label");
+                card.append(&status);
+            }
             if let Some(path) = result["path"].as_str() {
                 let path = std::path::PathBuf::from(path);
                 let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -425,6 +605,7 @@ impl BrowserControl {
             }
             self.result_list.append(&card);
         }
+        self.refresh();
     }
 
     pub fn admit(&self, task: Option<Uuid>, native: bool) -> Result<(Operation, u64), String> {
@@ -496,28 +677,27 @@ impl BrowserControl {
     }
 }
 
-#[cfg(any(test, feature = "native-smoke"))]
+#[cfg(test)]
 pub(crate) fn check_controls() {
     let control = BrowserControl::new();
     let window = gtk::Window::builder().child(&control.bar).build();
     window.present();
     let click = |name: &str| {
-        let mut widget = control.bar.first_child();
-        while let Some(child) = widget {
-            if let Some(button) = child.downcast_ref::<gtk::Button>() {
-                if button.label().as_deref() == Some(name) {
-                    assert!(button.is_sensitive(), "{name} disabled");
-                    button.emit_clicked();
-                    return;
-                }
-            }
-            widget = child.next_sibling();
-        }
-        panic!("missing {name}");
+        let button = match name {
+            "Take control" => &control.take,
+            "Continue" => &control.resume,
+            "Stop task" => &control.stop,
+            "Clear task" => &control.clear,
+            _ => panic!("unknown control"),
+        };
+        assert!(button.is_sensitive());
+        button.emit_clicked();
     };
     let task =
         serde_json::from_value(control.control("start", None).unwrap()["task_id"].clone()).unwrap();
     assert!(control.bar.is_visible());
+    assert!(control.take.get_visible() && control.stop.get_visible());
+    assert!(!control.resume.get_visible() && !control.clear.get_visible());
     let details = flowmux_ipc::protocol::BrowserTaskDetails {
         name: Some("Account report".into()),
         step: Some("Download".into()),
@@ -534,10 +714,11 @@ pub(crate) fn check_controls() {
         control.status()["results"][0]["title"],
         "Upload unconfirmed"
     );
-    assert!(control.result_list.first_child().is_some());
+    let first_card = control.result_list.first_child().unwrap();
     control.set_tab_opener(Rc::new(|_| false));
     control.record("popup", serde_json::json!(Uuid::new_v4()));
-    let card = control.result_list.first_child().unwrap();
+    assert_eq!(control.result_list.first_child(), Some(first_card));
+    let card = control.result_list.last_child().unwrap();
     let button = card
         .last_child()
         .unwrap()
@@ -573,7 +754,9 @@ pub(crate) fn check_controls() {
     assert_eq!(row["path"], path.to_str().unwrap());
     std::fs::remove_file(path).unwrap();
     let (operation, revision) = control.admit(Some(task), true).unwrap();
+    assert!(!control.results.is_sensitive() && !control.panel_close.is_sensitive());
     click("Take control");
+    assert!(!control.take.get_visible() && control.resume.get_visible());
     assert!(control.check_revision(revision).is_err());
     assert!(!control.resume.is_sensitive());
     drop(operation);
@@ -581,9 +764,13 @@ pub(crate) fn check_controls() {
     assert_eq!(control.status()["state"], "running");
     drop(control.admit(Some(task), true).unwrap());
     control.control("handoff", Some(task)).unwrap();
+    assert!(!control.take.get_visible() && control.resume.get_visible());
+    assert!(control.bar.has_css_class("user-needed"));
     click("Continue");
     drop(control.admit(Some(task), true).unwrap());
     click("Stop task");
+    assert!(!control.stop.get_visible() && !control.resume.get_visible());
+    assert!(control.clear.get_visible());
     assert!(control.admit(Some(task), true).is_err());
     click("Clear task");
     assert!(!control.bar.is_visible());
@@ -591,6 +778,12 @@ pub(crate) fn check_controls() {
     assert!(control.status()["results"].as_array().unwrap().is_empty());
     assert!(control.admit(Some(task), true).is_err());
     drop(control.admit(None, true).unwrap());
+    let task =
+        serde_json::from_value(control.control("start", None).unwrap()["task_id"].clone()).unwrap();
+    control.control("finish", Some(task)).unwrap();
+    assert!(!control.take.get_visible() && !control.stop.get_visible());
+    assert!(!control.resume.get_visible() && control.clear.get_visible());
+    click("Clear task");
     window.destroy();
     println!("BROWSER_CONTROL_UI_OK");
 }

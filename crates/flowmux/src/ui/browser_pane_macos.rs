@@ -843,25 +843,6 @@ impl BrowserPane {
             web_view.setPageZoom(1.0);
         }
 
-        let back = gtk::Button::from_icon_name("go-previous-symbolic");
-        let forward = gtk::Button::from_icon_name("go-next-symbolic");
-        let reload = gtk::Button::from_icon_name("view-refresh-symbolic");
-        let find = gtk::Button::from_icon_name("edit-find-symbolic");
-        find.set_tooltip_text(Some("Find in page"));
-        let zoom_out = gtk::Button::from_icon_name("zoom-out-symbolic");
-        zoom_out.set_tooltip_text(Some("Zoom out"));
-        let zoom_reset = gtk::Button::with_label("100%");
-        zoom_reset.set_tooltip_text(Some("Reset page zoom"));
-        let zoom_in = gtk::Button::from_icon_name("zoom-in-symbolic");
-        zoom_in.set_tooltip_text(Some("Zoom in"));
-        let zoom_label = zoom_reset.clone();
-        let address = gtk::Entry::new();
-        address.set_hexpand(true);
-        address.set_placeholder_text(Some("Enter URL — e.g. http://localhost:3000"));
-        let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
-        inspector.set_widget_name("flowmux-web-inspector");
-        inspector.add_css_class("flat");
-        inspector.set_tooltip_text(Some("Open Web Inspector"));
         let downloads = DownloadManager::new();
         downloads.observe(control.clone());
         let bookmarks = BookmarkMenu::new(
@@ -899,30 +880,25 @@ impl BrowserPane {
             }
         )));
 
-        let chrome = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        chrome.set_margin_top(4);
-        chrome.set_margin_bottom(4);
-        chrome.set_margin_start(4);
-        chrome.set_margin_end(4);
-        chrome.append(&back);
-        chrome.append(&forward);
-        chrome.append(&reload);
-        chrome.append(&address);
-        chrome.append(&bookmarks.button);
-        chrome.append(&find);
-        chrome.append(&zoom_out);
-        chrome.append(&zoom_reset);
-        chrome.append(&zoom_in);
-        chrome.append(&downloads.button());
-        chrome.append(&inspector);
-
-        let find_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Find in page…")
-            .visible(false)
-            .build();
-        find_entry.set_margin_start(4);
-        find_entry.set_margin_end(4);
-        find_entry.set_margin_bottom(4);
+        let crate::ui::browser_chrome::BrowserChrome {
+            bar: chrome,
+            back,
+            forward,
+            reload,
+            address,
+            find,
+            zoom_out,
+            zoom_reset,
+            zoom_in,
+            inspector,
+            find_entry,
+            find_bar,
+        } = crate::ui::browser_chrome::BrowserChrome::new(
+            &bookmarks.button,
+            &downloads.button(),
+            &bookmarks.button.tooltip_text().unwrap_or_default(),
+        );
+        let zoom_label = zoom_reset.clone();
 
         let viewport = gtk::DrawingArea::new();
         viewport.set_hexpand(true);
@@ -936,8 +912,31 @@ impl BrowserPane {
         root.set_vexpand(true);
         root.append(&chrome);
         root.append(&control.bar);
-        root.append(&find_entry);
-        root.append(&viewport);
+        root.add_css_class("flowmux-browser");
+        root.append(&find_bar);
+        root.append(&control.content(&viewport));
+
+        for entry in [
+            address.clone().upcast::<gtk::Widget>(),
+            find_entry.clone().upcast(),
+        ] {
+            let focus = gtk::EventControllerFocus::new();
+            focus.connect_enter(|focus| {
+                if let Some(widget) = focus.widget() {
+                    focus_native_chrome(&widget);
+                }
+            });
+            entry.add_controller(focus);
+            let click = gtk::GestureClick::new();
+            click.set_propagation_phase(gtk::PropagationPhase::Capture);
+            click.connect_pressed(|click, _, _, _| {
+                if let Some(widget) = click.widget() {
+                    // A native page click need not change GTK's stored focus.
+                    focus_native_chrome(&widget);
+                }
+            });
+            entry.add_controller(click);
+        }
 
         let refs = Rc::new(RefCell::new(RefStore::new()));
         let ref_scope = ref_scope_for_surface(surface_id);
@@ -1044,7 +1043,11 @@ impl BrowserPane {
         }
         {
             let native = native.clone();
+            let viewport = web_widget.downgrade();
             find_entry.connect_stop_search(move |entry| {
+                if let Some(viewport) = viewport.upgrade() {
+                    viewport.grab_focus();
+                }
                 entry.set_visible(false);
                 focus_native_view(&native.web_view);
             });
@@ -1061,9 +1064,14 @@ impl BrowserPane {
         }
         {
             let native = native.clone();
+            let viewport = web_widget.downgrade();
             address.connect_activate(move |address| {
                 let uri = normalize_uri(&address.text());
                 load_uri_native(&native.web_view, &uri);
+                if let Some(viewport) = viewport.upgrade() {
+                    viewport.grab_focus();
+                }
+                focus_native_view(&native.web_view);
             });
         }
 
@@ -1113,6 +1121,8 @@ impl BrowserPane {
             let uri_cb = callbacks.on_browser_uri_changed.clone();
             let title_cb = callbacks.on_browser_title_changed.clone();
             let pane_id = pane_id.clone();
+            let back = back.downgrade();
+            let forward = forward.downgrade();
             gtk::glib::timeout_add_local(Duration::from_millis(250), move || {
                 let Some(native) = native.upgrade() else {
                     return glib::ControlFlow::Break;
@@ -1120,6 +1130,12 @@ impl BrowserPane {
                 let Some(address) = address.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
+                if let Some(back) = back.upgrade() {
+                    back.set_sensitive(unsafe { native.web_view.canGoBack() });
+                }
+                if let Some(forward) = forward.upgrade() {
+                    forward.set_sensitive(unsafe { native.web_view.canGoForward() });
+                }
                 sync_browser_state(
                     &native,
                     &address,
@@ -1321,7 +1337,9 @@ impl BrowserPane {
             return;
         }
         let normalized = normalize_uri(url);
-        self.address.set_text(&normalized);
+        if !crate::ui::browser_chrome::address_is_editing(&self.address) {
+            self.address.set_text(&normalized);
+        }
         load_uri_native(&self.native.web_view, &normalized);
     }
 
@@ -1389,6 +1407,35 @@ impl BrowserPane {
 
     pub fn grab_focus(&self) {
         focus_native_view(&self.native.web_view);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn check_native_chrome_focus(&self, address: &gtk::Entry) {
+        for entry in [
+            address.clone().upcast::<gtk::Widget>(),
+            self.find_entry.clone().upcast(),
+        ] {
+            self.web_view.grab_focus();
+            self.grab_focus();
+            assert!(native_view_has_focus(&self.native.web_view));
+            entry.set_visible(true);
+            assert!(entry.grab_focus());
+            assert!(
+                !native_view_has_focus(&self.native.web_view),
+                "browser chrome must take AppKit keyboard focus from the page"
+            );
+            self.grab_focus();
+            let controllers = entry.observe_controllers();
+            let click = (0..controllers.n_items())
+                .find_map(|i| controllers.item(i)?.downcast::<gtk::GestureClick>().ok())
+                .unwrap();
+            click.emit_by_name::<()>("pressed", &[&1_i32, &1_f64, &1_f64]);
+            assert!(
+                !native_view_has_focus(&self.native.web_view),
+                "a repeated chrome click must reclaim IME focus"
+            );
+        }
+        self.find_entry.emit_stop_search();
     }
 
     pub fn show_search(&self) {
@@ -1940,6 +1987,18 @@ fn focus_native_view(web_view: &WKWebView) {
     }
 }
 
+fn focus_native_chrome(widget: &gtk::Widget) {
+    let Some(window) = widget.root().and_downcast::<gtk::Window>() else {
+        return;
+    };
+    if let Some(view) = native_content_view(&window) {
+        if let Some(window) = view.window() {
+            // GTK focus alone leaves the page as AppKit's IME target.
+            window.makeFirstResponder(Some(view.as_super()));
+        }
+    }
+}
+
 fn sync_browser_state(
     native: &NativeBrowserView,
     address: &gtk::Entry,
@@ -1949,8 +2008,13 @@ fn sync_browser_state(
     title_cb: &Rc<RefCell<dyn FnMut(PaneId, SurfaceId, String)>>,
 ) {
     let url = current_url_native(&native.web_view);
-    if !url.is_empty() && *native.last_url.borrow() != url {
+    if !url.is_empty()
+        && !crate::ui::browser_chrome::address_is_editing(address)
+        && address.text().as_str() != url
+    {
         address.set_text(&url);
+    }
+    if !url.is_empty() && *native.last_url.borrow() != url {
         *native.last_url.borrow_mut() = url.clone();
         (uri_cb.borrow_mut())(id, surface_id, url);
     }

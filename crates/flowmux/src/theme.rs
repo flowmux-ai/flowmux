@@ -287,6 +287,13 @@ impl ResolvedTheme {
             0.94,
         ));
         let toast_border_css = rgba_css(&blend_with_alpha(&self.fg, 0.18));
+        let browser_css = include_str!("ui/browser.css")
+            .replace("$bg", &bg_css)
+            .replace("$fg", &rgba_css(&self.fg))
+            .replace("$surface", &tabbar_bg_css)
+            .replace("$border", &pane_border_css)
+            .replace("$hover", &control_hover_css)
+            .replace("$accent", &focus_full_css);
         let sidebar_zoom =
             flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
         format!(
@@ -844,7 +851,9 @@ paned > separator {{
 .flowmux-workspace-overview-card.active .flowmux-workspace-overview-name {{
     color: {fg};
 }}
+{browser_css}
 "#,
+            browser_css = browser_css,
             bg = bg_css,
             fg = rgba_css(&self.fg),
             border = pane_border_css,

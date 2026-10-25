@@ -252,6 +252,7 @@ impl DownloadManager {
         root.append(&clear);
         root.append(&scroll);
         let popover = gtk::Popover::new();
+        popover.add_css_class("browser-popover");
         popover.set_child(Some(&root));
         crate::ui::popover_pos::set_menu_popover(&button, &popover);
 

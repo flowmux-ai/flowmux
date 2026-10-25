@@ -348,29 +348,7 @@ impl BrowserPane {
             true
         });
 
-        let back = gtk::Button::from_icon_name("go-previous-symbolic");
-        let forward = gtk::Button::from_icon_name("go-next-symbolic");
-        let reload = gtk::Button::from_icon_name("view-refresh-symbolic");
-        let find = gtk::Button::from_icon_name("edit-find-symbolic");
-        find.set_tooltip_text(Some("Find in page"));
-        let zoom_out = gtk::Button::from_icon_name("zoom-out-symbolic");
-        zoom_out.set_tooltip_text(Some("Zoom out"));
-        let zoom_reset = gtk::Button::with_label("100%");
-        zoom_reset.set_tooltip_text(Some("Reset page zoom"));
-        let zoom_in = gtk::Button::from_icon_name("zoom-in-symbolic");
-        zoom_in.set_tooltip_text(Some("Zoom in"));
         let zoom = Rc::new(Cell::new(1.0));
-        let zoom_label = zoom_reset.clone();
-        let address = gtk::Entry::new();
-        address.set_hexpand(true);
-        address.set_placeholder_text(Some("Enter URL — e.g. http://localhost:3000"));
-        // Tool icon on the right side of the URL bar opens the WebKit
-        // Web Inspector as a detached (separate-window) popup.
-        // applications-utilities-symbolic ships with Adwaita and reads
-        // as a "toolbox / dev tools" glyph in both light and dark.
-        let inspector = gtk::Button::from_icon_name("applications-utilities-symbolic");
-        inspector.add_css_class("flat");
-        inspector.set_tooltip_text(Some("Open Web Inspector"));
         let file_choosers = FileChoosers::with_control(control.clone());
         {
             let file_choosers = file_choosers.clone();
@@ -509,22 +487,25 @@ impl BrowserPane {
             }
         )));
 
-        let chrome = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        chrome.set_margin_top(4);
-        chrome.set_margin_bottom(4);
-        chrome.set_margin_start(4);
-        chrome.set_margin_end(4);
-        chrome.append(&back);
-        chrome.append(&forward);
-        chrome.append(&reload);
-        chrome.append(&address);
-        chrome.append(&bookmarks.button);
-        chrome.append(&find);
-        chrome.append(&zoom_out);
-        chrome.append(&zoom_reset);
-        chrome.append(&zoom_in);
-        chrome.append(&downloads.button());
-        chrome.append(&inspector);
+        let crate::ui::browser_chrome::BrowserChrome {
+            bar: chrome,
+            back,
+            forward,
+            reload,
+            address,
+            find,
+            zoom_out,
+            zoom_reset,
+            zoom_in,
+            inspector,
+            find_entry,
+            find_bar,
+        } = crate::ui::browser_chrome::BrowserChrome::new(
+            &bookmarks.button,
+            &downloads.button(),
+            &bookmarks.button.tooltip_text().unwrap_or_default(),
+        );
+        let zoom_label = zoom_reset.clone();
 
         let download_signal = {
             let control = control.clone();
@@ -582,22 +563,27 @@ impl BrowserPane {
             })
         };
 
-        let find_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Find in page…")
-            .visible(false)
-            .build();
-        find_entry.set_margin_start(4);
-        find_entry.set_margin_end(4);
-        find_entry.set_margin_bottom(4);
-
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
         root.append(&chrome);
         root.append(&control.bar);
-        root.append(&find_entry);
-        root.append(&web_view);
+        root.add_css_class("flowmux-browser");
+        root.append(&find_bar);
+        root.append(&control.content(&web_view));
 
+        {
+            let back = back.downgrade();
+            let forward = forward.downgrade();
+            web_view.connect_load_changed(move |view, _| {
+                if let Some(back) = back.upgrade() {
+                    back.set_sensitive(view.can_go_back());
+                }
+                if let Some(forward) = forward.upgrade() {
+                    forward.set_sensitive(view.can_go_forward());
+                }
+            });
+        }
         // Wire chrome buttons.
         {
             let v = web_view.downgrade();
@@ -742,9 +728,23 @@ impl BrowserPane {
                 };
                 let uri = normalize_uri(&address.text());
                 v.load_uri(&uri);
+                v.grab_focus();
             });
         }
 
+        {
+            let focus = gtk::EventControllerFocus::new();
+            let entry = address.downgrade();
+            let view = web_view.downgrade();
+            focus.connect_leave(move |_| {
+                if let (Some(address), Some(view)) = (entry.upgrade(), view.upgrade()) {
+                    if let Some(uri) = view.uri() {
+                        address.set_text(&uri);
+                    }
+                }
+            });
+            address.add_controller(focus);
+        }
         // Reflect navigation in the address bar AND mirror the new URL
         // back to the daemon so state can restore the last page on next launch.
         {
@@ -755,7 +755,9 @@ impl BrowserPane {
                 if let Some(uri) = web_view.uri() {
                     let uri = uri.to_string();
                     if let Some(address) = address.upgrade() {
-                        address.set_text(&uri);
+                        if !crate::ui::browser_chrome::address_is_editing(&address) {
+                            address.set_text(&uri);
+                        }
                     }
                     (uri_cb.borrow_mut())(pane_id.get(), surface_id, uri);
                 }

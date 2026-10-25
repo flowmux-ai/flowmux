@@ -1,0 +1,119 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.flowmux-browser {
+    background-color: $bg;
+    color: $fg;
+}
+.browser-toolbar {
+    padding: 6px 8px;
+    border-bottom: 1px solid $border;
+    background-color: $surface;
+}
+button.browser-icon,
+menubutton.browser-icon > button,
+.browser-task-bar button,
+.browser-detail button,
+.browser-popover button {
+    min-height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background-image: none;
+    background-color: transparent;
+    color: $fg;
+    box-shadow: none;
+    text-shadow: none;
+    font-weight: 500;
+}
+button.browser-icon:hover,
+menubutton.browser-icon > button:hover,
+.browser-task-bar button:hover,
+.browser-detail button:hover,
+.browser-popover button:hover {
+    background-color: $hover;
+}
+button.browser-icon:active,
+menubutton.browser-icon > button:checked,
+.browser-task-bar button:checked {
+    background-color: alpha($accent, 0.16);
+}
+.browser-task-bar button.browser-primary {
+    background-color: alpha($accent, 0.14);
+    border-color: alpha($accent, 0.25);
+}
+.browser-task-bar button.browser-primary:hover {
+    background-color: alpha($accent, 0.24);
+}
+.browser-task-bar button.browser-stop:hover {
+    background-color: alpha(@error_color, 0.15);
+    color: @error_color;
+}
+.flowmux-browser button:focus-visible,
+.browser-popover button:focus-visible {
+    outline: 2px solid $accent;
+    outline-offset: -2px;
+}
+.flowmux-browser button:disabled,
+.browser-popover button:disabled { opacity: 0.4; }
+entry.browser-address {
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 9px;
+    background-color: $bg;
+    color: $fg;
+    border: 1px solid $border;
+    box-shadow: none;
+}
+entry.browser-address:focus-within {
+    border-color: $accent;
+    box-shadow: inset 0 0 0 1px alpha($accent, 0.25);
+}
+entry.browser-address image { opacity: 0.55; margin-right: 6px; }
+button.browser-zoom-badge {
+    min-height: 24px;
+    min-width: 0;
+    padding: 0 6px;
+    border-radius: 6px;
+    border: 0;
+    background-image: none;
+    background-color: $hover;
+    color: $fg;
+    box-shadow: none;
+    font-size: 0.9em;
+}
+.browser-task-bar {
+    padding: 4px 8px;
+    border-bottom: 1px solid $border;
+    border-left: 3px solid $accent;
+    background-color: $surface;
+    color: $fg;
+}
+.browser-task-bar.user-needed { border-left-color: @warning_color; }
+.browser-task-bar.paused,
+.browser-task-bar.ended { border-left-color: $border; }
+.browser-task-summary { font-size: 0.95em; }
+.browser-detail {
+    background-color: $surface;
+    color: $fg;
+    border-left: 1px solid $border;
+    border-top: 1px solid $border;
+}
+.browser-detail-header { padding: 8px 12px; border-bottom: 1px solid $border; }
+.browser-detail-content { padding: 12px; }
+.browser-result {
+    padding: 12px;
+    border: 1px solid $border;
+    border-radius: 10px;
+    background-color: $bg;
+}
+.browser-result expander { font-size: 0.95em; }
+.browser-find { padding: 6px 8px; border-bottom: 1px solid $border; }
+.browser-popover > contents {
+    background-color: $surface;
+    color: $fg;
+    border: 1px solid $border;
+    border-radius: 12px;
+    padding: 6px;
+}
+.browser-menu { padding: 6px; }
+.browser-menu-action { padding: 4px 10px; }
