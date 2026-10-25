@@ -102,13 +102,31 @@ OPEN=$("$FLOWMUX_CLI" --json browser open https://example.com) || exit 1
 PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
-"$FLOWMUX_CLI" --json browser snapshot "pane:$PANE"
+"$FLOWMUX_CLI" browser snapshot "pane:$PANE" --viewport --max-nodes 40 --max-chars 12000
 ```
 
 Open reuses a right-sibling browser pane as a new tab, or splits beside the
 calling pane. A new WebView initially shows `about:blank`. Wait for the requested
 URL and readiness before taking a snapshot. Wait prints `true` or `false`;
 **check the value**, not just the exit code. Stop on timeout.
+
+Choose the smallest observation that answers the next question:
+
+- Known target: `find PANE --role button --name Save --exact --max-chars 6000`.
+- Visible controls: `snapshot PANE --viewport --interactive --max-nodes 40 --max-chars 12000`.
+- Reading content: omit `--interactive`; it excludes document prose. Scope with
+  `--within REF`, then read the required element with `text PANE REF`.
+- Completion: use a typed `wait` or action `--receipt --expect` instead of
+  repeatedly dumping snapshots. Wait polling stays inside Flowmux.
+- Multiple form fields: use `form` and inspect its per-field results.
+
+Check `truncated` before deciding something is absent. A viewport/filter also
+excludes content even when `truncated` is false. Expand the scope or budget only
+when needed. Plain browser output is already JSON for snapshots; `--json` adds
+an outer response envelope for scripts. Keep large responses in local files and
+return only relevant fields to the model, retaining complete refs and scope.
+After navigation, node replacement or handoff, refresh the necessary scope;
+never reuse an old ref just to save tokens. Every snapshot/find replaces refs.
 
 A snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
 Copy the entire returned ref; short names such as `e1` are not aliases.

@@ -5,6 +5,23 @@ Flowmux can diagnose the current browser environment, reserve a tab for a local
 agent task, hand control to the user, and report an action's observed outcome.
 These features use the existing Linux WebKitGTK and macOS WKWebView panes.
 
+## Choose an observation scope
+
+For a known target, use `find PANE --role button --name Save --exact --max-chars 6000`.
+For an unfamiliar visible page, start with
+`snapshot PANE --viewport --max-nodes 40 --max-chars 12000`. Add `--interactive`
+only when looking for controls; omit it for reading prose. Use `--within REF`
+to inspect a known region. A filtered snapshot does not represent the whole page.
+Check `truncated` before assuming there are no more matches, and enlarge the
+scope or budget only when necessary. Every snapshot/find replaces the ref set.
+
+Prefer typed waits or an action's expected outcome to repeated full snapshots.
+Wait polling runs inside Flowmux and returns one result. Use `form` for a known
+set of fields. Keep large JSON in local files and expose only task-relevant data
+to the model, preserving complete refs, surface identity and truncation flags.
+These practices reduce returned text, not necessarily billed tokens by the same
+percentage; model context caching and tool-output limits differ by agent.
+
 ## Check the environment
 
 ```sh
@@ -39,7 +56,7 @@ Start a task and retain both IDs from the JSON result:
 ```sh
 flowmux --json browser control "$PANE" start
 # browser_result.value contains task_id and surface_id.
-flowmux --json browser --surface "$SURFACE" --task "$TASK" snapshot "$PANE"
+flowmux browser --surface "$SURFACE" --task "$TASK" snapshot "$PANE" --viewport --max-chars 12000
 flowmux browser --surface "$SURFACE" --task "$TASK" fill "$PANE" "$REF" "value"
 flowmux --json browser --surface "$SURFACE" --task "$TASK" control "$PANE" handoff
 ```

@@ -79,11 +79,11 @@ flowmux browser wait pane:$PANE --ready-state complete
 # Each wait prints true on success and false on timeout. Do not continue
 # when it prints false.
 
-# 3. Take an interactive snapshot. The result is a Markdown tree with
+# 3. Observe the visible page with a bounded snapshot. The result has a Markdown tree with
 #    opaque ref tokens (e.g. `e1-<snapshot-id>`) plus a selector map. Refs belong to
 #    the active browser tab. Take a fresh snapshot after switching tabs,
 #    navigation, page changes, or another snapshot.
-flowmux --json browser snapshot pane:$PANE
+flowmux browser snapshot pane:$PANE --viewport --max-nodes 40 --max-chars 12000
 
 # 4. Act on the page using complete returned ref tokens (e3/e1 below are placeholders).
 flowmux browser click pane:$PANE e3
@@ -105,6 +105,14 @@ flowmux browser attr  pane:$PANE e3 href
 flowmux browser url   pane:$PANE
 flowmux browser title pane:$PANE
 ```
+
+For a known target, prefer `find PANE --role button --name Save --exact` with
+an output budget. Use `--interactive` only for controls, not article reading.
+Inspect `truncated`; filtered/viewport output is not the whole page even when
+untruncated. Expand scope only when necessary. Use typed `wait`/receipts for
+completion and `form` for multiple fields instead of repeated full snapshots.
+Every snapshot/find replaces refs; refresh the required scope after navigation,
+node replacement or user handoff and keep complete ref tokens.
 
 ## Action coverage
 
