@@ -366,6 +366,23 @@ def exercise_compact_snapshot(cli, url, root):
     assert value("eval", "contact.value") == "compact@example.test"
     found = json.loads(value("find", "--compact", "--role", "textbox", "--name", "Contact email", "--exact"))
     assert len(found["refs"]) == 1 and "markdown" not in found
+    started = json.loads(value("control", "start"))
+    task, surface = started["task_id"], started["surface_id"]
+    ref = next(iter(found["refs"]))
+    for index in range(25):
+        receipt = json.loads(cli("browser", "--task", task, "--surface", surface,
+                                 "fill", pane, ref, str(index), "--receipt")["browser_result"]["value"])
+        assert receipt["status"] == "input_delivered" and receipt["side_effects_possible"]
+        assert receipt["automatic_retry"] is False and receipt["error"] is None
+        assert "results" not in receipt["control"], receipt
+        assert receipt["control"]["task_id"] == task
+    status = json.loads(value("control", "status"))
+    assert len(status["results"]) == 20
+    expected = {key: item for key, item in status.items() if key not in ("results", "surface_id")}
+    assert receipt["control"] == expected, (receipt["control"], expected)
+    assert receipt["surface_id"] == status["surface_id"]
+    cli("browser", "--task", task, "--surface", surface, "control", pane, "finish")
+    print("BROWSER_RECEIPT_SUMMARY_OK", flush=True)
     print("BROWSER_COMPACT_SNAPSHOT_OK", flush=True)
 
 
@@ -398,6 +415,7 @@ def exercise_ownership(cli, url, root):
     ref = next(key for key, meta in snap["refs"].items() if meta["name"] == "Submit once")
     unknown = json.loads(owned("click", ref, "--receipt", "--expect-text", "Never appears", "--outcome-timeout-ms", "150")["browser_result"]["value"])
     assert unknown["status"] == "outcome_unknown" and unknown["side_effects_possible"], unknown
+    assert "results" not in unknown["control"]
     assert unknown["automatic_retry"] is False and unknown["action_id"] != confirmed["action_id"]
     assert owned("eval", "String(submissions)")["browser_result"]["value"] == "2", "timed-out action was repeated"
     opened = json.loads(owned("eval", "window.open('about:blank','short-lived').close();'opened once'", "--receipt")["browser_result"]["value"])

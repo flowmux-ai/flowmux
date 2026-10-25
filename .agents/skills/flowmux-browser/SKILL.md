@@ -468,7 +468,9 @@ and `--outcome-timeout-ms 5000`. Inspect the returned JSON `status` and `error`:
 `input_delivered` is not an application-level outcome; `outcome_confirmed` means
 the condition was observed; `dialog_pending` requires a response; and
 `outcome_unknown` requires inspection before retrying. The command is never
-repeated automatically. Popup/download events include their IDs, but a download
+repeated automatically. Receipt `control` is a task summary without the `results`
+history; use `control PANE status` when the result cards are needed, rather than
+after every action. Popup/download events include their IDs, but a download
 must separately reach `complete`. See `docs/browser-workflow.md` in the source
 repository for the protocol, event-history limits and handoff semantics.
 

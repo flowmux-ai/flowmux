@@ -379,10 +379,16 @@ impl BrowserControl {
     }
 
     pub fn status(&self) -> serde_json::Value {
+        let mut status = self.summary();
+        status["results"] = serde_json::json!(self.state.borrow().results);
+        status
+    }
+
+    pub fn summary(&self) -> serde_json::Value {
         let state = self.state.borrow();
         serde_json::json!({"authentication": "same_os_user_ipc", "task_id_is_secret": false, "task_id":state.task,"state":if state.task.is_none(){"unmanaged"}else{state.phase},
             "action_in_progress":state.busy,"revision":state.revision,
-            "resume_requires_user":true,"details":state.details,"results":state.results})
+            "resume_requires_user":true,"details":state.details})
     }
 
     pub fn control(&self, action: &str, task: Option<Uuid>) -> Result<serde_json::Value, String> {
@@ -714,6 +720,10 @@ pub(crate) fn check_controls() {
         control.status()["results"][0]["title"],
         "Upload unconfirmed"
     );
+    let mut expected = control.status();
+    expected.as_object_mut().unwrap().remove("results");
+    assert_eq!(control.summary(), expected);
+    assert!(control.summary().get("results").is_none());
     let first_card = control.result_list.first_child().unwrap();
     control.set_tab_opener(Rc::new(|_| false));
     control.record("popup", serde_json::json!(Uuid::new_v4()));

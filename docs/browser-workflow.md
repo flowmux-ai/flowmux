@@ -113,6 +113,11 @@ flowmux --json browser --surface "$SURFACE" --task "$TASK" \
 
 The receipt contains an action ID, surface ID, document generations before/after,
 observed events, elapsed time, the original result/error and task state.
+The receipt's `control` contains the current task summary without `results`;
+previous result cards are not retransmitted on every action. Read
+`control PANE status` to fetch the bounded history, including the latest card.
+Clients that previously read `receipt.control.results` must use that command.
+The UI result cards, task details, error fields and event truncation are unchanged.
 
 | Status | Meaning |
 | --- | --- |

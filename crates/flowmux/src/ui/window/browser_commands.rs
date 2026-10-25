@@ -1246,7 +1246,7 @@ impl ActionReceipt {
             "elapsed_ms":self.started.elapsed().as_millis(),"outcome_met":outcome_met,
             "value":value,"error":error,"outcome_error":outcome_error,
             "side_effects_possible":self.mutation,"automatic_retry":false,
-            "control":browser.control.status(),
+            "control":browser.control.summary(),
         }).to_string())
     }
 }
