@@ -275,14 +275,17 @@ impl FileChoosers {
                     return;
                 }
             }
-            Self::present_gtk(
-                &parent,
-                &dialog,
-                multiple,
-                directories,
-                &cancellable,
-                move |files| complete(Ok(files)),
-            );
+            // AppKit can run a nested main loop while opening a picker; leave the executor first.
+            glib::idle_add_local_once(move || {
+                Self::present_gtk(
+                    &parent,
+                    &dialog,
+                    multiple,
+                    directories,
+                    &cancellable,
+                    move |files| complete(Ok(files)),
+                );
+            });
         });
     }
 
