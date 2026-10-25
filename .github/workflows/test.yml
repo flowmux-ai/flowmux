@@ -7,6 +7,12 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**'
+      - '!README.md'
+      - '!docs/**'
+      - 'docs/legal/**'
+      - '!resources/screenshot/**'
   workflow_dispatch:
   schedule:
     - cron: '23 3 * * 1'

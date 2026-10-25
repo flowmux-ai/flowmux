@@ -5,6 +5,12 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!README.md'
+      - '!docs/**'
+      - 'docs/legal/**'
+      - '!resources/screenshot/**'
   workflow_dispatch:
 
 jobs:

@@ -127,6 +127,11 @@ Regression review: no runtime code changes; future advisories intentionally fail
 both dependency updates and scheduled/release audits. GitHub-hosted execution
 itself was not triggered from this local branch.
 
+Update: advisories published between commits turned eight unrelated main pushes
+red in October 2026. The advisory check now runs only on the weekly schedule,
+manual dispatch and release audits; push and pull request audits keep the
+license and source checks.
+
 ## 6. Remaining risk validation
 
 ### Inspector address validation — confirmed and fixed
