@@ -16,6 +16,10 @@ use flowmux_core::{
     SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceId,
 };
 use gtk::prelude::*;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "tab_drag_smoke.rs"]
+pub(crate) mod tab_drag_smoke;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -185,6 +189,8 @@ pub struct PaneRegistry {
     /// Tab-bar `gtk::Box` so incremental tab additions can `append`
     /// into the same row instead of rebuilding the whole pane.
     pane_tab_containers: HashMap<PaneId, gtk::Box>,
+    #[cfg(target_os = "macos")]
+    pane_drop_previews: HashMap<PaneId, (gtk::DrawingArea, Rc<Cell<PaneDropZone>>)>,
     /// Per-pane tool-row buttons (maximize / split / add tab / add browser
     /// tab) that mirror a keyboard action, so their tooltips can be refreshed
     /// whenever the shortcut set changes.
@@ -650,6 +656,8 @@ impl PaneRegistry {
             self.active_browser_by_pane.remove(&pane);
             self.active_editor_by_pane.remove(&pane);
             self.pane_frames.remove(&pane);
+            #[cfg(target_os = "macos")]
+            self.pane_drop_previews.remove(&pane);
             self.surface_stacks.remove(&pane);
             self.surface_tabs.remove(&pane);
             self.pane_tab_containers.remove(&pane);
@@ -909,6 +917,39 @@ impl PaneRegistry {
         })
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn update_tab_drag_preview(&self, source: PaneId, point: Option<(&gtk::Widget, f64, f64)>) {
+        for (preview, zone) in self.pane_drop_previews.values() {
+            if zone.replace(PaneDropZone::None) != PaneDropZone::None {
+                preview.queue_draw();
+            }
+        }
+        for (_, tab) in self.surface_tabs.values().flatten() {
+            tab.remove_css_class("flowmux-pane-tab-drop-before");
+            tab.remove_css_class("flowmux-pane-tab-drop-after");
+        }
+        let Some((root, x, y)) = point else { return };
+        let Some(workspace) = self.pane_workspace.get(&source) else {
+            return;
+        };
+        if let Some((pane, _, index, after)) = self.tab_at_root_point(root, x, y) {
+            if self.pane_workspace.get(&pane) == Some(workspace) {
+                self.surface_tabs[&pane][index].1.add_css_class(if after {
+                    "flowmux-pane-tab-drop-after"
+                } else {
+                    "flowmux-pane-tab-drop-before"
+                });
+            }
+        } else if let Some((pane, fx, fy)) = self.pane_at_root_point(root, x, y) {
+            if self.pane_workspace.get(&pane) == Some(workspace) {
+                if let Some((preview, zone)) = self.pane_drop_previews.get(&pane) {
+                    zone.set(drop_zone(fx, fy));
+                    preview.queue_draw();
+                }
+            }
+        }
+    }
+
     pub fn refresh_tab_multi_class(&self, pane: PaneId) {
         let Some(tabs_box) = self.pane_tab_containers.get(&pane) else {
             return;
@@ -970,6 +1011,8 @@ impl PaneRegistry {
         self.surface_tabs.remove(&pane);
         self.surface_stacks.remove(&pane);
         self.pane_frames.remove(&pane);
+        #[cfg(target_os = "macos")]
+        self.pane_drop_previews.remove(&pane);
         self.pane_tab_containers.remove(&pane);
         self.pane_tool_buttons.remove(&pane);
         self.pane_zoom_badges.remove(&pane);
@@ -1845,7 +1888,7 @@ fn build_leaf_pane(
 
     // Overlay a translucent preview on top of the pane body so a drag can show
     // whether dropping will split (right / bottom half highlighted) or add a tab
-    // (no highlight). The drawing area is click-through.
+    // (whole pane highlighted). The drawing area is click-through.
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&root));
     let drop_zone = Rc::new(Cell::new(PaneDropZone::None));
@@ -1865,12 +1908,22 @@ fn build_leaf_pane(
                     cr.rectangle(0.0, h / 2.0, w, h / 2.0);
                     let _ = cr.fill();
                 }
-                PaneDropZone::Tab | PaneDropZone::None => {}
+                PaneDropZone::Tab => {
+                    cr.rectangle(0.0, 0.0, w, h);
+                    let _ = cr.fill();
+                }
+                PaneDropZone::None => {}
             }
         });
     }
     overlay.add_overlay(&preview);
     frame.set_child(Some(&overlay));
+
+    #[cfg(target_os = "macos")]
+    registry
+        .borrow_mut()
+        .pane_drop_previews
+        .insert(pane_id, (preview.clone(), drop_zone.clone()));
 
     // Dropping a tab on the pane body splits or appends depending on the region;
     // see `attach_pane_body_dnd`.
@@ -3283,6 +3336,7 @@ fn install_macos_tab_drag_fallback(
     gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
     gesture.set_button(gtk::gdk::BUTTON_PRIMARY);
     let drag_origin = Rc::new(Cell::new(None::<(f64, f64)>));
+    let native_views_suspend = Rc::new(RefCell::new(None));
 
     let tab_for_begin = tab.downgrade();
     let saw_target_for_begin = saw_tab_drop_target.clone();
@@ -3293,13 +3347,41 @@ fn install_macos_tab_drag_fallback(
         let Some(tab_for_begin) = tab_for_begin.upgrade() else {
             return;
         };
-        // The coordinate fallback owns the pointer sequence from the GTK tab;
-        // hiding every native WebView here only blanks unrelated panes.
         saw_target_for_begin.set(false);
         committed_for_begin.set(false);
         opened_for_begin.set(false);
         origin_for_begin.set(Some((x, y)));
         set_tab_drag_visual_state(&tab_for_begin, true);
+    });
+
+    let tab_for_update = tab.downgrade();
+    let origin_for_update = drag_origin.clone();
+    let preview_for_update = callbacks.tab_drag_preview.clone();
+    let suspend_for_update = native_views_suspend.clone();
+    gesture.connect_drag_update(move |_, dx, dy| {
+        let Some((x, y)) = origin_for_update.get() else {
+            return;
+        };
+        if dx.hypot(dy) < 8.0 {
+            return;
+        }
+        let Some(tab) = tab_for_update.upgrade() else {
+            return;
+        };
+        let Some(window) = tab.root().and_downcast::<gtk::Window>() else {
+            return;
+        };
+        if suspend_for_update.borrow().is_none() {
+            // Paint a still beneath GTK's preview instead of letting WKWebView cover it.
+            *suspend_for_update.borrow_mut() =
+                Some(crate::ui::browser_pane::suspend_native_browser_views_for_window(&window));
+        }
+        let root = window.upcast::<gtk::Widget>();
+        let point = gtk::graphene::Point::new((x + dx) as f32, (y + dy) as f32);
+        let point = tab
+            .compute_point(&root, &point)
+            .map(|p| (&root, f64::from(p.x()), f64::from(p.y())));
+        preview_for_update(pane_id, point);
     });
 
     let tab_for_end = tab.downgrade();
@@ -3315,7 +3397,11 @@ fn install_macos_tab_drag_fallback(
     let saw_target_for_end = saw_tab_drop_target.clone();
     let committed_for_end = committed_tab_drop.clone();
     let opened_for_end = opened_new_window.clone();
+    let preview_for_end = callbacks.tab_drag_preview.clone();
+    let suspend_for_end = native_views_suspend.clone();
     gesture.connect_drag_end(move |_, dx, dy| {
+        preview_for_end(pane_id, None);
+        suspend_for_end.borrow_mut().take();
         if let Some(tab) = tab_for_end.upgrade() {
             set_tab_drag_visual_state(&tab, false);
         }
@@ -3414,7 +3500,10 @@ fn install_macos_tab_drag_fallback(
 
     let tab_for_cancel = tab.downgrade();
     let origin_for_cancel = drag_origin.clone();
+    let preview_for_cancel = callbacks.tab_drag_preview.clone();
     gesture.connect_cancel(move |_, _| {
+        preview_for_cancel(pane_id, None);
+        native_views_suspend.borrow_mut().take();
         if let Some(tab) = tab_for_cancel.upgrade() {
             set_tab_drag_visual_state(&tab, false);
         }

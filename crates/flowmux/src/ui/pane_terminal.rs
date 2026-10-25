@@ -146,6 +146,8 @@ pub struct PaneCallbacks {
     #[cfg(target_os = "macos")]
     pub tab_at_root_point:
         Rc<dyn Fn(&gtk::Widget, f64, f64) -> Option<(PaneId, SurfaceId, usize, bool)>>,
+    #[cfg(target_os = "macos")]
+    pub tab_drag_preview: Rc<dyn Fn(PaneId, Option<(&gtk::Widget, f64, f64)>)>,
     /// Called when Ctrl+click selects a URL inside the terminal. The caller
     /// opens that URL in a new browser tab in the same pane
     /// (GtkCommand::OpenUrlInBrowserTab). The URL arrives with trailing
@@ -206,6 +208,8 @@ impl PaneCallbacks {
             pane_at_root_point: Rc::new(|_, _, _| None),
             #[cfg(target_os = "macos")]
             tab_at_root_point: Rc::new(|_, _, _| None),
+            #[cfg(target_os = "macos")]
+            tab_drag_preview: Rc::new(|_, _| {}),
             on_open_url: Rc::new(RefCell::new(|_, _| {})),
             on_open_browser_popup: Rc::new(RefCell::new(|_, _, _| {})),
             on_open_image: Rc::new(RefCell::new(|_, _| {})),

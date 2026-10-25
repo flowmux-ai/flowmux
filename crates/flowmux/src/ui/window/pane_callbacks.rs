@@ -403,6 +403,15 @@ impl PaneCallbackRouter {
                     tab
                 })
             },
+            #[cfg(target_os = "macos")]
+            tab_drag_preview: {
+                let registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |pane, point| {
+                    if let Some(registry) = registry.upgrade() {
+                        registry.borrow().update_tab_drag_preview(pane, point);
+                    }
+                })
+            },
             on_open_url: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, url| {

@@ -435,6 +435,24 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     })
     .await;
     page.join().unwrap();
+    if std::env::var_os("FLOWMUX_TAB_DRAG_PREVIEW_SMOKE_ONLY").is_some() {
+        javascript(
+            &browser,
+            "document.body.style.background='#18394b'; 'ready'",
+        )
+        .await;
+    }
+    crate::ui::workspace_view::tab_drag_smoke::check(
+        controller.window.upcast_ref(),
+        &controller.pane_registry,
+        terminal_pane,
+        pane,
+    )
+    .await;
+    if std::env::var_os("FLOWMUX_TAB_DRAG_PREVIEW_SMOKE_ONLY").is_some() {
+        controller.window.destroy();
+        return;
+    }
     assert_eq!(
         javascript(
             &browser,
