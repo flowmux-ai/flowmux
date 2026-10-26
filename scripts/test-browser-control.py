@@ -20,6 +20,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/navigation":
+            self.server.navigation_requests += 1
+            self.server.navigation_requested.set()
+            if not self.server.navigation_release.wait(10):
+                self.send_error(504, "navigation fixture was not released")
+                return
+            body = f'<!doctype html><p id=generation>{self.server.navigation_requests}</p><input aria-label="Fresh field">'.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path in ("/download", "/slow-download"):
             slow = self.path == "/slow-download"
             data = b"Flowmux download fixture\n"
@@ -1352,6 +1366,56 @@ def exercise(cli, url, root):
     print("PASS: native click sequence, CSS hover and double-click", flush=True)
 
 
+def exercise_navigation(cli, url, state, server):
+    server.navigation_requests = 0
+    server.navigation_requested = threading.Event()
+    server.navigation_release = threading.Event()
+    server.navigation_release.set()
+    workspace = cli("workspace", "new", "--name", "Navigation completion", "--root", str(state))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    destination = url + "navigation"
+    pane = cli("browser", "open", destination, pane_context=terminal)["browser_pane_opened"]["pane"]
+
+    def browser(op, *args):
+        return cli("browser", op, pane, *args)
+
+    def evaluate(source):
+        return browser("eval", source)["browser_result"]["value"]
+
+    def wait(*args):
+        return browser("wait", *args)["browser_bool_result"]["value"]
+
+    assert wait("--condition", json.dumps({"UrlExact": destination}))
+    assert wait("--ready-state", "complete")
+    fresh = "typeof window.__flowmuxNavigationPending === 'undefined' && document.readyState === 'complete'"
+    try:
+        for generation, action in enumerate(("navigate", "reload"), 2):
+            evaluate("window.__flowmuxNavigationPending=true;'marked'")
+            server.navigation_requested.clear()
+            server.navigation_release.clear()
+            receipt = json.loads(browser(action, *([destination] if action == "navigate" else []),
+                "--receipt", "--expect", json.dumps({"TextChanged": {"selector": "#generation"}}),
+                "--outcome-timeout-ms", "150")["browser_result"]["value"])
+            assert server.navigation_requested.wait(5), "navigation did not reach the fixture"
+            assert receipt["status"] == "outcome_unknown", receipt
+            assert evaluate("String(window.__flowmuxNavigationPending)") == "true"
+            ready_only = wait("--ready-state", "complete", "--timeout-ms", "150")
+            assert not wait("--js", fresh, "--timeout-ms", "150"), "old document satisfied the fresh-document wait"
+            server.navigation_release.set()
+            assert wait("--js", fresh)
+            assert wait("--condition", json.dumps({"UrlExact": destination}))
+            assert evaluate("document.querySelector('#generation').textContent") == str(generation)
+            assert server.navigation_requests == generation, "timed-out navigation was repeated"
+            snap = json.loads(browser("snapshot", "--compact")["browser_result"]["value"])
+            field = next(ref for ref, meta in snap["refs"].items() if meta["name"] == "Fresh field")
+            browser("fill", field, "new document")
+            assert browser("value", field)["browser_result"]["value"] == "new document"
+            print(f"BROWSER_NAVIGATION_COMPLETION {action}: ready_state_only={ready_only}, fresh_document_verified={generation}", flush=True)
+    finally:
+        server.navigation_release.set()
+    print("BROWSER_NAVIGATION_COMPLETION_OK", flush=True)
+
+
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/flowmux").resolve()
     cli_binary = binary.with_name("flowmuxctl")
@@ -1399,6 +1463,7 @@ def main():
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_regressions(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                    exercise_navigation(cli, f"http://127.0.0.1:{server.server_port}/", root, server)
                     exercise(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 assert process.poll() is None, "test GUI exited unexpectedly"
             finally:

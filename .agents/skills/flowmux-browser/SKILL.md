@@ -133,6 +133,15 @@ code. Stop dependent actions on timeout and inspect the current URL/diagnostics.
 when the exact URL matters. `complete` is document readiness, not completion of
 later application requests; wait for the result that the task actually needs.
 
+For `reload` or same-URL `navigate`, URL and ready-state waits can match the old
+document. Use a site-specific changed result, or mark the current document with
+an unused temporary window property before the action and use `wait --js` to
+require both its disappearance and `document.readyState === 'complete'`.
+Then verify the destination/result and refresh refs. This marker technique is
+for full-document navigation, not SPA or fragment changes. Receipt document
+generations indicate navigation start, not completed loading; receipt
+expectations reject JavaScript. A timeout never means the action should be repeated.
+
 Choose the smallest observation that answers the next question:
 
 - Known target: `find PANE --role button --name Save --exact --compact --max-chars 6000`.

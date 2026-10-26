@@ -30,6 +30,34 @@ to the model, preserving complete refs, surface identity and truncation flags.
 These practices reduce returned text, not necessarily billed tokens by the same
 percentage; model context caching and tool-output limits differ by agent.
 
+## Wait for a new document
+
+`navigate` and `reload` return after requesting navigation. A URL or
+`ready-state=complete` wait can still match the previous document, especially
+when reloading or navigating to the same URL. A receipt's document generation
+advances when navigation starts, not when the new document finishes loading.
+
+Prefer a site-specific changed result when available, such as a `TextChanged`
+receipt expectation. For a full-document reload with no distinct result, mark
+the current document with an unused temporary window property, then wait for
+its disappearance and readiness together:
+
+```sh
+flowmux browser --surface "$SURFACE" eval "$PANE" \
+  'window.__flowmuxNavigationPending = true; "marked"'
+flowmux browser --surface "$SURFACE" reload "$PANE"
+[ "$(flowmux browser --surface "$SURFACE" wait "$PANE" --js \
+  "typeof window.__flowmuxNavigationPending === 'undefined' && document.readyState === 'complete'")" = true ] || exit 1
+```
+
+The same sequence works with `navigate "$PANE" "$URL"` in place of `reload`.
+Then verify the expected URL and application result, and take a fresh snapshot
+before using refs. Same-document SPA or fragment navigation does not replace the
+window property; use the application's changed state for those actions instead.
+JavaScript predicates belong to `wait --js`; receipt expectations do not accept
+JavaScript. A timeout does not retry the navigation: inspect the state or keep
+waiting without issuing the action again.
+
 ## Check the environment
 
 ```sh
