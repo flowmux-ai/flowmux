@@ -28,7 +28,9 @@ def run():
             (root / child).mkdir(mode=0o700)
             env[key] = str(root / child)
         env.update(XDG_CURRENT_DESKTOP="GNOME", XDG_SESSION_TYPE="wayland",
-                   WAYLAND_DISPLAY="wayland-flowmux-test", GTK_A11Y="test", GSK_RENDERER="cairo")
+                   WAYLAND_DISPLAY="wayland-flowmux-test", GTK_A11Y="test", GSK_RENDERER="cairo",
+                   MUTTER_DEBUG_DUMMY_MODE_SPECS="800x600:1280x900",
+                   MUTTER_DEBUG_NUM_DUMMY_MONITORS="1", MUTTER_DEBUG_DUMMY_MONITOR_SCALES="1")
         return subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1440x1000x24",
                                "dbus-run-session", "--", sys.executable, "-B", __file__, str(binary),
                                "--nested", str(root)], env=env).returncode
@@ -130,6 +132,9 @@ def nested(binary, root):
                 window = re.findall(r'(?m)^\s+(0x[0-9a-f]+) "gnome-shell"', tree)
                 assert len(window) == 1, tree
                 subprocess.run(["xdotool", "windowfocus", window[0]], check=True)
+                subprocess.run(["xdotool", "key", "Escape"], check=True)
+                time.sleep(.5)
+                evaluate("window.events=[];f.focus();'ready'")
                 for allow in (False, True):
                     error = browser("press", "a", error=True)
                     assert "no input was sent" in str(error), error
@@ -248,6 +253,22 @@ def nested(binary, root):
 
                 def finish(cli, url, state):
                     try:
+                        # Resize the compositor output; resizing its X11 host window does not change the mode.
+                        bus = ["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.DisplayConfig",
+                               "--object-path", "/org/gnome/Mutter/DisplayConfig", "--method"]
+                        current = subprocess.check_output(bus + ["org.gnome.Mutter.DisplayConfig.GetCurrentState"], text=True)
+                        serial = re.match(r"\(uint32 (\d+),", current)
+                        assert serial and "'LVDS1'" in current and "'1280x900@60.000'" in current, current
+                        subprocess.run(bus + ["org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig", serial[1], "1",
+                            "[(0, 0, 1.0, 0, true, [('LVDS1', '1280x900@60.000', {})])]", "{}"], check=True)
+                        deadline = time.monotonic() + 5
+                        while True:
+                            geometry = subprocess.check_output(["xdotool", "getwindowgeometry", "--shell", window[0]], text=True)
+                            if "WIDTH=1280\n" in geometry and "HEIGHT=900\n" in geometry:
+                                break
+                            assert time.monotonic() < deadline, geometry
+                            time.sleep(.05)
+                        print("WAYLAND_OUTPUT_GEOMETRY_OK 1280x900", flush=True)
                         original(cli, url, state)
                     except BaseException:
                         evidence = Path("target/ci/linux")
