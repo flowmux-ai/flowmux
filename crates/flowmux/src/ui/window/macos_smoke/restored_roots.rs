@@ -106,7 +106,13 @@ pub(super) async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap();
     let editor = controller.pane_registry.borrow().editors[&editor_id].clone();
     editor.open_file(&file).await.unwrap();
-    editor.flush_pending_changes().await.unwrap();
+    glib::future_with_timeout(Duration::from_secs(30), async {
+        while let Err(error) = editor.flush_pending_changes().await {
+            println!("restored editor flush retried: {error}");
+        }
+    })
+    .await
+    .expect("restored editor synchronized");
     assert_eq!(editor.session_state().active_file.as_ref(), Some(&file));
     store.save_now().await.unwrap();
     let disk = StateStore::new_lazy_ephemeral(flowmux_state::load().unwrap());

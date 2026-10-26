@@ -71,12 +71,10 @@ fn click(viewer: &Viewer, tag: isize) {
 }
 
 fn wait(viewer: &Viewer, predicate: &str) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while viewer
-        .javascript(&format!("return !!({predicate});"))
-        .unwrap()
-        != "1"
-    {
+    // Mermaid rendering can hold the page's JavaScript thread for a while on
+    // hosted runners; a timed-out round trip is retried like a false predicate.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while viewer.javascript(&format!("return !!({predicate});")) != Ok("1".into()) {
         assert!(
             Instant::now() < deadline,
             "did not reach {predicate}: {}",

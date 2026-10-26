@@ -17,10 +17,13 @@ use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const RECOVERY_DEBOUNCE: Duration = Duration::from_millis(350);
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+// A flush sent before the page reported `editor_ready` is queued behind the
+// page load; its own budget starts once the page can answer.
+const EDITOR_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const QUICK_OPEN_LIMIT: usize = 2_000;
 const LAST_EDITOR_ZOOM_FILE: &str = "editor-zoom-percent";
@@ -137,6 +140,10 @@ impl EditorBridgeState {
 
     fn generation(&self) -> u64 {
         self.generation.get()
+    }
+
+    pub(super) fn is_ready(&self) -> bool {
+        self.ready.get()
     }
 
     pub(super) fn queue(&self, message: HostMessage) -> Result<Option<String>, ProtocolError> {
@@ -531,7 +538,12 @@ impl EditorHostState {
         &self,
         request_id: u64,
         completion: FlushCompletion,
+        bridge: &EditorBridgeState,
     ) -> Result<(), String> {
+        let ready_deadline = Instant::now() + EDITOR_READY_TIMEOUT;
+        while !bridge.is_ready() && Instant::now() < ready_deadline {
+            gtk::glib::timeout_future(FLUSH_POLL_INTERVAL).await;
+        }
         let attempts = FLUSH_TIMEOUT.as_millis() / FLUSH_POLL_INTERVAL.as_millis();
         for _ in 0..attempts {
             if let Some(result) = completion.borrow_mut().take() {
@@ -1205,7 +1217,8 @@ mod tests {
     }
 
     fn wait_for_search(host: &EditorHostState) -> Vec<HostMessage> {
-        for _ in 0..100 {
+        // The worker thread competes with parallel tests; poll for up to 30s.
+        for _ in 0..6_000 {
             let messages = host.poll_search_messages();
             if !messages.is_empty() {
                 return messages;

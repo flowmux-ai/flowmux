@@ -382,7 +382,9 @@ impl EditorPane {
             self.host.cancel_flush(request_id);
             return Err(error.to_string());
         }
-        self.host.wait_for_flush(request_id, completion).await
+        self.host
+            .wait_for_flush(request_id, completion, &self.bridge)
+            .await
     }
 
     pub async fn save_all_dirty(&self) -> Result<(), String> {

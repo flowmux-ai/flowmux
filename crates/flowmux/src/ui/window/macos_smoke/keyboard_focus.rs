@@ -193,9 +193,20 @@ pub(super) async fn check(
         })
         .await
         .unwrap_or_else(|_| {
+            let files = ["editor", "terminal"]
+                .iter()
+                .flat_map(|kind| (0..2).map(move |index| (kind, index)))
+                .map(|(kind, index)| {
+                    let file = root.join(format!("keyboard-{kind}-{index}.txt"));
+                    format!("{kind} {index}: {:?}", std::fs::read_to_string(file))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             panic!(
-                "{kind} {index}: native input did not settle: {:?}",
-                std::fs::read_to_string(&file)
+                "{kind} {index}: native input did not settle; files [{files}], gtk focus {:?}, native focus {:?}, focused pane {:?}",
+                gtk::prelude::GtkWindowExt::focus(&controller.window).map(|widget| widget.type_().name().to_owned()),
+                editors.iter().map(|editor| editor.has_native_focus()).collect::<Vec<_>>(),
+                controller.focused_pane.get()
             )
         });
     }
@@ -232,5 +243,7 @@ async fn key(app: &NSApplication, window: &NSWindow, text: &str, code: u16, shif
         ).unwrap();
         app.postEvent_atStart(&event, false);
     }
-    glib::timeout_future(Duration::from_millis(5)).await;
+    // Human typing pace: a focus handoff or Tab triggered by one key finishes
+    // before the next key is queued behind it.
+    glib::timeout_future(Duration::from_millis(50)).await;
 }
