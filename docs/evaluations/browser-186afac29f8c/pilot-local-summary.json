@@ -1,0 +1,233 @@
+{
+  "started_at": "2026-10-26T07:43:11.273669+00:00",
+  "commit": "186afac29f8cdd4482063706467726101856c54f",
+  "binary_sha256": "ef473b7b87eb7c3249cd34ab5f79467df3c17a9287670a03d822bcdd830bf7aa",
+  "samples_per_case": 2,
+  "warmup_per_case": 1,
+  "timer": "perf_counter_ns, CLI spawn through final-state verification; setup excluded",
+  "p95": "nearest rank, only for at least 100 successful samples",
+  "cases": {
+    "observe_20_full": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 4.978933,
+      "min_ms": 4.960283,
+      "max_ms": 4.997583,
+      "mean_calls": 1,
+      "mean_response_bytes": 8853
+    },
+    "observe_20_compact": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 5.5069645000000005,
+      "min_ms": 5.446362,
+      "max_ms": 5.567567,
+      "mean_calls": 1,
+      "mean_response_bytes": 6623
+    },
+    "observe_20_find": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 4.472555,
+      "min_ms": 4.037984,
+      "max_ms": 4.907126,
+      "mean_calls": 1,
+      "mean_response_bytes": 536
+    },
+    "observe_500_full": {
+      "attempted": 2,
+      "passed": 0,
+      "failed": 2,
+      "warmup_failed": 1
+    },
+    "observe_500_compact": {
+      "attempted": 2,
+      "passed": 0,
+      "failed": 2,
+      "warmup_failed": 1
+    },
+    "observe_500_find": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 11.348465000000001,
+      "min_ms": 9.82593,
+      "max_ms": 12.871,
+      "mean_calls": 1,
+      "mean_response_bytes": 536
+    },
+    "native_click_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 38.844075000000004,
+      "min_ms": 37.734549,
+      "max_ms": 39.953601,
+      "mean_calls": 2,
+      "mean_response_bytes": 53
+    },
+    "native_click_receipt_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 39.225672,
+      "min_ms": 38.055951,
+      "max_ms": 40.395393,
+      "mean_calls": 2,
+      "mean_response_bytes": 727
+    },
+    "fill_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 10.0625095,
+      "min_ms": 9.424566,
+      "max_ms": 10.700453,
+      "mean_calls": 2,
+      "mean_response_bytes": 57
+    },
+    "native_type_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 12.9428515,
+      "min_ms": 12.456125,
+      "max_ms": 13.429578,
+      "mean_calls": 3,
+      "mean_response_bytes": 93
+    },
+    "native_press_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 10.593236000000001,
+      "min_ms": 10.407295,
+      "max_ms": 10.779177,
+      "mean_calls": 2,
+      "mean_response_bytes": 48
+    },
+    "form_individual_5_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 35.3233795,
+      "min_ms": 32.489526,
+      "max_ms": 38.157233,
+      "mean_calls": 6,
+      "mean_response_bytes": 168
+    },
+    "form_batch_5_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 16.716023,
+      "min_ms": 16.050373,
+      "max_ms": 17.381673,
+      "mean_calls": 2,
+      "mean_response_bytes": 920
+    },
+    "wait_typed_250ms": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 270.017651,
+      "min_ms": 267.397226,
+      "max_ms": 272.638076,
+      "mean_calls": 2,
+      "mean_response_bytes": 79
+    },
+    "wait_snapshot_poll_250ms": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 257.40674249999995,
+      "min_ms": 256.698584,
+      "max_ms": 258.114901,
+      "mean_calls": 10,
+      "mean_response_bytes": 22803
+    },
+    "stale_ref_rejection_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 8.6459105,
+      "min_ms": 7.393572,
+      "max_ms": 9.898249,
+      "mean_calls": 2,
+      "mean_response_bytes": 152
+    },
+    "frame_field_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 8.447818999999999,
+      "min_ms": 7.923038,
+      "max_ms": 8.9726,
+      "mean_calls": 2,
+      "mean_response_bytes": 53
+    },
+    "shadow_field_verify": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 9.8906655,
+      "min_ms": 8.656335,
+      "max_ms": 11.124996,
+      "mean_calls": 2,
+      "mean_response_bytes": 53
+    },
+    "concurrent_observe_1": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 10.740883,
+      "min_ms": 9.034783,
+      "max_ms": 12.446983,
+      "mean_calls": 1,
+      "mean_response_bytes": 8511
+    },
+    "concurrent_observe_2": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 10.733548500000001,
+      "min_ms": 8.331343,
+      "max_ms": 13.135754,
+      "mean_calls": 2,
+      "mean_response_bytes": 17022
+    },
+    "concurrent_observe_4": {
+      "attempted": 2,
+      "passed": 2,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 15.800673499999998,
+      "min_ms": 15.561986,
+      "max_ms": 16.039361,
+      "mean_calls": 4,
+      "mean_response_bytes": 33324
+    }
+  },
+  "finished_at": "2026-10-26T07:43:20.890521+00:00"
+}

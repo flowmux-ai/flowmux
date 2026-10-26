@@ -1,0 +1,123 @@
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.1' (uid=1000 pid=1507744 comm="/home/junsu/dev/os/flowmux/target/release/flowmux" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.freedesktop.portal.Documents' requested by ':1.2' (uid=1000 pid=1507811 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.3' (uid=1000 pid=1507817 comm="/usr/libexec/xdg-document-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.freedesktop.portal.Documents'
+Ignoring invalid max threads value 4294967295 > max (100000).
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.2' (uid=1000 pid=1507811 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.a11y.Bus' requested by ':1.5' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.a11y.Bus'
+dbus-daemon[1507843]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507843]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.Daemon' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.Daemon'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:52.869: Failed connect to PipeWire: Couldn't connect to PipeWire
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.freedesktop.portal.Desktop'
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:55.166: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:55.388: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.Metadata' requested by ':1.12' (uid=1000 pid=1507993 comm="/usr/lib/x86_64-linux-gnu/webkitgtk-6.0/WebKitNetw" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.Metadata'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.UDisks2VolumeMonitor' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.UDisks2VolumeMonitor'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.GoaVolumeMonitor' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gnome.OnlineAccounts' requested by ':1.19' (uid=1000 pid=1508453 comm="/usr/libexec/gvfs-goa-volume-monitor" label="flowmux-webkit (unconfined)")
+goa-daemon-Message: 16:48:56.253: goa-daemon version 3.50.4 starting
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gnome.Identity' requested by ':1.20' (uid=1000 pid=1508460 comm="/usr/libexec/goa-daemon" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gnome.OnlineAccounts'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gnome.Identity'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.GoaVolumeMonitor'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.MTPVolumeMonitor' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.MTPVolumeMonitor'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.AfcVolumeMonitor' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.AfcVolumeMonitor'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='org.gtk.vfs.GPhoto2VolumeMonitor' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'org.gtk.vfs.GPhoto2VolumeMonitor'
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Activating service name='ca.desrt.dconf' requested by ':1.7' (uid=1000 pid=1507834 comm="/usr/libexec/xdg-desktop-portal-gtk" label="flowmux-webkit (unconfined)")
+dbus-daemon[1507740]: [session uid=1000 pid=1507740] Successfully activated service 'ca.desrt.dconf'
+
+** (process:1508566): WARNING **: 16:48:56.385: Failed to spawn the wsdd daemon: Failed to execute child process “wsdd” (No such file or directory)
+
+** (process:1508545): WARNING **: 16:48:56.385: Couldn't create directory monitor on wsdd:///. Error: Automount failed: Failed to spawn the underlying wsdd daemon.
+BROWSER_TASK_WORKFLOW_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:56.730: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:56.801: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+BROWSER_RECEIPT_SUMMARY_OK
+BROWSER_COMPACT_SNAPSHOT_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:57.361: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:57.426: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+BROWSER_RECEIPTS_OK
+BROWSER_OWNERSHIP_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:58.461: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:58.531: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+BROWSER_DIAGNOSTICS_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:58.830: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:58.915: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:58.959: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:48:59.029: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+BROWSER_POINTER_ORDER_OK
+BROWSER_P1_REGRESSIONS_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:00.332: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:00.393: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+BROWSER_SNAPSHOT_BUDGET={"full_bytes": 3694, "partial_bytes": 528}
+BROWSER_SEMANTIC_WAIT_SECURITY_OK
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:02.004: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: pinned recording retains timing and content through viewport resizing
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:07.357: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:07.898: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: viewport, document and element captures retain decoded video and WebGL pixels
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:10.012: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: viewport coordinates deliver trusted canvas input and reject invalid or hidden targets
+PASS: native popups preserve opener, WindowProxy, input, messaging and close
+PASS: native downloads save exact content without overwrite and expose cancellation
+PASS: page dialogs require matching IDs, complete native clicks/keys and preserve confirm/prompt/alert replies
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:22.229: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: native file selection validates paths and IDs and delivers exact file contents
+PASS: snapshot names follow HTML labels and ARIA reference order
+PASS: full-document PNG covers offscreen content and preserves scrolling
+PASS: element capture includes disabled and shadow targets and rejects unknown refs
+PASS: nested iframe names and native input stay in the intended document
+PASS: nested frame element captures account for padding and scale
+PASS: native iframe clicks and child-navigation ref invalidation
+PASS: nested Shadow DOM names, fill, focus and native text input
+PASS: nested open Shadow DOM refs target their own roots and expire with their host
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:52.153: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:52.280: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: media playback advances, pause/seek/mute report actual state
+
+(/usr/libexec/xdg-desktop-portal:1507811): xdg-desktop-portal-WARNING **: 16:49:52.475: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-eval-tools-k_or98vl/desktop/run/.flatpak/webkit-1507744-4/bwrapinfo.json”: No such file or directory
+PASS: stale nodes, snapshots and tabs rejected; live actions and non-mutating snapshots preserved
+PASS: explicit browser tab targeting survives active-tab changes and rejects closed or foreign tabs
+PASS: hidden, covered, disabled and readonly targets reject actions without effects
+PASS: async results settle, rejection is reported and timeout keeps the browser responsive
+PASS: native text insertion replaces selection, emits trusted input and respects cancellation
+PASS: native Enter, Tab, reverse Tab, select-all and canceled keys
+PASS: native click sequence, CSS hover and double-click
+BROWSER_CONTROL_OK
+A connection to the bus can't be made
+A connection to the bus can't be made
+A connection to the bus can't be made
+A connection to the bus can't be made

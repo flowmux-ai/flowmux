@@ -1,0 +1,77 @@
+{
+  "started_at": "2026-10-26T07:51:33.764242+00:00",
+  "commit": "186afac29f8cdd4482063706467726101856c54f",
+  "binary_sha256": "ef473b7b87eb7c3249cd34ab5f79467df3c17a9287670a03d822bcdd830bf7aa",
+  "samples_per_case": 3,
+  "warmup_per_case": 0,
+  "timer": "perf_counter_ns, CLI spawn through final-state verification; setup excluded",
+  "p95": "nearest rank, only for at least 100 successful samples",
+  "cases": {
+    "public_login": {
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 982.800186,
+      "min_ms": 966.433243,
+      "max_ms": 1160.395029,
+      "mean_calls": 5,
+      "mean_response_bytes": 117,
+      "requested_samples": 3,
+      "not_run": 0
+    },
+    "public_dynamic_controls": {
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 6166.34381,
+      "min_ms": 6154.104737,
+      "max_ms": 6168.876566,
+      "mean_calls": 8,
+      "mean_response_bytes": 6844,
+      "requested_samples": 3,
+      "not_run": 0
+    },
+    "public_add_remove": {
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 183.23177,
+      "min_ms": 181.800776,
+      "max_ms": 188.421356,
+      "mean_calls": 8,
+      "mean_response_bytes": 4524,
+      "requested_samples": 3,
+      "not_run": 0
+    },
+    "public_table_extract": {
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 4.462146,
+      "min_ms": 4.026084,
+      "max_ms": 4.669867,
+      "mean_calls": 1,
+      "mean_response_bytes": 84,
+      "requested_samples": 3,
+      "not_run": 0
+    },
+    "public_session_reload": {
+      "attempted": 3,
+      "passed": 3,
+      "failed": 0,
+      "warmup_failed": 0,
+      "p50_ms": 721.424394,
+      "min_ms": 656.572646,
+      "max_ms": 827.865916,
+      "mean_calls": 4,
+      "mean_response_bytes": 130,
+      "requested_samples": 3,
+      "not_run": 0
+    }
+  },
+  "finished_at": "2026-10-26T07:52:13.928646+00:00"
+}

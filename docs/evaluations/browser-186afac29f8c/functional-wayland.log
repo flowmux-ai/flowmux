@@ -1,0 +1,150 @@
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Connection :1.0 (uid=1000 pid=1515940 comm="dbus-monitor --session interface='org.freedesktop." label="flowmux-webkit (unconfined)") became a monitor.
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.Daemon' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.Daemon'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.a11y.Bus' requested by ':1.4' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.a11y.Bus'
+dbus-daemon[1516033]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1516033]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.systemd1' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.Shell.Screencast' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activated service 'org.freedesktop.systemd1' failed: Process org.freedesktop.systemd1 exited with status 1
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.Shell.CalendarServer' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.evolution.dataserver.Sources5' requested by ':1.12' (uid=1000 pid=1516075 comm="/usr/libexec/gnome-shell-calendar-server" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='ca.desrt.dconf' requested by ':1.13' (uid=1000 pid=1516087 comm="/usr/libexec/evolution-source-registry" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'ca.desrt.dconf'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.Shell.Notifications' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.OnlineAccounts' requested by ':1.13' (uid=1000 pid=1516087 comm="/usr/libexec/evolution-source-registry" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.UDisks2VolumeMonitor' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.Shell.Notifications'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.evolution.dataserver.Sources5'
+goa-daemon-Message: 16:52:44.673: goa-daemon version 3.50.4 starting
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.evolution.dataserver.Calendar8' requested by ':1.12' (uid=1000 pid=1516075 comm="/usr/libexec/gnome-shell-calendar-server" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.Identity' requested by ':1.16' (uid=1000 pid=1516128 comm="/usr/libexec/goa-daemon" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.Shell.CalendarServer'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.OnlineAccounts'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.Identity'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.UDisks2VolumeMonitor'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.GoaVolumeMonitor' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.GoaVolumeMonitor'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.MTPVolumeMonitor' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.MTPVolumeMonitor'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.AfcVolumeMonitor' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.AfcVolumeMonitor'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.GPhoto2VolumeMonitor' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.evolution.dataserver.Calendar8'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.GPhoto2VolumeMonitor'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gnome.evolution.dataserver.AddressBook10' requested by ':1.20' (uid=1000 pid=1516143 comm="/usr/libexec/evolution-calendar-factory" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.gtk.vfs.Metadata' requested by ':1.20' (uid=1000 pid=1516143 comm="/usr/libexec/evolution-calendar-factory" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gtk.vfs.Metadata'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.evolution.dataserver.AddressBook10'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.portal.IBus' requested by ':1.26' (uid=1000 pid=1516117 comm="ibus-daemon --panel disable" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.portal.IBus'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.FileManager1' requested by ':1.1' (uid=1000 pid=1515941 comm="gnome-shell --nested --wayland --no-x11 --wayland-" label="flowmux-webkit (unconfined)")
+** Message: 16:52:44.994: Connecting to org.freedesktop.Tracker3.Miner.Files
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.FileManager1'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.9' (uid=1000 pid=1516040 comm="/home/junsu/dev/os/flowmux/target/release/flowmux" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.gnome.Shell.Screencast'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.portal.Documents' requested by ':1.37' (uid=1000 pid=1516330 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.portal.Documents'
+Ignoring invalid max threads value 4294967295 > max (100000).
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.impl.portal.desktop.gnome' requested by ':1.37' (uid=1000 pid=1516330 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.impl.portal.desktop.gnome'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.37' (uid=1000 pid=1516330 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+
+(/usr/libexec/xdg-desktop-portal:1516330): xdg-desktop-portal-WARNING **: 16:52:45.488: Failed connect to PipeWire: Couldn't connect to PipeWire
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.secrets' requested by ':1.37' (uid=1000 pid=1516330 comm="/usr/libexec/xdg-desktop-portal" label="flowmux-webkit (unconfined)")
+** Message: 16:52:45.512: couldn't access control socket: /tmp/fm-wl-u8cdy3hc/run/keyring/control: No such file or directory
+discover_other_daemon: 0dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.secrets'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.portal.Desktop'
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Activating service name='org.freedesktop.Tracker3.Miner.Files' requested by ':1.35' (uid=1000 pid=1516304 comm="/usr/bin/nautilus --gapplication-service" label="flowmux-webkit (unconfined)")
+
+** (org.gnome.Nautilus:1516304): WARNING **: 16:52:45.566: Unable to get contents of the bookmarks file: Error opening file /home/junsu/.gtk-bookmarks: No such file or directory
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &DOCUMENTS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &MUSIC. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &PICTURES. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &VIDEOS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &DOWNLOAD. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &DOCUMENTS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &MUSIC. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &PICTURES. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.592: Unable to get XDG user directory path for special directory &VIDEOS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &DOCUMENTS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &MUSIC. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &PICTURES. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &VIDEOS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &DOWNLOAD. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &DOCUMENTS. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &MUSIC. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &PICTURES. Ignoring this location.
+
+(tracker-miner-fs-3:1516461): Tracker-WARNING **: 16:52:45.678: Unable to get XDG user directory path for special directory &VIDEOS. Ignoring this location.
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Successfully activated service 'org.freedesktop.Tracker3.Miner.Files'
+
+(/usr/libexec/xdg-desktop-portal:1516330): xdg-desktop-portal-WARNING **: 16:52:48.088: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-wl-u8cdy3hc/run/.flatpak/webkit-1516040-4/bwrapinfo.json”: No such file or directory
+
+(/usr/libexec/xdg-desktop-portal:1516330): xdg-desktop-portal-WARNING **: 16:52:48.236: Realtime error: Could not map pid: Could not determine pid namespace: Failed to open file “/tmp/fm-wl-u8cdy3hc/run/.flatpak/webkit-1516040-4/bwrapinfo.json”: No such file or directory
+
+** (xdg-desktop-portal-gnome:1516352): WARNING **: 16:52:48.589: Failed to associate portal window with parent window 
+
+(tracker-extract-3:1526436): GLib-GIO-WARNING **: 16:53:01.043: Error creating IO channel for /proc/self/mountinfo: Invalid argument (g-io-error-quark, 13)
+Warning: using insecure memory!
+
+** (xdg-desktop-portal-gnome:1516352): WARNING **: 16:53:03.675: Failed to stop screen cast session: GDBus.Error:org.freedesktop.DBus.Error.Failed: Session not started
+dbus-daemon[1515938]: [session uid=1000 pid=1515938] Monitoring connection :1.0 closed.
+Gdk-Message: 16:53:04.035: Error reading events from display: Broken pipe
+Gdk-Message: 16:53:04.036: Error reading events from display: Broken pipe
+
+** (flowmux:1516040): WARNING **: 16:52:48.092: Error creating WebKitWebView a11y socket: AT-SPI sockets can only be used with the AT-SPI backend
+WebKit wasn't able to find a WebVTT encoder. Subtitles handling will be degraded unless gst-plugins-bad is installed.
+
+Traceback (most recent call last):
+  File "/home/junsu/dev/os/flowmux/scripts/test-browser-wayland.py", line 336, in <module>
+    nested(Path(sys.argv[1]), Path(sys.argv[3]))
+  File "/home/junsu/dev/os/flowmux/scripts/test-browser-wayland.py", line 279, in nested
+    suite.main()
+  File "/home/junsu/dev/os/flowmux/scripts/test-browser-control.py", line 1396, in main
+    exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
+  File "/home/junsu/dev/os/flowmux/scripts/test-browser-wayland.py", line 137, in authorize_and_test
+    wait_picker()
+  File "/home/junsu/dev/os/flowmux/scripts/test-browser-wayland.py", line 109, in wait_picker
+    raise AssertionError("private portal dialog did not appear")
+AssertionError: private portal dialog did not appear
+A connection to the bus can't be made
+gnome-shell-calendar-server[1516075]: Lost (or failed to acquire) the name org.gnome.Shell.CalendarServer - exiting
+
+(evolution-calendar-factory:1516143): libedbus-private-WARNING **: 16:53:04.148: Error setting property 'ConnectionStatus' on interface org.gnome.evolution.dataserver.Source: The connection is closed (g-io-error-quark, 18)
+A connection to the bus can't be made
+
+(tracker-miner-fs-3:1516461): GVFS-RemoteVolumeMonitor-WARNING **: 16:53:04.148: Owner of volume monitor org.gtk.vfs.UDisks2VolumeMonitor disconnected from the bus; removing drives/volumes/mounts
+
+(tracker-miner-fs-3:1516461): GVFS-RemoteVolumeMonitor-WARNING **: 16:53:04.148: Owner of volume monitor org.gtk.vfs.GoaVolumeMonitor disconnected from the bus; removing drives/volumes/mounts
+
+(tracker-miner-fs-3:1516461): GVFS-RemoteVolumeMonitor-WARNING **: 16:53:04.148: Owner of volume monitor org.gtk.vfs.MTPVolumeMonitor disconnected from the bus; removing drives/volumes/mounts
+
+(evolution-addressbook-factory:1516192): libedbus-private-WARNING **: 16:53:04.148: Error setting property 'ConnectionStatus' on interface org.gnome.evolution.dataserver.Source: The connection is closed (g-io-error-quark, 18)
+
+(tracker-miner-fs-3:1516461): GVFS-RemoteVolumeMonitor-WARNING **: 16:53:04.148: Owner of volume monitor org.gtk.vfs.AfcVolumeMonitor disconnected from the bus; removing drives/volumes/mounts
+
+(tracker-miner-fs-3:1516461): GVFS-RemoteVolumeMonitor-WARNING **: 16:53:04.148: Owner of volume monitor org.gtk.vfs.GPhoto2VolumeMonitor disconnected from the bus; removing drives/volumes/mounts
+Tracker-Message: 16:53:04.151: Could not get size for 'file:///tmp/fm-wl-u8cdy3hc/cache/tracker3/files/meta.db', Error when getting information for file “/tmp/fm-wl-u8cdy3hc/cache/tracker3/files/meta.db”: No such file or directory
