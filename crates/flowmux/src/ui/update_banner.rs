@@ -48,14 +48,6 @@ fn banner_props(
             Some(*percent),
             false,
         ),
-        #[cfg(target_os = "macos")]
-        BannerState::Done(v) if origin == InstallOrigin::MacosBundle => (
-            format!("Flowmux {v} is ready. Quit all Flowmux instances, then open Flowmux again."),
-            Some("Dismiss"),
-            true,
-            None,
-            false,
-        ),
         BannerState::Done(v) => (
             format!("flowmux {v} is installed. Restart flowmux to use it."),
             Some("Dismiss"),
@@ -125,11 +117,7 @@ impl UpdateBanner {
         banner.dispatch(Event::Progress(update::Stage::Installing, 75));
         assert_eq!(banner.inner.progress.text().as_deref(), Some("75%"));
         banner.dispatch(Event::Done(version));
-        assert!(banner
-            .inner
-            .banner
-            .title()
-            .contains("Quit all Flowmux instances"));
+        assert!(banner.inner.banner.title().contains("Restart flowmux"));
         gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
         assert!(window.is_mapped());
         window.destroy();

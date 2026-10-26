@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Real signed fixture DMG -> staged app -> deferred swap, isolated from user apps."""
+"""Real signed fixture DMG -> in-place app replacement, isolated from user apps."""
 import json
 import os
 import pathlib
@@ -8,7 +8,6 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -46,8 +45,6 @@ class DmgUpdateTests(unittest.TestCase):
         run("hdiutil", "create", "-quiet", "-srcfolder", str(source.parent),
             "-format", "UDZO", str(cls.image))
         cls.source = source
-        cls.helper = cls.root / "swap.sh"
-        shutil.copyfile(REPO / "scripts/deferred-macos-app-swap.sh", cls.helper)
 
     @classmethod
     def tearDownClass(cls):
@@ -64,7 +61,6 @@ class DmgUpdateTests(unittest.TestCase):
         plist.write_bytes(plistlib.dumps(data))
         run("codesign", "--force", "--deep", "--sign", "-", str(self.dest))
         self.hosts = [subprocess.Popen([str(self.dest / "Contents/MacOS/flowmux"), "90"]) for _ in range(2)]
-        self.label = f"com.flowmux.update.{self.hosts[0].pid}"
         self.addCleanup(self.cleanup_hosts)
 
     def cleanup_hosts(self):
@@ -72,42 +68,38 @@ class DmgUpdateTests(unittest.TestCase):
             if host.poll() is None:
                 host.terminate()
             host.wait()
-        subprocess.run(["launchctl", "remove", self.label], capture_output=True)
 
     def install(self, image=None, wanted="9.8.7", env=None):
         return subprocess.run(["/bin/sh", str(REPO / "scripts/update-macos-dmg.sh"),
-                               str(image or self.image), str(self.dest), wanted,
-                               str(self.hosts[0].pid), str(self.helper)],
+                               str(image or self.image), str(self.dest), wanted],
                               text=True, capture_output=True, env=env)
 
-    def test_verified_dmg_waits_for_all_running_instances(self):
+    def retained(self):
+        return sorted(self.dest.parent.glob(".Flowmux.app.previous.*"))
+
+    def test_verified_dmg_replaces_the_app_while_instances_run(self):
+        stale = self.dest.parent / ".Flowmux.app.pending.12345"
+        stale.mkdir()
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(version(self.dest), "1.0.0")
-        self.assertTrue(all(host.poll() is None for host in self.hosts))
-        self.assertNotEqual(self.install().returncode, 0, "do not overwrite a pending update")
-        # A new window can start after the updater captured the original PIDs.
-        self.hosts.append(subprocess.Popen([str(self.dest / "Contents/MacOS/flowmux")]))
-        self.hosts[0].terminate()
-        self.hosts[0].wait()
-        time.sleep(0.4)
-        self.assertEqual(version(self.dest), "1.0.0")
-        self.hosts[1].terminate()
-        self.hosts[1].wait()
-        time.sleep(0.6)
-        self.assertEqual(version(self.dest), "1.0.0", "a later instance still uses this bundle")
-        self.assertIsNone(self.hosts[2].poll())
-        self.hosts[2].terminate()
-        self.hosts[2].wait()
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if self.dest.exists() and version(self.dest) == "9.8.7":
-                break
-            time.sleep(0.1)
-        log = self.dest.parent / ".Flowmux.app.update.log"
-        self.assertEqual(version(self.dest), "9.8.7", log.read_text() if log.exists() else "no swap log")
+        self.assertEqual(version(self.dest), "9.8.7")
         run("codesign", "--verify", "--deep", "--strict", str(self.dest))
+        self.assertTrue(all(host.poll() is None for host in self.hosts))
+        self.assertFalse(stale.exists(), "leftovers of the deferred updater are removed")
         self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
+        retained = self.retained()
+        self.assertEqual(len(retained), 1, "running instances keep their mapped files")
+        self.assertEqual(version(retained[0]), "1.0.0")
+        # A second update keeps the copy the hosts still map and nothing else.
+        self.assertEqual(self.install().returncode, 0)
+        second = self.retained()
+        self.assertIn(retained[0], second, "the copy running hosts still map is kept")
+        self.assertEqual(len(second), 2)
+        self.cleanup_hosts()
+        self.assertEqual(self.install().returncode, 0)
+        self.assertNotIn(retained[0], self.retained(), "unused copies are dropped")
+        self.assertEqual(len(self.retained()), 1)
+        self.assertEqual(version(self.dest), "9.8.7")
 
     def test_native_update_controls_in_an_isolated_bundle(self):
         env = {key: value for key, value in os.environ.items() if not key.startswith("FLOWMUX_")}
@@ -130,7 +122,7 @@ class DmgUpdateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("MACOS_DMG_UPDATE_UI_OK", result.stdout)
 
-    def test_incomplete_or_tampered_bundle_is_never_staged(self):
+    def test_incomplete_or_tampered_bundle_is_never_installed(self):
         for damage in ("missing-cli", "signature"):
             with self.subTest(damage=damage):
                 folder = pathlib.Path(self.temp.name) / damage
@@ -150,20 +142,9 @@ class DmgUpdateTests(unittest.TestCase):
                 self.assertEqual(version(self.dest), "1.0.0")
                 self.assertTrue(all(host.poll() is None for host in self.hosts))
                 self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
+                self.assertFalse(self.retained())
                 images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
                 self.assertFalse(any(item.get("image-path") == str(image) for item in images))
-
-    def test_failed_scheduling_cleans_staging_without_replacing_the_app(self):
-        tools = pathlib.Path(self.temp.name) / "tools"
-        tools.mkdir()
-        launchctl = tools / "launchctl"
-        launchctl.write_text("#!/bin/sh\nexit 12\n")
-        launchctl.chmod(0o755)
-        env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ.get("PATH", ""))
-        self.assertNotEqual(self.install(env=env).returncode, 0)
-        self.assertEqual(version(self.dest), "1.0.0")
-        self.assertTrue(all(host.poll() is None for host in self.hosts))
-        self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
 
     def test_busy_readonly_image_is_detached_after_validation_failure(self):
         tools = pathlib.Path(self.temp.name) / "tools"
@@ -198,6 +179,7 @@ class DmgUpdateTests(unittest.TestCase):
         self.assertEqual(version(self.dest), "1.0.0")
         self.assertTrue(all(host.poll() is None for host in self.hosts))
         self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
+        self.assertFalse(self.retained())
 
 
 if __name__ == "__main__":

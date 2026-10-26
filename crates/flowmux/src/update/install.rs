@@ -823,8 +823,6 @@ mod tests {
     use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
-    use std::thread;
-    use std::time::Duration;
 
     #[test]
     fn source_install_requires_successful_checkout() {
@@ -1138,65 +1136,5 @@ exit 17
         )
         .unwrap();
         assert_eq!(check_prerequisites("macos", Some(&path)), Ok(()));
-    }
-
-    #[test]
-    fn deferred_macos_swap_waits_for_the_running_app() {
-        for bundle_name in ["Flowmux.app", "FLOWMUX.APP"] {
-            check_deferred_macos_swap(bundle_name);
-        }
-    }
-
-    fn check_deferred_macos_swap(bundle_name: &str) {
-        let temp = tempfile::tempdir().unwrap();
-        let destination = temp.path().join(bundle_name);
-        let mut host = Command::new("sleep").arg("30").spawn().unwrap();
-        let staged = temp
-            .path()
-            .join(format!(".{bundle_name}.pending.{}", host.id()));
-        let backup = temp
-            .path()
-            .join(format!(".{bundle_name}.previous.{}", host.id()));
-        std::fs::create_dir_all(&destination).unwrap();
-        std::fs::create_dir_all(&staged).unwrap();
-        std::fs::write(destination.join("version"), "old").unwrap();
-        std::fs::write(staged.join("version"), "new").unwrap();
-
-        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scripts/deferred-macos-app-swap.sh");
-        let mut swap = Command::new("sh")
-            .arg(script)
-            .arg(host.id().to_string())
-            .arg(&staged)
-            .arg(&destination)
-            .arg(&backup)
-            .spawn()
-            .unwrap();
-
-        thread::sleep(Duration::from_millis(300));
-        assert_eq!(
-            std::fs::read_to_string(destination.join("version")).unwrap(),
-            "old"
-        );
-        assert!(staged.is_dir());
-        assert!(swap.try_wait().unwrap().is_none());
-
-        host.kill().unwrap();
-        host.wait().unwrap();
-        for _ in 0..100 {
-            if let Some(status) = swap.try_wait().unwrap() {
-                assert!(status.success());
-                assert_eq!(
-                    std::fs::read_to_string(destination.join("version")).unwrap(),
-                    "new"
-                );
-                assert!(!staged.exists());
-                assert!(!backup.exists());
-                return;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        let _ = swap.kill();
-        panic!("deferred app swap did not finish");
     }
 }

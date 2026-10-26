@@ -488,15 +488,6 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             update_label: None,
             check_sensitive: false,
         },
-        #[cfg(target_os = "macos")]
-        BannerState::Done(version) if origin == InstallOrigin::MacosBundle => UpdateTabProps {
-            status: format!(
-                "Flowmux v{version} is ready. Quit all Flowmux instances, then open Flowmux again."
-            ),
-            update_version: None,
-            update_label: None,
-            check_sensitive: true,
-        },
         BannerState::Done(version) => UpdateTabProps {
             status: format!("flowmux v{version} is installed. Restart flowmux to use it."),
             update_version: None,
@@ -1583,7 +1574,7 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn dmg_update_tab_offers_install_and_reports_a_deferred_swap() {
+    fn dmg_update_tab_offers_install_and_asks_for_a_restart() {
         let available = update_tab_props(
             &BannerState::Available(Version(9, 8, 7)),
             InstallOrigin::MacosBundle,
@@ -1593,7 +1584,7 @@ mod tests {
             &BannerState::Done(Version(9, 8, 7)),
             InstallOrigin::MacosBundle,
         );
-        assert!(done.status.contains("Quit all Flowmux instances"));
+        assert!(done.status.contains("Restart flowmux"));
         assert_eq!(done.update_version, None);
     }
 

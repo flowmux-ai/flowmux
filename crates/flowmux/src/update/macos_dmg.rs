@@ -54,14 +54,6 @@ pub(super) async fn install(
             &script,
             include_str!("../../../../scripts/update-macos-dmg.sh"),
         )?;
-        // Keep the existing swap helper outside the download scratch directory.
-        let helper = cache.join("deferred-macos-app-swap.sh");
-        let prepared_helper = work.join("swap.sh");
-        std::fs::write(
-            &prepared_helper,
-            include_str!("../../../../scripts/deferred-macos-app-swap.sh"),
-        )?;
-        std::fs::rename(&prepared_helper, &helper)?;
         let _ = tx.send(Event::Progress(Stage::Installing, 0)).await;
         let installing = Progress::new(Stage::Installing, tx);
         let mut argv = vec!["/bin/sh".into()];
@@ -72,14 +64,7 @@ pub(super) async fn install(
                     .to_owned(),
             );
         }
-        argv.extend([
-            version.to_string(),
-            std::process::id().to_string(),
-            helper
-                .to_str()
-                .context("helper path must be UTF-8")?
-                .to_owned(),
-        ]);
+        argv.push(version.to_string());
         run_logged(argv, None, None, log, installing.clone()).await?;
         installing.report(100);
         Ok(())

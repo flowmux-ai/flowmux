@@ -16,8 +16,9 @@ quit it. The app is installed in `~/Applications`, with CLI commands in
 `~/.local/bin`.
 
 An installed app can also update from **Options → Update**. It verifies the
-release DMG and stages it in the same app directory; quit all Flowmux instances
-and open the app again to apply it. No source build tools are needed.
+release DMG and replaces the app in place; running windows keep their current
+version and the next launch uses the new release. No source build tools are
+needed.
 
 For manual installation, install the runtime libraries with
 `brew install gtk4 libadwaita vte3`, then drag **Flowmux.app → Applications**
