@@ -22,6 +22,8 @@ use tracing::warn;
 
 const AGENT_VISIBILITY_QUERY_TIMEOUT: Duration = Duration::from_millis(100);
 const CODEX_STOP_INGRESS_GRACE: Duration = Duration::from_millis(250);
+const BROWSER_WAIT_MAX_TIMEOUT_MS: u64 = 300_000;
+const BROWSER_WAIT_MIN_POLL_MS: u64 = 10;
 
 async fn query_agent_surface_visible(bridge: &Bridge, surface: flowmux_core::SurfaceId) -> bool {
     tokio::time::timeout(AGENT_VISIBILITY_QUERY_TIMEOUT, async {
@@ -120,10 +122,29 @@ async fn browser_action(
             ));
         }
     }
-    if matches!(validated, BrowserOp::EvalAsync { timeout_ms: 0, .. }) {
+    // A wait or async script holds its connection permit and, for mutations,
+    // a mutation permit until it settles. Bound both so an abandoned client
+    // cannot exhaust the permits or poll the page every millisecond.
+    if matches!(validated, BrowserOp::EvalAsync { timeout_ms, .. }
+        if !(1..=BROWSER_WAIT_MAX_TIMEOUT_MS as u32).contains(timeout_ms))
+    {
         return Response::Error(RpcError::InvalidArgument(
-            "async timeout must be positive".into(),
+            "async timeout must be 1..300000 ms".into(),
         ));
+    }
+    if let BrowserOp::Wait {
+        timeout_ms,
+        poll_ms,
+        ..
+    } = validated
+    {
+        if !(1..=BROWSER_WAIT_MAX_TIMEOUT_MS).contains(timeout_ms)
+            || !(BROWSER_WAIT_MIN_POLL_MS..=BROWSER_WAIT_MAX_TIMEOUT_MS).contains(poll_ms)
+        {
+            return Response::Error(RpcError::InvalidArgument(
+                "wait timeout must be 1..300000 ms and poll interval 10..300000 ms".into(),
+            ));
+        }
     }
     if let BrowserOp::Drag { from, to } = validated {
         if from

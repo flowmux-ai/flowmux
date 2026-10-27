@@ -2368,20 +2368,48 @@ async fn browser_snapshot_reports_not_found_for_missing_browser_pane() {
 }
 
 #[tokio::test]
-async fn browser_async_rejects_zero_timeout_before_dispatch() {
+async fn browser_async_rejects_zero_and_unbounded_timeouts_before_dispatch() {
     let (handler, rx, pane, _) = single_pane_handler().await;
-    let response = handler
-        .handle(Request::BrowserEvalAsync {
-            pane,
-            body: "document.body.remove()".into(),
-            timeout_ms: 0,
-        })
-        .await;
-    assert!(matches!(
-        response,
-        Response::Error(RpcError::InvalidArgument(_))
-    ));
-    assert!(rx.try_recv().is_err());
+    for timeout_ms in [0, 300_001, u32::MAX] {
+        let response = handler
+            .handle(Request::BrowserEvalAsync {
+                pane,
+                body: "document.body.remove()".into(),
+                timeout_ms,
+            })
+            .await;
+        assert!(
+            matches!(response, Response::Error(RpcError::InvalidArgument(_))),
+            "timeout {timeout_ms} was accepted"
+        );
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[tokio::test]
+async fn browser_wait_rejects_unbounded_timeout_and_tight_polling_before_dispatch() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    for (timeout_ms, poll_ms) in [
+        (0, 100),
+        (300_001, 100),
+        (u64::MAX, 1),
+        (5000, 0),
+        (5000, 9),
+    ] {
+        let response = handler
+            .handle(Request::BrowserWait {
+                pane,
+                condition: flowmux_ipc::protocol::BrowserWaitCondition::Text("ready".into()),
+                timeout_ms,
+                poll_ms,
+            })
+            .await;
+        assert!(
+            matches!(response, Response::Error(RpcError::InvalidArgument(_))),
+            "wait {timeout_ms}/{poll_ms} was accepted"
+        );
+        assert!(rx.try_recv().is_err(), "invalid wait dispatched an effect");
+    }
 }
 
 #[tokio::test]
