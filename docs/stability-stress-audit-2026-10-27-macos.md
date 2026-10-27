@@ -77,7 +77,59 @@ GUI 로그의 panic·CRITICAL·ERROR 0, `leaks` 416건 35KB(모두 Apple 프레�
 수정 후 통과한다. dispatch guard, 저장 재시도 지연, IPC 상한, 에디터 reload
 상한은 단위 테스트로 확인했다.
 
-`scripts/test-ci.sh macos` 전체 gate는 37개 phase 모두 통과했다(`CI_GATE_EXIT=0`, 새 `palette-release` phase 포함). 첫 실행은 CI runner 자체 검사가 새 phase를 몰라 실패했고, mock 등록과 phase 위치 조정 후 재실행했다. 원격 Linux Test·Sanitizers CI 결과는 아래 커밋 기록을 참고한다.
+`scripts/test-ci.sh macos` 전체 gate는 코드 커밋 `c140b7e4`에서
+39개 단계 모두 통과했고 `CI_GATE_EXIT=0`, `GATE_DONE rc=0`을 확인했다.
+새 검사 `MACOS_PALETTE_RELEASE_OK`를 포함해 native smoke, 에이전트 훅,
+에디터 입력, 이미지·Lottie, 알림 정리, WebDriver 검사가 통과했다.
+
+첫 전체 gate 실행은 새 팔레트 단계에 대한 runner mock 누락으로 실패했다.
+`f918957e`에 mock·호출 횟수·성공 marker 검사까지 반영한 뒤 전체를 다시
+실행한 결과다. 첫 실행은 성공으로 계산하지 않는다.
+
+인계받은 과부하 로그·실행 스크립트와 전체 gate 로그는 로컬
+`target/stability-resume-20261027/`에 보존했다. 이 폴더는 Git 추적 대상이
+아니며 원래 `/tmp`의 상세 `leaks` 스택 파일은 이미 정리되어, 스택 분류는
+이전 세션의 검사 기록이고 총 할당량은 보존된 로그에서 확인한 값이다.
+
+### 원격 CI에서 확인한 테스트 결함
+
+첫 원격 Test 실행(`40517615591`, `733bf684`)의 Linux 단계는 실패했다.
+추가한 팔레트 해제 테스트가 async GTK executor 안에서 직접 main context를
+다시 순회해 `EnterError` → `panic_cannot_unwind`로 abort됐다. `2933c692`는
+비동기 타이머에 양보하며 위젯 해제를 최대 10초 기다리도록 수정했다.
+브라우저 통합 검사의 5ms polling도 새 최소 간격과 맞지 않아 두 테스트가
+실패했다. `4a82971d`는 해당 입력을 허용된 10ms로 수정했다.
+
+Ubuntu 24.04 aarch64 검증 VM의 격리 Xvfb·D-Bus에서 팔레트 해제 1개와
+실제 브라우저 탐색 2개를 재실행해 모두 통과했다. 소스는 읽기 전용으로
+공유하고 테스트 상태는 별도 XDG 디렉터리에 두었다. 로그는
+`target/stability-resume-20261027/linux-focused.log`에 있다.
+전체 Linux suite가 abort되어 첫 실행의 coverage도 기준에 미달했으므로,
+그 실행을 안정성 검증 성공으로 계산하지 않는다.
+
+### 최종 원격 CI 결과
+
+최종 코드 `4a82971da94ae5d5197d48c303ef387f211080e9`의
+[Test](https://github.com/flowmux-ai/flowmux/actions/runs/40519873837)와
+[Sanitizers](https://github.com/flowmux-ai/flowmux/actions/runs/40519873833)는
+모두 성공했다. 이후에는 이 보고서만 수정하며 실행 코드에는 변경이 없다.
+
+- Linux 전체 테스트·coverage: 통과. 라인 85.00%, region 84.89%, 함수 83.99%로
+  기준(각각 79%, 78%, 78%)을 충족했다. 수정한 팔레트·브라우저 검사,
+  `STALLED_CWD_CALLS=1`, `IDLE_STABILITY_OK`, `CI_GATE_EXIT=0`을 확인했다.
+- macOS build/native smoke: 통과. `MACOS_PALETTE_RELEASE_OK`와
+  `CI_GATE_EXIT=0`을 확인했다.
+- 에디터 웹 테스트·번들 재생성: 통과.
+- 헤드리스 ASan/LSan, 네이티브 Lottie ASan/LSan, GUI ASan, ThorVG
+  ASan/UBSan/LSan: 통과. GUI binary는 865개 통과·4개 ignored였고,
+  브라우저 통합 검사 2개도 통과했다. GUI ASan은 기존 설정대로 leak
+  detection을 끄므로 GUI 전체의 누수 부재를 증명하지 않는다.
+- 예약·수동 실행 전용 headless stress 작업은 push에서 skipped였다.
+
+첫 원격 실행의 Linux 실패 로그를 보존한 뒤, 수정 전 남은 작업은 취소하고
+새 커밋의 전체 CI를 확인했다. 핵심 성공 로그는 로컬 증거 폴더의
+`linux-final-markers.log`, `macos-final-markers.log`,
+`sanitizers-final-markers.log`에 보존했다.
 
 ## 남은 항목
 
