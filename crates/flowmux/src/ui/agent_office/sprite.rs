@@ -353,18 +353,23 @@ fn whole(scale: f64) -> bool {
 }
 
 /// `surface` enlarged `k` times, each art pixel becoming a `k` x `k` block.
-pub(super) fn enlarged(surface: &ImageSurface, k: u32) -> ImageSurface {
+fn enlarged(surface: &ImageSurface, k: u32) -> Result<ImageSurface, gtk::cairo::Error> {
     let (w, h) = (surface.width(), surface.height());
-    let big = ImageSurface::create(Format::ARgb32, w * k as i32, h * k as i32)
-        .expect("enlarged sprite surface");
+    let k = i32::try_from(k).map_err(|_| gtk::cairo::Error::InvalidSize)?;
+    let big = ImageSurface::create(
+        Format::ARgb32,
+        w.checked_mul(k).ok_or(gtk::cairo::Error::InvalidSize)?,
+        h.checked_mul(k).ok_or(gtk::cairo::Error::InvalidSize)?,
+    )?;
     let (sx, sy) = surface.device_scale();
     big.set_device_scale(sx, sy);
     {
-        let cr = Context::new(&big).expect("enlarged sprite context");
+        let cr = Context::new(&big)?;
         cr.scale(k as f64, k as f64);
         paint(&cr, surface, 0.0, 0.0);
+        cr.status()?;
     }
-    big
+    Ok(big)
 }
 
 thread_local! {
@@ -377,6 +382,9 @@ pub(super) fn scaled(
     surface: &ImageSurface,
     scale: f64,
 ) -> Result<ImageSurface, gtk::cairo::Error> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(gtk::cairo::Error::InvalidSize);
+    }
     let density = surface.device_scale().0;
     let output = ImageSurface::create(
         Format::ARgb32,
@@ -388,7 +396,7 @@ pub(super) fn scaled(
     let pixel_scale = scale / density;
     let k = pixel_scale.ceil().max(1.0) as u32;
     let source = if k > 1 {
-        enlarged(surface, k)
+        enlarged(surface, k)?
     } else {
         surface.clone()
     };
@@ -421,7 +429,10 @@ pub(super) fn paint_scaled(
             if let Some(ready) = cache.get_mut(&key) {
                 return ready.touch();
             }
-            let ready = scaled(surface, scale).expect("scaled sprite surface");
+            // Resampling is optional: keep drawing the original if Cairo cannot allocate a copy.
+            let Ok(ready) = scaled(surface, scale) else {
+                return surface.clone();
+            };
             let bytes = ready.stride() as usize * ready.height() as usize;
             if SCALED_BYTES.get() + bytes > SCALED_BYTES_LIMIT {
                 cache.clear();
@@ -448,6 +459,64 @@ pub(super) fn paint_scaled(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_resampling_preserves_the_original_sprite() {
+        let _view = CacheLease::new();
+        // The final image fits Cairo, but nearest-neighbor enlargement does not.
+        let source = ImageSurface::create(Format::ARgb32, 17_000, 2).unwrap();
+        source.set_device_scale(2.0, 2.0);
+        let source_cr = Context::new(&source).unwrap();
+        source_cr.set_source_rgb(1.0, 0.0, 0.0);
+        source_cr.paint().unwrap();
+        assert!(scaled(&source, 2.1).is_err());
+        let target = ImageSurface::create(Format::ARgb32, 16, 4).unwrap();
+        let cr = Context::new(&target).unwrap();
+        paint_scaled(&cr, &source, 0.0, 0.0, 2.1, 1.0);
+        cr.status().unwrap();
+        target
+            .with_data(|data| assert_eq!(&data[..4], &0xffff0000_u32.to_ne_bytes()))
+            .unwrap();
+        assert_eq!(
+            SCALED_BYTES.get(),
+            0,
+            "failed copies must not enter the cache"
+        );
+        assert!(enlarged(&source, u32::MAX).is_err());
+        for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(scaled(&source, scale).is_err());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn failed_sprite_resampling_keeps_mapped_drawing_alive() {
+        use gtk::prelude::*;
+        use std::rc::Rc;
+        let window = gtk::Window::new();
+        let drawing = gtk::DrawingArea::new();
+        let frames = Rc::new(Cell::new(0));
+        let drawn = frames.clone();
+        let source = ImageSurface::create(Format::ARgb32, 17_000, 2).unwrap();
+        source.set_device_scale(2.0, 2.0);
+        drawing.set_draw_func(move |_, cr, _, _| {
+            paint_scaled(cr, &source, 0.0, 0.0, 2.1, 1.0);
+            cr.status().unwrap();
+            drawn.set(drawn.get() + 1);
+        });
+        window.set_child(Some(&drawing));
+        window.present();
+        gtk::glib::future_with_timeout(Duration::from_secs(5), async {
+            while frames.get() < 3 {
+                drawing.queue_draw();
+                gtk::glib::timeout_future(Duration::from_millis(30)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(drawing.is_mapped());
+        window.destroy();
+    }
 
     #[test]
     fn outline_shading_and_cache_are_stable() {
