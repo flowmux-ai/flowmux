@@ -1097,12 +1097,12 @@ mod gtk_tests {
 
         dialog.close();
         drop(dialog);
-        let context = gtk::glib::MainContext::default();
-        for _ in 0..20 {
-            while context.pending() {
-                context.iteration(false);
+        // Yield to the async test's main loop instead of re-entering its executor.
+        for _ in 0..200 {
+            if widgets.iter().all(|widget| widget.upgrade().is_none()) {
+                break;
             }
-            gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+            gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         }
         let alive = widgets.iter().filter(|w| w.upgrade().is_some()).count();
         assert_eq!(alive, 0, "closed palette kept {alive} widgets alive");
