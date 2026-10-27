@@ -98,6 +98,34 @@ struct DownloadUi {
     handle: Rc<RefCell<Option<Retained<WKDownload>>>>,
 }
 
+impl Drop for DownloadUi {
+    fn drop(&mut self) {
+        // The delegate leaves with its tab, so no completion can reach Rust.
+        // Cancel the transfer and release the progress timer's handle.
+        if let Some(download) = self.handle.borrow_mut().take() {
+            unsafe { download.cancel(None) };
+        }
+    }
+}
+
+/// WebKit raises an exception when a permission decision handler is released
+/// uncalled, so an unanswered prompt denies on drop.
+struct PermissionReply(Option<block2::RcBlock<dyn Fn(WKPermissionDecision)>>);
+
+impl PermissionReply {
+    fn send(&mut self, decision: WKPermissionDecision) {
+        if let Some(handler) = self.0.take() {
+            handler.call((decision,));
+        }
+    }
+}
+
+impl Drop for PermissionReply {
+    fn drop(&mut self) {
+        self.send(WKPermissionDecision::Deny);
+    }
+}
+
 struct BrowserNavigationDelegateIvars {
     control: crate::ui::browser_control::BrowserControl,
     navigation_enabled: Rc<Cell<bool>>,
@@ -1847,17 +1875,18 @@ fn present_web_permission_dialog(
     // Do not wait for WebKit to paint while it awaits a native permission reply.
     let native_browser_suspend = suspend_native_browser_views(parent, false);
     let pending = Rc::new(RefCell::new(Some((
-        decision_handler,
+        PermissionReply(Some(decision_handler)),
         native_browser_suspend,
     ))));
     dialog.connect_response(None, move |_dialog, response| {
-        if let Some((decision_handler, native_browser_suspend)) = pending.borrow_mut().take() {
+        let taken = pending.borrow_mut().take();
+        if let Some((mut reply, native_browser_suspend)) = taken {
             let decision = if response == "allow" {
                 WKPermissionDecision::Grant
             } else {
                 WKPermissionDecision::Deny
             };
-            decision_handler.call((decision,));
+            reply.send(decision);
             drop(native_browser_suspend);
         }
     });
