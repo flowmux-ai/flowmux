@@ -34,12 +34,23 @@ pub(super) fn install_heap_trim() {
 #[cfg(not(any(target_env = "gnu", target_os = "macos")))]
 pub(super) fn install_heap_trim() {}
 
-fn schedule_agent_process_poll(controller: WindowController) {
-    glib::timeout_add_local_once(Duration::from_secs(2), move || {
-        glib::MainContext::default().spawn_local(async move {
-            controller.poll_agent_processes().await;
-            schedule_agent_process_poll(controller);
-        });
+fn install_poll(
+    window: &adw::ApplicationWindow,
+    interval: Duration,
+    mut poll: impl AsyncFnMut() + 'static,
+) {
+    // A slow filesystem/process query must not accumulate another task every tick.
+    let task = glib::spawn_future_local(async move {
+        loop {
+            glib::timeout_future(interval).await;
+            poll().await;
+        }
+    });
+    let task = RefCell::new(Some(task));
+    window.connect_unrealize(move |_| {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
+        }
     });
 }
 
@@ -92,13 +103,13 @@ impl WindowController {
 
     pub(super) fn install_editor_session_persistence(&self) {
         let controller = self.clone();
-        glib::timeout_add_local(EDITOR_SESSION_REFRESH_INTERVAL, move || {
-            let controller = controller.clone();
-            glib::MainContext::default().spawn_local(async move {
+        install_poll(
+            &self.window,
+            EDITOR_SESSION_REFRESH_INTERVAL,
+            async move || {
                 controller.persist_editor_sessions().await;
-            });
-            glib::ControlFlow::Continue
-        });
+            },
+        );
     }
 
     pub(super) async fn persist_editor_sessions(&self) {
@@ -132,43 +143,36 @@ impl WindowController {
     /// and debounces disk writes.
     pub(super) fn install_scrollback_persistence(&self) {
         let controller = self.clone();
-        let running = Rc::new(Cell::new(false));
-        glib::timeout_add_local(Duration::from_secs(15), move || {
-            if controller.options.borrow().restore_terminal_scrollback && !running.replace(true) {
-                let controller = controller.clone();
-                let running = running.clone();
-                glib::MainContext::default().spawn_local(async move {
-                    // Hold identifiers only; closed tabs must not survive a pending capture.
-                    let surfaces: Vec<_> = controller
+        install_poll(&self.window, Duration::from_secs(15), async move || {
+            if controller.options.borrow().restore_terminal_scrollback {
+                // Hold identifiers only; closed tabs must not survive a pending capture.
+                let surfaces: Vec<_> = controller
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .keys()
+                    .copied()
+                    .collect();
+                for surface in surfaces {
+                    let snapshot = controller
                         .pane_registry
                         .borrow()
                         .terminals
-                        .keys()
-                        .copied()
-                        .collect();
-                    for surface in surfaces {
-                        let snapshot = controller
-                            .pane_registry
-                            .borrow()
-                            .terminals
-                            .get(&surface)
-                            .and_then(|terminal| {
-                                terminal
-                                    .dirty_scrollback_snapshot()
-                                    .map(|snapshot| (terminal.id(), snapshot))
-                            });
-                        if let Some((pane, snapshot)) = snapshot {
-                            let _ = controller
-                                .store
-                                .update_surface_scrollback(pane, surface, snapshot)
-                                .await;
-                            glib::timeout_future(Duration::from_millis(1)).await;
-                        }
+                        .get(&surface)
+                        .and_then(|terminal| {
+                            terminal
+                                .dirty_scrollback_snapshot()
+                                .map(|snapshot| (terminal.id(), snapshot))
+                        });
+                    if let Some((pane, snapshot)) = snapshot {
+                        let _ = controller
+                            .store
+                            .update_surface_scrollback(pane, surface, snapshot)
+                            .await;
+                        glib::timeout_future(Duration::from_millis(1)).await;
                     }
-                    running.set(false);
-                });
+                }
             }
-            glib::ControlFlow::Continue
         });
     }
     /// Relying only on VTE OSC 7 (`current-directory-uri::notify`) misses shells
@@ -179,18 +183,17 @@ impl WindowController {
     /// polling is a safety net for OSC-7-naive shells.
     pub(super) fn install_cwd_polling_fallback(&self) {
         let controller = self.clone();
-        glib::timeout_add_local(Duration::from_secs(1), move || {
-            let controller = controller.clone();
-            glib::MainContext::default().spawn_local(async move {
-                controller.poll_terminal_cwds().await;
-            });
-            glib::ControlFlow::Continue
+        install_poll(&self.window, Duration::from_secs(1), async move || {
+            controller.poll_terminal_cwds().await;
         });
     }
     /// Agent Bar presence is driven primarily by process truth. Keep the 2s
     /// cadence even when another tab has hooks so starts and exits do not lag.
     pub(super) fn install_agent_process_polling(&self) {
-        schedule_agent_process_poll(self.clone());
+        let controller = self.clone();
+        install_poll(&self.window, Duration::from_secs(2), async move || {
+            controller.poll_agent_processes().await;
+        });
     }
     pub(super) async fn poll_agent_processes(&self) {
         let pids = self.pane_registry.borrow().terminal_agent_pids();
@@ -343,5 +346,49 @@ impl WindowController {
         self.sidebar.set_notification_workspaces(&workspaces);
         self.pane_registry.borrow().set_notification_panes(&panes);
         self.notifications.refresh_launcher_badge();
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    async fn slow_poll_does_not_overlap_and_destroy_releases_pending_work() {
+        adw::init().unwrap();
+        let window = adw::ApplicationWindow::builder().build();
+        window.present();
+        let starts = Rc::new(Cell::new(0));
+        let count = starts.clone();
+        let lifetime = Rc::new(());
+        let weak = Rc::downgrade(&lifetime);
+        let (resume, pending) = async_channel::bounded::<()>(1);
+        install_poll(&window, Duration::from_millis(10), async move || {
+            let _keep_alive = &lifetime;
+            count.set(count.get() + 1);
+            let _ = pending.recv().await;
+        });
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(starts.get(), 1, "a stalled poll must not accumulate tasks");
+        window.set_visible(false);
+        assert!(
+            weak.upgrade().is_some(),
+            "hiding a window must keep polling"
+        );
+        resume.send(()).await.unwrap();
+        glib::future_with_timeout(Duration::from_secs(2), async {
+            while starts.get() < 2 {
+                glib::timeout_future(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        window.destroy();
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(starts.get(), 2, "destroyed windows must stop polling");
+        assert!(
+            weak.upgrade().is_none(),
+            "pending poll retained its captures"
+        );
     }
 }
