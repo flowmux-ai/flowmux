@@ -365,10 +365,12 @@ impl WindowController {
             };
             let button = palette_button(label, shortcut);
             let controller = self.clone();
-            let dialog_for_click = dialog.clone();
+            let dialog_for_click = dialog.downgrade();
             let command = *command;
             button.connect_clicked(move |_| {
-                dialog_for_click.close();
+                if let Some(dialog) = dialog_for_click.upgrade() {
+                    dialog.close();
+                }
                 let controller = controller.clone();
                 glib::MainContext::default().spawn_local(async move {
                     controller.run_command_palette_command(command).await;
@@ -388,9 +390,11 @@ impl WindowController {
         let label = format!("Workspace template: {}", builtin_template.label);
         let button = palette_button(&label, None);
         let controller = self.clone();
-        let dialog_for_click = dialog.clone();
+        let dialog_for_click = dialog.downgrade();
         button.connect_clicked(move |_| {
-            dialog_for_click.close();
+            if let Some(dialog) = dialog_for_click.upgrade() {
+                dialog.close();
+            }
             let controller = controller.clone();
             let template = builtin_template.clone();
             let base_dir = builtin_base_dir.clone();
@@ -413,10 +417,12 @@ impl WindowController {
             let label = format!("Workspace: {workspace_name}");
             let button = palette_button(&label, None);
             let controller = self.clone();
-            let dialog_for_click = dialog.clone();
+            let dialog_for_click = dialog.downgrade();
             let command = CommandPaletteCommand::ActivateWorkspace(workspace.id);
             button.connect_clicked(move |_| {
-                dialog_for_click.close();
+                if let Some(dialog) = dialog_for_click.upgrade() {
+                    dialog.close();
+                }
                 let controller = controller.clone();
                 glib::MainContext::default().spawn_local(async move {
                     controller.run_command_palette_command(command).await;
@@ -447,13 +453,15 @@ impl WindowController {
                 let label = format!("Pane: {workspace_name} / {pane_title}");
                 let button = palette_button(&label, None);
                 let controller = self.clone();
-                let dialog_for_click = dialog.clone();
+                let dialog_for_click = dialog.downgrade();
                 let command = CommandPaletteCommand::FocusPane {
                     workspace: workspace.id,
                     pane,
                 };
                 button.connect_clicked(move |_| {
-                    dialog_for_click.close();
+                    if let Some(dialog) = dialog_for_click.upgrade() {
+                        dialog.close();
+                    }
                     let controller = controller.clone();
                     glib::MainContext::default().spawn_local(async move {
                         controller.run_command_palette_command(command).await;
@@ -475,14 +483,16 @@ impl WindowController {
                         );
                         let button = palette_button(&label, None);
                         let controller = self.clone();
-                        let dialog_for_click = dialog.clone();
+                        let dialog_for_click = dialog.downgrade();
                         let command = CommandPaletteCommand::ActivateSurface {
                             workspace: workspace.id,
                             pane,
                             surface: surface.id,
                         };
                         button.connect_clicked(move |_| {
-                            dialog_for_click.close();
+                            if let Some(dialog) = dialog_for_click.upgrade() {
+                                dialog.close();
+                            }
                             let controller = controller.clone();
                             glib::MainContext::default().spawn_local(async move {
                                 controller.run_command_palette_command(command).await;
@@ -505,9 +515,11 @@ impl WindowController {
                 .and_then(|accelerator| accelerator_label(accelerator));
             let button = palette_button(label, shortcut.as_deref());
             let controller = self.clone();
-            let dialog_for_click = dialog.clone();
+            let dialog_for_click = dialog.downgrade();
             button.connect_clicked(move |_| {
-                dialog_for_click.close();
+                if let Some(dialog) = dialog_for_click.upgrade() {
+                    dialog.close();
+                }
                 let controller = controller.clone();
                 glib::MainContext::default().spawn_local(async move {
                     controller
@@ -527,11 +539,13 @@ impl WindowController {
                 let button = palette_button(&command.label, None);
                 let search_text = format!("{} {}", command.label, command.id);
                 let controller = self.clone();
-                let dialog_for_click = dialog.clone();
+                let dialog_for_click = dialog.downgrade();
                 let env = config.env.clone();
                 let base_dir = base_dir.clone();
                 button.connect_clicked(move |_| {
-                    dialog_for_click.close();
+                    if let Some(dialog) = dialog_for_click.upgrade() {
+                        dialog.close();
+                    }
                     let controller = controller.clone();
                     let command = command.clone();
                     let env = env.clone();
@@ -588,14 +602,18 @@ impl WindowController {
                 }
             }
         });
-        let dialog_for_stop = dialog.clone();
-        search.connect_stop_search(move |_| dialog_for_stop.close());
+        let dialog_for_stop = dialog.downgrade();
+        search.connect_stop_search(move |_| {
+            if let Some(dialog) = dialog_for_stop.upgrade() {
+                dialog.close();
+            }
+        });
 
         dialog.present();
         search.grab_focus();
 
         if let Some(root) = quick_open_root {
-            let dialog = dialog.clone();
+            let dialog = dialog.downgrade();
             let list = list.clone();
             let search = search.clone();
             let entries = entries.clone();
@@ -613,7 +631,7 @@ impl WindowController {
                 let mut completed = true;
 
                 for batch in quick_open.chunks(100) {
-                    if !dialog.is_visible() {
+                    if !dialog.upgrade().is_some_and(|dialog| dialog.is_visible()) {
                         completed = false;
                         break;
                     }
@@ -627,7 +645,9 @@ impl WindowController {
                         let path = path.clone();
                         let bridge = bridge.clone();
                         button.connect_clicked(move |_| {
-                            dialog_for_click.close();
+                            if let Some(dialog) = dialog_for_click.upgrade() {
+                                dialog.close();
+                            }
                             let bridge = bridge.clone();
                             let path = path.clone();
                             glib::MainContext::default().spawn_local(async move {
@@ -654,7 +674,7 @@ impl WindowController {
                     glib::timeout_future(std::time::Duration::from_millis(1)).await;
                 }
 
-                if completed && dialog.is_visible() {
+                if completed && dialog.upgrade().is_some_and(|dialog| dialog.is_visible()) {
                     for key in palette_mru.borrow().iter().rev() {
                         if let Some((_, _, button)) = entries
                             .borrow()
@@ -1038,5 +1058,54 @@ mod tests {
             quick_open_files(root.path(), 2),
             vec![root.path().join("a.rs"), root.path().join("b.rs")]
         );
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod gtk_tests {
+    use super::super::tests::build_single_workspace_controller;
+    use gtk::prelude::*;
+
+    fn widget_tree(root: &gtk::Widget) -> Vec<gtk::Widget> {
+        let mut widgets = vec![root.clone()];
+        let mut child = root.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            widgets.extend(widget_tree(&widget));
+        }
+        widgets
+    }
+
+    #[gtk::test]
+    async fn closing_command_palette_releases_its_widget_tree() {
+        let (controller, _, _) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.PaletteRelease").await;
+        controller.window.present();
+        let previous: Vec<_> = gtk::Window::list_toplevels();
+        controller.show_command_palette().await;
+        let dialog = gtk::Window::list_toplevels()
+            .into_iter()
+            .find(|window| !previous.contains(window))
+            .and_then(|window| window.downcast::<gtk::Window>().ok())
+            .expect("palette window");
+        assert_eq!(dialog.title().as_deref(), Some("Command Palette"));
+        let widgets: Vec<_> = widget_tree(dialog.upcast_ref())
+            .into_iter()
+            .map(|widget| widget.downgrade())
+            .collect();
+        assert!(widgets.len() > 10, "palette rendered rows");
+
+        dialog.close();
+        drop(dialog);
+        let context = gtk::glib::MainContext::default();
+        for _ in 0..20 {
+            while context.pending() {
+                context.iteration(false);
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        let alive = widgets.iter().filter(|w| w.upgrade().is_some()).count();
+        assert_eq!(alive, 0, "closed palette kept {alive} widgets alive");
+        controller.window.destroy();
     }
 }

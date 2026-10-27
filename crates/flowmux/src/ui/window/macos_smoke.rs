@@ -238,6 +238,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         controller.window.destroy();
         return;
     }
+    if std::env::var_os("FLOWMUX_PALETTE_RELEASE_SMOKE_ONLY").is_some() {
+        palette::check_release(&controller).await;
+        controller.window.destroy();
+        return;
+    }
     if std::env::var_os("FLOWMUX_AGENT_ENTRYPOINT_SMOKE_ONLY").is_some() {
         process_args::check(&controller, terminal_pane, root).await;
         controller.window.destroy();

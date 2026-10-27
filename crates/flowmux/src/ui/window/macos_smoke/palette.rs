@@ -149,3 +149,33 @@ pub(super) async fn check(
     .await;
     println!("MACOS_PALETTE_VISIBLE_ORDER_OK");
 }
+
+/// Every open builds a fresh dialog whose row handlers hold it strongly.
+/// Closing must release the whole widget tree instead of leaking it per open.
+pub(super) async fn check_release(controller: &WindowController) {
+    let (window, _) = open(controller).await;
+    let widgets: Vec<_> = descendants(window.upcast_ref())
+        .into_iter()
+        .map(|widget| widget.downgrade())
+        .collect();
+    assert!(widgets.len() > 10, "palette rendered rows");
+    window.close();
+    drop(window);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while widgets.iter().any(|widget| widget.upgrade().is_some()) {
+        if std::time::Instant::now() > deadline {
+            for widget in widgets.iter().filter_map(|w| w.upgrade()) {
+                println!(
+                    "SURVIVOR type={} parent={:?} root={:?} refs={}",
+                    widget.type_().name(),
+                    widget.parent().map(|p| p.type_().name().to_string()),
+                    widget.root().map(|r| r.type_().name().to_string()),
+                    widget.ref_count()
+                );
+            }
+            panic!("closed palette widgets were not released");
+        }
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
+    println!("MACOS_PALETTE_RELEASE_OK");
+}

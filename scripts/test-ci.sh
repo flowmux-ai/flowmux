@@ -151,3 +151,8 @@ grep -q '^MACOS_WEBDRIVER_OK$' "$report_dir/webdriver.log"
 FLOWMUX_BROWSER_CHROME_SMOKE_ONLY=1 run_phase browser-chrome 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/browser-chrome.log"
 grep -q '^BROWSER_CHROME_LAYOUT_OK$' "$report_dir/browser-chrome.log"
+
+# Closing the command palette must release its dialog tree; rows hold the window.
+FLOWMUX_PALETTE_RELEASE_SMOKE_ONLY=1 run_phase palette-release 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/palette-release.log"
+grep -q '^MACOS_PALETTE_RELEASE_OK$' "$report_dir/palette-release.log"

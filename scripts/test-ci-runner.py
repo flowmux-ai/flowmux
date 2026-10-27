@@ -56,7 +56,8 @@ if name == 'cargo' and 'macos_native' in args:
     for flag, prefix, marker in [('FLOWMUX_BROWSER_CHROME_SMOKE_ONLY', 'BROWSER_CHROME', 'BROWSER_CHROME_LAYOUT_OK'),
                                   ('FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY', 'BOOT_RESTORE', 'MACOS_BOOT_RESTORE_POLICY_OK'),
                                   ('FLOWMUX_SSH_PREVIEW_SMOKE_ONLY', 'SSH_PREVIEW', 'MACOS_SSH_PREVIEW_EXPIRY_OK'),
-                                  ('FLOWMUX_IMAGE_VIEWER_SMOKE_ONLY', 'IMAGE_VIEWER', 'MACOS_IMAGE_LOTTIE_VIEWER_OK')]:
+                                  ('FLOWMUX_IMAGE_VIEWER_SMOKE_ONLY', 'IMAGE_VIEWER', 'MACOS_IMAGE_LOTTIE_VIEWER_OK'),
+                                  ('FLOWMUX_PALETTE_RELEASE_SMOKE_ONLY', 'PALETTE_RELEASE', 'MACOS_PALETTE_RELEASE_OK')]:
         if os.environ.get(flag):
             if os.environ.get(prefix + '_MARKER', '1') == '1':
                 print(marker)
@@ -176,7 +177,7 @@ time.sleep(60)
         self.assertEqual(sum('macos_native' in c['args'] for c in calls), 1)
 
     def test_macos_parity_gates_preserve_failures_and_require_native_markers(self):
-        for phase in ('BOOT_RESTORE', 'SSH_PREVIEW', 'IMAGE_VIEWER', 'BROWSER_CHROME'):
+        for phase in ('BOOT_RESTORE', 'SSH_PREVIEW', 'IMAGE_VIEWER', 'BROWSER_CHROME', 'PALETTE_RELEASE'):
             for exit_code, marker, expected in [(41, '1', 41), (0, '0', 1)]:
                 with self.subTest(phase=phase, marker=marker):
                     result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
@@ -195,7 +196,7 @@ time.sleep(60)
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 10 if exit_code == 0 else 5)
+                self.assertEqual(len(native), 11 if exit_code == 0 else 5)
                 self.assertIsNone(native[0]['skills'])
                 self.assertEqual(native[4]['skills'], '1')
 
@@ -207,7 +208,7 @@ time.sleep(60)
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 10 if expected == 0 else 4)
+                self.assertEqual(len(native), 11 if expected == 0 else 4)
                 self.assertEqual(native[3]['keyboard'], '1')
                 self.assertIsNone(native[3]['socket'])
 
@@ -218,7 +219,7 @@ time.sleep(60)
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 10)
+                self.assertEqual(len(native), 11)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
                 preview = next(c for c in native if c['ssh_preview'] == '1')
                 self.assertTrue(preview['tmp'].endswith('/macos-native-long-temporary-directory'))
