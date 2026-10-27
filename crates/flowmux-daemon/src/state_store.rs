@@ -307,6 +307,17 @@ pub struct StateStore {
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
 const PERSIST_MAX_DELAY: Duration = Duration::from_secs(2);
+const PERSIST_RETRY_MIN: Duration = Duration::from_secs(1);
+const PERSIST_RETRY_MAX: Duration = Duration::from_secs(60);
+
+/// Delay before retrying a failed save: doubles per consecutive failure so a
+/// full disk or rejected file does not re-parse and re-serialize the whole
+/// state every second for the rest of the session.
+fn persist_retry_delay(consecutive_failures: u32) -> Duration {
+    PERSIST_RETRY_MIN
+        .saturating_mul(1u32 << consecutive_failures.min(6))
+        .min(PERSIST_RETRY_MAX)
+}
 
 impl StateStore {
     /// Construct from inside a tokio runtime context. Spawns the
@@ -1936,6 +1947,7 @@ impl StateStore {
 
     pub async fn persist_loop(&self) {
         let mut persisted_generation = 0;
+        let mut consecutive_failures = 0u32;
         loop {
             let stable_generation = self
                 .wait_for_stable_dirty_generation(persisted_generation, PERSIST_DEBOUNCE)
@@ -1958,13 +1970,16 @@ impl StateStore {
                     "state persisted"
                 ),
                 Err(e) => {
-                    error!(error = %e, "state save failed");
+                    let delay = persist_retry_delay(consecutive_failures);
+                    consecutive_failures = consecutive_failures.saturating_add(1);
+                    error!(error = %e, retry_in_s = delay.as_secs(), "state save failed");
                     // Keep this generation dirty. Retry even without another
-                    // mutation, with a delay so a persistent failure cannot spin.
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    // mutation, backing off so a persistent failure cannot spin.
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
             }
+            consecutive_failures = 0;
             // A mutation after the snapshot keeps a higher generation and starts
             // a fresh debounce. Stale Notify permits from mutations already in
             // this snapshot are consumed without scheduling another write.
@@ -2254,6 +2269,15 @@ fn first_active_pane_surface(pane: &Pane) -> Option<PaneSurface> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn persist_retry_delay_backs_off_and_caps() {
+        assert_eq!(persist_retry_delay(0), Duration::from_secs(1));
+        assert_eq!(persist_retry_delay(1), Duration::from_secs(2));
+        assert_eq!(persist_retry_delay(5), Duration::from_secs(32));
+        assert_eq!(persist_retry_delay(6), Duration::from_secs(60));
+        assert_eq!(persist_retry_delay(u32::MAX), Duration::from_secs(60));
+    }
+
     use super::*;
     use flowmux_core::{AgentPresence, AgentStatus, AgentStatusReport};
     use flowmux_ipc::protocol::AgentLifecycleEvent;
