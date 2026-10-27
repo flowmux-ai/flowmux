@@ -49,11 +49,12 @@ python3 scripts/test-terminal-image-links-gui.py \
 python3 scripts/test-ipc-recovery-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
-python3 scripts/test-polling-delay-gui.py \
+# Keep probe evidence outside the CI temporary tree, which is deleted on exit.
+TMPDIR=/tmp python3 scripts/test-polling-delay-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-idle-stability-gui.py --self-check
-python3 scripts/test-idle-stability-gui.py \
+TMPDIR=/tmp python3 scripts/test-idle-stability-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-editor-io-gui.py \

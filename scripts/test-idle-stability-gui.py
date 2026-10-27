@@ -112,6 +112,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         h.env.update(GTK_A11Y="atspi", GSK_RENDERER=args.renderer, G_DEBUG="fatal-criticals")
+        h.env.pop("AT_SPI_BUS_ADDRESS", None)
         shell = h.root / "clean-shell"
         shell.write_text("#!/bin/sh\nexec /bin/bash --noprofile --norc\n")
         shell.chmod(0o755)
@@ -124,7 +125,9 @@ def main():
 <script>let n=0; const c=document.querySelector('canvas').getContext('2d');
 setInterval(()=>{c.fillStyle=(++n%2)?'#658':'#853';c.fillRect(0,0,200,100)},100)</script>""")
         h.start_display()
+        os.environ["DISPLAY"] = h.env["DISPLAY"]
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
+        os.environ.pop("AT_SPI_BUS_ADDRESS", None)
         import gi
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
