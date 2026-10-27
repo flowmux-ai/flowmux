@@ -897,13 +897,19 @@ impl GhosttyPane {
         );
         install_ibus_nav_workaround(&term, smart_page_enabled);
 
-        // Process exit.
+        // Process exit. VTE reaps the child; the PTY must stop treating the
+        // PID as its process group before a later close signals it.
+        let pty_slot: Rc<RefCell<Option<flowmux_terminal::pty::Pty>>> = Rc::new(RefCell::new(None));
         {
             let cb = callbacks.on_child_exited.clone();
             let pane_id = pane_id.clone();
             let pid = pid.clone();
+            let pty_slot = pty_slot.clone();
             term.connect_child_exited(move |_term, status| {
                 pid.set(None);
+                if let Some(pty) = pty_slot.borrow_mut().as_mut() {
+                    pty.mark_child_exited();
+                }
                 (cb.borrow_mut())(pane_id.get(), status);
             });
         }
@@ -1163,6 +1169,7 @@ impl GhosttyPane {
         })?;
         term.set_pty(Some(&vpty));
         pty.set_external_child_watch();
+        *pty_slot.borrow_mut() = Some(pty);
         term.watch_child(glib::Pid(child_pid));
 
         Ok(Self {
@@ -1180,7 +1187,7 @@ impl GhosttyPane {
             terminal_alternate_screen,
             terminal_minimap,
             last_selection,
-            _pty: Rc::new(RefCell::new(Some(pty))),
+            _pty: pty_slot,
         })
     }
 

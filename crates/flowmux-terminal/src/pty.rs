@@ -233,6 +233,13 @@ impl Pty {
         Ok(Some(status))
     }
 
+    /// The external watcher reaped the child. The PID may already belong to an
+    /// unrelated process group, so later close paths must neither signal nor
+    /// poll it.
+    pub fn mark_child_exited(&mut self) {
+        self.reaped = true;
+    }
+
     /// Send SIGHUP to the child (used on pane close before reaping).
     pub fn hangup(&mut self) {
         if !self.reaped {
@@ -549,6 +556,45 @@ mod tests {
                 assert_eq!(libc::WEXITSTATUS(status), 23);
             }
         }
+    }
+
+    #[test]
+    fn close_after_external_exit_does_not_signal_the_process_group() {
+        let mut pty = Pty::spawn(
+            &[
+                "sh",
+                "-c",
+                "trap '' HUP; printf ready; while :; do sleep 1; done",
+            ],
+            None,
+            &[],
+            80,
+            24,
+        )
+        .unwrap();
+        let child = pty.child_pid();
+        let mut ready = [0; 5];
+        let mut received = 0;
+        while received < ready.len() {
+            let n = pty.read(&mut ready[received..]).unwrap();
+            assert!(n > 0, "child exited before readiness");
+            received += n;
+        }
+        pty.set_external_child_watch();
+        // The watcher reported the exit; the PID may now name a foreign group.
+        pty.mark_child_exited();
+        pty.close_async();
+        std::thread::sleep(CLOSE_GRACE + Duration::from_millis(500));
+        let mut status = 0;
+        let rc = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
+        unsafe {
+            libc::kill(-child, libc::SIGKILL);
+            libc::waitpid(child, &mut status, 0);
+        }
+        assert_eq!(
+            rc, 0,
+            "closed PTY terminated a process group it no longer owns"
+        );
     }
 
     #[test]
