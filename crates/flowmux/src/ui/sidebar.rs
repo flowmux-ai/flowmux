@@ -991,6 +991,11 @@ fn schedule_activity_panel_layout(
     let panel = panel.clone();
     let layout = layout.clone();
     split.add_tick_callback(move |split, _| {
+        if !panel.is_visible() {
+            // A hidden panel never allocates; stop instead of ticking forever.
+            layout.layout_pending.set(false);
+            return gtk::glib::ControlFlow::Break;
+        }
         let total_height = split.height();
         if total_height <= 0 || panel.width() <= 0 {
             return gtk::glib::ControlFlow::Continue;

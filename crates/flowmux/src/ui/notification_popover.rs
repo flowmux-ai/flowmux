@@ -305,7 +305,11 @@ impl NotificationPopover {
             *self.workspaces.borrow_mut() = workspaces;
             self.workspace.set_selected(index as u32);
         }
-        let selected = self.workspaces.borrow()[self.workspace.selected() as usize].0;
+        let selected = self
+            .workspaces
+            .borrow()
+            .get(self.workspace.selected() as usize)
+            .and_then(|(id, _)| *id);
         let kind = KINDS.get(self.kind.selected() as usize).copied().flatten();
         for (filter, label, button) in &self.filters {
             let count = entries
