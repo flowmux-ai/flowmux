@@ -113,6 +113,13 @@ jobs:
           path: |
             target/ci/linux
             target/llvm-cov
+            /tmp/fm-gui-*/memory.jsonl
+            /tmp/fm-gui-*/summary.json
+            /tmp/fm-gui-*/idle-stability.log
+            /tmp/fm-gui-*/polling-delay.log
+            /tmp/fm-gui-*/entered
+            /tmp/fm-gui-*/office-before-idle.png
+            /tmp/fm-gui-*/office-after-idle.png
           if-no-files-found: warn
 
   stress:
