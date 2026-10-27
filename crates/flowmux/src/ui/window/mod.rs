@@ -4224,20 +4224,74 @@ async fn service_control(
     }
 }
 
+/// The variant name of a command for diagnostics, without formatting its
+/// payload. Formatting stops at the first delimiter.
+fn command_label(cmd: &GtkCommand) -> String {
+    struct Prefix(String);
+    impl std::fmt::Write for Prefix {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            let end = text.find(['{', '(', ' ']).unwrap_or(text.len());
+            self.0.push_str(&text[..end]);
+            if end < text.len() {
+                return Err(std::fmt::Error);
+            }
+            Ok(())
+        }
+    }
+    let mut label = Prefix(String::new());
+    let _ = std::fmt::Write::write_fmt(&mut label, format_args!("{cmd:?}"));
+    label.0
+}
+
+/// Run one command handler and contain a panic inside it. A detached
+/// `spawn_local` task swallows the panic and ends, which would leave the
+/// window alive but deaf to every later command. The panic hook has already
+/// recorded the report; the loop logs the command and continues.
+async fn dispatch_guarded(controller: &WindowController, cmd: GtkCommand) {
+    let label = command_label(&cmd);
+    if let Err(payload) = contain_panic(controller.dispatch(cmd)).await {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|m| (*m).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".into());
+        tracing::error!(
+            command = %label,
+            panic = %message,
+            "GTK command handler panicked; the window keeps serving commands"
+        );
+    }
+}
+
+/// Poll `future` to completion, turning a panic inside any poll into `Err`.
+/// The future is never polled again after it panicked.
+async fn contain_panic(
+    future: impl std::future::Future<Output = ()>,
+) -> Result<(), Box<dyn std::any::Any + Send>> {
+    tokio::pin!(future);
+    std::future::poll_fn(|cx| {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| future.as_mut().poll(cx))) {
+            Ok(poll) => poll.map(Ok),
+            Err(payload) => std::task::Poll::Ready(Err(payload)),
+        }
+    })
+    .await
+}
+
 pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: WindowController) {
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
             // Preserve mutation order while serving observations during SSH I/O
             // and confirmation dialogs. Control messages only read state or update
             // hook telemetry; they cannot close or replace widgets.
-            let dispatch = controller.dispatch(cmd);
+            let dispatch = dispatch_guarded(&controller, cmd);
             tokio::pin!(dispatch);
             loop {
                 tokio::select! {
                     biased;
                     _ = &mut dispatch => break,
                     Ok(control) = rx.recv_control() => {
-                        if service_control(dispatch.as_mut(), controller.dispatch(control)).await {
+                        if service_control(dispatch.as_mut(), dispatch_guarded(&controller, control)).await {
                             break;
                         }
                     },
@@ -4266,6 +4320,45 @@ mod tests {
 
     fn agent_bar_visible(controller: &WindowController) -> bool {
         controller.agent_bar.bar.root.property::<bool>("visible")
+    }
+
+    #[test]
+    fn command_label_names_the_variant_without_its_payload() {
+        let (ack, _reply) = tokio::sync::oneshot::channel();
+        let label = command_label(&GtkCommand::RenameWorkspace {
+            id: WorkspaceId::new(),
+            name: "secret payload".into(),
+            ack,
+        });
+        assert_eq!(label, "RenameWorkspace");
+        assert_eq!(
+            command_label(&GtkCommand::ToggleAgentOffice),
+            "ToggleAgentOffice"
+        );
+    }
+
+    #[tokio::test]
+    async fn contain_panic_reports_a_handler_panic_and_lets_later_commands_run() {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let first = contain_panic(async {
+            tokio::task::yield_now().await;
+            panic!("handler bug");
+        })
+        .await;
+        std::panic::set_hook(previous);
+        let message = first
+            .expect_err("panic must surface as an error")
+            .downcast_ref::<&str>()
+            .map(|m| m.to_string());
+        assert_eq!(message.as_deref(), Some("handler bug"));
+        let completed = std::cell::Cell::new(false);
+        assert!(contain_panic(async {
+            completed.set(true);
+        })
+        .await
+        .is_ok());
+        assert!(completed.get(), "later commands must still run");
     }
 
     #[tokio::test]
