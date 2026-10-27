@@ -1178,8 +1178,31 @@ mod imp;
 
 pub use imp::*;
 
+/// Reloads allowed after the editor's web process terminates. A document
+/// that crashes the web process on every load would otherwise respawn it
+/// without end.
+pub(crate) const MAX_WEB_PROCESS_RELOADS: u8 = 3;
+
+/// Record one web process termination and report whether the pane may
+/// reload again.
+pub(crate) fn allow_web_process_reload(terminations: &Cell<u8>) -> bool {
+    let count = terminations.get().saturating_add(1);
+    terminations.set(count);
+    count <= MAX_WEB_PROCESS_RELOADS
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn web_process_reloads_stop_after_the_cap() {
+        let terminations = Cell::new(0);
+        let allowed: Vec<bool> = (0..MAX_WEB_PROCESS_RELOADS + 2)
+            .map(|_| allow_web_process_reload(&terminations))
+            .collect();
+        assert_eq!(allowed, [true, true, true, false, false]);
+        assert_eq!(terminations.get(), MAX_WEB_PROCESS_RELOADS + 2);
+    }
+
     use super::*;
     use flowmux_core::SurfaceId;
     use std::fs;

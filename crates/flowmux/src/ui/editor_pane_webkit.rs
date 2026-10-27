@@ -194,6 +194,7 @@ impl EditorPane {
             let host = Rc::downgrade(&host);
             let closed = closed.clone();
             let appearance = appearance.clone();
+            let terminations = Cell::new(0u8);
             web_view.connect_web_process_terminated(move |web_view, reason| {
                 if closed.get() {
                     return;
@@ -201,6 +202,13 @@ impl EditorPane {
                 let Some(host) = host.upgrade() else {
                     return;
                 };
+                if !crate::ui::editor_pane::allow_web_process_reload(&terminations) {
+                    tracing::error!(
+                        ?reason,
+                        "editor WebView web process terminated repeatedly; not reloading"
+                    );
+                    return;
+                }
                 tracing::warn!(?reason, "editor WebView web process terminated; reloading");
                 bridge.reset();
                 let bridge = bridge.clone();

@@ -154,6 +154,7 @@ define_class!(
 );
 
 struct EditorNavigationDelegateIvars {
+    terminations: Cell<u8>,
     allowed_prefix: String,
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
@@ -243,8 +244,14 @@ define_class!(
             // otherwise leave a permanently blank pane: the bridge still
             // thinks the page is ready. Reset it, queue a full
             // re-initialization, and reload the page.
-            tracing::warn!("editor WKWebView web content process terminated; reloading");
             let ivars = self.ivars();
+            if !crate::ui::editor_pane::allow_web_process_reload(&ivars.terminations) {
+                tracing::error!(
+                    "editor WKWebView web content process terminated repeatedly; not reloading"
+                );
+                return;
+            }
+            tracing::warn!("editor WKWebView web content process terminated; reloading");
             ivars.bridge.reset();
             let bridge = ivars.bridge.clone();
             let host = ivars.host.clone();
@@ -769,6 +776,7 @@ fn create_native_editor_view(
     }
     let navigation_delegate =
         EditorNavigationDelegate::alloc(mtm).set_ivars(EditorNavigationDelegateIvars {
+            terminations: Cell::new(0),
             allowed_prefix: allowed_prefix.to_string(),
             bridge,
             host,
