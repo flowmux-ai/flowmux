@@ -369,7 +369,7 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
                 pane,
                 condition: BrowserWaitCondition::Selector("#missing".into()),
                 timeout_ms: 50,
-                poll_ms: 5,
+                poll_ms: 10,
             }
         )
         .await,
