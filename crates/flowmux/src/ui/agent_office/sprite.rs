@@ -467,6 +467,11 @@ pub(super) fn paint_scaled(
 }
 
 #[cfg(test)]
+pub(super) fn cache_usage() -> (usize, usize) {
+    (CACHE_BYTES.get(), SCALED_BYTES.get())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -682,9 +687,4 @@ mod tests {
             "old sprites are evicted when their pixel budget is exceeded"
         );
     }
-}
-
-#[cfg(test)]
-pub(super) fn cache_usage() -> (usize, usize) {
-    (CACHE_BYTES.get(), SCALED_BYTES.get())
 }

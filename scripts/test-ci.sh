@@ -47,6 +47,7 @@ run_phase thorvg-installer 60 python3 -B scripts/test-thorvg-macos.py
 run_phase agent-runner-tests 120 python3 -B scripts/test-agent-unit-runner.py
 run_phase agent-team-tests 120 python3 scripts/test-agent-team.py
 run_phase benchmark-agent-tests 60 python3 -B scripts/benchmark-browser-agent.py self-test
+run_phase stability-harness-tests 60 python3 -B scripts/test-macos-stability.py --self-check
 run_phase format 180 cargo fmt --all -- --check
 
 if [[ $mode == linux ]]; then
