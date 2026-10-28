@@ -105,8 +105,9 @@ class DmgUpdateTests(unittest.TestCase):
         env = {key: value for key, value in os.environ.items() if not key.startswith("FLOWMUX_")}
         env.update(CARGO_INCREMENTAL="0", CARGO_PROFILE_DEV_DEBUG="0", CARGO_PROFILE_TEST_DEBUG="0")
         build = subprocess.run(["cargo", "test", "-p", "flowmux", "--test", "macos_native",
-                                "--features", "native-smoke", "--locked", "--no-run", "--message-format=json"],
-                               cwd=REPO, env=env, text=True, capture_output=True, check=True)
+                                "--features", "native-smoke", "--locked", "--no-run", "--message-format=json-render-diagnostics"],
+                               cwd=REPO, env=env, text=True, capture_output=True)
+        self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
         artifacts = [json.loads(line) for line in build.stdout.splitlines() if line.startswith("{")]
         executable = next(item["executable"] for item in artifacts
                           if item.get("reason") == "compiler-artifact" and item.get("executable")

@@ -94,9 +94,10 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
         .terminations
         .set(super::super::MAX_WEB_PROCESS_RELOADS);
     unsafe {
-        pane.native
-            ._navigation_delegate
-            .webViewWebContentProcessDidTerminate(&pane.native.web_view);
+        WKNavigationDelegate::webViewWebContentProcessDidTerminate(
+            &*pane.native._navigation_delegate,
+            &pane.native.web_view,
+        );
     }
     assert!(pane.bridge.failed.get());
     assert!(!pane.web_widget.is_visible());
