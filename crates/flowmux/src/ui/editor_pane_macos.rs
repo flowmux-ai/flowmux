@@ -806,7 +806,7 @@ fn create_native_editor_view(
     };
     unsafe {
         web_view.setAllowsBackForwardNavigationGestures(false);
-        web_view.setPageZoom(host.zoom_factor());
+        web_view.setPageZoom(navigation.host.zoom_factor());
     }
     let navigation_delegate = EditorNavigationDelegate::alloc(mtm).set_ivars(navigation);
     let navigation_delegate: Retained<EditorNavigationDelegate> =
