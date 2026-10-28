@@ -384,10 +384,11 @@ pub(crate) fn smoke() {
     )
     .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while crate::macos_input::pointer_pending() {
+    // AppKit completion can precede WebKit's delivery of the release to the page.
+    while crate::macos_input::pointer_pending() || browser.evaluate("releases").unwrap() == 0 {
         assert!(
             Instant::now() < deadline,
-            "cancelled pointer input did not settle"
+            "cancelled pointer input did not release on the page"
         );
         pump();
     }
