@@ -83,6 +83,7 @@ pub struct EditorPane {
     file_monitor_generation: Rc<Cell<u64>>,
     on_focus: EditorFocusCallback,
     on_focus_direction: EditorFocusDirectionCallback,
+    retry_button: gtk::Button,
 }
 
 struct NativeEditorView {
@@ -154,11 +155,12 @@ define_class!(
 );
 
 struct EditorNavigationDelegateIvars {
-    terminations: Cell<u8>,
     allowed_prefix: String,
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
     appearance: Rc<RefCell<EditorAppearance>>,
+    failure_page: adw::StatusPage,
+    web_widget: glib::WeakRef<gtk::Widget>,
 }
 
 define_class!(
@@ -245,28 +247,19 @@ define_class!(
             // thinks the page is ready. Reset it, queue a full
             // re-initialization, and reload the page.
             let ivars = self.ivars();
-            if !crate::ui::editor_pane::allow_web_process_reload(&ivars.terminations) {
+            if !ivars.bridge.web_process_terminated() {
                 tracing::error!(
                     "editor WKWebView web content process terminated repeatedly; not reloading"
                 );
+                web_view.as_super().setHidden(true);
+                if let Some(widget) = ivars.web_widget.upgrade() {
+                    widget.set_visible(false);
+                }
+                ivars.failure_page.set_visible(true);
                 return;
             }
             tracing::warn!("editor WKWebView web content process terminated; reloading");
-            ivars.bridge.reset();
-            let bridge = ivars.bridge.clone();
-            let host = ivars.host.clone();
-            let appearance = ivars.appearance.clone();
-            let reloaded_view = web_view.retain();
-            glib::spawn_future_local(async move {
-                let mut messages = vec![HostMessage::SetAppearance {
-                    appearance: appearance.borrow().clone(),
-                }];
-                messages.extend(host.reinitialize_messages().await);
-                for script in queue_host_messages(&bridge, messages) {
-                    evaluate_script(&reloaded_view, &script);
-                }
-            });
-            let _ = unsafe { web_view.reload() };
+            reload_editor(web_view, &ivars.bridge, &ivars.host, &ivars.appearance);
         }
     }
 );
@@ -309,27 +302,59 @@ impl EditorPane {
         let on_focus: EditorFocusCallback = Rc::new(RefCell::new(None));
         let on_focus_direction: EditorFocusDirectionCallback = Rc::new(RefCell::new(None));
         let appearance = Rc::new(RefCell::new(appearance));
-        let mtm = MainThreadMarker::new().expect("WKWebView must be created on the main thread");
-        let native = Rc::new(create_native_editor_view(
-            mtm,
-            bridge.clone(),
-            host.clone(),
-            &allowed_prefix,
-            appearance.clone(),
-            pane_id.clone(),
-            on_focus_direction.clone(),
-        ));
-
+        let (failure_page, retry_button) = super::editor_failure_page();
         let viewport = gtk::DrawingArea::new();
         viewport.set_hexpand(true);
         viewport.set_vexpand(true);
         viewport.set_focusable(true);
-        crate::ui::browser_pane::install_native_view_still(&viewport, &native.web_view);
         let web_widget = viewport.clone().upcast::<gtk::Widget>();
+        let mtm = MainThreadMarker::new().expect("WKWebView must be created on the main thread");
+        let native = Rc::new(create_native_editor_view(
+            mtm,
+            EditorNavigationDelegateIvars {
+                allowed_prefix,
+                bridge: bridge.clone(),
+                host: host.clone(),
+                appearance: appearance.clone(),
+                failure_page: failure_page.clone(),
+                web_widget: web_widget.downgrade(),
+            },
+            pane_id.clone(),
+            on_focus_direction.clone(),
+        ));
+
+        crate::ui::browser_pane::install_native_view_still(&viewport, &native.web_view);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
+        root.append(&failure_page);
         root.append(&viewport);
+
+        {
+            let native = Rc::downgrade(&native);
+            let host = Rc::downgrade(&host);
+            let bridge = bridge.clone();
+            let appearance = appearance.clone();
+            let web_widget = web_widget.downgrade();
+            let failure_page = failure_page.downgrade();
+            retry_button.connect_clicked(move |_| {
+                let (Some(native), Some(host), Some(widget), Some(page)) = (
+                    native.upgrade(),
+                    host.upgrade(),
+                    web_widget.upgrade(),
+                    failure_page.upgrade(),
+                ) else {
+                    return;
+                };
+                bridge.retry();
+                page.set_visible(false);
+                widget.set_visible(true);
+                reload_editor(&native.web_view, &bridge, &host, &appearance);
+                widget.grab_focus();
+                sync_native_view_frame(&native, &widget);
+                focus_native_view(&native.web_view);
+            });
+        }
 
         install_editor_key_compatibility(&web_widget, &native);
 
@@ -393,6 +418,7 @@ impl EditorPane {
             file_monitor_generation: Rc::new(Cell::new(0)),
             on_focus,
             on_focus_direction,
+            retry_button,
         };
         let initial_appearance = pane.appearance.borrow().clone();
         pane.apply_appearance(initial_appearance);
@@ -468,12 +494,18 @@ impl EditorPane {
     }
 
     pub fn focus_widget(&self) -> gtk::Widget {
-        self.web_widget.clone()
+        if self.bridge.failed.get() {
+            self.retry_button.clone().upcast()
+        } else {
+            self.web_widget.clone()
+        }
     }
 
     pub fn grab_focus(&self) {
-        self.web_widget.grab_focus();
-        focus_native_view(&self.native.web_view);
+        self.focus_widget().grab_focus();
+        if !self.bridge.failed.get() {
+            focus_native_view(&self.native.web_view);
+        }
     }
 
     pub(crate) fn has_native_focus(&self) -> bool {
@@ -735,10 +767,7 @@ impl EditorPane {
 
 fn create_native_editor_view(
     mtm: MainThreadMarker,
-    bridge: Rc<EditorBridgeState>,
-    host: Rc<EditorHostState>,
-    allowed_prefix: &str,
-    appearance: Rc<RefCell<EditorAppearance>>,
+    navigation: EditorNavigationDelegateIvars,
     pane_id: Rc<Cell<PaneId>>,
     on_focus_direction: EditorFocusDirectionCallback,
 ) -> NativeEditorView {
@@ -747,8 +776,8 @@ fn create_native_editor_view(
     let user_content_controller = unsafe { WKUserContentController::new(mtm) };
     let script_message_handler =
         EditorScriptMessageHandler::alloc(mtm).set_ivars(EditorScriptMessageHandlerIvars {
-            bridge: bridge.clone(),
-            host: host.clone(),
+            bridge: navigation.bridge.clone(),
+            host: navigation.host.clone(),
             pane_id,
             on_focus_direction,
         });
@@ -774,14 +803,7 @@ fn create_native_editor_view(
         web_view.setAllowsBackForwardNavigationGestures(false);
         web_view.setPageZoom(host.zoom_factor());
     }
-    let navigation_delegate =
-        EditorNavigationDelegate::alloc(mtm).set_ivars(EditorNavigationDelegateIvars {
-            terminations: Cell::new(0),
-            allowed_prefix: allowed_prefix.to_string(),
-            bridge,
-            host,
-            appearance,
-        });
+    let navigation_delegate = EditorNavigationDelegate::alloc(mtm).set_ivars(navigation);
     let navigation_delegate: Retained<EditorNavigationDelegate> =
         unsafe { msg_send![super(navigation_delegate), init] };
     unsafe {
@@ -795,6 +817,32 @@ fn create_native_editor_view(
         _script_message_handler: script_message_handler,
         _navigation_delegate: navigation_delegate,
     }
+}
+
+fn reload_editor(
+    web_view: &WKWebView,
+    bridge: &Rc<EditorBridgeState>,
+    host: &Rc<EditorHostState>,
+    appearance: &Rc<RefCell<EditorAppearance>>,
+) {
+    let generation = bridge.generation();
+    let bridge = bridge.clone();
+    let host = host.clone();
+    let appearance = appearance.clone();
+    let reloaded_view = web_view.retain();
+    glib::spawn_future_local(async move {
+        let mut messages = vec![HostMessage::SetAppearance {
+            appearance: appearance.borrow().clone(),
+        }];
+        messages.extend(host.reinitialize_messages().await);
+        if bridge.generation() != generation {
+            return;
+        }
+        for script in queue_host_messages(&bridge, messages) {
+            evaluate_script(&reloaded_view, &script);
+        }
+    });
+    let _ = unsafe { web_view.reload() };
 }
 
 fn evaluate_script(web_view: &WKWebView, source: &str) {

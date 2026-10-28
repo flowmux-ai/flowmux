@@ -58,6 +58,7 @@ pub struct EditorPane {
     file_monitors: Rc<RefCell<HashMap<PathBuf, gio::FileMonitor>>>,
     file_monitor_generation: Rc<Cell<u64>>,
     on_focus_direction: EditorFocusDirectionCallback,
+    retry_button: gtk::Button,
 }
 
 impl EditorPane {
@@ -86,6 +87,7 @@ impl EditorPane {
         let on_focus_direction: EditorFocusDirectionCallback = Rc::new(RefCell::new(None));
         let closed = Rc::new(Cell::new(false));
         let appearance = Rc::new(RefCell::new(appearance));
+        let (failure_page, retry_button) = super::editor_failure_page();
         let user_content_manager = webkit6::UserContentManager::new();
         assert!(
             user_content_manager.register_script_message_handler(MESSAGE_HANDLER_NAME, None),
@@ -194,7 +196,7 @@ impl EditorPane {
             let host = Rc::downgrade(&host);
             let closed = closed.clone();
             let appearance = appearance.clone();
-            let terminations = Cell::new(0u8);
+            let failure_page = failure_page.clone();
             web_view.connect_web_process_terminated(move |web_view, reason| {
                 if closed.get() {
                     return;
@@ -202,34 +204,43 @@ impl EditorPane {
                 let Some(host) = host.upgrade() else {
                     return;
                 };
-                if !crate::ui::editor_pane::allow_web_process_reload(&terminations) {
+                if !bridge.web_process_terminated() {
                     tracing::error!(
                         ?reason,
                         "editor WebView web process terminated repeatedly; not reloading"
                     );
+                    web_view.set_visible(false);
+                    failure_page.set_visible(true);
                     return;
                 }
                 tracing::warn!(?reason, "editor WebView web process terminated; reloading");
-                bridge.reset();
-                let bridge = bridge.clone();
-                let appearance = appearance.clone();
-                let reloaded_view = web_view.clone();
-                gtk::glib::spawn_future_local(async move {
-                    let mut messages = vec![HostMessage::SetAppearance {
-                        appearance: appearance.borrow().clone(),
-                    }];
-                    messages.extend(host.reinitialize_messages().await);
-                    for script in queue_host_messages(&bridge, messages) {
-                        evaluate_script(&reloaded_view, &script);
-                    }
-                });
-                web_view.reload();
+                reload_editor(web_view, &bridge, &host, &appearance);
+            });
+        }
+        {
+            let bridge = bridge.clone();
+            let host = Rc::downgrade(&host);
+            let web_view = web_view.downgrade();
+            let appearance = appearance.clone();
+            let failure_page = failure_page.downgrade();
+            retry_button.connect_clicked(move |_| {
+                let (Some(host), Some(web_view), Some(page)) =
+                    (host.upgrade(), web_view.upgrade(), failure_page.upgrade())
+                else {
+                    return;
+                };
+                bridge.retry();
+                page.set_visible(false);
+                web_view.set_visible(true);
+                reload_editor(&web_view, &bridge, &host, &appearance);
+                web_view.grab_focus();
             });
         }
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
+        root.append(&failure_page);
         root.append(&web_view);
         web_view.load_uri(&editor_url);
 
@@ -248,6 +259,7 @@ impl EditorPane {
             file_monitors: Rc::new(RefCell::new(HashMap::new())),
             file_monitor_generation: Rc::new(Cell::new(0)),
             on_focus_direction,
+            retry_button,
         };
         let initial_appearance = pane.appearance.borrow().clone();
         pane.apply_appearance(initial_appearance);
@@ -319,11 +331,15 @@ impl EditorPane {
     }
 
     pub fn focus_widget(&self) -> gtk::Widget {
-        self.web_view.clone().upcast()
+        if self.bridge.failed.get() {
+            self.retry_button.clone().upcast()
+        } else {
+            self.web_view.clone().upcast()
+        }
     }
 
     pub fn grab_focus(&self) {
-        self.web_view.grab_focus();
+        self.focus_widget().grab_focus();
     }
 
     pub fn connect_focus_direction<F: FnMut(PaneId, EditorFocusDirection) + 'static>(
@@ -482,6 +498,34 @@ impl EditorPane {
         self.web_view.stop_loading();
         self.web_view.terminate_web_process();
     }
+}
+
+fn reload_editor(
+    web_view: &webkit6::WebView,
+    bridge: &Rc<EditorBridgeState>,
+    host: &Rc<EditorHostState>,
+    appearance: &Rc<RefCell<EditorAppearance>>,
+) {
+    let generation = bridge.generation();
+    let bridge = bridge.clone();
+    let host = host.clone();
+    let appearance = appearance.clone();
+    let reloaded_view = web_view.downgrade();
+    gtk::glib::spawn_future_local(async move {
+        let mut messages = vec![HostMessage::SetAppearance {
+            appearance: appearance.borrow().clone(),
+        }];
+        messages.extend(host.reinitialize_messages().await);
+        if bridge.generation() != generation {
+            return;
+        }
+        if let Some(web_view) = reloaded_view.upgrade() {
+            for script in queue_host_messages(&bridge, messages) {
+                evaluate_script(&web_view, &script);
+            }
+        }
+    });
+    web_view.reload();
 }
 
 fn evaluate_script(web_view: &webkit6::WebView, script: &str) {

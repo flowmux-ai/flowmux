@@ -87,5 +87,24 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
     .unwrap();
     assert!(!discarded.exists());
     assert!(store.read(&discarded).unwrap().is_none());
+
+    // Exercise the native delegate's exhausted-budget UI without private WebKit APIs.
+    javascript(pane, "window.beforeRetry = true; 'marked'").await;
+    pane.bridge
+        .terminations
+        .set(super::super::MAX_WEB_PROCESS_RELOADS);
+    unsafe {
+        pane.native
+            ._navigation_delegate
+            .webViewWebContentProcessDidTerminate(&pane.native.web_view);
+    }
+    assert!(pane.bridge.failed.get());
+    assert!(!pane.web_widget.is_visible());
+    pane.flush_pending_changes().await.unwrap();
+    pane.retry_button.emit_clicked();
+    wait_js(pane, "typeof window.beforeRetry === 'undefined' && document.querySelector('.view-lines')?.textContent.includes('복구됨')").await;
+    assert!(!pane.bridge.failed.get());
+    assert!(pane.web_widget.is_visible());
+    println!("MACOS_EDITOR_RENDERER_RETRY_OK");
     println!("MACOS_EDITOR_DELETED_RECOVERY_OK");
 }

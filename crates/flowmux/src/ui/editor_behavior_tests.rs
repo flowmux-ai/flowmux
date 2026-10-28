@@ -119,14 +119,39 @@ async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process()
     assert!(page.pane.dirty_document_paths().is_empty());
 
     page.insert("recovered ").await;
-    page.eval("window.beforeCrash = true").await;
+    for _ in 0..crate::ui::editor_pane::MAX_WEB_PROCESS_RELOADS {
+        page.eval("window.beforeCrash = true").await;
+        page.pane.web_view.terminate_web_process();
+        page.wait("typeof window.beforeCrash === 'undefined' && typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('recovered') === true").await;
+    }
     page.pane.web_view.terminate_web_process();
-    page.wait("typeof window.beforeCrash === 'undefined' && typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('recovered') === true").await;
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while !page.pane.bridge.failed.get() {
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!page.pane.web_view.is_visible());
+    assert!(page.pane.retry_button.is_mapped());
+    assert_eq!(page.pane.dirty_document_paths(), vec![path.clone()]);
+    // The close guard can inspect and save host edits without a dead page's ack.
     page.pane.flush_pending_changes().await.unwrap();
     page.pane.save_all_dirty().await.unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "recovered external update\n"
+    );
+    page.pane.retry_button.emit_clicked();
+    page.wait("typeof window.flowmuxEditorHost === 'object' && document.querySelector('#editor .view-lines')?.textContent.includes('recovered') === true").await;
+    assert!(!page.pane.bridge.failed.get());
+    assert!(page.pane.web_view.is_visible());
+    assert!(!page.pane.retry_button.is_mapped());
+    page.insert("after retry ").await;
+    page.pane.save_all_dirty().await.unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "after retry recovered external update\n"
     );
 
     page.pane.show_workspace_search();

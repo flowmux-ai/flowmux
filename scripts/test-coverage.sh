@@ -60,6 +60,9 @@ TMPDIR=/tmp python3 scripts/test-idle-stability-gui.py \
 python3 scripts/test-editor-io-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp python3 scripts/test-editor-renderer-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-lazy-restore-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"

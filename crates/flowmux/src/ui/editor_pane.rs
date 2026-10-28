@@ -117,6 +117,9 @@ pub(super) struct EditorBridgeState {
     // Bumped by `reset`. A bridge message that was still waiting on the file
     // worker when the page died must not queue its replies for the new page.
     generation: Cell<u64>,
+    failed: Cell<bool>,
+    terminations: Cell<u8>,
+    ready_since: Cell<Option<Instant>>,
 }
 
 impl EditorBridgeState {
@@ -126,6 +129,9 @@ impl EditorBridgeState {
             ready: Cell::new(false),
             pending: RefCell::new(Vec::new()),
             generation: Cell::new(0),
+            failed: Cell::new(false),
+            terminations: Cell::new(0),
+            ready_since: Cell::new(None),
         }
     }
 
@@ -134,6 +140,8 @@ impl EditorBridgeState {
     /// again, which drains whatever is queued after this reset.
     pub(super) fn reset(&self) {
         self.ready.set(false);
+        self.ready_since.set(None);
+        self.failed.set(false);
         self.pending.borrow_mut().clear();
         self.generation.set(self.generation.get().wrapping_add(1));
     }
@@ -146,7 +154,32 @@ impl EditorBridgeState {
         self.ready.get()
     }
 
+    fn web_process_terminated(&self) -> bool {
+        let healthy = self
+            .ready_since
+            .get()
+            .is_some_and(|ready| ready.elapsed() >= Duration::from_secs(60));
+        let count = if healthy {
+            1
+        } else {
+            self.terminations.get().saturating_add(1)
+        };
+        self.terminations.set(count);
+        self.reset();
+        self.failed.set(count > MAX_WEB_PROCESS_RELOADS);
+        !self.failed.get()
+    }
+
+    fn retry(&self) {
+        self.terminations.set(0);
+        self.reset();
+    }
+
     pub(super) fn queue(&self, message: HostMessage) -> Result<Option<String>, ProtocolError> {
+        // A manual retry sends a fresh host snapshot; do not retain messages for a dead page.
+        if self.failed.get() {
+            return Ok(None);
+        }
         let script = javascript_for_host_message(&self.surface_id, &message)?;
         if self.ready.get() {
             Ok(Some(script))
@@ -175,7 +208,11 @@ impl EditorBridgeState {
 
         let became_ready = matches!(&message, EditorMessage::EditorReady);
         if became_ready {
+            if self.failed.get() {
+                return EditorBridgeReceive::default();
+            }
             self.ready.set(true);
+            self.ready_since.set(Some(Instant::now()));
             tracing::debug!(surface_id = %self.surface_id, "editor WebView bridge ready");
         }
         if !became_ready {
@@ -541,11 +578,19 @@ impl EditorHostState {
         bridge: &EditorBridgeState,
     ) -> Result<(), String> {
         let ready_deadline = Instant::now() + EDITOR_READY_TIMEOUT;
-        while !bridge.is_ready() && Instant::now() < ready_deadline {
+        while !bridge.is_ready() && !bridge.failed.get() && Instant::now() < ready_deadline {
             gtk::glib::timeout_future(FLUSH_POLL_INTERVAL).await;
         }
         let attempts = FLUSH_TIMEOUT.as_millis() / FLUSH_POLL_INTERVAL.as_millis();
         for _ in 0..attempts {
+            if bridge.failed.get() {
+                self.cancel_flush(request_id);
+                // The page cannot answer. Drain edits already received by the host
+                // before the normal save/discard guard inspects dirty documents.
+                return gtk::glib::future_with_timeout(FLUSH_TIMEOUT, self.with_session(|_| ()))
+                    .await
+                    .map_err(|_| "Timed out while synchronizing editor changes.".to_string())?;
+            }
             if let Some(result) = completion.borrow_mut().take() {
                 return result;
             }
@@ -1183,24 +1228,55 @@ pub use imp::*;
 /// without end.
 pub(crate) const MAX_WEB_PROCESS_RELOADS: u8 = 3;
 
-/// Record one web process termination and report whether the pane may
-/// reload again.
-pub(crate) fn allow_web_process_reload(terminations: &Cell<u8>) -> bool {
-    let count = terminations.get().saturating_add(1);
-    terminations.set(count);
-    count <= MAX_WEB_PROCESS_RELOADS
+fn editor_failure_page() -> (adw::StatusPage, gtk::Button) {
+    use gtk::prelude::*;
+    let retry = gtk::Button::with_label("Retry Editor");
+    retry.set_halign(gtk::Align::Center);
+    retry.add_css_class("suggested-action");
+    let page = adw::StatusPage::builder()
+        .title("Editor stopped responding")
+        .description("You can retry or close this tab. Changes received by Flowmux are retained, but recent keystrokes may be missing.")
+        .child(&retry)
+        .vexpand(true)
+        .visible(false)
+        .build();
+    (page, retry)
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn web_process_reloads_stop_after_the_cap() {
-        let terminations = Cell::new(0);
+        let bridge = EditorBridgeState::new(SurfaceId::new());
         let allowed: Vec<bool> = (0..MAX_WEB_PROCESS_RELOADS + 2)
-            .map(|_| allow_web_process_reload(&terminations))
+            .map(|_| bridge.web_process_terminated())
             .collect();
         assert_eq!(allowed, [true, true, true, false, false]);
-        assert_eq!(terminations.get(), MAX_WEB_PROCESS_RELOADS + 2);
+        assert!(bridge.failed.get());
+        assert!(!bridge.is_ready());
+        for _ in 0..100 {
+            bridge.queue(HostMessage::ShowWorkspaceSearch).unwrap();
+        }
+        assert!(bridge.pending.borrow().is_empty());
+        bridge.retry();
+        assert!(!bridge.failed.get());
+        assert!(bridge.web_process_terminated());
+    }
+
+    #[test]
+    fn healthy_editor_gets_a_new_reload_budget() {
+        let bridge = EditorBridgeState::new(SurfaceId::new());
+        for _ in 0..MAX_WEB_PROCESS_RELOADS {
+            assert!(bridge.web_process_terminated());
+        }
+        bridge
+            .ready_since
+            .set(Some(Instant::now() - Duration::from_secs(61)));
+        assert!(bridge.web_process_terminated());
+        assert_eq!(bridge.terminations.get(), 1);
+        bridge.ready_since.set(Some(Instant::now()));
+        assert!(bridge.web_process_terminated());
+        assert_eq!(bridge.terminations.get(), 2);
     }
 
     use super::*;
@@ -1457,6 +1533,50 @@ mod tests {
             if documents[0].content == "unsaved before crash" && documents[0].dirty)
         );
         assert_eq!(fs::read_to_string(path).unwrap(), "original");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn failed_renderer_drains_received_edits_before_close() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("failed.txt");
+        fs::write(&path, "original").unwrap();
+        let host = Rc::new(EditorHostState::new(
+            workspace.path(),
+            EditorSessionState::default(),
+        ));
+        host.initialize_messages().await;
+        let opened = host.open_document(&path).await.unwrap();
+        let HostMessage::OpenDocument { document } = &opened[0] else {
+            panic!("missing document")
+        };
+        let bridge = EditorBridgeState::new(SurfaceId::new());
+        let raw = serde_json::json!({
+            "protocolVersion": flowmux_editor::PROTOCOL_VERSION,
+            "surfaceId": bridge.surface_id,
+            "type": "document_changed", "documentId": document.id,
+            "documentVersion": document.version, "changeSequence": 1,
+            "content": "received before termination"
+        })
+        .to_string();
+        for _ in 0..=MAX_WEB_PROCESS_RELOADS {
+            bridge.web_process_terminated();
+        }
+        // The native message callback already received this edit before the crash,
+        // but its GLib task can run after the termination callback.
+        assert!(handle_bridge_message(&bridge, &host, &raw)
+            .await
+            .scripts
+            .is_empty());
+        let (id, completion, _) = host.start_flush();
+        host.wait_for_flush(id, completion, &bridge).await.unwrap();
+        assert!(host.pending_flushes.borrow().is_empty());
+        assert_eq!(host.dirty_document_paths(), vec![path.clone()]);
+        host.save_all_dirty().await.1.unwrap();
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "received before termination"
+        );
     }
 
     #[tokio::test]
