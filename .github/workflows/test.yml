@@ -118,6 +118,8 @@ jobs:
             /tmp/fm-gui-*/idle-stability.log
             /tmp/fm-gui-*/polling-delay.log
             /tmp/fm-gui-*/editor-renderer.log
+            /tmp/fm-gui-*/editor-io.log
+            /tmp/fm-gui-*/recovery-entered
             /tmp/fm-gui-*/entered
             /tmp/fm-gui-*/office-before-idle.png
             /tmp/fm-gui-*/office-after-idle.png

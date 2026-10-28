@@ -761,7 +761,12 @@ impl EditorPane {
         }
         unsafe {
             self.native.web_view.stopLoading();
+            self.native.web_view.setNavigationDelegate(None);
+            self.native
+                .user_content_controller
+                .removeScriptMessageHandlerForName(&NSString::from_str(MESSAGE_HANDLER_NAME));
         }
+        self.host.shutdown_recovery();
     }
 }
 

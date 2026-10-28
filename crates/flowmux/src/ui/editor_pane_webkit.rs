@@ -497,6 +497,7 @@ impl EditorPane {
             .unregister_script_message_handler(MESSAGE_HANDLER_NAME, None);
         self.web_view.stop_loading();
         self.web_view.terminate_web_process();
+        self.host.shutdown_recovery();
     }
 }
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Check document I/O isolation, edit ordering, and UI progress in a real GUI.
 
-A one-shot fsync delay applies only to this test's editor document directory.
+A one-shot fsync delay applies only to this test's document and recovery directories.
 The FIFO case uses a real filesystem object with no injected read functions.
 """
 import argparse
@@ -49,11 +49,15 @@ def main():
         document = work / "slow.txt"
         document.write_text("Original regular file\n")
         flag, entered = h.root / "delay-save", h.root / "fsync-entered"
+        recovery_flag, recovery_entered = h.root / "delay-recovery", h.root / "recovery-entered"
         library = h.root / "delay.so"
         subprocess.run(["cc", "-shared", "-fPIC", "-o", str(library),
                         str(Path(__file__).with_name("test-editor-io-delay.c")), "-ldl"], check=True)
         h.env.update(LD_PRELOAD=str(library), FM_ARCH_PROJECT=str(work) + "/",
-                     FM_ARCH_DELAY_FLAG=str(flag), FM_ARCH_ENTERED=str(entered))
+                     FM_ARCH_DELAY_FLAG=str(flag), FM_ARCH_ENTERED=str(entered),
+                     FM_ARCH_RECOVERY=str(h.root / "state/flowmux/editor-recovery") + "/",
+                     FM_ARCH_RECOVERY_FLAG=str(recovery_flag),
+                     FM_ARCH_RECOVERY_ENTERED=str(recovery_entered))
         h.start_display()
         process, path = h.window("editor-io")
         workspace = h.rpc(path, "workspace_create", name="Editor I/O", root=str(work))["workspace_created"]["id"]
@@ -170,8 +174,50 @@ def main():
         document.unlink()
         document.write_text("Restored regular file\n")
         responsive(terminal)
-        h.close_window(process)
-        h.pass_check(f"blocked FIFO read: GTK responds in {latency:.4f}s; close waits safely and succeeds after release")
+        h.pass_check(f"blocked FIFO read: GTK responds in {latency:.4f}s; close waits safely for pending edits")
+
+        h.rpc(path, "surface_focus", pane=pane, surface=editor["id"])
+        time.sleep(1.5)
+        key("End", ("Control_L",))
+        recovery_flag.touch()
+        key("x", delay=.01)
+        gui.wait_for(recovery_entered.exists, "delayed recovery fsync")
+        key("s", ("Control_L",), delay=.01)
+        gui.wait_for(lambda: document.read_text().endswith("x"), "save during delayed recovery write")
+        h.rpc(path, "surface_close", pane=pane, surface=editor["id"])
+        latency = responsive(terminal)
+        recovery_root = h.root / "state/flowmux/editor-recovery"
+        gui.wait_for(lambda: not list(recovery_root.rglob("*.json"))
+                     and not list(recovery_root.rglob(".tmp*")), "closed editor recovery operations drained")
+        h.pass_check(f"3-second recovery fsync: closed-tab GTK responds in {latency:.4f}s; saved snapshot is removed")
+
+        # Reopen to cover closing the last window with an editor still registered.
+        gui.wait_for(focus_window, "mapped editor test window")
+        h.rpc(path, "pane_focus", pane=terminal)
+        time.sleep(.3)
+        key("Right", ("Alt_L",))
+        key("Return")
+        pane, editor = gui.wait_for(lambda: next(((p["id"], t) for w in h.tree(path) for p in w["panes"]
+                                                for t in p["tabs"] if t["kind"] == "editor"), None), "reopened editor")
+        h.rpc(path, "surface_focus", pane=pane, surface=editor["id"])
+        time.sleep(2)
+        key("End", ("Control_L",))
+        recovery_entered.unlink()
+        recovery_flag.touch()
+        key("y", delay=.01)
+        gui.wait_for(recovery_entered.exists, "delayed recovery write during window close")
+        key("s", ("Control_L",), delay=.01)
+        gui.wait_for(lambda: document.read_text().endswith("xy"), "save before window close")
+        # The last window may disappear, but the process must retain the worker
+        # until the queued removal after this successful save reaches disk.
+        request_close()
+        time.sleep(.2)
+        assert process.poll() is None, "process exited before the stalled recovery writer drained"
+        process.wait(timeout=15)
+        assert process.returncode == 0, process.returncode
+        assert not list(recovery_root.rglob("*.json")), "saved document left a stale recovery snapshot"
+        assert not list(recovery_root.rglob(".tmp*")), "recovery write was abandoned during exit"
+        h.pass_check("last-window close drains the delayed recovery snapshot and its queued removal before exit")
         connection.close()
     finally:
         h.cleanup()

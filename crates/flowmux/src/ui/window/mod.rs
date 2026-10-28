@@ -2342,6 +2342,16 @@ impl WindowController {
         for browser in self.pane_registry.borrow().browsers.values() {
             browser.stop_loading();
         }
+        let editors: Vec<_> = self
+            .pane_registry
+            .borrow()
+            .editors
+            .values()
+            .cloned()
+            .collect();
+        for editor in editors {
+            editor.prepare_for_close();
+        }
         let window = self.window.clone();
         // Let native WebViews unrealize before the window is destroyed.
         glib::idle_add_local_once(move || {

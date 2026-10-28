@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const RECOVERY_DEBOUNCE: Duration = Duration::from_millis(350);
@@ -332,7 +331,7 @@ pub(super) struct EditorHostState {
     zoom_percent: Cell<u16>,
     startup_messages: RefCell<Vec<HostMessage>>,
     recovery_sender: RefCell<Option<RecoverySender>>,
-    recovery_worker: RefCell<Option<JoinHandle<()>>>,
+    recovery_worker: RefCell<Option<tokio::sync::oneshot::Receiver<()>>>,
     pending_recovery: RefCell<HashMap<PathBuf, RecoveryOperation>>,
     recovery_flush_pending: Cell<bool>,
     search_worker: RefCell<Option<SearchWorker>>,
@@ -922,6 +921,31 @@ impl EditorHostState {
         }
     }
 
+    pub(super) fn shutdown_recovery(&self) {
+        use gtk::gio::prelude::ApplicationExtManual;
+
+        self.stage_recovery_operations();
+        self.flush_recovery();
+        self.recovery_sender.borrow_mut().take();
+        let Some(worker) = self.recovery_worker.borrow_mut().take() else {
+            return;
+        };
+        // Keep the process alive after its last window closes until snapshots drain.
+        let hold = if gtk::is_initialized_main_thread() {
+            gtk::gio::Application::default().map(|app| app.hold())
+        } else {
+            None
+        };
+        if let Some(hold) = hold {
+            gtk::glib::spawn_future_local(async move {
+                let _hold = hold;
+                if worker.await.is_err() {
+                    tracing::warn!("editor recovery worker stopped during shutdown");
+                }
+            });
+        }
+    }
+
     pub(super) async fn poll_external_changes(&self) -> Vec<HostMessage> {
         self.poll_external_changes_inner(false).await
     }
@@ -975,14 +999,7 @@ impl Drop for EditorHostState {
         // final flush any recovery snapshot staged in the last few hundred
         // milliseconds would be lost when the surface is torn down (pane
         // close, workspace rerender, app quit).
-        self.stage_recovery_operations();
-        self.flush_recovery();
-        self.recovery_sender.get_mut().take();
-        if let Some(worker) = self.recovery_worker.get_mut().take() {
-            if worker.join().is_err() {
-                tracing::warn!("editor recovery worker panicked during shutdown");
-            }
-        }
+        self.shutdown_recovery();
         if let Some(worker) = self.search_worker.get_mut().take() {
             worker.cancellation.cancel();
         }
@@ -1101,11 +1118,14 @@ impl RecoverySender {
     }
 }
 
-fn start_recovery_worker(store: RecoveryStore) -> Option<(RecoverySender, JoinHandle<()>)> {
+fn start_recovery_worker(
+    store: RecoveryStore,
+) -> Option<(RecoverySender, tokio::sync::oneshot::Receiver<()>)> {
     // Only the latest operation for each document waits behind slow disk I/O.
     // A bounded wake-up channel never blocks GTK or retains document copies.
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let (wake, receiver) = mpsc::sync_channel(1);
+    let (finished, completion) = tokio::sync::oneshot::channel();
     let sender = RecoverySender {
         pending: pending.clone(),
         wake,
@@ -1121,9 +1141,10 @@ fn start_recovery_worker(store: RecoveryStore) -> Option<(RecoverySender, JoinHa
                     }
                 }
             }
+            let _ = finished.send(());
         });
     match result {
-        Ok(worker) => Some((sender, worker)),
+        Ok(_) => Some((sender, completion)),
         Err(error) => {
             tracing::warn!(%error, "failed to start editor recovery worker");
             None
@@ -1759,13 +1780,45 @@ mod tests {
 
         sender.send(RecoveryOperation::Write(snapshot)).unwrap();
         drop(sender);
-        worker.join().unwrap();
+        worker.blocking_recv().unwrap();
 
         let (recovered, _) = store
             .read(fs::canonicalize(path).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(recovered.content, "unsaved\n");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn dropping_editor_does_not_join_a_stalled_recovery_worker_on_gtk() {
+        let workspace = tempfile::tempdir().unwrap();
+        let host = EditorHostState::new(workspace.path(), EditorSessionState::default());
+        let (release, stalled) = mpsc::channel();
+        let (finished, completed) = mpsc::channel();
+        let (done, completion) = tokio::sync::oneshot::channel();
+        *host.recovery_worker.borrow_mut() = Some(completion);
+        std::thread::spawn(move || {
+            let _ = stalled.recv_timeout(Duration::from_secs(5));
+            let _ = finished.send(());
+            let _ = done.send(());
+        });
+        let started = Instant::now();
+        drop(host);
+        gtk::glib::timeout_future(Duration::from_millis(10)).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "GTK waited for recovery I/O"
+        );
+        assert!(matches!(completed.try_recv(), Err(TryRecvError::Empty)));
+        release.send(()).unwrap();
+        gtk::glib::future_with_timeout(Duration::from_secs(5), async {
+            while completed.try_recv().is_err() {
+                gtk::glib::timeout_future(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
