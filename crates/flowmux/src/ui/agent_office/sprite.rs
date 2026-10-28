@@ -352,12 +352,23 @@ fn whole(scale: f64) -> bool {
     scale >= 1.0 && (scale - scale.round()).abs() < 1e-6
 }
 
+// Bound transient resampling buffers too, before Cairo commits their pixel storage.
+fn resample_surface(width: i32, height: i32) -> Result<ImageSurface, gtk::cairo::Error> {
+    if width <= 0 || height <= 0 {
+        return Err(gtk::cairo::Error::InvalidSize);
+    }
+    let stride = Format::ARgb32.stride_for_width(width as u32)? as usize;
+    if stride.saturating_mul(height as usize) > CACHE_BYTES_LIMIT {
+        return Err(gtk::cairo::Error::NoMemory);
+    }
+    ImageSurface::create(Format::ARgb32, width, height)
+}
+
 /// `surface` enlarged `k` times, each art pixel becoming a `k` x `k` block.
 fn enlarged(surface: &ImageSurface, k: u32) -> Result<ImageSurface, gtk::cairo::Error> {
     let (w, h) = (surface.width(), surface.height());
     let k = i32::try_from(k).map_err(|_| gtk::cairo::Error::InvalidSize)?;
-    let big = ImageSurface::create(
-        Format::ARgb32,
+    let big = resample_surface(
         w.checked_mul(k).ok_or(gtk::cairo::Error::InvalidSize)?,
         h.checked_mul(k).ok_or(gtk::cairo::Error::InvalidSize)?,
     )?;
@@ -386,8 +397,7 @@ pub(super) fn scaled(
         return Err(gtk::cairo::Error::InvalidSize);
     }
     let density = surface.device_scale().0;
-    let output = ImageSurface::create(
-        Format::ARgb32,
+    let output = resample_surface(
         (surface.width() as f64 / density * scale).ceil() as i32,
         (surface.height() as f64 / density * scale).ceil() as i32,
     )?;
@@ -459,6 +469,16 @@ pub(super) fn paint_scaled(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resampling_rejects_oversized_output_and_intermediate_buffers() {
+        let source = ImageSurface::create(Format::ARgb32, 32, 32).unwrap();
+        assert!(scaled(&source, 100.0).is_err());
+        let source = ImageSurface::create(Format::ARgb32, 1024, 1024).unwrap();
+        // The output fits 32 MiB, but the 3x nearest-neighbor intermediate does not.
+        assert!(scaled(&source, 2.1).is_err());
+        assert!(scaled(&source, 1.5).is_ok());
+    }
 
     #[test]
     fn failed_resampling_preserves_the_original_sprite() {
@@ -662,4 +682,9 @@ mod tests {
             "old sprites are evicted when their pixel budget is exceeded"
         );
     }
+}
+
+#[cfg(test)]
+pub(super) fn cache_usage() -> (usize, usize) {
+    (CACHE_BYTES.get(), SCALED_BYTES.get())
 }

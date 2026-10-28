@@ -517,7 +517,8 @@ impl Background {
                 sprite::paint(&cr, &surface, item.x, item.y);
             }
         }
-        let device = sprite::scaled(&art, scale)?;
+        // Keep the room visible at its authored density if optional resampling is too large.
+        let device = sprite::scaled(&art, scale).unwrap_or(art);
         Ok(Self {
             surface: device,
             scale,
@@ -847,6 +848,20 @@ mod tests {
         }
         let data = surface.data().unwrap().to_vec();
         data
+    }
+
+    #[test]
+    fn oversized_background_resampling_keeps_authored_pixels() {
+        let plan = Plan::fit(4, 0, 1.6);
+        let background = Background::new(&plan, 10_000.0, Daylight::Day).unwrap();
+        assert_eq!(background.surface.device_scale(), (2.0, 2.0));
+        assert_eq!(background.scale, 10_000.0);
+        background
+            .surface
+            .with_data(|pixels| {
+                assert!(pixels.iter().any(|byte| *byte != 0));
+            })
+            .unwrap();
     }
 
     #[test]

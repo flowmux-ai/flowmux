@@ -8,6 +8,8 @@ mod preview;
 mod props;
 mod scene;
 mod sprite;
+#[cfg(test)]
+pub(crate) mod stress;
 mod theme;
 
 use crate::bridge::{Bridge, GtkCommand};

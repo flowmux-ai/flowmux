@@ -123,6 +123,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         cwd_poll::check(app, root).await;
         return;
     }
+    if std::env::var_os("FLOWMUX_OFFICE_STRESS_SMOKE_ONLY").is_some() {
+        crate::ui::agent_office::stress::check().await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_OFFICE_CACHE_SMOKE_ONLY").is_some() {
         crate::ui::agent_office::check_native_screen_cache(app).await;
         return;

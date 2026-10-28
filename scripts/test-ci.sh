@@ -161,3 +161,8 @@ grep -q '^MACOS_PALETTE_RELEASE_OK$' "$report_dir/palette-release.log"
 FLOWMUX_EDITOR_RECOVERY_SMOKE_ONLY=1 run_phase editor-recovery 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/editor-recovery.log"
 grep -q '^MACOS_EDITOR_RENDERER_RETRY_OK$' "$report_dir/editor-recovery.log"
+
+# Exercise actual office drawing and release after repeated status/resize churn.
+FLOWMUX_OFFICE_STRESS_SMOKE_ONLY=1 run_phase office-stability 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/office-stability.log"
+grep -q '^OFFICE_STABILITY_OK ' "$report_dir/office-stability.log"
