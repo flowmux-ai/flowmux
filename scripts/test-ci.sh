@@ -156,3 +156,7 @@ grep -q '^BROWSER_CHROME_LAYOUT_OK$' "$report_dir/browser-chrome.log"
 FLOWMUX_PALETTE_RELEASE_SMOKE_ONLY=1 run_phase palette-release 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/palette-release.log"
 grep -q '^MACOS_PALETTE_RELEASE_OK$' "$report_dir/palette-release.log"
+
+FLOWMUX_EDITOR_RECOVERY_SMOKE_ONLY=1 run_phase editor-recovery 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/editor-recovery.log"
+grep -q '^MACOS_EDITOR_RENDERER_RETRY_OK$' "$report_dir/editor-recovery.log"
