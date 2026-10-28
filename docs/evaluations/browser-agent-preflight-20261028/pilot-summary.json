@@ -1,0 +1,35 @@
+{
+  "task_id": "c1f60ee6-506c-4ddb-b4eb-64106930667b",
+  "category": "InteractionTests",
+  "selection": "First InteractionTests task in original V1 order; convenience pilot, not random",
+  "executor": "Current Codex conversation; no separately pinned batch-agent model",
+  "page_success_observed": true,
+  "official_judge_run": false,
+  "official_verdict": null,
+  "score_percent": null,
+  "recorded_browser_cli_calls": 20,
+  "command_failures": [
+    {
+      "operation": "form",
+      "error": "Error: invalid form JSON\n\nCaused by:\n    invalid type: unit variant, expected newtype variant at line 1 column 245"
+    },
+    {
+      "operation": "press",
+      "error": "Error: Internal(\"error: native key input completion timed out\")"
+    }
+  ],
+  "private_evidence_directory": "/tmp/flowmux-benchmark-session-20261028",
+  "evidence_limitations": [
+    "The initial navigation preceded the pilot recorder.",
+    "Three concurrent read-only probes share the recorder step value 1; JSONL line order remains available.",
+    "Pilot recorder includes observation and debugging calls; this is not a validated official trajectory."
+  ],
+  "final_screenshot_sha256": "060a5713a82a2ad88caa1c77d559085cc0bd3932abb1c36322ef8ae1b74e18e6",
+  "success_evidence": {
+    "snapshot_jsonl_line_1_based": 18,
+    "snapshot_sha256": "2467bdaff403c229696aed02f7227e34dd884434dc3d6f1f920cb5e9d6a027e9",
+    "immediate_screenshot": "pilot-0016.png",
+    "immediate_screenshot_sha256": "409faf4d3f461277b9d20d87bd4d1ad82a551afed9b0f9647808a7b072b75673",
+    "later_full_screenshot_note": "Transient success banner had disappeared before the full-page capture; it shows filled fields only."
+  }
+}

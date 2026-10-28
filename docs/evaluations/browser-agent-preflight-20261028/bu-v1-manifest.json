@@ -1,0 +1,415 @@
+{
+  "benchmark": "BU_Bench_V1",
+  "repository_commit": "77b4df339fe8fc293fb48896cfa1c73dd743af42",
+  "encrypted_dataset_sha256": "a93f3e5c019cb7853b4b497fcf05f3836a6dd2a7e0f53f038ae8558300bc096e",
+  "task_count": 100,
+  "categories": {
+    "WebBenchREAD": 20,
+    "OM2W2": 20,
+    "InteractionTests": 20,
+    "GAIA": 20,
+    "BrowseComp": 20
+  },
+  "tasks": [
+    {
+      "task_id": "66c6641b-f949-46a2-8bcc-6d9dd388b534",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "2b28d676-5ae8-4ed3-8b67-0493db120edf",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "1bab296c-8836-453f-9008-5e5cae260cea",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "5ea33144-d08f-43bf-95d7-4eee0ad24f9d",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "39272ced-43e3-4c3d-95c2-7ef1c7621c59",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "c9f78efb-bdae-40fb-b4b4-78a859e506d7",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "20c680da-1972-4ab7-8970-7ed089f21fd0",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "6aa71dee-b9a8-4897-83b9-42facca4c541",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "7966e6bd-f197-43d0-9ee5-88fab61c8c36",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "0a58ebe0-9d6c-4839-9b09-d909271bb1f9",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "64e9fa0e-d9b8-49b4-aab8-82742a082592",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "262f00ea-98d1-42a6-ba8a-1a7ef48834bf",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "a4662c0f-1cb1-4208-a6bb-932735a3f007",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "d617325c-ca94-4557-abfc-8a1ef71b0640",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "8e50132d-9de6-4ae1-85bd-72b9374d906d",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "13cfb151-3b2c-4e4c-9632-d3145a4b63ad",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "d61e1671-f68b-4c9a-bf8a-ef437f17901c",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "d19f3978-9b9f-403f-a09c-936d41fd56fc",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "a54df89d-7659-499d-bbd4-2d07e9f2bd53",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "d919dc4d-dc69-431c-8af3-e52d849b9810",
+      "category": "WebBenchREAD"
+    },
+    {
+      "task_id": "2c93f863-f1e8-47c5-a731-6449d37150ee",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "62ef9538-b0b2-474e-8844-b34fd484cb24",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "b79e09f2-0cb3-4c14-bfb5-aa834d64f858",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "c1640562-f622-431a-bed5-da18dea68606",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "5c7f062d-e3c2-4680-9414-f870f05e6578",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "34cbe431-fbeb-4d0b-b3e7-a80d3de302bc",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "762e9505-41b1-47cd-8adc-95d19fd23c23",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "33f4cc19-2380-42bc-95fa-338e83d5ddaf",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "18ac2735-e471-4784-8560-16cb6eacf3d0",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "5eca85e0-4b4d-418e-ad1a-390dc68910d1",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "d72b6a6b-1232-421c-b208-2a568047973e",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "f2366e2e-ab84-4739-a493-3e81c091e00c",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "f6e6d6f9-62db-49e6-a9b5-38df9a8d71f1",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "a43a8cbc-0e3d-465b-89e8-1fb86adf511c",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "a07c4b00-b17d-4215-abb1-ee10a85fecf2",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "3e26342c-747e-4193-b14d-f33b12c76481",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "5065986c-7142-4b67-b2a9-69f5d71127e9",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "2085c51b-7e1a-417e-8725-b534e5a39090",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "f924e084-8cd6-4ef2-8fb6-68277ffe68ea",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "93ce5624-b44c-41dc-9055-ca9e35c302d6",
+      "category": "OM2W2"
+    },
+    {
+      "task_id": "c1f60ee6-506c-4ddb-b4eb-64106930667b",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "36f4e2db-4387-4163-99c3-c221d63a9733",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "296beb37-09d9-49f6-b644-1efa0383a483",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "7db8369d-727b-485e-9d7a-e0f0ecdd964d",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "0a8d83a8-32c5-4609-ac78-2e8c784315bb",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "755c9f4c-02e3-47fe-99ff-847a8037e227",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "a34dfbf1-3e36-4099-bb52-f6c688453375",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "cecf0cdc-87eb-44ec-9c8e-17c8335afa5f",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "53cd3515-d11a-4340-b352-e73f49e70d09",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "45789896-66b8-4b38-810d-6fc839df03da",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "9be48103-a449-4247-9177-d6e90c76576e",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "97c99135-3aff-4831-af24-c9fcf8d92ef7",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "bb85cb1e-679f-455d-95e5-edd421ea8205",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "4df60129-66b6-49e4-979d-f201930d732a",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "78bdcade-3ac8-46a9-bd6f-1f4c1c219a5f",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "fe521e79-3b4d-4218-8bf9-f3421e44cb5c",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "7fa92efb-8237-4c81-82dc-e0a5bdc0b675",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "7d17ab49-6539-40d0-a67d-68f12958620f",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "2a8e2322-f7b3-418e-a871-0819dcc55474",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "9ba7ecfc-e5ad-43d3-9e0d-e380bb8891b6",
+      "category": "InteractionTests"
+    },
+    {
+      "task_id": "5a0c2db3-a687-4dfe-b7e7-22d01eae23f6",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "79458461-3e78-499f-9ea5-2b2d639e78c9",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "cd01e2b6-33dd-4949-b875-6dfb11008568",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "d7eea2b1-7d31-425e-977c-b803ffd28250",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "efac7982-64c6-4f44-8c63-0ea37d24dd5e",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "3ecc7404-6d88-47fb-994e-382b66cb570d",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "fadd935f-d3dd-4c03-8366-bd7e7c146581",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "1fd2d69b-5d3f-4d1e-8e29-4dddced1868b",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "b29bddb6-2612-48fd-ae11-345b9126f5ae",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "701f7732-d2dd-4d0c-b545-49013eca6237",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "8f529c71-b308-4385-a48a-c6339c31811a",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "b0bf1829-1145-4008-b7de-46244d8d50c2",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "e92e3e34-48b4-444a-8b32-1f8e3c7b3544",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "0a32a0e6-6bd4-454f-b238-d7f650f71ab8",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "631f887e-60d3-41b5-b2a3-97571d72d30f",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "90be6fd6-9f82-49df-88b9-4e119ef5b654",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "f1d9b60c-dae0-43be-adb2-de93f3e9d49b",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "0e2e0517-ccf8-483e-8693-b60cf35216bd",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "25000017-ad2a-41e1-bb69-aa86473c314d",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "8c13e8a8-343d-417d-acac-fac86de1cd22",
+      "category": "GAIA"
+    },
+    {
+      "task_id": "815307aa-4c87-4da0-867c-529b8aa55f63",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "fe7a02f0-788f-4ba8-981c-d045df4955a9",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "3ca72fce-117c-4de7-a95c-92cb8f1e16b4",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "cd22ee34-6f65-4bf2-acb1-34bc32a735af",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "d839901d-8444-41f8-8fcf-b565de608d56",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "0a7082f9-0bde-44c2-8b3c-0a516865a6e6",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "22e3ff48-5c2d-4bc8-867f-261e7e9ce5b4",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "e876e436-862e-4710-aaec-a01ca57a6c90",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "a4e0d35d-1ce0-4f65-9759-c7b0394bfb3d",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "0be6ba06-8e22-4f62-be27-691dc882a68a",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "8d92dbe1-bf45-4daf-ac05-02d0bd2cf9c8",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "a5580966-d7e1-4348-a0de-6e71807e6878",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "a527109f-4b9c-4ba6-9458-009ad0bdd3f7",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "a78f98be-efef-4d24-b826-c6d4f2cb93e6",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "9176d7a9-5b89-4643-837c-07d0e349f183",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "71906b5a-577d-48c4-a253-c756790afa64",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "4d72d153-caa6-448b-b3ff-19b814e715ee",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "3a6c4eed-1bd0-4f73-ab31-998449c5a3a4",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "55371adf-23f9-4f35-88d4-f342c972bf8e",
+      "category": "BrowseComp"
+    },
+    {
+      "task_id": "6c97009d-7b10-43c0-8a4b-32db17f60c41",
+      "category": "BrowseComp"
+    }
+  ]
+}

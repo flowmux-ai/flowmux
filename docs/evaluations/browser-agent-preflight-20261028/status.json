@@ -1,0 +1,96 @@
+{
+  "checked_at_utc": "2026-10-28T05:01:14.764610+00:00",
+  "kind": "prerequisite_checks_and_one_ungraded_live_pilot",
+  "flowmux": {
+    "checkout_commit": "42651f543afdc5b873c28b90416483e0e10472ac",
+    "checkout_dirty": true,
+    "binary_build_commit_verified": false,
+    "binaries": {
+      "target/release/flowmux": "ef473b7b87eb7c3249cd34ab5f79467df3c17a9287670a03d822bcdd830bf7aa",
+      "target/release/flowmuxctl": "85ca438a0a3bf2bb6a380660abf982bf5e98f5a7ebb8e3d641187c28e24d5f7d"
+    },
+    "platform": "Linux-7.0.0-34-generic-x86_64-with-glibc2.39",
+    "engine": "WebKitGTK 2.52.6",
+    "display": "Isolated Xvfb/X11 1440x1080x24",
+    "browser_viewport": "See private screenshots; pane is narrower than Xvfb screen",
+    "user_session_socket_reachable": false,
+    "diagnostics": {
+      "engine": "WebKitGTK",
+      "engine_version": "2.52.6",
+      "display_backend": "GdkX11Display",
+      "cross_origin_frames": false,
+      "cookie_import": {
+        "next_action": "Sign in inside the selected Flowmux profile; host cookie insertion is not implemented",
+        "supported": false
+      },
+      "native_input": {
+        "commands": [
+          "press",
+          "click",
+          "dblclick",
+          "hover",
+          "pointer",
+          "drag"
+        ],
+        "environment_ready": true,
+        "next_action": null,
+        "reason": null,
+        "requires_visible_active_tab": true,
+        "supported": true
+      },
+      "document_capture": {
+        "max_bitmap_bytes": 67108864,
+        "may_omit_accelerated_layers": true,
+        "next_action": null,
+        "supported": true
+      }
+    },
+    "initial_checkout_commit": "6cdad285baef9abf8796a46dabec95f312802b22",
+    "initial_tracked_changes_present": true,
+    "checkout_changed_during_investigation": true,
+    "binaries_unchanged_between_hash_checks": true
+  },
+  "credential_presence": {
+    "HF_TOKEN": false,
+    "OPENAI_API_KEY": false,
+    "GOOGLE_API_KEY": false,
+    "ANTHROPIC_API_KEY": false
+  },
+  "benchmarks": {
+    "Online-Mind2Web": {
+      "task_count_expected": 300,
+      "downloaded_task_count": 0,
+      "executed_tasks": 0,
+      "judged_tasks": 0,
+      "success_rate_percent": null,
+      "code_commit": "b422075b059f0bba670ddda168444eb1d326aa45",
+      "dataset_revision": "eacad896a84dc5b65e29b0b06e4699ab0544d701",
+      "gated": "auto",
+      "dataset_request": {
+        "url": "https://huggingface.co/datasets/osunlp/Online-Mind2Web/resolve/eacad896a84dc5b65e29b0b06e4699ab0544d701/Online_Mind2Web.json",
+        "http_status": 401,
+        "message": "Access to dataset osunlp/Online-Mind2Web is restricted. You must have access to it and be authenticated to access it. Please log in."
+      },
+      "blockers": [
+        "Dataset access approval and authenticated download",
+        "Batch executor and WebJudge backend not configured"
+      ],
+      "judge_note": "Upstream README warns replacement judges are not directly comparable with previous o4-mini results."
+    },
+    "BU_Bench_V1": {
+      "task_count": 100,
+      "downloaded_task_count": 100,
+      "pilot_tasks_executed": 1,
+      "batch_tasks_executed": 0,
+      "judged_tasks": 0,
+      "success_rate_percent": null,
+      "not_attempted_tasks": 99,
+      "official_legacy_judge": "gemini-2.5-flash",
+      "blockers": [
+        "Batch executor configuration missing",
+        "GOOGLE_API_KEY for the official legacy judge missing"
+      ],
+      "dataset_manifest": "bu-v1-manifest.json"
+    }
+  }
+}

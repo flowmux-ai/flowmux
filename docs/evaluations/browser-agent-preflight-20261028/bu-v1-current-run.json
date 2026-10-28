@@ -1,0 +1,15 @@
+{
+  "run_directory": "/home/junsu/.local/state/flowmux/benchmarks/bu-v1-20261028-full-v2",
+  "status_file": "/home/junsu/.local/state/flowmux/benchmarks/bu-v1-20261028-full-v2/status.json",
+  "selected_tasks": 100,
+  "model": "gpt-6-astra",
+  "reasoning": "xhigh",
+  "parallel": 3,
+  "task_timeout_seconds": 1800,
+  "max_browser_calls": 200,
+  "judge_kind": "Codex replacement using upstream V1 prompt; not official Gemini score",
+  "runner_sha256": "8adccac8568285551c956465014f7975acbc2d4f78be375651289264f2e43a79",
+  "dataset_sha256": "a93f3e5c019cb7853b4b497fcf05f3836a6dd2a7e0f53f038ae8558300bc096e",
+  "official_gemini_judged": false,
+  "prior_run_excluded": "bu-v1-20261028-full (harness prompt conflict, all results excluded)"
+}
