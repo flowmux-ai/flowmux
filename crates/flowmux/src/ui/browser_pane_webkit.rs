@@ -1038,6 +1038,10 @@ impl BrowserPane {
             ));
             return;
         }
+        let on_done = super::javascript_completion(
+            std::time::Duration::from_secs(if asynchronous { 300 } else { 30 }),
+            on_done,
+        );
         let navigation_enabled = self.navigation_enabled.clone();
         let callback = move |result: Result<webkit6::javascriptcore::Value, gtk::glib::Error>| {
             if !navigation_enabled.get() {

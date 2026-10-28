@@ -196,6 +196,10 @@ errors are carried inside the JSON result; consumers must inspect `status` and
 `error`, not just the process exit code. Admission/protocol errors remain normal
 CLI errors. `--outcome-timeout-ms` bounds the outcome wait, not the underlying
 command; use `eval-async --timeout-ms` for bounded asynchronous evaluation.
+Synchronous JavaScript completions have a 30-second host deadline, and asynchronous
+completions have a five-minute ceiling. A stalled renderer cannot retain the
+caller indefinitely. These deadlines do not stop page code or undo its effects;
+inspect the page before retrying.
 
 Use `download list` until the matching ID reaches `complete` before using its
 file. Neither a download-start event nor a successful file-picker selection

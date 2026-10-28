@@ -166,3 +166,8 @@ grep -q '^MACOS_EDITOR_RENDERER_RETRY_OK$' "$report_dir/editor-recovery.log"
 FLOWMUX_OFFICE_STRESS_SMOKE_ONLY=1 run_phase office-stability 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/office-stability.log"
 grep -q '^OFFICE_STABILITY_OK ' "$report_dir/office-stability.log"
+
+run_phase browser-completion-unit 180 cargo test -p flowmux --bin flowmux --locked completion_tests
+FLOWMUX_BROWSER_DEADLINE_SMOKE_ONLY=1 run_phase browser-deadline 120 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/browser-deadline.log"
+grep -q '^MACOS_BROWSER_SCRIPT_DEADLINE_OK$' "$report_dir/browser-deadline.log"

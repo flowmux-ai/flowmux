@@ -1203,6 +1203,71 @@ impl BrowserPane {
         }
     }
 
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) async fn check_native_script_deadline(app: &gtk::Application) {
+        let browser = Self::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            None,
+            PaneCallbacks::noop_for_test(),
+            BrowserEngine::Webkit,
+            false,
+        );
+        let window = gtk::ApplicationWindow::builder()
+            .application(app)
+            .default_width(800)
+            .default_height(600)
+            .child(&browser.root)
+            .build();
+        window.present();
+        browser.load_uri("about:blank");
+        glib::timeout_future(Duration::from_millis(500)).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        browser.evaluate_js("'ready'", move |result| {
+            let _ = tx.send(result);
+        });
+        assert_eq!(
+            glib::future_with_timeout(Duration::from_secs(10), rx)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            "ready"
+        );
+        let captured = Rc::new(());
+        let weak = Rc::downgrade(&captured);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        browser.evaluate_js("while (true) {}", move |result| {
+            drop(captured);
+            let _ = tx.send(result);
+        });
+        // A GTK timer must still run while JavaScript has wedged the separate renderer.
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(weak.upgrade().is_some());
+        let result = glib::future_with_timeout(Duration::from_secs(35), rx)
+            .await
+            .expect("wedged renderer retained the completion forever")
+            .unwrap();
+        assert!(result.unwrap_err().contains("timed out"));
+        assert!(weak.upgrade().is_none());
+        let native = Rc::downgrade(&browser.native);
+        autoreleasepool(|_| {
+            browser.prepare_for_close();
+            window.set_child(gtk::Widget::NONE);
+            window.destroy();
+            drop(window);
+            drop(browser);
+        });
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while autoreleasepool(|_| native.upgrade().is_some()) {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("timed-out browser was not released");
+        println!("MACOS_BROWSER_SCRIPT_DEADLINE_OK");
+    }
+
     /// Call on the GTK main thread after isolating XDG state and registering the app.
     #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_native_lifetime(app: &gtk::Application) {
@@ -1694,6 +1759,10 @@ impl BrowserPane {
             return;
         }
         let script = NSString::from_str(source);
+        let on_done = super::javascript_completion(
+            Duration::from_secs(if asynchronous { 300 } else { 30 }),
+            on_done,
+        );
         let navigation_enabled = self.native.navigation_enabled.clone();
         let callback = Rc::new(RefCell::new(Some(on_done)));
         let block = block2::RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
