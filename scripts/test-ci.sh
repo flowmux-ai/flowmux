@@ -41,7 +41,8 @@ uname -a
 rustc -Vv
 cargo --version
 pkg-config --modversion gtk4 libadwaita-1
-run_phase ci-runner-tests 180 python3 scripts/test-ci-runner.py
+# The full failure/marker matrix starts many mock processes on hosted macOS.
+run_phase ci-runner-tests 300 python3 scripts/test-ci-runner.py
 run_phase installer-routing 60 python3 scripts/test-install.py
 run_phase thorvg-installer 60 python3 -B scripts/test-thorvg-macos.py
 run_phase agent-runner-tests 120 python3 -B scripts/test-agent-unit-runner.py
