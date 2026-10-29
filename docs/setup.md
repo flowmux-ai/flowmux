@@ -26,7 +26,7 @@ plus desktop entries and icons. macOS installs `~/Applications/Flowmux.app`
 and CLI commands in `~/.local/bin`. You can run `./install.sh` from a Flowmux
 terminal while the app is running. The new version is installed immediately;
 existing sessions keep running their current version until you quit and reopen
-the app. The installer prints the installed executable's version and retains
+the app. The macOS installer prints the installed executable's version and retains
 the previous app in a hidden `.Flowmux.app.previous.*` directory beside the app.
 These backups can be removed after all sessions using them have exited.
 Use `./install.sh --release --launch` for a macOS release build.
@@ -49,13 +49,15 @@ on macOS. Other browser controls do not require these tools.
 cargo build --release --workspace   # binaries under target/release/
 cargo run -p flowmux                # debug GUI
 cargo check --workspace             # type-check everything
-GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked
+python3 scripts/test-agent-unit.py --all  # headless tests isolated from agent ancestry
 scripts/check-ubuntu-compat.sh      # Docker smoke check for 24.04 / 26.04
 ```
 
-`GDK_BACKEND=x11` keeps GTK on Xvfb even in a Wayland session;
-`GTK_A11Y=test` enables the accessibility assertions without a desktop service.
-`G_DEBUG=fatal-criticals` turns invalid GTK calls into test failures.
+The headless runner requires a working systemd user manager on Linux. For the
+complete platform checks, use the [CI gates below](#platform-scope). They supply
+the display, accessibility and fatal-critical settings for GUI tests; macOS GTK
+checks run on the main thread. See the [development guide](../CLAUDE.md) for
+formatting, linting and implementation rules.
 
 The Monaco editor bundle under `editor/flowmux-editor-web/dist` is committed,
 so builds do not need Node.js. Only changes to the editor frontend need
@@ -254,6 +256,6 @@ resolving the host policy. flowmux never enables this override automatically.
 This setting does not control macOS WKWebView.
 
 - `FLOWMUX_LOG=debug` (or any `tracing` filter) raises console log verbosity.
-- Daily log files are written under `$XDG_STATE_HOME/flowmux/logs`
-  (usually `~/.local/state/flowmux/logs`); crash reports go to
-  `$XDG_STATE_HOME/flowmux/crash`.
+- Daily log files and crash reports are written to `logs/` and `crash/` inside
+  the [state directory](configuration.md): `~/.local/state/flowmux` on Linux or
+  `~/Library/Application Support/flowmux` on macOS by default.

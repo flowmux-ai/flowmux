@@ -2,7 +2,7 @@
 
 # Code Review
 
-Open the pane's top-right **… → Code Review** menu, click the sidebar's Code Review icon
+Open the pane's top-right **… → Code Review** menu, click the side panel's Code Review icon
 right of AI usage, or press **Ctrl+Alt+E**
 for the focused pane. The review stays inside that pane, including split layouts.
 Other panes remain visible and usable. Use the same icon, menu item, or shortcut

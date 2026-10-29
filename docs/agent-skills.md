@@ -24,7 +24,7 @@ The optional [Flowmux team skill](agent-teams.md) adds role-based pane delegatio
 and result collection. Options → Skills manages both skills in separate sections.
 Flowmux Team installs for Claude Code, Codex, Gemini CLI and Antigravity CLI
 (`agy`), including its scripts and sample with the instructions.
-All four can lead teams; worker sessions currently use Claude Code or Codex.
+All four can lead teams and run worker sessions.
 
 The CLI embeds that file at build time. Installation copies the embedded
 payload; it does not download skills, run `npx`, or install a browser engine.
@@ -90,17 +90,16 @@ they do not automatically install these user-level integrations.
 | `gemini` | `~/.gemini/skills/flowmux-browser/SKILL.md` | `GEMINI_CLI_HOME` replaces the home directory, before appending `.gemini/skills` |
 | `cline` | `~/.cline/skills/flowmux-browser/SKILL.md` | Default user skills root |
 
-Paths were checked against the official [Claude skills](https://code.claude.com/docs/en/skills)
-and [configuration](https://code.claude.com/docs/en/env-vars) documentation,
+For agent discovery rules, see the official [Claude skills](https://code.claude.com/docs/en/skills)
+and [configuration](https://code.claude.com/docs/en/env-vars) guides,
 [OpenCode](https://opencode.ai/docs/skills/),
 [Codex](https://learn.chatgpt.com/docs/build-skills),
 [Antigravity](https://antigravity.google/docs/skills), and
-[Cline](https://docs.cline.bot/customization/skills) documentation on 2026-10-05.
+[Cline](https://docs.cline.bot/customization/skills) documentation.
 Agents' additional project, plugin, or custom search directories remain under
 that agent's management; Flowmux does not scan every possible discovery source.
 `agy` is an alias for `antigravity`; it keeps the existing installation path.
-Gemini CLI 0.64.0 discovery and the installed agy skill list were also checked
-on 2026-10-22. Gemini also discovers `~/.agents/skills`, with precedence over
+Gemini also discovers `~/.agents/skills`, with precedence over
 `~/.gemini/skills`. The UI and doctor report known shared copies without changing
 them. Project skills can override both; check the agent's actual skill list.
 
@@ -164,13 +163,14 @@ establish launch identity. These are independent integrations.
 Some agents also discover compatible agents' skill directories. Removing one
 copy may leave another discoverable copy. Codex can show duplicate names rather
 than merging them; Flowmux reports an existing `$CODEX_HOME/skills/flowmux-browser`
-copy without modifying it. Inspect user and project copies before removing any.
+copy without modifying it during that check. Inspect user and project copies before removing any.
 When upgrading the guide, inspect these reported copies too: an old duplicate
 can retain obsolete ref-token rules or omit supported browser commands. Updating
-the managed copy does not update the duplicate. If its owner requests that copy's
-update, back it up and synchronize it explicitly; preserve unrelated custom text
-and user-managed links. Compare against the rebuilt CLI's payload, not an older
-running app's bundled guide. Do not restart an active session to refresh discovery.
+the managed copy through `agent install` does not update the duplicate. The
+app-version refresh described above also updates known existing legacy/shared
+copies, with backups. Other custom copies and linked directories remain manually
+managed. Compare against the rebuilt CLI's payload, not an older running app's
+bundled guide. Do not restart an active session to refresh discovery.
 
 For persistent activation controls, use the agent's own settings:
 [Codex `skills.config`](https://learn.chatgpt.com/docs/build-skills),

@@ -13,42 +13,23 @@ acceptance checks. The [communication cookbook](../.agents/skills/flowmux-team/r
 contains copyable user prompts, expected lead/worker conversations, acceptance
 checks and runnable review, clarification and test-driven correction examples.
 
-## Design
-
-```mermaid
-sequenceDiagram
-    participant Lead as Lead agent
-    participant Helper as team.py
-    participant Pane as New Flowmux pane
-    participant Agent as Claude / Codex / Gemini / agy
-    Lead->>Helper: start(role, task file, cwd)
-    Helper->>Pane: Team-only split with launcher in its first tab
-    Helper-->>Lead: job directory + pane/tab IDs
-    Pane->>Agent: bounded prompt, explicit permissions
-    Agent-->>Helper: completed turn in saved conversation
-    Helper->>Helper: atomic result.md + status.json
-    Lead->>Helper: status / bounded wait
-    Helper-->>Lead: result or failure
-    loop until acceptance checks pass or review budget is exhausted
-        Lead->>Lead: review evidence and user changes
-        Lead->>Helper: followup(original job, correction file)
-        Helper->>Agent: same idle session, unique turn marker
-        Agent-->>Helper: completed turn in pinned transcript
-        Lead->>Helper: wait(returned turn job)
-        Helper-->>Lead: separate turn result + session evidence
-    end
-    Lead->>Lead: verify, integrate, report remaining gaps or completion
-```
+## Workspace and worker lifecycle
 
 The helper first resolves the lead's workspace with `team.py context`. Normal
 and SSH workspaces return `inline`: the current agent completes the work itself.
-Team workspaces allow `team-spawn`, which creates a split with a single tab
-running the normal Claude/Codex interactive interface or Gemini/agy native
-structured output. Worker creation and recovery preserve the current workspace,
-keyboard focus and another workspace's pane zoom. The provider's
-initial prompt carries a task-file reference and a unique job marker. Each worker may use a
-different provider; pass the first report into the next worker's task file for
-cross-provider review.
+In a Team workspace, `team.py start` first looks for a completed, idle worker
+from the same lead pane and directory, with matching provider, model, effort,
+edit permission and provider configuration. It can reuse that session for a new
+assignment. Pass `--fresh-session` when an independent conversation is required,
+such as a separate review. Otherwise, the helper can retire a completed managed
+worker with incompatible settings before creating a replacement.
+
+New workers use a split with a single tab running the Claude/Codex interactive
+interface or Gemini/agy structured output. Creation and recovery preserve the
+current workspace, keyboard focus and another workspace's pane zoom. Each
+assignment carries a task-file reference and a unique job marker. Workers may
+use different providers; pass the first report's path into the next assignment
+for cross-provider review.
 
 The managed Codex shim starts local invocations with `--no-daemon` when supported.
 The lead and its workers therefore keep the originating pane's environment and
@@ -61,16 +42,11 @@ wrapper precedence after login startup and when reusing a provider PATH. Existin
 sessions are not restarted or migrated; starting a new chat in an existing TUI
 does not change that TUI’s shared-daemon connection.
 
-Codex source resolution validates direct agent/window process ancestry on the
-first turn, without waiting for a session hook. Existing shared-daemon sessions
-still require a unique reported session binding;
-working directory, window focus and tab titles cannot select a launch target.
+Source discovery requires process ancestry or a unique reported session binding;
+the current directory, window focus and tab title cannot select the lead pane.
 A worker remains in the lead's workspace even when its working directory differs.
-Retrying an unbound shared session cannot establish ownership: the daemon has
-already lost the pane-local origin. Keep the session open and report that limit.
-The GUI checks the requesting process against its live terminal PIDs as well as
-reported agent presence. Source discovery does not depend on the Agent Bar's
-periodic process poll and does not synthesize a session or activity event.
+An unbound shared Codex session can lack its pane-local origin. Keep that session
+open and report the unresolved source instead of redirecting it to another pane.
 
 Results come from a completed turn in the saved conversation containing the
 exact job marker in its user prompt. The final JSON report must declare
@@ -89,11 +65,9 @@ The helper verifies the live session, workspace, pane and active surface before
 input, retains paste evidence, and correlates completion with a unique user-prompt
 marker after the recorded transcript offset. Concurrent or unresolved assignments
 prevent another dispatch. Uncertain delivery is retained, never blindly retried.
-Managed follow-ups verify that their supervisor still owns its lock before
-dispatch; new jobs additionally verify its process identity and generation.
-A live idle provider without its supervisor receives no new assignment.
-Managed collection/progress timeouts trigger bounded recovery; verified input
-waits pause these deadlines and never approve dialogs. A restored launcher never reruns its task.
+A worker without its live supervisor receives no new assignment. Managed
+timeouts trigger bounded recovery; verified input waits pause these deadlines
+and never approve dialogs. A restored launcher never reruns its task.
 With automatic agent restoration enabled, the launcher passes the saved resume
 command to a real shell so the conversation reopens in its original pane.
 New jobs keep their private launchers, worker code and reports under
@@ -106,18 +80,16 @@ New jobs pin the lead's provider configuration roots for execution, transcript
 lookup and restoration; quota fallback also uses the CLI resolved on the lead's
 PATH. Only paths are stored, not authentication tokens.
 
-The supervisor owns an OS file lock. Status/wait and launcher reentry reconcile
-an unfinished job whose owner exited to `failed` / `interrupted`, including
-after a forced termination. Completed, blocked, failed and timed-out outcomes
-are never rewritten. This does not kill a surviving child or replay partial work.
-Older jobs without the lock marker cannot be reconciled this way.
+Status/wait report unfinished managed jobs whose supervisor exited as
+`failed` / `interrupted`. Completed reports are retained; reconciliation does
+not replay partial work or kill a surviving child.
 
 ## Use and installation
 
 Read [the skill](../.agents/skills/flowmux-team/SKILL.md), then run
 [the researcher → reviewer sample](../.agents/skills/flowmux-team/references/sample.md)
 from a trusted local repository in a **Team workspace**. Create one with the
-sidebar menu or command palette → **New Team Workspace**, or
+side-panel menu or command palette → **New Team Workspace**, or
 `flowmux workspace new --team --root /absolute/project`, then start the lead
 agent there. Normal and SSH workspaces reject team worker creation. Each worker
 uses the split’s sole tab and displays its native interface or structured output. Python 3.9+ and an authenticated
@@ -126,11 +98,10 @@ agent CLI are required. The sample selects a simple-tier model on the configured
 The lead also needs access to that window's Unix socket and `.ctl` companion.
 Codex can deny these connections even when it can read the repository. The CLI
 reports socket permission errors separately from an unresolved session. Use
-Codex's normal permission approval flow for authorized Flowmux commands; stop
-if approval is denied. In Linux verification with Codex 0.162.0, the network
-proxy returned `unix sockets unsupported` even with a Unix socket allowlist,
-so that setting alone is not a working solution on that build. Installing the
-skill does not grant socket access, disable the sandbox, or change hook trust.
+the agent's normal permission flow for authorized Flowmux commands; stop if
+approval is denied. A runtime reporting `unix sockets unsupported` cannot be
+fixed merely by retrying with a socket allowlist. Installing the skill does not
+grant socket access, disable the sandbox, or change hook trust.
 
 Open **Options → Skills → Flowmux Team** to install for Claude Code, Codex,
 Gemini CLI or Antigravity CLI (`agy`). **Check Team setup** reports Python 3.9+,
@@ -158,8 +129,8 @@ installed. Start a new agent session if the skill is not discovered immediately.
 
 `flowmux doctor` checks existing team installations and `flowmux fix` repairs
 them. The team skill remains opt-in: repair does not create a new installation
-or reinstall a fully removed bundle. `flowmux agent install/doctor/uninstall`
-continue to target the Flowmux CLI skill.
+or reinstall a fully removed bundle. `flowmux agent install`, `doctor` and
+`uninstall` default to the Flowmux CLI skill; use `--skill flowmux-team` for Team.
 
 For manual installation, copy the **whole** `.agents/skills/flowmux-team` directory, including `scripts/` and
 `references/`, to the desired agent's skills root:
@@ -168,6 +139,8 @@ For manual installation, copy the **whole** `.agents/skills/flowmux-team` direct
 |---|---|
 | Claude Code | `~/.claude/skills/flowmux-team` (`CLAUDE_CONFIG_DIR` overrides the root) |
 | Codex | `~/.agents/skills/flowmux-team` |
+| Gemini CLI | `~/.gemini/skills/flowmux-team` (`GEMINI_CLI_HOME` replaces the home directory) |
+| Antigravity CLI | `~/.gemini/config/skills/flowmux-team` |
 
 For example, from this repository, install a new Claude copy without replacing
 an existing directory:
@@ -189,8 +162,9 @@ The source is also discoverable by agents that load repository `.agents/skills`.
 
 ## Limits and validation
 
-The helper supports local Flowmux panes with Claude, Codex, Gemini and agy. It does not
-attach to an existing agent conversation. For existing Claude sessions, use
+The helper supports local Flowmux panes with Claude, Codex, Gemini and agy. It
+reuses its own managed workers, but does not adopt unrelated conversations. For
+other existing Claude sessions, use
 Claude's `ListAgents`/`SendMessage` contract described in [AGENTS.md](../AGENTS.md).
 It does not implement the native Claude Agent Teams shared task list, automatic
 merges, persistent scheduling or remote SSH workers.
@@ -273,7 +247,8 @@ malformed/failed reports and stalled attempts trigger bounded substitution.
 The default is at most four attempts, without repeating provider/model pairs;
 quota-exhausted providers are skipped for the rest of the assignment. Current
 account limits are enforced by the provider, not inferred from CLI installation.
-`--stall-timeout` defaults to 180 seconds without native progress. There is no
+`--stall-timeout` defaults to 180 seconds without native progress; an outstanding
+native tool call allows five times that interval. There is no
 total deadline by default (`--timeout 0`). A positive `--timeout` is an explicit
 attempt budget: expiry stops and closes the owned worker with `time_budget`,
 without automatic replacement or a false `stalled` diagnosis, even when both

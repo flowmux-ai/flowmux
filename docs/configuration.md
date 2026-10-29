@@ -2,9 +2,17 @@
 
 # Configuration reference
 
-The main file is `$XDG_CONFIG_HOME/flowmux/options.json` (normally
-`~/.config/flowmux/options.json`). All fields are optional; omitted values use
-the built-in defaults.
+The main file is `options.json` in Flowmux's configuration directory.
+All fields are optional; omitted values use the built-in defaults.
+
+| Directory | Linux default | macOS default | Environment override |
+|---|---|---|---|
+| Configuration | `~/.config/flowmux` | `~/Library/Application Support/flowmux` | `$XDG_CONFIG_HOME/flowmux` |
+| Data | `~/.local/share/flowmux` | `~/Library/Application Support/flowmux` | `$XDG_DATA_HOME/flowmux` |
+| State | `~/.local/state/flowmux` | `~/Library/Application Support/flowmux` | `$XDG_STATE_HOME/flowmux` |
+
+Nonempty overrides take precedence. On macOS, state falls back to the data
+directory when `XDG_STATE_HOME` is unset, including an `XDG_DATA_HOME` override.
 
 ## options.json
 
@@ -13,7 +21,7 @@ the built-in defaults.
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
 `terminal_minimap_enabled`, `terminal_minimap_width`, `terminal_minimap_opacity`,
 `system_notifications_enabled`, `agent_bar_mode`, `agent_sort_mode`,
-`usage_bar_enabled`, `cursor_blink`,
+`usage_bar_enabled`, `usage_bar_pins`, `cursor_blink`,
 `cursor_blink_interval_ms`, `font_family`, `font_size`,
 `editor_minimap_enabled`, `agent_notification_target`, `theme`, `theme_overrides`,
 and `keybindings`.
@@ -35,6 +43,11 @@ key: when the current turn was requested or the last one ended. flowmux times
 these status changes itself, so agents without hooks sort too; the times last
 for the running flowmux process, and an agent with no observed finish counts
 as the longest finished.
+
+`usage_bar_enabled` defaults to `true`. Use **Pin to usage bar** in **AI Usage**
+to choose which Claude/Codex usage windows appear in the footer. The selections
+are saved in `usage_bar_pins`: an omitted or `null` provider keeps the automatic
+selection; an empty array hides that provider's meters.
 
 The browser uses the platform WebKit backend; Options shows a fixed `WebKit`
 label. Legacy `default_browser_engine` values are preserved for existing profile
@@ -90,7 +103,7 @@ Distinct input requests and errors are retained.
 
 ## Theme file
 
-`$XDG_CONFIG_HOME/flowmux/theme` uses Ghostty's `key = value` format. It
+The `theme` file in the configuration directory uses Ghostty's `key = value` format. It
 supports `font-family`, `font-size`, `background`, `foreground`,
 `cursor-color`, `selection-background`, `selection-foreground`, and
 `palette = N=#rrggbb` for `N` from 0 to 15. A selected `options.json` theme
@@ -142,7 +155,7 @@ See [keyboard shortcuts](keybindings.md) for action names and context behavior.
 
 ## State and environment
 
-`state.json` under `$XDG_STATE_HOME/flowmux` is managed by flowmux and is not a
+`state.json` in the state directory is managed by Flowmux and is not a
 user-editable configuration file. Runtime context variables include
 `FLOWMUX_PANE_ID`, `FLOWMUX_SURFACE_ID`, `FLOWMUX_WORKSPACE_ID`,
 `FLOWMUX_TAB_ID`, `FLOWMUX_SOCKET_PATH`, and optional

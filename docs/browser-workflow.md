@@ -162,8 +162,6 @@ observed events, elapsed time, the original result/error and task state.
 The receipt's `control` contains the current task summary without `results`;
 previous result cards are not retransmitted on every action. Read
 `control PANE status` to fetch the bounded history, including the latest card.
-Clients that previously read `receipt.control.results` must use that command.
-The UI result cards, task details, error fields and event truncation are unchanged.
 
 | Status | Meaning |
 | --- | --- |
@@ -212,7 +210,7 @@ runtime path. It verifies ownership, handoff cancellation, receipts, timeout
 non-repetition, popup/dialog events, active/inactive diagnostics and missing
 ffmpeg, followed by existing browser-control scenarios.
 
-The P1 regressions cover native text opening a confirm dialog, subsequent input
+The regressions cover native text opening a confirm dialog, subsequent input
 when a modal consumes keyup, and fixed-element capture after scrolling on both
 platforms. Linux CI also enables
 `FLOWMUX_TEST_X11_LOCKS=1` on its private Xvfb display to check logical key case
