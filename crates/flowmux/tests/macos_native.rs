@@ -21,6 +21,11 @@ mod keybindings;
 mod notifications;
 #[path = "../src/platform.rs"]
 mod platform;
+#[cfg(target_os = "linux")]
+#[path = "../src/process_scope.rs"]
+mod process_scope;
+#[path = "../src/termination.rs"]
+mod termination;
 #[path = "../src/theme.rs"]
 mod theme;
 #[path = "../src/ui/mod.rs"]
