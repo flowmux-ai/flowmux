@@ -25,7 +25,7 @@ pub(super) struct TerminationPresenter {
     #[cfg(target_os = "linux")]
     scope_isolation: Rc<RefCell<Option<crate::process_scope::ScopeIsolation>>>,
     termination_reports: Rc<RefCell<std::collections::VecDeque<TerminationReport>>>,
-    termination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
+    termination_dialog: Rc<RefCell<Option<(SurfaceId, adw::AlertDialog)>>>,
     termination_presenting: Rc<Cell<bool>>,
     torn_off_terminals: Rc<RefCell<HashMap<SurfaceId, TornOffTerminal>>>,
 }
@@ -91,7 +91,10 @@ impl WindowController {
 
     #[cfg(test)]
     pub(super) fn current_termination_dialog(&self) -> Option<adw::AlertDialog> {
-        self.termination_dialog.borrow().clone()
+        self.termination_dialog
+            .borrow()
+            .as_ref()
+            .map(|(_, dialog)| dialog.clone())
     }
 }
 
@@ -260,7 +263,7 @@ impl TerminationPresenter {
                 else {
                     continue;
                 };
-                *presenter.termination_dialog.borrow_mut() = Some(dialog.clone());
+                *presenter.termination_dialog.borrow_mut() = Some((report.surface, dialog.clone()));
                 let choice = {
                     let _native_suspend =
                         crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -550,7 +553,7 @@ mod tests {
     }
 
     #[gtk::test]
-    async fn reports_queue_and_manual_close_makes_response_harmless() {
+    async fn reports_queue_and_manual_close_dismisses_obsolete_dialog() {
         let (c, ws, pane) = setup("com.flowmux.App.UiTest.TerminationQueue").await;
         let a = add_tab(&c, ws, pane).await;
         let b = add_tab(&c, ws, pane).await;
@@ -567,7 +570,6 @@ mod tests {
         })
         .await;
         rx.await.unwrap().unwrap();
-        respond(&first, "close");
         let second = glib::future_with_timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(d) = c.current_termination_dialog().filter(|d| *d != first) {

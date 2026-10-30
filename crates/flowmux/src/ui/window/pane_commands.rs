@@ -128,7 +128,7 @@ impl WindowController {
                         Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
                     )
                 {
-                    self.forget_agent_surfaces(&closing_surfaces);
+                    self.forget_closed_surfaces_ui_state(&closing_surfaces);
                 }
                 match outcome {
                     None => {
@@ -649,7 +649,7 @@ impl WindowController {
                 Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
             )
         {
-            self.forget_agent_surfaces(&[surface]);
+            self.forget_closed_surfaces_ui_state(&[surface]);
         }
         match outcome {
             None => {

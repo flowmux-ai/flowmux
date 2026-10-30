@@ -35,7 +35,15 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     );
     assert_eq!(dialog.response_label("close"), "Close tab");
     glib::timeout_future(Duration::from_millis(300)).await;
-    dialog.close();
+    let (ack, rx) = oneshot::channel();
+    controller
+        .dispatch(GtkCommand::CloseSurface { pane, surface, ack })
+        .await;
+    rx.await.unwrap().unwrap();
+    wait_until("closed tab's termination explanation dismissed", || {
+        controller.current_termination_dialog().is_none() && !dialog.is_mapped()
+    })
+    .await;
     wait_until("dead tab removed", || {
         !controller
             .pane_registry

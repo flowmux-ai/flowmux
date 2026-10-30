@@ -614,7 +614,7 @@ pub struct WindowController {
     pane_scopes: Rc<RefCell<HashMap<SurfaceId, Result<crate::process_scope::PaneScope, String>>>>,
     termination_reports:
         Rc<RefCell<std::collections::VecDeque<crate::termination::TerminationReport>>>,
-    termination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
+    termination_dialog: Rc<RefCell<Option<(SurfaceId, adw::AlertDialog)>>>,
     termination_presenting: Rc<Cell<bool>>,
     torn_off_terminals: Rc<RefCell<HashMap<SurfaceId, termination_dialog::TornOffTerminal>>>,
     callbacks: PaneCallbacks,
@@ -2597,7 +2597,7 @@ impl WindowController {
                 registry.pane_ids_in_workspace(id).collect::<Vec<_>>(),
             )
         };
-        self.forget_agent_surfaces(&closing_surfaces);
+        self.forget_closed_surfaces_ui_state(&closing_surfaces);
         self.forget_closed_pane_ui_state(&closing_panes);
         self.focus_mru.borrow_mut().remove(&id);
         let dropping_zoomed_workspace = self
@@ -2650,7 +2650,19 @@ impl WindowController {
         });
     }
 
-    fn forget_agent_surfaces(&self, surfaces: &[SurfaceId]) {
+    fn forget_closed_surfaces_ui_state(&self, surfaces: &[SurfaceId]) {
+        self.termination_reports
+            .borrow_mut()
+            .retain(|report| !surfaces.contains(&report.surface));
+        let dialog = self
+            .termination_dialog
+            .borrow()
+            .as_ref()
+            .filter(|(surface, _)| surfaces.contains(surface))
+            .map(|(_, dialog)| dialog.clone());
+        if let Some(dialog) = dialog {
+            dialog.close();
+        }
         forget_saved_agent_sessions(surfaces);
         self.activities.forget_surfaces(surfaces);
         self.agent_bar
