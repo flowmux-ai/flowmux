@@ -346,6 +346,26 @@ fn main() -> anyhow::Result<()> {
 
     // GTK runs on the main thread.
     let app = build_application();
+    #[cfg(target_os = "macos")]
+    app.connect_window_removed(|app, _| {
+        if !app.windows().is_empty() {
+            return;
+        }
+        let app = app.downgrade();
+        // Deferred file-panel events can start menu tracking after the last window closes.
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if app.upgrade().is_none_or(|app| !app.windows().is_empty()) {
+                return gtk::glib::ControlFlow::Break;
+            }
+            let native = objc2_app_kit::NSApplication::sharedApplication(
+                objc2::MainThreadMarker::new().unwrap(),
+            );
+            if let Some(menu) = native.mainMenu() {
+                menu.cancelTrackingWithoutAnimation();
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    });
     let store_for_activate = store.clone();
     let rx_for_activate = rx.clone();
     let bridge_for_activate = bridge.clone();
