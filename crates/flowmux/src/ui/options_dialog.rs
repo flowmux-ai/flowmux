@@ -1717,7 +1717,14 @@ mod tests {
         let minimap_on = build_toggle_switch(true);
         let blink_on = build_toggle_switch(true);
         let blink_interval = build_blink_interval_spin(300);
+        let current = Options {
+            process_isolation: flowmux_config::options::ProcessIsolation::Off,
+            child_oom_score_adj: 250,
+            pane_memory_max: Some("64M".into()),
+            ..Options::default()
+        };
         let opts = collect_options(
+            &current,
             &zoom,
             &engine,
             &focus_color,
@@ -1756,6 +1763,9 @@ mod tests {
             opts.agent_notification_target,
             AgentNotificationTarget::Both
         );
+        assert_eq!(opts.process_isolation, current.process_isolation);
+        assert_eq!(opts.child_oom_score_adj, 250);
+        assert_eq!(opts.pane_memory_max.as_deref(), Some("64M"));
         assert_eq!(opts.zoom_percent, 117);
         assert_eq!(opts.default_browser_engine, BrowserEngine::Firefox);
         assert_eq!(opts.focus_border_opacity, 40);
@@ -1788,7 +1798,14 @@ mod tests {
         zoom.drop
             .set_selected((zoom.values.borrow().len() - 1) as u32);
         default_shell.set_text("  ");
+        let current = Options {
+            process_isolation: flowmux_config::options::ProcessIsolation::Off,
+            child_oom_score_adj: 250,
+            pane_memory_max: Some("64M".into()),
+            ..Options::default()
+        };
         let opts = collect_options(
+            &current,
             &zoom,
             &engine,
             &focus_color,
@@ -1834,6 +1851,9 @@ mod tests {
         assert!(!opts.agent_bar_mode);
         assert!(!opts.usage_bar_enabled);
         assert!(!opts.editor_minimap_enabled);
+        assert_eq!(opts.process_isolation, current.process_isolation);
+        assert_eq!(opts.child_oom_score_adj, 250);
+        assert_eq!(opts.pane_memory_max.as_deref(), Some("64M"));
         assert_eq!(opts.zoom_percent, 200);
         assert_eq!(opts.default_shell, None);
         assert_eq!(opts.font_family, Some("Fira Code".to_string()));
