@@ -1301,7 +1301,7 @@ const CODEX_EVENTS: &[CodexEvent] = &[
         name: "Interrupt",
         subcommand: "interrupt",
         matcher: "",
-        timeout_secs: 5,
+        timeout_secs: 3,
     },
     CodexEvent {
         name: "SessionEnd",
@@ -3845,6 +3845,33 @@ mod tests {
             root["hooks"]["SessionStart"][0]["matcher"],
             "^(startup|resume|clear)$"
         );
+    }
+
+    #[test]
+    fn codex_interrupt_timeout_repairs_owned_handler_and_preserves_user_hook() {
+        let event = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Interrupt")
+            .unwrap();
+        let user_hook = json!({ "type": "command", "command": "user-interrupt", "timeout": 2 });
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        root["hooks"]["Interrupt"][0]["hooks"][0]["timeout"] = json!(5);
+        root["hooks"]["Interrupt"][0]["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .push(user_hook.clone());
+
+        // Native interruption handlers have a three-second deadline. The old
+        // five-second entry must be diagnosed as drift, then repaired in place.
+        assert_eq!(codex_matching_entry_count(&root, event), 0);
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        assert_eq!(root["hooks"]["Interrupt"][0]["hooks"][0]["timeout"], 3);
+        assert_eq!(root["hooks"]["Interrupt"][0]["hooks"][1], user_hook);
+        assert_eq!(codex_matching_entry_count(&root, event), 1);
+        let repaired = root.clone();
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        assert_eq!(root, repaired);
     }
 
     #[test]

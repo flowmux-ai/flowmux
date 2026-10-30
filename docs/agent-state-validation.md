@@ -69,8 +69,8 @@ Verification status:
   virtual display. The full Linux coverage gate has not yet been run.
 
 One installed native-hook agent also reported an Interrupt hook timeout clamp from
-five to three seconds. That installer compatibility adjustment is a separate
-change, with its own configuration and real interruption checks.
+five to three seconds. That installer compatibility adjustment is covered in the
+separate validation section below.
 
 A fresh session also briefly classified draft text mentioning approval as
 blocked before submission. That separate screen-input boundary issue was left
@@ -138,3 +138,30 @@ existing application profile and failed to launch the WebKit sandbox. The next
 run uses the same `aa-exec -p flowmux-webkit` invocation as CI, without changing
 system policy or disabling the web-process sandbox. Final Linux coverage remains
 pending.
+
+## Native interruption hook deadline — 2026-10-30
+
+The installed native-hook agent B version 0.166.0 displayed a startup warning
+that its Interrupt timeout was clamped to three seconds. Flowmux had installed
+five seconds. The installer now emits three seconds, and the existing drift
+comparison recognizes and repairs the old entry.
+
+A failing test first demonstrated that the old entry was incorrectly considered
+current. The repaired entry retains an adjacent user handler and its position;
+repeating installation does not change the result. The actual installer was then
+run twice against a private test configuration. Only its managed hook changed;
+the user handler and configuration file were preserved.
+
+A new real-agent session in isolated application PID 53463 started without the
+timeout warning. A long response entered working, Escape produced the native
+interrupted outcome, and the preserved user handler wrote its private test
+marker. A subsequent prompt completed normally. Existing application sessions
+were not restarted. The original application PID 72789 remained alive.
+
+Verified CLI SHA-256:
+`590844d3edfc70ea3afa2df93e9550c63852d8a7a987a8facec3b67d80958541`.
+
+The full agent unit runner, focused all-targets CLI Clippy, CLI build, formatting,
+and diff checks passed. Evidence logs are `/tmp/fm-hook-timeout-unit.log` and
+`/tmp/fm-hook-timeout-clippy.log`. The private hook configuration and marker are
+under `/tmp/fm-atn-fx9y65bg`; no authentication material is included here.
