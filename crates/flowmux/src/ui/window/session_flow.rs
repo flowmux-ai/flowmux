@@ -27,6 +27,7 @@ struct Catalog {
     forkable: BTreeSet<SessionKey>,
     views: BTreeMap<uuid::Uuid, flowmux_state::session_flow::SavedView>,
     live: BTreeMap<SessionKey, Vec<LiveSession>>,
+    warnings: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -141,6 +142,7 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         forkable: BTreeSet::new(),
         views: store.views().map_err(|e| e.to_string())?,
         live: BTreeMap::new(),
+        warnings: Vec::new(),
     };
     let mut namespaces = BTreeSet::new();
     for anchor in targets {
@@ -160,7 +162,8 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
             let native = import_native(&mut store, anchor.target.agent, &home.path)
                 .map_err(|e| e.to_string())?;
             let (resumable, forkable) = probe_agent(anchor.target.agent, &home);
-            for (native_key, session) in native {
+            catalog.warnings.extend(native.warnings);
+            for (native_key, session) in native.sessions {
                 if resumable
                     && session.cwd.is_dir()
                     && session.path.is_file()
@@ -414,10 +417,31 @@ impl WindowController {
             nodes,
             &catalog.snapshot.positions,
         );
+        let incomplete = if catalog.warnings.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " · Incomplete history: {} relationships unavailable",
+                catalog.warnings.len()
+            )
+        };
         self.flow.panel.status.set_text(&format!(
-            "{} sessions · scroll to zoom · drag nodes or space",
+            "{} sessions{incomplete} · scroll to zoom · drag nodes or space",
             graph.nodes().len()
         ));
+        self.flow.panel.status.set_tooltip_text(
+            (!catalog.warnings.is_empty())
+                .then(|| {
+                    catalog
+                        .warnings
+                        .iter()
+                        .take(8)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .as_deref(),
+        );
         self.flow.panel.show_workspace(active, graph, keys);
     }
 
@@ -920,6 +944,7 @@ pub(super) async fn check_native(
         forkable: BTreeSet::new(),
         views: BTreeMap::new(),
         live: BTreeMap::new(),
+        warnings: Vec::new(),
     });
     controller
         .pane_registry
@@ -1001,6 +1026,48 @@ pub(super) async fn check_native(
         widget
     );
     assert_eq!(terminal.pid.get(), pid);
+    controller
+        .flow
+        .catalog
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .warnings
+        .push("Fixture: malformed fork metadata".into());
+    controller
+        .render_session_flow(std::slice::from_ref(&anchor))
+        .await;
+    assert!(controller
+        .flow
+        .panel
+        .status
+        .text()
+        .contains("Incomplete history: 1"));
+    assert!(controller
+        .flow
+        .panel
+        .status
+        .tooltip_text()
+        .unwrap()
+        .contains("malformed fork metadata"));
+    controller
+        .flow
+        .catalog
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .warnings
+        .clear();
+    controller
+        .render_session_flow(std::slice::from_ref(&anchor))
+        .await;
+    assert!(!controller
+        .flow
+        .panel
+        .status
+        .text()
+        .contains("Incomplete history"));
+    assert!(controller.flow.panel.status.tooltip_text().is_none());
     // Moving through another anchor of the same family must not change its geometry.
     let positions = controller.flow.panel.positions();
     let graph = store.snapshot().unwrap().lineage;

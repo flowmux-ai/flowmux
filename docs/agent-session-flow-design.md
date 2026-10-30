@@ -282,6 +282,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 ## 현재 구현과 검증 경계
 
 - Schema 3의 `views`는 workspace별 camera·선택·열림·높이만, `live_sessions`는 실행 위치와 process birth marker만 저장한다. 계보는 session/edge에만 속한다.
+- Native discovery는 잘못된 parent metadata, 순환, 충돌 부모를 연결하지 않고 정상 계보를 보존한다. 유효 관계 검증과 publication은 같은 writer transaction에서 이루어지며 기존 확정 부모를 덮어쓰지 않는다. `Incomplete history`와 누락 관계 수, tooltip의 이유(최대 8개)를 표시하고 정상 refresh 후 해제한다. Native history 파일과 기존 strict import의 전체 rollback 계약은 유지한다.
 - Resume 예약과 실행 binding 공개는 DB transaction으로 보호한다. 지연된 갱신은 읽었던 binding snapshot과 현재 값이 다르면 덮어쓰지 않는다. PID가 재사용된 binding은 실행 소유권으로 인정하지 않는다.
 - Codex 0.166.0에서 첫 요청 전의 TUI 시작 hook이 지연되는 것을 확인했다. 이 경우 해당 pane의 프로세스 자손 중 **Codex가 쓰기 모드로 연 native rollout 파일**을 확인한다. Native ID, 저장소, process birth marker가 일치하고 후보가 하나일 때만 식별한다. 최근 파일·제목·유사도는 사용하지 않는다. macOS는 시간·출력 크기가 제한된 `lsof`, Linux는 `/proc/<pid>/fd`와 `fdinfo`를 worker에서 조회한다.
 - Codex fork의 parent는 `forked_from_id`를 추가 확인한다. Hook의 `source: fork` 필터도 포함한다. 기존 lifecycle 추정 엔진과 사용자 hook trust 설정은 변경하지 않는다.

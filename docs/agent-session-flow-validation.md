@@ -292,3 +292,11 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 원격 runner에서 browser-control, editor-keyboard, markdown, webdriver-native, webdriver, browser-chrome이 모두 통과했다. 이는 최신 제품 코드의 해당 회귀 gate 성공 증거이며 잠긴 로컬 화면에서 물리 입력을 검증했다는 의미는 아니다. Native state/복원, hook·session 경로, notification, editor recovery, palette pointer release, Office stability, browser deadline phase도 통과했다. 전체 목록과 실행 식별자는 [macOS gate JSON](design-assets/session-flow-macos-gate-ecc97ae2.json)에 보존했다.
 
 이 CI commit 이후의 코드 차이는 opt-in macOS provider harness 및 test-only graph helper 보강이다. 해당 부분은 실제 Codex로 로컬 native smoke와 clippy를 따로 통과했다. 제품 실행 코드는 `ecc97ae2`와 동일하다. 현재 Test 실행의 Linux job `124256539183`은 계속 실행 중이므로 workflow 전체 성공은 아직 확정하지 않는다.
+
+
+완료 감사 중 발견한 metadata 격리 오류: 유효한 Codex 계보와 잘못된 `forked_from_id`가 함께 있으면 한 세션의 parse error가 전체 import를 중단했다. `/tmp/flowmux-session-flow-partial-before.log`에서 새 회귀 시험이 실제 실패하는 것을 확인한 뒤 수정했다. Native discovery는 잘못된 관계를 보고하고 정상 기록·계보를 유지한다. 순환·충돌 부모도 writer transaction 안에서 걸러 기존 확정 edge를 덮어쓰지 않는다. 기존 strict batch import는 여전히 오류 시 전체 rollback한다.
+
+수정 후 state 81개와 integration 1+2+13개가 통과했다(`/tmp/flowmux-session-flow-partial-state-full.log`). 잘못된 parent, 충돌 부모, 자기 참조·순환, 독립 family 보존, 반복 import의 idempotence, native 파일 무수정을 검사했다. Native harness에서는 정상 graph를 유지하며 `Incomplete history`와 tooltip을 표시하고 다음 정상 갱신에서 둘 다 제거함을 확인했다(`/tmp/flowmux-session-flow-partial-native.log`, `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`, exit 0). Workspace all-target clippy에 `flowmux/native-smoke`를 포함해 `-D warnings`로 통과했다(`/tmp/flowmux-session-flow-partial-clippy.log`). 이 제품 코드 보완은 기존 CI 이후의 변경이므로 기존 통과 결과를 새 변경의 최종 CI로 주장하지 않는다.
+
+
+부분 계보 보완 이후 실제 Codex 회귀도 통과했다(`/tmp/flowmux-session-flow-partial-real-codex.log`, exit 0). Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e4e-88e7-7ae0-a75d-fefca0788c42`; 실제 메뉴 fork, graph click resume, 중복 방지, workspace 간 공유 계보와 정확한 active tab 전환, 원본/자식 PID 보존 marker를 확인했다.

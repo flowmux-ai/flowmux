@@ -49,33 +49,44 @@ pub struct Snapshot {
     pub positions: BTreeMap<SessionKey, Point>,
 }
 
+pub struct NativeImport {
+    pub sessions: Vec<(SessionKey, HistorySession)>,
+    pub warnings: Vec<String>,
+}
+
 /// Refresh one native namespace without changing the existing history panel's
 /// discovery/filtering behavior. Unknown provider lineage stays unknown.
 pub fn import_native(
     store: &mut FlowStore,
     agent: SessionAgent,
     home: &Path,
-) -> io::Result<Vec<(SessionKey, HistorySession)>> {
+) -> io::Result<NativeImport> {
     let sessions = crate::session_history::list_sessions(agent, home)?;
     let mut available = Vec::new();
     let mut records = Vec::new();
     let mut edges = Vec::new();
+    let mut warnings = Vec::new();
     for session in sessions {
         let key = session_key(agent, home, &session.id)?;
-        if let Some(parent) = session.fork_parent()? {
-            edges.push((
+        match session.fork_parent() {
+            Ok(Some(parent)) => edges.push((
                 SessionKey {
                     id: parent,
                     ..key.clone()
                 },
                 key.clone(),
-            ));
+            )),
+            Ok(None) => {}
+            Err(error) => warnings.push(format!("{} {}: {error}", key.provider, key.id)),
         }
         records.push((key.clone(), SessionRecord::from(&session)));
         available.push((key, session));
     }
-    store.import(&records, &edges)?;
-    Ok(available)
+    warnings.extend(store.import_checked(&records, &edges, true)?);
+    Ok(NativeImport {
+        sessions: available,
+        warnings,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -302,24 +313,43 @@ impl FlowStore {
         records: &[(SessionKey, SessionRecord)],
         edges: &[(SessionKey, SessionKey)],
     ) -> io::Result<()> {
+        self.import_checked(records, edges, false).map(|_| ())
+    }
+
+    /// Native discovery can retain valid families while reporting rejected edges.
+    /// Validation and publication share the writer transaction, including conflicts
+    /// introduced by another instance since the native files were read.
+    fn import_checked(
+        &mut self,
+        records: &[(SessionKey, SessionRecord)],
+        edges: &[(SessionKey, SessionKey)],
+        skip_invalid: bool,
+    ) -> io::Result<Vec<String>> {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(io::Error::other)?;
         let mut graph = read_lineage(&tx)?;
+        let mut accepted = Vec::new();
+        let mut warnings = Vec::new();
         for (parent, child) in edges {
-            graph
-                .link(parent.clone(), child.clone())
-                .map_err(|e| invalid(format!("Invalid fork: {e:?}")))?;
+            match graph.link(parent.clone(), child.clone()) {
+                Ok(()) => accepted.push((parent, child)),
+                Err(error) if skip_invalid => {
+                    warnings.push(format!("{} {}: {error:?}", child.provider, child.id));
+                }
+                Err(error) => return Err(invalid(format!("Invalid fork: {error:?}"))),
+            }
         }
         for (key, record) in records {
             tx.execute("INSERT INTO sessions(key,metadata) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata",
                 params![encode(key)?, encode(record)?]).map_err(io::Error::other)?;
         }
-        for (parent, child) in edges {
+        for (parent, child) in accepted {
             insert_edge(&tx, parent, child)?;
         }
-        tx.commit().map_err(io::Error::other)
+        tx.commit().map_err(io::Error::other)?;
+        Ok(warnings)
     }
 
     /// Missing native records remain visible placeholders; this only updates display geometry.
@@ -795,7 +825,8 @@ mod tests {
         }
         let before = crate::session_history::list_sessions(SessionAgent::Codex, &home).unwrap();
         let available = import_native(&mut db, SessionAgent::Codex, &home).unwrap();
-        assert_eq!(available.len(), before.len());
+        assert_eq!(available.sessions.len(), before.len());
+        assert!(available.warnings.is_empty());
         let graph = db.snapshot().unwrap().lineage;
         assert_eq!(graph.edges().count(), 2);
         assert_eq!(
@@ -861,6 +892,118 @@ mod tests {
         }
         session.agent = SessionAgent::Codex;
         assert!(session.fork_command().is_err());
+    }
+
+    #[test]
+    fn malformed_fork_metadata_does_not_hide_other_families() {
+        let (dir, mut db) = store();
+        let home = dir.path().join("codex");
+        let sessions = home.join("sessions/2026/10/31");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let parent = Uuid::new_v4().to_string();
+        let child = Uuid::new_v4().to_string();
+        let malformed = Uuid::new_v4().to_string();
+        for (id, fork) in [(&child, parent.as_str()), (&malformed, "invalid-parent")] {
+            std::fs::write(
+                sessions.join(format!("{id}.jsonl")),
+                serde_json::json!({"type":"session_meta","payload":{
+                    "id":id,"source":"cli","forked_from_id":fork,"cwd":dir.path()
+                }})
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let available = import_native(&mut db, SessionAgent::Codex, &home)
+            .expect("one malformed relation must not hide healthy families");
+        assert_eq!(available.sessions.len(), 2);
+        assert_eq!(available.warnings.len(), 1);
+        assert!(available.warnings[0].contains(&malformed));
+        let graph = db.snapshot().unwrap().lineage;
+        assert_eq!(graph.edges().count(), 1);
+        assert_eq!(
+            graph
+                .project([&session_key(SessionAgent::Codex, &home, &child).unwrap()])
+                .nodes()
+                .len(),
+            2
+        );
+        assert!(graph
+            .project([&session_key(SessionAgent::Codex, &home, &malformed).unwrap()])
+            .is_empty());
+        let second_parent = Uuid::new_v4().to_string();
+        let second_child = Uuid::new_v4().to_string();
+        for id in [&child, &second_child] {
+            std::fs::write(
+                sessions.join(format!("{id}.jsonl")),
+                serde_json::json!({"type":"session_meta","payload":{
+                    "id":id,"source":"cli","forked_from_id":second_parent,"cwd":dir.path()
+                }})
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let imported = import_native(&mut db, SessionAgent::Codex, &home).unwrap();
+        assert_eq!(imported.sessions.len(), 3);
+        assert_eq!(imported.warnings.len(), 2);
+        assert!(imported
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("ConflictingParent")));
+        let updated = db.snapshot().unwrap().lineage;
+        assert_eq!(updated.edges().count(), 2);
+        assert_eq!(
+            updated.project([&session_key(SessionAgent::Codex, &home, &child).unwrap()]),
+            graph
+        );
+        // Refresh repeats the warning without inventing edges or modifying native data.
+        let before = std::fs::read(sessions.join(format!("{child}.jsonl"))).unwrap();
+        assert_eq!(
+            import_native(&mut db, SessionAgent::Codex, &home)
+                .unwrap()
+                .warnings
+                .len(),
+            2
+        );
+        assert_eq!(db.snapshot().unwrap().lineage, updated);
+        assert_eq!(
+            std::fs::read(sessions.join(format!("{child}.jsonl"))).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn native_cycles_are_reported_without_hiding_independent_families() {
+        let (dir, mut db) = store();
+        let home = dir.path().join("codex");
+        let sessions = home.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let ids: Vec<_> = (0..5).map(|_| Uuid::new_v4().to_string()).collect();
+        for (child, parent) in [(0, 1), (1, 0), (2, 2), (4, 3)] {
+            std::fs::write(
+                sessions.join(format!("{}.jsonl", ids[child])),
+                serde_json::json!({"type":"session_meta","payload":{
+                    "id":ids[child],"source":"cli","forked_from_id":ids[parent],"cwd":dir.path()
+                }})
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let imported = import_native(&mut db, SessionAgent::Codex, &home).unwrap();
+        assert_eq!(imported.warnings.len(), 2);
+        assert!(imported
+            .warnings
+            .iter()
+            .all(|warning| warning.contains("Cycle")));
+        let graph = db.snapshot().unwrap().lineage;
+        assert_eq!(graph.edges().count(), 2);
+        assert_eq!(graph.families().len(), 2);
+        assert_eq!(
+            graph
+                .project([&session_key(SessionAgent::Codex, &home, &ids[4]).unwrap()])
+                .nodes()
+                .len(),
+            2
+        );
     }
 
     #[test]
