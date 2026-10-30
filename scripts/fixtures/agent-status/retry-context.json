@@ -1,0 +1,5 @@
+{
+  "automatic": "⏺ Usage limit reached · continuing automatically at 4:10pm · esc to cancel\n✻ Worked for 0s · done 2:34 PM\n────────────────\n❯ \n────────────────\n  ⚠ Usage limit reached · limit resets 4:10pm\n    Continuing automatically at 4:10pm · Esc to cancel · /usage-credits to continue now\n  ⏸ manual mode on\n",
+  "manual": "⏺ Usage limit reached · continuing automatically at 4:10pm · esc to cancel\n✻ Worked for 0s · done 2:34 PM\n⏺ Automatic continue cancelled · /rate-limit-options to re-arm\n────────────────\n❯ \n────────────────\n  ⏸ manual mode on\n",
+  "empty": "────────────────\n❯ \n────────────────\n  ⏸ manual mode on\n"
+}

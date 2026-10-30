@@ -2684,6 +2684,307 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn screen_retry_context_refines_quota_without_resolving_it() {
+        use flowmux_core::{
+            AgentEvidenceSource, AgentRetryState, AgentWaitActor, AgentWaitContext, AgentWaitReason,
+        };
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, "/tmp".into()).await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        let wait = |context| AgentLifecycleEvent::SessionWaitStarted {
+            scope: None,
+            reason: AgentWaitReason::Quota,
+            context,
+            outcome: Some(flowmux_core::AgentTurnOutcome::Failed),
+            message: None,
+            status_text: "Usage limit reached".into(),
+        };
+        let id = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(1),
+                "session",
+                wait(None),
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert!(
+            store
+                .claim_agent_notification(surface, "claude", "session", id)
+                .await
+        );
+        let before = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        let auto = "Claude Code\n────────────────\n❯ \n────────────────\n  ⚠ Usage limit reached · limit resets 4:10pm\n    Continuing automatically at 4:10pm · Esc to cancel · /usage-credits to continue now\n  ⏸ manual mode on";
+        let manual = "⏺ Automatic continue cancelled · /rate-limit-options to re-arm\n────────────────\n❯ \n────────────────\n  ⏸ manual mode on";
+        for (screen, retry, actor) in [
+            (auto, AgentRetryState::Automatic, AgentWaitActor::External),
+            (manual, AgentRetryState::Manual, AgentWaitActor::User),
+        ] {
+            store
+                .report_agent_screen_signals_with_visibility(surface, Some(screen), None, false)
+                .await;
+            let presence = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            let summary = presence.pending_waits[0];
+            assert_eq!((summary.retry, summary.actor), (retry, actor));
+            assert_eq!(
+                summary.context_evidence.unwrap().source,
+                AgentEvidenceSource::Screen
+            );
+            assert_eq!(summary.since, before.pending_waits[0].since);
+            assert_eq!(summary.count, 1);
+            assert_eq!(presence.activity, flowmux_core::AgentActivity::NeedsInput);
+            assert_eq!(presence.seq, Some(1));
+            assert_eq!(presence.source, before.source);
+            assert_eq!(presence.status_evidence, before.status_evidence);
+            assert_eq!(presence.turn_outcome, before.turn_outcome);
+            assert_eq!(presence.seen, before.seen);
+            assert!(flowmux_core::agent_status_tooltip(
+                "agent",
+                presence.status_text().unwrap(),
+                presence.status_evidence,
+                &presence.pending_waits
+            )
+            .contains("retry inferred from screen"));
+            store
+                .report_agent_screen_signals_with_visibility(surface, Some(screen), None, false)
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .pending_waits,
+                presence.pending_waits
+            );
+        }
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(2),
+                "session",
+                wait(None),
+                false,
+            )
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .pending_waits[0]
+                .retry,
+            AgentRetryState::Manual
+        );
+        store
+            .report_agent_screen_signals_with_visibility(surface, None, None, false)
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .pending_waits[0]
+                .retry,
+            AgentRetryState::Manual
+        );
+        store
+            .report_agent_screen_signals_with_visibility(
+                surface,
+                Some("────────────────\n❯ draft only\n────────────────\n  ⏸ manual mode on"),
+                None,
+                false,
+            )
+            .await;
+        let unknown = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(unknown.pending_waits[0].retry, AgentRetryState::Unknown);
+        assert!(unknown.pending_waits[0].context_evidence.is_none());
+        assert_eq!(unknown.activity, flowmux_core::AgentActivity::NeedsInput);
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(3),
+                "session",
+                wait(Some(AgentWaitContext {
+                    actor: AgentWaitActor::External,
+                    retry: AgentRetryState::Automatic,
+                })),
+                false,
+            )
+            .await;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(manual), None, false)
+            .await;
+        let native = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(native.pending_waits[0].retry, AgentRetryState::Automatic);
+        assert!(native.pending_waits[0].context_evidence.is_none());
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(4),
+                "session",
+                AgentLifecycleEvent::SessionWaitResolved {
+                    scope: None,
+                    resume: true,
+                    status_text: "Resumed".into(),
+                },
+                false,
+            )
+            .await;
+        assert!(store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence
+            .pending_waits
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn retry_screen_does_not_reclassify_questions_or_reuse_an_old_frame() {
+        use flowmux_core::{AgentRetryState, AgentWaitReason};
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, "/tmp".into()).await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        let screen = "Claude Code\n────────────────\n❯ \n────────────────\n  ⚠ Usage limit reached · limit resets 4:10pm\n    Continuing automatically at 4:10pm · Esc to cancel";
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(1),
+                "session",
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    scope: None,
+                    reason: AgentWaitReason::Question,
+                    message: None,
+                    status_text: "Waiting for answer".into(),
+                },
+                false,
+            )
+            .await;
+        let question = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(screen), None, false)
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .pending_waits,
+            question.pending_waits
+        );
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(2),
+                "session",
+                AgentLifecycleEvent::SessionWaitStarted {
+                    scope: None,
+                    reason: AgentWaitReason::Quota,
+                    context: None,
+                    outcome: None,
+                    message: None,
+                    status_text: "Usage limit reached".into(),
+                },
+                false,
+            )
+            .await;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(screen), None, false)
+            .await;
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert!(presence
+            .pending_waits
+            .iter()
+            .all(|wait| wait.retry == AgentRetryState::Unknown));
+        assert_eq!(presence.pending_waits.len(), 2);
+        assert_eq!(presence.status_text(), Some("Multiple waits"));
+        let fresh = screen.replace("4:10pm", "4:11pm");
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(&fresh), None, false)
+            .await;
+        let refined = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(refined.pending_waits.len(), 2);
+        assert_eq!(refined.pending_waits[0], question.pending_waits[0]);
+        assert_eq!(refined.pending_waits[1].retry, AgentRetryState::Automatic);
+        assert_eq!(refined.status_text(), Some("Multiple waits"));
+    }
+
+    #[tokio::test]
+    async fn removing_workspace_retires_unclaimed_completion_receipt() {
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, "/tmp".into()).await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        let id = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(1),
+                "session",
+                AgentLifecycleEvent::TurnStopped {
+                    message: None,
+                    status_text: "Completed".into(),
+                },
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert!(store.remove_workspace(workspace).await);
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", id)
+                .await
+        );
+    }
+
+    #[tokio::test]
     async fn completion_notification_identity_tracks_accepted_work_boundaries() {
         let store = StateStore::new_lazy(State::default());
         let workspace = store.create_workspace(None, "/tmp".into()).await;

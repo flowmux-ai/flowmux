@@ -45,6 +45,15 @@ these status changes itself, so agents without hooks sort too; the times last
 for the running flowmux process, and an agent with no observed finish counts
 as the longest finished.
 
+An unresolved usage-limit wait shows **Waiting to retry** when automatic
+continuation is observed, or **Usage limit reached; input required** after its
+automatic continuation is canceled. Recognized terminal controls can supplement
+an existing hook wait; they do not resolve it or change its original hook
+evidence. The tooltip identifies retry context inferred from the screen.
+Unknown context remains unknown, and elapsed time alone never completes a wait.
+Live JSON exposes this supplemental basis as optional
+`pending_waits[].context_evidence`, separately from `status_evidence`.
+
 `usage_bar_enabled` defaults to `true`. Use **Pin to usage bar** in **AI Usage**
 to choose which Claude/Codex usage windows appear in the footer. The selections
 are saved in `usage_bar_pins`: an omitted or `null` provider keeps the automatic

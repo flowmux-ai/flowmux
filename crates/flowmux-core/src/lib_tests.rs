@@ -3103,6 +3103,7 @@ fn screen_working_restores_blocked_acknowledgement_state() {
             reason: AgentWaitReason::Question,
             actor: AgentWaitActor::User,
             retry: AgentRetryState::Unknown,
+            context_evidence: None,
             count: 2,
             since: chrono::Utc::now(),
         };
@@ -4777,4 +4778,52 @@ fn status_evidence_roundtrips_old_and_future_payloads() {
     assert!(
         agent_status_tooltip("agent", "Idle", Some(process), &[]).contains("activity unconfirmed")
     );
+}
+
+#[test]
+fn retry_screen_controls_are_scoped_to_the_live_input_frame() {
+    let automatic =
+        "    Continuing automatically at 4:10pm · Esc to cancel · /usage-credits to continue now";
+    let canceled = "⏺ Automatic continue cancelled · /rate-limit-options to re-arm";
+    let frame = |before: &str, draft: &str, footer: &str| {
+        format!("{before}\n────────────────\n❯ {draft}\n────────────────\n{footer}")
+    };
+    let context =
+        |text: &str| detect_agent_retry_screen(Some(text)).and_then(|screen| screen.context);
+    assert_eq!(
+        context(&frame("", "", automatic)),
+        Some(AgentWaitContext {
+            actor: AgentWaitActor::External,
+            retry: AgentRetryState::Automatic,
+        })
+    );
+    assert_eq!(
+        context(&frame(canceled, "", "  ⏸ manual mode on")),
+        Some(AgentWaitContext {
+            actor: AgentWaitActor::User,
+            retry: AgentRetryState::Manual,
+        })
+    );
+    assert_eq!(
+        context(&frame(canceled, "", automatic)).unwrap().retry,
+        AgentRetryState::Automatic
+    );
+    for text in [
+        automatic.to_string(),
+        canceled.to_string(),
+        frame(automatic, "", ""),
+        frame("", &format!("draft\n{automatic}\n{canceled}"), ""),
+        frame(
+            &format!("{canceled}\n⏺ New response\n✻ Worked for 1s · done 2:00 PM"),
+            "",
+            "",
+        ),
+        frame("", "", "Continuing automatically · Esc to cancel"),
+        frame("", "", "Continuing automatically at 4:10pm"),
+    ] {
+        assert_eq!(context(&text), None, "{text}");
+    }
+    let empty = frame("", "draft only", "  ⏸ manual mode on");
+    assert!(detect_agent_retry_screen(Some(&empty)).is_some_and(|screen| screen.context.is_none()));
+    assert!(detect_agent_retry_screen(None).is_none());
 }

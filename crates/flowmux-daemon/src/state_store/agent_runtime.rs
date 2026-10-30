@@ -9,7 +9,7 @@ use super::StateStore;
 use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_completion, detect_agent_idle_name_from_signals,
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
-    detect_agent_status_from_signals, detect_agent_usage_limit_text,
+    detect_agent_retry_screen, detect_agent_status_from_signals, detect_agent_usage_limit_text,
     select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport,
     AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope, AgentWaitSummary,
     NotificationId, Pane, PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace,
@@ -107,6 +107,8 @@ pub(super) struct PendingAgentWait {
     notification_claimed: bool,
     reason: AgentWaitReason,
     context: AgentWaitContext,
+    screen_context: Option<(AgentWaitContext, flowmux_core::AgentStatusEvidence)>,
+    screen_baseline: Option<u64>,
     since: chrono::DateTime<chrono::Utc>,
 }
 
@@ -120,6 +122,8 @@ impl PendingAgentWait {
                 actor: reason.actor(),
                 ..Default::default()
             },
+            screen_context: None,
+            screen_baseline: None,
             since: chrono::Utc::now(),
         }
     }
@@ -140,6 +144,7 @@ fn record_scope_wait(
                     wait.notification_claimed = false;
                 }
                 wait.reason = reason;
+                wait.screen_context = None;
                 wait.context = AgentWaitContext {
                     actor: reason.actor(),
                     ..Default::default()
@@ -155,6 +160,9 @@ fn record_scope_wait(
             wait.notification_claimed = false;
         }
         wait.context = context;
+        if context != AgentWaitContext::default() {
+            wait.screen_context = None;
+        }
     }
 }
 
@@ -166,6 +174,8 @@ struct CompletionNotification {
 
 #[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
+    /// Latest recognized retry frame per live surface, including an empty frame.
+    retry_screen_fingerprints: HashMap<SurfaceId, u64>,
     /// One receipt per session's most recently completed response. Accepted new
     /// work retires it; notification-log retention does not.
     completion_notifications: HashMap<AgentLifecycleKey, CompletionNotification>,
@@ -414,8 +424,17 @@ fn pending_wait_summary(
         .flat_map(|waits| waits.values())
         .map(|wait| (AgentWaitScope::Session, wait));
     for (scope, wait) in tool.chain(permission).chain(session) {
+        let context = wait
+            .screen_context
+            .map_or(wait.context, |(context, _)| context);
         summary
-            .entry((scope, wait.reason, wait.context.actor, wait.context.retry))
+            .entry((
+                scope,
+                wait.reason,
+                context.actor,
+                context.retry,
+                wait.screen_context.is_some(),
+            ))
             .and_modify(|entry| {
                 entry.count = entry.count.saturating_add(1);
                 entry.since = entry.since.min(wait.since);
@@ -423,8 +442,9 @@ fn pending_wait_summary(
             .or_insert(AgentWaitSummary {
                 scope,
                 reason: wait.reason,
-                actor: wait.context.actor,
-                retry: wait.context.retry,
+                actor: context.actor,
+                retry: context.retry,
+                context_evidence: wait.screen_context.map(|(_, evidence)| evidence),
                 count: 1,
                 since: wait.since,
             });
@@ -775,6 +795,12 @@ impl StateStore {
         }
         drop(saw_no_signal);
         let mut lifecycle = self.agents.lifecycle.lock().await;
+        lifecycle
+            .retry_screen_fingerprints
+            .retain(|surface, _| !surfaces.contains(surface));
+        lifecycle
+            .completion_notifications
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
         lifecycle
             .screen_absent
             .retain(|surface| !surfaces.contains(surface));
@@ -1369,12 +1395,16 @@ impl StateStore {
                             .or_default()
                             .insert(scope.to_string(), seq);
                     }
-                    record_scope_wait(
-                        runtime.session_waits.entry(wait_key.clone()).or_default(),
-                        scope,
-                        reason,
-                        context,
-                    );
+                    let baseline = runtime.retry_screen_fingerprints.get(&surface_id).copied();
+                    let scopes = runtime.session_waits.entry(wait_key.clone()).or_default();
+                    let before = scopes
+                        .get(&scope)
+                        .map(|wait| (wait.notification_id, wait.reason));
+                    record_scope_wait(scopes, scope.clone(), reason, context);
+                    let wait = scopes.get_mut(&scope).unwrap();
+                    if before != Some((wait.notification_id, wait.reason)) {
+                        wait.screen_baseline = baseline;
+                    }
                     turn_outcome = outcome;
                     Some((NeedsInput, message, status_text))
                 } else {
@@ -2495,6 +2525,25 @@ impl StateStore {
             .lock()
             .await
             .insert(surface_id, fingerprint);
+        if let Some(observation) = detect_agent_retry_screen(screen_text) {
+            let mut hash = DefaultHasher::new();
+            observation.marker.hash(&mut hash);
+            let fingerprint = hash.finish();
+            lifecycle
+                .retry_screen_fingerprints
+                .insert(surface_id, fingerprint);
+            if let Some(changed) = self
+                .refine_agent_retry_screen_context(
+                    &mut lifecycle,
+                    surface_id,
+                    &observation,
+                    fingerprint,
+                )
+                .await
+            {
+                return Some(changed);
+            }
+        }
         let status_text = match detected_status {
             Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
             Some(AgentStatus::Blocked) => detect_agent_usage_limit_text(screen_text),
@@ -2721,6 +2770,79 @@ impl StateStore {
         drop(s);
         drop(lifecycle);
         outcome
+    }
+
+    async fn refine_agent_retry_screen_context(
+        &self,
+        lifecycle: &mut AgentLifecycleRuntime,
+        surface_id: SurfaceId,
+        observation: &flowmux_core::AgentRetryScreen<'_>,
+        fingerprint: u64,
+    ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        let mut state = self.inner.lock().await;
+        for workspace in &mut state.workspaces {
+            for surface in &mut workspace.surfaces {
+                let Some(mut presence) = surface.root_pane.agent_presence_for_surface(surface_id)
+                else {
+                    continue;
+                };
+                if presence.name != "claude"
+                    || presence.status != AgentStatus::Blocked
+                    || presence.source.as_deref() != Some("flowmux:hook")
+                {
+                    return None;
+                }
+                let key = (
+                    surface_id,
+                    presence.name.clone(),
+                    presence.session_id.clone()?,
+                );
+                let scopes = lifecycle.session_waits.get_mut(&key)?;
+                let mut changed = false;
+                for wait in scopes.values_mut() {
+                    if wait.reason != AgentWaitReason::Quota
+                        || wait.context != AgentWaitContext::default()
+                        || (wait.screen_context.is_none()
+                            && wait.screen_baseline == Some(fingerprint))
+                    {
+                        continue;
+                    }
+                    let previous = wait.screen_context.map(|(context, _)| context);
+                    if previous == observation.context {
+                        continue;
+                    }
+                    if previous.is_some_and(|context| {
+                        context.retry == flowmux_core::AgentRetryState::Automatic
+                    }) && observation.context.is_some_and(|context| {
+                        context.retry == flowmux_core::AgentRetryState::Manual
+                    }) {
+                        wait.notification_id = NotificationId::new();
+                        wait.notification_claimed = false;
+                    }
+                    wait.screen_context = observation.context.map(|context| {
+                        (
+                            context,
+                            flowmux_core::AgentStatusEvidence {
+                                source: flowmux_core::AgentEvidenceSource::Screen,
+                                since: chrono::Utc::now(),
+                            },
+                        )
+                    });
+                    changed = true;
+                }
+                if !changed {
+                    return None;
+                }
+                presence.pending_waits = pending_wait_summary(lifecycle, &key);
+                surface
+                    .root_pane
+                    .set_surface_agent(surface_id, Some(presence));
+                tracing::debug!(target: "flowmux_agent", reason = "retry_screen_context", changed = true,
+                    surface = %surface_id, "agent decision");
+                return Some((workspace.id, workspace.agent_status_rollup()));
+            }
+        }
+        None
     }
 
     async fn clear_screen_agent_signal(

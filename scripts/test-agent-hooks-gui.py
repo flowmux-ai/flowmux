@@ -28,6 +28,7 @@ def main():
     env = {k: v for k, v in os.environ.items() if not k.startswith("FLOWMUX_")}
     # A real executable basename is needed for process identity on both OSes.
     frames = json.loads((Path(__file__).parent / "fixtures/agent-status/codex-goal.json").read_text())
+    retry_frames = json.loads((Path(__file__).parent / "fixtures/agent-status/retry-context.json").read_text())
     source = root / "agent.c"
     source.write_text("""#include <stdio.h>
 #include <string.h>
@@ -54,6 +55,15 @@ int main(int argc, char **argv) {
         if (!strncmp(line, "screen-interrupted", 18)) {
             printf("\\033[2J\\033[H"); fputs(INTERRUPTED_FRAME, stdout);
         }
+        if (!strncmp(line, "retry-auto", 10)) {
+            printf("\\033[2J\\033[H"); fputs(RETRY_AUTO_FRAME, stdout);
+        }
+        if (!strncmp(line, "retry-manual", 12)) {
+            printf("\\033[2J\\033[H"); fputs(RETRY_MANUAL_FRAME, stdout);
+        }
+        if (!strncmp(line, "retry-empty", 11)) {
+            printf("\\033[2J\\033[H"); fputs(RETRY_EMPTY_FRAME, stdout);
+        }
         fflush(stdout);
     }
 }
@@ -61,7 +71,10 @@ int main(int argc, char **argv) {
        .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False))
        .replace("APPROVED_FRAME", json.dumps(frames["approved"], ensure_ascii=False))
        .replace("DRAFT_FRAME", json.dumps(frames["draft"], ensure_ascii=False))
-       .replace("INTERRUPTED_FRAME", json.dumps(frames["interrupted"], ensure_ascii=False)))
+       .replace("INTERRUPTED_FRAME", json.dumps(frames["interrupted"], ensure_ascii=False))
+       .replace("RETRY_AUTO_FRAME", json.dumps(retry_frames["automatic"], ensure_ascii=False))
+       .replace("RETRY_MANUAL_FRAME", json.dumps(retry_frames["manual"], ensure_ascii=False))
+       .replace("RETRY_EMPTY_FRAME", json.dumps(retry_frames["empty"], ensure_ascii=False)))
 
     def rpc(verb, **fields):
         with socket.socket(socket.AF_UNIX) as stream:
@@ -203,6 +216,25 @@ int main(int argc, char **argv) {
                     hook("stop-failure", "needs_input", error="rate_limit")
                     quota = expect_waits([("session", "quota", 1)], "Usage limit reached")
                     assert quota[0]["actor"] == "unknown" and quota[0]["retry"] == "unknown"
+                    for frame, retry, actor, label in (
+                        ("retry-auto", "automatic", "external", "Waiting to retry"),
+                        ("retry-manual", "manual", "user", "Usage limit reached; input required"),
+                    ):
+                        before_context = observed()
+                        rpc("pane_send_keys", pane=pane, keys=frame+"\r")
+                        inferred = expect_waits([("session", "quota", 1)], label)[0]
+                        assert inferred["retry"] == retry and inferred["actor"] == actor, inferred
+                        assert inferred["context_evidence"]["source"] == "screen", inferred
+                        after_context = observed()
+                        for key in ("activity", "source", "status_evidence", "seq", "turn_outcome"):
+                            assert after_context.get(key) == before_context.get(key), (key, before_context, after_context)
+                        assert inferred["since"] == quota[0]["since"]
+                        evidence.write(json.dumps(dict(agent=name, event=frame, observed=after_context))+"\n")
+                        time.sleep(.15)  # Keep this state visible to the native tooltip observer.
+                    rpc("pane_send_keys", pane=pane, keys="retry-empty\r")
+                    cleared = expect_waits([("session", "quota", 1)], "Usage limit reached")[0]
+                    assert cleared["retry"] == "unknown" and "context_evidence" not in cleared
+                    print("PASS: screen retry context preserves native quota wait", flush=True)
                     hook("post-tool-batch", "needs_input")
                     hook("notification", "needs_input", notification_type="quota_auto_resume_stale")
                     manual = expect_waits([("session", "quota", 1)], "Usage limit reached; input required")

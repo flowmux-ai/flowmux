@@ -2640,6 +2640,9 @@ pub struct AgentWaitSummary {
     pub actor: AgentWaitActor,
     #[serde(default)]
     pub retry: AgentRetryState,
+    /// A supplemental basis for retry context, separate from lifecycle ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_evidence: Option<AgentStatusEvidence>,
     pub count: u32,
     pub since: chrono::DateTime<chrono::Utc>,
 }
@@ -2757,6 +2760,14 @@ pub fn agent_status_tooltip(
             AgentRetryState::Automatic => text.push_str(" · automatic retry"),
             AgentRetryState::Manual => text.push_str(" · retry requires input"),
             AgentRetryState::Unknown => {}
+        }
+        if let Some(evidence) = wait.context_evidence {
+            if evidence.source == AgentEvidenceSource::Screen {
+                text.push_str(&format!(
+                    " · retry inferred from screen since {}",
+                    evidence.since.format("%H:%M:%S UTC")
+                ));
+            }
         }
     }
     text
@@ -3263,6 +3274,83 @@ pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> 
     agent_status_screen_lines(screen_text?).find_map(|line| {
         let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
         is_agent_usage_limit_status_line(line).then_some(line)
+    })
+}
+
+/// Retry controls in a recognized input frame. Missing controls can retract a
+/// previous screen inference, but never resolve a native pending request.
+pub struct AgentRetryScreen<'a> {
+    pub context: Option<AgentWaitContext>,
+    pub marker: &'a str,
+}
+
+pub fn detect_agent_retry_screen(screen_text: Option<&str>) -> Option<AgentRetryScreen<'_>> {
+    const CANCELED: &str = "Automatic continue cancelled · /rate-limit-options to re-arm";
+    let lines: Vec<_> = screen_text?.lines().collect();
+    let prompt = lines.iter().rposition(|line| {
+        line.strip_prefix('❯')
+            .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+    })?;
+    let separator = |line: &str| {
+        let line = line.trim();
+        line.chars().take(3).count() == 3 && line.chars().all(|ch| matches!(ch, '─' | '━'))
+    };
+    let top = (0..prompt).rfind(|i| !lines[*i].trim().is_empty())?;
+    if !separator(lines[top]) {
+        return None;
+    }
+    let bottom = (prompt + 1..lines.len()).find(|i| separator(lines[*i]))?;
+    let automatic = AgentWaitContext {
+        actor: AgentWaitActor::External,
+        retry: AgentRetryState::Automatic,
+    };
+    let manual = AgentWaitContext {
+        actor: AgentWaitActor::User,
+        retry: AgentRetryState::Manual,
+    };
+    for line in lines[bottom + 1..].iter().rev().map(|line| line.trim()) {
+        let line = line.trim_start_matches('⚠').trim_start();
+        let automatic_control = line
+            .strip_prefix("Continuing automatically ")
+            .and_then(|rest| rest.split_once(" · Esc to cancel"))
+            .or_else(|| {
+                line.strip_prefix("Usage limit reached · continuing automatically ")
+                    .and_then(|rest| rest.split_once(" · esc to cancel"))
+            });
+        if automatic_control.is_some_and(|(when, suffix)| {
+            !when.trim().is_empty() && (suffix.is_empty() || suffix.starts_with(" · "))
+        }) {
+            return Some(AgentRetryScreen {
+                context: Some(automatic),
+                marker: line,
+            });
+        }
+        if line == CANCELED
+            || line
+                .strip_suffix(CANCELED)
+                .is_some_and(|prefix| prefix.starts_with("⏸ ") && prefix.ends_with("  "))
+        {
+            return Some(AgentRetryScreen {
+                context: Some(manual),
+                marker: CANCELED,
+            });
+        }
+    }
+    // Cancellation is also printed as the newest response, after the failed
+    // turn footer. Older transcript messages cannot override current controls.
+    if lines[..top]
+        .iter()
+        .rfind(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.trim().strip_prefix("⏺ ") == Some(CANCELED))
+    {
+        return Some(AgentRetryScreen {
+            context: Some(manual),
+            marker: CANCELED,
+        });
+    }
+    Some(AgentRetryScreen {
+        context: None,
+        marker: "",
     })
 }
 

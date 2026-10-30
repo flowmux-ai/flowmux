@@ -739,3 +739,64 @@ the permanent vendor executable link stayed unchanged. This validates the row
 change with the stated actual-agent limitation. It does not complete automatic
 retry classification, the horizontal bar, shared attention counts/priorities,
 or the outstanding full cross-platform gates.
+
+
+## Screen evidence for retry context (2026-10-30)
+
+A recognized composer frame can now supplement an existing hook-owned quota
+wait with automatic or manual retry context. The lifecycle source, sequence,
+state evidence, failed outcome, request start time, and pending count remain
+unchanged. `pending_waits[].context_evidence` identifies this separate screen
+basis; tooltips disclose it. Explicit native retry context takes precedence.
+Repeated identical controls preserve the evidence timestamp. Recognized empty
+controls retract the inference to unknown without resolving the wait;
+unrecognized frames retain the previous context. Old pre-wait frames, unrelated
+question/approval waits, transcript controls, and unsubmitted drafts cannot
+create or reclassify a quota wait. No retry deadline is invented or scheduled.
+
+Surface cleanup also retires completion receipts and retry fingerprints. The
+receipt regression first demonstrated that an unclaimed completion survived
+workspace removal. The retry regression first demonstrated unknown context
+despite current automatic controls. RED logs:
+`/tmp/fm-retry-screen_retry_context_refines_quota_without_resolving_it-red.log`
+and `/tmp/fm-retry-removing_workspace_retires_unclaimed_completion_receipt-red.log`.
+
+Final isolated agent unit suites passed on macOS and Linux, including 168 core
+and 200 daemon tests (one daemon test ignored). Full workspace/all-targets Clippy
+with native-smoke and the canonical application build passed. Logs:
+`/tmp/fm-retry-context-unit-final.log`,
+`/tmp/fm-retry-context-clippy-final.log`,
+`/tmp/fm-retry-context-build.log`, and
+`/tmp/fm-retry-context-linux-final.log`. Linux GUI replay and the macOS
+main-thread harness passed automatic/manual/empty controls, the existing native
+hook matrix, and stable row checks. The native tooltip observer also verified
+the separate retry-screen evidence (`/tmp/fm-retry-context-native.log`,
+`MACOS_NATIVE_SMOKE_OK`). These replay events are synthetic.
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 ran in isolated application
+PID 44944, root `/tmp/fm-atn-3lmp7bkl`. A's real quota failure first displayed
+Waiting to retry. Escape canceled its automatic continuation without another
+native hook sequence, and Flowmux displayed Usage limit reached; input required.
+The original quota request, evidence timestamp, sequence, session, and failed
+outcome stayed unchanged. B passed two consecutive responses, a displayed
+one-time harmless command approval, interruption, and recovery. Both agents'
+unsubmitted drafts containing exact retry-control text left state unchanged.
+Native screenshots confirmed automatic retry, approval, interruption, and
+manual retry labels. Log: `/tmp/fm-retry-context-live.log`
+(`LIVE_RETRY_CONTEXT_MATRIX_OK`). The isolated root retains before/after screen
+text, state JSON, draft comparisons, and final agent JSON. Application and CLI
+SHA-256:
+
+`2317c8a0e49bd3ba9794d20011efd6f00ffa07fcde52b53d5e0593e487ecf19c`
+
+`f05f50e0ce54a9d1493352926a333381a5399be82fc61522c11fa30230eeee13`
+
+A's normal response/question/recovery matrix and actual deadline-driven resume
+remain quota-blocked. Identical controls already observed before a new wait are
+conservatively ignored until a fresh control signature appears. Unknown or
+changed terminal layouts may therefore retain unknown context; screen evidence
+is supplemental, not delivery or success proof. Original application PID 72789
+and independent user agent PID 1401 stayed alive; the permanent vendor
+executable link and hash stayed unchanged. Account/billing/model settings were
+unchanged. Full cross-platform gates and the remaining attention UI/protocol
+work are still outstanding.

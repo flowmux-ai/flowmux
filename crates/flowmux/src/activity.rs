@@ -329,6 +329,7 @@ mod tests {
             retry: flowmux_core::AgentRetryState::Unknown,
             scope: flowmux_core::AgentWaitScope::Permission,
             reason: flowmux_core::AgentWaitReason::Question,
+            context_evidence: None,
             count: 1,
             since: chrono::Utc::now(),
         }];
