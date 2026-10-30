@@ -291,14 +291,14 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 
 | 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |
 | --- | --- | --- | --- |
-| Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → 재선택 중복 없음. 원본 widget/PID 유지 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
+| Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → workspace 간 기존 tab 포커스 → child 재fork의 3세대 관계 확인. 원본 widget/PID 유지 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
 | Claude Code 2.1.314 | `--resume ID --fork-session`, `--resume ID` | 실제 CLI에서 child ID 분리, 이전 대화 표식 상속, 같은 child ID로 resume | Native GUI 연동은 별도 검증 필요. 외부 fork의 명시적 parent metadata는 확인하지 못함 |
 | OpenCode 1.17.18 | `--session ID --fork`, `--session ID` | Native 저장소에 별도 child 생성과 원본 메시지 복제 | 모델 호출은 token refresh 401로 blocked. GUI 전체 검증 미완료. Native fork의 `parent_id`는 NULL이어서 외부 계보 근거로 쓰지 않음 |
 | Gemini·agy·Cline | 기존 history/resume 재사용 | Parser·명령 및 기존 회귀 테스트 대상 | 비파괴 외부 fork 미확인으로 Fork session 비활성. 실제 provider별 그래프 resume 검증은 별도 |
 
 **과거 계보 조회의 한계:** Codex의 명시적 native fork metadata와 Flowmux가 직접 확인하여 기록한 관계를 표시한다. 도구가 원본 ID를 보관하지 않은 외부 fork는 자동 복원할 수 없다. 임의의 부모를 연결하지 않으며, 여섯 도구의 모든 과거 fork를 같은 수준으로 복원한다고 발표하지 않는다.
 
-**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 30분 이상 지속 사용과 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 수치는 목표이며 측정 결과와 구분한다.
+**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 더 큰 그래프·더 긴 기간의 지속 사용과 실제 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 목표는 측정 결과와 구분한다. 실제 Codex의 17노드·3terminal을 유지한 30분/159회 전환 시험은 통과했으며 offscreen render와 snapshot 준비 대기를 별도로 기록했다. 실제 표시 frame 지연 측정은 아니다.
 
 테스트와 실제 provider 증거는 [검증 기록](agent-session-flow-validation.md#실행-기록)에 모은다. 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다.
 

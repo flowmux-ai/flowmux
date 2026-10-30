@@ -4,7 +4,7 @@
 
 상태: 구현·검증 진행 중. 아래 항목은 수용 조건이며 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-`7cc0c176`의 [Test 41116487881](https://github.com/flowmux-ai/flowmux/actions/runs/41116487881)는 macOS IPC 포화 시험에서 실패했고 Linux 작업은 진행 중이다. [Sanitizers 41116492686](https://github.com/flowmux-ai/flowmux/actions/runs/41116492686)도 진행 중이다. 아래 IPC 경쟁 조건 보완 후 새 최종 CI가 필요하다. 이전 `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
+최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)는 macOS 46개 phase와 editor/headless 작업이 성공했고 Linux coverage는 진행 중이다. [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 전체 성공했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -198,7 +198,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | --- | --- | --- |
 | R01 | Native terminal 메뉴의 활성/비활성, stale menu 거절; 실제 Codex 메뉴 callback → fork | 물리 secondary click과 다른 provider GUI는 미확인 |
 | R02 | 실제 Codex 오른쪽 split과 원본 widget/PID 보존; daemon의 source/surface 검증 및 증분 split | 모든 혼합 pane 조합의 실제 provider fork를 실행한 것은 아님 |
-| R03 | 실제 새 child ID·native parent·edge 확인; state의 원자적 완료·중복 방지 | 실제 child에서 재fork하는 3세대 GUI 시나리오는 미확인 |
+| R03 | 실제 새 child ID·native parent·edge 확인; resume한 child의 재fork로 3세대 부모 연결 검증; state의 원자적 완료·중복 방지 | 실제 GUI provider 증거는 Codex 기준 |
 | R04 | 모든 terminal surface를 anchor로 읽는 구현과 native projection fixture | 비활성 tab만 남긴 workspace 버튼의 물리 UI 조작은 미확인 |
 | R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | 실제 sidebar 버튼의 물리 입력은 미확인 |
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
@@ -206,7 +206,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처 | 물리 trackpad·VoiceOver/AT-SPI·실제 화면 frame 지연은 미확인 |
 | R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
 | R10 | Native disabled node 입력이 launch를 만들지 않음; 기록 누락 placeholder·불가 사유 | 수동 접근성 검증 미확인 |
-| R11 | Native 토글·gesture 동안 widget/PID 보존, 실제 Codex source/child 유지 | 진행 중인 30분 시험과 기존 혼합 pane 회귀 gate의 최종 결과를 별도로 판정 |
+| R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
 | R12 | 실제 Codex native ID 확인 후 publication, 같은 ID resume, stale source·writer/PID 재사용 검증 | Claude GUI 및 OpenCode 전체 provider 경로 미확인; 외부 writer 원자적 배제 없음 |
 | R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
 | R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 기반 복구 시험 | 새 GUI 프로세스의 실제 provider crash/restart 전체 시나리오와 미확인 작업 수동 정리 UI는 미완료 |
@@ -338,3 +338,19 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 최신 macOS CI의 IPC 포화 실패: 일반 연결 64개가 모두 응답한 뒤 추가 `Client::connect`의 `peer_cred()`가 `ENOTCONN`으로 실패했다(`/tmp/flowmux-session-flow-macos-7cc0c176.log`). 기존 단일 worker 시험을 두 worker의 동시 accept와 100회 연결로 강화하자 첫 연결에서 같은 오류를 재현했다(`/tmp/flowmux-ipc-saturation-race-before.log`). 포화 서버가 일반 stream을 닫은 뒤 macOS에서 peer credentials를 읽는 경쟁 조건이다.
 
 클라이언트는 이 특정 연결 종료 오류에서만 별도 control endpoint의 동일 사용자 credentials를 검증한다. 일반 요청은 기존 거절된 stream에 남아 실패하며, hook·상태 요청만 기존 control 경로를 사용한다. 전송한 요청을 재시도하거나 mutation을 control로 우회하지 않는다. 수정 후 IPC 단위 80개 및 integration 5+4개가 통과했다(`/tmp/flowmux-ipc-saturation-final.log`). 강화된 시험은 100회 포화 상태 조회, mutation 거절, 이후 상태 조회 성공을 검사한다. IPC all-target clippy와 formatting도 통과했다(`/tmp/flowmux-ipc-saturation-clippy.log`). 실제 native 전체 gate의 재검증은 아직 필요하다. 진행 중인 30분 시험 binary는 이 IPC 수정 전 빌드이므로 그 범위를 별도로 기록한다.
+
+
+최신 macOS 최종 gate: `9116d3bb`의 job `124281231198`은 success이며 artifact `13009385966`의 46개 phase JSON이 모두 passed / exit 0이다. IPC 포화 뒤 hook 2건의 응답 및 `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`를 원본 로그 `/tmp/flowmux-session-flow-macos-9116d3bb.log`에서 확인했다. [최신 macOS phase JSON](design-assets/session-flow-macos-gate-9116d3bb.json)에 보존했다. 최신 Sanitizers workflow `41119199156`와 두 job도 success이고 GUI ASan은 907 passed / 기존 ignored 4개다(`/tmp/flowmux-session-flow-sanitizers-9116d3bb.log`).
+
+`7cc0c176` Linux job `124271947702`도 success로 종료됐다. Coverage phase 1,719.523초와 JSON/HTML/threshold가 통과했고 lines 86.89%, regions 86.80%, functions 85.84%다. 해당 workflow 전체는 앞서 기록한 macOS IPC 오류로 failure다. IPC 수정이 포함된 `9116d3bb`의 Linux 결과와 혼동하지 않는다. 원본 로그 `/tmp/flowmux-session-flow-linux-7cc0c176.log`, artifact `13008498176`.
+
+30분 지속 시험 완료: `/tmp/flowmux-session-flow-soak-final-1800.log`의 프로세스 exit 0과 `MACOS_SESSION_FLOW_SOAK_OK seconds=1800 iterations=159`, real-Codex/native-smoke marker를 확인했다. Probe는 `5e49af23`, 제품 코드는 `7cc0c176` 빌드다. Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e5e-4e9e-73a1-bac8-ff16675e74e9`. 159회 모두 17노드·3terminal, 정확한 active surface·동일 계보·원본/자식 PID 검사를 통과했다. [전체 표본과 요약 JSON](design-assets/session-flow-native-soak-5e49af23.json)에 로그 hash와 범위를 기록했다.
+
+| 30분 시험 측정 | p50 | p95 | 최대 |
+| --- | ---: | ---: | ---: |
+| Offscreen snapshot/render 호출 | 2.90 ms | 4.14 ms | 15.46 ms |
+| Snapshot 준비 대기 | 160.64 ms | 404.58 ms | 429.78 ms |
+
+RSS는 초기 최대 602,896 KiB, 시작 60초 이후 247,280–248,016 KiB, 종료 247,904 KiB였다. 관측값이며 메모리 누수가 없다는 보편적 결론은 아니다. 물리 입력·실제 화면 frame 지연·1,000노드 UI 성능을 측정한 것이 아니다. 진행 중 headless 빌드/검사가 같은 호스트에서 실행됐다. 이 바이너리에는 이후 IPC 수정이 포함되지 않았으며 해당 변경은 별도 최신 native/CI로 검증한다.
+
+3세대 실제 Codex 검증: 최신 제품 코드와 추가 opt-in harness의 `/tmp/flowmux-session-flow-real-refork-final.log`는 exit 0이며 shared-workspace/refork/real-Codex/native-smoke marker를 모두 남겼다. Source `01a18ddc-a51f-7472-ab63-045abb779243` → child `01a18e7a-2962-7462-aa52-5beb822f94e9` → grandchild `01a18e7a-422b-7360-a3a2-c52e772bf11a`. Resume한 child를 다른 workspace에서 우클릭 메뉴 callback으로 다시 fork했다. 새 edge가 child에 연결되고 root에 직접 연결되지 않음, root와 grandchild의 전체 family projection 일치, 기존 source/child PID 유지, terminal 1개만 증가함을 확인했다. 물리 클릭 증거는 아니며 실제 provider와 GTK event/bridge 경로의 결합 검증이다. Native harness clippy와 formatting도 통과했다(`/tmp/flowmux-session-flow-refork-clippy.log`).

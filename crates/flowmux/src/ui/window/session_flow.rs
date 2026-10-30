@@ -1644,6 +1644,75 @@ pub(super) async fn check_real_codex(
         }
         println!("MACOS_SESSION_FLOW_SOAK_OK seconds={seconds} iterations={iteration}");
     }
+    // Fork the resumed child in its new workspace: the new edge must name the
+    // child, not the original root or the previously focused source pane.
+    controller
+        .activate_workspace_at(
+            other_workspace,
+            Some((resumed_terminal.id(), Some(resumed_target.surface))),
+        )
+        .await;
+    controller.refresh_session_flow(true).await;
+    glib::future_with_timeout(Duration::from_secs(15), async {
+        while !controller
+            .pane_registry
+            .borrow()
+            .session_flow_forkable
+            .contains_key(&resumed_target.surface)
+        {
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("resumed child did not become forkable");
+    let fork = native_fork_button(&resumed_terminal.widget);
+    assert!(fork.is_sensitive());
+    fork.emit_clicked();
+    let grandchild_key = glib::future_with_timeout(Duration::from_secs(40), async {
+        loop {
+            controller.poll_agent_processes().await;
+            let snapshot = FlowStore::open(&FlowStore::default_path().unwrap())
+                .unwrap()
+                .snapshot()
+                .unwrap();
+            if let Some((_, grandchild)) = snapshot
+                .lineage
+                .edges()
+                .find(|(parent, _)| *parent == &child_key)
+            {
+                break grandchild.clone();
+            }
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "child refork was not confirmed: {}",
+            controller.flow.panel.status.text()
+        )
+    });
+    assert_ne!(grandchild_key, child_key);
+    assert_ne!(grandchild_key, key);
+    assert_eq!(terminal.pid.get(), original_pid);
+    assert_eq!(resumed_terminal.pid.get(), resumed_pid);
+    assert_eq!(
+        controller.pane_registry.borrow().terminals.len(),
+        terminal_count + 1
+    );
+    let lineage = FlowStore::open(&FlowStore::default_path().unwrap())
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .lineage;
+    assert!(!lineage
+        .edges()
+        .any(|(parent, child)| parent == &key && child == &grandchild_key));
+    assert_eq!(lineage.project([&key]), lineage.project([&grandchild_key]));
+    println!(
+        "MACOS_SESSION_FLOW_REFORK_OK source={source_id} child={child_id} grandchild={}",
+        grandchild_key.id
+    );
     println!("MACOS_SESSION_FLOW_CODEX_REAL_OK source={source_id} child={child_id}");
     server.abort();
 }
