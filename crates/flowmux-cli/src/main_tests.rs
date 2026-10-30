@@ -857,6 +857,13 @@ fn render_tree_marks_active_tab_and_indents() {
                     kind: "terminal".into(),
                     active: false,
                     agent: Some(TreeAgent {
+                        status_evidence: Some(
+                            serde_json::from_value(serde_json::json!({
+                                "source": "screen",
+                                "since": "2026-10-30T00:00:00Z"
+                            }))
+                            .unwrap(),
+                        ),
                         name: "claude".into(),
                         status: AgentStatus::Blocked,
                         activity: AgentActivity::NeedsInput,
@@ -897,6 +904,16 @@ fn render_tree_marks_active_tab_and_indents() {
     let rows: serde_json::Value = serde_json::from_str(&agents).unwrap();
     assert_eq!(rows[0]["session_name"], "demo-1234-abcd");
     assert_eq!(rows[0]["messaging"], true);
+    assert_eq!(rows[0]["identity_source"], "flowmux:hook");
+    assert_eq!(rows[0]["status_evidence"]["source"], "screen");
+    assert_eq!(rows[0]["status_evidence"]["since"], "2026-10-30T00:00:00Z");
+    let mut legacy =
+        serde_json::to_value(workspaces[0].panes[0].tabs[0].agent.as_ref().unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("status_evidence");
+    assert!(serde_json::from_value::<TreeAgent>(legacy)
+        .unwrap()
+        .status_evidence
+        .is_none());
 }
 
 #[test]

@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
             while not observed():
                 assert time.monotonic() < deadline, f"{name} process was not detected"
                 time.sleep(.05)
+            assert observed()["status_evidence"]["source"] == "process", observed()
 
             def hook(event, activity, **fields):
                 payload = dict(session_id=f"fixture-{name}", hook_event_name=event,
@@ -135,6 +136,7 @@ int main(int argc, char **argv) {
                     time.sleep(.05)
                 assert value["name"] == name and value["session_id"] == payload["session_id"], value
                 assert value["source"] == "flowmux:hook", value
+                assert value["status_evidence"]["source"] == "hook", value
                 statuses = {"running": ("working",), "needs_input": ("blocked",),
                             "idle": ("idle", "done")}
                 expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
@@ -280,6 +282,9 @@ int main(int argc, char **argv) {
                                 time.sleep(.05)
                             if completion != "native":
                                 assert observed()["custom_status"] == "Completed", observed()
+                            expected_evidence = "hook" if completion == "native" else "screen"
+                            assert observed()["status_evidence"]["source"] == expected_evidence, observed()
+                            assert observed()["source"] == "flowmux:hook", observed()
                             if completion == "approved":
                                 # Outlast polling so a stale approval phrase cannot reopen the wait.
                                 time.sleep(1)

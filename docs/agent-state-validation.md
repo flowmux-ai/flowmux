@@ -165,3 +165,82 @@ The full agent unit runner, focused all-targets CLI Clippy, CLI build, formattin
 and diff checks passed. Evidence logs are `/tmp/fm-hook-timeout-unit.log` and
 `/tmp/fm-hook-timeout-clippy.log`. The private hook configuration and marker are
 under `/tmp/fm-atn-fx9y65bg`; no authentication material is included here.
+
+## Status evidence separate from identity — 2026-10-30
+
+Live state now carries optional `status_evidence` with its source and `since`
+timestamp. Identity ownership retains its existing source. A screen fallback
+therefore reports screen evidence without taking ownership from a hook or live
+process. Process-only detection explicitly leaves activity unconfirmed.
+
+The timestamp describes when the current state basis was established; it is not
+a heartbeat, last poll, turn identifier, or proof of successful work. Identical
+polling and same-state screen refinements retain native evidence. A restored
+pending request recovers its original evidence, while a newly screen-detected
+completion cannot borrow an earlier idle hook. Missing fields remain compatible
+with old peers; an unknown future source is displayed as unavailable evidence.
+
+Both live Agent lists use the same evidence description in their tooltips.
+`flowmux --json agents` exposes `identity_source` and `status_evidence`; tree JSON
+retains its existing ownership `source` and adds the optional evidence object.
+
+Two regression tests failed before implementation because the evidence contract
+was absent. Coverage now checks stale reports, ownership reclamation, repeated
+polls, misleading screen identity, pending-request restoration, screen completion,
+legacy JSON, and propagation through the live UI model and CLI projection.
+
+Actual-agent verification used application PID 66246 in
+`/tmp/fm-atn-xl9d6bnb`, with separate configuration, state, and socket directories.
+The original application PID 72789 remained running throughout.
+
+| Scenario | Observed result |
+| --- | --- |
+| Native-hook agent A 2.1.314, plain response and question | Hook-backed Working, Blocked, resumed Working, and Idle/Done |
+| Native-hook agent B 0.166.0, shell command and one-time approval | Hook-backed Working/Blocked; reading retained the visible warning; approval completed without reopening the wait |
+| Agent A, immediate interruption | Hook ownership retained; screen evidence explained the fallback to Idle/Done |
+| Agent B, native interruption | Hook evidence and the interrupted status remained visible |
+| Both agents, recovery prompt | A fresh Working state followed by a completed response |
+| Both agents, unsubmitted request/progress/quota wording | Idle/Done and evidence timestamp remained unchanged |
+| Agent B before native hooks started | Process evidence explicitly identified unconfirmed activity |
+
+Agent A's early-interruption label still says Completed. The evidence change
+makes its screen basis inspectable but does not add cancellation inference.
+Question/permission labels and typed outcomes remain subsequent work. A background
+shell may outlive a response; response completion does not claim all child work
+or verification succeeded.
+
+Verified application SHA-256:
+`8a4a29ebc976969eae936dfcfb062785d728824fa3240927045b48d03e1cb2ac`.
+
+Verified CLI SHA-256:
+`737fc3c4f0f479a54201206849ef2e9c59eb317aab205d65298c0cf2274d2c9a`.
+
+The agent unit runner passed, including 166 core and 188 daemon tests. Focused
+all-targets Clippy, build, formatting, and diff checks passed. The expanded native
+replay passed with hook-versus-screen evidence assertions in visible and hidden
+workspaces. Logs: `/tmp/fm-evidence-unit.log`, `/tmp/fm-evidence-clippy.log`,
+`/tmp/fm-evidence-native.log`. A subsequent native replay also observed both
+evidence descriptions attached to live GTK rows and passed with
+`MACOS_AGENT_EVIDENCE_TOOLTIPS_OK` in `/tmp/fm-evidence-agent-native.log`.
+
+The first full macOS gate failed in the code-review history fixture when Git
+could not create a temporary commit-object file (`Invalid argument`). An isolated
+110-commit probe and the repeated full native scenario passed. A review-only
+diagnostic attempt instead timed out at its earlier footer-overflow check and
+did not reproduce the Git operation. Neither failed run is passing evidence;
+the original Git error remains unexplained. The subsequent full macOS gate passed
+all 45 phases with `CI_GATE_EXIT=0` in `/tmp/fm-evidence-macos-ci2.log`, including
+the evidence-tooltip marker. IPC tests and native-smoke Clippy also passed in
+`/tmp/fm-evidence-ipc.log` and `/tmp/fm-evidence-native-clippy.log`.
+
+The preceding Linux snapshot gate failed while generating coverage reports
+because its VM ran out of disk space (`CI_GATE_EXIT=1`). It is not passing
+coverage evidence. Rebuildable sanitizer artifacts were cleared, and the next
+coverage run removed its previous raw profiles through the normal coverage
+cleanup. The VM then had 26 GiB free. The final snapshot for the preceding three
+commits is running in `/tmp/fm-attention-final-63e4fb42`; it does not include this
+evidence change. The Linux agent unit runner for this change passed (166 core
+and 188 daemon tests), as did five Agent Bar tests and the live activity-model
+projection test. Full Linux coverage for this change remains pending. Logs are
+`/tmp/fm-evidence-linux-unit.log`, `/tmp/fm-evidence-linux-bar.log`, and
+`/tmp/fm-evidence-linux-activity.log`.

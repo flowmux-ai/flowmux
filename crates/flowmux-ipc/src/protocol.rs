@@ -113,6 +113,8 @@ pub struct TreeAgent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -170,6 +172,7 @@ fn collect_leaf_panes(pane: &Pane, out: &mut Vec<TreePane>) {
                             status: agent.public_status(),
                             activity: agent.activity,
                             source: agent.source.clone(),
+                            status_evidence: agent.status_evidence,
                             seq: agent.seq,
                             message: agent.message.clone(),
                             custom_status: agent.custom_status.clone(),

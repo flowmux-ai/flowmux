@@ -107,7 +107,11 @@ impl AgentBar {
         }
         button.set_size_request(AGENT_BAR_ITEM_MAX_WIDTH_PX as i32, -1);
         button.set_hexpand(false);
-        button.set_tooltip_text(Some(&format!("{}: {}", item.agent_name, item.status_text)));
+        button.set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
+            &item.agent_name,
+            &item.status_text,
+            item.status_evidence,
+        )));
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         row.set_valign(gtk::Align::Center);
@@ -396,6 +400,7 @@ mod tests {
 
     fn working_item() -> AgentBarItem {
         AgentBarItem {
+            status_evidence: None,
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),

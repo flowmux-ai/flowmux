@@ -150,6 +150,8 @@ pub(crate) fn render_agents(
                         "tab": tab.id,
                         "agent": agent.name,
                         "status": agent.status.as_str(),
+                        "identity_source": agent.source,
+                        "status_evidence": agent.status_evidence,
                         "session_name": agent.session_name,
                         "messaging": agent.messaging_socket.is_some(),
                     }));

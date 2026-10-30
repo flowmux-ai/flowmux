@@ -1117,6 +1117,7 @@ mod tests {
             visible: true,
             items: (0..8)
                 .map(|_| AgentBarItem {
+                    status_evidence: None,
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId::new(),
@@ -1206,6 +1207,7 @@ mod tests {
     fn active_speech_persists_until_status_changes() {
         let (bridge, _receiver) = Bridge::new();
         let item = AgentBarItem {
+            status_evidence: None,
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),
@@ -1243,6 +1245,7 @@ mod tests {
         let workspace = WorkspaceId::new();
         let rooms = [(workspace, "Large team".into())];
         let item = |id| AgentBarItem {
+            status_evidence: None,
             workspace,
             pane: PaneId::new(),
             surface: SurfaceId(uuid::Uuid::from_u128(id)),
@@ -1321,6 +1324,7 @@ mod tests {
             visible: true,
             items: (1..=3)
                 .map(|id| AgentBarItem {
+                    status_evidence: None,
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId(uuid::Uuid::from_u128(id)),

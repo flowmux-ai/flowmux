@@ -12,6 +12,7 @@ pub(crate) async fn check() {
         visible: true,
         items: (0..32)
             .map(|i| AgentBarItem {
+                status_evidence: None,
                 workspace: workspaces[i / 8].0,
                 pane: PaneId::new(),
                 surface: SurfaceId::new(),

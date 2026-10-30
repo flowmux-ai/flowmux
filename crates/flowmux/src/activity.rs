@@ -32,6 +32,7 @@ pub struct ActivityNowEntry {
     pub agent: String,
     pub status: AgentStatus,
     pub status_text: String,
+    pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
     pub seen: bool,
     pub workspace: WorkspaceId,
     pub pane: PaneId,
@@ -49,6 +50,7 @@ pub fn current_activity_entries(model: &flowmux_core::AgentBarModel) -> Vec<Acti
             agent: item.agent_name,
             status: item.status,
             status_text: item.status_text,
+            status_evidence: item.status_evidence,
             seen: item.seen,
             workspace: item.workspace,
             pane: item.pane,
@@ -317,6 +319,7 @@ mod tests {
     fn sort_entries_puts_working_agents_before_recent_finishes_and_mirrors_for_oldest() {
         let store = ActivityStore::new();
         let now = || ActivityNowEntry {
+            status_evidence: None,
             agent: "codex".into(),
             status: AgentStatus::Idle,
             status_text: String::new(),
@@ -389,6 +392,11 @@ mod tests {
             AgentPresence::new("codex", AgentStatus::Working.to_activity(), Some(42));
         presence.status = AgentStatus::Working;
         presence.custom_status = Some("Running tests".into());
+        let evidence = flowmux_core::AgentStatusEvidence {
+            source: flowmux_core::AgentEvidenceSource::Screen,
+            since: chrono::Utc::now(),
+        };
+        presence.status_evidence = Some(evidence);
         tab.agent = Some(presence);
         let state = flowmux_state::State {
             workspace_order: vec![workspace],
@@ -426,6 +434,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].agent, "codex");
         assert_eq!(entries[0].status_text, "Running tests");
+        assert_eq!(entries[0].status_evidence, Some(evidence));
         assert_eq!(entries[0].surface_label, "zsh");
         assert_eq!(entries[0].color, "#123456");
     }

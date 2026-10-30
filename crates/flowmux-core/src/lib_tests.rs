@@ -1607,6 +1607,77 @@ fn agent_activity_maps_to_public_status() {
 }
 
 #[test]
+fn status_evidence_is_distinct_from_identity_and_ignores_stale_reports() {
+    let mut report =
+        AgentStatusReport::from_activity("codex", Some(AgentActivity::Running), Some(7));
+    report.source = Some("flowmux:hook".into());
+    report.session_id = Some("session".into());
+    report.seq = Some(1);
+    let mut presence = AgentPresence::from_report(report.clone(), true).unwrap();
+    let evidence = |presence: &AgentPresence| {
+        serde_json::to_value(presence).unwrap()["status_evidence"].clone()
+    };
+    assert_eq!(evidence(&presence)["source"], "hook");
+
+    let mut screen = AgentStatusReport::from_activity("codex", Some(AgentActivity::Running), None);
+    screen.source = Some("flowmux:screen".into());
+    screen.custom_status = Some("Working (1s)".into());
+    presence.apply_report(screen.clone(), true);
+    assert_eq!(
+        evidence(&presence)["source"],
+        "hook",
+        "an unchanged state retains its hook evidence"
+    );
+    screen.status = Some(AgentStatus::Idle);
+    presence.apply_report(screen.clone(), true);
+    assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+    assert_eq!(evidence(&presence)["source"], "screen");
+    assert!(evidence(&presence)["since"].is_string());
+    let observed = presence.clone();
+    presence.apply_report(screen, true);
+    assert_eq!(
+        presence, observed,
+        "identical polling must not refresh evidence or trigger UI churn"
+    );
+    let mut misnamed_screen =
+        AgentStatusReport::from_activity("other-agent", Some(AgentActivity::Idle), None);
+    misnamed_screen.source = Some("flowmux:screen".into());
+    let observed_evidence = presence.status_evidence;
+    presence.apply_report(misnamed_screen, true);
+    assert_eq!(presence.status_evidence, observed_evidence);
+    assert_eq!(presence.name, "codex");
+    let observed = presence.clone();
+    assert!(!presence.apply_report(report.clone(), true));
+    assert_eq!(
+        presence, observed,
+        "a stale hook cannot replace screen evidence"
+    );
+    report.seq = Some(2);
+    presence.apply_report(report, true);
+    assert_eq!(evidence(&presence)["source"], "hook");
+}
+
+#[test]
+fn process_identity_reclaim_preserves_screen_status_evidence() {
+    let mut slot = None;
+    reconcile_surface_process_agent(&mut slot, Some("codex"));
+    assert_eq!(
+        serde_json::to_value(&slot).unwrap()["status_evidence"]["source"],
+        "process"
+    );
+    let mut report = AgentStatusReport::from_activity("codex", Some(AgentActivity::Running), None);
+    report.source = Some("flowmux:screen".into());
+    slot = AgentPresence::from_report(report, false);
+    reconcile_surface_process_agent(&mut slot, Some("codex"));
+    let presence = slot.unwrap();
+    assert_eq!(presence.source.as_deref(), Some(AGENT_SOURCE_PROC));
+    assert_eq!(
+        serde_json::to_value(&presence).unwrap()["status_evidence"]["source"],
+        "screen"
+    );
+}
+
+#[test]
 fn agent_presence_ignores_stale_seq() {
     let mut presence = AgentPresence::new("codex", AgentActivity::Running, Some(7));
     presence.seq = Some(20);
@@ -2932,6 +3003,14 @@ fn screen_idle_restores_hidden_screen_working_as_done() {
         Some(true)
     );
     assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Done));
+    assert_eq!(
+        pane.agent_presence_for_surface(surface_id)
+            .unwrap()
+            .status_evidence
+            .unwrap()
+            .source,
+        AgentEvidenceSource::Screen
+    );
     assert_eq!(pane.settle_screen_idle(surface_id, false), Some(false));
 }
 
@@ -2949,6 +3028,8 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         let mut presence = AgentPresence::new("gemini", AgentActivity::NeedsInput, Some(42));
         presence.source = Some("flowmux:hook".into());
         presence.seen = seen;
+        presence.status_evidence = Some(AgentStatusEvidence::new(AgentEvidenceSource::Hook));
+        let original_evidence = presence.status_evidence;
         surface.agent = Some(presence);
         let mut pane = Pane::Leaf {
             id: PaneId::new(),
@@ -2987,6 +3068,14 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         let agent = pane.agent_presence_for_surface(surface_id).unwrap();
         assert_eq!(agent.status, AgentStatus::Blocked);
         assert_eq!(agent.seen, expected_seen);
+        if final_status == Some(AgentStatus::Blocked) {
+            assert_eq!(
+                agent.status_evidence.unwrap().source,
+                AgentEvidenceSource::Screen
+            );
+        } else {
+            assert_eq!(agent.status_evidence, original_evidence);
+        }
     }
 }
 
@@ -4573,4 +4662,26 @@ fn take_then_insert_moves_between_leaves_in_split() {
     let right_ids = leaf_tab_ids(&p, l2);
     assert_eq!(right_ids.last().copied(), Some(moved_id));
     assert_eq!(right_ids.len(), 2);
+}
+
+#[test]
+fn status_evidence_roundtrips_old_and_future_payloads() {
+    let mut value =
+        serde_json::to_value(AgentPresence::new("agent", AgentActivity::Idle, None)).unwrap();
+    assert!(value.get("status_evidence").is_none());
+    let old: AgentPresence = serde_json::from_value(value.clone()).unwrap();
+    assert!(old.status_evidence.is_none());
+    value["status_evidence"] =
+        serde_json::json!({"source":"future_sensor", "since":"2026-10-30T00:00:00Z"});
+    let future: AgentPresence = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        future.status_evidence.unwrap().source,
+        AgentEvidenceSource::Unknown
+    );
+    assert!(
+        agent_status_tooltip("agent", "Idle", future.status_evidence)
+            .contains("Status evidence unavailable")
+    );
+    let process = AgentStatusEvidence::new(AgentEvidenceSource::Process);
+    assert!(agent_status_tooltip("agent", "Idle", Some(process)).contains("activity unconfirmed"));
 }

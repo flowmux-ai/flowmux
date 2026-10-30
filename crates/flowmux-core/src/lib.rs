@@ -846,7 +846,7 @@ impl Pane {
                 } else {
                     None
                 };
-                let status = screen_base.map(|(status, _)| status).unwrap_or(status);
+                let status = screen_base.map(|base| base.status).unwrap_or(status);
                 let name = incoming_name
                     .or_else(|| surface.agent.as_ref().map(|agent| agent.name.clone()))?;
                 let same_status = surface
@@ -889,14 +889,19 @@ impl Pane {
                                 } else {
                                     before.status
                                 };
-                                agent
-                                    .screen_working_base
-                                    .get_or_insert((base_status, before.seen));
+                                agent.screen_working_base.get_or_insert(ScreenWorkingBase {
+                                    status: base_status,
+                                    seen: before.seen,
+                                    evidence: before.status_evidence,
+                                });
                             } else if agent.status != AgentStatus::Working
                                 && before.status == AgentStatus::Working
                             {
-                                if let Some((AgentStatus::Blocked, seen)) = screen_base {
-                                    agent.seen = seen || visible;
+                                if let Some(base) = screen_base {
+                                    agent.status_evidence = base.restored_evidence();
+                                    if base.status == AgentStatus::Blocked {
+                                        agent.seen = base.seen || visible;
+                                    }
                                 }
                                 agent.screen_working_base = None;
                             }
@@ -1024,7 +1029,7 @@ impl Pane {
                     }
                     source => {
                         let screen_base = agent.screen_working_base.take();
-                        let next = screen_base.map(|(status, _)| status).or_else(|| {
+                        let next = screen_base.map(|base| base.status).or_else(|| {
                             (source == Some(AGENT_SOURCE_PROC) && agent.status != AgentStatus::Idle)
                                 .then_some(AgentStatus::Idle)
                         });
@@ -1034,11 +1039,15 @@ impl Pane {
                         let prev = agent.status;
                         agent.status = next;
                         agent.activity = next.to_activity();
+                        agent.status_evidence = screen_base.map_or_else(
+                            || Some(AgentStatusEvidence::new(AgentEvidenceSource::Screen)),
+                            |base| base.restored_evidence(),
+                        );
                         agent.message = None;
                         agent.custom_status = None;
                         if next == AgentStatus::Blocked {
                             agent.seen =
-                                screen_base.is_none_or(|(_, seen)| seen) || surface_visible;
+                                screen_base.is_none_or(|base| base.seen) || surface_visible;
                         } else if AgentStatus::should_mark_unseen_on_idle(prev, next) {
                             agent.seen = surface_visible;
                         } else if surface_visible {
@@ -2324,6 +2333,7 @@ pub struct AgentBarItem {
     pub visual_status: AgentBarVisualStatus,
     pub seen: bool,
     pub status_text: String,
+    pub status_evidence: Option<AgentStatusEvidence>,
     pub color: String,
 }
 
@@ -2346,6 +2356,7 @@ impl AgentBarItem {
             status,
             visual_status,
             seen: agent.seen,
+            status_evidence: agent.status_evidence,
             status_text: agent
                 .status_text()
                 .map(str::to_string)
@@ -2463,6 +2474,7 @@ fn reconcile_surface_process_agent(
         (None, Some(name)) => {
             let mut presence = AgentPresence::new(name, AgentActivity::Idle, None);
             presence.source = Some(AGENT_SOURCE_PROC.to_string());
+            presence.status_evidence = Some(AgentStatusEvidence::new(AgentEvidenceSource::Process));
             *slot = Some(presence);
             true
         }
@@ -2496,6 +2508,8 @@ fn reconcile_surface_process_agent(
             if identity_changed {
                 let mut replacement = AgentPresence::new(name, AgentActivity::Idle, None);
                 replacement.source = Some(AGENT_SOURCE_PROC.to_string());
+                replacement.status_evidence =
+                    Some(AgentStatusEvidence::new(AgentEvidenceSource::Process));
                 *existing = replacement;
                 true
             } else if screen_owned {
@@ -2506,6 +2520,81 @@ fn reconcile_surface_process_agent(
             }
         }
         (None, None) => false,
+    }
+}
+
+/// What established the displayed activity, independently of identity ownership.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentEvidenceSource {
+    Hook,
+    Screen,
+    Process,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentStatusEvidence {
+    pub source: AgentEvidenceSource,
+    /// When this basis was established, not the latest heartbeat or screen poll.
+    pub since: chrono::DateTime<chrono::Utc>,
+}
+
+impl AgentStatusEvidence {
+    fn new(source: AgentEvidenceSource) -> Self {
+        Self {
+            source,
+            since: chrono::Utc::now(),
+        }
+    }
+
+    fn report_source(source: Option<&str>) -> Option<AgentEvidenceSource> {
+        match source {
+            Some("flowmux:hook") => Some(AgentEvidenceSource::Hook),
+            Some("flowmux:screen") => Some(AgentEvidenceSource::Screen),
+            Some(AGENT_SOURCE_PROC) => Some(AgentEvidenceSource::Process),
+            _ => None,
+        }
+    }
+}
+
+pub fn agent_status_tooltip(
+    name: &str,
+    status_text: &str,
+    evidence: Option<AgentStatusEvidence>,
+) -> String {
+    let heading = format!("{name}: {status_text}");
+    let Some(evidence) = evidence else {
+        return format!("{heading}\nStatus evidence unavailable");
+    };
+    let basis = match evidence.source {
+        AgentEvidenceSource::Hook => "Hook-reported state",
+        AgentEvidenceSource::Screen => "Screen-inferred state",
+        AgentEvidenceSource::Process => "Process detected; activity unconfirmed",
+        AgentEvidenceSource::Unknown => "Status evidence unavailable",
+    };
+    format!(
+        "{heading}\n{basis}\nEvidence since {}",
+        evidence.since.format("%Y-%m-%d %H:%M:%S UTC")
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScreenWorkingBase {
+    status: AgentStatus,
+    seen: bool,
+    evidence: Option<AgentStatusEvidence>,
+}
+
+impl ScreenWorkingBase {
+    fn restored_evidence(self) -> Option<AgentStatusEvidence> {
+        if self.status == AgentStatus::Idle {
+            // A newly observed completion cannot borrow an earlier Ready/Idle hook.
+            Some(AgentStatusEvidence::new(AgentEvidenceSource::Screen))
+        } else {
+            self.evidence
+        }
     }
 }
 
@@ -2523,11 +2612,12 @@ pub struct AgentPresence {
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_evidence: Option<AgentStatusEvidence>,
     /// Lifecycle status hidden by the current screen-derived Working state.
-    /// Internal only: ownership/status provenance must not leak into the IPC
-    /// model or persisted state.
+    /// Internal restoration context; never persisted or exposed over IPC.
     #[serde(skip)]
-    screen_working_base: Option<(AgentStatus, bool)>,
+    screen_working_base: Option<ScreenWorkingBase>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2556,6 +2646,7 @@ impl AgentPresence {
             status: activity.status(),
             pid,
             source: None,
+            status_evidence: None,
             screen_working_base: None,
             seq: None,
             message: None,
@@ -2571,6 +2662,8 @@ impl AgentPresence {
         let status = report.effective_status()?;
         let mut presence = Self::new(report.name, status.to_activity(), report.pid);
         presence.status = status;
+        presence.status_evidence = AgentStatusEvidence::report_source(report.source.as_deref())
+            .map(AgentStatusEvidence::new);
         presence.source = report.source;
         presence.seq = report.seq;
         presence.message = report.message;
@@ -2676,6 +2769,23 @@ impl AgentPresence {
                 self.source.as_deref(),
                 Some("flowmux:hook") | Some(AGENT_SOURCE_PROC)
             );
+        // A same-state screen refinement cannot erase native lifecycle evidence.
+        // Identical polls retain the timestamp so they do not cause UI churn.
+        if report.effective_status().is_some() {
+            let incoming = AgentStatusEvidence::report_source(report.source.as_deref());
+            let keep_hook = from_screen
+                && prev == next
+                && self
+                    .status_evidence
+                    .is_some_and(|e| e.source == AgentEvidenceSource::Hook);
+            if !keep_hook
+                && (prev != next
+                    || (!same_session && !screen_defers_to_authoritative)
+                    || self.status_evidence.map(|e| e.source) != incoming)
+            {
+                self.status_evidence = incoming.map(AgentStatusEvidence::new);
+            }
+        }
         if !screen_defers_to_authoritative {
             self.name = report.name;
         }

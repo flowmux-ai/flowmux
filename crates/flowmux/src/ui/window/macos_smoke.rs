@@ -336,6 +336,33 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         wait_until("agent IPC listening", || socket.exists()).await;
         let cli = std::env::var_os("FLOWMUX_BUNDLED_CLI_PATH")
             .expect("agent smoke requires the built flowmuxctl");
+        fn tooltip_evidence(widget: &gtk::Widget) -> u8 {
+            let mut found = 0;
+            if let Some(text) = widget.tooltip_text() {
+                if text.lines().any(|line| line == "Hook-reported state") {
+                    found |= 1;
+                }
+                if text.lines().any(|line| line == "Screen-inferred state") {
+                    found |= 2;
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                found |= tooltip_evidence(&widget);
+                child = widget.next_sibling();
+            }
+            found
+        }
+        let evidence_seen = Rc::new(std::cell::Cell::new(0u8));
+        let observed_evidence = evidence_seen.clone();
+        let observed_window = controller.window.downgrade();
+        let tooltip_observer = glib::timeout_add_local(Duration::from_millis(50), move || {
+            if let Some(window) = observed_window.upgrade() {
+                observed_evidence
+                    .set(observed_evidence.get() | tooltip_evidence(window.upcast_ref()));
+            }
+            glib::ControlFlow::Continue
+        });
         let output = tokio::process::Command::new("python3")
             .arg(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -349,10 +376,17 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .await
             .expect("agent hook replay timed out")
             .unwrap();
+        tooltip_observer.remove();
         print!("{}", String::from_utf8_lossy(&output.stdout));
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
         assert!(output.status.success(), "agent hook replay failed");
         assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE_NATIVE_HOOK_MATRIX_OK"));
+        assert_eq!(
+            evidence_seen.get(),
+            3,
+            "live Agent rows must expose both evidence kinds"
+        );
+        println!("MACOS_AGENT_EVIDENCE_TOOLTIPS_OK");
         server.abort();
         controller.window.destroy();
         println!("MACOS_NATIVE_AGENT_HOOKS_OK");
