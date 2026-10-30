@@ -1202,6 +1202,14 @@ pub(crate) async fn check_quit_dialog(app: &adw::Application) {
     gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
     assert!(dialog.close());
     assert!(!rx.await.unwrap(), "dismissing the dialog cancels quitting");
+    // The response precedes the closing animation; keep its parent alive until unmap.
+    gtk::glib::future_with_timeout(std::time::Duration::from_secs(5), async {
+        while dialog.is_mapped() {
+            gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("quit dialog did not finish closing");
     assert!(window.is_visible());
     window.destroy();
     println!("MACOS_QUIT_DIALOG_RESPONSE_OK");

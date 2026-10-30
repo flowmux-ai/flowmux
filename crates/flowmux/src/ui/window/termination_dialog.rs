@@ -89,7 +89,7 @@ impl WindowController {
         }
     }
 
-    #[cfg(any(test, feature = "native-smoke"))]
+    #[cfg(test)]
     pub(super) fn current_termination_dialog(&self) -> Option<adw::AlertDialog> {
         self.termination_dialog.borrow().clone()
     }
