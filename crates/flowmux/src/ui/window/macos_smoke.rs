@@ -390,6 +390,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             "live Agent rows must expose evidence kinds and the waiting actor"
         );
         println!("MACOS_AGENT_EVIDENCE_TOOLTIPS_OK");
+        crate::ui::sidebar::check_stable_activity_rows().await;
+        println!("MACOS_STABLE_ACTIVITY_ROWS_OK");
         server.abort();
         controller.window.destroy();
         println!("MACOS_NATIVE_AGENT_HOOKS_OK");

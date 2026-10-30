@@ -684,3 +684,58 @@ Original application PID 72789 and independent user agent PID 1401 stayed alive;
 the permanent vendor executable link stayed unchanged. Final full Linux/macOS
 gates remain outstanding, including the previously recorded editor-dialog and
 browser-input fixture failures. Focused passing checks do not close those gates.
+
+
+## Stable side-panel agent rows (2026-10-30)
+
+The side-panel Agents list now reuses each surface's button and click handler.
+Changed content updates inside that button, elapsed time updates its label, and
+ordering changes move existing children without detaching them. A row's current
+workspace and pane are updated independently of its persistent surface identity.
+Ended surfaces release their rows, including when the final agent disappears.
+Lifecycle detection, sorting policy, and the horizontal agent bar are unchanged.
+
+A regression first failed because a status refresh replaced the button
+(`/tmp/fm-stable-rows-red.log`). The shared native GTK check uses 24 rows and
+verifies button identity, keyboard focus, scroll position, updated tooltip,
+reordering, routing after a location change, and widget/handler release. The
+release check waits for the next GTK frame because a mapped, focused widget can
+still be retained during the current frame. Linux passed all 28 sidebar tests
+(`/tmp/fm-stable-rows-linux2.log`). Full workspace/all-targets Clippy with
+native-smoke and the application build passed (`/tmp/fm-stable-rows-clippy2.log`,
+`/tmp/fm-stable-rows-build.log`).
+
+The macOS main-thread harness passed the same row check, native hook replay,
+and evidence tooltips (`/tmp/fm-stable-rows-native.log`,
+`MACOS_STABLE_ACTIVITY_ROWS_OK`, `MACOS_NATIVE_SMOKE_OK`). Those hook events
+are synthetic. The actual-agent application used PID 36782 and separate
+state/socket/private hooks in `/tmp/fm-atn-x5jj1034`. Native-hook agent B 0.166.0
+passed consecutive responses, one-time harmless command approval, interruption,
+and recovery. Clicking the visibly updated A and B rows opened the correct
+actual terminal tabs. Unsubmitted status-like drafts left both agents' state
+and waits unchanged. Evidence: `/tmp/fm-stable-rows-b-live.log`
+(`LIVE_STABLE_ROWS_B_MATRIX_AND_A_QUOTA_OK`), draft/final-agent JSON, and the
+observed native screenshots. Application and CLI SHA-256:
+
+`b8c841d4e23f1672c4b57fca25e5d3d5581f683b33012445d44f3b79c5940629`
+
+`d82e62edc956b0c6932c5b0d144d08e5ae9ee8096c1095db4966de87b55a3940`
+
+Agent A 2.1.314 reached its real five-hour quota on the first plain prompt;
+the full two-agent scenario stopped at that boundary
+(`/tmp/fm-stable-rows-live.log`). Its failure/quota wait remained visible, but
+normal-response/question/recovery coverage for A on this build is incomplete.
+The actual terminal advertised automatic continuation while structured retry
+context remained unknown. Canceling that owned test's automatic continuation
+with Escape changed the terminal footer without another hook sequence; the
+quota wait remained. This confirms the separate screen-context improvement is
+still needed. Raw screen and state evidence before/after cancellation is in
+`actual-quota-screen.txt`, `actual-quota-state.json`,
+`actual-quota-canceled-screen.txt`, and `actual-quota-canceled-state.json` under
+the isolated root. Account limits, billing, and model settings were unchanged.
+
+Original application PID 72789 and independent user agent PID 1401 stayed alive;
+the permanent vendor executable link stayed unchanged. This validates the row
+change with the stated actual-agent limitation. It does not complete automatic
+retry classification, the horizontal bar, shared attention counts/priorities,
+or the outstanding full cross-platform gates.

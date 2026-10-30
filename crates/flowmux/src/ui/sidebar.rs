@@ -158,6 +158,7 @@ pub struct Sidebar {
     notification_popover: Rc<NotificationPopover>,
     activity_panel: gtk::Box,
     activity_list: gtk::Box,
+    activity_rows: Rc<RefCell<HashMap<SurfaceId, ActivityRowWidget>>>,
     activity_split: gtk::Paned,
     activity_layout: Rc<ActivityPanelLayoutState>,
     activity_has_agents: Rc<Cell<bool>>,
@@ -603,6 +604,7 @@ impl Sidebar {
             notification_popover,
             activity_panel,
             activity_list,
+            activity_rows: Rc::new(RefCell::new(HashMap::new())),
             activity_split,
             activity_layout,
             activity_has_agents,
@@ -929,15 +931,14 @@ impl Sidebar {
     ) {
         let has_agents = !current.is_empty();
         self.activity_has_agents.set(has_agents);
-        if has_agents {
-            render_activity_rows(
-                &self.activity_list,
-                &self.activities,
-                current,
-                focused_surface,
-                self.bridge.clone(),
-            );
-        }
+        render_activity_rows(
+            &self.activity_list,
+            &self.activity_rows,
+            &self.activities,
+            current,
+            focused_surface,
+            self.bridge.clone(),
+        );
         set_activity_panel_visible(
             &self.activity_panel,
             &self.activity_split,
@@ -1093,140 +1094,26 @@ fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Bu
     (root.upcast(), content, sort_button)
 }
 
-fn render_activity_rows(
-    content: &gtk::Box,
-    store: &ActivityStore,
-    current: &[ActivityNowEntry],
-    focused_surface: Option<SurfaceId>,
-    bridge: Bridge,
-) {
-    while let Some(child) = content.first_child() {
-        content.remove(&child);
-    }
-
-    for entry in current {
-        content.append(&activity_now_row(
-            entry,
-            store,
-            focused_surface == Some(entry.surface),
-            bridge.clone(),
-        ));
-    }
+struct ActivityRowWidget {
+    button: gtk::Button,
+    when: gtk::Label,
+    entry: ActivityNowEntry,
+    target: Rc<Cell<(WorkspaceId, flowmux_core::PaneId, SurfaceId)>>,
 }
 
-fn activity_now_row(
-    entry: &ActivityNowEntry,
-    store: &ActivityStore,
-    focused: bool,
-    bridge: Bridge,
-) -> gtk::Widget {
-    let when = store
-        .since(entry.surface)
-        .map(|at| format_relative_time(&at));
-    let row = activity_row(
-        &entry.agent,
-        Some(entry.status),
-        entry.seen,
-        &entry.status_text,
-        &entry.surface_label,
-        &entry.color,
-        when.as_deref(),
-        true,
-        entry.workspace,
-        entry.pane,
-        entry.surface,
-        bridge,
-    );
-    row.add_css_class("flowmux-agent-bar-item");
-    row.set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
-        &entry.agent,
-        &entry.status_text,
-        entry.status_evidence,
-        &entry.pending_waits,
-    )));
-    if entry.status == AgentStatus::Working {
-        row.add_css_class("flowmux-agent-bar-working");
-    }
-    if focused {
-        row.add_css_class("focused");
-    }
-    row
-}
-
-#[allow(clippy::too_many_arguments)]
-fn activity_row(
-    agent: &str,
-    status: Option<AgentStatus>,
-    seen: bool,
-    summary: &str,
-    surface_label: &str,
-    color: &str,
-    when: Option<&str>,
-    enabled: bool,
-    workspace: WorkspaceId,
-    pane: flowmux_core::PaneId,
-    surface: flowmux_core::SurfaceId,
-    bridge: Bridge,
-) -> gtk::Widget {
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.set_vexpand(false);
-    button.set_valign(gtk::Align::Start);
-    button.set_sensitive(enabled);
-    if !enabled {
-        button.set_tooltip_text(Some("The original workspace is closed"));
-    }
-
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    row.set_margin_top(2);
-    row.set_margin_bottom(2);
-    row.append(&color_bar(color));
-
-    if let Some(status) = status {
-        row.append(&agent_status_indicator(status, seen));
-    } else {
-        let icon = gtk::Image::from_icon_name("application-exit-symbolic");
-        icon.set_pixel_size(12);
-        row.append(&icon);
-    }
-
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    text.set_hexpand(true);
-    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    heading.append(&agent_icon(agent));
-    let agent = gtk::Label::new(Some(agent));
-    agent.set_halign(gtk::Align::Start);
-    agent.set_hexpand(true);
-    agent.add_css_class("caption-heading");
-    heading.append(&agent);
-    if let Some(when) = when {
-        let when = gtk::Label::new(Some(when));
-        when.add_css_class("caption");
-        when.add_css_class("dim-label");
-        heading.append(&when);
-    }
-    text.append(&heading);
-
-    let summary = gtk::Label::new(Some(&format!("{summary} · {surface_label}")));
-    summary.set_halign(gtk::Align::Start);
-    summary.set_xalign(0.0);
-    summary.set_wrap(true);
-    summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    summary.set_lines(3);
-    summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    summary.set_max_width_chars(44);
-    summary.add_css_class("caption");
-    if let Some(status) = status {
-        summary.add_css_class(agent_status_css_class(status, seen));
-    } else {
-        summary.add_css_class("dim-label");
-    }
-    text.append(&summary);
-    row.append(&text);
-    button.set_child(Some(&row));
-
-    if enabled {
+impl ActivityRowWidget {
+    fn new(entry: &ActivityNowEntry, bridge: Bridge) -> Self {
+        let button = gtk::Button::new();
+        button.add_css_class("flat");
+        button.add_css_class("flowmux-agent-bar-item");
+        button.set_vexpand(false);
+        button.set_valign(gtk::Align::Start);
+        let (content, when) = activity_row_content(entry);
+        button.set_child(Some(&content));
+        let target = Rc::new(Cell::new((entry.workspace, entry.pane, entry.surface)));
+        let click_target = target.clone();
         button.connect_clicked(move |_| {
+            let (workspace, pane, surface) = click_target.get();
             let bridge = bridge.clone();
             gtk::glib::MainContext::default().spawn_local(async move {
                 let _ = bridge
@@ -1239,8 +1126,229 @@ fn activity_row(
                     .await;
             });
         });
+        Self {
+            button,
+            when,
+            entry: entry.clone(),
+            target,
+        }
     }
-    button.upcast()
+
+    fn update(&mut self, entry: &ActivityNowEntry, store: &ActivityStore, focused: bool) {
+        if self.entry != *entry {
+            let (content, when) = activity_row_content(entry);
+            self.button.set_child(Some(&content));
+            self.when = when;
+            self.entry = entry.clone();
+        }
+        self.target
+            .set((entry.workspace, entry.pane, entry.surface));
+        let when = store
+            .since(entry.surface)
+            .map(|at| format_relative_time(&at));
+        self.when.set_label(when.as_deref().unwrap_or_default());
+        self.when.set_visible(when.is_some());
+        self.button
+            .set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
+                &entry.agent,
+                &entry.status_text,
+                entry.status_evidence,
+                &entry.pending_waits,
+            )));
+        for (class, enabled) in [
+            (
+                "flowmux-agent-bar-working",
+                entry.status == AgentStatus::Working,
+            ),
+            ("focused", focused),
+        ] {
+            if enabled {
+                self.button.add_css_class(class);
+            } else {
+                self.button.remove_css_class(class);
+            }
+        }
+    }
+}
+
+fn render_activity_rows(
+    content: &gtk::Box,
+    rows: &RefCell<HashMap<SurfaceId, ActivityRowWidget>>,
+    store: &ActivityStore,
+    current: &[ActivityNowEntry],
+    focused_surface: Option<SurfaceId>,
+    bridge: Bridge,
+) {
+    let mut rows = rows.borrow_mut();
+    rows.retain(|surface, row| {
+        let keep = current.iter().any(|entry| entry.surface == *surface);
+        if !keep {
+            content.remove(&row.button);
+        }
+        keep
+    });
+    let mut previous: Option<gtk::Widget> = None;
+    for entry in current {
+        let row = rows.entry(entry.surface).or_insert_with(|| {
+            let row = ActivityRowWidget::new(entry, bridge.clone());
+            content.append(&row.button);
+            row
+        });
+        row.update(entry, store, focused_surface == Some(entry.surface));
+        // Reorder without detaching the button that owns keyboard focus.
+        if row.button.prev_sibling() != previous {
+            content.reorder_child_after(&row.button, previous.as_ref());
+        }
+        previous = Some(row.button.clone().upcast());
+    }
+}
+
+fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_margin_top(2);
+    row.set_margin_bottom(2);
+    row.append(&color_bar(&entry.color));
+    row.append(&agent_status_indicator(entry.status, entry.seen));
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    text.set_hexpand(true);
+    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    heading.append(&agent_icon(&entry.agent));
+    let agent = gtk::Label::new(Some(&entry.agent));
+    agent.set_halign(gtk::Align::Start);
+    agent.set_hexpand(true);
+    agent.add_css_class("caption-heading");
+    heading.append(&agent);
+    let when = gtk::Label::new(None);
+    when.add_css_class("caption");
+    when.add_css_class("dim-label");
+    heading.append(&when);
+    text.append(&heading);
+
+    let summary = gtk::Label::new(Some(&format!(
+        "{} · {}",
+        entry.status_text, entry.surface_label
+    )));
+    summary.set_halign(gtk::Align::Start);
+    summary.set_xalign(0.0);
+    summary.set_wrap(true);
+    summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    summary.set_lines(3);
+    summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    summary.set_max_width_chars(44);
+    summary.add_css_class("caption");
+    summary.add_css_class(agent_status_css_class(entry.status, entry.seen));
+    text.append(&summary);
+    row.append(&text);
+    (row, when)
+}
+
+#[cfg(test)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) async fn check_stable_activity_rows() {
+    let (bridge, rx) = Bridge::new();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_child(Some(&content));
+    let window = gtk::Window::builder()
+        .default_width(360)
+        .default_height(220)
+        .child(&scroll)
+        .build();
+    let rows = RefCell::new(HashMap::new());
+    let store = ActivityStore::new();
+    let mut current: Vec<_> = (0..24)
+        .map(|i| ActivityNowEntry {
+            status_evidence: None,
+            pending_waits: Vec::new(),
+            agent: "test agent".into(),
+            status: AgentStatus::Working,
+            status_text: "Running tests".into(),
+            seen: true,
+            workspace: WorkspaceId::new(),
+            pane: flowmux_core::PaneId::new(),
+            surface: SurfaceId::new(),
+            surface_label: format!("Task {i}"),
+            color: "#abcdef".into(),
+        })
+        .collect();
+    store.sort_entries(&mut current, AgentSortMode::Workspace);
+    let surface = current[0].surface;
+    render_activity_rows(
+        &content,
+        &rows,
+        &store,
+        &current,
+        Some(surface),
+        bridge.clone(),
+    );
+    window.present();
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    let button = rows.borrow()[&surface].button.clone();
+    let removed_content = button.child().unwrap().downgrade();
+    assert!(button.grab_focus());
+    assert!(button.is_focus());
+    let adjustment = scroll.vadjustment();
+    assert!(adjustment.upper() - adjustment.page_size() > 120.0);
+    adjustment.set_value(120.0);
+    gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+    let scroll_before = adjustment.value();
+    current[0].status_text = "Reviewing patch".into();
+    current[0].workspace = WorkspaceId::new();
+    current[0].pane = flowmux_core::PaneId::new();
+    let target = (current[0].workspace, current[0].pane, surface);
+    render_activity_rows(
+        &content,
+        &rows,
+        &store,
+        &current,
+        Some(surface),
+        bridge.clone(),
+    );
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    assert_eq!(content.first_child(), Some(button.clone().upcast()));
+    assert!(
+        button.is_focus(),
+        "status refresh must preserve keyboard focus"
+    );
+    assert!(
+        (adjustment.value() - scroll_before).abs() < 1.0,
+        "status refresh moved the scroll position"
+    );
+    assert!(
+        removed_content.upgrade().is_none(),
+        "old content must release its widgets"
+    );
+    assert!(button.tooltip_text().unwrap().contains("Reviewing patch"));
+    current.rotate_left(1);
+    render_activity_rows(&content, &rows, &store, &current, None, bridge.clone());
+    assert_eq!(content.last_child(), Some(button.clone().upcast()));
+    assert!(
+        button.is_focus(),
+        "reordering must keep keyboard focus on the same surface"
+    );
+    assert!(!button.has_css_class("focused"));
+    button.emit_clicked();
+    let command = gtk::glib::future_with_timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(command, GtkCommand::OpenActivityTarget { workspace, pane, surface }
+        if (workspace, pane, surface) == target),
+        "reused rows must route to the current location"
+    );
+    let removed = button.downgrade();
+    drop(button);
+    render_activity_rows(&content, &rows, &store, &[], None, bridge);
+    assert!(content.first_child().is_none());
+    assert!(rows.borrow().is_empty());
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    assert!(
+        removed.upgrade().is_none(),
+        "ended surfaces must release their rows and handlers"
+    );
+    window.destroy();
 }
 
 fn format_relative_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
@@ -3095,46 +3203,8 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn refreshing_activity_content_releases_replaced_row() {
-        let (bridge, _rx) = crate::bridge::Bridge::new();
-        let sidebar = Sidebar::new(
-            |_| {},
-            |_| {},
-            || {},
-            bridge,
-            NotificationStore::new(),
-            ActivityStore::new(),
-            None,
-            true,
-        );
-        let surface = SurfaceId::new();
-        let mut current = [ActivityNowEntry {
-            status_evidence: None,
-            pending_waits: Vec::new(),
-            agent: "codex".into(),
-            status: AgentStatus::Working,
-            status_text: "Running tests".into(),
-            seen: true,
-            workspace: WorkspaceId::new(),
-            pane: PaneId::new(),
-            surface,
-            surface_label: "zsh".into(),
-            color: "#abcdef".into(),
-        }];
-        sidebar.refresh_activity_panel(&current, Some(surface));
-        let replaced_row = sidebar.activity_list.first_child().unwrap().downgrade();
-
-        current[0].status_text = "Reviewing patch".into();
-        sidebar.refresh_activity_panel(&current, Some(surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
-
-        assert!(
-            replaced_row.upgrade().is_none(),
-            "refreshing Agent content must release the replaced row and its handlers"
-        );
-        assert!(descendant_labels(&sidebar.activity_list)
-            .iter()
-            .any(|label| label.label().starts_with("Reviewing patch")));
+    async fn refreshing_activity_content_preserves_live_row() {
+        check_stable_activity_rows().await;
     }
 
     #[cfg(not(target_os = "macos"))]
