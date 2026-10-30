@@ -777,6 +777,30 @@ impl WindowController {
 }
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+fn native_fork_button(terminal: &vte::Terminal) -> gtk::Button {
+    let controllers = terminal.observe_controllers();
+    let click = (0..controllers.n_items())
+        .filter_map(|i| controllers.item(i)?.downcast::<gtk::GestureClick>().ok())
+        .find(|gesture| gesture.button() == gtk::gdk::BUTTON_SECONDARY)
+        .expect("terminal context menu gesture");
+    click.emit_by_name::<()>("pressed", &[&1i32, &20.0f64, &20.0f64]);
+    let mut pending = vec![terminal.clone().upcast::<gtk::Widget>()];
+    while let Some(widget) = pending.pop() {
+        if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+            if button.label().as_deref() == Some("Fork session") {
+                return button.clone();
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            pending.push(widget);
+        }
+    }
+    panic!("terminal context menu has no Fork session action");
+}
+
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 pub(super) async fn check_native(
     controller: &WindowController,
     workspace: WorkspaceId,
@@ -869,6 +893,16 @@ pub(super) async fn check_native(
             }),
         },
     };
+    let fork = native_fork_button(&terminal.widget);
+    assert!(
+        !fork.is_sensitive(),
+        "unverified session enabled native fork"
+    );
+    fork.ancestor(gtk::Popover::static_type())
+        .unwrap()
+        .downcast::<gtk::Popover>()
+        .unwrap()
+        .popdown();
     *controller.flow.targets.borrow_mut() = vec![anchor.clone()];
     *controller.flow.catalog.borrow_mut() = Some(Catalog {
         snapshot: store.snapshot().unwrap(),
@@ -1169,10 +1203,19 @@ pub(super) async fn check_real_codex(
         .filter(|(parent, _)| *parent == &key)
         .map(|(_, child)| child.id.clone())
         .collect();
-    controller
-        .launch_flow_session(key.clone(), Some((pane, source)))
-        .await
-        .unwrap();
+    let fork = native_fork_button(&terminal.widget);
+    assert!(
+        fork.is_sensitive(),
+        "verified session has a disabled fork action"
+    );
+    fork.emit_clicked();
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while controller.pane_registry.borrow().terminals.len() < 2 {
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("context menu did not create the fork pane");
     let (child_pane, child_surface) = {
         let registry = controller.pane_registry.borrow();
         let (&surface, term) = registry

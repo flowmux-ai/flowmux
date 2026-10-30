@@ -226,3 +226,5 @@ Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱�
 잠금 해제 후 `bash scripts/test-ci.sh macos`로 전체 gate를 다시 실행한다. 이 실패들이 모두 잠금만으로 발생했다는 결론은 재실행 전까지 확정하지 않는다. 사용자 앱 PID `72789`는 실행 중임을 확인했으며 종료·재시작하지 않았다.
 
 추가 입력 검증: `/tmp/flowmux-session-flow-pan-input-final.log`에서 native harness의 `MACOS_SESSION_FLOW_LAYOUT_OK`와 `MACOS_NATIVE_SMOKE_OK`를 확인했다. GTK gesture/key signal을 통한 Space·가운데 버튼 팬, 누적 pinch 배율과 커서 기준점, Escape 이후 늦은 drag-end의 열기 억제를 검사했다. 실제 하드웨어 트랙패드/키보드 검증을 대신하는 증거는 아니다. 캡처는 `docs/design-assets/agent-session-flow-native.png`이며 실제 provider 데이터가 아닌 fixture다. All-target clippy는 `/tmp/flowmux-session-flow-input-clippy.log`에 기록했다.
+
+실제 메뉴 경로 검증: `/tmp/flowmux-session-flow-context-menu.log`에서 native terminal의 secondary-click gesture가 구성한 `Fork session` 버튼의 미지원 상태 비활성을 확인했다. `/tmp/flowmux-session-flow-real-menu.log`에서는 동일 버튼의 활성 상태 및 clicked callback → bridge → fork → split → child 종료 → 같은 ID resume을 통과했다. source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e15-da1a-7362-b196-a1276bd3fdda`. 모델 요청을 자동 입력하지 않았으며 원본 widget/PID가 유지됐다. 이 검사는 GTK gesture/button signal 경로이며 물리 마우스 입력 검증과는 구분한다.
