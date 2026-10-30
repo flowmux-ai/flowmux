@@ -397,6 +397,13 @@ pub(crate) async fn run_claude_hook_event(
             }
         }
         ClaudeHookEvent::StopFailure => {
+            let reason = match input.error.as_deref() {
+                Some("rate_limit" | "usage_limit") => flowmux_core::AgentWaitReason::Quota,
+                Some("authentication_failed" | "cloud_credential_error") => {
+                    flowmux_core::AgentWaitReason::Authentication
+                }
+                _ => flowmux_core::AgentWaitReason::ApiFailure,
+            };
             let message = normalized_activity_text(input.last_assistant_message.as_deref())
                 .or_else(|| {
                     input
@@ -413,15 +420,9 @@ pub(crate) async fn run_claude_hook_event(
                     surface,
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        context: None,
                         outcome: Some(flowmux_core::AgentTurnOutcome::Failed),
-                        reason: if matches!(
-                            input.error.as_deref(),
-                            Some("rate_limit" | "usage_limit")
-                        ) {
-                            flowmux_core::AgentWaitReason::Quota
-                        } else {
-                            flowmux_core::AgentWaitReason::ApiFailure
-                        },
+                        reason,
                         message: message.clone(),
                         status_text: status_text.to_string(),
                         scope: Some(
@@ -504,6 +505,14 @@ pub(crate) async fn run_claude_hook_event(
                             }
                         } else {
                             AgentLifecycleEvent::SessionWaitStarted {
+                                context: Some(flowmux_core::AgentWaitContext {
+                                    actor: flowmux_core::AgentWaitActor::User,
+                                    retry: if notification_type == Some("quota_auto_resume_stale") {
+                                        flowmux_core::AgentRetryState::Manual
+                                    } else {
+                                        flowmux_core::AgentRetryState::Unknown
+                                    },
+                                }),
                                 outcome: None,
                                 reason: if notification_type == Some("quota_auto_resume_stale") {
                                     flowmux_core::AgentWaitReason::Quota
@@ -679,6 +688,7 @@ pub(crate) async fn run_claude_hook_event(
                         surface,
                         session_id,
                         AgentLifecycleEvent::SessionWaitStarted {
+                            context: None,
                             outcome: None,
                             reason: if input
                                 .tool_name

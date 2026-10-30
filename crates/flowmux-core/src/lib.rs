@@ -2574,6 +2574,13 @@ pub enum AgentWaitReason {
 }
 
 impl AgentWaitReason {
+    pub fn actor(self) -> AgentWaitActor {
+        match self {
+            Self::Approval | Self::Question | Self::Authentication => AgentWaitActor::User,
+            Self::Quota | Self::ApiFailure | Self::Unknown => AgentWaitActor::Unknown,
+        }
+    }
+
     pub fn status_text(self) -> Option<&'static str> {
         match self {
             Self::Approval => Some("Waiting for approval"),
@@ -2584,6 +2591,36 @@ impl AgentWaitReason {
             Self::Unknown => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWaitActor {
+    User,
+    Agent,
+    External,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRetryState {
+    Automatic,
+    Manual,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Explicit provider information; a quota failure alone does not imply a retry.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentWaitContext {
+    #[serde(default)]
+    pub actor: AgentWaitActor,
+    #[serde(default)]
+    pub retry: AgentRetryState,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -2599,8 +2636,24 @@ pub enum AgentWaitScope {
 pub struct AgentWaitSummary {
     pub scope: AgentWaitScope,
     pub reason: AgentWaitReason,
+    #[serde(default)]
+    pub actor: AgentWaitActor,
+    #[serde(default)]
+    pub retry: AgentRetryState,
     pub count: u32,
     pub since: chrono::DateTime<chrono::Utc>,
+}
+
+impl AgentWaitSummary {
+    pub fn status_text(&self) -> Option<&'static str> {
+        match (self.reason, self.retry) {
+            (AgentWaitReason::Quota, AgentRetryState::Automatic) => Some("Waiting to retry"),
+            (AgentWaitReason::Quota, AgentRetryState::Manual) => {
+                Some("Usage limit reached; input required")
+            }
+            _ => self.reason.status_text(),
+        }
+    }
 }
 
 /// A response boundary does not establish successful work or passing checks.
@@ -2691,9 +2744,20 @@ pub fn agent_status_tooltip(
         text.push_str(&format!(
             "\n{scope}: {} · {} · since {}",
             wait.count,
-            wait.reason.status_text().unwrap_or("Reason unavailable"),
+            wait.status_text().unwrap_or("Reason unavailable"),
             wait.since.format("%H:%M:%S UTC")
         ));
+        match wait.actor {
+            AgentWaitActor::User => text.push_str(" · waiting on user"),
+            AgentWaitActor::Agent => text.push_str(" · waiting on agent"),
+            AgentWaitActor::External => text.push_str(" · waiting on external service"),
+            AgentWaitActor::Unknown => {}
+        }
+        match wait.retry {
+            AgentRetryState::Automatic => text.push_str(" · automatic retry"),
+            AgentRetryState::Manual => text.push_str(" · retry requires input"),
+            AgentRetryState::Unknown => {}
+        }
     }
     text
 }
@@ -2833,11 +2897,11 @@ impl AgentPresence {
                 if self
                     .pending_waits
                     .iter()
-                    .any(|wait| wait.reason != first.reason)
+                    .any(|wait| wait.status_text() != first.status_text())
                 {
                     return Some("Multiple waits");
                 }
-                if let Some(label) = first.reason.status_text() {
+                if let Some(label) = first.status_text() {
                     return Some(label);
                 }
             }

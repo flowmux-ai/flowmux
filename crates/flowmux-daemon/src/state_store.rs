@@ -3463,6 +3463,15 @@ mod tests {
         ] {
             let wait = waits.iter().find(|wait| wait["scope"] == scope).unwrap();
             assert_eq!(wait["reason"], reason);
+            assert_eq!(
+                wait["actor"],
+                if scope == "session" {
+                    "unknown"
+                } else {
+                    "user"
+                }
+            );
+            assert_eq!(wait["retry"], "unknown");
             assert_eq!(wait["count"], 1);
             assert!(wait["since"].is_string());
         }
@@ -3632,6 +3641,136 @@ mod tests {
         );
         assert!(tooltip.contains("Tool requests: 2"));
         assert!(tooltip.contains("Permission scopes: 1"));
+    }
+
+    #[tokio::test]
+    async fn quota_wait_context_refines_without_reopening_or_inventing_a_retry() {
+        for resume in [false, true] {
+            let store = StateStore::new_lazy(State::default());
+            let workspace = store.create_workspace(None, "/tmp/waits".into()).await;
+            let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+            let failure = serde_json::json!({"event":"session_wait_started", "scope":"quota", "reason":"quota", "outcome":"failed", "status_text":"Limit reached"});
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(1),
+                    "session",
+                    serde_json::from_value(failure.clone()).unwrap(),
+                    false,
+                )
+                .await;
+            let first = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(
+                serde_json::to_value(&first).unwrap()["pending_waits"][0]["actor"],
+                "unknown"
+            );
+            assert_eq!(
+                serde_json::to_value(&first).unwrap()["pending_waits"][0]["retry"],
+                "unknown"
+            );
+            let manual = serde_json::json!({"event":"session_wait_started", "scope":"quota", "reason":"quota", "context":{"actor":"user", "retry":"manual"}, "status_text":"Press Enter to resume"});
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(3),
+                    "session",
+                    serde_json::from_value(manual).unwrap(),
+                    false,
+                )
+                .await;
+            // Older deliveries cannot revert the required action. A later
+            // metadata-free duplicate must not erase provider retry evidence.
+            for seq in [2, 4] {
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "claude",
+                        Some(42),
+                        Some(seq),
+                        "session",
+                        serde_json::from_value(failure.clone()).unwrap(),
+                        false,
+                    )
+                    .await;
+            }
+            let refined = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            let wait = &serde_json::to_value(&refined).unwrap()["pending_waits"][0];
+            assert_eq!(wait["actor"], "user");
+            assert_eq!(wait["retry"], "manual");
+            assert_eq!(refined.pending_waits[0].since, first.pending_waits[0].since);
+            assert_eq!(
+                refined.status_text(),
+                Some("Usage limit reached; input required")
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(5),
+                    "session",
+                    AgentLifecycleEvent::SessionWaitResolved {
+                        status_text: "Wait ended".into(),
+                        resume,
+                        scope: Some("quota".into()),
+                    },
+                    false,
+                )
+                .await;
+            let ended = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert!(ended.pending_waits.is_empty());
+            assert_eq!(
+                ended.status,
+                if resume {
+                    AgentStatus::Working
+                } else {
+                    AgentStatus::Idle
+                }
+            );
+            assert_eq!(
+                ended.turn_outcome,
+                if resume {
+                    None
+                } else {
+                    Some(flowmux_core::AgentTurnOutcome::Failed)
+                }
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(4),
+                    "session",
+                    serde_json::from_value(failure).unwrap(),
+                    false,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence,
+                ended
+            );
+        }
     }
 
     #[tokio::test]
@@ -3865,6 +4004,7 @@ mod tests {
                 Some(20),
                 "session-1",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    context: None,
                     outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,
@@ -4641,6 +4781,7 @@ mod tests {
                     Some(20),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        context: None,
                         outcome: None,
                         reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
@@ -4666,6 +4807,7 @@ mod tests {
                     Some(seq),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        context: None,
                         outcome: None,
                         reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
@@ -4868,6 +5010,7 @@ mod tests {
             (
                 3,
                 AgentLifecycleEvent::SessionWaitStarted {
+                    context: None,
                     outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: Some("Answer question".into()),
@@ -6546,6 +6689,7 @@ mod tests {
             (
                 "claude",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    context: None,
                     outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,

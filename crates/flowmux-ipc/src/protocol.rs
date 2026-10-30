@@ -286,6 +286,8 @@ pub enum AgentLifecycleEvent {
     /// teardown so unrelated progress cannot hide a real user wait.
     SessionWaitStarted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<flowmux_core::AgentWaitContext>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         outcome: Option<flowmux_core::AgentTurnOutcome>,
         #[serde(default)]
         reason: flowmux_core::AgentWaitReason,

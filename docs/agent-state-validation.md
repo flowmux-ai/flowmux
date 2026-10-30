@@ -264,7 +264,7 @@ an already known scope reason and start time.
 Question, approval, usage-limit, and API-failure events receive typed reasons.
 Unknown or legacy events retain a fallback; no authentication or automatic-retry
 state is inferred from missing data. The data model can represent authentication
-when a future adapter has explicit evidence. Mixed reasons display Multiple
+when an adapter has explicit evidence. Mixed reasons display Multiple
 waits. Both live Agent lists share scope/reason/count details in their tooltips;
 tree JSON and `flowmux --json agents` expose `pending_waits` and the derived
 `status_text` while preserving raw `custom_status` for existing consumers.
@@ -417,3 +417,75 @@ The full Linux gate for the preceding pending-wait commit is running from a
 frozen snapshot; it does not include this outcome change. Full cross-platform
 verification remains outstanding, including the macOS foreground/input blocker
 recorded above. These focused results do not replace those final gates.
+
+## Waiting actor and retry context
+
+Live waits now expose `actor` and `retry` alongside reason, scope, count, and
+start time. Missing or future values remain unknown. Approval, question, and
+explicit authentication failures identify user action. A usage-limit or generic
+API failure alone does not establish who must act or whether a retry is scheduled.
+An explicit stale auto-resume event reports user/manual and displays
+`Usage limit reached; input required`. Ending auto-resume without continuing
+clears the wait but preserves an already known failed response outcome.
+
+Duplicate same-reason events retain explicit retry context and the original
+start time. A changed known reason resets obsolete actor/retry context. Summary
+groups include actor and retry so an automatic wait cannot hide a simultaneous
+manual wait with the same reason. Tooltip details show the waiting actor and
+known retry mode; public activity and the existing request-resolution rules are
+unchanged.
+
+Automatic retry is representable and covered with explicit lifecycle evidence
+in reducer tests. The current native adapter does not receive an automatic-wait
+start or reset deadline from the failure hook, so it does not fabricate either.
+Automatic-wait screen refinement and its evidence boundary remain follow-up
+work. No deadline is inferred from an ambiguous displayed clock.
+
+The pre-change regression failed on the missing actor field in
+`/tmp/fm-wait-context-red.log`. Final isolated unit runs passed 167 core and
+193 daemon tests on macOS and Linux, with the existing CLI and process tests:
+`/tmp/fm-wait-context-unit-verified.log` and
+`/tmp/fm-wait-context-linux-unit.log`. IPC compatibility tests passed in
+`/tmp/fm-wait-context-ipc.log`; full workspace/all-targets Clippy with native-smoke
+passed in `/tmp/fm-wait-context-clippy.log`.
+
+The expanded native replay passed authentication categories, unknown retry on
+quota failure, manual resumption, automatic resumption, cancellation preserving
+failure, and changing authentication to a generic API error. Live GTK tooltip
+inspection also observed the waiting actor. Log:
+`/tmp/fm-wait-context-native.log` (`LIVE_NATIVE_HOOK_MATRIX_OK`,
+`MACOS_AGENT_EVIDENCE_TOOLTIPS_OK`, `MACOS_NATIVE_AGENT_HOOKS_OK`). Authentication
+and quota events were synthetic; no real login failure or quota exhaustion was
+induced.
+
+Actual-agent verification used application PID 848 in `/tmp/fm-atn-jkp6usvc`,
+separate application state and sockets, private hook settings, and a private
+home for native-hook agent B. Agents A 2.1.314 and B 0.166.0 passed plain responses,
+question/answer, one-time command approval, immediate/delayed interruption,
+recovery, and unsubmitted status-like drafts. The actual question and approval
+reported user/unknown context and cleared only after their corresponding
+answers. Screenshots showed both request types and the later interrupted versus
+unconfirmed-result states. Final recovery responses completed with empty waits.
+Evidence: `/tmp/fm-wait-context-live.log` (`LIVE_WAIT_CONTEXT_MATRIX_OK`) and the
+state/draft/CLI JSON files under the isolated root. Application and CLI hashes:
+
+`43a6bf4476c9c5c7a046cbeab84abd7d07036fe58cd6721f71f3a88f38accce8`
+
+`a4381724e87a3ce6d37bc6e6e2df2bc385d073e277ebcb78ae1df96d8de45b82`
+
+A test-session vendor auto-update had redirected its executable link into a
+temporary data directory. Only the owned test-agent processes were stopped;
+the same binary was copied to permanent storage and the link restored with a
+matching SHA-256. Subsequent live tests disabled auto-updating in their private
+environment and verified the permanent link stayed unchanged. Original
+application PID 72789 and the independent user agent remained alive.
+
+The preceding full Linux gate failed because the editor I/O fixture dismissed
+an error dialog before it appeared, leaving a later focus command queued behind
+the still-open dialog. Screenshots established this ordering. The fixture now
+waits for the named accessible dialog before dismissing it, then observes its
+disappearance. The same failing binary passed the complete focused scenario
+(`/tmp/fm-editor-io-recheck.log`), committed separately as `c4c4c486`.
+The full gate is running from that frozen commit in
+`/tmp/fm-outcomes-c4-linux-final.log`; it excludes this wait-context change.
+Final full cross-platform verification remains outstanding.

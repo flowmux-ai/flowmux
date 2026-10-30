@@ -345,6 +345,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
                 if text.lines().any(|line| line == "Screen-inferred state") {
                     found |= 2;
                 }
+                if text.contains("waiting on user") {
+                    found |= 4;
+                }
             }
             let mut child = widget.first_child();
             while let Some(widget) = child {
@@ -383,8 +386,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE_NATIVE_HOOK_MATRIX_OK"));
         assert_eq!(
             evidence_seen.get(),
-            3,
-            "live Agent rows must expose both evidence kinds"
+            7,
+            "live Agent rows must expose evidence kinds and the waiting actor"
         );
         println!("MACOS_AGENT_EVIDENCE_TOOLTIPS_OK");
         server.abort();

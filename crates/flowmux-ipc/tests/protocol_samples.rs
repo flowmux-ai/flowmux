@@ -389,3 +389,23 @@ fn response_outcome_is_optional_and_unknown_future_values_remain_readable() {
         AgentLifecycleEvent::SessionWaitStarted { outcome: None, .. }
     ));
 }
+
+#[test]
+fn wait_context_is_optional_and_future_values_do_not_invent_user_action() {
+    use flowmux_core::{AgentRetryState, AgentWaitActor, AgentWaitSummary};
+    use flowmux_ipc::protocol::AgentLifecycleEvent;
+    let mut value = serde_json::json!({"scope":"session", "reason":"quota", "count":1, "since":"2026-10-30T00:00:00Z"});
+    let wait: AgentWaitSummary = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(wait.actor, AgentWaitActor::Unknown);
+    assert_eq!(wait.retry, AgentRetryState::Unknown);
+    value["actor"] = "future_actor".into();
+    value["retry"] = "future_retry".into();
+    let future: AgentWaitSummary = serde_json::from_value(value).unwrap();
+    assert_eq!(future, wait);
+    let legacy = serde_json::json!({"event":"session_wait_started", "status_text":"Waiting"});
+    let event: AgentLifecycleEvent = serde_json::from_value(legacy).unwrap();
+    assert!(matches!(
+        event,
+        AgentLifecycleEvent::SessionWaitStarted { context: None, .. }
+    ));
+}

@@ -3101,6 +3101,8 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         let wait = AgentWaitSummary {
             scope: AgentWaitScope::Tool,
             reason: AgentWaitReason::Question,
+            actor: AgentWaitActor::User,
+            retry: AgentRetryState::Unknown,
             count: 2,
             since: chrono::Utc::now(),
         };

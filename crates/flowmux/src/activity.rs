@@ -325,6 +325,8 @@ mod tests {
         assert_eq!(completed.summary, "Completed: fixed tests");
         let mut question = located(AgentStatus::Blocked, "Waiting for approval");
         question.presence.pending_waits = vec![flowmux_core::AgentWaitSummary {
+            actor: flowmux_core::AgentWaitActor::User,
+            retry: flowmux_core::AgentRetryState::Unknown,
             scope: flowmux_core::AgentWaitScope::Permission,
             reason: flowmux_core::AgentWaitReason::Question,
             count: 1,

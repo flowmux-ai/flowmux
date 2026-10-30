@@ -11,8 +11,8 @@ use flowmux_core::{
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_status_from_signals, detect_agent_usage_limit_text,
     select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport,
-    AgentTurnOutcome, AgentWaitReason, AgentWaitScope, AgentWaitSummary, Pane, PaneContent, PaneId,
-    PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
+    AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope, AgentWaitSummary, Pane,
+    PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
@@ -103,6 +103,7 @@ const SESSION_WAIT_SCOPE: &str = "session";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PendingAgentWait {
     reason: AgentWaitReason,
+    context: AgentWaitContext,
     since: chrono::DateTime<chrono::Utc>,
 }
 
@@ -110,6 +111,10 @@ impl PendingAgentWait {
     fn new(reason: AgentWaitReason) -> Self {
         Self {
             reason,
+            context: AgentWaitContext {
+                actor: reason.actor(),
+                ..Default::default()
+            },
             since: chrono::Utc::now(),
         }
     }
@@ -119,15 +124,23 @@ fn record_scope_wait(
     scopes: &mut HashMap<String, PendingAgentWait>,
     scope: String,
     reason: AgentWaitReason,
+    context: Option<AgentWaitContext>,
 ) {
-    scopes
+    let wait = scopes
         .entry(scope)
         .and_modify(|wait| {
-            if reason != AgentWaitReason::Unknown {
+            if reason != AgentWaitReason::Unknown && reason != wait.reason {
                 wait.reason = reason;
+                wait.context = AgentWaitContext {
+                    actor: reason.actor(),
+                    ..Default::default()
+                };
             }
         })
         .or_insert_with(|| PendingAgentWait::new(reason));
+    if let Some(context) = context {
+        wait.context = context;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -347,8 +360,7 @@ fn pending_wait_summary(
     runtime: &AgentLifecycleRuntime,
     key: &AgentLifecycleKey,
 ) -> Vec<AgentWaitSummary> {
-    let mut summary: BTreeMap<(AgentWaitScope, AgentWaitReason), AgentWaitSummary> =
-        BTreeMap::new();
+    let mut summary = BTreeMap::<_, AgentWaitSummary>::new();
     let tool = runtime
         .waits
         .get(key)
@@ -370,7 +382,7 @@ fn pending_wait_summary(
         .map(|wait| (AgentWaitScope::Session, wait));
     for (scope, wait) in tool.chain(permission).chain(session) {
         summary
-            .entry((scope, wait.reason))
+            .entry((scope, wait.reason, wait.context.actor, wait.context.retry))
             .and_modify(|entry| {
                 entry.count = entry.count.saturating_add(1);
                 entry.since = entry.since.min(wait.since);
@@ -378,6 +390,8 @@ fn pending_wait_summary(
             .or_insert(AgentWaitSummary {
                 scope,
                 reason: wait.reason,
+                actor: wait.context.actor,
+                retry: wait.context.retry,
                 count: 1,
                 since: wait.since,
             });
@@ -1213,6 +1227,10 @@ impl StateStore {
                             .or_default(),
                         scope,
                         reason,
+                        Some(AgentWaitContext {
+                            actor: flowmux_core::AgentWaitActor::User,
+                            ..Default::default()
+                        }),
                     );
                     Some((NeedsInput, message, status_text))
                 } else {
@@ -1220,6 +1238,7 @@ impl StateStore {
                 }
             }
             AgentLifecycleEvent::SessionWaitStarted {
+                context,
                 outcome,
                 reason,
                 message,
@@ -1251,6 +1270,7 @@ impl StateStore {
                         runtime.session_waits.entry(wait_key.clone()).or_default(),
                         scope,
                         reason,
+                        context,
                     );
                     turn_outcome = outcome;
                     Some((NeedsInput, message, status_text))
@@ -1288,6 +1308,8 @@ impl StateStore {
                     }
                     clear_session_wait_scope(&mut runtime, &wait_key, &scope);
                     if !resume {
+                        // Ending a wait is not evidence that a failed response succeeded.
+                        turn_outcome = current.as_ref().and_then(|c| c.presence.turn_outcome);
                         if let Some(seq) = seq {
                             runtime.boundary_seq.insert(wait_key.clone(), seq);
                         }
@@ -2881,6 +2903,52 @@ mod tests {
             !log.contains("private-"),
             "diagnostics leaked payload: {log}"
         );
+    }
+
+    #[test]
+    fn pending_wait_summary_keeps_manual_and_automatic_scopes_distinct() {
+        use flowmux_core::{AgentActivity, AgentRetryState, AgentWaitActor};
+        let mut runtime = AgentLifecycleRuntime::default();
+        let key = (SurfaceId::new(), "agent".into(), "session".into());
+        let mut automatic = PendingAgentWait::new(AgentWaitReason::Quota);
+        automatic.context = AgentWaitContext {
+            actor: AgentWaitActor::External,
+            retry: AgentRetryState::Automatic,
+        };
+        let mut manual = automatic;
+        manual.context = AgentWaitContext {
+            actor: AgentWaitActor::User,
+            retry: AgentRetryState::Manual,
+        };
+        runtime.session_waits.insert(
+            key.clone(),
+            HashMap::from([("automatic".into(), automatic), ("manual".into(), manual)]),
+        );
+        let waits = pending_wait_summary(&runtime, &key);
+        assert_eq!(
+            waits.len(),
+            2,
+            "same reason must not merge different required actions"
+        );
+        assert!(waits.iter().all(|wait| wait.count == 1));
+        let mut presence = AgentPresence::new("agent", AgentActivity::NeedsInput, None);
+        presence.pending_waits = waits;
+        assert_eq!(presence.status_text(), Some("Multiple waits"));
+        let tooltip = flowmux_core::agent_status_tooltip(
+            "agent",
+            "Multiple waits",
+            None,
+            &presence.pending_waits,
+        );
+        assert!(tooltip.contains("waiting on user"));
+        assert!(tooltip.contains("automatic retry"));
+        runtime
+            .session_waits
+            .get_mut(&key)
+            .unwrap()
+            .remove("manual");
+        presence.pending_waits = pending_wait_summary(&runtime, &key);
+        assert_eq!(presence.status_text(), Some("Waiting to retry"));
     }
 
     #[test]

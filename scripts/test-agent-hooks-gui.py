@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
                     question = dict(tool_name="AskUserQuestion", tool_use_id="a")
                     hook("pre-tool-use", "needs_input", **question)
                     initial_wait = expect_waits([("tool", "question", 1)], "Waiting for answer")
+                    assert initial_wait[0]["actor"] == "user" and initial_wait[0]["retry"] == "unknown"
                     hook("pre-tool-use", "needs_input", **question)
                     assert expect_waits([("tool", "question", 1)]) == initial_wait
                     hook("pre-tool-use", "needs_input", tool_name="AskUserQuestion", tool_use_id="b")
@@ -191,12 +192,27 @@ int main(int argc, char **argv) {
                     hook("post-tool-use", "needs_input", tool_name="Bash", tool_use_id="ordinary")
                     hook("post-tool-batch", "running")
                     hook("stop-failure", "needs_input", error="rate_limit")
-                    expect_waits([("session", "quota", 1)], "Usage limit reached")
+                    quota = expect_waits([("session", "quota", 1)], "Usage limit reached")
+                    assert quota[0]["actor"] == "unknown" and quota[0]["retry"] == "unknown"
                     hook("post-tool-batch", "needs_input")
+                    hook("notification", "needs_input", notification_type="quota_auto_resume_stale")
+                    manual = expect_waits([("session", "quota", 1)], "Usage limit reached; input required")
+                    assert manual[0]["actor"] == "user" and manual[0]["retry"] == "manual"
+                    assert manual[0]["since"] == quota[0]["since"]
                     hook("notification", "running", notification_type="quota_auto_resume_fired")
                     expect_waits([])
+                    hook("stop-failure", "needs_input", error="rate_limit")
+                    hook("notification", "idle", notification_type="quota_auto_resume_disabled")
+                    expect_waits([], "Response failed")
+                    assert observed()["turn_outcome"] == "failed"
+                    for error in ("authentication_failed", "cloud_credential_error"):
+                        hook("prompt-submit", "running")
+                        hook("stop-failure", "needs_input", error=error)
+                        auth = expect_waits([("session", "authentication", 1)], "Authentication required")
+                        assert auth[0]["actor"] == "user" and auth[0]["retry"] == "unknown"
                     hook("stop-failure", "needs_input", error="api_error")
-                    expect_waits([("session", "api_failure", 1)], "API request failed")
+                    api = expect_waits([("session", "api_failure", 1)], "API request failed")
+                    assert api[0]["actor"] == "unknown" and api[0]["retry"] == "unknown"
                     hook("stop", "idle", last_assistant_message="Completed fixture")
                     expect_waits([])
                     hook("prompt-submit", "running")
