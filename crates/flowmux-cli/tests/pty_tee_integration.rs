@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixListener;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -419,6 +420,84 @@ fn run_tee_capture_stdout(script: &str, test_cwd: &Path) -> Vec<u8> {
     }
 
     output
+}
+
+/// Runs pty-tee around `/bin/sh -c script`; `after_start` receives the
+/// pty-tee pid once the first stdout byte arrived. Returns the wait status.
+fn run_tee_exit_status(script: &str, after_start: impl FnOnce(u32)) -> ExitStatus {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+
+    let mut cmd = Command::new(flowmuxctl_path());
+    cmd.arg("pty-tee")
+        .arg("--pane")
+        .arg("11111111-1111-1111-1111-111111111111")
+        .arg("--surface")
+        .arg("22222222-2222-2222-2222-222222222222")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(script)
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_LOG", "off")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn flowmuxctl pty-tee");
+    let stdin_keepalive = child.stdin.take();
+    let mut stdout = DeadlineReader::new(
+        child.stdout.take().expect("pty-tee stdout"),
+        Duration::from_secs(10),
+    );
+    let (started_tx, started_rx) = mpsc::channel();
+    let stdout_thread = thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut first = [0u8; 1];
+        if matches!(stdout.read(&mut first), Ok(1)) {
+            output.push(first[0]);
+            let _ = started_tx.send(());
+        }
+        // Keep draining so a full pipe can never stall the proxy.
+        let _ = stdout.read_to_end(&mut output);
+        output
+    });
+
+    let started = started_rx.recv_timeout(Duration::from_secs(10)).is_ok();
+    if started {
+        after_start(child.id());
+    }
+    let status =
+        wait_for_child(&mut child, Duration::from_secs(10)).expect("wait flowmuxctl pty-tee");
+    drop(stdin_keepalive);
+    let output = stdout_thread.join().expect("join stdout reader");
+    assert!(
+        started,
+        "pty-tee produced no output before exiting: {:?}, status: {status:?}",
+        String::from_utf8_lossy(&output)
+    );
+    status
+}
+
+#[test]
+fn inner_signal_death_is_reported_as_a_signal() {
+    let status = run_tee_exit_status("printf started; kill -KILL $$", |_| {});
+    assert_eq!(status.signal(), Some(libc::SIGKILL), "status: {status:?}");
+}
+
+#[test]
+fn inner_exit_code_passes_through_unchanged() {
+    let status = run_tee_exit_status("printf started; exit 3", |_| {});
+    assert_eq!(status.code(), Some(3), "status: {status:?}");
+}
+
+#[test]
+fn external_sigterm_is_reraised_after_the_inner_group_is_gone() {
+    let status = run_tee_exit_status("printf started; sleep 30", |pid| {
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    });
+    assert_eq!(status.signal(), Some(libc::SIGTERM), "status: {status:?}");
 }
 
 fn osc7_for_test_path(path: &Path) -> Vec<u8> {

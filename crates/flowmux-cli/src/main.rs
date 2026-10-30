@@ -1198,8 +1198,8 @@ fn main() -> anyhow::Result<()> {
         argv,
     } = cli.cmd
     {
-        let exit_code = pty_tee::run(pane, surface, cli.socket, argv)?;
-        std::process::exit(exit_code);
+        let exit = pty_tee::run(pane, surface, cli.socket, argv)?;
+        pty_tee::exit_with(exit);
     }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()

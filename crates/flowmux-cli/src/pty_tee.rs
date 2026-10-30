@@ -70,13 +70,19 @@ use std::time::{Duration, Instant};
 /// one byte here; the loop polls the read end together with the PTY fds.
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
+/// SIGHUP/SIGTERM/SIGINT delivered to pty-tee itself, or -1. Recorded so
+/// the wrapper can die from the same signal once the inner group is gone.
+static TERMINATION_SIGNAL: AtomicI32 = AtomicI32::new(-1);
 const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const EVENT_QUEUE_CAPACITY: usize = 16;
 const PENDING_BYTES: usize = 256 * 1024;
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
     if matches!(sig, libc::SIGHUP | libc::SIGTERM | libc::SIGINT) {
-        TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
+        // Lock-free atomic stores are async-signal-safe. Publish the signal
+        // number before the flag the pump loop polls.
+        TERMINATION_SIGNAL.store(sig, Ordering::SeqCst);
+        TERMINATION_REQUESTED.store(true, Ordering::SeqCst);
     }
     let fd = SIGNAL_PIPE_WRITE.load(Ordering::Relaxed);
     if fd >= 0 {
@@ -117,15 +123,25 @@ impl OutputRefreshState {
     }
 }
 
-/// Public entry point used by `main.rs`. Returns the inner shell's exit
-/// code so `flowmuxctl` can exit transparently — the terminal pane sees the
-/// child exit at the user's expected status.
+/// How the wrapper ends so the terminal pane observes the inner shell's
+/// real wait status instead of a `128 + n` encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeeExit {
+    /// Exit normally with this status code.
+    Code(i32),
+    /// Die from this signal number.
+    Signal(i32),
+}
+
+/// Public entry point used by `main.rs`. Returns how the inner shell
+/// ended, or the termination signal delivered to the wrapper itself, so
+/// `flowmuxctl` can end transparently via [`exit_with`].
 pub fn run(
     pane: Option<PaneId>,
     surface: Option<SurfaceId>,
     socket: Option<PathBuf>,
     child_argv: Vec<OsString>,
-) -> anyhow::Result<i32> {
+) -> anyhow::Result<TeeExit> {
     if child_argv.is_empty() {
         return Err(anyhow!("pty-tee needs a child argv after `--`"));
     }
@@ -175,7 +191,58 @@ pub fn run(
     // the last in-flight event isn't truncated mid-write on exit.
     let _ = worker.join();
 
-    result
+    // An external SIGHUP/SIGTERM/SIGINT outranks the inner status: the
+    // wrapper was asked to die and only tore the inner group down first.
+    let exit = result?;
+    Ok(match TERMINATION_SIGNAL.load(Ordering::SeqCst) {
+        sig if sig >= 0 => TeeExit::Signal(sig),
+        _ => exit,
+    })
+}
+
+/// End the process the way [`run`] decided. A signal exit restores the
+/// default disposition, unblocks the signal, and raises it so the parent
+/// observes a genuine `WIFSIGNALED` status with the real signal number.
+pub fn exit_with(exit: TeeExit) -> ! {
+    let sig = match exit {
+        TeeExit::Code(code) => std::process::exit(code),
+        TeeExit::Signal(sig) => sig,
+    };
+    if matches!(
+        sig,
+        libc::SIGSEGV
+            | libc::SIGABRT
+            | libc::SIGBUS
+            | libc::SIGILL
+            | libc::SIGFPE
+            | libc::SIGTRAP
+            | libc::SIGQUIT
+    ) {
+        // The inner process crashed, not the wrapper: never dump a core
+        // for the re-raised signal.
+        let no_core = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        unsafe {
+            libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+        }
+    }
+    // SIG_DFL first so pty-tee's own handler cannot catch the re-raise.
+    // SIGKILL rejects both calls harmlessly and still terminates below.
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = libc::SIG_DFL;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaction(sig, &action, std::ptr::null_mut());
+        let mut unblock: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut unblock);
+        libc::sigaddset(&mut unblock, sig);
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &unblock, std::ptr::null_mut());
+        libc::raise(sig);
+    }
+    // Only reached for a signal whose default action does not terminate.
+    std::process::exit(128 + sig)
 }
 
 fn run_pty_pump(
@@ -183,7 +250,7 @@ fn run_pty_pump(
     ssh_terminal: bool,
     event_tx: mpsc::SyncSender<PtyEvent>,
     output_refresh: Arc<OutputRefreshState>,
-) -> anyhow::Result<i32> {
+) -> anyhow::Result<TeeExit> {
     // 1. Allocate the inner PTY pair the shell will live on.
     let OpenptyResult { master, slave } = openpty(None, None).context("openpty for inner shell")?;
 
@@ -234,6 +301,7 @@ fn run_pty_pump(
     set_nonblocking(sig_r.as_raw_fd())?;
     set_nonblocking(sig_w.as_raw_fd())?;
     TERMINATION_REQUESTED.store(false, Ordering::Relaxed);
+    TERMINATION_SIGNAL.store(-1, Ordering::SeqCst);
     SIGNAL_PIPE_WRITE.store(sig_w.as_raw_fd(), Ordering::Relaxed);
 
     let sa = nix::sys::signal::SigAction::new(
@@ -280,7 +348,7 @@ fn run_pty_pump(
 
     // 7. Pump loop.
     let mut buf = [0u8; 8192];
-    let exit_code: i32;
+    let exit_code: TeeExit;
     loop {
         let mut fds = [
             libc::pollfd {
@@ -483,7 +551,7 @@ fn run_pty_pump(
                 }
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
-                    let code = wait_blocking(child_pid).unwrap_or(0);
+                    let code = wait_blocking(child_pid).unwrap_or(TeeExit::Code(0));
                     let alternate_screen_exited = drain_inner(
                         master_fd,
                         &mut extractor,
@@ -516,7 +584,7 @@ fn run_pty_pump(
             if alternate_screen_exited {
                 cwd_tracker.emit_shell_title(child_pid, &mut to_outer);
             }
-            let code = wait_blocking(child_pid).unwrap_or(0);
+            let code = wait_blocking(child_pid).unwrap_or(TeeExit::Code(0));
             exit_code = code;
             break;
         }
@@ -544,7 +612,7 @@ fn terminate_inner_group<F: FnMut(&str)>(
     event_tx: &mpsc::SyncSender<PtyEvent>,
     output_refresh: &OutputRefreshState,
     to_outer: &mut VecDeque<u8>,
-) -> i32 {
+) -> TeeExit {
     // Keep EOF distinct from an explicit termination request: stdin can close
     // while a slow stdout consumer still expects every queued byte. Signal
     // and write-error callers set TERMINATION_REQUESTED to avoid waiting for
@@ -632,7 +700,8 @@ fn terminate_inner_group<F: FnMut(&str)>(
     drain_inner(master_fd, extractor, input_modes, output_refresh, to_outer);
     flush_pending(pending, event_tx);
     queue_output_refresh(event_tx, output_refresh);
-    exit_code.unwrap_or(128 + libc::SIGKILL)
+    // Never reaped within the grace periods: report the SIGKILL we sent.
+    exit_code.unwrap_or(TeeExit::Signal(libc::SIGKILL))
 }
 
 fn termination_grace(name: &str, default: Duration) -> Duration {
@@ -657,7 +726,7 @@ fn process_group_exists(pid: Pid) -> bool {
 fn wait_for_group_exit(
     pid: Pid,
     child_reaped: &mut bool,
-    exit_code: &mut Option<i32>,
+    exit_code: &mut Option<TeeExit>,
     timeout: Duration,
     pump_output: &mut impl FnMut(),
 ) -> bool {
@@ -668,11 +737,11 @@ fn wait_for_group_exit(
             match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::Exited(_, code)) => {
                     *child_reaped = true;
-                    *exit_code = Some(code);
+                    *exit_code = Some(TeeExit::Code(code));
                 }
                 Ok(WaitStatus::Signaled(_, sig, _)) => {
                     *child_reaped = true;
-                    *exit_code = Some(128 + sig as i32);
+                    *exit_code = Some(TeeExit::Signal(sig as i32));
                 }
                 Err(nix::errno::Errno::ECHILD) => *child_reaped = true,
                 Err(nix::errno::Errno::EINTR) | Ok(WaitStatus::StillAlive) => {}
@@ -1123,18 +1192,18 @@ fn set_winsize(fd: RawFd, ws: &libc::winsize) -> std::io::Result<()> {
     }
 }
 
-fn try_reap(pid: Pid) -> Option<i32> {
+fn try_reap(pid: Pid) -> Option<TeeExit> {
     match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
-        Ok(WaitStatus::Exited(_, code)) => Some(code),
-        Ok(WaitStatus::Signaled(_, sig, _)) => Some(128 + sig as i32),
+        Ok(WaitStatus::Exited(_, code)) => Some(TeeExit::Code(code)),
+        Ok(WaitStatus::Signaled(_, sig, _)) => Some(TeeExit::Signal(sig as i32)),
         _ => None,
     }
 }
 
-fn wait_blocking(pid: Pid) -> Option<i32> {
+fn wait_blocking(pid: Pid) -> Option<TeeExit> {
     match waitpid(pid, None) {
-        Ok(WaitStatus::Exited(_, code)) => Some(code),
-        Ok(WaitStatus::Signaled(_, sig, _)) => Some(128 + sig as i32),
+        Ok(WaitStatus::Exited(_, code)) => Some(TeeExit::Code(code)),
+        Ok(WaitStatus::Signaled(_, sig, _)) => Some(TeeExit::Signal(sig as i32)),
         _ => None,
     }
 }
