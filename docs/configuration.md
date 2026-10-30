@@ -214,6 +214,16 @@ It includes identity ownership, status evidence, turn outcome, pending wait
 summaries, and observed child work where a matching session ledger exists.
 The ordinary `flowmux agents` listing keeps its existing format.
 
+The information button beside each live agent in the side panel or bottom bar
+opens the same evidence in **Agent details**. The popup refreshes while open
+and preserves its expanded child section during updates. Opening details does
+not navigate, mark results read, or resolve requests. **Observed child work**
+distinguishes active observations, unmatched requests, and unavailable evidence.
+**Open parent terminal** navigates to the current parent tab after checking the
+session again. If the agent ended or its reported session changed, an old
+snapshot will not open it.
+Approve or answer requests in that terminal using the agent's own controls.
+
 Child observations are partial. `children: null` means the ledger is unavailable,
 not that no children exist. An empty `active` list means no active children are
 currently observed. Child waits without a matching observed identity and turn

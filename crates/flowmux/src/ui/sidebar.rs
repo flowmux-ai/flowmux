@@ -1109,6 +1109,7 @@ fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Bu
 }
 
 struct ActivityRowWidget {
+    root: gtk::Box,
     button: gtk::Button,
     when: gtk::Label,
     entry: ActivityNowEntry,
@@ -1125,6 +1126,7 @@ impl ActivityRowWidget {
         let (content, when) = activity_row_content(entry);
         button.set_child(Some(&content));
         let target = Rc::new(Cell::new((entry.workspace, entry.pane, entry.surface)));
+        let root = crate::ui::agent_details::row(&button, entry.surface, bridge.clone());
         let click_target = target.clone();
         button.connect_clicked(move |_| {
             let (workspace, pane, surface) = click_target.get();
@@ -1141,6 +1143,7 @@ impl ActivityRowWidget {
             });
         });
         Self {
+            root,
             button,
             when,
             entry: entry.clone(),
@@ -1197,7 +1200,7 @@ fn render_activity_rows(
     rows.retain(|surface, row| {
         let keep = current.iter().any(|entry| entry.surface == *surface);
         if !keep {
-            content.remove(&row.button);
+            content.remove(&row.root);
         }
         keep
     });
@@ -1205,15 +1208,15 @@ fn render_activity_rows(
     for entry in current {
         let row = rows.entry(entry.surface).or_insert_with(|| {
             let row = ActivityRowWidget::new(entry, bridge.clone());
-            content.append(&row.button);
+            content.append(&row.root);
             row
         });
         row.update(entry, store, focused_surface == Some(entry.surface));
         // Reorder without detaching the button that owns keyboard focus.
-        if row.button.prev_sibling() != previous {
-            content.reorder_child_after(&row.button, previous.as_ref());
+        if row.root.prev_sibling() != previous {
+            content.reorder_child_after(&row.root, previous.as_ref());
         }
-        previous = Some(row.button.clone().upcast());
+        previous = Some(row.root.clone().upcast());
     }
 }
 
@@ -1322,7 +1325,7 @@ pub(crate) async fn check_stable_activity_rows() {
         bridge.clone(),
     );
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
-    assert_eq!(content.first_child(), Some(button.clone().upcast()));
+    assert_eq!(content.first_child(), button.parent());
     assert!(
         button.is_focus(),
         "status refresh must preserve keyboard focus"
@@ -1338,7 +1341,7 @@ pub(crate) async fn check_stable_activity_rows() {
     assert!(button.tooltip_text().unwrap().contains("Reviewing patch"));
     current.rotate_left(1);
     render_activity_rows(&content, &rows, &store, &current, None, bridge.clone());
-    assert_eq!(content.last_child(), Some(button.clone().upcast()));
+    assert_eq!(content.last_child(), button.parent());
     assert!(
         button.is_focus(),
         "reordering must keep keyboard focus on the same surface"

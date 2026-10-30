@@ -1139,3 +1139,83 @@ The final application/CLI hashes and remaining validation limits are recorded
 above. This query is a snapshot, not event-history storage, a complete child
 inventory, child navigation, or an approval interface. The detail UI and final
 cross-platform gates remain separate work.
+
+## Live agent details and parent navigation (2026-10-30)
+
+Both live agent lists now place an information button beside the existing
+navigation button. Agent details reads the same explanation as the CLI without
+acknowledging results or resolving requests. It shows evidence time/source,
+identity ownership, outcome, typed waits, and an expandable child section.
+Unavailable child evidence, an observed empty list, active child/turn identities,
+and unmatched child waits remain distinct. The action opens the current parent
+terminal, never an inferred child approval interface. Dispatch rechecks the
+reported session and exact registry location; ended agents and changed session
+keys do not fall back to another target.
+
+The popup queries only while open, with one outstanding read and a bounded
+response wait. Existing keyed navigation buttons, focus, drag ordering, and
+scroll positions are retained. Text updates preserve the child expansion and
+navigation control. Removing a row releases the popup and its callbacks.
+An initial live candidate exposed clipping at the bottom of the window. The
+existing menu anchor helper now positions this popup, followed by a bounded
+layout-frame correction using its allocated native surface. This handles wrapped
+content whose final height exceeds its initial measurement. The native fixture
+checks the expanded popup against a 600-pixel parent surface.
+
+Focused validation passed:
+
+- Linux: nine tests covering details rendering/lifetime, agent-bar updates and
+  drag ordering, activity-row stability, read-only dispatch, changed sessions,
+  ended targets, and exact navigation (`/tmp/fm-details-position-linux4.log`).
+- macOS: the full focused agent hook replay, normal-screen footer extraction,
+  evidence tooltips, stable rows/bar, and detail popup checks
+  (`/tmp/fm-details-final-native.log`, `MACOS_AGENT_DETAILS_OK` and
+  `MACOS_NATIVE_SMOKE_OK`). The earlier geometry failure was retained in
+  `/tmp/fm-details-geometry.log`; the corrected focused native run also passed.
+- Exact application/CLI build, workspace all-target Clippy with native-smoke
+  and warnings denied, formatting, and whitespace checks passed
+  (`/tmp/fm-details-final-build.log`, `/tmp/fm-details-final-clippy.log`).
+
+Actual native-hook agents A and B ran in `/tmp/fm-atn-0uytdtbx`, application
+PID 7936, bundle `com.flowmux.AttentionVerify27`. A's earlier usage limit had
+expired: ordinary replies and an actual question/answer completed. While A's
+question remained pending and another workspace was visible, opening and
+expanding details preserved the complete explanation over ten queries and kept
+the current workspace unchanged. The detail action reached A's exact terminal;
+answering the question cleared the waits and completed the response.
+
+Both agents then passed a single-runner sequence of newly streamed, uniquely
+marked text, interruption, and a fresh successful response
+(`/tmp/fm-details-single-live.log`, `LIVE_SINGLE_DETAILS_A_B_OK`). A's earlier
+pre-output cancellation restored a draft without an interruption marker; its
+screen-derived unknown outcome was retained as unknown. Two exploratory runners
+overlapped in a preceding interruption/recovery interval. That interval is
+excluded from pass evidence, as recorded in `details-overlap-excluded.txt` under
+the isolated root. An earlier candidate also encountered a transient model
+capacity response; it is not counted as a successful reply.
+
+B created one real child, returned before it finished, and later reused the
+same child for a one-time approval. The bottom-bar details displayed the exact
+observed child ID, new turn ID, permission scope, actor, and count. Opening,
+expanding, scrolling, closing with Escape, and reopening preserved the pending
+request. Once hidden-state reporting settled, ten queries matched the full
+unread explanation while the other workspace remained selected. Parent
+navigation, subsequent normal workspace clicks, and the original bar navigation
+all worked. After the one-time command approval, requests and active child work
+cleared and remained clear for eight seconds. The reopened, still-expanded
+details showed no active children and a screen-derived unknown outcome, not
+invented native success. Logs: `/tmp/fm-details-final-child.log` and
+`/tmp/fm-details-final-approval.log` (`LIVE_CHILD_EXPLANATION_OK`,
+`LIVE_REUSED_CHILD_APPROVAL_OK`). Query/navigation receipts and final states are
+retained under the isolated root in `details-question-*`, `details-child-*`,
+`single-*`, and `child-approval-*` files.
+
+The signed application's SHA-256 is
+`6fca7cb61ea190d4723e29aa26fd74082252e38d65c5f1dc2a02401a1ce00e3e`;
+the signed CLI's is
+`f777ece6db949b663a758c71c80c934bb4478ec86bc76bafffa07ab69efabfb8`.
+Build UUID comparison ties the copies to the build outputs
+(`binary-evidence.json`). Original application PID 72789 and user process PID
+1401 were preserved, and the permanent agent binary hash was unchanged.
+Existing theme parser warnings remain. These focused passes do not close the
+earlier full GUI gate failures, protocol/capability work, or performance gates.

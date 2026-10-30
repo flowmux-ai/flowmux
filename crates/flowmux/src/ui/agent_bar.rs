@@ -71,7 +71,7 @@ impl AgentBar {
         buttons.retain(|surface, item| {
             let keep = model.visible && model.items.iter().any(|item| item.surface == *surface);
             if !keep {
-                self.items.remove(&item.button);
+                self.items.remove(&item.root);
             }
             keep
         });
@@ -84,7 +84,7 @@ impl AgentBar {
         for item in self.ordered_items(model) {
             let widget = buttons.entry(item.surface).or_insert_with(|| {
                 let widget = self.item_button(item);
-                self.items.append(&widget.button);
+                self.items.append(&widget.root);
                 widget
             });
             widget.update(item);
@@ -101,11 +101,11 @@ impl AgentBar {
                     widget.button.remove_css_class(class);
                 }
             }
-            if widget.button.prev_sibling() != previous {
+            if widget.root.prev_sibling() != previous {
                 self.items
-                    .reorder_child_after(&widget.button, previous.as_ref());
+                    .reorder_child_after(&widget.root, previous.as_ref());
             }
-            previous = Some(widget.button.clone().upcast());
+            previous = Some(widget.root.clone().upcast());
         }
     }
 
@@ -158,7 +158,9 @@ impl AgentBar {
 
         self.attach_dnd_handlers(&button, item.surface);
 
+        let root = crate::ui::agent_details::row(&button, item.surface, self.bridge.clone());
         let widget = AgentBarItemWidget {
+            root,
             button,
             item: item.clone(),
             target,
@@ -292,6 +294,7 @@ impl AgentBar {
 }
 
 struct AgentBarItemWidget {
+    root: gtk::Box,
     button: gtk::Button,
     item: AgentBarItem,
     target: Rc<Cell<(flowmux_core::WorkspaceId, flowmux_core::PaneId, SurfaceId)>>,
@@ -399,7 +402,7 @@ fn reorder_item_widgets(
     let mut previous: Option<gtk::Widget> = None;
     for surface in order {
         if let Some(widget) = buttons.get(surface) {
-            let button = &widget.button;
+            let button = &widget.root;
             items.reorder_child_after(button, previous.as_ref());
             previous = Some(button.clone().upcast());
         }
@@ -503,7 +506,7 @@ pub(crate) async fn check_stable_agent_bar_items() {
     gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
     let scroll_before = adjustment.value();
     bar.render(&model, &HashSet::from([surface]), Some(surface));
-    assert_eq!(bar.items.first_child(), Some(button.clone().upcast()));
+    assert_eq!(bar.items.first_child(), button.parent());
     assert_eq!(
         button.child(),
         Some(content.clone()),
@@ -520,7 +523,7 @@ pub(crate) async fn check_stable_agent_bar_items() {
     let target = (model.items[0].workspace, model.items[0].pane, surface);
     bar.render(&model, &HashSet::new(), None);
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
-    assert_eq!(bar.items.first_child(), Some(button.clone().upcast()));
+    assert_eq!(bar.items.first_child(), button.parent());
     assert!(
         button.is_focus(),
         "status refresh must preserve keyboard focus"
@@ -565,7 +568,7 @@ pub(crate) async fn check_stable_agent_bar_items() {
     bar.render(&model, &HashSet::new(), None);
     assert_eq!(
         bar.items.first_child().unwrap().next_sibling(),
-        Some(button.clone().upcast())
+        button.parent()
     );
     assert!(button.is_focus(), "reordering must preserve keyboard focus");
     button.emit_clicked();
