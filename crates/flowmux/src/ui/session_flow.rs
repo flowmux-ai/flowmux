@@ -45,6 +45,7 @@ struct Scene {
     moved: bool,
     drag_active: bool,
     pan_mode: bool,
+    space_pan: bool,
     fit_during_settle: bool,
 }
 
@@ -172,7 +173,7 @@ impl FlowPanel {
         area.set_vexpand(true);
         area.set_focusable(true);
         area.set_content_height(140);
-        area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · arrows to select · Enter to open"));
+        area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · Space or middle-drag to pan over nodes · arrows to select · Enter to open"));
         root.append(&area);
         let host = gtk::Paned::new(gtk::Orientation::Vertical);
         host.set_hexpand(true);
@@ -284,6 +285,7 @@ impl FlowPanel {
             scene.fit_during_settle = false;
             scene.drag_active = false;
             scene.held = None;
+            scene.space_pan = false;
         }
         scene.workspace = workspace;
         scene.graph = graph;
@@ -307,6 +309,11 @@ impl FlowPanel {
             view.height = (self.host.height() / 3).max(180);
         }
         let (open, height) = (view.open, view.height);
+        if !open {
+            scene.drag_active = false;
+            scene.held = None;
+            scene.space_pan = false;
+        }
         drop(scene);
         self.root.set_visible(open);
         self.host.set_position(height);
@@ -359,7 +366,7 @@ impl FlowPanel {
 
     fn activate(&self, key: SessionKey) {
         let mut scene = self.scene.borrow_mut();
-        if scene.pan_mode {
+        if scene.pan_mode || scene.space_pan {
             return;
         }
         let node = scene.nodes.get(&key).cloned();
@@ -488,92 +495,119 @@ impl FlowPanel {
             glib::Propagation::Stop
         });
         self.area.add_controller(scroll);
-        let drag = gtk::GestureDrag::new();
-        drag.set_button(1);
-        let p = self.downgrade();
-        drag.connect_drag_begin(move |_, x, y| {
-            let Some(p) = p.upgrade() else {
-                return;
-            };
-            p.area.grab_focus();
-            let mut s = p.scene.borrow_mut();
-            s.fit_during_settle = false;
-            s.drag_active = true;
-            s.drag_start = Point { x, y };
-            s.held = if s.pan_mode {
-                None
-            } else {
-                s.hit(s.drag_start)
-            };
-            s.moved = false;
-            s.drag_origin = s
-                .held
-                .as_ref()
-                .and_then(|k| s.layout.positions.get(k))
-                .copied()
-                .unwrap_or(s.camera().origin);
-        });
-        let p = self.downgrade();
-        drag.connect_drag_update(move |_, x, y| {
-            let Some(p) = p.upgrade() else {
-                return;
-            };
-            let mut s = p.scene.borrow_mut();
-            if !s.drag_active || (x.hypot(y) < 4.0 && !s.moved) {
+        let zoom = gtk::GestureZoom::new();
+        let last_scale = Rc::new(Cell::new(1.0f64));
+        let scale = last_scale.clone();
+        zoom.connect_begin(move |_, _| scale.set(1.0));
+        let panel = self.downgrade();
+        zoom.connect_scale_changed(move |_, scale| {
+            if !scale.is_finite() || scale <= 0.0 {
                 return;
             }
-            s.moved = true;
-            let origin = s.drag_origin;
-            if let Some(key) = s.held.clone() {
-                let zoom = s.camera().zoom;
-                s.layout.drag(
-                    &key,
-                    Point {
-                        x: origin.x + x / zoom,
-                        y: origin.y + y / zoom,
-                    },
-                );
-            } else if let Some(v) = s.view() {
-                v.camera.origin = Point {
-                    x: origin.x + x,
-                    y: origin.y + y,
+            let Some(panel) = panel.upgrade() else {
+                return;
+            };
+            let factor = scale / last_scale.replace(scale);
+            let mut scene = panel.scene.borrow_mut();
+            scene.fit_during_settle = false;
+            let cursor = scene.cursor;
+            if let Some(view) = scene.view() {
+                view.camera.zoom_at(cursor, factor);
+            }
+            drop(scene);
+            panel.schedule_save();
+            panel.area.queue_draw();
+        });
+        self.area.add_controller(zoom);
+        for button in [1, 2] {
+            let drag = gtk::GestureDrag::new();
+            drag.set_button(button);
+            let p = self.downgrade();
+            drag.connect_drag_begin(move |_, x, y| {
+                let Some(p) = p.upgrade() else {
+                    return;
                 };
-            }
-            drop(s);
-            p.area.queue_draw();
-            p.animate();
-        });
-        let p = self.downgrade();
-        drag.connect_drag_end(move |_, _, _| {
-            let Some(p) = p.upgrade() else {
-                return;
-            };
-            let mut s = p.scene.borrow_mut();
-            let key = s.held.take();
-            let moved = s.moved || !s.drag_active;
-            s.drag_active = false;
-            p.schedule_save();
-            drop(s);
-            if !moved {
-                if let Some(key) = key {
-                    p.activate(key);
+                p.area.grab_focus();
+                let mut s = p.scene.borrow_mut();
+                s.fit_during_settle = false;
+                s.drag_active = true;
+                s.drag_start = Point { x, y };
+                s.held = if s.pan_mode || s.space_pan || button == 2 {
+                    None
+                } else {
+                    s.hit(s.drag_start)
+                };
+                s.moved = false;
+                s.drag_origin = s
+                    .held
+                    .as_ref()
+                    .and_then(|k| s.layout.positions.get(k))
+                    .copied()
+                    .unwrap_or(s.camera().origin);
+            });
+            let p = self.downgrade();
+            drag.connect_drag_update(move |_, x, y| {
+                let Some(p) = p.upgrade() else {
+                    return;
+                };
+                let mut s = p.scene.borrow_mut();
+                if !s.drag_active || (x.hypot(y) < 5.0 && !s.moved) {
+                    return;
                 }
-            }
-        });
-        let scene = self.scene.clone();
-        drag.connect_cancel(move |_, _| {
-            let mut s = scene.borrow_mut();
-            s.held = None;
-            s.moved = false;
-            s.drag_active = false;
-        });
-        self.area.add_controller(drag);
+                s.moved = true;
+                let origin = s.drag_origin;
+                if let Some(key) = s.held.clone() {
+                    let zoom = s.camera().zoom;
+                    s.layout.drag(
+                        &key,
+                        Point {
+                            x: origin.x + x / zoom,
+                            y: origin.y + y / zoom,
+                        },
+                    );
+                } else if let Some(v) = s.view() {
+                    v.camera.origin = Point {
+                        x: origin.x + x,
+                        y: origin.y + y,
+                    };
+                }
+                drop(s);
+                p.area.queue_draw();
+                p.animate();
+            });
+            let p = self.downgrade();
+            drag.connect_drag_end(move |_, _, _| {
+                let Some(p) = p.upgrade() else {
+                    return;
+                };
+                let mut s = p.scene.borrow_mut();
+                let key = s.held.take();
+                let moved = s.moved || !s.drag_active;
+                s.drag_active = false;
+                p.schedule_save();
+                drop(s);
+                if !moved {
+                    if let Some(key) = key {
+                        p.activate(key);
+                    }
+                }
+            });
+            let scene = self.scene.clone();
+            drag.connect_cancel(move |_, _| {
+                let mut s = scene.borrow_mut();
+                s.held = None;
+                s.moved = false;
+                s.drag_active = false;
+            });
+            self.area.add_controller(drag);
+        }
         let focus = gtk::EventControllerFocus::new();
         let scene = self.scene.clone();
         focus.connect_leave(move |_| {
             let mut scene = scene.borrow_mut();
             scene.drag_active = false;
             scene.held = None;
+            scene.space_pan = false;
         });
         self.area.add_controller(focus);
         let keys = gtk::EventControllerKey::new();
@@ -585,6 +619,7 @@ impl FlowPanel {
             use gtk::gdk::Key;
             let mut s = p.scene.borrow_mut();
             match key {
+                Key::space => s.space_pan = true,
                 Key::Return | Key::KP_Enter => {
                     let selected = s.view().and_then(|v| v.selected.clone());
                     drop(s);
@@ -619,6 +654,9 @@ impl FlowPanel {
                     p.area.queue_draw();
                 }
                 Key::Escape => {
+                    s.drag_active = false;
+                    s.held = None;
+                    s.space_pan = false;
                     let id = s.workspace;
                     drop(s);
                     if let Some(id) = id {
@@ -628,6 +666,12 @@ impl FlowPanel {
                 _ => return glib::Propagation::Proceed,
             }
             glib::Propagation::Stop
+        });
+        let scene = self.scene.clone();
+        keys.connect_key_released(move |_, key, _, _| {
+            if key == gtk::gdk::Key::space {
+                scene.borrow_mut().space_pan = false;
+            }
         });
         self.area.add_controller(keys);
     }
@@ -719,6 +763,13 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
             std::f64::consts::TAU,
         );
         let _ = cr.fill();
+        if !available {
+            cr.set_source_rgb(0.82, 0.84, 0.90);
+            cr.set_line_width(1.5);
+            cr.move_to(p.x - 5.0, p.y + 5.0);
+            cr.line_to(p.x + 5.0, p.y - 5.0);
+            let _ = cr.stroke();
+        }
         if focused {
             cr.set_line_width(1.5);
             cr.arc(p.x, p.y, 14.0, 0.0, std::f64::consts::TAU);
@@ -839,11 +890,21 @@ pub(crate) fn check_canvas_controls() {
         })
         .unwrap();
     let drag = (0..controllers.n_items())
-        .find_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())
+        .filter_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())
+        .find(|gesture| gesture.button() == 1)
         .unwrap();
     motion.emit_by_name::<()>("motion", &[&point.x, &point.y]);
     let before = panel.scene.borrow().camera().world(point);
     assert!(scroll.emit_by_name::<bool>("scroll", &[&0.0, &1.0]));
+    let after = panel.scene.borrow().camera().world(point);
+    assert!((before.x - after.x).abs() < 0.00001 && (before.y - after.y).abs() < 0.00001);
+    let zoom = (0..controllers.n_items())
+        .find_map(|i| controllers.item(i)?.downcast::<gtk::GestureZoom>().ok())
+        .unwrap();
+    let start_zoom = panel.scene.borrow().camera().zoom;
+    zoom.emit_by_name::<()>("scale-changed", &[&1.2f64]);
+    zoom.emit_by_name::<()>("scale-changed", &[&1.5f64]);
+    assert!((panel.scene.borrow().camera().zoom - start_zoom * 1.5).abs() < 0.00001);
     let after = panel.scene.borrow().camera().world(point);
     assert!((before.x - after.x).abs() < 0.00001 && (before.y - after.y).abs() < 0.00001);
     let point = panel
@@ -877,6 +938,74 @@ pub(crate) fn check_canvas_controls() {
         "pan mode must not activate sessions"
     );
     panel.scene.borrow_mut().pan_mode = false;
+    let keys = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerKey>()
+                .ok()
+        })
+        .unwrap();
+    let middle = (0..controllers.n_items())
+        .filter_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())
+        .find(|gesture| gesture.button() == 2)
+        .unwrap();
+    for gesture in [&drag, &middle] {
+        if gesture.button() == 1 {
+            assert!(keys.emit_by_name::<bool>(
+                "key-pressed",
+                &[
+                    &gtk::gdk::Key::space,
+                    &0u32,
+                    &gtk::gdk::ModifierType::empty()
+                ]
+            ));
+        }
+        let point = panel
+            .scene
+            .borrow()
+            .camera()
+            .screen(panel.positions()[&key("child")]);
+        let positions = panel.positions();
+        let camera = panel.scene.borrow().camera();
+        gesture.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+        gesture.emit_by_name::<()>("drag-update", &[&60.0, &20.0]);
+        gesture.emit_by_name::<()>("drag-end", &[&60.0, &20.0]);
+        assert_eq!(panel.positions(), positions, "pan gesture moved a node");
+        assert_ne!(panel.scene.borrow().camera(), camera);
+        assert!(receiver.try_recv().is_err(), "pan gesture opened a session");
+        keys.emit_by_name::<()>(
+            "key-released",
+            &[
+                &gtk::gdk::Key::space,
+                &0u32,
+                &gtk::gdk::ModifierType::empty(),
+            ],
+        );
+        assert!(!panel.scene.borrow().space_pan);
+    }
+    let point = panel
+        .scene
+        .borrow()
+        .camera()
+        .screen(panel.positions()[&key("child")]);
+    drag.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+    assert!(keys.emit_by_name::<bool>(
+        "key-pressed",
+        &[
+            &gtk::gdk::Key::Escape,
+            &0u32,
+            &gtk::gdk::ModifierType::empty()
+        ]
+    ));
+    assert!(
+        matches!(receiver.try_recv(), Ok(GtkCommand::SessionFlow(FlowAction::Toggle(id))) if id == workspace)
+    );
+    drag.emit_by_name::<()>("drag-end", &[&0.0, &0.0]);
+    assert!(
+        receiver.try_recv().is_err(),
+        "Escape left a clickable drag active"
+    );
     panel.activate(key("parent"));
     assert!(
         receiver.try_recv().is_err(),

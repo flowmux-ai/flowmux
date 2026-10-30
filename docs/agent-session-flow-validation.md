@@ -224,3 +224,5 @@ Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱�
 - `browser-chrome`: 입력 후 예상 DOM field focus가 비어 있음.
 
 잠금 해제 후 `bash scripts/test-ci.sh macos`로 전체 gate를 다시 실행한다. 이 실패들이 모두 잠금만으로 발생했다는 결론은 재실행 전까지 확정하지 않는다. 사용자 앱 PID `72789`는 실행 중임을 확인했으며 종료·재시작하지 않았다.
+
+추가 입력 검증: `/tmp/flowmux-session-flow-pan-input-final.log`에서 native harness의 `MACOS_SESSION_FLOW_LAYOUT_OK`와 `MACOS_NATIVE_SMOKE_OK`를 확인했다. GTK gesture/key signal을 통한 Space·가운데 버튼 팬, 누적 pinch 배율과 커서 기준점, Escape 이후 늦은 drag-end의 열기 억제를 검사했다. 실제 하드웨어 트랙패드/키보드 검증을 대신하는 증거는 아니다. 캡처는 `docs/design-assets/agent-session-flow-native.png`이며 실제 provider 데이터가 아닌 fixture다. All-target clippy는 `/tmp/flowmux-session-flow-input-clippy.log`에 기록했다.

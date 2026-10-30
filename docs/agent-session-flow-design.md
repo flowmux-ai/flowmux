@@ -285,7 +285,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 - Resume 예약과 실행 binding 공개는 DB transaction으로 보호한다. 지연된 갱신은 읽었던 binding snapshot과 현재 값이 다르면 덮어쓰지 않는다. PID가 재사용된 binding은 실행 소유권으로 인정하지 않는다.
 - Codex 0.166.0에서 첫 요청 전의 TUI 시작 hook이 지연되는 것을 확인했다. 이 경우 해당 pane의 프로세스 자손 중 **Codex가 쓰기 모드로 연 native rollout 파일**을 확인한다. Native ID, 저장소, process birth marker가 일치하고 후보가 하나일 때만 식별한다. 최근 파일·제목·유사도는 사용하지 않는다. macOS는 시간·출력 크기가 제한된 `lsof`, Linux는 `/proc/<pid>/fd`와 `fdinfo`를 worker에서 조회한다.
 - Codex fork의 parent는 `forked_from_id`를 추가 확인한다. Hook의 `source: fork` 필터도 포함한다. 기존 lifecycle 추정 엔진과 사용자 hook trust 설정은 변경하지 않는다.
-- Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 확대·팬·노드 이동·전체 맞춤·Pan 모드·키보드 선택을 제공한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
+- Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 휠·트랙패드 제스처 확대, 빈 공간·Space·가운데 버튼 팬, 노드 이동·전체 맞춤·Pan 모드·키보드 선택을 제공한다. 재개 불가 노드는 축소 상태에도 사선 표식을 유지한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
 - 확인된 pending 작업은 저장된 surface/native ID와 native parent 증거로 재조정한다. 증거가 없는 작업은 자동 재실행하지 않고 예약을 유지한다. 미확인 결과를 사용자가 정리하는 전용 UI는 아직 없다.
 
 | 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |
@@ -300,3 +300,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 **별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 30분 이상 지속 사용과 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 수치는 목표이며 측정 결과와 구분한다.
 
 테스트와 실제 provider 증거는 [검증 기록](agent-session-flow-validation.md#실행-기록)에 모은다. 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다.
+
+실제 GTK fixture 캡처(3개 테스트 세션이며 실제 provider 실행 화면과 구분):
+
+![Session Flow native fixture](design-assets/agent-session-flow-native.png)
