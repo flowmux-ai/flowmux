@@ -1328,10 +1328,14 @@ pub(super) async fn check_real_codex(
         glib::timeout_future(Duration::from_millis(50)).await;
     }
     let child_key = session_key(SessionAgent::Codex, &home, &child_id).unwrap();
-    controller
-        .launch_flow_session(child_key.clone(), None)
-        .await
-        .unwrap();
+    controller.flow.panel.toggle(workspace);
+    glib::future_with_timeout(Duration::from_secs(15), async {
+        while !controller.flow.panel.try_click_native_node(&child_key) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("Session Flow did not render an available child node");
     let resumed = glib::future_with_timeout(Duration::from_secs(35), async {
         loop {
             let anchors = controller.flow_anchors().await;
@@ -1357,10 +1361,27 @@ pub(super) async fn check_real_codex(
     while controller.flow.loading.get() {
         glib::timeout_future(Duration::from_millis(50)).await;
     }
-    controller
-        .launch_flow_session(child_key, None)
+    let resumed_pane = controller
+        .flow_anchors()
         .await
-        .unwrap();
+        .into_iter()
+        .find_map(|anchor| {
+            anchor
+                .target
+                .focused
+                .filter(|focused| focused.session_id.as_deref() == Some(&child_id))
+        })
+        .unwrap()
+        .pane;
+    controller.focus_pane(pane);
+    assert!(controller.flow.panel.try_click_native_node(&child_key));
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while controller.focused_pane.get() != Some(resumed_pane) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("selecting the open node did not focus its existing pane");
     assert_eq!(
         controller.pane_registry.borrow().terminals.len(),
         2,

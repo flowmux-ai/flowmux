@@ -807,6 +807,32 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 impl FlowPanel {
+    pub(crate) fn try_click_native_node(&self, key: &SessionKey) -> bool {
+        if !self.area.is_mapped() {
+            return false;
+        }
+        let point = {
+            let mut scene = self.scene.borrow_mut();
+            if !scene.nodes.get(key).is_some_and(|node| node.available)
+                || !scene.graph.nodes().contains(key)
+            {
+                return false;
+            }
+            scene.fit(self.area.width() as f64, self.area.height() as f64);
+            let point = scene.camera().screen(scene.layout.positions[key]);
+            assert_eq!(scene.hit(point).as_ref(), Some(key));
+            point
+        };
+        let controllers = self.area.observe_controllers();
+        let drag = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())
+            .find(|gesture| gesture.button() == 1)
+            .unwrap();
+        drag.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+        drag.emit_by_name::<()>("drag-end", &[&0.0, &0.0]);
+        true
+    }
+
     pub(crate) fn check_native_interactions(
         &self,
         available: &SessionKey,

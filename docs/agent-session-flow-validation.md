@@ -254,3 +254,10 @@ macOS CI `41108551043`의 browser-control은 통과했다. 이후 CLI의 `pty_te
 원인 분리 시험은 Flowmux 없이 Python `pty.fork()`로 동일한 1MiB 비차단 출력을 만들고, master를 4KiB씩 읽으며 0.5ms 간격을 두었다. 자식이 마지막 write 직후 종료하면 10회 중 1회 CI와 같은 1,024바이트 누락이 재현됐다. 종료 전에 blocking mode와 `termios.tcdrain(1)`을 적용한 10회는 모두 1,048,576바이트를 받았다. 이 결과를 근거로 `ecc97ae2`는 테스트 producer만 배출 완료 후 종료하도록 수정했다. 제품 PTY 코드는 수정하지 않았다. 전체 길이와 모든 byte의 값을 각각 검사하므로 무손실 조건은 유지하며, 실패 시 거대한 byte 배열 대신 짧은 진단을 출력한다.
 
 수정 후 PTY integration 24개 통과 및 해당 압력 시험 20회 연속 통과. 로그: `/tmp/flowmux-session-flow-pty-drain-final.log`, `/tmp/flowmux-session-flow-pty-drain-repeat.log`. `cargo fmt --all -- --check`, `git diff --check`도 통과했다. 최종 Test `41112091385`는 `ecc97ae2`를 검증하며 진행 중이다. 기존 Linux 작업은 별도로 결과를 보존하기 위해 취소하지 않았다.
+
+
+그래프 열기 경로 보강: `/tmp/flowmux-session-flow-real-graph-click.log`에서 `MACOS_SESSION_FLOW_CODEX_REAL_OK`와 `MACOS_NATIVE_SMOKE_OK`를 확인했고 프로세스는 exit 0으로 종료했다. Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e35-5c15-75b0-a70f-46981228b50f`. 실제 우클릭 메뉴 fork 후 child pane을 닫고, 표시된 graph node의 GTK drag-begin/end(이동 없음) → `FlowAction::Open` → bridge dispatch → 오른쪽 split resume을 확인했다. 다시 원본 pane으로 포커스를 옮긴 뒤 열린 child node를 클릭하면 기존 child pane으로 포커스가 돌아오고 pane 수는 2개를 유지했다. Native ID와 관계 수, 원본 PID/widget도 유지됐다.
+
+이 시험은 history worker 완료 플래그만 기다리지 않고 graph에 해당 node가 렌더링 가능한 상태로 들어온 뒤 클릭한다. 물리 입력 검증은 아니며 실제 provider와 GTK event/dispatch 경로의 결합 검증이다. 신규 코드는 `test + macOS + native-smoke` 조건의 검증 helper와 opt-in provider harness에만 적용되며 제품 실행 코드는 바뀌지 않았다.
+
+해당 native harness의 `cargo clippy -p flowmux --test macos_native --features native-smoke --locked -- -D warnings`도 통과했다. 로그: `/tmp/flowmux-session-flow-graph-click-clippy.log`.
