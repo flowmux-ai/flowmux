@@ -204,7 +204,8 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 실제 Claude Code 2.1.314 | source `8683a908-3515-4cc9-a35a-1da44cf7a563` → child `21fcba07-00f6-4ea1-9749-24b6cbde520d`; `FLOW_NATIVE_731` 상속; resume 같은 child ID | `/tmp/flowmux-session-flow-claude-evidence.json` |
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
-| 전체 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
+| 원격 macOS gate | `ecc97ae2`의 46개 phase 모두 passed; 수정된 PTY 압력 테스트, Session Flow native smoke, 기존 browser/editor/WebDriver 회귀 포함 | Test `41112091385`, job `124256538732`; [phase JSON](design-assets/session-flow-macos-gate-ecc97ae2.json) |
+| 로컬 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
 | Linux coverage·원격 CI | `a1ceb185` macOS는 기존 PTY 압력 fixture에서 실패, Linux 테스트·coverage는 success; Sanitizers·License success. Fixture 수정 `ecc97ae2`의 Test `41112091385` 재실행 중. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
@@ -284,3 +285,10 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 
 
 정확한 tab 전환 검증: `/tmp/flowmux-session-flow-real-exact-tab.log`의 native 시험은 workspace와 pane뿐 아니라 대상 pane의 active surface가 실제 Codex child surface와 일치할 때까지 기다린다. 대상 pane에는 기존 shell tab도 있으므로 pane 포커스만으로 통과하지 않는다. Child `01a18e40-f64a-7130-bcf4-90b5d9d16728`에서 shared-workspace/real-Codex/native-smoke marker와 exit 0을 확인했다.
+
+
+수정 후 macOS job `124256538732` (`ecc97ae2`, Test `41112091385`)는 success다. 공통 gate의 46개 phase가 모두 passed / exit 0임을 job 로그와 다운로드한 `macos-test-evidence` artifact (`13004149126`)의 개별 JSON에서 확인했다. 원본 로그: `/tmp/flowmux-session-flow-macos-ecc97ae2.log`. 압력 시험 `pty_tee_keeps_input_and_resize_live_under_output_backpressure` 및 Session Flow의 `MACOS_SESSION_FLOW_LAYOUT_OK` / `MACOS_NATIVE_SMOKE_OK`도 통과했다.
+
+원격 runner에서 browser-control, editor-keyboard, markdown, webdriver-native, webdriver, browser-chrome이 모두 통과했다. 이는 최신 제품 코드의 해당 회귀 gate 성공 증거이며 잠긴 로컬 화면에서 물리 입력을 검증했다는 의미는 아니다. Native state/복원, hook·session 경로, notification, editor recovery, palette pointer release, Office stability, browser deadline phase도 통과했다. 전체 목록과 실행 식별자는 [macOS gate JSON](design-assets/session-flow-macos-gate-ecc97ae2.json)에 보존했다.
+
+이 CI commit 이후의 코드 차이는 opt-in macOS provider harness 및 test-only graph helper 보강이다. 해당 부분은 실제 Codex로 로컬 native smoke와 clippy를 따로 통과했다. 제품 실행 코드는 `ecc97ae2`와 동일하다. 현재 Test 실행의 Linux job `124256539183`은 계속 실행 중이므로 workflow 전체 성공은 아직 확정하지 않는다.
