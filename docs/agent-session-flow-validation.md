@@ -205,7 +205,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
 | 전체 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
-| Linux coverage·원격 CI | `a1ceb185` Test·Sanitizers·License 실행 중(대기 포함). 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
+| Linux coverage·원격 CI | `a1ceb185` macOS는 기존 PTY 압력 fixture에서 실패, Linux는 실행 중; Sanitizers·License success. Fixture 수정 `ecc97ae2`의 Test `41112091385` 재실행 중. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
 
@@ -245,3 +245,12 @@ Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱�
 ```sh
 cargo run -p flowmux-core --release --example session_flow_benchmark --locked
 ```
+
+최신 Sanitizers `41108555435`는 success다. Linux GUI ASan 실행에서 907 passed, 기존 ignored 4개를 확인했고, 이전에 실패했던 registry 해제와 stderr/PATH capability 테스트도 통과했다. Headless ASan/LSan 및 별도 ThorVG ASan/UBSan/LSan 작업도 success다. 원본 로그: `/tmp/flowmux-session-flow-sanitizers-final.log`. 라이선스 검사 `41108559323`도 success다.
+
+
+macOS CI `41108551043`의 browser-control은 통과했다. 이후 CLI의 `pty_tee_keeps_input_and_resize_live_under_output_backpressure`에서 입력과 resize는 통과했으나 마지막 출력 1,024바이트가 부족했다(1,047,552 / 1,048,576). 원본 로그: `/tmp/flowmux-session-flow-macos-ci-final.log`. 따라서 이 run의 macOS 전체 gate는 실패이며 이후 native phase의 통과를 의미하지 않는다.
+
+원인 분리 시험은 Flowmux 없이 Python `pty.fork()`로 동일한 1MiB 비차단 출력을 만들고, master를 4KiB씩 읽으며 0.5ms 간격을 두었다. 자식이 마지막 write 직후 종료하면 10회 중 1회 CI와 같은 1,024바이트 누락이 재현됐다. 종료 전에 blocking mode와 `termios.tcdrain(1)`을 적용한 10회는 모두 1,048,576바이트를 받았다. 이 결과를 근거로 `ecc97ae2`는 테스트 producer만 배출 완료 후 종료하도록 수정했다. 제품 PTY 코드는 수정하지 않았다. 전체 길이와 모든 byte의 값을 각각 검사하므로 무손실 조건은 유지하며, 실패 시 거대한 byte 배열 대신 짧은 진단을 출력한다.
+
+수정 후 PTY integration 24개 통과 및 해당 압력 시험 20회 연속 통과. 로그: `/tmp/flowmux-session-flow-pty-drain-final.log`, `/tmp/flowmux-session-flow-pty-drain-repeat.log`. `cargo fmt --all -- --check`, `git diff --check`도 통과했다. 최종 Test `41112091385`는 `ecc97ae2`를 검증하며 진행 중이다. 기존 Linux 작업은 별도로 결과를 보존하기 위해 취소하지 않았다.

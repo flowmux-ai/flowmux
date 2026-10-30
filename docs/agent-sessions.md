@@ -51,6 +51,47 @@ Another session can be opened while the focused agent is working or waiting for
 input; the original tab remains untouched. The currently active session cannot
 be opened again from that tab. The session ID remains visible for manual use.
 
+## Session Flow
+
+Right-click an identified, idle Claude Code, Codex, or OpenCode terminal and
+choose **Fork session** to split that pane into left and right halves. The
+original session stays on the left; the new native session opens on the right.
+The action is disabled when the installed tool or current session cannot safely
+fork. A conversation fork shares the project directory; it does not create a Git
+branch or worktree.
+
+When an open terminal tab belongs to a known fork family, its workspace item
+shows a **Session Flow** button. Click it to open the graph above the existing
+panes, initially using about a third of the available height. The graph includes
+known ancestors, siblings, and descendants. Separate families appear together;
+opening several sessions in one family does not duplicate that graph. The
+relationships belong to sessions, so different workspaces can show the same
+family with independent camera positions.
+
+- Scroll or pinch to zoom around the pointer; use **Fit** to see the whole graph.
+- Drag empty space, hold Space while dragging, use the middle mouse button, or
+  enable **Pan** to move the view. Dragging a node moves it and its connected
+  layout without opening a session.
+- Click an available node, or select it with the arrow keys and press Enter, to
+  open it. A closed session resumes to the right of the last focused pane below
+  the graph. An already open session focuses its existing terminal.
+- Unavailable nodes retain their relationships and show a disabled mark; they
+  cannot start a session. Closing the graph leaves the running terminals intact.
+
+External lineage is currently imported from explicit Codex fork metadata.
+Flowmux also records forks it performs and verifies. Other tools may not retain
+enough metadata to recover forks made outside Flowmux; similar titles or prompt
+text are not treated as relationship evidence. Gemini, agy, and Cline retain
+their existing history/resume paths, but their **Fork session** action is
+disabled. Remote Session Flow execution is not supported.
+
+Launch confirmation requires the actual native session ID. If confirmation
+times out, the operation is not automatically retried: it may already have
+created a session. This version has no dedicated UI for resolving an unknown
+operation. See the [design](agent-session-flow-design.md) and
+[validation record](agent-session-flow-validation.md) for tested provider versions
+and outstanding verification.
+
 ## History and limits
 
 Titles come from native titles or the first user message. The summary is a recent conversation excerpt, not a generated
