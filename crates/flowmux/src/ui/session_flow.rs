@@ -807,6 +807,12 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 impl FlowPanel {
+    pub(crate) fn assert_native_graph(&self, workspace: WorkspaceId, expected: &Lineage) {
+        let scene = self.scene.borrow();
+        assert_eq!(scene.workspace, Some(workspace));
+        assert_eq!(&scene.graph, expected);
+    }
+
     pub(crate) fn try_click_native_node(&self, key: &SessionKey) -> bool {
         if !self.area.is_mapped() {
             return false;

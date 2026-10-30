@@ -1361,7 +1361,7 @@ pub(super) async fn check_real_codex(
     while controller.flow.loading.get() {
         glib::timeout_future(Duration::from_millis(50)).await;
     }
-    let resumed_pane = controller
+    let resumed_target = controller
         .flow_anchors()
         .await
         .into_iter()
@@ -1371,8 +1371,8 @@ pub(super) async fn check_real_codex(
                 .focused
                 .filter(|focused| focused.session_id.as_deref() == Some(&child_id))
         })
-        .unwrap()
-        .pane;
+        .unwrap();
+    let resumed_pane = resumed_target.pane;
     controller.focus_pane(pane);
     assert!(controller.flow.panel.try_click_native_node(&child_key));
     glib::future_with_timeout(Duration::from_secs(5), async {
@@ -1402,7 +1402,62 @@ pub(super) async fn check_real_codex(
         previous_children.len() + 1,
         "resume created a fork edge"
     );
-    controller.flow.panel.toggle(workspace);
+    let family = snapshot.lineage.project([&key]);
+    controller
+        .flow
+        .panel
+        .assert_native_graph(workspace, &family);
+    let other_workspace = controller
+        .store
+        .create_workspace(
+            Some("Related Codex session".into()),
+            source_session.cwd.clone(),
+        )
+        .await;
+    controller.render_workspace(
+        &controller
+            .store
+            .get_workspace(other_workspace)
+            .await
+            .unwrap(),
+    );
+    let resumed_terminal =
+        controller.pane_registry.borrow().terminals[&resumed_target.surface].clone();
+    let resumed_pid = resumed_terminal.pid.get();
+    controller
+        .move_surface_to_workspace(resumed_pane, resumed_target.surface, other_workspace)
+        .await
+        .unwrap();
+    controller.activate_workspace(workspace).await;
+    controller.focus_pane(pane);
+    controller.refresh_session_flow(false).await;
+    controller
+        .flow
+        .panel
+        .assert_native_graph(workspace, &family);
+    let terminal_count = controller.pane_registry.borrow().terminals.len();
+    assert!(controller.flow.panel.try_click_native_node(&child_key));
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while controller.store.active_workspace().await != Some(other_workspace) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("graph selection did not switch to the child's workspace");
+    controller.refresh_session_flow(false).await;
+    controller
+        .flow
+        .panel
+        .assert_native_graph(other_workspace, &family);
+    assert_eq!(controller.focused_pane.get(), Some(resumed_terminal.id()));
+    assert_eq!(resumed_terminal.pid.get(), resumed_pid);
+    assert_eq!(
+        controller.pane_registry.borrow().terminals.len(),
+        terminal_count
+    );
+    assert_eq!(terminal.pid.get(), original_pid);
+    assert_eq!(terminal.widget, original_widget);
+    println!("MACOS_SESSION_FLOW_SHARED_WORKSPACES_OK");
     println!("MACOS_SESSION_FLOW_CODEX_REAL_OK source={source_id} child={child_id}");
     server.abort();
 }

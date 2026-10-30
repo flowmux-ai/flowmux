@@ -200,7 +200,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 정적 검사 | workspace check, all-target clippy `-D warnings`, format, diff check 통과 | `/tmp/flowmux-session-flow-check.log`, `/tmp/flowmux-session-flow-menu-key-clippy.log` |
 | Hook·capability·해제 | Codex installer 25 passed/기존 ignored 1개; stderr help/실패 응답 및 제한된 PATH, fork callback registry 해제 테스트 통과 | `/tmp/flowmux-session-flow-hook-tests.log`, `/tmp/flowmux-session-flow-capability-final.log`, `/tmp/flowmux-session-flow-weak-registry.log` |
 | GTK canvas·배치 | `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`; widget/PID 보존, wheel 좌표, drag/Pan/비활성 노드, 50회 toggle, widget 해제, workspace 전환 중 drag 취소 | `/tmp/flowmux-session-flow-stale-menu.log` |
-| 실제 Codex 0.166.0 | `MACOS_SESSION_FLOW_CODEX_REAL_OK`; 첫 요청 자동 전송 없이 identity 식별, fork/split/resume/중복 방지 | `/tmp/flowmux-session-flow-real-menu-key.log` |
+| 실제 Codex 0.166.0 | `MACOS_SESSION_FLOW_CODEX_REAL_OK`; 첫 요청 자동 전송 없이 identity 식별, 메뉴 fork, graph click resume/중복 방지, workspace 이동 후 공유 계보·기존 tab 포커스 | `/tmp/flowmux-session-flow-real-shared-workspaces.log` |
 | 실제 Claude Code 2.1.314 | source `8683a908-3515-4cc9-a35a-1da44cf7a563` → child `21fcba07-00f6-4ea1-9749-24b6cbde520d`; `FLOW_NATIVE_731` 상속; resume 같은 child ID | `/tmp/flowmux-session-flow-claude-evidence.json` |
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
@@ -276,3 +276,8 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 | Window orchestration | 38.89% | 37.88% | 29.76% |
 
 전체 기준은 통과했으나 window orchestration의 Linux 계측 범위는 낮다. 별도 macOS native/provider 시험은 Linux coverage에 합산되지 않는다. 위 수치에는 빌드된 테스트 코드도 포함되며 branch coverage는 수집하지 않았다. 전체 수치로 개별 실행 경로의 검증 완료를 주장하지 않는다. 집계 원본과 식별자는 [coverage JSON](design-assets/session-flow-coverage-a1ceb185.json)에 보존했다. 해당 workflow 전체는 macOS PTY fixture 실패로 failure이며 Linux job 성공과 구분한다. 수정된 fixture를 포함한 Test `41112091385`는 계속 실행 중이다.
+
+
+실제 workspace 간 계보 공유: `/tmp/flowmux-session-flow-real-shared-workspaces.log`에서 `MACOS_SESSION_FLOW_SHARED_WORKSPACES_OK`, `MACOS_SESSION_FLOW_CODEX_REAL_OK`, `MACOS_NATIVE_SMOKE_OK` 및 exit 0을 확인했다. Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e3e-5b0b-7b72-9f34-80983092c327`. Fork와 graph click resume 후 실제 자식 terminal surface를 두 번째 workspace로 옮겼다. 원래 workspace의 graph node 클릭이 새 workspace의 기존 자식 pane으로 이동했고, 두 workspace의 canvas scene이 같은 session/edge 집합을 표시 대상으로 유지하는지 확인했다. Terminal 수는 증가하지 않았고, 자식 PID 및 원본 PID/widget이 유지됐다. Workspace별 camera 저장·복구는 별도 state/canvas 시험 증거이며 이 시나리오를 물리 입력·양쪽 화면 캡처 검증으로 표현하지 않는다.
+
+해당 opt-in native harness의 clippy(`-D warnings`)도 통과했다: `/tmp/flowmux-session-flow-shared-workspaces-clippy.log`. 새 변경은 test-only helper와 provider harness이며 제품 실행 코드는 바뀌지 않았다. 사용자 앱 PID `72789`는 계속 실행 중이다.
