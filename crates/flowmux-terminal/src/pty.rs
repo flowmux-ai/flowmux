@@ -6,10 +6,14 @@
 
 use std::ffi::CString;
 use std::io;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
 const CLOSE_GRACE: Duration = Duration::from_secs(5);
 const REAP_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -20,6 +24,28 @@ pub struct Pty {
     child: libc::pid_t,
     reaped: bool,
     external_child_watch: bool,
+}
+
+/// Holds the forked child before `exec` until released or dropped.
+///
+/// The child blocks reading the pipe whose write end this owns; closing the
+/// write end (via [`SpawnGate::release`] or `Drop`) lets it proceed. Another
+/// child forked while a gate is open inherits its write end until that
+/// child's own `exec` (the fd is `CLOEXEC`), which can delay release.
+pub struct SpawnGate(Option<OwnedFd>);
+
+impl SpawnGate {
+    /// Let the parked child proceed to `exec`.
+    pub fn release(self) {
+        drop(self);
+    }
+}
+
+impl Drop for SpawnGate {
+    fn drop(&mut self) {
+        // Dropping the OwnedFd closes the write end exactly once.
+        self.0.take();
+    }
 }
 
 impl Pty {
@@ -33,6 +59,23 @@ impl Pty {
         cols: u16,
         rows: u16,
     ) -> io::Result<Pty> {
+        let (pty, gate) = Self::spawn_gated(argv, cwd, extra_env, cols, rows, None)?;
+        drop(gate);
+        Ok(pty)
+    }
+
+    /// Like [`Pty::spawn`], but the child blocks before `exec` until the
+    /// returned [`SpawnGate`] is released or dropped. When `oom_score_adj` is
+    /// `Some` (Linux only) the child writes it to `/proc/self/oom_score_adj`
+    /// before parking; write errors are ignored.
+    pub fn spawn_gated(
+        argv: &[&str],
+        cwd: Option<&Path>,
+        extra_env: &[(String, String)],
+        cols: u16,
+        rows: u16,
+        oom_score_adj: Option<i32>,
+    ) -> io::Result<(Pty, SpawnGate)> {
         if argv.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty argv"));
         }
@@ -60,6 +103,25 @@ impl Pty {
             None => None,
         };
 
+        // Prepared before fork: the child may not allocate.
+        let c_oom_value = match oom_score_adj {
+            Some(v) => Some(
+                CString::new(v.to_string())
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "bad oom value"))?,
+            ),
+            None => None,
+        };
+        let c_oom_path = CString::new("/proc/self/oom_score_adj").expect("static path");
+
+        // Serialize "create gate pipe + fork": a child forked while another
+        // thread's gate pipe exists inherits that pipe's write end, and two
+        // concurrent spawns could then each hold the other's write end while
+        // parked, deadlocking both. Held until the parent closes `gate_read`.
+        let _spawn_guard = SPAWN_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (gate_read, gate_write) = create_gate_pipe()?;
+
         let mut ws = libc::winsize {
             ws_row: rows,
             ws_col: cols,
@@ -84,11 +146,42 @@ impl Pty {
         };
 
         if pid < 0 {
-            return Err(io::Error::last_os_error());
+            let err = io::Error::last_os_error();
+            // SAFETY: both fds were just created by us and are still open.
+            unsafe {
+                libc::close(gate_read);
+                libc::close(gate_write);
+            }
+            return Err(err);
         }
 
         if pid == 0 {
             // ---- Child: async-signal-safe only, then exec or _exit. ----
+            unsafe {
+                libc::close(gate_write);
+                #[cfg(target_os = "linux")]
+                if let Some(ref v) = c_oom_value {
+                    let fd = libc::open(c_oom_path.as_ptr(), libc::O_WRONLY);
+                    if fd >= 0 {
+                        let bytes = v.as_bytes();
+                        libc::write(fd, bytes.as_ptr() as *const libc::c_void, bytes.len());
+                        libc::close(fd);
+                    }
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = (&c_oom_value, &c_oom_path);
+                }
+                // Park until the parent closes (or drops) its write end.
+                let mut byte = 0u8;
+                loop {
+                    let n = libc::read(gate_read, &mut byte as *mut u8 as *mut libc::c_void, 1);
+                    if n >= 0 || *errno_location() != libc::EINTR {
+                        break;
+                    }
+                }
+                libc::close(gate_read);
+            }
             if let Some(ref c) = c_cwd {
                 // Ignore chdir failure: better to exec in the wrong dir than to
                 // leave a half-spawned child. (Mirrors common shell behavior.)
@@ -121,13 +214,19 @@ impl Pty {
         // slave side then never see a hangup.
         unsafe {
             libc::fcntl(master, libc::F_SETFD, libc::FD_CLOEXEC);
+            libc::close(gate_read);
         }
-        Ok(Pty {
-            master,
-            child: pid,
-            reaped: false,
-            external_child_watch: false,
-        })
+        // SAFETY: gate_write is a valid fd we own and have not shared.
+        let gate = SpawnGate(Some(unsafe { OwnedFd::from_raw_fd(gate_write) }));
+        Ok((
+            Pty {
+                master,
+                child: pid,
+                reaped: false,
+                external_child_watch: false,
+            },
+            gate,
+        ))
     }
 
     /// The PTY master file descriptor (for poll/glib fd watches).
@@ -287,6 +386,39 @@ impl Drop for Pty {
     }
 }
 
+/// Create the close-on-exec gate pipe, returning `(read, write)`.
+fn create_gate_pipe() -> io::Result<(RawFd, RawFd)> {
+    let mut fds = [-1 as libc::c_int; 2];
+    #[cfg(not(target_os = "macos"))]
+    {
+        // SAFETY: fds is a valid two-element array.
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: fds is a valid two-element array.
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        for fd in fds {
+            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+        }
+    }
+    Ok((fds[0], fds[1]))
+}
+
+/// Async-signal-safe access to the calling thread's `errno`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn errno_location() -> *mut libc::c_int {
+    libc::__errno_location()
+}
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+unsafe fn errno_location() -> *mut libc::c_int {
+    libc::__error()
+}
+
 fn signal_process_group(pid: libc::pid_t, signal: libc::c_int) {
     // SAFETY: forkpty creates the child as the leader of its own process group.
     unsafe {
@@ -378,6 +510,76 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    fn poll_readable(fd: RawFd, timeout_ms: i32) -> bool {
+        let mut p = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        (unsafe { libc::poll(&mut p, 1, timeout_ms) }) > 0
+    }
+
+    #[test]
+    fn gated_child_produces_no_output_until_released() {
+        let (mut pty, gate) =
+            Pty::spawn_gated(&["sh", "-c", "printf ready"], None, &[], 40, 8, None).expect("spawn");
+        assert!(
+            !poll_readable(pty.master_fd(), 300),
+            "child must be parked before exec"
+        );
+        gate.release();
+        assert!(
+            poll_readable(pty.master_fd(), 5000),
+            "child must run after release"
+        );
+        let mut buf = [0u8; 64];
+        let n = pty.read(&mut buf).expect("read");
+        assert!(String::from_utf8_lossy(&buf[..n]).contains("ready"));
+    }
+
+    #[test]
+    fn dropping_the_gate_releases_the_child() {
+        let (mut pty, gate) =
+            Pty::spawn_gated(&["sh", "-c", "printf go"], None, &[], 40, 8, None).expect("spawn");
+        drop(gate);
+        assert!(poll_readable(pty.master_fd(), 5000));
+        let mut buf = [0u8; 64];
+        let n = pty.read(&mut buf).expect("read");
+        assert!(String::from_utf8_lossy(&buf[..n]).contains("go"));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_adj_eventually(pid: i32, want: &str) -> String {
+        // The child writes the value after fork, so poll briefly.
+        let path = format!("/proc/{pid}/oom_score_adj");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let adj = std::fs::read_to_string(&path).unwrap();
+            if adj.trim() == want || Instant::now() >= deadline {
+                return adj;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn oom_score_adj_is_written_before_exec_only_when_requested() {
+        let (pty, gate) =
+            Pty::spawn_gated(&["sleep", "5"], None, &[], 40, 8, Some(500)).expect("spawn");
+        let adj = read_adj_eventually(pty.child_pid(), "500");
+        assert_eq!(adj.trim(), "500");
+        drop(gate);
+        drop(pty);
+
+        let own = std::fs::read_to_string("/proc/self/oom_score_adj").unwrap();
+        let (pty, gate) = Pty::spawn_gated(&["sleep", "5"], None, &[], 40, 8, None).expect("spawn");
+        let adj = read_adj_eventually(pty.child_pid(), own.trim());
+        assert_eq!(adj.trim(), own.trim());
+        drop(gate);
+        drop(pty);
+    }
 
     fn envp_strings(envp: Vec<CString>) -> Vec<String> {
         envp.into_iter()
