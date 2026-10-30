@@ -82,7 +82,7 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
         .map(|(key, value)| shell_quote(&format!("{key}={value}")))
         .collect::<Vec<_>>()
         .join(" ");
-    let command = format!("exec env {environment} {command}");
+    let command = format!("exec /usr/bin/env {environment} {command}");
     cmd.args(["-lc", &command])
         .stdin(Stdio::null())
         .stdout(stdout)

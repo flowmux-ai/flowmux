@@ -221,8 +221,12 @@ impl PaneCallbackRouter {
                 }))
             },
             can_fork_session: {
-                let registry = pane_registry.clone();
-                Rc::new(move |surface| registry.borrow().session_flow_forkable.contains(&surface))
+                let registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |surface| {
+                    registry.upgrade().is_some_and(|registry| {
+                        registry.borrow().session_flow_forkable.contains(&surface)
+                    })
+                })
             },
             on_fork_session: {
                 let bridge = bridge.clone();
@@ -490,9 +494,12 @@ impl PaneCallbackRouter {
 mod tests {
     use super::*;
 
-    #[gtk::test]
+    #[cfg_attr(target_os = "macos", test)]
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
     fn pane_callbacks_do_not_retain_registry() {
         let registry = Rc::new(RefCell::new(PaneRegistry::default()));
+        let surface = SurfaceId::new();
+        registry.borrow_mut().session_flow_forkable.insert(surface);
         let weak = Rc::downgrade(&registry);
         let (bridge, _rx) = Bridge::new();
         let callbacks = PaneCallbackRouter::new(
@@ -505,8 +512,10 @@ mod tests {
             Rc::new(Cell::new(false)),
         )
         .into_callbacks();
+        assert!((callbacks.can_fork_session)(surface));
         drop(registry);
         assert!(weak.upgrade().is_none(), "callbacks retained the registry");
+        assert!(!(callbacks.can_fork_session)(surface));
         let pane = PaneId::new();
         assert_eq!((callbacks.workspace_of_pane)(pane), None);
         assert_eq!(
