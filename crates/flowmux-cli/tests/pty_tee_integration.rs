@@ -423,8 +423,21 @@ fn run_tee_capture_stdout(script: &str, test_cwd: &Path) -> Vec<u8> {
 }
 
 /// Runs pty-tee around `/bin/sh -c script`; `after_start` receives the
-/// pty-tee pid once the first stdout byte arrived. Returns the wait status.
+/// pty-tee pid once the script's `started` marker reached stdout. Returns
+/// the wait status.
 fn run_tee_exit_status(script: &str, after_start: impl FnOnce(u32)) -> ExitStatus {
+    run_tee_until_exit(script, |_| {}, after_start).0
+}
+
+/// Like [`run_tee_exit_status`], but `configure` adjusts the command before
+/// spawn and the captured stdout is returned with the status. The trigger is
+/// the script's own `started` text: pty-tee can write an OSC 7 before the
+/// script runs, so the first byte alone does not prove the shell started.
+fn run_tee_until_exit(
+    script: &str,
+    configure: impl FnOnce(&mut Command),
+    after_start: impl FnOnce(u32),
+) -> (ExitStatus, Vec<u8>) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let socket = tmp.path().join("flowmux.sock");
     let _rx = spawn_fake_daemon(socket.clone());
@@ -444,6 +457,7 @@ fn run_tee_exit_status(script: &str, after_start: impl FnOnce(u32)) -> ExitStatu
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure(&mut cmd);
 
     let mut child = cmd.spawn().expect("spawn flowmuxctl pty-tee");
     let stdin_keepalive = child.stdin.take();
@@ -454,13 +468,15 @@ fn run_tee_exit_status(script: &str, after_start: impl FnOnce(u32)) -> ExitStatu
     let (started_tx, started_rx) = mpsc::channel();
     let stdout_thread = thread::spawn(move || {
         let mut output = Vec::new();
-        let mut first = [0u8; 1];
-        if matches!(stdout.read(&mut first), Ok(1)) {
-            output.push(first[0]);
-            let _ = started_tx.send(());
+        let mut chunk = [0u8; 4096];
+        let mut started_tx = Some(started_tx);
+        // Keep draining after the marker so a full pipe never stalls the proxy.
+        while let Ok(n @ 1..) = stdout.read(&mut chunk) {
+            output.extend_from_slice(&chunk[..n]);
+            if started_tx.is_some() && output.windows(7).any(|w| w == b"started") {
+                let _ = started_tx.take().unwrap().send(());
+            }
         }
-        // Keep draining so a full pipe can never stall the proxy.
-        let _ = stdout.read_to_end(&mut output);
         output
     });
 
@@ -474,10 +490,44 @@ fn run_tee_exit_status(script: &str, after_start: impl FnOnce(u32)) -> ExitStatu
     let output = stdout_thread.join().expect("join stdout reader");
     assert!(
         started,
-        "pty-tee produced no output before exiting: {:?}, status: {status:?}",
+        "the script never reported `started`: {:?}, status: {status:?}",
         String::from_utf8_lossy(&output)
     );
-    status
+    (status, output)
+}
+
+/// Parses the inner shell pid a script printed as `pid=<n>`.
+fn inner_pid_from_output(output: &[u8]) -> libc::pid_t {
+    let text = String::from_utf8_lossy(output);
+    let digits: String = text
+        .split("pid=")
+        .nth(1)
+        .unwrap_or_default()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits
+        .parse()
+        .unwrap_or_else(|_| panic!("no inner pid in output: {text:?}"))
+}
+
+fn is_gone(target: libc::pid_t) -> bool {
+    let rc = unsafe { libc::kill(target, 0) };
+    rc == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+/// The inner shell leads its own process group. Waits up to 5 s for the
+/// shell and its whole group to vanish, killing a survivor before failing
+/// so a broken teardown never leaks processes.
+fn assert_inner_group_gone(shell: libc::pid_t) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !(is_gone(shell) && is_gone(-shell)) {
+        if Instant::now() >= deadline {
+            unsafe { libc::kill(-shell, libc::SIGKILL) };
+            panic!("inner process group {shell} survived pty-tee");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -493,11 +543,73 @@ fn inner_exit_code_passes_through_unchanged() {
 }
 
 #[test]
+fn inner_sighup_death_is_reported_as_sighup() {
+    let status = run_tee_exit_status("printf started; kill -HUP $$", |_| {});
+    assert_eq!(status.signal(), Some(libc::SIGHUP), "status: {status:?}");
+}
+
+#[test]
 fn external_sigterm_is_reraised_after_the_inner_group_is_gone() {
-    let status = run_tee_exit_status("printf started; sleep 30", |pid| {
-        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-    });
+    let (status, output) = run_tee_until_exit(
+        "printf 'started pid=%s\\n' $$; sleep 30",
+        |_| {},
+        |pid| {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        },
+    );
+    assert_inner_group_gone(inner_pid_from_output(&output));
     assert_eq!(status.signal(), Some(libc::SIGTERM), "status: {status:?}");
+}
+
+/// A tab close hangs up the outer PTY, which delivers SIGHUP to pty-tee.
+#[test]
+fn external_sighup_is_reraised() {
+    let (status, output) = run_tee_until_exit(
+        "printf 'started pid=%s\\n' $$; sleep 30",
+        |_| {},
+        |pid| {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGHUP) };
+        },
+    );
+    assert_inner_group_gone(inner_pid_from_output(&output));
+    assert_eq!(status.signal(), Some(libc::SIGHUP), "status: {status:?}");
+}
+
+/// SIGXCPU dumps core by default. The inner process makes itself
+/// non-dumpable, so only a wrapper core could set the core flag; the
+/// wrapper inherits an unlimited RLIMIT_CORE and runs in a temp directory.
+#[cfg(target_os = "linux")]
+#[test]
+fn reraised_signal_never_dumps_core() {
+    use std::os::unix::process::CommandExt;
+    let cwd = tempfile::tempdir().expect("tempdir");
+    let script = "printf started; exec python3 -c 'import ctypes, os, signal; \
+                  ctypes.CDLL(None).prctl(4, 0, 0, 0, 0); \
+                  os.kill(os.getpid(), signal.SIGXCPU)'";
+    let (status, _) = run_tee_until_exit(
+        script,
+        |cmd| {
+            cmd.current_dir(cwd.path());
+            unsafe {
+                cmd.pre_exec(|| {
+                    let mut limit: libc::rlimit = std::mem::zeroed();
+                    if libc::getrlimit(libc::RLIMIT_CORE, &mut limit) == 0 {
+                        limit.rlim_cur = limit.rlim_max;
+                        libc::setrlimit(libc::RLIMIT_CORE, &limit);
+                    }
+                    Ok(())
+                });
+            }
+        },
+        |_| {},
+    );
+    assert_eq!(status.signal(), Some(libc::SIGXCPU), "status: {status:?}");
+    assert!(!status.core_dumped(), "pty-tee dumped core: {status:?}");
+    let leftovers: Vec<_> = std::fs::read_dir(cwd.path())
+        .expect("read wrapper cwd")
+        .map(|entry| entry.expect("dir entry").file_name())
+        .collect();
+    assert!(leftovers.is_empty(), "core files: {leftovers:?}");
 }
 
 fn osc7_for_test_path(path: &Path) -> Vec<u8> {

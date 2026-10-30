@@ -200,33 +200,31 @@ pub fn run(
     })
 }
 
-/// End the process the way [`run`] decided. A signal exit restores the
-/// default disposition, unblocks the signal, and raises it so the parent
-/// observes a genuine `WIFSIGNALED` status with the real signal number.
+/// End the process the way [`run`] decided. A signal exit first disables
+/// core dumps for the wrapper, then restores the default disposition,
+/// unblocks the signal, and raises it so the parent observes a genuine
+/// `WIFSIGNALED` status with the real signal number.
 pub fn exit_with(exit: TeeExit) -> ! {
     let sig = match exit {
         TeeExit::Code(code) => std::process::exit(code),
         TeeExit::Signal(sig) => sig,
     };
-    if matches!(
-        sig,
-        libc::SIGSEGV
-            | libc::SIGABRT
-            | libc::SIGBUS
-            | libc::SIGILL
-            | libc::SIGFPE
-            | libc::SIGTRAP
-            | libc::SIGQUIT
-    ) {
-        // The inner process crashed, not the wrapper: never dump a core
-        // for the re-raised signal.
-        let no_core = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
-        unsafe {
-            libc::setrlimit(libc::RLIMIT_CORE, &no_core);
-        }
+    // The inner process died, not the wrapper, so no re-raised signal may
+    // dump a wrapper core, whichever signals dump core on this platform.
+    // RLIMIT_CORE=0 stops a core file in the tab's start directory. On
+    // Linux a pipe core_pattern (apport, systemd-coredump) ignores that
+    // limit, so the wrapper also becomes non-dumpable.
+    let no_core = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    unsafe {
+        libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let off: libc::c_ulong = 0;
+        libc::prctl(libc::PR_SET_DUMPABLE, off, off, off, off);
     }
     // SIG_DFL first so pty-tee's own handler cannot catch the re-raise.
     // SIGKILL rejects both calls harmlessly and still terminates below.
