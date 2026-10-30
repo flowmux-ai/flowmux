@@ -186,12 +186,27 @@ bash scripts/test-ci.sh macos
 - 기능을 끈 뒤 기존 세션이 계속 동작하고, 구버전에서도 기존 세션 저장소를 읽을 수 있다.
 - 목업, fixture, local test, real provider, native GUI, remote CI 결과를 구분해 출시 기록에 남겼다.
 
-본 설계 문서와 HTML 목업의 확인 범위는 문서·상호작용 설계다. 제품 구현과 위 매트릭스 실행은 다음 작업이다.
+HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구현 이후 확보한 증거이며, 전체 매트릭스의 통과 여부와 구분한다.
 
-## 현재 확보한 증거 (2026-10-31, 구현 중)
+## 실행 기록
 
-- Core 177개, state 74개, daemon 211개 통과(기존 ignored 1개). 계보 projection, cycle/namespace 격리, transaction/idempotency, UI 설정 roundtrip, split target 재검증을 포함한다.
-- `cargo check --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` 통과.
-- `FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1` macOS main-thread harness: `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK` 확인. 상단 패널, 삭제된 세션 비활성, 확대 좌표, 분할 전후 기존 terminal widget/PID 보존을 검증했다.
-- 이 native GUI 검사는 fixture 계보를 사용한다. 실제 provider fork/resume, 동시 창 소유권 조정, 전체 회귀·coverage gate는 아직 완료되지 않았다. 위 결과로 이를 통과했다고 간주하지 않는다.
-- 활성 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다. GUI 검증은 `/tmp/fm-native-*`의 독립 XDG/runtime 상태를 사용했다.
+2026-10-31 기록. 아래 결과는 위 전체 D/O/U/G 매트릭스를 모두 통과했다는 의미가 아니다.
+
+| 범위 | 결과 | 증거 |
+| --- | --- | --- |
+| Core 모델 | 178 passed; 1만 노드·20개 계보, 긴 chain, projection, cycle/namespace, geometry | `/tmp/flowmux-session-flow-domain-tests.log` |
+| State | 79 passed 및 별도 integration 통과; transaction, 동시 writer, PID 재사용, stale refresh, native 증거 기반 복구 | 같은 domain log |
+| Daemon | 211 passed, 기존 ignored 1개; source/surface 검증과 증분 split | `/tmp/flowmux-session-flow-headless.log` |
+| 정적 검사 | workspace check, all-target clippy `-D warnings`, format, diff check 통과 | `/tmp/flowmux-session-flow-check.log`, `/tmp/flowmux-session-flow-clippy.log` |
+| Hook·capability | Codex installer 25 passed/기존 ignored 1개; stderr help/실패 응답 테스트 통과 | `/tmp/flowmux-session-flow-hook-tests.log`, `/tmp/flowmux-session-flow-capability.log` |
+| GTK canvas·배치 | `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`; widget/PID 보존, wheel 좌표, drag/Pan/비활성 노드, 50회 toggle, widget 해제, workspace 전환 중 drag 취소 | `/tmp/flowmux-session-flow-native-ui-final.log` |
+| 실제 Codex 0.166.0 | `MACOS_SESSION_FLOW_CODEX_REAL_OK`; 첫 요청 자동 전송 없이 identity 식별, fork/split/resume/중복 방지 | `/tmp/flowmux-session-flow-real-ui-final.log` |
+| 실제 Claude Code 2.1.314 | source `8683a908-3515-4cc9-a35a-1da44cf7a563` → child `21fcba07-00f6-4ea1-9749-24b6cbde520d`; `FLOW_NATIVE_731` 상속; resume 같은 child ID | `/tmp/flowmux-session-flow-claude-evidence.json` |
+| 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
+| 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
+| 전체 macOS gate | browser-control에서 `stable pointer target` 실패. 기존 설치 버전도 같은 실패; document.visibilityState=hidden. 나머지 phase 별도 실행 중이며 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log` |
+| Linux coverage·원격 CI | `cc994263` 실행 중. 최종 결과 확인 전 통과로 기록하지 않음 | Test `41105907140`, Sanitizers `41105913058`, License `41105917623` |
+
+Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
+
+Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱의 실행을 원자적으로 잠그는 기능은 아니다. 인증 실패, 미지원 외부 fork, 수동 접근성·장기 성능 미수행은 `passed`로 바꾸지 않는다.

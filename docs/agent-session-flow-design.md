@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 설계
 
-상태: `feat/session-flow`에서 구현·검증 중. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
+상태: 설계 확정, `feat/session-flow`에 구현 후 최종 회귀·coverage 검증 중. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
 
 에이전트 화면의 **Fork session**은 그 pane을 좌우로 분할하고 오른쪽에 새 분기 세션을 연다. Workspace의 **Session Flow**는 현재 열린 세션들이 속한 전체 fork 계보를 상단 약 1/3의 캔버스에 표시한다. 다른 원본에서 분기된 세션을 resume하면 별도의 그래프가 추가된다. 노드를 선택하면 아래 pane 영역에서 해당 세션을 열고, 재개할 수 없는 노드는 관계만 표시한다.
 
@@ -93,7 +93,7 @@ flowchart TD
 
 ## 데이터 모델
 
-아래 타입과 저장 경로는 제안이다. 기존 public CLI 계약을 의미하지 않는다.
+아래 표는 설계 계약이다. 현재 로컬 구현은 `SessionKey(provider, canonical home, native ID)`, `Lineage`, `SessionRecord`, `LiveSession`, `Operation`, `SavedView`로 구성한다. Remote namespace와 세분화된 operation 단계는 후속 범위다. 기존 public CLI 계약은 변경하지 않는다.
 
 | 객체 | 필수 정보와 의미 |
 | --- | --- |
@@ -272,8 +272,31 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 
 ## 출시와 되돌리기
 
-초기에는 기본 비활성인 기능 설정과 도구별 capability gate를 사용한다. 읽기 전용 그래프 → resume → fork 순서로 검증 범위를 확대한다. 지원되는 도구·버전·host 조합을 명시한다.
+현재 구현은 도구별 capability와 native identity 확인으로 동작을 제한한다. 별도의 전역 기능 설정은 추가하지 않았다. Workspace 버튼은 알려진 fork 계보가 있는 세션에만 나타나며, 패널을 열었다는 이유로 fork나 resume을 실행하지 않는다.
 
-기능을 끄면 신규 fork/resume 요청과 그래프 구독만 중단한다. 이미 열린 terminal과 진행 중인 에이전트를 종료하지 않는다. 생성된 native 세션, worktree, 원본 기록을 삭제하지 않는다. 계보 저장소는 읽기 가능한 형태로 보존하며 기존 세션 기능으로 계속 작업할 수 있어야 한다.
+패널을 닫으면 캔버스 애니메이션을 중단한다. 이미 열린 terminal과 진행 중인 에이전트를 종료하지 않는다. 생성된 native 세션, worktree, 원본 기록을 삭제하지 않는다. 계보 저장소는 읽기 가능한 형태로 보존하며 기존 세션 기능으로 계속 작업할 수 있어야 한다.
 
-완료 판정과 증거 형식은 [검증 계획](agent-session-flow-validation.md)을 따른다. 현재 문서의 모든 신규 타입·설정·테스트 marker는 제안이며 실제 구현 완료를 뜻하지 않는다.
+완료 판정과 증거 형식은 [검증 계획](agent-session-flow-validation.md)을 따른다. 설계 계약과 실제 구현·검증 범위는 아래 표 및 검증 기록으로 구분한다.
+
+
+## 현재 구현과 검증 경계
+
+- Schema 3의 `views`는 workspace별 camera·선택·열림·높이만, `live_sessions`는 실행 위치와 process birth marker만 저장한다. 계보는 session/edge에만 속한다.
+- Resume 예약과 실행 binding 공개는 DB transaction으로 보호한다. 지연된 갱신은 읽었던 binding snapshot과 현재 값이 다르면 덮어쓰지 않는다. PID가 재사용된 binding은 실행 소유권으로 인정하지 않는다.
+- Codex 0.166.0에서 첫 요청 전의 TUI 시작 hook이 지연되는 것을 확인했다. 이 경우 해당 pane의 프로세스 자손 중 **Codex가 쓰기 모드로 연 native rollout 파일**을 확인한다. Native ID, 저장소, process birth marker가 일치하고 후보가 하나일 때만 식별한다. 최근 파일·제목·유사도는 사용하지 않는다. macOS는 시간·출력 크기가 제한된 `lsof`, Linux는 `/proc/<pid>/fd`와 `fdinfo`를 worker에서 조회한다.
+- Codex fork의 parent는 `forked_from_id`를 추가 확인한다. Hook의 `source: fork` 필터도 포함한다. 기존 lifecycle 추정 엔진과 사용자 hook trust 설정은 변경하지 않는다.
+- Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 확대·팬·노드 이동·전체 맞춤·Pan 모드·키보드 선택을 제공한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
+- 확인된 pending 작업은 저장된 surface/native ID와 native parent 증거로 재조정한다. 증거가 없는 작업은 자동 재실행하지 않고 예약을 유지한다. 미확인 결과를 사용자가 정리하는 전용 UI는 아직 없다.
+
+| 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |
+| --- | --- | --- | --- |
+| Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → 재선택 중복 없음. 원본 widget/PID 유지 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
+| Claude Code 2.1.314 | `--resume ID --fork-session`, `--resume ID` | 실제 CLI에서 child ID 분리, 이전 대화 표식 상속, 같은 child ID로 resume | Native GUI 연동은 별도 검증 필요. 외부 fork의 명시적 parent metadata는 확인하지 못함 |
+| OpenCode 1.17.18 | `--session ID --fork`, `--session ID` | Native 저장소에 별도 child 생성과 원본 메시지 복제 | 모델 호출은 token refresh 401로 blocked. GUI 전체 검증 미완료. Native fork의 `parent_id`는 NULL이어서 외부 계보 근거로 쓰지 않음 |
+| Gemini·agy·Cline | 기존 history/resume 재사용 | Parser·명령 및 기존 회귀 테스트 대상 | 비파괴 외부 fork 미확인으로 Fork session 비활성. 실제 provider별 그래프 resume 검증은 별도 |
+
+**과거 계보 조회의 한계:** Codex의 명시적 native fork metadata와 Flowmux가 직접 확인하여 기록한 관계를 표시한다. 도구가 원본 ID를 보관하지 않은 외부 fork는 자동 복원할 수 없다. 임의의 부모를 연결하지 않으며, 여섯 도구의 모든 과거 fork를 같은 수준으로 복원한다고 발표하지 않는다.
+
+**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 30분 이상 지속 사용과 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 수치는 목표이며 측정 결과와 구분한다.
+
+테스트와 실제 provider 증거는 [검증 기록](agent-session-flow-validation.md#실행-기록)에 모은다. 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다.
