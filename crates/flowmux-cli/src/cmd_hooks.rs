@@ -413,6 +413,7 @@ pub(crate) async fn run_claude_hook_event(
                     surface,
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        outcome: Some(flowmux_core::AgentTurnOutcome::Failed),
                         reason: if matches!(
                             input.error.as_deref(),
                             Some("rate_limit" | "usage_limit")
@@ -503,6 +504,7 @@ pub(crate) async fn run_claude_hook_event(
                             }
                         } else {
                             AgentLifecycleEvent::SessionWaitStarted {
+                                outcome: None,
                                 reason: if notification_type == Some("quota_auto_resume_stale") {
                                     flowmux_core::AgentWaitReason::Quota
                                 } else {
@@ -677,6 +679,7 @@ pub(crate) async fn run_claude_hook_event(
                         surface,
                         session_id,
                         AgentLifecycleEvent::SessionWaitStarted {
+                            outcome: None,
                             reason: if input
                                 .tool_name
                                 .as_deref()

@@ -857,6 +857,7 @@ fn render_tree_marks_active_tab_and_indents() {
                     kind: "terminal".into(),
                     active: false,
                     agent: Some(TreeAgent {
+                        turn_outcome: None,
                         pending_waits: vec![serde_json::from_value(serde_json::json!({
                             "scope": "tool", "reason": "question", "count": 2,
                             "since": "2026-10-30T00:00:00Z"

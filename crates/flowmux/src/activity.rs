@@ -76,8 +76,20 @@ impl ActivityEntry {
         }
         let (status, summary) = if status_text == "Ready" {
             (Some(located.presence.status), "Session started".to_string())
-        } else if status_text == "Completed" || status_text.starts_with("Completed:") {
-            (Some(AgentStatus::Done), status_text.to_string())
+        } else if located.presence.turn_outcome == Some(flowmux_core::AgentTurnOutcome::Completed)
+            || status_text == "Completed"
+            || status_text.starts_with("Completed:")
+        {
+            (
+                Some(AgentStatus::Done),
+                located
+                    .presence
+                    .custom_status
+                    .as_deref()
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or(status_text)
+                    .to_string(),
+            )
         } else {
             (Some(located.presence.status), status_text.to_string())
         };
@@ -309,6 +321,22 @@ mod tests {
         let completed =
             ActivityEntry::from_hook_presence(located(AgentStatus::Idle, "Completed: fixed tests"))
                 .unwrap();
+        assert_eq!(completed.status, Some(AgentStatus::Done));
+        assert_eq!(completed.summary, "Completed: fixed tests");
+        let mut question = located(AgentStatus::Blocked, "Waiting for approval");
+        question.presence.pending_waits = vec![flowmux_core::AgentWaitSummary {
+            scope: flowmux_core::AgentWaitScope::Permission,
+            reason: flowmux_core::AgentWaitReason::Question,
+            count: 1,
+            since: chrono::Utc::now(),
+        }];
+        assert_eq!(
+            ActivityEntry::from_hook_presence(question).unwrap().summary,
+            "Waiting for answer"
+        );
+        let mut typed = located(AgentStatus::Idle, "Completed: fixed tests");
+        typed.presence.turn_outcome = Some(flowmux_core::AgentTurnOutcome::Completed);
+        let completed = ActivityEntry::from_hook_presence(typed).unwrap();
         assert_eq!(completed.status, Some(AgentStatus::Done));
         assert_eq!(completed.summary, "Completed: fixed tests");
         assert!(

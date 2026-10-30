@@ -2528,6 +2528,7 @@ mod tests {
             .await
             .is_none());
         let report = AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
@@ -2694,6 +2695,7 @@ mod tests {
         let surface = first_pane_active_surface(&ws);
 
         let report = |status, activity, seq| AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: agent.into(),
             status: Some(status),
@@ -2885,6 +2887,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Working),
@@ -2923,6 +2926,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Blocked),
@@ -2973,6 +2977,7 @@ mod tests {
         let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
         let pid = std::process::id();
         let start = |seq| AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
@@ -3046,6 +3051,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Idle),
@@ -3102,6 +3108,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
@@ -3193,6 +3200,7 @@ mod tests {
         let outer_pid = std::process::id();
         let inner_pid = u32::MAX;
         let start = |session: &str, pid, seq| AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
@@ -3287,6 +3295,130 @@ mod tests {
         assert_eq!(outer.pid, Some(outer_pid));
         assert_eq!(outer.session_id.as_deref(), Some("outer-session"));
         assert_eq!(outer.source.as_deref(), Some("flowmux:hook"));
+    }
+
+    #[tokio::test]
+    async fn response_outcomes_are_typed_and_clear_on_a_new_turn() {
+        for (agent, event, expected) in [
+            (
+                "claude",
+                serde_json::json!({"event":"turn_stopped", "status_text":"Completed"}),
+                "completed",
+            ),
+            (
+                "claude",
+                serde_json::json!({"event":"session_wait_started", "scope":"api_failure", "reason":"api_failure", "outcome":"failed", "status_text":"API request failed"}),
+                "failed",
+            ),
+            (
+                "codex",
+                serde_json::json!({"event":"codex_turn_stopped", "turn_id":"turn", "status_text":"Completed"}),
+                "completed",
+            ),
+            (
+                "codex",
+                serde_json::json!({"event":"codex_turn_interrupted", "turn_id":"turn", "status_text":"Turn interrupted"}),
+                "canceled",
+            ),
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let workspace = store
+                .create_workspace(Some("outcome".into()), "/tmp/outcome".into())
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+            let start = |turn: &str| AgentLifecycleEvent::TurnStarted {
+                turn_id: Some(turn.into()),
+                status_text: "Working".into(),
+            };
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(42),
+                    Some(1),
+                    "session",
+                    start("turn"),
+                    false,
+                )
+                .await;
+            let result = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(42),
+                    Some(2),
+                    "session",
+                    serde_json::from_value(event.clone()).unwrap(),
+                    false,
+                )
+                .await;
+            if let Some(settlement) = result.settle_codex_after_grace {
+                store
+                    .settle_codex_turn_after_grace(
+                        surface,
+                        Some(42),
+                        settlement.stop_seq,
+                        "session",
+                        &settlement.turn_id,
+                        false,
+                    )
+                    .await;
+            }
+            let presence = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(
+                serde_json::to_value(&presence).unwrap()["turn_outcome"],
+                expected
+            );
+            let pane = store.get_workspace(workspace).await.unwrap().surfaces[0]
+                .root_pane
+                .first_leaf_id()
+                .unwrap();
+            store.set_active_surface(pane, surface).await;
+            assert_eq!(
+                serde_json::to_value(
+                    store
+                        .located_agent_presence(surface)
+                        .await
+                        .unwrap()
+                        .presence
+                )
+                .unwrap()["turn_outcome"],
+                expected
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(42),
+                    Some(3),
+                    "session",
+                    start("next"),
+                    false,
+                )
+                .await;
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(42),
+                    Some(2),
+                    "session",
+                    serde_json::from_value(event).unwrap(),
+                    false,
+                )
+                .await;
+            let working = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(working.status, AgentStatus::Working);
+            assert!(serde_json::to_value(working).unwrap()["turn_outcome"].is_null());
+        }
     }
 
     #[tokio::test]
@@ -3733,6 +3865,7 @@ mod tests {
                 Some(20),
                 "session-1",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,
                     status_text: "Waiting for quota".into(),
@@ -4508,6 +4641,7 @@ mod tests {
                     Some(20),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        outcome: None,
                         reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
                         status_text: "Delayed quota failure".into(),
@@ -4532,6 +4666,7 @@ mod tests {
                     Some(seq),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        outcome: None,
                         reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
                         status_text: format!("Waiting for {scope}"),
@@ -4616,6 +4751,7 @@ mod tests {
                 .report_agent_status_with_visibility(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "claude".into(),
                         status: Some(AgentStatus::Idle),
@@ -4732,6 +4868,7 @@ mod tests {
             (
                 3,
                 AgentLifecycleEvent::SessionWaitStarted {
+                    outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: Some("Answer question".into()),
                     status_text: "Waiting for input".into(),
@@ -5587,6 +5724,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Idle),
@@ -5905,6 +6043,7 @@ mod tests {
 
         // A tab that reported the session matches whatever its title says.
         let report = AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Working),
@@ -5949,6 +6088,7 @@ mod tests {
             .reconcile_process_agents(&[(other, Some("codex"))])
             .await;
         let report = AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Working),
@@ -6018,6 +6158,7 @@ mod tests {
                     .report_agent_status(
                         surface,
                         AgentStatusReport {
+                            turn_outcome: None,
                             pending_waits: None,
                             name: "codex".into(),
                             status: Some(AgentStatus::Idle),
@@ -6173,6 +6314,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
@@ -6404,6 +6546,7 @@ mod tests {
             (
                 "claude",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    outcome: None,
                     reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,
                     status_text: "API error".into(),
@@ -6607,6 +6750,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "opencode".into(),
                     status: Some(AgentStatus::Working),
@@ -6967,6 +7111,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Idle),
@@ -7019,6 +7164,7 @@ Do you want to continue?";
         let session_id = "claude-session";
         let report =
             |activity: flowmux_core::AgentActivity, seq, custom_status: &str| AgentStatusReport {
+                turn_outcome: None,
                 pending_waits: None,
                 name: "claude".into(),
                 status: Some(activity.status()),
@@ -7150,6 +7296,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "cline".into(),
                         status: Some(AgentStatus::Idle),
@@ -7202,6 +7349,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
@@ -7224,6 +7372,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
@@ -7262,6 +7411,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
@@ -7342,6 +7492,7 @@ Do you want to continue?";
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Working),
@@ -7412,6 +7563,7 @@ Do you want to continue?";
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
@@ -7508,6 +7660,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Working),
@@ -7548,6 +7701,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Idle),
@@ -7591,6 +7745,7 @@ Do you want to continue?";
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Working),
@@ -7651,6 +7806,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Working),
@@ -7702,6 +7858,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        turn_outcome: None,
                         pending_waits: None,
                         name: "claude".into(),
                         status: Some(AgentStatus::Idle),

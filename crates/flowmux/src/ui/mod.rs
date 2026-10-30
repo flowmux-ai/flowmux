@@ -50,7 +50,8 @@ pub(crate) fn agent_status_icon_name(status: AgentStatus, seen: bool) -> &'stati
     match status {
         AgentStatus::Blocked => "dialog-warning-symbolic",
         AgentStatus::Working => "process-working-symbolic",
-        AgentStatus::Done if !seen => "emblem-ok-symbolic",
+        // Done is an unread response boundary, not verification of successful work.
+        AgentStatus::Done if !seen => "process-stop-symbolic",
         AgentStatus::Done | AgentStatus::Idle => "media-playback-pause-symbolic",
         AgentStatus::Unknown => "dialog-question-symbolic",
     }

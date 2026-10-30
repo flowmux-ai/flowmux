@@ -8902,6 +8902,7 @@ mod tests {
             .report_agent_status(
                 right_surface,
                 flowmux_core::AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(flowmux_core::AgentStatus::Working),
@@ -9123,6 +9124,7 @@ mod tests {
             .report_agent_status(
                 agent_surface,
                 flowmux_core::AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(flowmux_core::AgentStatus::Working),
@@ -10455,6 +10457,7 @@ mod tests {
             .report_agent_status(
                 background_surface,
                 flowmux_core::AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(flowmux_core::AgentStatus::Idle),

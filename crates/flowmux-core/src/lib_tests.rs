@@ -1683,6 +1683,7 @@ fn agent_presence_ignores_stale_seq() {
     presence.seq = Some(20);
     let applied = presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Idle),
@@ -1712,6 +1713,7 @@ fn repeated_session_start_does_not_regress_active_hook_lifecycle() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
@@ -1745,6 +1747,7 @@ fn native_session_start_resets_completed_same_session_to_ready() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
@@ -1777,6 +1780,7 @@ fn native_session_start_resets_blocked_same_session_to_ready() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Unknown),
@@ -1807,6 +1811,7 @@ fn apply_report_screen_scan_keeps_proc_owned_identity() {
     presence.source = Some(AGENT_SOURCE_PROC.to_string());
     let applied = presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "cline".into(),
             status: Some(AgentStatus::Working),
@@ -1841,6 +1846,7 @@ fn working_to_idle_in_hidden_surface_becomes_done_until_seen() {
     presence.seq = Some(1);
     let applied = presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
@@ -1869,6 +1875,7 @@ fn hidden_blocked_attention_survives_acknowledgement_until_resolved() {
     let surface_id = surface.id;
     surface.agent = AgentPresence::from_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Blocked),
@@ -1904,6 +1911,7 @@ fn hidden_blocked_attention_survives_acknowledgement_until_resolved() {
             AgentStatus::Working,
             "flowmux:hook",
             Some("codex"),
+            None,
             None,
             true,
         ),
@@ -1954,6 +1962,7 @@ fn blocked_attention_is_independent_of_visibility_and_other_acknowledged_tabs() 
 fn initial_idle_agent_report_in_hidden_surface_stays_idle() {
     let presence = AgentPresence::from_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "cline".into(),
             status: Some(AgentStatus::Idle),
@@ -1986,6 +1995,7 @@ fn agent_presence_replaces_transient_message_metadata() {
 
     let applied = presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
@@ -2018,6 +2028,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
@@ -2037,6 +2048,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
@@ -2060,6 +2072,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
     presence.messaging_socket = Some("/tmp/claude-2.sock".into());
     assert!(presence.apply_report(
         AgentStatusReport {
+            turn_outcome: None,
             pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
@@ -2095,6 +2108,7 @@ fn hook_report_identity_wins_over_stale_surface_title() {
         pane.report_surface_agent(
             surface_id,
             AgentStatusReport {
+                turn_outcome: None,
                 pending_waits: None,
                 name: "codex".into(),
                 status: Some(AgentStatus::Idle),
@@ -2813,6 +2827,7 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
         "flowmux:screen",
         Some("codex"),
         None,
+        None,
         true,
     );
     // Working turn ends: proc presence settles to Idle, not cleared.
@@ -2820,6 +2835,30 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
     assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Idle));
     // Still present — a second settle is a no-op.
     assert_eq!(pane.settle_screen_idle(surface_id, true), Some(false));
+}
+
+#[test]
+fn response_outcome_is_not_replaced_by_same_state_screen_text() {
+    let mut report = AgentStatusReport::from_activity("codex", Some(AgentActivity::Idle), Some(42));
+    report.source = Some("flowmux:hook".into());
+    report.session_id = Some("session".into());
+    report.turn_outcome = Some(AgentTurnOutcome::Canceled);
+    let mut presence = AgentPresence::from_report(report, false).unwrap();
+    assert_eq!(presence.status_text(), Some("Turn interrupted"));
+    let mut screen = AgentStatusReport::from_activity("codex", Some(AgentActivity::Idle), None);
+    screen.source = Some("flowmux:screen".into());
+    screen.turn_outcome = Some(AgentTurnOutcome::Unknown);
+    screen.custom_status = Some("Completed".into());
+    assert!(presence.apply_report(screen, true));
+    assert_eq!(presence.turn_outcome, Some(AgentTurnOutcome::Canceled));
+    assert_eq!(presence.status_text(), Some("Turn interrupted"));
+    assert!(presence.seen);
+    let mut start =
+        AgentStatusReport::from_activity("codex", Some(AgentActivity::Running), Some(42));
+    start.source = Some("flowmux:hook".into());
+    start.session_id = Some("session".into());
+    assert!(presence.apply_report(start, false));
+    assert_eq!(presence.turn_outcome, None);
 }
 
 #[test]
@@ -2853,6 +2892,7 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
             "flowmux:screen",
             Some(name),
             Some("Working (1s • esc to interrupt)"),
+            None,
             true,
         );
         pane.report_surface_agent_signal(
@@ -2861,6 +2901,7 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
             "flowmux:screen",
             Some(name),
             Some("Working (2s • esc to interrupt)"),
+            None,
             true,
         );
         if lifecycle_status == AgentStatus::Working {
@@ -2870,6 +2911,7 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
                     AgentStatus::Idle,
                     "flowmux:screen",
                     Some(name),
+                    None,
                     None,
                     true,
                 ),
@@ -2893,6 +2935,13 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
             "{name}"
         );
         assert_eq!(agent.source.as_deref(), Some("flowmux:hook"), "{name}");
+        if agent.status == AgentStatus::Idle {
+            assert_eq!(agent.turn_outcome, Some(AgentTurnOutcome::Unknown));
+            assert_eq!(
+                agent.status_text(),
+                Some("Response ended; outcome unconfirmed")
+            );
+        }
     }
 }
 
@@ -2925,12 +2974,14 @@ fn codex_screen_completion_survives_tool_progress_but_not_a_new_turn() {
                 "flowmux:screen",
                 Some("codex"),
                 Some("Working (1s • esc to interrupt)"),
+                None,
                 visible,
             );
             // The last tool hook can arrive after the last observed spinner.
             pane.report_surface_agent(
                 surface_id,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "codex".into(),
                     status: Some(status),
@@ -2952,6 +3003,7 @@ fn codex_screen_completion_survives_tool_progress_but_not_a_new_turn() {
                     AgentStatus::Idle,
                     "flowmux:screen",
                     Some("codex"),
+                    None,
                     None,
                     visible,
                 ),
@@ -3003,6 +3055,7 @@ fn screen_idle_restores_hidden_screen_working_as_done() {
         "flowmux:screen",
         Some("opencode"),
         None,
+        None,
         false,
     );
     assert_eq!(
@@ -3011,6 +3064,7 @@ fn screen_idle_restores_hidden_screen_working_as_done() {
             AgentStatus::Idle,
             "flowmux:screen",
             Some("opencode"),
+            None,
             None,
             false,
         ),
@@ -3051,6 +3105,7 @@ fn screen_working_restores_blocked_acknowledgement_state() {
             since: chrono::Utc::now(),
         };
         presence.pending_waits = vec![wait];
+        presence.turn_outcome = Some(AgentTurnOutcome::Failed);
         surface.agent = Some(presence);
         let mut pane = Pane::Leaf {
             id: PaneId::new(),
@@ -3067,6 +3122,7 @@ fn screen_working_restores_blocked_acknowledgement_state() {
                 "flowmux:screen",
                 Some("gemini"),
                 Some("Working (1s)"),
+                None,
                 false,
             ),
             Some(true)
@@ -3079,6 +3135,7 @@ fn screen_working_restores_blocked_acknowledgement_state() {
                     "flowmux:screen",
                     Some("gemini"),
                     None,
+                    None,
                     false,
                 ),
                 Some(true)
@@ -3089,6 +3146,7 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         let agent = pane.agent_presence_for_surface(surface_id).unwrap();
         assert_eq!(agent.status, AgentStatus::Blocked);
         assert_eq!(agent.pending_waits, vec![wait]);
+        assert_eq!(agent.turn_outcome, Some(AgentTurnOutcome::Failed));
         assert_eq!(agent.status_text(), Some("Waiting for answer"));
         assert_eq!(agent.seen, expected_seen);
         if final_status == Some(AgentStatus::Blocked) {
@@ -3186,6 +3244,7 @@ fn screen_fallback_does_not_override_claude_hook_presence() {
             "flowmux:screen",
             Some("claude"),
             None,
+            None,
             true,
         ),
         Some(false)
@@ -3217,6 +3276,7 @@ fn screen_progress_refines_matching_claude_hook_presence() {
             "flowmux:screen",
             Some("claude"),
             Some("Working (2s • esc to interrupt)"),
+            None,
             true,
         ),
         Some(true)
@@ -3248,6 +3308,7 @@ fn screen_fallback_does_not_take_ownership_from_matching_hook_presence() {
             AgentStatus::Working,
             "flowmux:screen",
             Some("codex"),
+            None,
             None,
             true,
         ),
@@ -3295,6 +3356,7 @@ fn screen_signal_cannot_replace_hook_owned_identity() {
                 "flowmux:screen",
                 Some(detected_agent),
                 None,
+                None,
                 true,
             ),
             Some(false),
@@ -3337,6 +3399,7 @@ fn mismatched_screen_idle_cannot_create_a_sticky_false_completion() {
             "flowmux:screen",
             Some("codex"),
             Some("Codex idle"),
+            None,
             false,
         ),
         Some(false)
@@ -3370,6 +3433,7 @@ fn screen_title_cannot_rename_hook_owned_claude_presence() {
             AgentStatus::Blocked,
             "flowmux:screen",
             Some("claude"),
+            None,
             None,
             true,
         ),
@@ -3973,6 +4037,7 @@ fn gemini_cli_signals_detect_working_blocked_and_idle_states() {
         "flowmux:screen",
         Some("gemini"),
         Some("Thinking... (esc to cancel, 2m 22s)"),
+        None,
         true,
     );
     assert_eq!(applied, Some(true));
@@ -4033,6 +4098,7 @@ fn codex_composer_identity_ignores_agent_names_in_session_title() {
                     "flowmux:screen",
                     name,
                     detect_agent_progress_text(Some(&screen)),
+                    None,
                     true,
                 ),
                 Some(true),

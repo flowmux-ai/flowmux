@@ -366,3 +366,26 @@ fn wait_reason_defaults_preserve_legacy_and_future_hook_payloads() {
         }
     }
 }
+
+#[test]
+fn response_outcome_is_optional_and_unknown_future_values_remain_readable() {
+    use flowmux_core::AgentTurnOutcome;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, TreeAgent};
+    let legacy = serde_json::json!({"name":"agent", "status":"idle", "activity":"idle"});
+    let agent: TreeAgent = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(agent.turn_outcome, None);
+    assert!(serde_json::to_value(agent)
+        .unwrap()
+        .get("turn_outcome")
+        .is_none());
+    let mut future = legacy;
+    future["turn_outcome"] = "future_outcome".into();
+    let agent: TreeAgent = serde_json::from_value(future).unwrap();
+    assert_eq!(agent.turn_outcome, Some(AgentTurnOutcome::Unknown));
+    let wait = serde_json::json!({"event":"session_wait_started", "status_text":"Waiting"});
+    let event: AgentLifecycleEvent = serde_json::from_value(wait).unwrap();
+    assert!(matches!(
+        event,
+        AgentLifecycleEvent::SessionWaitStarted { outcome: None, .. }
+    ));
+}

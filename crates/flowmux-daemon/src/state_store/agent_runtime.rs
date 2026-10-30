@@ -10,9 +10,9 @@ use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_completion, detect_agent_idle_name_from_signals,
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_status_from_signals, detect_agent_usage_limit_text,
-    select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport, AgentWaitReason,
-    AgentWaitScope, AgentWaitSummary, Pane, PaneContent, PaneId, PaneSurface, SurfaceId,
-    SurfaceKind, Workspace, WorkspaceId,
+    select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport,
+    AgentTurnOutcome, AgentWaitReason, AgentWaitScope, AgentWaitSummary, Pane, PaneContent, PaneId,
+    PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
@@ -248,6 +248,7 @@ pub(super) struct PendingCodexStop {
     pub(super) message: Option<String>,
     pub(super) status_text: String,
     pub(super) notify_completion: bool,
+    pub(super) outcome: AgentTurnOutcome,
     pub(super) seq: Option<u64>,
 }
 
@@ -1105,6 +1106,7 @@ impl StateStore {
         let turn_boundary_seq = seq;
         let mut settle_codex_after_grace = None;
         let mut completion_message = None;
+        let mut turn_outcome = None;
         let mut no_transition_reason = "ledger_only";
         let decision = match lifecycle_event {
             AgentLifecycleEvent::TurnStarted {
@@ -1218,6 +1220,7 @@ impl StateStore {
                 }
             }
             AgentLifecycleEvent::SessionWaitStarted {
+                outcome,
                 reason,
                 message,
                 status_text,
@@ -1249,6 +1252,7 @@ impl StateStore {
                         scope,
                         reason,
                     );
+                    turn_outcome = outcome;
                     Some((NeedsInput, message, status_text))
                 } else {
                     None
@@ -1356,6 +1360,7 @@ impl StateStore {
             } if agent != "codex" => {
                 turn_finished = true;
                 completed = true;
+                turn_outcome = Some(AgentTurnOutcome::Completed);
                 completion_message = message.clone();
                 Some((Idle, message, status_text))
             }
@@ -1534,6 +1539,7 @@ impl StateStore {
                         message,
                         status_text,
                         notify_completion: !already_settled,
+                        outcome: AgentTurnOutcome::Completed,
                         seq,
                     });
                     if child_count == 0 {
@@ -1597,6 +1603,7 @@ impl StateStore {
                             message: None,
                             status_text,
                             notify_completion: false,
+                            outcome: AgentTurnOutcome::Canceled,
                             seq,
                         });
                         settle_codex_after_grace = Some(CodexGraceSettlement {
@@ -1610,6 +1617,7 @@ impl StateStore {
                             message: None,
                             status_text,
                             notify_completion: false,
+                            outcome: AgentTurnOutcome::Canceled,
                             seq,
                         });
                         if has_waits {
@@ -1690,6 +1698,7 @@ impl StateStore {
             message,
             custom_status: Some(custom_status),
             pending_waits: Some(pending_waits),
+            turn_outcome,
             session_id: Some(session_id.to_string()),
             session_name: None,
             messaging_socket: None,
@@ -1986,6 +1995,7 @@ impl StateStore {
         }
         let report = AgentStatusReport {
             pending_waits: None,
+            turn_outcome: Some(pending.outcome),
             name: "codex".into(),
             status: None,
             activity: Some(Idle),
@@ -2321,6 +2331,13 @@ impl StateStore {
             Some(AgentStatus::Idle) if completed_agent.is_some() => Some("Completed"),
             _ => None,
         };
+        let turn_outcome = match detected_status {
+            Some(AgentStatus::Idle) if detect_agent_interruption(screen_text) => {
+                Some(AgentTurnOutcome::Canceled)
+            }
+            Some(AgentStatus::Idle) if completed_agent.is_some() => Some(AgentTurnOutcome::Unknown),
+            _ => None,
+        };
         // The composer stays visible while working: it identifies the agent
         // even when the progress row and tmux title do not contain its name.
         let prompt_agent_name = detect_agent_idle_name_from_signals(screen_text, osc_title);
@@ -2494,6 +2511,7 @@ impl StateStore {
                     "flowmux:screen",
                     agent_name,
                     status_text,
+                    turn_outcome,
                     surface_visible,
                 ) {
                     tracing::debug!(target: "flowmux_agent", workspace = %ws.id,
@@ -2943,6 +2961,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    turn_outcome: None,
                     pending_waits: None,
                     name: "claude".into(),
                     status: None,

@@ -141,6 +141,15 @@ int main(int argc, char **argv) {
                             "idle": ("idle", "done")}
                 expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
                 assert value["status"] in expected, value
+                if event == "stop" and activity == "idle":
+                    assert value.get("turn_outcome") == "completed", value
+                    assert value.get("status_text") == "Response completed", value
+                elif event == "interrupt" and activity == "idle":
+                    assert value.get("turn_outcome") == "canceled", value
+                elif event == "stop-failure":
+                    assert value.get("turn_outcome") == "failed", value
+                elif activity == "running":
+                    assert value.get("turn_outcome") is None, value
                 if other_surface:
                     other = observed(other_surface)
                     assert other and other["status"] == other_status, other

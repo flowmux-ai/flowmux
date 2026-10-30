@@ -758,6 +758,7 @@ impl Pane {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn report_surface_agent_signal(
         &mut self,
         surface_id: SurfaceId,
@@ -765,6 +766,7 @@ impl Pane {
         source: &'static str,
         agent_name: Option<&str>,
         status_text: Option<&str>,
+        turn_outcome: Option<AgentTurnOutcome>,
         surface_visible: bool,
     ) -> Option<bool> {
         match self {
@@ -858,6 +860,7 @@ impl Pane {
                     .filter(|agent| agent.status == status);
                 let report = AgentStatusReport {
                     pending_waits: None,
+                    turn_outcome,
                     name,
                     status: Some(status),
                     activity: Some(status.to_activity()),
@@ -898,12 +901,14 @@ impl Pane {
                                     seen: before.seen,
                                     evidence: before.status_evidence,
                                     pending_waits: before.pending_waits.clone(),
+                                    turn_outcome: before.turn_outcome,
                                 });
                             } else if agent.status != AgentStatus::Working
                                 && before.status == AgentStatus::Working
                             {
                                 if let Some(base) = screen_base {
                                     agent.status_evidence = base.restored_evidence();
+                                    agent.turn_outcome = base.restored_outcome();
                                     agent.pending_waits = base.pending_waits;
                                     if base.status == AgentStatus::Blocked {
                                         agent.seen = base.seen || visible;
@@ -915,6 +920,7 @@ impl Pane {
                                         .filter(|base| base.status == AgentStatus::Blocked)
                                     {
                                         agent.pending_waits = base.pending_waits.clone();
+                                        agent.turn_outcome = base.restored_outcome();
                                     }
                                 }
                                 agent.screen_working_base = None;
@@ -936,6 +942,7 @@ impl Pane {
                     source,
                     agent_name,
                     status_text,
+                    turn_outcome,
                     surface_visible,
                 )
                 .or_else(|| {
@@ -945,6 +952,7 @@ impl Pane {
                         source,
                         agent_name,
                         status_text,
+                        turn_outcome,
                         surface_visible,
                     )
                 }),
@@ -1057,6 +1065,9 @@ impl Pane {
                             || Some(AgentStatusEvidence::new(AgentEvidenceSource::Screen)),
                             |base| base.restored_evidence(),
                         );
+                        agent.turn_outcome = screen_base
+                            .as_ref()
+                            .and_then(ScreenWorkingBase::restored_outcome);
                         agent.pending_waits = screen_base
                             .as_ref()
                             .map(|base| base.pending_waits.clone())
@@ -2270,6 +2281,8 @@ pub struct AgentStatusReport {
     pub custom_status: Option<String>,
     /// An authoritative snapshot; None leaves same-state fallback details intact.
     pub pending_waits: Option<Vec<AgentWaitSummary>>,
+    /// Response outcome, independent of process liveness or task verification.
+    pub turn_outcome: Option<AgentTurnOutcome>,
     pub session_id: Option<String>,
     pub session_name: Option<String>,
     pub messaging_socket: Option<String>,
@@ -2291,6 +2304,7 @@ impl AgentStatusReport {
             message: None,
             custom_status: None,
             pending_waits: None,
+            turn_outcome: None,
             session_id: None,
             session_name: None,
             messaging_socket: None,
@@ -2589,6 +2603,28 @@ pub struct AgentWaitSummary {
     pub since: chrono::DateTime<chrono::Utc>,
 }
 
+/// A response boundary does not establish successful work or passing checks.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTurnOutcome {
+    Completed,
+    Failed,
+    Canceled,
+    #[serde(other)]
+    Unknown,
+}
+
+impl AgentTurnOutcome {
+    pub fn status_text(self) -> &'static str {
+        match self {
+            Self::Completed => "Response completed",
+            Self::Failed => "Response failed",
+            Self::Canceled => "Turn interrupted",
+            Self::Unknown => "Response ended; outcome unconfirmed",
+        }
+    }
+}
+
 /// What established the displayed activity, independently of identity ownership.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2668,9 +2704,18 @@ struct ScreenWorkingBase {
     seen: bool,
     evidence: Option<AgentStatusEvidence>,
     pending_waits: Vec<AgentWaitSummary>,
+    turn_outcome: Option<AgentTurnOutcome>,
 }
 
 impl ScreenWorkingBase {
+    fn restored_outcome(&self) -> Option<AgentTurnOutcome> {
+        if self.status == AgentStatus::Idle {
+            Some(AgentTurnOutcome::Unknown)
+        } else {
+            self.turn_outcome
+        }
+    }
+
     fn restored_evidence(&self) -> Option<AgentStatusEvidence> {
         if self.status == AgentStatus::Idle {
             // A newly observed completion cannot borrow an earlier Ready/Idle hook.
@@ -2699,6 +2744,8 @@ pub struct AgentPresence {
     pub status_evidence: Option<AgentStatusEvidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_waits: Vec<AgentWaitSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_outcome: Option<AgentTurnOutcome>,
     /// Lifecycle status hidden by the current screen-derived Working state.
     /// Internal restoration context; never persisted or exposed over IPC.
     #[serde(skip)]
@@ -2733,6 +2780,7 @@ impl AgentPresence {
             source: None,
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             screen_working_base: None,
             seq: None,
             message: None,
@@ -2755,6 +2803,7 @@ impl AgentPresence {
         presence.message = report.message;
         presence.custom_status = report.custom_status;
         presence.pending_waits = report.pending_waits.unwrap_or_default();
+        presence.turn_outcome = report.turn_outcome;
         presence.session_id = report.session_id;
         presence.session_name = report.session_name;
         presence.messaging_socket = report.messaging_socket;
@@ -2774,6 +2823,11 @@ impl AgentPresence {
     }
 
     pub fn status_text(&self) -> Option<&str> {
+        if self.status == AgentStatus::Idle {
+            if let Some(outcome) = self.turn_outcome {
+                return Some(outcome.status_text());
+            }
+        }
         if self.status == AgentStatus::Blocked {
             if let Some(first) = self.pending_waits.first() {
                 if self
@@ -2870,6 +2924,22 @@ impl AgentPresence {
                 self.source.as_deref(),
                 Some("flowmux:hook") | Some(AGENT_SOURCE_PROC)
             );
+        let keep_hook_outcome = from_screen
+            && prev == next
+            && self
+                .status_evidence
+                .is_some_and(|e| e.source == AgentEvidenceSource::Hook);
+        if !keep_hook_outcome {
+            if let Some(outcome) = report.turn_outcome {
+                self.turn_outcome = Some(outcome);
+            } else if prev != next
+                || next == AgentStatus::Working
+                || hook_session_start
+                || (!same_session && !screen_defers_to_authoritative)
+            {
+                self.turn_outcome = None;
+            }
+        }
         // A same-state screen refinement cannot erase native lifecycle evidence.
         // Identical polls retain the timestamp so they do not cause UI churn.
         if report.effective_status().is_some() {

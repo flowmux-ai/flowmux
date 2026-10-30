@@ -344,3 +344,76 @@ bare empty prompt and retains the draft/busy/blocked rejection cases. The same
 binary then passed all remote Send scenarios in
 `/tmp/fm-waits-ssh-send-recheck.log`; product input protection was unchanged.
 Full Linux validation of this pending-wait change is still outstanding.
+
+## Response outcome separate from activity — 2026-10-30
+
+The current response carries optional `turn_outcome`: completed, failed,
+canceled, or unknown. A normal native Stop records response completion; the
+native failure hook records failure without discarding its unresolved wait.
+The explicit interruption boundary records cancellation only when the existing
+root/child settlement permits it. The field does not assert successful work,
+passing tests, child-process termination, or session teardown.
+
+Screen-observed response endings report an unknown outcome unless the existing
+interruption detector identifies an explicit interruption. They cannot borrow
+the previous response's result. Same-state screen refinements preserve a native
+outcome, temporary screen Working restores a pending failure, and a fresh turn
+clears the old result. Stale boundaries still pass through the existing sequence
+and ownership checks. Legacy peers can omit the field; future values deserialize
+as unknown. Live labels use Response completed, Turn interrupted, or Response
+ended; outcome unconfirmed. Unread response boundaries use a neutral stop marker
+instead of a success checkmark. Activity history retains its existing detailed
+completion summary while the live lists show the typed outcome label.
+
+The new outcome regression failed against the preceding implementation with a
+missing completed value (`/tmp/fm-outcomes-red.log`). The isolated agent runner
+then passed 167 core and 191 daemon tests, including stale boundaries, new turns,
+read state, screen restoration, and preservation of native cancellation. IPC
+tests passed, including legacy/future outcome values. Full-workspace all-targets
+Clippy with native-smoke passed. Ten Linux activity tests passed, including typed
+completion projection. The Linux agent runner also passed, and final UI changes
+passed focused Clippy and the ten activity tests. Logs: `/tmp/fm-outcomes-unit2.log`,
+`/tmp/fm-outcomes-ipc.log`, `/tmp/fm-outcomes-clippy.log`, and
+`/tmp/fm-outcomes-linux-unit.log`, `/tmp/fm-outcomes-ui-clippy-history.log`,
+`/tmp/fm-outcomes-linux-history.log`. History tests also ensure typed question
+labels remain distinct while completed-response details are preserved.
+
+The expanded macOS native replay passed both provider matrices with explicit
+outcome assertions and the live GTK evidence-tooltip check:
+`/tmp/fm-outcomes-native.log` (`LIVE_NATIVE_HOOK_MATRIX_OK`,
+`MACOS_AGENT_EVIDENCE_TOOLTIPS_OK`, `MACOS_NATIVE_AGENT_HOOKS_OK`). API failures
+and quotas remain synthetic coverage; no real outage or rate limit was induced.
+
+Final actual-agent verification used isolated application PID 89151 in
+`/tmp/fm-atn-wqyxhit2`, private Flowmux state/socket directories and hook settings,
+and dedicated terminal sessions. Native-hook agent B also used a private agent
+home. Only the ten validated private test hooks were trusted. The original
+application PID 72789 remained running.
+
+| Scenario | Observed result |
+| --- | --- |
+| Native-hook agents A 2.1.314 and B 0.166.0, plain response | Working with no old outcome, then hook-backed completed outcome |
+| Agent A, question and answer | Typed question wait without old completion; answer resumed work and completed |
+| Agent B, one-time command approval | Typed approval wait; the exact harmless printf ran and completed |
+| Agent A, immediate Escape with restored draft | Hook identity retained; screen-backed unknown outcome replaced the former Completed label |
+| Agent B, Escape during response | Hook-backed canceled outcome and Turn interrupted label |
+| Both agents, recovery prompt | Old outcome cleared during Working, then completed with the expected response marker |
+| Both agents, unsubmitted approval/quota/interruption/completion/error wording | Activity, evidence timestamp, pending waits, and outcome remained unchanged |
+
+Visual inspection confirmed both question/approval labels, then the distinct
+interrupted and unconfirmed-result labels with neutral stop markers in both live
+lists. Outcome and draft
+evidence is in the two `*-outcomes.jsonl` files and `outcome-drafts.json` under
+the isolated root; `agents-outcomes.json` confirms the CLI projection.
+`/tmp/fm-outcomes-final-matrix.log` records `FINAL_LIVE_OUTCOME_MATRIX_OK`. Both
+sessions ended with completed recovery responses and
+empty composers. Verified application and CLI SHA-256 values are respectively:
+
+`68f205f2783e3be47d2a12a02c9730c77e9a00cfb7dfda440d158e78df69fa32`
+
+`2fa462a11b6374ea845a18db7bed14182bdb3a75421385c7d355024197d8a5c8`
+
+The full Linux gate for the preceding pending-wait commit is running from a
+frozen snapshot; it does not include this outcome change. Full cross-platform
+verification remains outstanding, including the macOS foreground/input blocker
+recorded above. These focused results do not replace those final gates.

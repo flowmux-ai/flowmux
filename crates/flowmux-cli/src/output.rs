@@ -152,6 +152,7 @@ pub(crate) fn render_agents(
                         "status": agent.status.as_str(),
                         "identity_source": agent.source,
                         "status_evidence": agent.status_evidence,
+                        "turn_outcome": agent.turn_outcome,
                         "pending_waits": agent.pending_waits,
                         "status_text": agent.status_text,
                         "session_name": agent.session_name,

@@ -114,6 +114,8 @@ pub struct TreeAgent {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_outcome: Option<flowmux_core::AgentTurnOutcome>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -177,6 +179,7 @@ fn collect_leaf_panes(pane: &Pane, out: &mut Vec<TreePane>) {
                             activity: agent.activity,
                             source: agent.source.clone(),
                             status_evidence: agent.status_evidence,
+                            turn_outcome: agent.turn_outcome,
                             pending_waits: agent.pending_waits.clone(),
                             status_text: agent.status_text().map(str::to_owned),
                             seq: agent.seq,
@@ -282,6 +285,8 @@ pub enum AgentLifecycleEvent {
     /// authoritative until the next root turn, turn completion, or session
     /// teardown so unrelated progress cannot hide a real user wait.
     SessionWaitStarted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<flowmux_core::AgentTurnOutcome>,
         #[serde(default)]
         reason: flowmux_core::AgentWaitReason,
         #[serde(default)]
