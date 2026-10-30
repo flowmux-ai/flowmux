@@ -59,20 +59,24 @@ mod completion_tests {
                     let weak = Rc::downgrade(&captured);
                     let calls = Rc::new(Cell::new(0));
                     let observed = calls.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
                     let callback =
                         javascript_completion(Duration::from_millis(10), move |result| {
-                            assert!(result.unwrap_err().contains("effects may still complete"));
                             observed.set(observed.get() + 1);
                             drop(captured);
+                            let _ = tx.send(result);
                         });
-                    gtk::glib::timeout_future(Duration::from_millis(50)).await;
+                    let result = gtk::glib::future_with_timeout(Duration::from_secs(5), rx)
+                        .await
+                        .expect("script deadline did not complete")
+                        .unwrap();
+                    assert!(result.unwrap_err().contains("effects may still complete"));
                     assert!(
                         weak.upgrade().is_none(),
                         "stalled script retained its caller"
                     );
                     assert_eq!(calls.get(), 1);
                     callback(Ok("late".into()));
-                    gtk::glib::timeout_future(Duration::from_millis(10)).await;
                     assert_eq!(calls.get(), 1);
                 })
             })
