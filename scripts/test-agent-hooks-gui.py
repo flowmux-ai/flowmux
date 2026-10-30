@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import shlex
-import signal
 import socket
 import subprocess
 import tempfile
@@ -83,6 +82,7 @@ int main(int argc, char **argv) {
                             FLOWMUX_AGENT_NAME=name,
                             FLOWMUX_RUNTIME_DIR=str(Path(args.socket).parent))
             other_pid = None
+            other_pane = None
             other_surface = None
             other_status = "idle"
             other_session_id = None
@@ -307,13 +307,10 @@ int main(int argc, char **argv) {
                     print("PASS: ambiguous Stop rejected; identical unique Stop completes", flush=True)
                 print(f"PASS: {name} native hook replay", flush=True)
             finally:
-                # Only the executable started in this test's new terminal.
-                for fixture_pid in (pid, other_pid):
-                    if fixture_pid:
-                        try:
-                            os.kill(fixture_pid, signal.SIGTERM)
-                        except ProcessLookupError:
-                            pass
+                # Normal EOF avoids reporting fixture cleanup as an external signal death.
+                for fixture_pane in (pane, other_pane):
+                    if fixture_pane:
+                        rpc("pane_send_keys", pane=fixture_pane, keys="\x04")
     print("LIVE_NATIVE_HOOK_MATRIX_OK", flush=True)
 
 
