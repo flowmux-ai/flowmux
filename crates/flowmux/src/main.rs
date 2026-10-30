@@ -16,6 +16,8 @@ mod ipc_handler;
 mod keybindings;
 mod notifications;
 mod platform;
+#[cfg(target_os = "linux")]
+mod process_scope;
 mod termination;
 mod theme;
 mod ui;
