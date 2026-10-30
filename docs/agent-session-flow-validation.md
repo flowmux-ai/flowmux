@@ -190,6 +190,29 @@ bash scripts/test-ci.sh macos
 
 HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구현 이후 확보한 증거이며, 전체 매트릭스의 통과 여부와 구분한다.
 
+## 요구사항별 현재 증거와 남은 확인
+
+이 표는 완료 감사용이다. 소스의 조건문 존재, 단위 테스트, GTK event 경로, 실제 provider 실행은 서로 다른 증거다. 최신 CI 종료 전에는 전체 통과로 해석하지 않는다.
+
+| 요구 | 현재 확인된 증거 | 추가 확인 또는 적용 한계 |
+| --- | --- | --- |
+| R01 | Native terminal 메뉴의 활성/비활성, stale menu 거절; 실제 Codex 메뉴 callback → fork | 물리 secondary click과 다른 provider GUI는 미확인 |
+| R02 | 실제 Codex 오른쪽 split과 원본 widget/PID 보존; daemon의 source/surface 검증 및 증분 split | 모든 혼합 pane 조합의 실제 provider fork를 실행한 것은 아님 |
+| R03 | 실제 새 child ID·native parent·edge 확인; state의 원자적 완료·중복 방지 | 실제 child에서 재fork하는 3세대 GUI 시나리오는 미확인 |
+| R04 | 모든 terminal surface를 anchor로 읽는 구현과 native projection fixture | 비활성 tab만 남긴 workspace 버튼의 물리 UI 조작은 미확인 |
+| R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | 실제 sidebar 버튼의 물리 입력은 미확인 |
+| R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
+| R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
+| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처 | 물리 trackpad·VoiceOver/AT-SPI·실제 화면 frame 지연은 미확인 |
+| R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
+| R10 | Native disabled node 입력이 launch를 만들지 않음; 기록 누락 placeholder·불가 사유 | 수동 접근성 검증 미확인 |
+| R11 | Native 토글·gesture 동안 widget/PID 보존, 실제 Codex source/child 유지 | 진행 중인 30분 시험과 기존 혼합 pane 회귀 gate의 최종 결과를 별도로 판정 |
+| R12 | 실제 Codex native ID 확인 후 publication, 같은 ID resume, stale source·writer/PID 재사용 검증 | Claude GUI 및 OpenCode 전체 provider 경로 미확인; 외부 writer 원자적 배제 없음 |
+| R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
+| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 기반 복구 시험 | 새 GUI 프로세스의 실제 provider crash/restart 전체 시나리오와 미확인 작업 수동 정리 UI는 미완료 |
+
+주요 소스: [모델과 모델 시험](../crates/flowmux-core/src/session_flow.rs), [저장·복구와 시험](../crates/flowmux-state/src/session_flow.rs), [canvas와 입력 시험](../crates/flowmux/src/ui/session_flow.rs), [native orchestration과 실제 Codex harness](../crates/flowmux/src/ui/window/session_flow.rs). 실제 실행 결과와 commit별 CI 범위는 아래 기록을 따른다. 이 표의 미확인 항목을 기존 baseline 성공으로 대체하지 않는다.
+
 ## 실행 기록
 
 2026-10-31 기록. 아래 결과는 위 전체 D/O/U/G 매트릭스를 모두 통과했다는 의미가 아니다.
