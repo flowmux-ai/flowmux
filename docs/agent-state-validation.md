@@ -1219,3 +1219,58 @@ Build UUID comparison ties the copies to the build outputs
 1401 were preserved, and the permanent agent binary hash was unchanged.
 Existing theme parser warnings remain. These focused passes do not close the
 earlier full GUI gate failures, protocol/capability work, or performance gates.
+
+### 2026-10-30: preserve native completion across final timer repaints
+
+An extended actual-agent check found that native-hook agent B could settle its
+response, then repaint a changed elapsed timer before reaching its final prompt.
+The existing guard rejected an identical spinner but accepted the timer change
+as fresh work. This changed Completed/Hook to Working/Screen and eventually
+Unknown/Screen. The retained trace in `/tmp/fm-atn-ha8d71cv` records that sequence
+at 07:41:34–07:41:35 UTC. The new timer-repaint assertion failed on the prior
+implementation (`/tmp/fm-settled-timer-red.log`).
+
+The per-session turn ledger now records whether an idle screen has been observed
+after native settlement. Until that boundary, final progress repaints cannot
+reopen the completed turn. After idle, changed progress still recovers when a
+start hook is missing; a new native turn also accepts progress immediately.
+Each new settlement resets the observation. This is an event boundary, not a
+silence timeout. Tests preserve the complete native completion/evidence through
+the changing timer and final footer, cover two successive turns, and distinguish
+late timer changes from accepted fresh work when claiming completion effects.
+
+Validation passed on the isolated repair tree, with the pending protocol parser
+kept separately:
+
+- Agent unit suites on macOS and Linux, including existing lifecycle, wait,
+  notification claim, process, and CLI cases
+  (`/tmp/fm-settled-timer-agent-units-final.log`,
+  `/tmp/fm-settled-timer-linux-units-final.log`).
+- macOS focused native agent replay, terminal footer extraction, evidence
+  tooltips, stable rows/bar, and details UI
+  (`/tmp/fm-settled-timer-native.log`, `MACOS_NATIVE_SMOKE_OK`).
+- Application/CLI build, workspace all-target Clippy with native-smoke and
+  warnings denied, formatting, and whitespace checks.
+
+Actual agents A and B ran in `/tmp/fm-atn-eqbz4goe`, PID 26191, bundle
+`com.flowmux.AttentionVerify29`. A completed two plain replies and B three;
+each retained idle, Completed, and Hook evidence throughout six subsequent
+seconds. Both streamed newly marked output, were interrupted, and completed a
+fresh response that also retained native completion for six seconds. A's actual
+question cleared only after its answer. B created a real child, returned before
+it finished, and retained the eventual native completion for six seconds. The
+same child was reused for a one-time approval; the exact pending child scope
+survived queries and cleared after approval. That reuse ended with screen-only
+Unknown evidence, which correctly remained unknown, with no active children or
+waits for eight seconds. Final fresh responses restored Completed/Hook for both.
+Logs: `/tmp/fm-settled-timer-live-start.log`,
+`/tmp/fm-settled-timer-live-interrupt-final.log`, and the corresponding
+`live-question`, `live-child`, and `live-approval` logs. Detailed observations are
+under the isolated root in `stable-completion.jsonl`, `stable-recovery.jsonl`,
+`child-*`, and `timer-final-state.json`.
+
+Build UUIDs match the isolated copies (`binary-evidence.json`). The signed GUI
+SHA-256 is `06f32177cc08e514e1c478d1d646f85d360174855b9227ac25388f55a17de943`.
+Original PIDs 72789 and 1401 and the permanent agent binary were preserved.
+Existing theme warnings remain. These focused checks do not close the earlier
+full GUI, protocol/capability, or performance gates.

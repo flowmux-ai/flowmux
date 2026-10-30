@@ -3183,7 +3183,8 @@ mod tests {
 
     #[tokio::test]
     async fn completion_claim_respects_screen_settlement_guards() {
-        for new_work in [false, true] {
+        for (idle_boundary, changed_timer) in [(false, false), (false, true), (true, true)] {
+            let new_work = idle_boundary && changed_timer;
             let store = StateStore::new_lazy(State::default());
             let workspace = store.create_workspace(None, "/tmp".into()).await;
             let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
@@ -3226,7 +3227,17 @@ mod tests {
                 .await
                 .notification_id
                 .unwrap();
-            let screen = if new_work {
+            if idle_boundary {
+                store
+                    .report_agent_screen_signals_with_visibility(
+                        surface,
+                        Some("• Response\n› Ask Codex to do anything\n  gpt-6-astra · ~/work"),
+                        None,
+                        false,
+                    )
+                    .await;
+            }
+            let screen = if changed_timer {
                 "Codex\n• Working (1s • esc to interrupt)"
             } else {
                 old_screen
@@ -12106,7 +12117,7 @@ Do you want to continue?";
         let spinner = "• Ran git status\n• Working (44s • esc to interrupt)\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
         // A filename in scrollback must not override the live Codex composer.
         let final_frame =
-            "?? .claude/\n• Done.\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
+            "?? .claude/\n• Done.\nWorked for 44s • 4:41 PM\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
         let lifecycle = |event, seq| {
             store.report_agent_lifecycle_with_visibility(
                 surface,
@@ -12159,14 +12170,41 @@ Do you want to continue?";
             .report_agent_screen_signals_with_visibility(surface, Some(spinner), None, false)
             .await;
         assert_eq!(status().await, AgentStatus::Idle);
+        let completed = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        // Stop can finish while the TUI is still repainting its elapsed timer.
+        // A changed timer before the first idle frame is not a new turn.
+        let late_spinner = spinner.replace("44s", "45s");
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(&late_spinner), None, false)
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence,
+            completed,
+            "a final timer repaint must preserve the native completion and evidence"
+        );
         store
             .report_agent_screen_signals_with_visibility(surface, Some(final_frame), None, false)
             .await;
         assert_eq!(status().await, AgentStatus::Idle);
+        let final_presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(final_presence.turn_outcome, completed.turn_outcome);
+        assert_eq!(final_presence.status_evidence, completed.status_evidence);
 
         // With legacy notify or a missed start hook, a changed live progress
         // row must recover. A subsequent bare prompt must settle it again.
-        let next_spinner = spinner.replace("44s", "45s");
+        let next_spinner = spinner.replace("44s", "46s");
         store
             .report_agent_screen_signals_with_visibility(surface, Some(&next_spinner), None, false)
             .await;
@@ -12197,6 +12235,37 @@ Do you want to continue?";
         assert_eq!(
             presence.custom_status.as_deref(),
             Some("Working (44s • esc to interrupt)")
+        );
+        // The previous turn's idle observation cannot authorize this turn's
+        // final timer repaint either.
+        lifecycle(
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id: "turn-2".into(),
+                message: Some("Second response".into()),
+                status_text: "Completed".into(),
+                stop_hook_active: false,
+            },
+            40,
+        )
+        .await;
+        store
+            .settle_codex_turn_after_grace(surface, Some(42), Some(40), session_id, "turn-2", false)
+            .await;
+        let second = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(&late_spinner), None, false)
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence,
+            second
         );
     }
 }

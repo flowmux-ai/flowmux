@@ -290,6 +290,8 @@ pub(super) struct CodexTurnLedger {
     pub(super) pending_parent_stop: Option<PendingCodexStop>,
     pub(super) settled_parent_turns: VecDeque<String>,
     last_screen_progress: Option<String>,
+    /// A final timer repaint is not evidence of a new turn before its idle frame.
+    settled_screen_idle: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -360,6 +362,7 @@ fn remember_settled_codex_turn(ledger: &mut CodexTurnLedger, turn_id: String) {
         return;
     }
     ledger.settled_parent_turns.push_back(turn_id);
+    ledger.settled_screen_idle = false;
     while ledger.settled_parent_turns.len() > 32 {
         ledger.settled_parent_turns.pop_front();
     }
@@ -2812,7 +2815,7 @@ impl StateStore {
             self.allow_agent_screen_restore(surface_id).await;
         }
         let mut s = self.inner.lock().await;
-        let settled_codex_turn = status == AgentStatus::Working
+        let settled_codex_turn = matches!(status, AgentStatus::Working | AgentStatus::Idle)
             && s.workspaces.iter().any(|ws| {
                 ws.surfaces.iter().any(|surface| {
                     surface
@@ -2826,6 +2829,16 @@ impl StateStore {
                                         .codex_turns
                                         .get_mut(&(surface_id, session_id.to_string()))
                                         .is_some_and(|ledger| {
+                                            let settled = !ledger.settled_parent_turns.is_empty()
+                                                && ledger.current_parent_turn.is_none()
+                                                && ledger.pending_parent_stop.is_none()
+                                                && ledger.active_children.is_empty();
+                                            if status == AgentStatus::Idle && settled {
+                                                ledger.settled_screen_idle = true;
+                                            }
+                                            if status != AgentStatus::Working {
+                                                return false;
+                                            }
                                             let unchanged = status_text.is_none()
                                                 || ledger.last_screen_progress.is_none()
                                                 || ledger.last_screen_progress.as_deref()
@@ -2833,19 +2846,15 @@ impl StateStore {
                                             if let Some(progress) = status_text {
                                                 ledger.last_screen_progress = Some(progress.into());
                                             }
-                                            !ledger.settled_parent_turns.is_empty()
-                                                && ledger.current_parent_turn.is_none()
-                                                && ledger.pending_parent_stop.is_none()
-                                                && ledger.active_children.is_empty()
-                                                && unchanged
+                                            settled && (!ledger.settled_screen_idle || unchanged)
                                         })
                                 })
                         })
                 })
             });
         if settled_codex_turn {
-            // Ignore the final spinner repaint, but let a changed progress row
-            // recover when TurnStarted is missing (including legacy notify).
+            // The final timer can keep changing until the TUI reaches idle.
+            // After that boundary, changed progress can recover a missed start.
             tracing::debug!(target: "flowmux_agent", reason = "settled_turn_spinner", changed = false, "agent decision");
             return None;
         }
