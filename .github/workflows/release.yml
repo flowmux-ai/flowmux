@@ -169,8 +169,33 @@ jobs:
             cargo-release-macos-${{ runner.arch }}-
 
       - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja ffmpeg
-
+        run: brew install pkg-config gtk4 libadwaita appstream vte3 meson ninja ffmpeg
+      # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
+      # Keep fatal-critical checks enabled with a compatible GTK/libadwaita pair.
+      - name: Install compatible GTK and libadwaita for native popup checks
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew tap-new --no-git flowmux/ci
+          for spec in \
+            c84201a409ee9fd5588cad21e51a5e4ca3379271/Formula/g/gtk4.rb \
+            10672485509320336f1d885f842b6b938aecfb0a/Formula/lib/libadwaita.rb; do
+            formula="$(brew --repository flowmux/ci)/Formula/${spec##*/}"
+            curl --fail --location --retry 3 \
+              "https://raw.githubusercontent.com/Homebrew/homebrew-core/$spec" \
+              --output "$formula"
+            # Fetch checksummed bottles from the original tap.
+            sed -i '' '/  bottle do/a\
+                root_url "https://ghcr.io/v2/homebrew/core"
+            ' "$formula"
+          done
+          brew uninstall --ignore-dependencies libadwaita gtk4
+          brew install --force-bottle flowmux/ci/gtk4
+          # Dependencies were installed above; do not upgrade the pinned GTK.
+          brew install --force-bottle --ignore-dependencies flowmux/ci/libadwaita
+          test "$(pkg-config --modversion gtk4)" = 4.22.3
+          test "$(pkg-config --modversion libadwaita-1)" = 1.9.3
+          pkg-config --print-errors --exists gtk4 libadwaita-1 vte-2.91-gtk4
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
 
