@@ -197,16 +197,30 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | Core 모델 | 178 passed; 1만 노드·20개 계보, 긴 chain, projection, cycle/namespace, geometry | `/tmp/flowmux-session-flow-domain-tests.log` |
 | State | 79 passed 및 별도 integration 통과; transaction, 동시 writer, PID 재사용, stale refresh, native 증거 기반 복구 | 같은 domain log |
 | Daemon | 211 passed, 기존 ignored 1개; source/surface 검증과 증분 split | `/tmp/flowmux-session-flow-headless.log` |
-| 정적 검사 | workspace check, all-target clippy `-D warnings`, format, diff check 통과 | `/tmp/flowmux-session-flow-check.log`, `/tmp/flowmux-session-flow-clippy.log` |
-| Hook·capability | Codex installer 25 passed/기존 ignored 1개; stderr help/실패 응답 테스트 통과 | `/tmp/flowmux-session-flow-hook-tests.log`, `/tmp/flowmux-session-flow-capability.log` |
+| 정적 검사 | workspace check, all-target clippy `-D warnings`, format, diff check 통과 | `/tmp/flowmux-session-flow-check.log`, `/tmp/flowmux-session-flow-clippy-final.log` |
+| Hook·capability·해제 | Codex installer 25 passed/기존 ignored 1개; stderr help/실패 응답 및 제한된 PATH, fork callback registry 해제 테스트 통과 | `/tmp/flowmux-session-flow-hook-tests.log`, `/tmp/flowmux-session-flow-capability-final.log`, `/tmp/flowmux-session-flow-weak-registry.log` |
 | GTK canvas·배치 | `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`; widget/PID 보존, wheel 좌표, drag/Pan/비활성 노드, 50회 toggle, widget 해제, workspace 전환 중 drag 취소 | `/tmp/flowmux-session-flow-native-ui-final.log` |
 | 실제 Codex 0.166.0 | `MACOS_SESSION_FLOW_CODEX_REAL_OK`; 첫 요청 자동 전송 없이 identity 식별, fork/split/resume/중복 방지 | `/tmp/flowmux-session-flow-real-ui-final.log` |
 | 실제 Claude Code 2.1.314 | source `8683a908-3515-4cc9-a35a-1da44cf7a563` → child `21fcba07-00f6-4ea1-9749-24b6cbde520d`; `FLOW_NATIVE_731` 상속; resume 같은 child ID | `/tmp/flowmux-session-flow-claude-evidence.json` |
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
-| 전체 macOS gate | browser-control에서 `stable pointer target` 실패. 기존 설치 버전도 같은 실패; document.visibilityState=hidden. 나머지 phase 별도 실행 중이며 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log` |
-| Linux coverage·원격 CI | `cc994263` 실행 중. 최종 결과 확인 전 통과로 기록하지 않음 | Test `41105907140`, Sanitizers `41105913058`, License `41105917623` |
+| 전체 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
+| Linux coverage·원격 CI | `6fd9157b` Test·Sanitizers 실행 중, License success. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41106537904`, Sanitizers `41106543517`, License `41106548949`; `/tmp/flowmux-session-flow-linux-job.log` |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
 
 Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱의 실행을 원자적으로 잠그는 기능은 아니다. 인증 실패, 미지원 외부 fork, 수동 접근성·장기 성능 미수행은 `passed`로 바꾸지 않는다.
+
+
+최신 코드의 로컬 회귀 보강(`6fd9157b`): fork callback은 weak registry를 사용해 pane tree 해제를 방해하지 않는다. Provider PATH에 시스템 명령이 없더라도 capability probe는 `/usr/bin/env`로 실행된다. Linux가 발견한 두 실패를 수정한 뒤 해당 로컬 테스트와 전체 all-target clippy를 통과했다. 기존 Linux 실패 run은 수정 후 통과 증거로 대체하지 않는다.
+
+화면 잠금 상태에서 남은 재실행 항목:
+
+- `browser-control`: 안정적인 pointer target 대기 실패; 기존 설치 버전도 동일.
+- `editor-keyboard`: native keyboard window active 대기 timeout.
+- `markdown`: PNG renderer timeout; native Markdown smoke 자체는 통과.
+- `webdriver-native`: pointer fixture 표시 실패.
+- `webdriver`: automation window가 native focus를 얻지 못함.
+- `browser-chrome`: 입력 후 예상 DOM field focus가 비어 있음.
+
+잠금 해제 후 `bash scripts/test-ci.sh macos`로 전체 gate를 다시 실행한다. 이 실패들이 모두 잠금만으로 발생했다는 결론은 재실행 전까지 확정하지 않는다. 사용자 앱 PID `72789`는 실행 중임을 확인했으며 종료·재시작하지 않았다.
