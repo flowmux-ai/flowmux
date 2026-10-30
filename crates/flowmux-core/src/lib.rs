@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub mod session_flow;
+
 const TERMINAL_TAB_TITLE_MAX_CHARS: usize = 17;
 const FALLBACK_TERMINAL_TAB_TITLE: &str = "Terminal";
 pub const AGENT_BAR_ITEM_MIN_WIDTH_PX: u16 = 84;
