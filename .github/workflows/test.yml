@@ -150,7 +150,7 @@ jobs:
           rustup show active-toolchain
           cargo fmt --all -- --check
       - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita vte3 meson ninja ffmpeg
+        run: brew install pkg-config gtk4 libadwaita appstream vte3 meson ninja ffmpeg
       # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
       # Keep fatal-critical checks enabled with a compatible GTK/libadwaita pair.
       - name: Install compatible GTK and libadwaita for native popup checks
