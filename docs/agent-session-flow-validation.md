@@ -230,3 +230,18 @@ Writer 조정은 Flowmux가 관측한 실행에 대한 보장이다. 다른 앱�
 실제 메뉴 경로 검증: `/tmp/flowmux-session-flow-context-menu.log`에서 native terminal의 secondary-click gesture가 구성한 `Fork session` 버튼의 미지원 상태 비활성을 확인했다. `/tmp/flowmux-session-flow-real-menu.log`에서는 동일 버튼의 활성 상태 및 clicked callback → bridge → fork → split → child 종료 → 같은 ID resume을 통과했다. source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e15-da1a-7362-b196-a1276bd3fdda`. 모델 요청을 자동 입력하지 않았으며 원본 widget/PID가 유지됐다. 이 검사는 GTK gesture/button signal 경로이며 물리 마우스 입력 검증과는 구분한다.
 
 메뉴 대상 보존 회귀: `/tmp/flowmux-session-flow-stale-menu.log`의 native fixture는 메뉴를 연 후 같은 surface의 session ID와 catalog binding을 교체한다. 원래 key를 유지한 메뉴가 `Source session changed`로 거절되고 pane 및 pending operation이 증가하지 않음을 확인했다. UI status의 일시적 변경은 notify 이벤트로 관측하여 이후 refresh에 덮여도 검증을 잃지 않는다. `/tmp/flowmux-session-flow-real-menu-key.log`에서는 정상 메뉴 fork/resume도 다시 통과했다(child `01a18e19-e39a-73f0-a62b-d8cfd06553f6`). Callback 해제 테스트와 all-target clippy도 통과했다.
+
+
+모델 성능 측정(2026-10-31 KST): Apple M4 Pro, 64 GiB, macOS 27.0.1, Rust 1.99.0 release 빌드에서 1,000노드·20계보를 준비했다. 2회 warm-up 후 30회 측정했으며 기존 사용자 앱을 유지한 환경이다.
+
+| 측정 범위 | p50 | p95 | 최대 |
+| --- | ---: | ---: | ---: |
+| 계보 projection + 초기 layout | 2.30 ms | 2.35 ms | 2.41 ms |
+| 물리 계산 한 단계(9,000개 표본) | 3.14 ms | 3.33 ms | 3.57 ms |
+| 300단계 계산 합계(frame 대기 없음) | 944.59 ms | 956.60 ms | 957.63 ms |
+
+이는 모델 계산 비용이며 실제 UI frame p95, 입력 지연, provider discovery, 30분 soak의 통과 증거가 아니다. 결과는 [원본 JSON](design-assets/session-flow-model-benchmark.json)에, 재현 코드는 [benchmark example](../crates/flowmux-core/examples/session_flow_benchmark.rs)에 있다.
+
+```sh
+cargo run -p flowmux-core --release --example session_flow_benchmark --locked
+```

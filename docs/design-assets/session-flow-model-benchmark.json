@@ -1,0 +1,37 @@
+{
+  "implementation_commit": "a1ceb1855c70ebafb6381f6f8eb26616bf512e08",
+  "command": "cargo run -p flowmux-core --release --example session_flow_benchmark --locked",
+  "hardware": "Apple M4 Pro",
+  "memory_gib": 64,
+  "os_version": "macOS 27.0.1",
+  "rustc": "1.99.0 (b940084d7 2026-09-28)",
+  "conditions": "Existing user applications remained running; no isolated CPU scheduling. Excludes GTK, Pango, frame scheduling, provider IO and input delivery.",
+  "result": {
+    "all_settling_steps_without_frame_wait": {
+      "max_ms": 957.625542,
+      "p50_ms": 944.589209,
+      "p95_ms": 956.598208,
+      "samples": 30
+    },
+    "arch": "aarch64",
+    "debug_assertions": false,
+    "families": 20,
+    "measured_runs": 30,
+    "nodes": 1000,
+    "os": "macos",
+    "physics_step": {
+      "max_ms": 3.570208,
+      "p50_ms": 3.142,
+      "p95_ms": 3.332041,
+      "samples": 9000
+    },
+    "projection_and_initial_layout": {
+      "max_ms": 2.414625,
+      "p50_ms": 2.296958,
+      "p95_ms": 2.349916,
+      "samples": 30
+    },
+    "scope": "model only; not UI frame or input latency",
+    "warmup_runs": 2
+  }
+}
