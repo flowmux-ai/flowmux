@@ -475,6 +475,12 @@ pub enum GtkCommand {
         ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Close a pane-local surface tab.
+    /// Close only an already terminated terminal, using the termination dialog's consent.
+    CloseTerminatedSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
     ChildExited {
         exit: crate::ui::pane_terminal::ChildExit,
         scope_unit: Option<String>,

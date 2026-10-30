@@ -90,6 +90,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
             | GtkCommand::ShowRenameSurfaceDialog { .. }
             | GtkCommand::ReorderSurface { .. }
@@ -605,11 +606,16 @@ pub struct WindowController {
     pane_zoom: PaneZoomState,
     workspace_overview: workspace_overview::WorkspaceOverviewState,
     content_overlay: gtk::Overlay,
+    #[cfg(target_os = "linux")]
     tokio_handle: Option<tokio::runtime::Handle>,
     #[cfg(target_os = "linux")]
     scope_isolation: Rc<RefCell<Option<crate::process_scope::ScopeIsolation>>>,
     #[cfg(target_os = "linux")]
     pane_scopes: Rc<RefCell<HashMap<SurfaceId, Result<crate::process_scope::PaneScope, String>>>>,
+    termination_reports:
+        Rc<RefCell<std::collections::VecDeque<crate::termination::TerminationReport>>>,
+    termination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
+    termination_presenting: Rc<Cell<bool>>,
     callbacks: PaneCallbacks,
     bridge: Bridge,
     /// Currently applied visual theme. Swapped in place by
@@ -1284,6 +1290,7 @@ mod sessions;
 pub(crate) mod ssh;
 mod surface_ops;
 mod terminal_output_search;
+mod termination_dialog;
 #[cfg(target_os = "linux")]
 mod webkit_automation;
 mod window_chrome_commands;
@@ -1973,11 +1980,15 @@ impl WindowController {
             agent_office: Rc::new(RefCell::new(None)),
             workspace_overview: workspace_overview::WorkspaceOverviewState::default(),
             content_overlay,
+            #[cfg(target_os = "linux")]
             tokio_handle: tokio_handle.clone(),
             #[cfg(target_os = "linux")]
             scope_isolation: Rc::new(RefCell::new(None)),
             #[cfg(target_os = "linux")]
             pane_scopes: Rc::new(RefCell::new(HashMap::new())),
+            termination_reports: Rc::new(RefCell::new(std::collections::VecDeque::new())),
+            termination_dialog: Rc::new(RefCell::new(None)),
+            termination_presenting: Rc::new(Cell::new(false)),
             callbacks,
             bridge,
             theme: Rc::new(RefCell::new(theme)),
@@ -2902,6 +2913,7 @@ impl WindowController {
                 | GtkCommand::CreateSurface { .. }
                 | GtkCommand::NewSurface { .. }
                 | GtkCommand::CloseSurface { .. }
+                | GtkCommand::CloseTerminatedSurface { .. }
                 | GtkCommand::RenameSurface { .. }
                 | GtkCommand::TerminalCwdChanged { .. }
                 | GtkCommand::TerminalTitleChanged { .. }
@@ -2999,6 +3011,7 @@ impl WindowController {
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
             | GtkCommand::ShowRenameSurfaceDialog { .. }
             | GtkCommand::ReorderSurface { .. }

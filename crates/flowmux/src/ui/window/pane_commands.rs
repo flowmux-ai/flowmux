@@ -11,7 +11,8 @@ impl WindowController {
         let clears_zoom = match &cmd {
             GtkCommand::TeamSpawn { pane, .. }
             | GtkCommand::CloseFocused { pane, .. }
-            | GtkCommand::CloseSurface { pane, .. } => zoomed.is_some_and(|zoom| {
+            | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::CloseTerminatedSurface { pane, .. } => zoomed.is_some_and(|zoom| {
                 let registry = self.pane_registry.borrow();
                 registry.workspace_of_pane(*pane) == registry.workspace_of_pane(zoom)
             }),
@@ -31,8 +32,29 @@ impl WindowController {
         }
 
         match cmd {
-            GtkCommand::ChildExited { exit, .. } => {
-                tracing::info!(pane = %exit.pane, status = exit.status, "child exited");
+            GtkCommand::ChildExited {
+                exit,
+                scope_unit,
+                cgroup_dir,
+                isolation_unavailable,
+            } => {
+                self.handle_child_exit(exit, scope_unit, cgroup_dir, isolation_unavailable);
+            }
+            GtkCommand::CloseTerminatedSurface { pane, surface, ack } => {
+                let current_pane = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .get(&surface)
+                    .filter(|t| t.pid.get().is_none())
+                    .map(|t| t.id());
+                if let Some(current_pane) = current_pane {
+                    self.close_surface_command(current_pane, surface, false, ack)
+                        .await;
+                } else {
+                    tracing::debug!(%pane, %surface, "terminated tab was already removed or replaced");
+                    let _ = ack.send(Ok(()));
+                }
             }
             GtkCommand::TeamSpawn {
                 pane,
@@ -285,90 +307,7 @@ impl WindowController {
                 });
             }
             GtkCommand::CloseSurface { pane, surface, ack } => {
-                // A successful in-process MOVE can rehome the surface before
-                // DragSource::drag-end emits its fallback close for the old
-                // pane. Reject that stale close before considering whether the
-                // old pane is the workspace's last one; otherwise we present a
-                // spurious workspace-close dialog and block the GTK dispatcher.
-                if self.store.surface_title(pane, surface).await.is_none() {
-                    let _ = ack.send(Err(format!("surface not found: {surface}")));
-                    return;
-                }
-                // The last tab of the last pane also removes its workspace.
-                let tabs = self.store.tab_count_in_pane(pane).await;
-                let panes = self.store.workspace_pane_count_for(pane).await;
-                if tabs == Some(1) {
-                    if let Some((ws_id, count)) = panes {
-                        if count == 1 && !self.confirm_close_workspace(ws_id).await {
-                            let _ = ack.send(Err("Pane close cancelled".into()));
-                            return;
-                        }
-                    }
-                }
-                if !self.confirm_dirty_surfaces(&[surface]).await {
-                    let _ = ack.send(Err("Pane close cancelled".into()));
-                    return;
-                }
-                let outcome = self.store.close_surface(pane, surface).await;
-                if outcome.is_some()
-                    && !matches!(
-                        outcome,
-                        Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
-                    )
-                {
-                    self.forget_agent_surfaces(&[surface]);
-                }
-                match outcome {
-                    None => {
-                        let _ = ack.send(Err(format!("surface not found: {surface}")));
-                    }
-                    Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { workspace }) => {
-                        self.drop_workspace(workspace);
-                        self.activate_active_or_show_empty().await;
-                        let _ = ack.send(Ok(()));
-                    }
-                    Some(flowmux_daemon::CloseOutcome::SurfaceRemoved { workspace }) => {
-                        // Only one surface in the same pane disappeared. Full
-                        // workspace rerender would lose other panes' shell and
-                        // browser state, so detach incrementally. If the store
-                        // moved active to a new surface, activate it to sync the
-                        // stack and tab highlight.
-                        self.pane_registry
-                            .borrow_mut()
-                            .detach_surface_widget(pane, surface);
-                        if let Some(ws) = self.store.get_workspace(workspace).await {
-                            if let Some(active) = ws
-                                .surfaces
-                                .iter()
-                                .find_map(|s| s.root_pane.active_surface_id(pane))
-                            {
-                                self.pane_registry
-                                    .borrow_mut()
-                                    .activate_surface(pane, active);
-                            }
-                            self.refresh_workspace_solo(&ws);
-                        }
-                        self.refresh_window_title().await;
-                        self.sync_workspace_agent_status_from_store(workspace).await;
-                        let _ = ack.send(Ok(()));
-                    }
-                    Some(flowmux_daemon::CloseOutcome::PaneRemoved { workspace }) => {
-                        // Incremental collapse — see
-                        // `apply_close_pane_incremental_or_rerender`
-                        // for the details. Keeps every other pane's
-                        // widget alive across the close.
-                        self.apply_close_pane_incremental_or_rerender(workspace, pane)
-                            .await;
-                        // Alt+W on a single-tab pane lands here. Without this
-                        // call focus stays on the dead pane id, so arrow keys
-                        // / typing go nowhere until the user clicks a sibling.
-                        // CloseFocused already calls focus_after_close in the
-                        // same situation; keep the two close paths in sync.
-                        self.focus_after_close(workspace, pane).await;
-                        self.sync_workspace_agent_status_from_store(workspace).await;
-                        let _ = ack.send(Ok(()));
-                    }
-                }
+                self.close_surface_command(pane, surface, true, ack).await;
             }
             GtkCommand::RenameSurface {
                 pane,
@@ -606,6 +545,101 @@ impl WindowController {
                 let _ = ack.send(res);
             }
             other => unreachable!("non-pane command routed to pane dispatcher: {other:?}"),
+        }
+    }
+}
+
+impl WindowController {
+    pub(super) async fn close_surface_command(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        confirm: bool,
+        ack: oneshot::Sender<Result<(), String>>,
+    ) {
+        // A successful in-process MOVE can rehome the surface before
+        // DragSource::drag-end emits its fallback close for the old
+        // pane. Reject that stale close before considering whether the
+        // old pane is the workspace's last one; otherwise we present a
+        // spurious workspace-close dialog and block the GTK dispatcher.
+        if self.store.surface_title(pane, surface).await.is_none() {
+            let _ = ack.send(Err(format!("surface not found: {surface}")));
+            return;
+        }
+        // The last tab of the last pane also removes its workspace.
+        let tabs = self.store.tab_count_in_pane(pane).await;
+        let panes = self.store.workspace_pane_count_for(pane).await;
+        if confirm && tabs == Some(1) {
+            if let Some((ws_id, count)) = panes {
+                if count == 1 && !self.confirm_close_workspace(ws_id).await {
+                    let _ = ack.send(Err("Pane close cancelled".into()));
+                    return;
+                }
+            }
+        }
+        if confirm && !self.confirm_dirty_surfaces(&[surface]).await {
+            let _ = ack.send(Err("Pane close cancelled".into()));
+            return;
+        }
+        let outcome = self.store.close_surface(pane, surface).await;
+        if outcome.is_some()
+            && !matches!(
+                outcome,
+                Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
+            )
+        {
+            self.forget_agent_surfaces(&[surface]);
+        }
+        match outcome {
+            None => {
+                let _ = ack.send(Err(format!("surface not found: {surface}")));
+            }
+            Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { workspace }) => {
+                self.drop_workspace(workspace);
+                self.activate_active_or_show_empty().await;
+                let _ = ack.send(Ok(()));
+            }
+            Some(flowmux_daemon::CloseOutcome::SurfaceRemoved { workspace }) => {
+                // Only one surface in the same pane disappeared. Full
+                // workspace rerender would lose other panes' shell and
+                // browser state, so detach incrementally. If the store
+                // moved active to a new surface, activate it to sync the
+                // stack and tab highlight.
+                self.pane_registry
+                    .borrow_mut()
+                    .detach_surface_widget(pane, surface);
+                if let Some(ws) = self.store.get_workspace(workspace).await {
+                    if let Some(active) = ws
+                        .surfaces
+                        .iter()
+                        .find_map(|s| s.root_pane.active_surface_id(pane))
+                    {
+                        self.pane_registry
+                            .borrow_mut()
+                            .activate_surface(pane, active);
+                    }
+                    self.refresh_workspace_solo(&ws);
+                }
+                self.refresh_window_title().await;
+                self.sync_workspace_agent_status_from_store(workspace).await;
+                let _ = ack.send(Ok(()));
+            }
+            Some(flowmux_daemon::CloseOutcome::PaneRemoved { workspace }) => {
+                // Incremental collapse — see
+                // `apply_close_pane_incremental_or_rerender`
+                // for the details. Keeps every other pane's
+                // widget alive across the close.
+                self.apply_close_pane_incremental_or_rerender(workspace, pane)
+                    .await;
+                // Alt+W on a single-tab pane lands here. Without this
+                // call focus stays on the dead pane id, so arrow keys
+                // / typing go nowhere until the user clicks a sibling.
+                // CloseFocused already calls focus_after_close in the
+                // same situation; keep the two close paths in sync.
+                self.focus_after_close(workspace, pane).await;
+                self.sync_workspace_agent_status_from_store(workspace).await;
+                let _ = ack.send(Ok(()));
+            }
         }
     }
 }
