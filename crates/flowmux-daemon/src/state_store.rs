@@ -24,6 +24,7 @@ use tokio::sync::{Mutex, Notify};
 use tracing::{error, info};
 
 mod agent_runtime;
+mod program_runtime;
 pub use agent_runtime::{AgentLifecycleResult, CodexGraceSettlement, LocatedAgentPresence};
 
 fn remote_cwd_for_pane(tree: &Pane, pane: PaneId) -> Option<String> {

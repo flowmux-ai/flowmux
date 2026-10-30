@@ -70,6 +70,7 @@ pub struct GhosttyPane {
     search_entry: gtk::SearchEntry,
     /// PID of the spawned shell.
     pub pid: Rc<Cell<Option<i32>>>,
+    pub program_status_generation: uuid::Uuid,
     /// Last cwd returned by [`Self::poll_cwd_if_changed`], so the poller only
     /// reports real changes.
     last_polled_cwd: Rc<RefCell<Option<PathBuf>>>,
@@ -939,6 +940,7 @@ impl GhosttyPane {
         let pty_slot: Rc<RefCell<Option<flowmux_terminal::pty::Pty>>> = Rc::new(RefCell::new(None));
         {
             let cb = callbacks.on_child_exited.clone();
+            let refresh = callbacks.on_terminal_lifecycle_changed.clone();
             let pane_id = pane_id.clone();
             let pid = pid.clone();
             let pty_slot = pty_slot.clone();
@@ -956,6 +958,7 @@ impl GhosttyPane {
                     wrapper_pid,
                     command: command.clone(),
                 });
+                (refresh.borrow_mut())(surface);
             });
         }
 
@@ -1156,6 +1159,11 @@ impl GhosttyPane {
         let cwd_str = cwd.as_ref().and_then(|p| p.to_str());
 
         let mut extra_env = extra_env;
+        let program_status_generation = uuid::Uuid::new_v4();
+        extra_env.push((
+            "FLOWMUX_PROGRAM_STATUS_GENERATION".into(),
+            program_status_generation.to_string(),
+        ));
         if !is_ssh {
             prepare_terminal_child_env(&mut extra_env);
         }
@@ -1218,6 +1226,7 @@ impl GhosttyPane {
             pid: child_pid,
             gate,
         });
+        (callbacks.on_terminal_lifecycle_changed.borrow_mut())(surface);
 
         Ok(Self {
             id: pane_id,
@@ -1228,6 +1237,7 @@ impl GhosttyPane {
             search_revealer,
             search_entry,
             pid,
+            program_status_generation,
             last_polled_cwd: Rc::new(RefCell::new(None)),
             scrollback_dirty,
             terminal_scrollbar: scrollbar,

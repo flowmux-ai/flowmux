@@ -464,6 +464,7 @@ impl Handler for GuiHandler {
                 | Request::PaneSendKeys { .. }
                 | Request::PaneReadScreen { .. }
                 | Request::TerminalOutput { .. }
+                | Request::TerminalProgramStatus { .. }
                 | Request::SurfaceFocus { .. }
                 | Request::SurfaceClose { .. }
                 | Request::PaneFocus { .. }
@@ -721,6 +722,26 @@ impl GuiHandler {
                 }
                 match rx.await {
                     Ok(()) => Response::Ok,
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                }
+            }
+            Request::TerminalProgramStatus { surface, snapshot } => {
+                let (tx, rx) = oneshot::channel();
+                if let Err(error) = self
+                    .bridge
+                    .tx
+                    .send(GtkCommand::TerminalProgramStatusObserved {
+                        surface,
+                        snapshot,
+                        ack: tx,
+                    })
+                    .await
+                {
+                    return Response::Error(RpcError::Internal(error.to_string()));
+                }
+                match rx.await {
+                    Ok(Ok(())) => Response::Ok,
+                    Ok(Err(error)) => Response::Error(RpcError::InvalidArgument(error)),
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }

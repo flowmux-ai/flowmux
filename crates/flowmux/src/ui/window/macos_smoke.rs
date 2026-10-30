@@ -49,6 +49,19 @@ pub(crate) fn run() {
         }
     }
     std::env::set_var("SHELL", "/bin/sh");
+    if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
+        // The native test executable lives in target/debug/deps, outside the
+        // GUI's bundled helper directory. Use the same built CLI for its PTYs
+        // as for the explicit hook calls, not an older installed PATH helper.
+        let cli = std::env::var_os("FLOWMUX_BUNDLED_CLI_PATH")
+            .expect("agent smoke requires the built flowmuxctl");
+        let mut paths = vec![std::path::Path::new(&cli).parent().unwrap().to_path_buf()];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        assert_eq!(flowmux_terminal::find_flowmuxctl(), Some(cli.into()));
+    }
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _entered = runtime.enter();
     crate::ui::macos_layer::install_tile_refresh();
@@ -422,6 +435,20 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         println!("MACOS_STABLE_AGENT_BAR_OK");
         crate::ui::agent_details::check_agent_details().await;
         println!("MACOS_AGENT_DETAILS_OK");
+        let output = tokio::process::Command::new("python3")
+            .arg(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../scripts/test-program-status-gui.py"),
+            )
+            .args(["--socket", socket.to_str().unwrap()])
+            .kill_on_drop(true)
+            .output()
+            .await
+            .unwrap();
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "program status transport failed");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("PROGRAM_STATUS_TRANSPORT_OK"));
         server.abort();
         controller.window.destroy();
         println!("MACOS_NATIVE_AGENT_HOOKS_OK");

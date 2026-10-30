@@ -551,6 +551,8 @@ while time.monotonic() < deadline:
         subprocess.run(["python3", str(Path(__file__).with_name("test-agent-hooks-gui.py")),
                         "--socket", str(path), "--cli", self.args.cli],
                        env=self.env, check=True, timeout=180)
+        subprocess.run(["python3", str(Path(__file__).with_name("test-program-status-gui.py")),
+                        "--socket", str(path)], env=self.env, check=True, timeout=120)
         self.assert_protected()
         (self.root / "final-tree.json").write_text(json.dumps(self.tree(path), indent=2))
         self.log("complete", protected_pids=sorted(self.protected_pids), display=self.env["DISPLAY"])

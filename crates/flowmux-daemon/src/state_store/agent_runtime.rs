@@ -74,6 +74,7 @@ fn trace_agent_before(current: Option<&LocatedAgentPresence>) {
 
 #[derive(Default)]
 pub(super) struct AgentRuntime {
+    pub(super) programs: Mutex<HashMap<SurfaceId, flowmux_ipc::protocol::TerminalProgramSnapshot>>,
     pub(super) cleared_agent_surfaces: Mutex<HashSet<SurfaceId>>,
     last_agent_screen_fingerprints: Mutex<HashMap<SurfaceId, u64>>,
     cleared_agent_screen_fingerprints: Mutex<HashMap<SurfaceId, Option<u64>>>,
@@ -907,6 +908,11 @@ impl StateStore {
         if surfaces.is_empty() {
             return;
         }
+        self.agents
+            .programs
+            .lock()
+            .await
+            .retain(|surface, _| !surfaces.contains(surface));
         let mut cleared = self.agents.cleared_agent_surfaces.lock().await;
         for surface in surfaces {
             cleared.remove(surface);

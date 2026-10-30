@@ -26,6 +26,9 @@ enum State {
     /// In overflow recovery and the previous byte was ESC; if the next byte
     /// is `\\` this is an ST terminator and the sequence ends.
     OscOverflowEsc,
+    /// Control strings are opaque when lifecycle tracking is enabled.
+    ControlString,
+    ControlStringEsc,
 }
 
 pub struct OscExtractor<F: FnMut(&str)> {
@@ -33,6 +36,7 @@ pub struct OscExtractor<F: FnMut(&str)> {
     buf: Vec<u8>,
     on_osc: F,
     max_payload: usize,
+    on_full_reset: Option<Box<dyn FnMut()>>,
 }
 
 impl<F: FnMut(&str)> OscExtractor<F> {
@@ -47,7 +51,15 @@ impl<F: FnMut(&str)> OscExtractor<F> {
             buf: Vec::with_capacity(64),
             on_osc,
             max_payload,
+            on_full_reset: None,
         }
+    }
+
+    /// Also observe RIS outside strings. This opts into strict control-string
+    /// boundaries; legacy notification sniffers keep their existing behavior.
+    pub fn with_full_reset_callback(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.on_full_reset = Some(Box::new(callback));
+        self
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
@@ -73,6 +85,17 @@ impl<F: FnMut(&str)> OscExtractor<F> {
     }
 
     fn step(&mut self, b: u8) {
+        if self.on_full_reset.is_some()
+            && matches!(b, 0x18 | 0x1a)
+            && matches!(
+                self.state,
+                State::Osc | State::OscEsc | State::OscOverflow | State::OscOverflowEsc
+            )
+        {
+            self.buf.clear();
+            self.state = State::Ground;
+            return;
+        }
         match self.state {
             State::Ground => {
                 if b == 0x1B {
@@ -83,7 +106,14 @@ impl<F: FnMut(&str)> OscExtractor<F> {
                 if b == b']' {
                     self.state = State::Osc;
                     self.buf.clear();
+                } else if self.on_full_reset.is_some() && matches!(b, b'P' | b'X' | b'^' | b'_') {
+                    self.state = State::ControlString;
                 } else {
+                    if b == b'c' {
+                        if let Some(callback) = &mut self.on_full_reset {
+                            callback();
+                        }
+                    }
                     // Any other CSI / sequence — ignore for our purposes.
                     self.state = State::Ground;
                 }
@@ -138,6 +168,18 @@ impl<F: FnMut(&str)> OscExtractor<F> {
                     self.state = State::OscOverflow;
                 }
             }
+            State::ControlString => match b {
+                0x1b => self.state = State::ControlStringEsc,
+                0x18 | 0x1a => self.state = State::Ground,
+                _ => {}
+            },
+            State::ControlStringEsc => {
+                self.state = match b {
+                    b'\\' | 0x18 | 0x1a => State::Ground,
+                    0x1b => State::ControlStringEsc,
+                    _ => State::ControlString,
+                };
+            }
         }
     }
 }
@@ -157,6 +199,48 @@ mod tests {
     fn extracts_bel_terminated() {
         let s = b"hello\x1b]9;done\x07world";
         assert_eq!(collect(s), vec!["9;done"]);
+    }
+
+    #[test]
+    fn lifecycle_observation_preserves_order_across_every_split() {
+        use std::{cell::RefCell, rc::Rc};
+        let bytes = b"\x1b]7501;state=working\x07\x1b[?1049h\x1b[!p\x1bc\x1b]7501;state=done\x1b\\\x1b]133;A\x07";
+        for split in 0..=bytes.len() {
+            let events = Rc::new(RefCell::new(Vec::<String>::new()));
+            let reports = events.clone();
+            let resets = events.clone();
+            let mut parser =
+                OscExtractor::new(move |payload| reports.borrow_mut().push(payload.into()))
+                    .with_full_reset_callback(move || resets.borrow_mut().push("reset".into()));
+            parser.feed(&bytes[..split]);
+            parser.feed(&bytes[split..]);
+            assert_eq!(
+                *events.borrow(),
+                ["7501;state=working", "reset", "7501;state=done", "133;A"],
+                "split {split}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_lifecycle_parser_keeps_control_strings_opaque_and_honors_cancel() {
+        use std::{cell::RefCell, rc::Rc};
+        for opener in *b"PX^_" {
+            let events = Rc::new(RefCell::new(Vec::<String>::new()));
+            let reports = events.clone();
+            let resets = events.clone();
+            let mut parser =
+                OscExtractor::new(move |payload| reports.borrow_mut().push(payload.into()))
+                    .with_full_reset_callback(move || resets.borrow_mut().push("reset".into()));
+            parser.feed(&[0x1b, opener]);
+            parser.feed(b"\x1bc\x1b]7501;state=error\x07\x1b\\");
+            assert!(events.borrow().is_empty());
+            parser.feed(b"\x1b]7501;state=working\x18\x1bc");
+            parser.feed(b"\x1b]7501;state=done\x1b\x1a\x1bc");
+            assert_eq!(*events.borrow(), ["reset", "reset"]);
+        }
+        // Opting into lifecycle parsing must not change the older notification sniffer.
+        assert_eq!(collect(b"\x1bP\x1b]9;legacy\x07\x1b\\"), ["9;legacy"]);
     }
 
     #[test]

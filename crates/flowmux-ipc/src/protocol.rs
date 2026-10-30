@@ -92,6 +92,16 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
+/// Runtime-only snapshot from one PTY wrapper. Canonical OSC payloads keep
+/// encoded text bounded on the wire and are validated again by the receiver.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalProgramSnapshot {
+    pub generation: uuid::Uuid,
+    pub owner_pid: u32,
+    pub revision: u64,
+    pub records: Vec<String>,
+}
+
 /// A single tab inside a leaf pane, as reported by `flowmux tree`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeTab {
@@ -535,6 +545,13 @@ pub enum Request {
         surface: SurfaceId,
         #[serde(default)]
         alternate_screen: Option<bool>,
+    },
+    TerminalProgramStatus {
+        surface: SurfaceId,
+        snapshot: TerminalProgramSnapshot,
+    },
+    TerminalProgramStatusQuery {
+        surface: SurfaceId,
     },
 
     /// `flowmux focus-pane <pane>` — grab keyboard focus for a pane.
@@ -1126,6 +1143,7 @@ impl Request {
                 | Self::WorkspaceList
                 | Self::WorkspaceTree
                 | Self::AgentExplain { .. }
+                | Self::TerminalProgramStatusQuery { .. }
                 | Self::WorkspaceCurrent
                 | Self::PaneReadScreen { .. }
                 | Self::NotificationsList { .. }
@@ -1147,6 +1165,9 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    TerminalProgramStatus {
+        snapshot: Option<TerminalProgramSnapshot>,
+    },
     AgentExplanations {
         agents: Vec<AgentExplanation>,
     },
@@ -1292,6 +1313,48 @@ pub enum Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_program_snapshot_keeps_owner_revision_and_query_admission() {
+        let surface = SurfaceId::new();
+        let snapshot = TerminalProgramSnapshot {
+            generation: uuid::Uuid::new_v4(),
+            owner_pid: 123,
+            revision: 4,
+            records: vec!["7501;state=blocked:kind=question".into()],
+        };
+        let request = Request::TerminalProgramStatus {
+            surface,
+            snapshot: snapshot.clone(),
+        };
+        assert!(
+            !request.uses_control_socket(),
+            "large snapshots must not consume reserved hook admission"
+        );
+        match roundtrip_request(request) {
+            Request::TerminalProgramStatus {
+                surface: actual,
+                snapshot: actual_snapshot,
+            } => {
+                assert_eq!(actual, surface);
+                assert_eq!(actual_snapshot, snapshot);
+            }
+            _ => panic!("wrong request"),
+        }
+        let query = Request::TerminalProgramStatusQuery { surface };
+        assert!(query.uses_control_socket());
+        assert!(
+            matches!(roundtrip_request(query), Request::TerminalProgramStatusQuery { surface: actual } if actual == surface)
+        );
+        let response = Response::TerminalProgramStatus {
+            snapshot: Some(snapshot.clone()),
+        };
+        let restored: Response =
+            serde_json::from_str(&serde_json::to_string(&response).unwrap()).unwrap();
+        assert!(
+            matches!(restored, Response::TerminalProgramStatus { snapshot: Some(actual) } if actual == snapshot)
+        );
+    }
 
     #[test]
     fn agent_explanation_defaults_to_all_surfaces_and_uses_control_admission() {

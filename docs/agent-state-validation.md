@@ -1320,3 +1320,80 @@ Original PIDs 72789 and 1401 and the permanent agent binary were preserved.
 PTY/IPC delivery, exactly-once probe responses, process-boundary wiring, SSH
 compatibility, native-wait precedence, performance, and full GUI gates remain
 separate unfinished work; parsing tests are not evidence of those integrations.
+
+
+### 2026-10-30: terminal program-status transport and owner lifecycle
+
+The PTY wrapper now keeps bounded program records independently of the
+best-effort notification queue and sends coalesced, canonical snapshots. IPC
+retries retain the newest revision, including updates received while an older
+snapshot awaits acknowledgement. The GUI validates the live wrapper PID and
+per-terminal generation before admitting a report; stale revisions cannot
+restore cleared child records. Reads neither acknowledge native requests nor
+change the selected workspace. Records are runtime-only and are removed when
+the surface closes. These identity checks reject stale owners; they are not an
+authorization boundary against another process with the same user's IPC access.
+
+OSC 133 A and attached-process exit remove working/blocked/idle records while
+preserving done/error. The GUI also performs this cleanup after a wrapper crash.
+RIS clears all records; alternate-screen switches and soft reset preserve them.
+Lifecycle parsing treats other control strings as opaque while retaining the
+existing notification parser's behavior. Canonical base64 payloads keep a full
+256-record snapshot within the IPC line limit. The separate state store does
+not project reports into agent activity or attention yet, and probes still
+receive no support response.
+
+A focused regression test reproduced an existing screen-refresh problem:
+receiving IPC Busy disabled background output support permanently. Only an
+explicit Unimplemented response now disables that support; later output can
+recover from transient admission errors. The failing case is retained in
+`/tmp/fm-program-busy-red.log`; the corrected PTY worker tests passed.
+
+Validation passed: macOS/Linux agent unit runners, 41/42 notification tests,
+IPC tests, four runtime snapshot tests, five producer tests, PTY worker tests,
+and all 19 real-PTY integration tests on each platform. Workspace all-target
+Clippy with native-smoke and denied warnings, formatting, and whitespace checks
+passed. Logs use `/tmp/fm-program-transport-` prefixes, including `agents.log`,
+`linux-agents.log`, `notify.log`, `ipc.log`, `daemon.log`, `cli.log`, `pty.log`,
+`linux.log`, and `clippy-final.log`.
+
+The permanent `scripts/test-program-status-gui.py` passed against a disposable
+macOS app, the macOS native main-thread harness, and an isolated Linux GUI. It
+covers hidden delivery, read-only queries, stale/foreign owners, invalid reports,
+subtree clear, prompt/reset boundaries, a 1,000-record burst, negative capability
+probing, final output on exit, wrapper SIGKILL cleanup, and surface removal.
+Protocol fixture artifacts: `/tmp/fm-program-_8vh8808`,
+`/tmp/fm-program-8r65t0_1`, and Linux `/tmp/fm-program-tmm79zs8`.
+
+The initial native harness run selected an older installed PATH helper: the
+fixture child inherited the internal generation and no reports arrived. The
+harness now prepends and asserts the built helper path before creating PTYs.
+The corrected native run passed the existing hook matrix, evidence/detail UI,
+stable rows, and the new transport fixture (`native2.log`). This was a harness
+configuration failure, not a passing runtime result.
+
+Actual native-hook agents A and B ran in `/tmp/fm-atn-py4vcbt9`, PID 50635,
+bundle `com.flowmux.AttentionVerify32`. Both completed ordinary replies and
+recovered after interruption of newly observed, uniquely marked streamed
+responses. Each completion retained idle/Completed/Hook for six seconds.
+Logs: `live-start.log` and `live-interrupt.log` under the same log prefix.
+
+A also issued a real question. After verifying its PID ancestry reached only
+the isolated GUI, the test wrote working, done, idle, blocked/auth, and clear
+reports to that agent's output PTY while its workspace was hidden. The queried
+program snapshots changed, but both native pending scopes, needs-input state,
+and Hook evidence remained intact. Selecting Alpha through the native terminal
+resolved the requests and completed the response. The initial assertion sampled
+only the first of two successive native start hooks; a stable baseline captured
+both before the final injection run. This test timing issue and the successful
+rerun are retained in `live-question.log` and `live-wait-final.log`.
+Final states, per-report evidence, owner ancestry, and binary UUID comparisons
+are stored under the isolated root. The signed GUI SHA-256 is
+`58fadac475e4787ceee5618bd9065e32ed7ffc041b9ae9ab4c94829d5afa6bec`.
+Original PIDs 72789 and 1401 and the permanent agent binary were preserved.
+
+Remaining gates: agent/attention projection, exactly-once probe response and
+capability negotiation, foreground-command boundaries without OSC 133 A,
+SSH reconnect compatibility, measured latency/load, and the full shared GUI
+suites. This transport commit does not claim full protocol support or closure
+of those previously outstanding gates.

@@ -79,6 +79,12 @@ impl PaneCallbackRouter {
         use std::cell::RefCell;
         use std::rc::Rc;
         PaneCallbacks {
+            on_terminal_lifecycle_changed: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |surface| {
+                    dispatch_detached(&bridge, GtkCommand::TerminalProgramOwnerChanged { surface });
+                }))
+            },
             on_child_exited: Rc::new(RefCell::new(|exit: crate::ui::pane_terminal::ChildExit| {
                 tracing::info!(pane = %exit.pane, status = exit.status, "child exited");
             })),

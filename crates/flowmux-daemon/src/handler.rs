@@ -137,6 +137,11 @@ impl Handler for DaemonHandler {
                 Request::AgentExplain { surface } => Response::AgentExplanations {
                     agents: self.store.explain_agents(surface).await,
                 },
+                Request::TerminalProgramStatusQuery { surface } => {
+                    Response::TerminalProgramStatus {
+                        snapshot: self.store.terminal_program_status(surface).await,
+                    }
+                }
 
                 Request::WorkspaceCurrent => Response::WorkspaceCurrent {
                     id: self.store.active_workspace().await,

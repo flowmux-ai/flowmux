@@ -25,6 +25,7 @@ mod cmd_ops;
 mod hooks;
 mod keys;
 mod output;
+mod program_status;
 mod pty_tee;
 mod recording;
 mod request;

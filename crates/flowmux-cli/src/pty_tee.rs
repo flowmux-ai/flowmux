@@ -38,6 +38,7 @@
 //! * The same binary works on Ubuntu 22.04 and 24.04 because we never
 //!   touch a renderer-version-specific API.
 
+use crate::program_status::{OscCallback, ProgramStatusShared, ProgramStatusStream};
 use anyhow::{anyhow, Context};
 use flowmux_core::{terminal_tab_title_for_cwd, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{
@@ -111,6 +112,7 @@ struct OutputRefreshState {
     requested: AtomicBool,
     supported: AtomicBool,
     alternate_screen: AtomicBool,
+    programs: Arc<ProgramStatusShared>,
 }
 
 impl OutputRefreshState {
@@ -119,7 +121,29 @@ impl OutputRefreshState {
             requested: AtomicBool::new(false),
             supported: AtomicBool::new(true),
             alternate_screen: AtomicBool::new(false),
+            programs: Arc::new(ProgramStatusShared::new(None)),
         }
+    }
+}
+
+struct PtyOscExtractor {
+    notifications: OscExtractor<OscCallback>,
+    programs: ProgramStatusStream,
+}
+
+impl PtyOscExtractor {
+    fn new(pending: Rc<RefCell<Vec<String>>>, programs: Arc<ProgramStatusShared>) -> Self {
+        let callback: OscCallback =
+            Box::new(move |payload| pending.borrow_mut().push(payload.into()));
+        Self {
+            notifications: OscExtractor::new(callback),
+            programs: ProgramStatusStream::new(programs),
+        }
+    }
+
+    fn feed(&mut self, bytes: &[u8]) {
+        self.notifications.feed(bytes);
+        self.programs.feed(bytes);
     }
 }
 
@@ -166,6 +190,11 @@ pub fn run(
     let ssh_terminal = std::env::var_os("FLOWMUX_SSH_TERMINAL").is_some_and(|value| value == "1");
     let mut child_command = Command::new(&child_argv[0]);
     child_command.args(&child_argv[1..]);
+    let program_generation = std::env::var("FLOWMUX_PROGRAM_STATUS_GENERATION")
+        .ok()
+        .and_then(|value| uuid::Uuid::parse_str(&value).ok())
+        .filter(|id| !id.is_nil());
+    child_command.env_remove("FLOWMUX_PROGRAM_STATUS_GENERATION");
     if ssh_terminal {
         // Keep IPC context in this wrapper, but never expose it to ssh's
         // SendEnv, ProxyCommand, or any remote command. Snapshot before fork.
@@ -178,14 +207,24 @@ pub fn run(
     // terminal-side event arriving in the very first millisecond doesn't get
     // dropped.
     let (event_tx, event_rx) = mpsc::sync_channel::<PtyEvent>(EVENT_QUEUE_CAPACITY);
-    let output_refresh = Arc::new(OutputRefreshState::new());
+    let output_refresh = Arc::new(OutputRefreshState {
+        programs: Arc::new(ProgramStatusShared::new(program_generation)),
+        ..OutputRefreshState::new()
+    });
     let output_refresh_for_worker = output_refresh.clone();
     let worker = std::thread::Builder::new()
         .name("flowmuxctl-pty-tee-ipc".into())
         .spawn(move || ipc_worker(socket, pane, surface, event_rx, output_refresh_for_worker))
         .context("spawn ipc worker thread")?;
 
-    let result = run_pty_pump(child_command, ssh_terminal, event_tx, output_refresh);
+    let result = run_pty_pump(
+        child_command,
+        ssh_terminal,
+        event_tx.clone(),
+        output_refresh.clone(),
+    );
+    output_refresh.programs.process_boundary();
+    drop(event_tx);
 
     // Worker shuts down naturally when the sender half drops. Join so
     // the last in-flight event isn't truncated mid-write on exit.
@@ -330,10 +369,7 @@ fn run_pty_pump(
     //    immediately after each `feed()`. Single-threaded — no Mutex
     //    needed.
     let pending: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-    let pending_for_cb = pending.clone();
-    let mut extractor = OscExtractor::new(move |payload| {
-        pending_for_cb.borrow_mut().push(payload.to_string());
-    });
+    let mut extractor = PtyOscExtractor::new(pending.clone(), output_refresh.programs.clone());
     let mut input_modes = TerminalInputModes::default();
     let mut cwd_tracker = CwdOscTracker {
         local: !ssh_terminal,
@@ -601,10 +637,10 @@ fn run_pty_pump(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn terminate_inner_group<F: FnMut(&str)>(
+fn terminate_inner_group(
     child_pid: Pid,
     master_fd: RawFd,
-    extractor: &mut OscExtractor<F>,
+    extractor: &mut PtyOscExtractor,
     input_modes: &mut TerminalInputModes,
     pending: &Rc<RefCell<Vec<String>>>,
     event_tx: &mpsc::SyncSender<PtyEvent>,
@@ -820,18 +856,37 @@ fn ipc_worker(
 
     rt.block_on(async move {
         let mut next_output_refresh = None;
+        let mut closed_at = None;
         loop {
             let event = match rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(event) => event,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Ok(event) => Some(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    closed_at.get_or_insert_with(Instant::now);
+                    None
+                }
             };
+            let program_snapshot = output_refresh.programs.pending();
+            if event.is_none() && program_snapshot.is_none() {
+                if closed_at.is_some() {
+                    break;
+                }
+                continue;
+            }
+            if closed_at.is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(5)) {
+                break;
+            }
             // Silent terminals must not reserve an IPC slot or reuse a socket
             // that the server expired while they were idle. One connection
             // carries this batch's notification and coalesced output update.
             let client = match connect_with_retry(&socket).await {
                 Some(c) => c,
                 None => {
+                    if program_snapshot.is_some() && closed_at.is_none() {
+                        // A complete revision can be replayed safely. The producer
+                        // keeps only the newest bounded state while IPC is down.
+                        continue;
+                    }
                     tracing::warn!(
                         socket = %socket.display(),
                         "ipc worker: daemon unreachable; terminal events disabled"
@@ -841,7 +896,7 @@ fn ipc_worker(
                 }
             };
             match event {
-                PtyEvent::Notify(ev) => {
+                Some(PtyEvent::Notify(ev)) => {
                     let req = Request::Notify {
                         pane,
                         surface,
@@ -853,7 +908,24 @@ fn ipc_worker(
                         tracing::warn!(error = %e, "ipc worker: notify call failed");
                     }
                 }
-                PtyEvent::Output => {}
+                Some(PtyEvent::Output) | None => {}
+            }
+            if let Some(snapshot) = program_snapshot {
+                if let Some(surface) = surface {
+                    let revision = snapshot.revision;
+                    let request = Request::TerminalProgramStatus { surface, snapshot };
+                    match tokio::time::timeout(Duration::from_secs(3), client.call(request)).await {
+                        Ok(Ok(Response::Ok)) => output_refresh.programs.delivered(revision),
+                        Ok(Ok(Response::Error(
+                            flowmux_ipc::protocol::RpcError::Unimplemented(_)
+                            | flowmux_ipc::protocol::RpcError::InvalidArgument(_)
+                            | flowmux_ipc::protocol::RpcError::NotFound(_),
+                        ))) => output_refresh.programs.disable(),
+                        _ => {} // Retain the revision for retry, never discard a live record.
+                    }
+                } else {
+                    output_refresh.programs.disable();
+                }
             }
             if output_refresh.requested.swap(false, Ordering::AcqRel) {
                 if let Some(delay) = output_refresh_delay(next_output_refresh, Instant::now()) {
@@ -873,12 +945,21 @@ fn ipc_worker(
                     .await
                 {
                     Ok(Response::Ok) => {}
-                    Ok(response) => {
+                    Ok(
+                        response @ Response::Error(flowmux_ipc::protocol::RpcError::Unimplemented(
+                            _,
+                        )),
+                    ) => {
                         output_refresh.supported.store(false, Ordering::Release);
                         tracing::debug!(
                             ?response,
                             "ipc worker: daemon does not support background terminal output events"
                         );
+                    }
+                    Ok(response) => {
+                        // Admission pressure and a stale surface do not remove
+                        // protocol support. Later output can try again.
+                        tracing::debug!(?response, "ipc worker: terminal output not applied");
                     }
                     Err(error) => {
                         // A closed/overloaded connection is not an unsupported
@@ -888,6 +969,9 @@ fn ipc_worker(
                     }
                 }
                 next_output_refresh = Some(Instant::now() + OUTPUT_REFRESH_INTERVAL);
+            }
+            if closed_at.is_some() && output_refresh.programs.pending().is_some() {
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     });
@@ -954,9 +1038,9 @@ fn observe_terminal_output(
     input_modes.take_alternate_screen_exit()
 }
 
-fn drain_inner<F: FnMut(&str)>(
+fn drain_inner(
     master_fd: RawFd,
-    extractor: &mut OscExtractor<F>,
+    extractor: &mut PtyOscExtractor,
     input_modes: &mut TerminalInputModes,
     output_refresh: &OutputRefreshState,
     output: &mut VecDeque<u8>,
@@ -1266,7 +1350,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             ipc_worker(socket, None, Some(SurfaceId::new()), rx, worker_state);
         });
-        for batch in 0..3 {
+        for batch in 0..4 {
             queue_output_refresh(&tx, &state);
             let (stream, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
                 .await
@@ -1279,7 +1363,11 @@ mod tests {
             assert_eq!(request["verb"], "terminal_output");
             let response = flowmux_ipc::protocol::Envelope {
                 id: request["id"].as_u64().unwrap(),
-                payload: flowmux_ipc::protocol::Payload::Response(Response::Ok),
+                payload: flowmux_ipc::protocol::Payload::Response(if batch == 2 {
+                    Response::Error(flowmux_ipc::protocol::RpcError::Busy("retry later".into()))
+                } else {
+                    Response::Ok
+                }),
             };
             if batch != 1 {
                 reader
@@ -1297,6 +1385,73 @@ mod tests {
             .await
             .unwrap();
         assert!(state.supported.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn program_delivery_retries_busy_and_preserves_updates_while_awaiting_ack() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("program.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let state = Arc::new(OutputRefreshState {
+            programs: Arc::new(ProgramStatusShared::new(Some(uuid::Uuid::new_v4()))),
+            ..OutputRefreshState::new()
+        });
+        let mut stream = ProgramStatusStream::new(state.programs.clone());
+        stream.feed(b"\x1b]7501;state=working\x07");
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            ipc_worker(socket, None, Some(SurfaceId::new()), rx, worker_state)
+        });
+        tx.send(PtyEvent::Output).unwrap();
+        let mut revisions = Vec::new();
+        for attempt in 0..3 {
+            let (socket, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut reader = BufReader::new(socket);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["verb"], "terminal_program_status");
+            revisions.push(request["snapshot"]["revision"].as_u64().unwrap());
+            if attempt == 1 {
+                // No acknowledgement has been sent; output must still be accepted.
+                stream.feed(
+                    b"\x1b]7501;state=done\x07\x1b]7501;state=blocked:id=child:kind=auth\x07",
+                );
+            }
+            if attempt == 2 {
+                assert_eq!(
+                    request["snapshot"]["records"],
+                    serde_json::json!(["7501;state=done", "7501;state=blocked:id=child:kind=auth"])
+                );
+            }
+            let response = flowmux_ipc::protocol::Envelope {
+                id: request["id"].as_u64().unwrap(),
+                payload: flowmux_ipc::protocol::Payload::Response(if attempt == 0 {
+                    Response::Error(flowmux_ipc::protocol::RpcError::Busy(
+                        "fixture admission".into(),
+                    ))
+                } else {
+                    Response::Ok
+                }),
+            };
+            reader
+                .get_mut()
+                .write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes())
+                .await
+                .unwrap();
+        }
+        assert_eq!(revisions[0], revisions[1]);
+        assert!(revisions[2] > revisions[1]);
+        drop(tx);
+        tokio::task::spawn_blocking(move || worker.join().unwrap())
+            .await
+            .unwrap();
+        assert!(state.programs.pending().is_none());
     }
 
     #[test]
@@ -1380,7 +1535,8 @@ mod tests {
         assert_eq!(written, exit.len() as isize);
         drop(pipe_w);
 
-        let mut extractor = OscExtractor::new(|_| {});
+        let mut extractor =
+            PtyOscExtractor::new(Rc::new(RefCell::new(Vec::new())), state.programs.clone());
         let mut output = VecDeque::from(b"before".to_vec());
         assert!(drain_inner(
             pipe_r.as_raw_fd(),

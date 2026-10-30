@@ -3033,6 +3033,8 @@ impl WindowController {
             | GtkCommand::TerminalTitleChanged { .. }
             | GtkCommand::TerminalContentsChanged { .. }
             | GtkCommand::TerminalOutputObserved { .. }
+            | GtkCommand::TerminalProgramStatusObserved { .. }
+            | GtkCommand::TerminalProgramOwnerChanged { .. }
             | GtkCommand::RefreshWindowTitle
             | GtkCommand::PaneFocused { .. }
             | GtkCommand::PaneSendKeys { .. }

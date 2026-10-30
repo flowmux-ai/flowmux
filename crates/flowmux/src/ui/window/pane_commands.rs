@@ -468,6 +468,51 @@ impl WindowController {
             GtkCommand::TerminalContentsChanged { surface } => {
                 self.refresh_agent_screen_status(surface, None).await;
             }
+            GtkCommand::TerminalProgramOwnerChanged { surface } => {
+                let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
+                match terminal {
+                    Some(terminal) => {
+                        if self
+                            .store
+                            .terminal_program_status(surface)
+                            .await
+                            .is_some_and(|snapshot| {
+                                snapshot.generation != terminal.program_status_generation
+                            })
+                        {
+                            self.store.forget_terminal_program_status(surface).await;
+                        } else if terminal.pid.get().is_none() {
+                            self.store.terminal_program_process_exited(surface).await;
+                        }
+                    }
+                    None => self.store.forget_terminal_program_status(surface).await,
+                }
+            }
+            GtkCommand::TerminalProgramStatusObserved {
+                surface,
+                snapshot,
+                ack,
+            } => {
+                let matches = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .get(&surface)
+                    .is_some_and(|terminal| {
+                        terminal.pid.get().and_then(|pid| u32::try_from(pid).ok())
+                            == Some(snapshot.owner_pid)
+                            && terminal.program_status_generation == snapshot.generation
+                    });
+                let result = if matches {
+                    self.store
+                        .report_terminal_program_status(surface, snapshot)
+                        .await
+                        .map(|_| ())
+                } else {
+                    Err("terminal report belongs to a different or ended PTY".into())
+                };
+                let _ = ack.send(result);
+            }
             GtkCommand::TerminalOutputObserved {
                 surface,
                 alternate_screen,

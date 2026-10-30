@@ -48,6 +48,47 @@ pub enum ProgramStatus {
     Report(ProgramReport),
 }
 
+impl ProgramReport {
+    /// Canonical wire representation. Encoding text keeps a complete snapshot
+    /// of 256 validated records below the IPC line limit even for quote-heavy text.
+    pub fn to_payload(&self) -> String {
+        let state = match self.state {
+            ProgramState::Idle => "idle",
+            ProgramState::Working => "working",
+            ProgramState::Done => "done",
+            ProgramState::Blocked => "blocked",
+            ProgramState::Error => "error",
+            ProgramState::Clear => "clear",
+        };
+        let mut payload = format!("7501;state={state}");
+        for (key, value) in [("id", &self.id), ("app", &self.app)] {
+            if let Some(value) = value {
+                payload.push_str(&format!(":{key}={value}"));
+            }
+        }
+        if let Some(kind) = self.kind {
+            let kind = match kind {
+                BlockedKind::Permission => "permission",
+                BlockedKind::Question => "question",
+                BlockedKind::Auth => "auth",
+            };
+            payload.push_str(&format!(":kind={kind}"));
+        }
+        if let Some(progress) = self.progress {
+            payload.push_str(&format!(":progress={progress}"));
+        }
+        for (key, value) in [("title", &self.title), ("msg", &self.message)] {
+            if let Some(value) = value {
+                payload.push_str(&format!(
+                    ":{key}={}",
+                    general_purpose::STANDARD.encode(value)
+                ));
+            }
+        }
+        payload
+    }
+}
+
 /// Parse the payload supplied by [`crate::OscExtractor`]. Malformed pairs are
 /// skipped; limits and invalid encoded text reject the entire report, including
 /// invalid values that a later duplicate would otherwise replace.
@@ -266,6 +307,31 @@ mod tests {
         }
         assert!(parse_osc("7501;state=blocked:kind=permission").is_none());
         assert!(parse_osc("7501;?").is_none());
+    }
+
+    #[test]
+    fn canonical_snapshots_round_trip_and_fit_one_ipc_line() {
+        let body = format!(
+            "state=blocked:id={}:app={}:kind=permission:progress=100:title={}:msg={}",
+            vec!["i".repeat(31); 4].join("/"),
+            "a".repeat(32),
+            general_purpose::STANDARD.encode("\"".repeat(192)),
+            general_purpose::STANDARD.encode("\"".repeat(2048))
+        );
+        let original = report(&body);
+        let payload = original.to_payload();
+        assert_eq!(
+            parse_program_status(&payload),
+            Some(ProgramStatus::Report(original))
+        );
+        // Canonical payloads contain no JSON escapes; three bytes cover each
+        // quoted entry and comma. Reserve ample space for envelope/identity.
+        assert!((payload.len() + 3) * MAX_PROGRAM_STATUS_RECORDS + 1024 < 1024 * 1024);
+        let normalized = report("state=working:future=ignored:msg=b2s:title=VGVzdA");
+        assert_eq!(
+            parse_program_status(&normalized.to_payload()),
+            Some(ProgramStatus::Report(normalized))
+        );
     }
 
     #[test]

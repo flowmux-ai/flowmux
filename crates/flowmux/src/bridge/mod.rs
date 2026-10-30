@@ -588,6 +588,14 @@ pub enum GtkCommand {
         alternate_screen: Option<bool>,
         ack: oneshot::Sender<()>,
     },
+    TerminalProgramStatusObserved {
+        surface: SurfaceId,
+        snapshot: flowmux_ipc::protocol::TerminalProgramSnapshot,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
+    TerminalProgramOwnerChanged {
+        surface: SurfaceId,
+    },
     /// Recompute the window title as "flowmux - {focused tab name}".
     /// Sent after focus changes, tab activation, or tab label changes.
     RefreshWindowTitle,
