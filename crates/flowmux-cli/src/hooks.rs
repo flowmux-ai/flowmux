@@ -17,6 +17,7 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tracing::Instrument;
 
 const HOOK_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 const HOOK_NOTIFY_TIMEOUT: Duration = Duration::from_millis(750);
@@ -469,21 +470,72 @@ async fn send_best_effort_with_timeout(
     req: Request,
     timeout: Duration,
 ) -> Option<Response> {
-    match tokio::time::timeout(timeout, client.call(req)).await {
-        Ok(Ok(Response::Error(e))) => {
-            tracing::debug!(?e, "hook notify rejected by daemon");
-            None
+    let (operation, surface, seq, session) = match &req {
+        Request::AgentLifecycleUpdate {
+            surface,
+            seq,
+            session_id,
+            ..
+        } => ("lifecycle", Some(*surface), *seq, Some(session_id.as_str())),
+        Request::AgentActivityUpdate {
+            surface,
+            seq,
+            session_id,
+            ..
+        } => ("activity", *surface, *seq, session_id.as_deref()),
+        Request::AgentSessionUpdate {
+            surface,
+            session_id,
+            ..
+        } => (
+            "session_update",
+            Some(*surface),
+            None,
+            Some(session_id.as_str()),
+        ),
+        Request::AgentSessionForget { surface, .. } => {
+            ("session_forget", Some(*surface), None, None)
         }
-        Ok(Ok(response)) => Some(response),
-        Ok(Err(e)) => {
-            tracing::debug!(error = %e, "hook notify failed");
-            None
-        }
-        Err(_) => {
-            tracing::debug!(?timeout, "hook notify timed out");
-            None
+        Request::Notify { surface, .. } => ("notification", *surface, None, None),
+        _ => ("other", None, None, None),
+    };
+    let span = tracing::debug_span!(target: "flowmux_hook", "hook request",
+        instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
+        operation, surface = ?surface, seq = ?seq,
+        session_key = ?flowmux_config::diagnostics::agent_trace_key(session));
+    async {
+        let started = std::time::Instant::now();
+        tracing::debug!(target: "flowmux_hook", phase = "send", "hook delivery");
+        let result = tokio::time::timeout(timeout, client.call(req)).await;
+        let outcome = match &result {
+            Ok(Ok(Response::AgentLifecycleReceipt { applied: true })) => "applied",
+            Ok(Ok(Response::AgentLifecycleReceipt { applied: false })) => "not_applied",
+            Ok(Ok(Response::Ok)) => "acknowledged",
+            Ok(Ok(Response::Error(_))) => "rejected",
+            Ok(Ok(_)) => "unexpected_response",
+            Ok(Err(_)) => "transport_error",
+            Err(_) => "timed_out",
+        };
+        tracing::debug!(target: "flowmux_hook", phase = "response", outcome,
+        elapsed_ms = started.elapsed().as_millis() as u64, "hook delivery");
+        match result {
+            Ok(Ok(Response::Error(e))) => {
+                tracing::debug!(?e, "hook notify rejected by daemon");
+                None
+            }
+            Ok(Ok(response)) => Some(response),
+            Ok(Err(e)) => {
+                tracing::debug!(error = %e, "hook notify failed");
+                None
+            }
+            Err(_) => {
+                tracing::debug!(?timeout, "hook notify timed out");
+                None
+            }
         }
     }
+    .instrument(span)
+    .await
 }
 
 pub async fn send_hook_requests(client: &Client, requests: Vec<Request>) {
@@ -579,7 +631,14 @@ async fn connect_daemon_with_timeout(socket: Option<PathBuf>, timeout: Duration)
 }
 
 async fn try_connect(socket: &Path, timeout: Duration) -> Option<Client> {
-    match tokio::time::timeout(timeout, Client::connect(socket)).await {
+    let result = tokio::time::timeout(timeout, Client::connect(socket)).await;
+    tracing::debug!(target: "flowmux_hook", instance = std::process::id(), phase = "connect",
+        socket = %socket.display(), outcome = match &result {
+            Ok(Ok(_)) => "connected",
+            Ok(Err(_)) => "unreachable",
+            Err(_) => "timed_out",
+        }, "hook delivery");
+    match result {
         Ok(Ok(c)) => Some(c),
         Ok(Err(e)) => {
             let e = e.context(format!("connect daemon at {}", socket.display()));
@@ -1528,7 +1587,62 @@ mod tests {
         use flowmux_ipc::protocol::{Envelope, Payload};
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-        for mode in 0..7 {
+        const CHILD: &str = "FLOWMUX_DELIVERY_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            for trace in ["0", "1"] {
+                let dir = tempfile::tempdir().unwrap();
+                let output = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", "hooks::tests::lifecycle_notification_delivery_requires_a_receipt_or_explicit_legacy_ok", "--nocapture"])
+                    .env(CHILD, "1").env("FLOWMUX_AGENT_TRACE", trace)
+                    .env_remove("FLOWMUX_LOG").env("XDG_STATE_HOME", dir.path())
+                    .output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(!String::from_utf8_lossy(&output.stdout).contains("hook delivery"));
+                assert!(!String::from_utf8_lossy(&output.stderr).contains("hook delivery"));
+                let logs: String = std::fs::read_dir(dir.path().join("flowmux/logs"))
+                    .unwrap()
+                    .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+                    .collect();
+                if trace == "1" {
+                    for outcome in [
+                        "applied",
+                        "not_applied",
+                        "acknowledged",
+                        "unexpected_response",
+                        "timed_out",
+                        "rejected",
+                        "transport_error",
+                        "connected",
+                        "unreachable",
+                    ] {
+                        assert!(
+                            logs.contains(&format!("outcome=\"{outcome}\"")),
+                            "missing {outcome}: {logs}"
+                        );
+                    }
+                    assert!(logs.contains("session_key=Some("));
+                    assert!(logs.contains("elapsed_ms="));
+                } else {
+                    assert!(!logs.contains("hook delivery"));
+                }
+                for private in [
+                    "PRIVATE_SESSION_SENTINEL",
+                    "Review request",
+                    "PRIVATE_ERROR_SENTINEL",
+                    "Waiting",
+                ] {
+                    assert!(!logs.contains(private), "trace exposed {private}");
+                }
+            }
+            return;
+        }
+        let _guard = flowmux_config::diagnostics::init_logging("delivery-test", "error").unwrap();
+        for mode in 0..9 {
             let dir = tempfile::tempdir().unwrap();
             let socket = dir.path().join("flowmux.sock");
             let listener = tokio::net::UnixListener::bind(&socket).unwrap();
@@ -1560,6 +1674,9 @@ mod tests {
                         panic!("expected request")
                     };
                     requests.push(request);
+                    if mode == 8 {
+                        break;
+                    }
                     if mode == 4 {
                         continue;
                     }
@@ -1568,6 +1685,9 @@ mod tests {
                         payload: Payload::Response(match mode {
                             0 | 1 => Response::AgentLifecycleReceipt { applied: mode == 0 },
                             3 => Response::Pong,
+                            7 => Response::Error(flowmux_ipc::protocol::RpcError::InvalidArgument(
+                                "PRIVATE_ERROR_SENTINEL".into(),
+                            )),
                             _ => Response::Ok,
                         }),
                     };
@@ -1576,7 +1696,9 @@ mod tests {
                 }
                 requests
             });
-            let client = Client::connect(&socket).await.unwrap();
+            let client = try_connect(&socket, Duration::from_millis(50))
+                .await
+                .unwrap();
             send_hook_requests_with_timeout(
                 &client,
                 vec![
@@ -1585,7 +1707,7 @@ mod tests {
                         None,
                         Some(pane),
                         surface,
-                        "session",
+                        "PRIVATE_SESSION_SENTINEL",
                         AgentLifecycleEvent::PermissionWaitStarted {
                             reason: flowmux_core::AgentWaitReason::Approval,
                             message: None,
@@ -1607,7 +1729,7 @@ mod tests {
             let Request::AgentLifecycleUpdate { notification, .. } = &requests[0] else {
                 panic!("expected lifecycle")
             };
-            assert_eq!(notification.is_some(), mode < 5);
+            assert_eq!(notification.is_some(), !matches!(mode, 5 | 6));
             if let Some(notification) = notification {
                 assert_eq!(notification.body, "Review request");
                 assert_eq!(notification.level, NotificationLevel::NeedsInput);
@@ -1619,6 +1741,13 @@ mod tests {
                 );
             }
         }
+        let missing = tempfile::tempdir().unwrap();
+        assert!(try_connect(
+            &missing.path().join("missing.sock"),
+            Duration::from_millis(50)
+        )
+        .await
+        .is_none());
     }
 
     #[tokio::test]

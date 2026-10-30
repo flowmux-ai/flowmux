@@ -258,12 +258,46 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
     // Probe the same socket resolution and fallback scan used by agent hooks.
     println!("daemon ping      : ...");
     match hooks::connect_daemon(socket).await {
-        Some(client) => match client.call(flowmux_ipc::protocol::Request::Ping).await {
-            Ok(resp) => println!("  -> ok ({resp:?})"),
-            Err(e) => println!("  -> connected but rpc failed: {e}"),
-        },
+        Some(client) => {
+            let timeout = std::time::Duration::from_millis(750);
+            match tokio::time::timeout(timeout, client.call(flowmux_ipc::protocol::Request::Ping))
+                .await
+            {
+                Ok(Ok(flowmux_ipc::protocol::Response::Pong)) => {
+                    println!("  -> connected; ping acknowledged")
+                }
+                Ok(Ok(_)) => println!("  -> connected; unexpected ping response"),
+                Ok(Err(e)) => println!("  -> connected but rpc failed: {e}"),
+                Err(_) => println!("  -> connected but ping timed out"),
+            }
+            println!("--- current agent evidence (snapshot, not delivery history) ---");
+            match tokio::time::timeout(
+                timeout,
+                client.call(flowmux_ipc::protocol::Request::WorkspaceTree),
+            )
+            .await
+            {
+                Ok(Ok(flowmux_ipc::protocol::Response::Tree { workspaces })) => {
+                    for line in hook_live_evidence(&workspaces) {
+                        println!("{line}");
+                    }
+                }
+                Ok(Ok(_)) => println!("  evidence unavailable: unsupported response"),
+                Ok(Err(_)) => println!("  evidence unavailable: transport error"),
+                Err(_) => println!("  evidence unavailable: query timed out"),
+            }
+        }
         None => println!("  -> UNREACHABLE"),
     }
+    println!("Installation and a successful hook exit do not prove state application.");
+    println!(
+        "An acknowledged request is not an applied-state receipt; a timeout is indeterminate."
+    );
+    println!("Agent trace: set FLOWMUX_AGENT_TRACE=1 before launching an isolated Flowmux instance and its agents.");
+    println!(
+        "Trace files: {:?}; hook transport and state decisions use surface/sequence/session keys.",
+        flowmux_config::paths::logs_dir()
+    );
 
     // 3. Per-agent install state
     println!();
@@ -292,6 +326,61 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
             println!("           {p:?} ({info})");
         }
     }
+}
+
+pub(crate) fn hook_live_evidence(
+    workspaces: &[flowmux_ipc::protocol::TreeWorkspace],
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (surface, agent) in workspaces
+        .iter()
+        .flat_map(|w| &w.panes)
+        .flat_map(|p| &p.tabs)
+        .filter_map(|t| t.agent.as_ref().map(|a| (t.id, a)))
+    {
+        if lines.len() == 32 {
+            lines.push(
+                "  additional agents omitted; use flowmux --json agents for all surfaces".into(),
+            );
+            break;
+        }
+        let owner = match agent.source.as_deref() {
+            Some("flowmux:hook") => "hook",
+            Some("flowmux:screen") => "screen",
+            Some(flowmux_core::AGENT_SOURCE_PROC) => "process",
+            _ => "unconfirmed",
+        };
+        let evidence = agent
+            .status_evidence
+            .map(|e| format!("{:?} since {}", e.source, e.since))
+            .unwrap_or_else(|| "unconfirmed".into());
+        let waits = agent
+            .pending_waits
+            .iter()
+            .take(8)
+            .map(|wait| {
+                format!(
+                    "{:?}:{:?}/{:?} retry={:?} context={:?}",
+                    wait.scope,
+                    wait.reason,
+                    wait.actor,
+                    wait.retry,
+                    wait.context_evidence.map(|e| e.source)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("  surface={surface} owner={owner} status={:?} evidence={evidence} seq={:?} session_key={:?} wait_scopes={} waits=[{waits}{}]",
+            agent.status, agent.seq, flowmux_config::diagnostics::agent_trace_key(agent.session_id.as_deref()), agent.pending_waits.len(),
+            if agent.pending_waits.len() > 8 { ", additional scopes omitted" } else { "" }));
+    }
+    if lines.is_empty() {
+        lines.push(
+            "  no current agent evidence; installation alone does not establish a live session"
+                .into(),
+        );
+    }
+    lines
 }
 pub(crate) fn parse_hook_targets(
     agents: &[String],

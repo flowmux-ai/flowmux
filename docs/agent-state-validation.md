@@ -948,3 +948,86 @@ executable hash was unchanged. This focused verification does not close the
 previous full Linux editor or macOS browser gate failures. Delivery diagnostics,
 child/detail observability, protocol support, performance measurements, and
 final cross-platform gates remain outstanding.
+
+## Hook transport and application diagnostics (2026-10-30)
+
+`FLOWMUX_AGENT_TRACE=1` enables the existing hook-transport and reducer diagnostic
+targets in daily files without raising console verbosity. The hook transport
+records connection attempts, request operation, surface, sequence, hashed
+session key, elapsed response time, and response category. The reducer uses the
+same correlation-key implementation. Event payloads, messages, tool arguments,
+raw session IDs, and server error text are excluded from these diagnostic
+records. No new state transitions, delivery retries, receipt semantics, or
+provider settings are introduced.
+
+An explicit positive lifecycle receipt is `applied`; a negative receipt is
+`not_applied`, which also covers events that produce no transition. A generic
+successful response is only `acknowledged`. Rejection, unexpected response,
+transport failure, and timeout remain distinct. Neither timeout nor disconnect
+proves that the server failed to apply the event. Existing notification fallback
+still occurs only after an explicit legacy acknowledgement, never after an
+indeterminate failure.
+
+`flowmux hooks doctor` separates installation and connectivity from a bounded
+snapshot of current state evidence. It shows identity owner, evidence source
+and timestamp, sequence/session correlation, and typed wait context. It prints
+at most 32 agent surfaces and eight wait summaries per surface. It does not
+print agent messages or raw session IDs. Ping and evidence queries each have a
+750 ms limit; an unavailable query does not prevent installation diagnostics.
+This is a current snapshot, not a retrospective event journal. Tracing must be
+enabled before the reproduction, in the isolated application and its agents.
+Usage is documented in `docs/configuration.md`.
+
+The transport regression exercises applied/not-applied receipts, legacy Ok,
+unexpected response, timeout, RPC rejection, connection loss, connection success,
+and an unreachable socket. It runs twice in isolated child processes, with
+tracing off and on. Both modes retain request counts and notification admission;
+the enabled run writes the expected file records while stdout/stderr remain
+free of diagnostic output. Private session, message, and error sentinels are
+absent from the files. Snapshot tests cover source separation, private-field
+omission, empty state, and output bounds.
+
+macOS and Linux isolated agent suites passed: CLI library 127, CLI binary 155,
+core 170, daemon 200, daemon binary 2, and platform process tests. Logs:
+`/tmp/fm-hook-delivery-unit.log`, `/tmp/fm-hook-delivery-linux-unit.log`.
+The final doctor snapshot test passed on both platforms after wait-context
+formatting (`/tmp/fm-hook-delivery-doctor-test.log`,
+`/tmp/fm-hook-delivery-linux-doctor-test.log`). Configuration 98 tests,
+workspace/all-targets Clippy with native-smoke, the application build, formatting,
+and diff checks passed (`/tmp/fm-hook-delivery-config-test.log`,
+`/tmp/fm-hook-delivery-clippy-final.log`,
+`/tmp/fm-hook-delivery-build-final.log`, `/tmp/fm-hook-delivery-fmt.log`).
+A real CLI process against a nonresponding test socket returned both timeout
+diagnostics in 2.006 seconds with exactly two read-only requests
+(`/tmp/fm-hook-doctor-timeout.log`).
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 ran with tracing enabled in
+isolated application PID 62169, `/tmp/fm-atn-ovni79fw`. B passed consecutive
+responses, the displayed one-time harmless approval, interruption, and recovery.
+A's actual quota wait changed from automatic/external to manual/user while
+preserving native evidence, sequence, session, and wait age. Status-like drafts
+did not alter either agent's state and were cleared. Native screenshots verified
+the approval, interrupted response, and final retry/completion displays.
+`/tmp/fm-hook-delivery-live.log` ended with `LIVE_HOOK_DELIVERY_MATRIX_OK`.
+
+The doctor snapshot during the live approval showed A's hook-owned quota wait
+with supplemental screen/automatic context and B's hook-reported permission
+wait. Exact agent state before and after the read-only query was equal
+(`hook-doctor-pending.txt`). All 15 observed lifecycle responses matched receiver
+records by surface, sequence, and session key, including both acknowledgement
+and explicit application receipts. Their diagnostic records omitted the test
+prompt/output markers and raw session IDs; pane screens contained no hook trace
+output. Evidence: `hook-delivery-correlation.json` under the isolated root and
+`/tmp/fm-hook-delivery-trace-check.log` (`LIVE_HOOK_TRACE_CORRELATION_OK`).
+Application and CLI SHA-256:
+
+`c316a0b87770ab61234b5f71f3452770c7f22eabdd0089a83e6a347d5ea607a1`
+
+`7a6eaccb4e2e9ea60ab386976ef544701cde90a1930af31b72503ce849d7b359`
+
+Original application PID 72789 and user agent PID 1401 remained alive; the
+permanent agent executable hash was unchanged. A's ordinary response/question
+coverage remains quota-blocked. This does not close the earlier full GUI gate
+failures or establish protocol/child-detail support and performance budgets.
+Trace files use existing logging retention and are not a durable delivery queue
+or a complete inventory of missed events.

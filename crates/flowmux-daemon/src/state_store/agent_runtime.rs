@@ -24,11 +24,7 @@ use tokio::sync::Mutex;
 
 // Diagnostic IDs are opaque correlation tokens, never payload, prompt or title text.
 fn trace_key(value: Option<&str>) -> Option<u64> {
-    value.map(|value| {
-        let mut hash = DefaultHasher::new();
-        value.hash(&mut hash);
-        hash.finish()
-    })
+    flowmux_config::diagnostics::agent_trace_key(value)
 }
 
 fn lifecycle_trace_event(event: &AgentLifecycleEvent) -> (&'static str, Option<u64>) {

@@ -6,6 +6,7 @@ use anyhow::Context;
 use chrono::{DateTime, SecondsFormat, Utc};
 use std::backtrace::Backtrace;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::filter::EnvFilter;
@@ -16,6 +17,15 @@ use tracing_subscriber::Layer;
 pub const MAX_CRASH_REPORTS: usize = 20;
 const LAST_SEEN_FILE: &str = ".last-seen";
 const LOG_BUFFERED_LINES_LIMIT: usize = 1_024;
+
+/// Correlate hook delivery and reducer decisions without recording raw IDs.
+pub fn agent_trace_key(value: Option<&str>) -> Option<u64> {
+    value.map(|value| {
+        let mut hash = DefaultHasher::new();
+        value.hash(&mut hash);
+        hash.finish()
+    })
+}
 
 /// Initialize console and daily file logging. `FLOWMUX_LOG`, when valid, is
 /// applied to both layers; otherwise the console keeps the binary's existing
@@ -55,10 +65,17 @@ pub fn init_logging(
     let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
         .buffered_lines_limit(LOG_BUFFERED_LINES_LIMIT)
         .finish(appender);
-    let file_filter = override_filter
+    let mut file_filter = override_filter
         .as_deref()
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new("warn"));
+    // Hook stdout is a provider protocol. Opt-in agent diagnostics go only to
+    // the existing file sink, independently of the console filter.
+    if std::env::var("FLOWMUX_AGENT_TRACE").as_deref() == Ok("1") {
+        file_filter = file_filter
+            .add_directive("flowmux_hook=debug".parse()?)
+            .add_directive("flowmux_agent=debug".parse()?);
+    }
     let file = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_writer(writer)

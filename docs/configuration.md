@@ -185,3 +185,23 @@ user-editable configuration file. Runtime context variables include
 `FLOWMUX_BUNDLED_CLI_PATH`. `FLOWMUX_RUNTIME_DIR` can isolate a smoke run;
 `FLOWMUX_LOG` sets the tracing filter for console and daily file logging,
 for example `debug`. Log paths are described in [setup](setup.md#troubleshooting).
+
+For an agent-state investigation, set `FLOWMUX_AGENT_TRACE=1` before launching
+an isolated Flowmux instance and its agents. This adds hook transport and state
+decision diagnostics to the existing daily log files without changing console
+verbosity or hook stdout. It is off by default. The records include surface,
+sequence, hashed session keys, connection/delivery outcomes, and elapsed time;
+they omit prompt text, messages, tool arguments, and raw session IDs. The keys
+correlate records within the same build and are not authentication tokens.
+
+`flowmux hooks doctor` reports installation separately from socket reachability
+and current agent evidence. Its snapshot shows up to 32 agent surfaces, their
+identity owner, status evidence/time, and up to eight wait summaries per agent.
+It does not interpret silence as a failed or completed task. A successful hook
+exit does not prove delivery; `acknowledged` means an IPC response was received,
+while `applied` requires the server's explicit lifecycle receipt. `not_applied`
+can mean a rejected or nontransitioning event. A timeout or disconnect leaves
+application uncertain and never triggers a diagnostic retry. Consult the
+matching state-decision record for the reason. A snapshot alone cannot explain
+an earlier missed event; enable tracing before reproducing it. Existing user
+logging overrides still apply independently.

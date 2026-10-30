@@ -903,6 +903,27 @@ fn render_tree_marks_active_tab_and_indents() {
         "  [terminal] {t1} \"shell\" agent=claude status=blocked"
     )));
     assert_eq!(render_tree(&[]), "(no workspaces)\n");
+    let diagnostic = cmd_hooks::hook_live_evidence(std::slice::from_ref(&ws)).join("\n");
+    assert!(diagnostic.contains(&format!("surface={t1} owner=hook")));
+    assert!(diagnostic.contains("evidence=Screen since 2026-10-30"));
+    assert!(diagnostic.contains("seq=Some(7)"));
+    assert!(diagnostic.contains("wait_scopes=1"));
+    assert!(diagnostic.contains("Tool:Question/Unknown retry=Unknown context=None"));
+    for private in [
+        "session-1",
+        "approval needed",
+        "Waiting for answer",
+        "demo",
+        "/tmp/claude.sock",
+    ] {
+        assert!(!diagnostic.contains(private), "doctor leaked {private}");
+    }
+    let mut many = ws.clone();
+    many.panes[0].tabs = vec![many.panes[0].tabs[0].clone(); 33];
+    let bounded = cmd_hooks::hook_live_evidence(&[many]);
+    assert_eq!(bounded.len(), 33);
+    assert!(bounded[32].contains("additional agents omitted"));
+    assert!(cmd_hooks::hook_live_evidence(&[])[0].contains("no current agent evidence"));
 
     let workspaces = [ws];
     let agents = render_agents(&workspaces, false).unwrap();
