@@ -140,6 +140,56 @@ impl HistorySession {
         })
     }
 
+    /// Explicit source selection only. Interactive-only branching is not safe to
+    /// send into the source pane, so unsupported providers remain disabled.
+    pub fn fork_command(&self) -> io::Result<String> {
+        let resume = self.resume_command()?;
+        match self.agent {
+            SessionAgent::Claude => Ok(format!("{resume} --fork-session")),
+            SessionAgent::Codex => Ok(format!(
+                "codex fork {}",
+                uuid::Uuid::parse_str(&self.id).map_err(io::Error::other)?
+            )),
+            SessionAgent::OpenCode => Ok(format!("{resume} --fork")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "This agent does not expose a verified external fork command",
+            )),
+        }
+    }
+
+    /// Read only an explicit native fork field. Parent/subagent IDs and copied
+    /// conversation messages are not evidence of a fork. Codex thread IDs differ
+    /// from session-tree IDs; `id` and `forked_from_id` are the matching pair.
+    pub fn fork_parent(&self) -> io::Result<Option<String>> {
+        if self.agent != SessionAgent::Codex {
+            return Ok(None);
+        }
+        let (head, _) = read_window(&self.path, 256 * 1024, false)?;
+        for record in records(&head) {
+            if record["type"] != "session_meta" {
+                continue;
+            }
+            let meta = &record["payload"];
+            if meta["id"].as_str() != Some(self.id.as_str())
+                || meta["source"].is_object()
+                || meta["thread_source"].is_object()
+                || meta["thread_source"] == "subagent"
+            {
+                return Ok(None);
+            }
+            return meta["forked_from_id"]
+                .as_str()
+                .map(|id| {
+                    uuid::Uuid::parse_str(id)
+                        .map(|id| id.to_string())
+                        .map_err(io::Error::other)
+                })
+                .transpose();
+        }
+        Ok(None)
+    }
+
     pub fn preview(&self) -> io::Result<String> {
         if matches!(
             self.agent,

@@ -46,6 +46,35 @@ pub struct Snapshot {
     pub positions: BTreeMap<SessionKey, Point>,
 }
 
+/// Refresh one native namespace without changing the existing history panel's
+/// discovery/filtering behavior. Unknown provider lineage stays unknown.
+pub fn import_native(
+    store: &mut FlowStore,
+    agent: SessionAgent,
+    home: &Path,
+) -> io::Result<Vec<(SessionKey, HistorySession)>> {
+    let sessions = crate::session_history::list_sessions(agent, home)?;
+    let mut available = Vec::new();
+    let mut records = Vec::new();
+    let mut edges = Vec::new();
+    for session in sessions {
+        let key = session_key(agent, home, &session.id)?;
+        if let Some(parent) = session.fork_parent()? {
+            edges.push((
+                SessionKey {
+                    id: parent,
+                    ..key.clone()
+                },
+                key.clone(),
+            ));
+        }
+        records.push((key.clone(), SessionRecord::from(&session)));
+        available.push((key, session));
+    }
+    store.import(&records, &edges)?;
+    Ok(available)
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum OperationKind {
     Fork,
@@ -507,5 +536,139 @@ mod tests {
             session_key(SessionAgent::Codex, &alias, "id").unwrap()
         );
         assert!(session_key(SessionAgent::Codex, &dir.path().join("missing"), "id").is_err());
+    }
+    #[test]
+    fn native_codex_fork_uses_thread_identity_and_does_not_change_history() {
+        let (dir, mut db) = store();
+        let home = dir.path().join("codex");
+        let sessions = home.join("sessions/2026/10/31");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let parent = Uuid::new_v4().to_string();
+        let child = Uuid::new_v4().to_string();
+        let grandchild = Uuid::new_v4().to_string();
+        let unrelated = Uuid::new_v4().to_string();
+        for (id, source, fork, ordinary_parent) in [
+            (&child, serde_json::json!("cli"), Some(&parent), None),
+            (&grandchild, serde_json::json!("cli"), Some(&child), None),
+            (&unrelated, serde_json::json!("cli"), None, Some(&parent)),
+        ] {
+            let content = serde_json::json!({"type":"session_meta","payload":{
+                "id":id,"session_id":parent,"source":source,"forked_from_id":fork,
+                "parent_thread_id":ordinary_parent,"cwd":dir.path()
+            }})
+            .to_string();
+            std::fs::write(sessions.join(format!("{id}.jsonl")), content).unwrap();
+        }
+        let before = crate::session_history::list_sessions(SessionAgent::Codex, &home).unwrap();
+        let available = import_native(&mut db, SessionAgent::Codex, &home).unwrap();
+        assert_eq!(available.len(), before.len());
+        let graph = db.snapshot().unwrap().lineage;
+        assert_eq!(graph.edges().count(), 2);
+        assert_eq!(
+            graph
+                .project([&session_key(SessionAgent::Codex, &home, &grandchild).unwrap()])
+                .nodes()
+                .len(),
+            3
+        );
+        assert!(graph
+            .project([&session_key(SessionAgent::Codex, &home, &unrelated).unwrap()])
+            .is_empty());
+        import_native(&mut db, SessionAgent::Codex, &home).unwrap();
+        assert_eq!(db.snapshot().unwrap().lineage, graph);
+        assert_eq!(
+            crate::session_history::list_sessions(SessionAgent::Codex, &home)
+                .unwrap()
+                .len(),
+            before.len()
+        );
+    }
+
+    #[test]
+    fn fork_commands_validate_ids_and_never_relax_permissions() {
+        let mut session = HistorySession {
+            agent: SessionAgent::Claude,
+            id: Uuid::new_v4().to_string(),
+            title: String::new(),
+            summary: String::new(),
+            cwd: "/repo".into(),
+            path: "/transcript".into(),
+            modified: std::time::UNIX_EPOCH,
+        };
+        assert_eq!(
+            session.fork_command().unwrap(),
+            format!("claude --resume {} --fork-session", session.id)
+        );
+        session.agent = SessionAgent::Codex;
+        assert_eq!(
+            session.fork_command().unwrap(),
+            format!("codex fork {}", session.id)
+        );
+        for agent in [
+            SessionAgent::Gemini,
+            SessionAgent::Cline,
+            SessionAgent::Antigravity,
+        ] {
+            session.agent = agent;
+            assert_eq!(
+                session.fork_command().unwrap_err().kind(),
+                io::ErrorKind::Unsupported
+            );
+        }
+        session.agent = SessionAgent::OpenCode;
+        session.id = "ses_valid123".into();
+        assert_eq!(
+            session.fork_command().unwrap(),
+            "opencode --session ses_valid123 --fork"
+        );
+        for id in ["ses_x;touch /tmp/pwn", "ses_", "$(echo injected)"] {
+            session.id = id.into();
+            assert!(session.fork_command().is_err());
+        }
+        session.agent = SessionAgent::Codex;
+        assert!(session.fork_command().is_err());
+    }
+
+    #[test]
+    fn malformed_native_parent_rejects_import_without_publishing_guesswork() {
+        let (dir, mut db) = store();
+        let path = dir.path().join("transcript.jsonl");
+        let id = Uuid::new_v4().to_string();
+        let session = HistorySession {
+            agent: SessionAgent::Codex,
+            id: id.clone(),
+            title: String::new(),
+            summary: String::new(),
+            cwd: dir.path().into(),
+            path: path.clone(),
+            modified: std::time::UNIX_EPOCH,
+        };
+        for (meta, expected) in [
+            (serde_json::json!({"id":id,"forked_from_id":"bad"}), "error"),
+            (
+                serde_json::json!({"id":id,"source":{"subagent":"review"},"forked_from_id":Uuid::new_v4()}),
+                "none",
+            ),
+            (
+                serde_json::json!({"id":Uuid::new_v4(),"forked_from_id":Uuid::new_v4()}),
+                "none",
+            ),
+            (
+                serde_json::json!({"id":id,"parent_thread_id":Uuid::new_v4()}),
+                "none",
+            ),
+        ] {
+            std::fs::write(
+                &path,
+                serde_json::json!({"type":"session_meta","payload":meta}).to_string(),
+            )
+            .unwrap();
+            match expected {
+                "error" => assert!(session.fork_parent().is_err()),
+                _ => assert_eq!(session.fork_parent().unwrap(), None),
+            }
+        }
+        assert!(db.snapshot().unwrap().lineage.is_empty());
+        db.import(&[], &[]).unwrap();
     }
 }
