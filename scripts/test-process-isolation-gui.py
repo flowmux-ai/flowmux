@@ -37,6 +37,7 @@ def main():
         options = {"default_shell": str(shell), "pane_memory_max": "64M"}
         (config / "options.json").write_text(json.dumps(options))
         h.start_display()
+        private_bus = h.env["DBUS_SESSION_BUS_ADDRESS"]
         # Keep accessibility private while scope creation uses the real user manager.
         address = subprocess.check_output(["gdbus", "call", "--session", "--dest", "org.a11y.Bus",
             "--object-path", "/org/a11y/bus", "--method", "org.a11y.Bus.GetAddress"], env=h.env, text=True)
@@ -89,6 +90,7 @@ def main():
         def shell_pid(surface):
             h.rpc(path, "surface_focus", pane=pane, surface=surface)
             target = h.root / (surface + ".pid")
+            target.unlink(missing_ok=True)
             h.send(path, pane, "echo $$ > " + shlex.quote(str(target)))
             gui.wait_for(lambda: target.exists() and target.read_text().strip(), "shell PID")
             return int(target.read_text())
@@ -136,6 +138,13 @@ def main():
         time.sleep(.5)
         assert not find("Keep tab")
         h.pass_check("external SIGKILL reports; exit 0/130/137 and manual tab close stay silent")
+        split = h.rpc(path, "pane_split", pane=pane, direction="vertical")["pane_split_done"]["new_pane"]
+        h.send(path, split, "kill -KILL $$")
+        gui.wait_for(lambda: find("This tab's process was terminated by SIGKILL"), "split tab explanation")
+        click("Close tab")
+        gui.wait_for(lambda: len(h.workspace(path, workspace)["panes"]) == 1, "empty split collapsed")
+        assert h.workspace(path, workspace)["panes"][0]["id"] == pane and gui.alive(original_pid)
+        h.pass_check("closing the only tab of a split collapses only that pane")
         h.rpc(path, "surface_focus", pane=pane, surface=original)
         h.send(path, pane, "kill -HUP $$")
         gui.wait_for(lambda: find("This tab's process was terminated by SIGHUP"), "external HUP explanation")
@@ -144,18 +153,20 @@ def main():
         assert not find("Keep tab")
         h.pass_check("last tab offers Close workspace and removes it with one confirmation")
         h.close_window(process)
-        options["process_isolation"] = "off"
-        (config / "options.json").write_text(json.dumps(options))
-        process, path = h.window("isolation-off")
-        workspace = h.rpc(path, "workspace_create", name="fallback", root=str(h.root))["workspace_created"]["id"]
-        h.rpc(path, "workspace_focus", workspace=workspace)
-        pane = h.workspace(path, workspace)["panes"][0]["id"]
-        original = tabs()[0]["id"]
-        pid = shell_pid(original)
-        assert Path(f"/proc/{pid}/oom_score_adj").read_text().strip() == "500"
-        assert "flowmux-" + str(process.pid) not in Path(f"/proc/{pid}/cgroup").read_text()
-        h.pass_check("disabled isolation starts promptly with oom_score_adj 500 fallback")
-        h.close_window(process)
+        for mode, bus in (("off", real_bus), ("auto", private_bus)):
+            options["process_isolation"] = mode
+            (config / "options.json").write_text(json.dumps(options))
+            h.env["DBUS_SESSION_BUS_ADDRESS"] = bus
+            process, path = h.window("isolation-fallback-" + mode)
+            workspace = h.rpc(path, "workspace_create", name="fallback", root=str(h.root))["workspace_created"]["id"]
+            h.rpc(path, "workspace_focus", workspace=workspace)
+            pane = h.workspace(path, workspace)["panes"][0]["id"]
+            original = tabs()[0]["id"]
+            pid = shell_pid(original)
+            assert Path(f"/proc/{pid}/oom_score_adj").read_text().strip() == "500"
+            assert "flowmux-" + str(process.pid) not in Path(f"/proc/{pid}/cgroup").read_text()
+            h.pass_check(f"{mode} without isolation starts promptly with oom_score_adj 500 fallback")
+            h.close_window(process)
     finally:
         h.cleanup()
 
