@@ -342,7 +342,7 @@ impl WindowController {
         };
         let mut workspace_anchors: HashMap<WorkspaceId, BTreeSet<SessionKey>> = HashMap::new();
         let mut running = BTreeSet::new();
-        let mut forkable = HashSet::new();
+        let mut forkable = HashMap::new();
         for anchor in anchors {
             let Some(focused) = &anchor.target.focused else {
                 continue;
@@ -360,7 +360,7 @@ impl WindowController {
                 .insert(key.clone());
             running.insert(key.clone());
             if idle.contains(&focused.surface) && catalog.forkable.contains(key) {
-                forkable.insert(focused.surface);
+                forkable.insert(focused.surface, key.clone());
             }
         }
         self.pane_registry.borrow_mut().session_flow_forkable = forkable;
@@ -458,16 +458,8 @@ impl WindowController {
                 }
             }
             FlowAction::Open(key) => self.open_flow_session(key, None).await,
-            FlowAction::Fork { pane, surface } => {
-                let key = self
-                    .flow
-                    .catalog
-                    .borrow()
-                    .as_ref()
-                    .and_then(|c| c.bindings.get(&surface).cloned());
-                if let Some(key) = key {
-                    self.open_flow_session(key, Some((pane, surface))).await;
-                }
+            FlowAction::Fork { pane, surface, key } => {
+                self.open_flow_session(key, Some((pane, surface))).await;
             }
         }
     }
@@ -488,6 +480,21 @@ impl WindowController {
     ) -> Result<(), String> {
         use flowmux_state::session_flow::{Operation, OperationKind};
         let anchors = self.flow_anchors().await;
+        if let Some((pane, surface)) = fork_source {
+            let same_source = anchors.iter().any(|anchor| {
+                SessionAgent::from_name(&key.provider) == Some(anchor.target.agent)
+                    && anchor.target.focused.as_ref().is_some_and(|focused| {
+                        focused.pane == pane
+                            && focused.surface == surface
+                            && focused.session_id.as_ref() == Some(&key.id)
+                    })
+            });
+            if !same_source {
+                return Err(
+                    "Source session changed; reopen its context menu before forking".into(),
+                );
+            }
+        }
         if fork_source.is_none() {
             let live = {
                 let catalog = self.flow.catalog.borrow();
@@ -915,6 +922,64 @@ pub(super) async fn check_native(
         live: BTreeMap::new(),
     });
     controller
+        .pane_registry
+        .borrow_mut()
+        .session_flow_forkable
+        .insert(source, key(&child));
+    let fork = native_fork_button(&terminal.widget);
+    assert!(fork.is_sensitive());
+    {
+        let mut catalog = controller.flow.catalog.borrow_mut();
+        let catalog = catalog.as_mut().unwrap();
+        catalog.bindings.insert(source, key(&other_child));
+        catalog.forkable.extend([key(&child), key(&other_child)]);
+    }
+    let mut changed =
+        flowmux_core::AgentPresence::new("Codex", flowmux_core::AgentActivity::Idle, None);
+    changed.session_id = Some(other_child.clone());
+    controller
+        .store
+        .set_agent_activity(source, Some(changed.clone()))
+        .await
+        .unwrap();
+    let rejected = Rc::new(Cell::new(false));
+    let seen = rejected.clone();
+    let handler = controller
+        .flow
+        .panel
+        .status
+        .connect_label_notify(move |label| {
+            if label.text().contains("Source session changed") {
+                seen.set(true);
+            }
+        });
+    fork.emit_clicked();
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !rejected.get() {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("stale menu did not reject the changed session");
+    controller.flow.panel.status.disconnect(handler);
+    assert_eq!(controller.pane_registry.borrow().terminals.len(), 1);
+    assert!(
+        store.pending().unwrap().is_empty(),
+        "stale menu reserved an operation"
+    );
+    changed.session_id = Some(child.clone());
+    controller
+        .store
+        .set_agent_activity(source, Some(changed))
+        .await
+        .unwrap();
+    {
+        let mut catalog = controller.flow.catalog.borrow_mut();
+        let catalog = catalog.as_mut().unwrap();
+        catalog.bindings.insert(source, key(&child));
+        catalog.forkable.clear();
+    }
+    controller
         .render_session_flow(std::slice::from_ref(&anchor))
         .await;
     controller.flow.panel.toggle(workspace);
@@ -1182,7 +1247,7 @@ pub(super) async fn check_real_codex(
             .pane_registry
             .borrow()
             .session_flow_forkable
-            .contains(&source)
+            .contains_key(&source)
         {
             glib::timeout_future(Duration::from_millis(50)).await;
         }

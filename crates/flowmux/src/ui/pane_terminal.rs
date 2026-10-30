@@ -100,8 +100,9 @@ pub struct PaneCallbacks {
     /// the same callback is reused by both terminal and browser
     /// right-click menus.
     pub on_copy_surface_text: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
-    pub on_fork_session: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
-    pub can_fork_session: Rc<dyn Fn(SurfaceId) -> bool>,
+    pub on_fork_session:
+        Rc<RefCell<dyn FnMut(PaneId, SurfaceId, flowmux_core::session_flow::SessionKey)>>,
+    pub fork_session_key: Rc<dyn Fn(SurfaceId) -> Option<flowmux_core::session_flow::SessionKey>>,
     /// Terminal body/tab right-click "Copy session ID".
     pub on_copy_surface_session_id: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
     /// A tab drag ended without landing on another tab drop target. The caller
@@ -211,8 +212,8 @@ impl PaneCallbacks {
             on_rename_surface: Rc::new(RefCell::new(|_, _| {})),
             on_show_surface_folder: Rc::new(RefCell::new(|_, _| {})),
             on_copy_surface_text: Rc::new(RefCell::new(|_, _| {})),
-            on_fork_session: Rc::new(RefCell::new(|_, _| {})),
-            can_fork_session: Rc::new(|_| false),
+            on_fork_session: Rc::new(RefCell::new(|_, _, _| {})),
+            fork_session_key: Rc::new(|_| None),
             on_copy_surface_session_id: Rc::new(RefCell::new(|_, _| {})),
             on_tab_drag_to_new_window: Rc::new(RefCell::new(|_, _| {})),
             on_move_surface_to_workspace: Rc::new(RefCell::new(|_, _, _| {})),

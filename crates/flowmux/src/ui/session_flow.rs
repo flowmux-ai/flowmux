@@ -16,7 +16,11 @@ pub enum FlowAction {
     Refresh,
     SaveView,
     Open(SessionKey),
-    Fork { pane: PaneId, surface: SurfaceId },
+    Fork {
+        pane: PaneId,
+        surface: SurfaceId,
+        key: SessionKey,
+    },
 }
 
 #[derive(Clone, Debug)]

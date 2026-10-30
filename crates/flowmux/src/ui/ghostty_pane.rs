@@ -994,7 +994,7 @@ impl GhosttyPane {
             let on_copy_text = callbacks.on_copy_surface_text.clone();
             let on_copy_session_id = callbacks.on_copy_surface_session_id.clone();
             let on_fork_session = callbacks.on_fork_session.clone();
-            let can_fork_session = callbacks.can_fork_session.clone();
+            let fork_session_key = callbacks.fork_session_key.clone();
             let surface_for_menu = surface;
             let pane_id = pane_id.clone();
             let term_widget = term.downgrade();
@@ -1070,7 +1070,8 @@ impl GhosttyPane {
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
                 let fork = mk("Fork session");
-                let enabled = can_fork_session(surface_for_menu);
+                let fork_key = fork_session_key(surface_for_menu);
+                let enabled = fork_key.is_some();
                 fork.set_sensitive(enabled);
                 fork.set_tooltip_text(Some(if enabled {
                     "Fork the conversation in a right split, using the same project files"
@@ -1083,7 +1084,9 @@ impl GhosttyPane {
                     if let Some(pop) = pop.upgrade() {
                         pop.popdown();
                     }
-                    (cb.borrow_mut())(id, surface_for_menu);
+                    if let Some(key) = fork_key.clone() {
+                        (cb.borrow_mut())(id, surface_for_menu, key);
+                    }
                 });
                 v.append(&fork);
 

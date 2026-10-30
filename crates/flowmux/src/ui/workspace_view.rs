@@ -170,7 +170,8 @@ struct DeferredPanel {
 
 #[derive(Default)]
 pub struct PaneRegistry {
-    pub(crate) session_flow_forkable: std::collections::HashSet<SurfaceId>,
+    pub(crate) session_flow_forkable:
+        std::collections::HashMap<SurfaceId, flowmux_core::session_flow::SessionKey>,
     deferred: HashMap<SurfaceId, DeferredPanel>,
     pub ssh: HashMap<WorkspaceId, Rc<RefCell<super::window::ssh::SshRuntime>>>,
     /// Surfaces whose panel could not be built during a full workspace

@@ -220,22 +220,27 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::CopySurfaceText { pane, surface });
                 }))
             },
-            can_fork_session: {
+            fork_session_key: {
                 let registry = Rc::downgrade(&pane_registry);
                 Rc::new(move |surface| {
-                    registry.upgrade().is_some_and(|registry| {
-                        registry.borrow().session_flow_forkable.contains(&surface)
+                    registry.upgrade().and_then(|registry| {
+                        registry
+                            .borrow()
+                            .session_flow_forkable
+                            .get(&surface)
+                            .cloned()
                     })
                 })
             },
             on_fork_session: {
                 let bridge = bridge.clone();
-                Rc::new(RefCell::new(move |pane, surface| {
+                Rc::new(RefCell::new(move |pane, surface, key| {
                     dispatch_detached(
                         &bridge,
                         GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::Fork {
                             pane,
                             surface,
+                            key,
                         }),
                     );
                 }))
@@ -499,7 +504,15 @@ mod tests {
     fn pane_callbacks_do_not_retain_registry() {
         let registry = Rc::new(RefCell::new(PaneRegistry::default()));
         let surface = SurfaceId::new();
-        registry.borrow_mut().session_flow_forkable.insert(surface);
+        let key = flowmux_core::session_flow::SessionKey {
+            provider: "codex".into(),
+            home: "/fixture".into(),
+            id: "source".into(),
+        };
+        registry
+            .borrow_mut()
+            .session_flow_forkable
+            .insert(surface, key.clone());
         let weak = Rc::downgrade(&registry);
         let (bridge, _rx) = Bridge::new();
         let callbacks = PaneCallbackRouter::new(
@@ -512,10 +525,10 @@ mod tests {
             Rc::new(Cell::new(false)),
         )
         .into_callbacks();
-        assert!((callbacks.can_fork_session)(surface));
+        assert_eq!((callbacks.fork_session_key)(surface), Some(key));
         drop(registry);
         assert!(weak.upgrade().is_none(), "callbacks retained the registry");
-        assert!(!(callbacks.can_fork_session)(surface));
+        assert_eq!((callbacks.fork_session_key)(surface), None);
         let pane = PaneId::new();
         assert_eq!((callbacks.workspace_of_pane)(pane), None);
         assert_eq!(
