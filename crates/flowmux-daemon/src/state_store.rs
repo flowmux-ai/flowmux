@@ -7240,6 +7240,7 @@ mod tests {
     #[tokio::test]
     async fn completed_codex_screen_recovers_without_observing_a_spinner() {
         for screen in [
+            "› Request approval with justification Allow this command.\n• Dispatched\nWorked for 28s • 3:39 PM\n• Completed `/root/child`\n› Ask Codex to do anything\n  GPT-6-Astra default · /tmp/work · Main [default]",
             "For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\nWorked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
             "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view",
             "• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work",
@@ -7453,6 +7454,7 @@ mod tests {
             );
             let screens: &[&str] = if agent == "codex" {
                 &[
+                    "› Request approval with justification Allow this command.\n• Dispatched\nWorked for 28s • 3:39 PM\n• Completed `/root/child`\n› Ask Codex to do anything\n  GPT-6-Astra default · /tmp/work · Main [default]",
                     "› Explain the phrase permission prompt.\n  • Working (1s • esc to interrupt)\n  Usage limit reached\n\n  GPT-6-Astra default · /tmp/work",
                     "› Explain the phrase permission prompt.\n■ Conversation interrupted - use /feedback if something went wrong\n› Ask Codex to do anything\n\n  GPT-6-Astra default · /tmp/work",
                     "Worked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",

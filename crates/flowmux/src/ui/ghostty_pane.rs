@@ -1333,7 +1333,15 @@ impl GhosttyPane {
         // ED2 may move the replaced frame into scrollback (notably VTE 0.76).
         // Read the live grid, never an old spinner above it, even when scrolled back.
         let first_row = last_row.saturating_sub(rows - 1);
-        self.output_search_text(first_row, last_row.saturating_add(1))
+        // ED3 rebases the adjustment without rebasing the absolute cursor.
+        // Include the live rows below it, then discard out-of-grid blank rows.
+        let end = last_row
+            .saturating_add(1)
+            .max(cursor_row.saturating_add(self.widget.row_count().max(1)));
+        let text = self.output_search_text(first_row, end)?;
+        let text = text.trim_end_matches('\n');
+        let skip = text.lines().count().saturating_sub(rows as usize);
+        Some(text.split_inclusive('\n').skip(skip).collect())
     }
 
     /// Styled terminal history for persistence. VTE exposes cell attributes
@@ -3427,6 +3435,72 @@ except (ChildProcessError, ValueError):
 "#;
 
 #[cfg(test)]
+pub(crate) async fn check_normal_agent_status_below_cursor() {
+    let pane = GhosttyPane::spawn(
+        PaneId::new(),
+        SurfaceId::new(),
+        vec!["/bin/sleep".into(), "30".into()],
+        None,
+        Vec::new(),
+        5_000,
+        PaneCallbacks::noop_for_test(),
+    )
+    .unwrap();
+    let window = gtk::Window::new();
+    window.set_default_size(1000, 600);
+    window.set_child(Some(&pane.container));
+    window.present();
+    glib::timeout_future(Duration::from_millis(100)).await;
+    let rows = pane.widget.row_count();
+    assert!(rows > 8);
+    // Clearing history rebases the adjustment but not VTE's absolute cursor row.
+    pane.widget.feed("old history\r\n".repeat(200).as_bytes());
+    glib::timeout_future(Duration::from_millis(100)).await;
+    let frame = format!(
+        "\x1b[2J\x1b[3J\x1b[HFor a permission prompt test, request approval.\x1b[{};1HWorked for 9s • 3:39 PM\x1b[{};1H• Completed `/root/child`\x1b[{};1H› Ask Codex to do anything\x1b[{};1H  GPT-6-Astra default · /tmp/work\x1b[{};3H",
+        rows - 7, rows - 5, rows - 3, rows - 1, rows - 3,
+    );
+    pane.widget.feed(frame.as_bytes());
+    for _ in 0..100 {
+        if pane
+            .screen_text()
+            .is_some_and(|t| t.contains("GPT-6-Astra default"))
+        {
+            break;
+        }
+        glib::timeout_future(Duration::from_millis(20)).await;
+    }
+    let viewport = pane.screen_text().unwrap();
+    assert!(viewport.contains("GPT-6-Astra default"), "{viewport:?}");
+    for visible in [true, false] {
+        window.set_visible(visible);
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let text = pane.agent_status_text().unwrap();
+        let adjustment = pane.widget.vadjustment().unwrap();
+        assert!(
+            text.contains("GPT-6-Astra default"),
+            "mapped={visible} cursor={:?} upper={} rows={rows}: {text:?}",
+            pane.widget.cursor_position(),
+            adjustment.upper()
+        );
+        assert!(text.lines().count() <= AGENT_STATUS_TEXT_ROWS as usize);
+        assert_eq!(
+            flowmux_core::detect_agent_completion(Some(&text)),
+            Some("codex"),
+            "{text:?}"
+        );
+        assert_eq!(
+            flowmux_core::detect_agent_status_from_signals(Some(&text), None),
+            Some(flowmux_core::AgentStatus::Idle),
+            "{text:?}"
+        );
+    }
+    pane.close_pty();
+    window.destroy();
+    println!("AGENT_NORMAL_SCREEN_FOOTER_OK");
+}
+
+#[cfg(test)]
 mod tests {
     async fn wait_for_exit(slot: &Rc<RefCell<Option<ChildExit>>>) -> ChildExit {
         glib::future_with_timeout(std::time::Duration::from_secs(10), async {
@@ -3557,6 +3631,12 @@ mod tests {
     }
 
     use super::*;
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn normal_agent_status_includes_footer_below_cursor_after_history_clear() {
+        check_normal_agent_status_below_cursor().await;
+    }
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]

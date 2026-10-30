@@ -3728,6 +3728,54 @@ fn completed_turn_history_does_not_reopen_a_resolved_permission_request() {
 }
 
 #[test]
+fn completed_child_rows_do_not_reopen_transcript_approval_requests() {
+    let composer = "› Ask Codex to do anything\n  GPT-6-Astra default · /tmp/work · Main [default]";
+    let history = "› Request a child command with justification \"Allow this one-time child approval test?\".\n• Interacted with `/root/lifecycle_observation`\n• Dispatched\n  Worked for 9s • 3:39 PM";
+    for children in [
+        "• Completed `/root/lifecycle_observation`",
+        "• Completed `/root/first`\n• Completed `/root/second`",
+    ] {
+        let screen = format!("{history}\n{children}\n{composer}");
+        assert_eq!(
+            detect_agent_completion(Some(&screen)),
+            Some("codex"),
+            "{screen}"
+        );
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&screen), None),
+            Some(AgentStatus::Idle),
+            "{screen}"
+        );
+        for (signal, expected) in [
+            ("• Working (1s • esc to interrupt)", AgentStatus::Working),
+            ("Do you want to approve this command?", AgentStatus::Blocked),
+        ] {
+            let live = format!("{history}\n{children}\n{signal}\n{composer}");
+            assert_eq!(detect_agent_completion(Some(&live)), None, "{live}");
+            assert_eq!(
+                detect_agent_status_from_signals(Some(&live), None),
+                Some(expected),
+                "{live}"
+            );
+        }
+    }
+    for intervening in [
+        "• Completed the task",
+        "• Completed `/root/child` with errors",
+        "• Started `/root/child`",
+        "• Interacted with `/root/child`",
+        "› A newly submitted prompt\n• Completed `/root/child`",
+    ] {
+        let screen = format!("{history}\n{intervening}\n{composer}");
+        assert_eq!(detect_agent_completion(Some(&screen)), None, "{screen}");
+    }
+    assert_eq!(
+        detect_agent_completion(Some(&format!("• Completed `/root/child`\n{composer}"))),
+        None
+    );
+}
+
+#[test]
 fn composer_drafts_are_not_status_evidence() {
     for composer in [
         "› Explain the phrase permission prompt.\n\n  GPT-6-Astra default · /tmp/work",

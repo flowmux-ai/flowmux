@@ -1031,3 +1031,70 @@ coverage remains quota-blocked. This does not close the earlier full GUI gate
 failures or establish protocol/child-detail support and performance budgets.
 Trace files use existing logging retention and are not a durable delivery queue
 or a complete inventory of missed events.
+
+## Completed child rows and live terminal bounds (2026-10-30)
+
+An actual reused child approval exposed a false input-required state after its
+native wait and active-child records had both cleared. Two conditions combined:
+the child completion row separated the parent footer from its composer, and
+clearing terminal history rebased the scroll adjustment without rebasing the
+absolute cursor row. The status extraction ended at the cursor and omitted the
+model/path row below it. Old approval prose consequently became status evidence.
+
+Completion detection now permits only structured completed-child rows between
+the existing validated footer and composer. New prompts, progress, and live
+approval controls still stop that search. Normal-screen extraction includes the
+bounded live range below the absolute cursor, discards out-of-grid trailing
+blank rows, and caps the returned lines. Native pending waits, active children,
+new-turn fingerprints, and ownership rules retain priority. A screen footer
+establishes that a response ended, not that its work succeeded.
+
+The reduced core case failed before the fix (`/tmp/fm-child-footer-red.log`).
+The GUI reproduction also failed on both platforms: after clearing history,
+the macOS cursor was at absolute row 239 while the adjustment upper bound was
+42. The visible footer was absent from the extracted status text. Red logs:
+`/tmp/fm-child-text-native-red.log`, `/tmp/fm-child-text-linux-red.log`.
+Both mapped and hidden terminal cases then passed. Linux's full terminal suite
+passed all 51 tests, including old-frame exclusion, alternate-screen footer
+capture, the 80-line limit, and the tall hidden viewport's final cell
+(`/tmp/fm-child-terminal-linux.log`). The final macOS native agent harness
+passed the new extraction check, lifecycle replay, evidence tooltips, and stable
+rows (`/tmp/fm-child-footer-final-native.log`).
+
+Isolated macOS/Linux agent suites passed: CLI library 127, CLI binary 156,
+core 171, daemon 201, daemon binary 2, and platform process tests. Logs:
+`/tmp/fm-child-footer-unit.log`, `/tmp/fm-child-footer-linux-unit.log`.
+Workspace/all-targets Clippy with native-smoke, the final application build,
+formatting, and diff checks passed. Build and Clippy logs use the
+`/tmp/fm-child-footer-final-` prefix. The validation candidate also contained
+the separate read-only explanation work used to inspect child
+records; it did not change approval or lifecycle policy.
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 ran in isolated application
+PID 90486, `/tmp/fm-atn-zcur98rj`. B passed consecutive responses, one-time
+approval, interruption, recovery, first-child completion, and two reused-child
+approvals. The final reuse completed with its workspace hidden; receiver traces
+confirm `surface_visible=false`. Each reuse retained zero pending waits and
+zero active children during an eight-second recovery observation. The hidden
+result remained unread and showed outcome-unconfirmed review, not input needed.
+A preserved its native quota evidence through automatic-to-manual retry, and
+status-like drafts changed neither agent's state. Logs:
+`/tmp/fm-child-footer-final-live.log`,
+`/tmp/fm-child-footer-final-child.log`,
+`/tmp/fm-child-footer-final-approval.log`,
+`/tmp/fm-child-footer-hidden-approval.log`. Native screenshots confirmed the
+approval and final input/review displays. Temporary screen-capture diagnostics
+were removed before this final build.
+
+Application and CLI bundle SHA-256:
+
+`59fde52d6eafcdd4698d7aec954dbf50652640bddfdab7f14e1fe39169e13448`
+
+`f777ece6db949b663a758c71c80c934bb4478ec86bc76bafffa07ab69efabfb8`
+
+The copied binaries' build UUIDs matched the build outputs. Original application
+PID 72789 and user process PID 1401 remained alive; the permanent agent binary
+hash was unchanged. A's ordinary response/question scenarios remain quota-blocked.
+Existing theme parser warnings remain, without a fatal critical in this run.
+These focused passes do not close the earlier full GUI gate failures or the
+remaining detail UI, protocol, and performance work.

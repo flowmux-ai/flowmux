@@ -93,6 +93,11 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 async fn check(app: &adw::Application, root: &std::path::Path) {
     crate::ui::browser_control::check_controls();
     crate::keybindings::check_quit_dialog(app).await;
+    #[cfg(test)]
+    if std::env::var_os("FLOWMUX_AGENT_TEXT_SMOKE_ONLY").is_some() {
+        crate::ui::ghostty_pane::check_normal_agent_status_below_cursor().await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_QUIT_DIALOG_SMOKE_ONLY").is_some() {
         return;
     }
@@ -321,6 +326,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     }
 
     if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
+        #[cfg(test)]
+        crate::ui::ghostty_pane::check_normal_agent_status_below_cursor().await;
         controller.options.borrow_mut().system_notifications_enabled = false;
         let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
         let handler = Arc::new(crate::ipc_handler::GuiHandler::new(

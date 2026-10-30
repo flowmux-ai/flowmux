@@ -3772,6 +3772,15 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
     let footer = lines
         .iter()
         .skip(prompt + 1)
+        // Child results may arrive after the parent's completed-turn footer.
+        // Skip only these rows; new prompts, progress, and waits end the search.
+        .skip_while(|line| {
+            lines[prompt].starts_with('›')
+                && line
+                    .strip_prefix("• Completed `/root/")
+                    .and_then(|child| child.strip_suffix('`'))
+                    .is_some_and(|child| !child.is_empty() && !child.contains('`'))
+        })
         .find(|line| !line.chars().all(|c| matches!(c, '─' | '━' | ' ')))
         .copied()
         .unwrap_or_default();
