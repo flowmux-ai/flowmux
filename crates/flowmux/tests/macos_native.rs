@@ -42,6 +42,16 @@ const APP_ID: &str = "com.flowmux.App";
 mod macos_input;
 
 fn main() {
+    // Native GLib failures do not pass through Rust's panic backtrace hook.
+    gtk::glib::log_set_default_handler(|domain, level, message| {
+        if matches!(
+            level,
+            gtk::glib::LogLevel::Error | gtk::glib::LogLevel::Critical
+        ) {
+            eprintln!("{}", std::backtrace::Backtrace::force_capture());
+        }
+        gtk::glib::log_default_handler(domain, level, Some(message));
+    });
     #[cfg(target_os = "macos")]
     ui::window::macos_smoke::run();
     #[cfg(not(target_os = "macos"))]

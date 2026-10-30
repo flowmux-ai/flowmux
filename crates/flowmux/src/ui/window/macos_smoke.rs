@@ -369,6 +369,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     if review_only {
         check_sidebar_footer(&controller).await;
     }
+    println!("MACOS_MENU_TOGGLE_START");
     crate::ui::popover_pos::menu_toggle_smoke().await;
     for _ in 0..2 {
         controller.dispatch(GtkCommand::ShowOptionsDialog).await;
