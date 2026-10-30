@@ -1274,3 +1274,49 @@ SHA-256 is `06f32177cc08e514e1c478d1d646f85d360174855b9227ac25388f55a17de943`.
 Original PIDs 72789 and 1401 and the permanent agent binary were preserved.
 Existing theme warnings remain. These focused checks do not close the earlier
 full GUI, protocol/capability, or performance gates.
+
+### 2026-10-30: bounded program-status parsing and record lifecycle
+
+The OSC 7501 revision 0.4 parser is separate from desktop notifications. It
+recognizes the probe without replying, validates the entire report before
+application, and bounds field sizes, paths, UTF-8/base64 text, and record count.
+Encoded control characters reject the report; message text is not interpreted
+as activity or markup. The payload cap reserves four framing bytes even for
+the shorter BEL terminator. Invalid explicit ids cannot overwrite the root.
+The existing locked base64 package is reused without adding a package version.
+
+Per-terminal records replace all previous fields at an id, inherit app identity
+from the nearest ancestor at read time, clear exact subtrees, and evict the
+least recently updated record at the 256-record cap. The explicit process/shell
+boundary operation retains done/error and removes working/blocked/idle; full
+reset removes everything. There is no clock-based expiry. These operations are
+library primitives: terminal event delivery, state projection, and capability
+negotiation are not connected in this commit.
+
+All 38 macOS and 39 Linux notification/parser tests passed, including 12 new
+protocol tests. Coverage includes every two-chunk split and byte-at-a-time
+input, interleaved existing notifications, invalid/oversized/unterminated
+reports, duplicate fields, text controls, path limits, replacement, inheritance,
+subtree clearing, lifecycle boundaries, and least-recent-update eviction.
+Logs: `/tmp/fm-program-final-tests.log` and
+`/tmp/fm-program-final-linux-tests.log`. The exact application/CLI build,
+workspace all-target Clippy with native-smoke and warnings denied, formatting,
+and whitespace checks also passed.
+
+Actual native-hook agents A and B ran in `/tmp/fm-atn-kutib1qx`, PID 29010,
+bundle `com.flowmux.AttentionVerify30`. Each completed an ordinary reply and a
+new response after interruption of uniquely marked streamed output. Every
+completion retained idle/Completed/Hook for six seconds. A also answered an
+actual question and cleared its pending request. A separate terminal probe
+received the device-attributes sentinel and no OSC 7501 support response,
+confirming that this parser-only build does not advertise support on the tested
+local renderer. Logs: `/tmp/fm-program-final-live-start.log`,
+`/tmp/fm-program-final-live-interrupt.log`,
+`/tmp/fm-program-final-live-question.log`, and
+`/tmp/fm-program-final-live-probe.log`. The final agent explanations and binary
+UUID comparison are retained under the isolated root. The signed GUI SHA-256 is
+`732869b30aa1364a0eab0151e0c79d5c4c7c6519a527ce855c7a65efba7ca9f7`.
+Original PIDs 72789 and 1401 and the permanent agent binary were preserved.
+PTY/IPC delivery, exactly-once probe responses, process-boundary wiring, SSH
+compatibility, native-wait precedence, performance, and full GUI gates remain
+separate unfinished work; parsing tests are not evidence of those integrations.

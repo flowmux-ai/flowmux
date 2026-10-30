@@ -3,6 +3,7 @@
 //! notifications through the platform's desktop service.
 
 pub mod osc;
+pub mod program_status;
 #[cfg(not(target_os = "macos"))]
 pub mod sender;
 #[cfg(target_os = "macos")]

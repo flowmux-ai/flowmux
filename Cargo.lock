@@ -1156,6 +1156,7 @@ dependencies = [
 name = "flowmux-notify"
 version = "0.12.1"
 dependencies = [
+ "base64",
  "block2",
  "chrono",
  "dispatch2",

@@ -8,6 +8,7 @@ publish = false
 description = "OSC notification parser (9 / 99 / 777) and platform desktop notifications."
 
 [dependencies]
+base64 = "0.22"
 flowmux-core = { workspace = true }
 zbus = { workspace = true }
 chrono = { workspace = true }
