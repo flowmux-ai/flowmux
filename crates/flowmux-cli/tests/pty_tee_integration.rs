@@ -933,7 +933,7 @@ fn pty_tee_keeps_input_and_resize_live_under_output_backpressure() {
     let outer = nix::pty::openpty(Some(&initial_size), None).unwrap();
     let mut master = std::fs::File::from(outer.master);
     let script = r#"
-import os, select, signal, sys, tty
+import os, select, signal, sys, termios, tty
 tty.setraw(0)
 os.set_blocking(1, False)
 events = open(sys.argv[1], 'w', buffering=1)
@@ -955,6 +955,10 @@ while output or not input_received:
     if writable:
         try: output = output[os.write(1, output[:8192]):]
         except BlockingIOError: pass
+# Darwin can discard queued slave output at close even after write succeeds.
+# Keep the producer alive until the master receives its final bytes.
+os.set_blocking(1, True)
+termios.tcdrain(1)
 sys.exit(17)
 "#;
     let child = Command::new(flowmuxctl_path())
@@ -1020,10 +1024,11 @@ sys.exit(17)
         .read_to_end(&mut output)
         .unwrap();
     assert_eq!(
-        output,
-        vec![b'x'; 128 * 8192],
+        output.len(),
+        128 * 8192,
         "queued output must remain lossless"
     );
+    assert!(output.iter().all(|&byte| byte == b'x'), "output corrupted");
     assert_eq!(
         wait_for_child(&mut guard.child, Duration::from_secs(10))
             .unwrap()
