@@ -22,8 +22,22 @@ impl Client {
         let stream = UnixStream::connect(socket)
             .await
             .with_context(|| format!("connecting to flowmux socket at {}", socket.display()))?;
+        let socket = socket.canonicalize().unwrap_or_else(|_| socket.to_owned());
+        let credentials = match stream.peer_cred() {
+            Ok(credentials) => credentials,
+            // A saturated regular endpoint can close before macOS reads its
+            // peer credentials. Authenticate the independent control endpoint
+            // instead; regular calls still use the rejected stream and fail.
+            // No request has been sent, and no mutation is rerouted or replayed.
+            Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {
+                UnixStream::connect(crate::control_socket_path(&socket))
+                    .await?
+                    .peer_cred()?
+            }
+            Err(error) => return Err(error.into()),
+        };
         anyhow::ensure!(
-            stream.peer_cred()?.uid() == unsafe { libc::geteuid() },
+            credentials.uid() == unsafe { libc::geteuid() },
             "IPC server belongs to another user"
         );
         let (r, w) = stream.into_split();
@@ -32,7 +46,7 @@ impl Client {
                 reader: BufReader::new(r),
                 writer: w,
             }),
-            socket: socket.canonicalize().unwrap_or_else(|_| socket.to_owned()),
+            socket,
             next_id: std::sync::atomic::AtomicU64::new(1),
         })
     }

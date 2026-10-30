@@ -4,7 +4,7 @@
 
 상태: 구현·검증 진행 중. 아래 항목은 수용 조건이며 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-최신 제품 커밋은 `7cc0c176`이다. [Test 41116487881](https://github.com/flowmux-ai/flowmux/actions/runs/41116487881)와 [Sanitizers 41116492686](https://github.com/flowmux-ai/flowmux/actions/runs/41116492686)는 진행 중이다. 이전 `ecc97ae2`의 Test workflow는 전체 성공했으며 최신 변경의 검증 완료와 구분한다.
+`7cc0c176`의 [Test 41116487881](https://github.com/flowmux-ai/flowmux/actions/runs/41116487881)는 macOS IPC 포화 시험에서 실패했고 Linux 작업은 진행 중이다. [Sanitizers 41116492686](https://github.com/flowmux-ai/flowmux/actions/runs/41116492686)도 진행 중이다. 아래 IPC 경쟁 조건 보완 후 새 최종 CI가 필요하다. 이전 `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -304,9 +304,14 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 부분 계보 보완 이후 실제 Codex 회귀도 통과했다(`/tmp/flowmux-session-flow-partial-real-codex.log`, exit 0). Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e4e-88e7-7ae0-a75d-fefca0788c42`; 실제 메뉴 fork, graph click resume, 중복 방지, workspace 간 공유 계보와 정확한 active tab 전환, 원본/자식 PID 보존 marker를 확인했다.
 
 
-기준 실행 종료 기록: `ecc97ae2`의 Test `41112091385`는 workflow 전체 success다. Linux job `124256539183`은 coverage phase 1,648.592초 및 JSON/HTML/threshold 단계 모두 passed였으며 GUI 907 passed / 기존 ignored 4개와 수정된 PTY 압력 시험 통과를 확인했다. Lines 86.92%, regions 86.85%, functions 85.85%로 기준을 충족했다. Linux artifact `13005333927`, 원본 로그 `/tmp/flowmux-session-flow-linux-ecc97ae2.log`. 아래 실행 당시의 진행 중 표기는 역사 기록이며 현재 최종 검증 대상은 상단의 `7cc0c176`이다.
+기준 실행 종료 기록: `ecc97ae2`의 Test `41112091385`는 workflow 전체 success다. Linux job `124256539183`은 coverage phase 1,648.592초 및 JSON/HTML/threshold 단계 모두 passed였으며 GUI 907 passed / 기존 ignored 4개와 수정된 PTY 압력 시험 통과를 확인했다. Lines 86.92%, regions 86.85%, functions 85.85%로 기준을 충족했다. Linux artifact `13005333927`, 원본 로그 `/tmp/flowmux-session-flow-linux-ecc97ae2.log`. 앞선 실행 당시의 진행 중 표기는 역사 기록이며 현재 최종 검증 대상은 상단의 `7cc0c176`이다.
 
 
 지속 사용 검증 harness: 실제 provider용 native 시험에 `FLOWMUX_SESSION_FLOW_SOAK_SECONDS`(1–1800)를 추가했다. 지정된 임시 Codex profile에서만 실행하며, 일반 native suite의 300초 제한은 유지하고 이 opt-in 경로만 요청된 지속 시간만큼 deadline을 늘린다. 약 10초마다 두 workspace를 전환하고 패널을 닫았다 열며, 같은 계보·정확한 active surface·terminal 수·원본과 자식 PID를 검사한다. 각 회차의 RSS, snapshot 준비 대기, offscreen snapshot/render 호출 시간을 따로 기록한다. 물리 입력이나 디스플레이 frame 지연 측정이 아니다.
 
 첫 지속 시험은 52초 부근에서 고정 20ms 대기 후 snapshot이 없어 실패했다(`/tmp/flowmux-session-flow-soak-1800.log`). 준비된 snapshot을 최대 5초까지 조건으로 기다리도록 바꾼 90초/9회 시험은 통과했고, 해당 시점의 준비 대기는 약 376ms였다(`/tmp/flowmux-session-flow-soak-readiness.log`). 90초 결과를 30분 결과로 대체하지 않는다. Native harness clippy도 통과했다(`/tmp/flowmux-session-flow-soak-final-clippy.log`). 새 코드는 opt-in 시험에만 적용하며 제품 실행 코드는 `7cc0c176`에서 바뀌지 않았다.
+
+
+최신 macOS CI의 IPC 포화 실패: 일반 연결 64개가 모두 응답한 뒤 추가 `Client::connect`의 `peer_cred()`가 `ENOTCONN`으로 실패했다(`/tmp/flowmux-session-flow-macos-7cc0c176.log`). 기존 단일 worker 시험을 두 worker의 동시 accept와 100회 연결로 강화하자 첫 연결에서 같은 오류를 재현했다(`/tmp/flowmux-ipc-saturation-race-before.log`). 포화 서버가 일반 stream을 닫은 뒤 macOS에서 peer credentials를 읽는 경쟁 조건이다.
+
+클라이언트는 이 특정 연결 종료 오류에서만 별도 control endpoint의 동일 사용자 credentials를 검증한다. 일반 요청은 기존 거절된 stream에 남아 실패하며, hook·상태 요청만 기존 control 경로를 사용한다. 전송한 요청을 재시도하거나 mutation을 control로 우회하지 않는다. 수정 후 IPC 단위 80개 및 integration 5+4개가 통과했다(`/tmp/flowmux-ipc-saturation-final.log`). 강화된 시험은 100회 포화 상태 조회, mutation 거절, 이후 상태 조회 성공을 검사한다. IPC all-target clippy와 formatting도 통과했다(`/tmp/flowmux-ipc-saturation-clippy.log`). 실제 native 전체 gate의 재검증은 아직 필요하다. 진행 중인 30분 시험 binary는 이 IPC 수정 전 빌드이므로 그 범위를 별도로 기록한다.

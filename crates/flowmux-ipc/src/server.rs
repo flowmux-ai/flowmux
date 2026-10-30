@@ -974,7 +974,7 @@ mod tests {
         assert!(matches!(response, Ok(Ok(Response::Pong))), "{response:?}");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn status_queries_survive_idle_connection_saturation() {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("idle.sock");
@@ -1009,10 +1009,33 @@ mod tests {
         }
         let alias = dir.path().join("current.sock");
         std::os::unix::fs::symlink(&socket, &alias).unwrap();
-        let client = crate::client::Client::connect(&alias).await.unwrap();
-        let response = timeout(Duration::from_secs(2), client.call(Request::Ping)).await;
+        // The server may reject the regular stream before Client reads peer
+        // credentials. Exercise that race with a concurrent accept loop.
+        for attempt in 0..100 {
+            let client = crate::client::Client::connect(&alias)
+                .await
+                .unwrap_or_else(|error| panic!("saturated connect {attempt}: {error:#}"));
+            let response = timeout(Duration::from_secs(2), client.call(Request::Ping)).await;
+            assert!(matches!(response, Ok(Ok(Response::Pong))), "{response:?}");
+            if attempt == 99 {
+                let mutation = timeout(
+                    Duration::from_secs(2),
+                    client.call(Request::WorkspaceCreate {
+                        team: false,
+                        name: None,
+                        root: dir.path().to_owned(),
+                    }),
+                )
+                .await
+                .expect("a rejected regular connection must not hang");
+                assert!(mutation.is_err(), "mutation must not use control admission");
+                assert!(matches!(
+                    client.call(Request::Ping).await.unwrap(),
+                    Response::Pong
+                ));
+            }
+        }
         server.abort();
-        assert!(matches!(response, Ok(Ok(Response::Pong))), "{response:?}");
     }
 
     #[tokio::test]
