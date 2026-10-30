@@ -338,6 +338,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .expect("agent smoke requires the built flowmuxctl");
         fn tooltip_evidence(widget: &gtk::Widget) -> u8 {
             let mut found = 0;
+            if widget.widget_name() == "flowmux-agent-attention-summary" {
+                if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                    if label.label().contains("Input ") {
+                        found |= 16;
+                    }
+                    if label.label().contains("Waiting ") {
+                        found |= 32;
+                    }
+                }
+            }
             if let Some(text) = widget.tooltip_text() {
                 if text.lines().any(|line| line == "Hook-reported state") {
                     found |= 1;
@@ -389,8 +399,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE_NATIVE_HOOK_MATRIX_OK"));
         assert_eq!(
             evidence_seen.get(),
-            15,
-            "live Agent rows must expose state evidence, waiting actor, and retry evidence"
+            63,
+            "live Agent rows must expose evidence and separate input/waiting counts"
         );
         println!("MACOS_AGENT_EVIDENCE_TOOLTIPS_OK");
         crate::ui::sidebar::check_stable_activity_rows().await;

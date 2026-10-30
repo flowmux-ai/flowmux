@@ -46,6 +46,28 @@ use gtk::prelude::*;
 
 pub use window::{spawn_dispatch_loop, WindowController};
 
+pub(crate) fn agent_attention_summary_label() -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.set_widget_name("flowmux-agent-attention-summary");
+    label.set_xalign(0.0);
+    label.set_halign(gtk::Align::Start);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_max_width_chars(32);
+    label.add_css_class("caption");
+    label.set_visible(false);
+    label
+}
+
+pub(crate) fn update_agent_attention_summary(
+    label: &gtk::Label,
+    summary: flowmux_core::AgentAttentionSummary,
+) {
+    let text = summary.label();
+    label.set_label(&text);
+    label.set_visible(!text.is_empty());
+    label.set_tooltip_text(Some(&summary.tooltip()));
+}
+
 pub(crate) fn agent_status_icon_name(status: AgentStatus, seen: bool) -> &'static str {
     match status {
         AgentStatus::Blocked => "dialog-warning-symbolic",
@@ -54,6 +76,19 @@ pub(crate) fn agent_status_icon_name(status: AgentStatus, seen: bool) -> &'stati
         AgentStatus::Done if !seen => "process-stop-symbolic",
         AgentStatus::Done | AgentStatus::Idle => "media-playback-pause-symbolic",
         AgentStatus::Unknown => "dialog-question-symbolic",
+    }
+}
+
+/// Presentation only: retry waiting must not look like a user input request.
+pub(crate) fn agent_attention_visual_status(
+    status: AgentStatus,
+    attention: flowmux_core::AgentAttention,
+) -> AgentStatus {
+    match attention {
+        flowmux_core::AgentAttention::InputRequired
+        | flowmux_core::AgentAttention::FailureReview => AgentStatus::Blocked,
+        flowmux_core::AgentAttention::Waiting => AgentStatus::Idle,
+        _ => status,
     }
 }
 

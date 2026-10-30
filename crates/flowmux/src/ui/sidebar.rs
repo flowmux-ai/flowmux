@@ -158,6 +158,7 @@ pub struct Sidebar {
     notification_popover: Rc<NotificationPopover>,
     activity_panel: gtk::Box,
     activity_list: gtk::Box,
+    activity_summary: gtk::Label,
     activity_rows: Rc<RefCell<HashMap<SurfaceId, ActivityRowWidget>>>,
     activity_split: gtk::Paned,
     activity_layout: Rc<ActivityPanelLayoutState>,
@@ -497,7 +498,8 @@ impl Sidebar {
         });
 
         let activity_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let (activity_list_root, activity_list, agent_sort_button) = activity_list(&office_btn);
+        let (activity_list_root, activity_list, agent_sort_button, activity_summary) =
+            activity_list(&office_btn);
         let agent_sort_mode = Rc::new(Cell::new(AgentSortMode::default()));
         show_agent_sort_mode(&agent_sort_button, agent_sort_mode.get());
         let agent_sort_mode_for_click = agent_sort_mode.clone();
@@ -604,6 +606,7 @@ impl Sidebar {
             notification_popover,
             activity_panel,
             activity_list,
+            activity_summary,
             activity_rows: Rc::new(RefCell::new(HashMap::new())),
             activity_split,
             activity_layout,
@@ -931,6 +934,11 @@ impl Sidebar {
     ) {
         let has_agents = !current.is_empty();
         self.activity_has_agents.set(has_agents);
+        let summary = flowmux_core::AgentAttentionSummary::from_attention(
+            current.iter().map(ActivityNowEntry::attention),
+        );
+        crate::ui::update_agent_attention_summary(&self.activity_summary, summary);
+        self.notification_popover.set_live_attention(summary);
         render_activity_rows(
             &self.activity_list,
             &self.activity_rows,
@@ -1045,6 +1053,10 @@ fn activity_panel_target_height(
 
 fn show_agent_sort_mode(button: &gtk::Button, mode: AgentSortMode) {
     let (icon, label) = match mode {
+        AgentSortMode::Attention => (
+            "dialog-warning-symbolic",
+            "Sort: input, failures, results, then activity",
+        ),
         AgentSortMode::Workspace => ("view-list-ordered-symbolic", "Sort: workspace order"),
         AgentSortMode::RecentlyFinished => (
             "view-sort-descending-symbolic",
@@ -1060,7 +1072,7 @@ fn show_agent_sort_mode(button: &gtk::Button, mode: AgentSortMode) {
     button.update_property(&[gtk::accessible::Property::Label(label)]);
 }
 
-fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Button) {
+fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Button, gtk::Label) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     root.set_margin_top(8);
     root.set_margin_bottom(8);
@@ -1081,6 +1093,8 @@ fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Bu
     header.append(office_button);
     header.append(&sort_button);
     root.append(&header);
+    let summary = crate::ui::agent_attention_summary_label();
+    root.append(&summary);
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
@@ -1091,7 +1105,7 @@ fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Bu
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
     scroll.set_child(Some(&content));
     root.append(&scroll);
-    (root.upcast(), content, sort_button)
+    (root.upcast(), content, sort_button, summary)
 }
 
 struct ActivityRowWidget {
@@ -1204,11 +1218,12 @@ fn render_activity_rows(
 }
 
 fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label) {
+    let visual_status = crate::ui::agent_attention_visual_status(entry.status, entry.attention());
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     row.set_margin_top(2);
     row.set_margin_bottom(2);
     row.append(&color_bar(&entry.color));
-    row.append(&agent_status_indicator(entry.status, entry.seen));
+    row.append(&agent_status_indicator(visual_status, entry.seen));
 
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_hexpand(true);
@@ -1237,7 +1252,7 @@ fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label) {
     summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
     summary.set_max_width_chars(44);
     summary.add_css_class("caption");
-    summary.add_css_class(agent_status_css_class(entry.status, entry.seen));
+    summary.add_css_class(agent_status_css_class(visual_status, entry.seen));
     text.append(&summary);
     row.append(&text);
     (row, when)
@@ -1261,6 +1276,7 @@ pub(crate) async fn check_stable_activity_rows() {
         .map(|i| ActivityNowEntry {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             agent: "test agent".into(),
             status: AgentStatus::Working,
             status_text: "Running tests".into(),
@@ -1627,6 +1643,7 @@ struct WorkspaceRowRenderState {
     details: WorkspaceRowDetails,
     linked_pr: Option<(u64, PrState)>,
     listening_ports: Vec<u16>,
+    attention: flowmux_core::AgentAttentionSummary,
 }
 
 impl WorkspaceRowRenderState {
@@ -1641,11 +1658,13 @@ impl WorkspaceRowRenderState {
                 .and_then(|git| git.linked_pr.as_ref())
                 .map(|pr| (pr.number, pr.state)),
             listening_ports: ws.listening_ports.clone(),
+            attention: flowmux_core::AgentAttentionSummary::for_workspace(ws),
         }
     }
 
     fn metadata_matches(&self, other: &Self) -> bool {
         self.details == other.details
+            && self.attention == other.attention
             && self.linked_pr == other.linked_pr
             && self.listening_ports == other.listening_ports
     }
@@ -2075,6 +2094,14 @@ fn build_meta_column_widget(ws: &Workspace, details: &WorkspaceRowDetails) -> Wo
     title.add_css_class("heading");
     title.set_margin_bottom(1);
     v.append(&title);
+    let attention = crate::ui::agent_attention_summary_label();
+    crate::ui::update_agent_attention_summary(
+        &attention,
+        flowmux_core::AgentAttentionSummary::for_workspace(ws),
+    );
+    if attention.get_visible() {
+        v.append(&attention);
+    }
 
     let aux = workspace_aux_row(ws);
     for layout in metadata_tree_layout(details, aux.is_some()) {
@@ -2925,6 +2952,7 @@ mod tests {
         let current = [ActivityNowEntry {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             agent: "codex".into(),
             status: AgentStatus::Working,
             status_text: "Running tests".into(),
@@ -3142,6 +3170,7 @@ mod tests {
         assert_eq!(refreshed_scroll.vadjustment().value(), position);
 
         for (mode, icon) in [
+            (AgentSortMode::Workspace, "view-list-ordered-symbolic"),
             (
                 AgentSortMode::RecentlyFinished,
                 "view-sort-descending-symbolic",
@@ -3150,7 +3179,7 @@ mod tests {
                 AgentSortMode::OldestFinished,
                 "view-sort-ascending-symbolic",
             ),
-            (AgentSortMode::Workspace, "view-list-ordered-symbolic"),
+            (AgentSortMode::Attention, "dialog-warning-symbolic"),
         ] {
             sidebar.agent_sort_button.emit_clicked();
             gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;

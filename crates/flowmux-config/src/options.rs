@@ -111,8 +111,10 @@ impl BrowserEngine {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSortMode {
-    /// Workspace order, then pane/tab order inside each workspace.
+    /// Unresolved input first, then failures and results needing review.
     #[default]
+    Attention,
+    /// Workspace order, then pane/tab order inside each workspace.
     Workspace,
     /// Most recently finished agents first.
     RecentlyFinished,
@@ -124,9 +126,10 @@ impl AgentSortMode {
     /// The mode the Agents list sort button switches to on click.
     pub fn next(self) -> Self {
         match self {
+            Self::Attention => Self::Workspace,
             Self::Workspace => Self::RecentlyFinished,
             Self::RecentlyFinished => Self::OldestFinished,
-            Self::OldestFinished => Self::Workspace,
+            Self::OldestFinished => Self::Attention,
         }
     }
 }
@@ -974,21 +977,28 @@ mod tests {
     }
 
     #[test]
-    fn agent_sort_mode_defaults_to_workspace_and_cycles_through_all_modes() {
+    fn agent_sort_mode_defaults_to_attention_and_preserves_explicit_modes() {
         let mut value = serde_json::to_value(Options::default()).unwrap();
         value.as_object_mut().unwrap().remove("agent_sort_mode");
-        let mut opts: Options = serde_json::from_value(value).unwrap();
-        assert_eq!(opts.agent_sort_mode, AgentSortMode::Workspace);
-
-        opts.agent_sort_mode = opts.agent_sort_mode.next();
-        let s = serde_json::to_string(&opts).unwrap();
-        assert!(s.contains("\"agent_sort_mode\":\"recently_finished\""));
-        assert_eq!(serde_json::from_str::<Options>(&s).unwrap(), opts);
-        assert_eq!(opts.agent_sort_mode.next(), AgentSortMode::OldestFinished);
-        assert_eq!(
-            AgentSortMode::OldestFinished.next(),
-            AgentSortMode::Workspace
-        );
+        let opts: Options = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(opts.agent_sort_mode, AgentSortMode::Attention);
+        let mut mode = opts.agent_sort_mode;
+        for expected in [
+            AgentSortMode::Workspace,
+            AgentSortMode::RecentlyFinished,
+            AgentSortMode::OldestFinished,
+            AgentSortMode::Attention,
+        ] {
+            mode = mode.next();
+            assert_eq!(mode, expected);
+            value["agent_sort_mode"] = serde_json::to_value(mode).unwrap();
+            assert_eq!(
+                serde_json::from_value::<Options>(value.clone())
+                    .unwrap()
+                    .agent_sort_mode,
+                mode
+            );
+        }
     }
 
     #[test]

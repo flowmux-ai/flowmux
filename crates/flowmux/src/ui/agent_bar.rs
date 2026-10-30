@@ -16,6 +16,7 @@ use std::str::FromStr;
 pub(crate) struct AgentBar {
     pub(crate) root: gtk::Box,
     items: gtk::Box,
+    summary: gtk::Label,
     item_buttons: Rc<RefCell<HashMap<SurfaceId, AgentBarItemWidget>>>,
     item_order: Rc<RefCell<Vec<SurfaceId>>>,
     bridge: Bridge,
@@ -30,7 +31,12 @@ impl AgentBar {
         let label = gtk::Label::new(Some("Agents"));
         label.add_css_class("caption-heading");
         label.set_halign(gtk::Align::Start);
-        root.append(&label);
+        let heading = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        heading.set_valign(gtk::Align::Center);
+        heading.append(&label);
+        let summary = crate::ui::agent_attention_summary_label();
+        heading.append(&summary);
+        root.append(&heading);
 
         let items = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         items.set_halign(gtk::Align::Start);
@@ -47,6 +53,7 @@ impl AgentBar {
         Self {
             root,
             items,
+            summary,
             item_buttons: Rc::new(RefCell::new(HashMap::new())),
             item_order: Rc::new(RefCell::new(Vec::new())),
             bridge,
@@ -59,6 +66,7 @@ impl AgentBar {
         attention_surfaces: &HashSet<SurfaceId>,
         focused_surface: Option<SurfaceId>,
     ) {
+        crate::ui::update_agent_attention_summary(&self.summary, model.attention_summary());
         let mut buttons = self.item_buttons.borrow_mut();
         buttons.retain(|surface, item| {
             let keep = model.visible && model.items.iter().any(|item| item.surface == *surface);
@@ -316,13 +324,14 @@ impl AgentBarItemWidget {
 }
 
 fn item_content(item: &AgentBarItem) -> gtk::Box {
+    let visual_status = crate::ui::agent_attention_visual_status(item.status, item.attention());
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     row.set_valign(gtk::Align::Center);
 
     let stripe = color_stripe(&item.color);
     row.append(&stripe);
 
-    row.append(&agent_status_indicator(item.status, item.seen));
+    row.append(&agent_status_indicator(visual_status, item.seen));
 
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_hexpand(true);
@@ -349,7 +358,7 @@ fn item_content(item: &AgentBarItem) -> gtk::Box {
     status.set_lines(1);
     status.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 8) as i32);
     status.add_css_class("caption");
-    status.add_css_class(agent_status_css_class(item.status, item.seen));
+    status.add_css_class(agent_status_css_class(visual_status, item.seen));
     text.append(&status);
 
     row.append(&text);
@@ -463,6 +472,7 @@ pub(crate) async fn check_stable_agent_bar_items() {
                 status_text: "Running tests".into(),
                 status_evidence: None,
                 pending_waits: Vec::new(),
+                turn_outcome: None,
                 color: "#abcdef".into(),
             })
             .collect(),
@@ -606,6 +616,7 @@ mod tests {
         AgentBarItem {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),

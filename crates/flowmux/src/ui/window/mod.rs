@@ -3388,7 +3388,7 @@ fn workspace_row_details(ws: &Workspace, mru: &[PaneId]) -> WorkspaceRowDetails 
 fn workspace_row_agent_block(block: &WorkspaceAgentBlock) -> WorkspaceRowAgentBlock {
     WorkspaceRowAgentBlock {
         agent_name: block.agent_name.clone(),
-        status: block.status,
+        status: crate::ui::agent_attention_visual_status(block.status, block.attention),
         seen: block.seen,
         status_text: block
             .status_text
@@ -4446,7 +4446,10 @@ mod tests {
 
     fn sidebar_label_texts(controller: &WindowController) -> Vec<String> {
         let mut labels = Vec::new();
-        let mut pending = vec![controller.sidebar.root.clone().upcast::<gtk::Widget>()];
+        let mut pending = vec![
+            controller.sidebar.root.clone().upcast::<gtk::Widget>(),
+            controller.sidebar.header.clone().upcast::<gtk::Widget>(),
+        ];
         while let Some(widget) = pending.pop() {
             if let Ok(label) = widget.clone().downcast::<gtk::Label>() {
                 labels.push(label.label().to_string());
@@ -10701,6 +10704,88 @@ mod tests {
                 .any(|text| text == &format!("working · {updated_tab_name}")),
             "rendered labels: {labels:?}"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_attention_summary_tracks_live_waits_across_all_displays() {
+        use flowmux_core::{
+            AgentActivity, AgentPresence, AgentRetryState, AgentWaitActor, AgentWaitReason,
+            AgentWaitScope, AgentWaitSummary,
+        };
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.AgentAttentionSummary").await;
+        controller.options.borrow_mut().agent_bar_mode = true;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let mut agent = AgentPresence::new("test agent", AgentActivity::NeedsInput, None);
+        agent.seen = false;
+        agent.pending_waits = vec![AgentWaitSummary {
+            scope: AgentWaitScope::Session,
+            reason: AgentWaitReason::Quota,
+            actor: AgentWaitActor::User,
+            retry: AgentRetryState::Manual,
+            context_evidence: None,
+            count: 1,
+            since: chrono::Utc::now(),
+        }];
+        for (seen, automatic, expected) in [
+            (false, false, "Input 1"),
+            (true, false, "Input 1"),
+            (true, true, "Waiting 1"),
+            (true, false, "Input 1"),
+        ] {
+            agent.seen = seen;
+            agent.pending_waits[0].actor = if automatic {
+                AgentWaitActor::External
+            } else {
+                AgentWaitActor::User
+            };
+            agent.pending_waits[0].retry = if automatic {
+                AgentRetryState::Automatic
+            } else {
+                AgentRetryState::Manual
+            };
+            controller
+                .store
+                .set_agent_activity(surface, Some(agent.clone()))
+                .await;
+            controller
+                .dispatch(GtkCommand::SetAgentStatus { workspace })
+                .await;
+            assert!(agent_bar_label_texts(&controller)
+                .iter()
+                .any(|text| text == expected));
+            let labels = sidebar_label_texts(&controller);
+            assert!(
+                labels.iter().filter(|text| *text == expected).count() >= 2,
+                "workspace and panel: {labels:?}"
+            );
+            assert!(
+                labels
+                    .iter()
+                    .any(|text| text == &format!("All live agents · {expected}")),
+                "popover: {labels:?}"
+            );
+            let actual = controller
+                .store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(actual.pending_waits, agent.pending_waits);
+        }
+        controller.store.set_agent_activity(surface, None).await;
+        controller
+            .dispatch(GtkCommand::SetAgentStatus { workspace })
+            .await;
+        assert!(!agent_bar_visible(&controller));
+        assert!(!sidebar_label_texts(&controller)
+            .iter()
+            .any(|text| text == "Input 1"));
     }
 
     #[cfg(not(target_os = "macos"))]

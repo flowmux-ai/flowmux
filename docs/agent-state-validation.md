@@ -853,3 +853,98 @@ application PID 72789 and independent user agent PID 1401 remained alive, and
 the permanent vendor executable stayed unchanged. Shared attention
 counts/priorities, delivery diagnostics, protocol support, and final full
 cross-platform gates remain outstanding.
+
+## Shared live attention projection (2026-10-30)
+
+Workspace captions, the side panel, the horizontal bar, the notification
+popover, and JSON `agents` output now derive attention from the same read-only
+projection. It distinguishes input required, failure review, result review,
+external/automatic waiting, working, unconfirmed, and idle. Counts represent
+agents, not hook requests: overlapping permission/tool scopes cannot double
+count one agent. Reading notifications does not resolve a pending wait.
+Unseen failed results remain failures; ordinary response completion means a
+result to review, not verified task success.
+
+Automatic retry keeps the underlying blocked lifecycle state but presents a
+neutral waiting indicator and does not raise workspace input attention.
+Manual retry or any simultaneous user-owned wait still requires input.
+Unconfirmed blocked reports retain their existing warning. Legacy blocked
+reports without typed waits continue to require input.
+
+The new default side-panel order is input, failures, unconfirmed, results,
+waiting, working, and idle. Within a category, existing pending-wait age is
+used; reading, reminders, and count changes do not restart it. Explicit saved
+sort modes are preserved and all four modes remain available. The horizontal
+bar retains manual order. Captions show nonzero Input, Review, Waiting, and
+Unconfirmed counts; tooltips distinguish failure/result counts and clarify the
+unit. The popover labels its count as all live agents, independently of its
+notification-history filters.
+
+The automatic-retry regression failed before the projection because the
+workspace still raised input attention (`/tmp/fm-attention-projection-red.log`).
+Core tests cover overlapping waits, two pending agents, one resolution, reading,
+mixed automatic/user waits, outcome categories, and nonmutation. Activity tests
+cover stable wait-age ordering. A GUI integration test compares all four display
+captions through read, automatic retry, manual retry, and removal. It exposed
+a closed-popover visibility condition that omitted the scope prefix; the label
+now uses its own visibility property. The broader popover suite also contained
+an outdated expectation that a distinct completion overwrote an information
+row. Its test now verifies separate entries, retained prior row identity, the
+selected filter, and independent read state; notification admission code did
+not change in this commit.
+
+Verification passed:
+
+- Core 170 and configuration 98 tests, plus the pane random walk
+  (`/tmp/fm-attention-projection-core.log`).
+- Isolated agent unit suites on macOS and Linux: CLI library 127, CLI binary
+  155, core 170, daemon 200, daemon binary 2, and platform process tests
+  (`/tmp/fm-attention-projection-unit.log`,
+  `/tmp/fm-attention-projection-linux-unit.log`). Existing ignored tests remain
+  ignored.
+- Fifty focused Linux activity, side-panel, bar, popover, and display integration
+  tests (`/tmp/fm-attention-projection-linux-final.log` and
+  `/tmp/fm-attention-projection-popover-final.log`). The first log retains the
+  outdated popover failure; the second is its corrected final run.
+- macOS main-thread hook replay, observed Input/Waiting captions, evidence
+  tooltips, retained side-panel/bar widgets, and native smoke
+  (`/tmp/fm-attention-projection-native.log`, `MACOS_NATIVE_SMOKE_OK`). Hook
+  replay is synthetic.
+- Workspace/all-targets Clippy with native-smoke, formatting, diff checks, and
+  the application build (`/tmp/fm-attention-projection-clippy-final.log`,
+  `/tmp/fm-attention-projection-fmt-final.log`,
+  `/tmp/fm-attention-projection-build-final.log`).
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 ran in isolated application
+PID 56712, `/tmp/fm-atn-zaarpb3r`. B passed consecutive responses, a displayed
+one-time harmless approval, interruption, and recovery. A's real quota wait
+changed from automatic/external to manual/user after Escape without changing
+the native event, session, or pending request age. Both agents' unsubmitted
+status-like drafts left state unchanged and were cleared afterward.
+`/tmp/fm-attention-projection-live.log` ended with
+`LIVE_ATTENTION_PROJECTION_MATRIX_OK`.
+
+Native screenshots showed Input 1 plus Waiting 1 consistently in all displays,
+with the approval above automatic retry in the side panel. Reading notification
+entries through IPC produced 0 unread while preserving Input 1 and the exact
+approval wait (`read-pending-state.json`). Native attempts to activate the
+popover's Mark all read button did not establish successful delivery; the
+verified read operation was IPC. Approval resolution removed Input; subsequent
+manual retry restored Input. An unseen completed response showed Review 1;
+clicking its actual bar item opened the correct tab and removed only Review,
+preserving the other agent's Input 1 (`attention-read-result.json`). JSON
+`agents` reported the corresponding waiting, input_required, result_review, and
+idle values. Evidence files are under the isolated root. Application and CLI
+SHA-256:
+
+`3037ac89cb250cb1c847c0b2dc175f5d353dd1862762d0d4056288f9d2002404`
+
+`c81ad859130ea6038962bdac9ca3224090e72779f2616394f44181e443c21a85`
+
+A's normal response/question/recovery remains blocked by its actual quota;
+automatic resumption at the deadline was not exercised. Original application
+PID 72789 and user agent PID 1401 remained alive, and the permanent agent
+executable hash was unchanged. This focused verification does not close the
+previous full Linux editor or macOS browser gate failures. Delivery diagnostics,
+child/detail observability, protocol support, performance measurements, and
+final cross-platform gates remain outstanding.

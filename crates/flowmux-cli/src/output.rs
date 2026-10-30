@@ -154,6 +154,7 @@ pub(crate) fn render_agents(
                         "status_evidence": agent.status_evidence,
                         "turn_outcome": agent.turn_outcome,
                         "pending_waits": agent.pending_waits,
+                        "attention": flowmux_core::agent_attention(agent.status, agent.status != flowmux_core::AgentStatus::Done, agent.turn_outcome, &agent.pending_waits),
                         "status_text": agent.status_text,
                         "session_name": agent.session_name,
                         "messaging": agent.messaging_socket.is_some(),

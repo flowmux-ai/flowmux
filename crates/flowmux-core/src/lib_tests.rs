@@ -1959,6 +1959,144 @@ fn blocked_attention_is_independent_of_visibility_and_other_acknowledged_tabs() 
 }
 
 #[test]
+fn automatic_retry_is_waiting_without_input_attention() {
+    let mut surface = PaneSurface::terminal("retry", None);
+    let mut agent = AgentPresence::new("test agent", AgentActivity::NeedsInput, None);
+    agent.seen = false;
+    agent.turn_outcome = Some(AgentTurnOutcome::Failed);
+    agent.pending_waits = vec![AgentWaitSummary {
+        scope: AgentWaitScope::Session,
+        reason: AgentWaitReason::Quota,
+        actor: AgentWaitActor::External,
+        retry: AgentRetryState::Automatic,
+        context_evidence: None,
+        count: 1,
+        since: chrono::Utc::now(),
+    }];
+    surface.agent = Some(agent);
+    let pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: surface.id,
+            surfaces: vec![surface],
+        },
+    };
+    assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Blocked));
+    assert_eq!(pane.agent_attention_rollup(), None);
+}
+
+#[test]
+fn live_attention_counts_agents_without_resolving_or_double_counting_waits() {
+    let wait = |scope, reason, actor, retry| AgentWaitSummary {
+        scope,
+        reason,
+        actor,
+        retry,
+        context_evidence: None,
+        count: 2,
+        since: chrono::Utc::now(),
+    };
+    let mut question = AgentPresence::new("test agent", AgentActivity::NeedsInput, None);
+    question.seen = false;
+    question.pending_waits = vec![
+        wait(
+            AgentWaitScope::Tool,
+            AgentWaitReason::Question,
+            AgentWaitActor::User,
+            AgentRetryState::Unknown,
+        ),
+        wait(
+            AgentWaitScope::Permission,
+            AgentWaitReason::Question,
+            AgentWaitActor::Unknown,
+            AgentRetryState::Unknown,
+        ),
+    ];
+    let mut retry = AgentPresence::new("test agent", AgentActivity::NeedsInput, None);
+    retry.turn_outcome = Some(AgentTurnOutcome::Failed);
+    retry.pending_waits = vec![wait(
+        AgentWaitScope::Session,
+        AgentWaitReason::Quota,
+        AgentWaitActor::External,
+        AgentRetryState::Automatic,
+    )];
+    let surfaces: Vec<_> = [question.clone(), question.clone(), retry.clone()]
+        .into_iter()
+        .map(|agent| {
+            let mut surface = PaneSurface::terminal("task", None);
+            surface.agent = Some(agent);
+            (PaneId::new(), surface)
+        })
+        .collect();
+    let first = surfaces[0].1.id;
+    let mut workspace = workspace_with_agent_leaves(surfaces);
+    let before = serde_json::to_value(&workspace).unwrap();
+    let expected = AgentAttentionSummary {
+        input_required: 2,
+        waiting: 1,
+        ..Default::default()
+    };
+    assert_eq!(AgentAttentionSummary::for_workspace(&workspace), expected);
+    assert_eq!(
+        collect_agent_bar_model([&workspace]).attention_summary(),
+        expected
+    );
+    assert_eq!(serde_json::to_value(&workspace).unwrap(), before);
+    for surface in &mut workspace.surfaces {
+        surface.root_pane.mark_all_agents_seen();
+    }
+    assert_eq!(AgentAttentionSummary::for_workspace(&workspace), expected);
+    for surface in &mut workspace.surfaces {
+        surface.root_pane.set_surface_agent(
+            first,
+            Some(AgentPresence::new("test agent", AgentActivity::Idle, None)),
+        );
+    }
+    assert_eq!(
+        AgentAttentionSummary::for_workspace(&workspace).input_required,
+        1
+    );
+    assert_eq!(
+        collect_agent_bar_model([&workspace])
+            .attention_summary()
+            .input_required,
+        1
+    );
+
+    retry.pending_waits.extend(question.pending_waits.clone());
+    assert_eq!(
+        retry.attention(),
+        AgentAttention::InputRequired,
+        "input outranks concurrent automatic retry"
+    );
+    retry.pending_waits = vec![wait(
+        AgentWaitScope::Session,
+        AgentWaitReason::Quota,
+        AgentWaitActor::User,
+        AgentRetryState::Manual,
+    )];
+    assert_eq!(retry.attention(), AgentAttention::InputRequired);
+    retry.pending_waits[0].actor = AgentWaitActor::Unknown;
+    retry.pending_waits[0].retry = AgentRetryState::Unknown;
+    assert_eq!(retry.attention(), AgentAttention::FailureReview);
+    retry.turn_outcome = None;
+    assert_eq!(retry.attention(), AgentAttention::Unconfirmed);
+    for (outcome, expected) in [
+        (AgentTurnOutcome::Failed, AgentAttention::FailureReview),
+        (AgentTurnOutcome::Completed, AgentAttention::ResultReview),
+        (AgentTurnOutcome::Canceled, AgentAttention::ResultReview),
+        (AgentTurnOutcome::Unknown, AgentAttention::ResultReview),
+    ] {
+        let mut ended = AgentPresence::new("test agent", AgentActivity::Idle, None);
+        ended.turn_outcome = Some(outcome);
+        ended.seen = false;
+        assert_eq!(ended.attention(), expected);
+        ended.seen = true;
+        assert_eq!(ended.attention(), AgentAttention::Idle);
+    }
+}
+
+#[test]
 fn initial_idle_agent_report_in_hidden_surface_stays_idle() {
     let presence = AgentPresence::from_report(
         AgentStatusReport {

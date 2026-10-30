@@ -34,12 +34,24 @@ pub struct ActivityNowEntry {
     pub status_text: String,
     pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
     pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
+    pub turn_outcome: Option<flowmux_core::AgentTurnOutcome>,
     pub seen: bool,
     pub workspace: WorkspaceId,
     pub pane: PaneId,
     pub surface: SurfaceId,
     pub surface_label: String,
     pub color: String,
+}
+
+impl ActivityNowEntry {
+    pub fn attention(&self) -> flowmux_core::AgentAttention {
+        flowmux_core::agent_attention(
+            self.status,
+            self.seen,
+            self.turn_outcome,
+            &self.pending_waits,
+        )
+    }
 }
 
 pub fn current_activity_entries(model: &flowmux_core::AgentBarModel) -> Vec<ActivityNowEntry> {
@@ -53,6 +65,7 @@ pub fn current_activity_entries(model: &flowmux_core::AgentBarModel) -> Vec<Acti
             status_text: item.status_text,
             status_evidence: item.status_evidence,
             pending_waits: item.pending_waits,
+            turn_outcome: item.turn_outcome,
             seen: item.seen,
             workspace: item.workspace,
             pane: item.pane,
@@ -254,6 +267,18 @@ impl ActivityStore {
         if mode == AgentSortMode::Workspace {
             return;
         }
+        if mode == AgentSortMode::Attention {
+            entries.sort_by_key(|entry| {
+                let since = entry
+                    .pending_waits
+                    .iter()
+                    .map(|wait| wait.since)
+                    .min()
+                    .or_else(|| self.since(entry.surface));
+                (entry.attention().priority(), since)
+            });
+            return;
+        }
         entries.sort_by_key(|entry| {
             let at = self
                 .since(entry.surface)
@@ -349,11 +374,70 @@ mod tests {
     }
 
     #[test]
+    fn attention_order_preserves_wait_age_across_reads_and_repaints() {
+        let mut entries: Vec<_> = (0..5)
+            .map(|_| ActivityNowEntry {
+                agent: "test agent".into(),
+                status: AgentStatus::Working,
+                status_text: "Working".into(),
+                status_evidence: None,
+                pending_waits: Vec::new(),
+                turn_outcome: None,
+                seen: false,
+                workspace: WorkspaceId::new(),
+                pane: PaneId::new(),
+                surface: SurfaceId::new(),
+                surface_label: "task".into(),
+                color: "#abcdef".into(),
+            })
+            .collect();
+        let ids: Vec<_> = entries.iter().map(|entry| entry.surface).collect();
+        for (index, age) in [(1, 2), (3, 5)] {
+            entries[index].status = AgentStatus::Blocked;
+            entries[index].pending_waits = vec![flowmux_core::AgentWaitSummary {
+                scope: flowmux_core::AgentWaitScope::Tool,
+                reason: flowmux_core::AgentWaitReason::Question,
+                actor: flowmux_core::AgentWaitActor::User,
+                retry: flowmux_core::AgentRetryState::Unknown,
+                context_evidence: None,
+                count: 1,
+                since: chrono::Utc::now() - chrono::Duration::minutes(age),
+            }];
+        }
+        entries[2].status = AgentStatus::Done;
+        entries[2].turn_outcome = Some(flowmux_core::AgentTurnOutcome::Failed);
+        entries[4].status = AgentStatus::Done;
+        entries[4].turn_outcome = Some(flowmux_core::AgentTurnOutcome::Completed);
+        let store = ActivityStore::new();
+        store.sort_entries(&mut entries, AgentSortMode::Attention);
+        let expected = vec![ids[3], ids[1], ids[2], ids[4], ids[0]];
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.surface)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        entries[0].seen = true;
+        entries[0].status_text = "Waiting for answer (reminder)".into();
+        entries[0].pending_waits[0].count = 2;
+        store.sort_entries(&mut entries, AgentSortMode::Attention);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.surface)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
     fn sort_entries_puts_working_agents_before_recent_finishes_and_mirrors_for_oldest() {
         let store = ActivityStore::new();
         let now = || ActivityNowEntry {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             agent: "codex".into(),
             status: AgentStatus::Idle,
             status_text: String::new(),

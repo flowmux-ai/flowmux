@@ -49,6 +49,7 @@ pub(super) struct NotificationPopover {
     scroll: gtk::ScrolledWindow,
     empty: gtk::Label,
     heading: gtk::Label,
+    live_attention: gtk::Label,
     mark_read: gtk::Button,
     filters: Vec<(Filter, &'static str, gtk::ToggleButton)>,
     filter: Cell<Filter>,
@@ -159,6 +160,8 @@ impl NotificationPopover {
         more.set_popover(Some(&menu));
         header.append(&more);
         root.append(&header);
+        let live_attention = crate::ui::agent_attention_summary_label();
+        root.append(&live_attention);
 
         let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         tabs.add_css_class("linked");
@@ -218,6 +221,7 @@ impl NotificationPopover {
             scroll,
             empty,
             heading,
+            live_attention,
             mark_read,
             filters,
             filter: Cell::new(Filter::All),
@@ -264,6 +268,14 @@ impl NotificationPopover {
             });
         }
         this
+    }
+
+    pub fn set_live_attention(&self, summary: flowmux_core::AgentAttentionSummary) {
+        crate::ui::update_agent_attention_summary(&self.live_attention, summary);
+        if self.live_attention.get_visible() {
+            self.live_attention
+                .set_label(&format!("All live agents · {}", summary.label()));
+        }
     }
 
     pub fn refresh(&self) {
@@ -648,7 +660,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn kind_promotion_refreshes_metadata_without_replacing_row() {
+    async fn distinct_completion_preserves_prior_info_row_and_filter() {
         let store = NotificationStore::new();
         let pane = flowmux_core::PaneId::new();
         let surface = flowmux_core::SurfaceId::new();
@@ -675,23 +687,26 @@ mod tests {
         assert!(!panel.rows.borrow()[&id].body.is_visible());
         panel.kind.set_selected(4);
         assert!(!original.is_visible());
-        store.push(
-            "Finished".into(),
-            "Changes are ready".into(),
-            NotificationLevel::TurnCompleted,
-            Some(pane),
-            Some(surface),
-            store.find(id).unwrap().workspace,
-        );
-        assert_eq!(
-            store.find(id).unwrap().level,
-            NotificationLevel::TurnCompleted
-        );
+        let completed = store
+            .push(
+                "Finished".into(),
+                "Changes are ready".into(),
+                NotificationLevel::TurnCompleted,
+                Some(pane),
+                Some(surface),
+                store.find(id).unwrap().workspace,
+            )
+            .unwrap()
+            .0;
+        assert_ne!(completed, id);
+        assert_eq!(store.find(id).unwrap().level, NotificationLevel::Info);
         panel.refresh();
         assert_eq!(panel.kind.selected(), 4);
         let rows = panel.rows.borrow();
-        let row = &rows[&id];
-        assert_eq!(row.row, original);
+        assert_eq!(rows[&id].row, original);
+        assert!(!original.is_visible());
+        assert_eq!(rows[&id].kind.label(), "Information");
+        let row = &rows[&completed];
         assert!(row.row.is_visible());
         assert_eq!(row.kind.label(), "Completed");
         assert_eq!(
@@ -703,10 +718,11 @@ mod tests {
         assert_eq!(row.title.label(), "Finished");
         assert_eq!(row.body.label(), "Changes are ready");
         assert!(row.body.is_visible());
-        assert!(!row.unread.is_visible());
+        assert!(row.unread.is_visible());
         assert!(store.find(id).unwrap().read);
+        assert!(!store.find(completed).unwrap().read);
         assert_eq!(panel.filters[0].2.label().as_deref(), Some("All 1"));
-        assert_eq!(panel.filters[1].2.label().as_deref(), Some("Unread 0"));
+        assert_eq!(panel.filters[1].2.label().as_deref(), Some("Unread 1"));
         window.close();
     }
 

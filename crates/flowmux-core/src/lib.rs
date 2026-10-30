@@ -1159,10 +1159,16 @@ impl Pane {
                 ..
             } => rollup_agent_statuses(surfaces.iter().filter_map(|surface| {
                 let agent = surface.agent.as_ref()?;
-                match agent.public_status() {
-                    // Acknowledgement does not resolve a pending input request.
-                    AgentStatus::Blocked => Some(AgentStatus::Blocked),
-                    AgentStatus::Done if !agent.seen => Some(AgentStatus::Done),
+                match agent.attention() {
+                    AgentAttention::InputRequired | AgentAttention::FailureReview => {
+                        Some(AgentStatus::Blocked)
+                    }
+                    AgentAttention::ResultReview => Some(AgentStatus::Done),
+                    AgentAttention::Unconfirmed
+                        if agent.public_status() == AgentStatus::Blocked =>
+                    {
+                        Some(AgentStatus::Blocked)
+                    }
                     _ => None,
                 }
             })),
@@ -1223,6 +1229,7 @@ impl Pane {
                         pane: *id,
                         surface: surface.id,
                         agent_name: agent.name.clone(),
+                        attention: agent.attention(),
                         status,
                         seen: agent.seen,
                         status_text: agent.status_text().map(str::to_string),
@@ -2321,6 +2328,7 @@ pub struct WorkspaceAgentBlock {
     pub pane: PaneId,
     pub surface: SurfaceId,
     pub agent_name: String,
+    pub attention: AgentAttention,
     pub status: AgentStatus,
     pub seen: bool,
     pub status_text: Option<String>,
@@ -2370,10 +2378,20 @@ pub struct AgentBarItem {
     pub status_text: String,
     pub status_evidence: Option<AgentStatusEvidence>,
     pub pending_waits: Vec<AgentWaitSummary>,
+    pub turn_outcome: Option<AgentTurnOutcome>,
     pub color: String,
 }
 
 impl AgentBarItem {
+    pub fn attention(&self) -> AgentAttention {
+        agent_attention(
+            self.status,
+            self.seen,
+            self.turn_outcome,
+            &self.pending_waits,
+        )
+    }
+
     fn from_presence(
         workspace: WorkspaceId,
         pane: PaneId,
@@ -2394,6 +2412,7 @@ impl AgentBarItem {
             seen: agent.seen,
             status_evidence: agent.status_evidence,
             pending_waits: agent.pending_waits.clone(),
+            turn_outcome: agent.turn_outcome,
             status_text: agent
                 .status_text()
                 .map(str::to_string)
@@ -2409,6 +2428,12 @@ impl AgentBarItem {
 pub struct AgentBarModel {
     pub visible: bool,
     pub items: Vec<AgentBarItem>,
+}
+
+impl AgentBarModel {
+    pub fn attention_summary(&self) -> AgentAttentionSummary {
+        AgentAttentionSummary::from_attention(self.items.iter().map(AgentBarItem::attention))
+    }
 }
 
 pub fn collect_agent_bar_model<'a>(
@@ -2681,6 +2706,153 @@ impl AgentTurnOutcome {
     }
 }
 
+/// Read-only projection of current evidence. It does not acknowledge or resolve
+/// requests and counts each live agent once, even when wait scopes overlap.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentAttention {
+    InputRequired,
+    FailureReview,
+    ResultReview,
+    Waiting,
+    Working,
+    Unconfirmed,
+    Idle,
+}
+
+impl AgentAttention {
+    pub fn priority(self) -> u8 {
+        match self {
+            Self::InputRequired => 0,
+            Self::FailureReview => 1,
+            Self::ResultReview => 3,
+            Self::Waiting => 4,
+            Self::Working => 5,
+            Self::Unconfirmed => 2,
+            Self::Idle => 6,
+        }
+    }
+}
+
+pub fn agent_attention(
+    status: AgentStatus,
+    seen: bool,
+    outcome: Option<AgentTurnOutcome>,
+    waits: &[AgentWaitSummary],
+) -> AgentAttention {
+    if status == AgentStatus::Blocked {
+        // Legacy reports lack typed waits but explicitly report input needed.
+        if waits.is_empty()
+            || waits.iter().any(|wait| {
+                wait.actor == AgentWaitActor::User
+                    || wait.reason.actor() == AgentWaitActor::User
+                    || wait.retry == AgentRetryState::Manual
+            })
+        {
+            return AgentAttention::InputRequired;
+        }
+        if waits.iter().all(|wait| {
+            wait.retry == AgentRetryState::Automatic
+                || matches!(wait.actor, AgentWaitActor::Agent | AgentWaitActor::External)
+        }) {
+            return AgentAttention::Waiting;
+        }
+        return if outcome == Some(AgentTurnOutcome::Failed) {
+            AgentAttention::FailureReview
+        } else {
+            AgentAttention::Unconfirmed
+        };
+    }
+    match status {
+        AgentStatus::Working => AgentAttention::Working,
+        AgentStatus::Idle | AgentStatus::Done if !seen => {
+            if outcome == Some(AgentTurnOutcome::Failed) {
+                AgentAttention::FailureReview
+            } else {
+                AgentAttention::ResultReview
+            }
+        }
+        AgentStatus::Idle | AgentStatus::Done => AgentAttention::Idle,
+        _ => AgentAttention::Unconfirmed,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+pub struct AgentAttentionSummary {
+    pub input_required: usize,
+    pub failures: usize,
+    pub results: usize,
+    pub waiting: usize,
+    pub working: usize,
+    pub unconfirmed: usize,
+}
+
+impl AgentAttentionSummary {
+    pub fn from_attention(items: impl IntoIterator<Item = AgentAttention>) -> Self {
+        let mut summary = Self::default();
+        for item in items {
+            summary.add(item);
+        }
+        summary
+    }
+
+    fn add(&mut self, item: AgentAttention) {
+        match item {
+            AgentAttention::InputRequired => self.input_required += 1,
+            AgentAttention::FailureReview => self.failures += 1,
+            AgentAttention::ResultReview => self.results += 1,
+            AgentAttention::Waiting => self.waiting += 1,
+            AgentAttention::Working => self.working += 1,
+            AgentAttention::Unconfirmed => self.unconfirmed += 1,
+            AgentAttention::Idle => {}
+        }
+    }
+
+    pub fn for_workspace(workspace: &Workspace) -> Self {
+        fn visit(pane: &Pane, summary: &mut AgentAttentionSummary) {
+            match pane {
+                Pane::Leaf {
+                    content: PaneContent::Tabs { surfaces, .. },
+                    ..
+                } => {
+                    for agent in surfaces.iter().filter_map(|surface| surface.agent.as_ref()) {
+                        summary.add(agent.attention());
+                    }
+                }
+                Pane::Split { first, second, .. } => {
+                    visit(first, summary);
+                    visit(second, summary);
+                }
+                _ => {}
+            }
+        }
+        let mut summary = Self::default();
+        for surface in &workspace.surfaces {
+            visit(&surface.root_pane, &mut summary);
+        }
+        summary
+    }
+
+    pub fn label(&self) -> String {
+        [
+            ("Input", self.input_required),
+            ("Review", self.failures + self.results),
+            ("Waiting", self.waiting),
+            ("Unconfirmed", self.unconfirmed),
+        ]
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(label, count)| format!("{label} {count}"))
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
+
+    pub fn tooltip(&self) -> String {
+        format!("Live agents: {} need input; {} failures and {} results to review; {} waiting; {} working; {} unconfirmed. Counts are agents, not requests. Reading notifications does not resolve input.",
+            self.input_required, self.failures, self.results, self.waiting, self.working, self.unconfirmed)
+    }
+}
+
 /// What established the displayed activity, independently of identity ownership.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2846,6 +3018,15 @@ fn agent_presence_seen_default() -> bool {
 }
 
 impl AgentPresence {
+    pub fn attention(&self) -> AgentAttention {
+        agent_attention(
+            self.public_status(),
+            self.seen,
+            self.turn_outcome,
+            &self.pending_waits,
+        )
+    }
+
     pub fn new(name: impl Into<String>, activity: AgentActivity, pid: Option<u32>) -> Self {
         Self {
             name: name.into(),

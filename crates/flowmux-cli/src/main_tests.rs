@@ -917,6 +917,7 @@ fn render_tree_marks_active_tab_and_indents() {
     assert_eq!(rows[0]["status_text"], "Waiting for answer");
     assert_eq!(rows[0]["pending_waits"][0]["reason"], "question");
     assert_eq!(rows[0]["pending_waits"][0]["count"], 2);
+    assert_eq!(rows[0]["attention"], "input_required");
     let mut legacy =
         serde_json::to_value(workspaces[0].panes[0].tabs[0].agent.as_ref().unwrap()).unwrap();
     for field in ["status_evidence", "pending_waits", "status_text"] {

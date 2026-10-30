@@ -14,6 +14,7 @@ pub(crate) async fn check() {
             .map(|i| AgentBarItem {
                 status_evidence: None,
                 pending_waits: Vec::new(),
+                turn_outcome: None,
                 workspace: workspaces[i / 8].0,
                 pane: PaneId::new(),
                 surface: SurfaceId::new(),

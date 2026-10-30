@@ -1119,6 +1119,7 @@ mod tests {
                 .map(|_| AgentBarItem {
                     status_evidence: None,
                     pending_waits: Vec::new(),
+                    turn_outcome: None,
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId::new(),
@@ -1210,6 +1211,7 @@ mod tests {
         let item = AgentBarItem {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),
@@ -1249,6 +1251,7 @@ mod tests {
         let item = |id| AgentBarItem {
             status_evidence: None,
             pending_waits: Vec::new(),
+            turn_outcome: None,
             workspace,
             pane: PaneId::new(),
             surface: SurfaceId(uuid::Uuid::from_u128(id)),
@@ -1329,6 +1332,7 @@ mod tests {
                 .map(|id| AgentBarItem {
                     status_evidence: None,
                     pending_waits: Vec::new(),
+                    turn_outcome: None,
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId(uuid::Uuid::from_u128(id)),
