@@ -1098,3 +1098,44 @@ hash was unchanged. A's ordinary response/question scenarios remain quota-blocke
 Existing theme parser warnings remain, without a fatal critical in this run.
 These focused passes do not close the earlier full GUI gate failures or the
 remaining detail UI, protocol, and performance work.
+
+## Read-only status and child explanation (2026-10-30)
+
+`flowmux agents --explain` adds a read-only snapshot of current evidence, with
+an optional exact `--surface UUID` filter and JSON output. The ordinary agent
+listing retains its format. The snapshot holds lifecycle and state locks in
+reporting order; it performs no process scan, acknowledgement, focus change, or
+wait resolution. Its request uses reserved control admission and the existing
+read-only query deadline. Messages and raw parent session IDs are omitted.
+
+The matching runtime ledger supplies observed active child IDs and turn IDs,
+parent completion deferral, and child-scoped pending permission waits. Waits
+without an exact observed child/turn match remain unattributed. A mismatched
+known owner PID suppresses the ledger; session replacement or teardown removes
+the old explanation. Unavailable child evidence is distinct from an observed
+empty active list. Neither value establishes a complete process inventory.
+The returned surface identifies the parent terminal, not a child approval API.
+
+Regression tests cover filtering, serialization, legacy command mapping,
+read-only state equality, child ordering, matched and unattributed waits, stale
+child stops, PID mismatch, session replacement, teardown, and text output for
+unavailable versus empty child evidence. The agent suites listed above passed
+on macOS and Linux. IPC tests passed on both platforms: 79 macOS / 80 Linux
+unit tests, five compatibility tests, and four stress tests
+(`/tmp/fm-agent-explain-ipc.log`, `/tmp/fm-agent-explain-linux-ipc.log`).
+
+The actual runs in `/tmp/fm-atn-zcur98rj` queried normal responses, approval,
+interruption, recovery, quota retry, and status-like drafts. First-child work
+exposed its active ID and the parent completion barrier. Reused-child approval
+exposed the same child ID with a new turn and matching permission scope, then
+removed only that completed work. Ten repeated queries during approvals were
+identical. Ten final real CLI JSON queries also preserved the entire workspace
+tree and the hidden result's unread review state. Parent session IDs and message
+fields were absent. Evidence includes `explain-child-approval.txt`,
+`child-explanation-live.jsonl`, `hidden-child-approval-explanation.jsonl`,
+`explain-final-all.txt`, and `explain-read-only-final.json` under that root.
+
+The final application/CLI hashes and remaining validation limits are recorded
+above. This query is a snapshot, not event-history storage, a complete child
+inventory, child navigation, or an approval interface. The detail UI and final
+cross-platform gates remain separate work.

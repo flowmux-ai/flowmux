@@ -5802,6 +5802,188 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explanation_preserves_observed_children_and_unattributed_waits() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let workspace = store
+            .create_workspace(None, "/tmp/explanation".into())
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("parent-turn".into()),
+                    status_text: "PRIVATE_STATUS".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-b".into(),
+                    turn_id: "turn-b".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-a".into(),
+                    turn_id: "turn-a".into(),
+                },
+            ),
+            (
+                4,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
+                    message: Some("PRIVATE_MESSAGE".into()),
+                    status_text: "PRIVATE_STATUS".into(),
+                    scope: Some("child:child-a:turn-a".into()),
+                },
+            ),
+            (
+                5,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Question,
+                    message: None,
+                    status_text: "PRIVATE_STATUS".into(),
+                    scope: Some("child:unobserved:turn-x".into()),
+                },
+            ),
+            (
+                6,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "parent-turn".into(),
+                    message: Some("PRIVATE_RESULT".into()),
+                    status_text: "PRIVATE_STATUS".into(),
+                    stop_hook_active: false,
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    "PRIVATE_SESSION",
+                    event,
+                    false,
+                )
+                .await;
+        }
+        let before = serde_json::to_value(store.snapshot().await).unwrap();
+        let details = store.explain_agents(Some(surface)).await;
+        assert_eq!(
+            serde_json::to_value(store.snapshot().await).unwrap(),
+            before
+        );
+        assert_eq!(details.len(), 1);
+        assert_eq!(
+            details[0].attention,
+            flowmux_core::AgentAttention::InputRequired
+        );
+        let children = details[0].children.as_ref().unwrap();
+        assert!(children.parent_completion_pending);
+        assert_eq!(
+            children
+                .active
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            ["child-a", "child-b"]
+        );
+        assert_eq!(
+            children.active[0].pending_waits[0].wait.reason,
+            flowmux_core::AgentWaitReason::Approval
+        );
+        assert!(children.active[1].pending_waits.is_empty());
+        assert_eq!(
+            children.unattributed_waits[0].scope_id,
+            "child:unobserved:turn-x"
+        );
+        let wire = serde_json::to_string(&details).unwrap();
+        for private in [
+            "PRIVATE_STATUS",
+            "PRIVATE_MESSAGE",
+            "PRIVATE_SESSION",
+            "PRIVATE_RESULT",
+        ] {
+            assert!(!wire.contains(private));
+        }
+        let decoded: Vec<flowmux_ipc::protocol::AgentExplanation> =
+            serde_json::from_str(&wire).unwrap();
+        assert_eq!(decoded, details);
+        assert!(store
+            .explain_agents(Some(SurfaceId::new()))
+            .await
+            .is_empty());
+        assert_eq!(store.explain_agents(None).await, details);
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(7),
+                "PRIVATE_SESSION",
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-a".into(),
+                    turn_id: "old-turn".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(store.explain_agents(Some(surface)).await, details);
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(8),
+                "PRIVATE_SESSION",
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-a".into(),
+                    turn_id: "turn-a".into(),
+                },
+                false,
+            )
+            .await;
+        let remaining = store.explain_agents(Some(surface)).await;
+        let children = remaining[0].children.as_ref().unwrap();
+        assert_eq!(children.active.len(), 1);
+        assert_eq!(children.active[0].id, "child-b");
+        assert_eq!(children.unattributed_waits.len(), 1);
+        assert_eq!(
+            remaining[0].attention,
+            flowmux_core::AgentAttention::InputRequired
+        );
+
+        let mut presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        presence.pid = Some(43);
+        store
+            .set_agent_activity(surface, Some(presence.clone()))
+            .await;
+        assert!(store.explain_agents(Some(surface)).await[0]
+            .children
+            .is_none());
+        presence.pid = Some(42);
+        store
+            .set_agent_activity(surface, Some(presence.clone()))
+            .await;
+        assert_eq!(store.explain_agents(Some(surface)).await, remaining);
+        presence.session_id = Some("successor-session".into());
+        store.set_agent_activity(surface, Some(presence)).await;
+        assert!(store.explain_agents(Some(surface)).await[0]
+            .children
+            .is_none());
+        store.set_agent_activity(surface, None).await;
+        assert!(store.explain_agents(Some(surface)).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn codex_parent_stop_waits_for_matching_active_subagent() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store

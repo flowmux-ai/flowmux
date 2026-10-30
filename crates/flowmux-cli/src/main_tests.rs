@@ -4,6 +4,46 @@
 use super::*;
 
 #[test]
+fn agent_explanation_requires_explicit_mode_and_exact_surface() {
+    let surface = SurfaceId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "agents",
+        "--explain",
+        "--surface",
+        &surface.to_string(),
+    ])
+    .unwrap();
+    assert!(
+        matches!(build_request(cli.cmd).unwrap(), Request::AgentExplain { surface: Some(id) } if id == surface)
+    );
+    assert!(
+        Cli::try_parse_from(["flowmuxctl", "agents", "--surface", &surface.to_string()]).is_err()
+    );
+    assert!(matches!(
+        build_request(Cli::try_parse_from(["flowmuxctl", "agents"]).unwrap().cmd).unwrap(),
+        Request::WorkspaceTree
+    ));
+    let agent: flowmux_ipc::protocol::AgentExplanation = serde_json::from_value(serde_json::json!({
+        "workspace": flowmux_core::WorkspaceId::new(), "pane": PaneId::new(), "surface": surface,
+        "agent": "test agent", "status": "blocked", "attention": "input_required", "seen": true,
+        "identity_source": "flowmux:hook", "status_evidence": null, "turn_outcome": null,
+        "sequence": 9, "session_key": 10, "pending_waits": [], "children": {
+            "active": [{"id":"child-1", "turn_id":"turn-1", "pending_waits":[]}],
+            "parent_completion_pending": true, "unattributed_waits": []
+        }
+    })).unwrap();
+    let text = render_agent_explanations(std::slice::from_ref(&agent));
+    assert!(text.contains("child=child-1 turn=turn-1"));
+    assert!(text.contains("parent completion pending=true"));
+    assert!(text.contains("not a child approval"));
+    let mut unavailable = agent;
+    unavailable.children = None;
+    assert!(render_agent_explanations(&[unavailable]).contains("does not mean zero children"));
+    assert!(render_agent_explanations(&[]).contains("No current agent evidence"));
+}
+
+#[test]
 fn integration_help_matches_current_hook_support() {
     use clap::CommandFactory;
 

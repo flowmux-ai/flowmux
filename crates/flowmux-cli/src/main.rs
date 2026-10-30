@@ -118,7 +118,14 @@ enum Cmd {
     Tree,
 
     /// List live AI agents and their Claude Code messaging addresses.
-    Agents,
+    Agents {
+        /// Explain status evidence, pending waits, and observed child work.
+        #[arg(long)]
+        explain: bool,
+        /// Restrict the explanation to this exact tab surface.
+        #[arg(long, requires = "explain")]
+        surface: Option<SurfaceId>,
+    },
 
     /// Workspace operations.
     Workspace {
@@ -1268,8 +1275,8 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         return run_session_name(&client).await;
     }
 
-    if matches!(cmd, Cmd::Agents) {
-        return run_agents(&client, json_mode).await;
+    if let Cmd::Agents { explain, surface } = cmd {
+        return run_agents(&client, json_mode, explain, surface).await;
     }
 
     if let Cmd::Browser {

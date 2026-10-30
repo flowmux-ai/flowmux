@@ -3,6 +3,89 @@
 
 use super::*;
 
+pub(crate) fn render_agent_explanations(
+    agents: &[flowmux_ipc::protocol::AgentExplanation],
+) -> String {
+    use std::fmt::Write;
+    if agents.is_empty() {
+        return "No current agent evidence for the requested surface(s).\n".into();
+    }
+    let mut text = String::new();
+    for agent in agents {
+        let _ = writeln!(
+            text,
+            "{} · {:?} · {:?}\n  workspace={} pane={} surface={}",
+            agent.agent, agent.status, agent.attention, agent.workspace, agent.pane, agent.surface
+        );
+        let _ = writeln!(
+            text,
+            "  identity={} evidence={:?} sequence={:?} session_key={:?}\n  seen={} outcome={:?}",
+            agent.identity_source.as_deref().unwrap_or("unconfirmed"),
+            agent.status_evidence,
+            agent.sequence,
+            agent.session_key,
+            agent.seen,
+            agent.turn_outcome
+        );
+        for wait in &agent.pending_waits {
+            let _ = writeln!(
+                text,
+                "  wait {:?}: {:?}, actor={:?}, retry={:?}, count={}, since={}, context={:?}",
+                wait.scope,
+                wait.reason,
+                wait.actor,
+                wait.retry,
+                wait.count,
+                wait.since,
+                wait.context_evidence
+            );
+        }
+        match &agent.children {
+            Some(children) => {
+                let _ = writeln!(
+                    text,
+                    "  observed active children: {}; parent completion pending={}",
+                    children.active.len(),
+                    children.parent_completion_pending
+                );
+                for child in &children.active {
+                    let _ = writeln!(text, "    child={} turn={}", child.id, child.turn_id);
+                    for wait in &child.pending_waits {
+                        let _ = writeln!(
+                            text,
+                            "      wait {:?}, actor={:?}, retry={:?}, since={}, context={:?}",
+                            wait.wait.reason,
+                            wait.wait.actor,
+                            wait.wait.retry,
+                            wait.wait.since,
+                            wait.wait.context_evidence
+                        );
+                    }
+                }
+                for wait in &children.unattributed_waits {
+                    let _ = writeln!(
+                        text,
+                        "    unattributed child wait={} reason={:?} actor={:?} retry={:?} since={}",
+                        wait.scope_id,
+                        wait.wait.reason,
+                        wait.wait.actor,
+                        wait.wait.retry,
+                        wait.wait.since
+                    );
+                }
+                let _ = writeln!(text, "  Child observations are incomplete; the surface above opens the parent terminal, not a child approval.");
+            }
+            None => {
+                let _ = writeln!(
+                    text,
+                    "  child observations unavailable (does not mean zero children)"
+                );
+            }
+        }
+    }
+    text
+}
+
 pub(crate) fn print_response(r: &Response, json_mode: bool) -> anyhow::Result<()> {
     // `flowmux tree` gets a human-readable indented view in text mode;
     // --json still emits the structured payload for scripts.

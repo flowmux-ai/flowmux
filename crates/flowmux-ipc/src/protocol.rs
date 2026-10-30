@@ -141,6 +141,47 @@ pub struct TreePane {
     pub tabs: Vec<TreeTab>,
 }
 
+/// A read-only explanation, without messages or transcript text. Child records
+/// are hook observations, not a complete process inventory or approval API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentExplanation {
+    pub workspace: WorkspaceId,
+    pub pane: PaneId,
+    pub surface: SurfaceId,
+    pub agent: String,
+    pub status: AgentStatus,
+    pub attention: flowmux_core::AgentAttention,
+    pub seen: bool,
+    pub identity_source: Option<String>,
+    pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
+    pub turn_outcome: Option<flowmux_core::AgentTurnOutcome>,
+    pub sequence: Option<u64>,
+    pub session_key: Option<u64>,
+    pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
+    /// None means no child observation ledger is available, not zero children.
+    pub children: Option<AgentChildrenExplanation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentChildrenExplanation {
+    pub active: Vec<AgentChildExplanation>,
+    pub parent_completion_pending: bool,
+    pub unattributed_waits: Vec<AgentChildWait>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentChildExplanation {
+    pub id: String,
+    pub turn_id: String,
+    pub pending_waits: Vec<AgentChildWait>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentChildWait {
+    pub scope_id: String,
+    pub wait: flowmux_core::AgentWaitSummary,
+}
+
 /// A workspace flattened to its leaf panes for agent inspection. The
 /// split hierarchy is intentionally collapsed: agents target panes by
 /// id (for browser/terminal verbs), not by split position.
@@ -431,6 +472,12 @@ pub enum Request {
 
     /// `flowmux tree` — full workspace → leaf-pane → tab inspection.
     WorkspaceTree,
+
+    /// Explain current evidence and observed children without acknowledging it.
+    AgentExplain {
+        #[serde(default)]
+        surface: Option<SurfaceId>,
+    },
 
     /// `flowmux workspace current` — the most-recently-activated
     /// (currently focused) workspace id, if any.
@@ -1078,6 +1125,7 @@ impl Request {
             Self::Ping
                 | Self::WorkspaceList
                 | Self::WorkspaceTree
+                | Self::AgentExplain { .. }
                 | Self::WorkspaceCurrent
                 | Self::PaneReadScreen { .. }
                 | Self::NotificationsList { .. }
@@ -1099,6 +1147,9 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    AgentExplanations {
+        agents: Vec<AgentExplanation>,
+    },
     /// Returned only when a lifecycle request includes a notification. Legacy
     /// servers ignore that optional field and return Ok, allowing the client
     /// to deliver the notification through its older standalone request.
@@ -1241,6 +1292,23 @@ pub enum Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_explanation_defaults_to_all_surfaces_and_uses_control_admission() {
+        let all: Request = serde_json::from_value(serde_json::json!({
+            "verb": "agent_explain"
+        }))
+        .unwrap();
+        assert!(matches!(all, Request::AgentExplain { surface: None }));
+        assert!(all.uses_control_socket());
+        let surface = SurfaceId::new();
+        let one: Request = serde_json::from_value(serde_json::json!({
+            "verb": "agent_explain", "surface": surface
+        }))
+        .unwrap();
+        assert!(matches!(one, Request::AgentExplain { surface: Some(id) } if id == surface));
+        assert!(one.uses_control_socket());
+    }
 
     #[test]
     fn screenshot_without_capture_mode_keeps_viewport_behavior() {

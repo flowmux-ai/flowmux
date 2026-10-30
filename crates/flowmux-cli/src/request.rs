@@ -287,7 +287,11 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
     Ok(match cmd {
         Cmd::Ping => Request::Ping,
         Cmd::Ssh { op } => ssh_op_to_request(op)?,
-        Cmd::Tree | Cmd::Agents | Cmd::SessionName => Request::WorkspaceTree,
+        Cmd::Agents {
+            explain: true,
+            surface,
+        } => Request::AgentExplain { surface },
+        Cmd::Tree | Cmd::Agents { .. } | Cmd::SessionName => Request::WorkspaceTree,
         Cmd::Workspace {
             op: WorkspaceOp::New { name, root, team },
         } => Request::WorkspaceCreate {

@@ -43,6 +43,7 @@ fn query_timeout(request: &Request) -> Option<Duration> {
         Request::Ping
         | Request::WorkspaceList
         | Request::WorkspaceTree
+        | Request::AgentExplain { .. }
         | Request::WorkspaceCurrent
         | Request::PaneReadScreen { .. }
         | Request::NotificationsList { .. }
@@ -1055,11 +1056,15 @@ mod tests {
         }
         for request in [
             Request::WorkspaceList,
+            Request::AgentExplain { surface: None },
             Request::PaneClose {
                 pane: flowmux_core::PaneId::new(),
             },
         ] {
-            let query = matches!(request, Request::WorkspaceList);
+            let query = matches!(
+                request,
+                Request::WorkspaceList | Request::AgentExplain { .. }
+            );
             let handler = Arc::new(WaitingHandler {
                 entered: tokio::sync::Notify::new(),
                 release: tokio::sync::Notify::new(),

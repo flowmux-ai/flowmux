@@ -205,3 +205,22 @@ application uncertain and never triggers a diagnostic retry. Consult the
 matching state-decision record for the reason. A snapshot alone cannot explain
 an earlier missed event; enable tracing before reproducing it. Existing user
 logging overrides still apply independently.
+
+`flowmux agents --explain` reads the running instance's current agent evidence.
+Use `flowmux --json agents --explain --surface UUID` to inspect one exact tab
+surface; without `--surface`, it includes every current agent presence. The
+query does not focus a terminal, mark a result read, or resolve a request.
+It includes identity ownership, status evidence, turn outcome, pending wait
+summaries, and observed child work where a matching session ledger exists.
+The ordinary `flowmux agents` listing keeps its existing format.
+
+Child observations are partial. `children: null` means the ledger is unavailable,
+not that no children exist. An empty `active` list means no active children are
+currently observed. Child waits without a matching observed identity and turn
+remain in `unattributed_waits`; the query does not guess their owner.
+`parent_completion_pending` explains when an observed parent stop is held behind
+child work. The returned surface identifies the parent terminal and is not a
+child approval address. This command neither approves requests nor supplies an
+approval API. Raw parent session IDs, messages, and transcript text are omitted;
+child IDs, turn IDs, and wait scopes are included for correlation. An older
+running instance may not support the explanation query.

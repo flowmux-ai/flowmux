@@ -395,6 +395,75 @@ fn remember_ended_agent_lifecycle(
     }
 }
 
+fn explain_agent_children(
+    runtime: &AgentLifecycleRuntime,
+    surface: SurfaceId,
+    agent: &AgentPresence,
+) -> Option<flowmux_ipc::protocol::AgentChildrenExplanation> {
+    use flowmux_ipc::protocol::{AgentChildExplanation, AgentChildWait, AgentChildrenExplanation};
+    if !agent.name.eq_ignore_ascii_case("codex") {
+        return None;
+    }
+    let session = agent.session_id.as_ref()?;
+    let ledger = runtime.codex_turns.get(&(surface, session.clone()));
+    if ledger
+        .and_then(|l| l.owner_pid)
+        .zip(agent.pid)
+        .is_some_and(|(owner, current)| owner != current)
+    {
+        return None;
+    }
+    let key = (surface, "codex".to_string(), session.clone());
+    let mut waits: BTreeMap<_, _> = runtime
+        .permission_waits
+        .get(&key)
+        .into_iter()
+        .flat_map(|w| w.iter())
+        .filter(|(scope, _)| scope.starts_with("child:"))
+        .map(|(scope, wait)| {
+            let context = wait
+                .screen_context
+                .map_or(wait.context, |(context, _)| context);
+            (
+                scope.clone(),
+                AgentChildWait {
+                    scope_id: scope.clone(),
+                    wait: AgentWaitSummary {
+                        scope: AgentWaitScope::Permission,
+                        reason: wait.reason,
+                        actor: context.actor,
+                        retry: context.retry,
+                        context_evidence: wait.screen_context.map(|(_, evidence)| evidence),
+                        count: 1,
+                        since: wait.since,
+                    },
+                },
+            )
+        })
+        .collect();
+    if ledger.is_none() && waits.is_empty() {
+        return None;
+    }
+    let mut active: Vec<_> = ledger
+        .into_iter()
+        .flat_map(|l| &l.active_children)
+        .map(|(id, turn_id)| AgentChildExplanation {
+            id: id.clone(),
+            turn_id: turn_id.clone(),
+            pending_waits: waits
+                .remove(&format!("child:{id}:{turn_id}"))
+                .into_iter()
+                .collect(),
+        })
+        .collect();
+    active.sort_by(|a, b| (&a.id, &a.turn_id).cmp(&(&b.id, &b.turn_id)));
+    Some(AgentChildrenExplanation {
+        active,
+        parent_completion_pending: ledger.is_some_and(|l| l.pending_parent_stop.is_some()),
+        unattributed_waits: waits.into_values().collect(),
+    })
+}
+
 fn pending_wait_summary(
     runtime: &AgentLifecycleRuntime,
     key: &AgentLifecycleKey,
@@ -604,6 +673,71 @@ fn clear_agent_lifecycle_runtime(
 }
 
 impl StateStore {
+    /// Snapshot lifecycle and presence under the same lock order as reporting.
+    /// A read must not acknowledge a result, resolve a wait, or scan processes.
+    pub async fn explain_agents(
+        &self,
+        surface: Option<SurfaceId>,
+    ) -> Vec<flowmux_ipc::protocol::AgentExplanation> {
+        use flowmux_ipc::protocol::AgentExplanation;
+        fn collect<'a>(
+            pane: &'a Pane,
+            filter: Option<SurfaceId>,
+            out: &mut Vec<(PaneId, SurfaceId, &'a AgentPresence)>,
+        ) {
+            match pane {
+                Pane::Leaf {
+                    id,
+                    content: PaneContent::Tabs { surfaces, .. },
+                } => {
+                    for tab in surfaces {
+                        if filter.is_none_or(|filter| filter == tab.id) {
+                            if let Some(agent) = tab.agent.as_ref() {
+                                out.push((*id, tab.id, agent));
+                            }
+                        }
+                    }
+                }
+                Pane::Split { first, second, .. } => {
+                    collect(first, filter, out);
+                    collect(second, filter, out);
+                }
+                _ => {}
+            }
+        }
+        let lifecycle = self.agents.lifecycle.lock().await;
+        let state = self.inner.lock().await;
+        let mut result = Vec::new();
+        for workspace_id in flowmux_state::ordered_workspace_ids(&state) {
+            let Some(workspace) = state.workspaces.iter().find(|w| w.id == workspace_id) else {
+                continue;
+            };
+            let mut agents = Vec::new();
+            for workspace_surface in &workspace.surfaces {
+                collect(&workspace_surface.root_pane, surface, &mut agents);
+            }
+            for (pane, surface, agent) in agents {
+                result.push(AgentExplanation {
+                    workspace: workspace.id,
+                    pane,
+                    surface,
+                    agent: agent.name.clone(),
+                    status: agent.public_status(),
+                    attention: agent.attention(),
+                    seen: agent.seen,
+                    identity_source: agent.source.clone(),
+                    status_evidence: agent.status_evidence,
+                    turn_outcome: agent.turn_outcome,
+                    sequence: agent.seq,
+                    session_key: trace_key(agent.session_id.as_deref()),
+                    pending_waits: agent.pending_waits.clone(),
+                    children: explain_agent_children(&lifecycle, surface, agent),
+                });
+            }
+        }
+        result
+    }
+
     /// Claim an accepted request or response effect once, independently of the
     /// bounded notification log. Resolved requests and superseded responses
     /// cannot claim a successor's effect.

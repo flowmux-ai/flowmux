@@ -2708,7 +2708,7 @@ impl AgentTurnOutcome {
 
 /// Read-only projection of current evidence. It does not acknowledge or resolve
 /// requests and counts each live agent once, even when wait scopes overlap.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentAttention {
     InputRequired,

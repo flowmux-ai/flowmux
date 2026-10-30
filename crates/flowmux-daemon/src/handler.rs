@@ -134,6 +134,10 @@ impl Handler for DaemonHandler {
                     }
                 }
 
+                Request::AgentExplain { surface } => Response::AgentExplanations {
+                    agents: self.store.explain_agents(surface).await,
+                },
+
                 Request::WorkspaceCurrent => Response::WorkspaceCurrent {
                     id: self.store.active_workspace().await,
                 },
@@ -232,6 +236,10 @@ mod tests {
 
         let response = handler.handle(Request::WorkspaceList).await;
         assert!(matches!(response, Response::WorkspaceList { ids } if ids == vec![id]));
+        assert!(
+            matches!(handler.handle(Request::AgentExplain { surface: None }).await,
+            Response::AgentExplanations { agents } if agents.is_empty())
+        );
         assert_eq!(
             handler.store().get_workspace(id).await.unwrap().name,
             "demo"

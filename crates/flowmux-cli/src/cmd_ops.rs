@@ -112,7 +112,25 @@ pub(crate) async fn run_session_name(client: &Client) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn run_agents(client: &Client, json: bool) -> anyhow::Result<()> {
+pub(crate) async fn run_agents(
+    client: &Client,
+    json: bool,
+    explain: bool,
+    surface: Option<SurfaceId>,
+) -> anyhow::Result<()> {
+    if explain {
+        let Response::AgentExplanations { agents } =
+            client.call(Request::AgentExplain { surface }).await?
+        else {
+            anyhow::bail!("agent explanation is unavailable from this server; update the running Flowmux instance");
+        };
+        if json {
+            println!("{}", serde_json::to_string_pretty(&agents)?);
+        } else {
+            print!("{}", render_agent_explanations(&agents));
+        }
+        return Ok(());
+    }
     let Response::Tree { workspaces } = client.call(Request::WorkspaceTree).await? else {
         anyhow::bail!("unexpected response to WorkspaceTree");
     };
