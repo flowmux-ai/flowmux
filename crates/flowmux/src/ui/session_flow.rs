@@ -282,6 +282,8 @@ impl FlowPanel {
         let mut scene = self.scene.borrow_mut();
         if scene.workspace != workspace {
             scene.fit_during_settle = false;
+            scene.drag_active = false;
+            scene.held = None;
         }
         scene.workspace = workspace;
         scene.graph = graph;
@@ -393,9 +395,12 @@ impl FlowPanel {
             }
             let mut scene = scene.borrow_mut();
             let Scene {
-                layout, all, held, ..
+                layout,
+                graph,
+                held,
+                ..
             } = &mut *scene;
-            let active = layout.step(all, held.as_ref());
+            let active = layout.step(graph, held.as_ref());
             if scene.fit_during_settle {
                 scene.fit(area.width() as f64, area.height() as f64);
                 scene.fit_during_settle = active;
@@ -881,6 +886,24 @@ pub(crate) fn check_canvas_controls() {
     assert!(
         matches!(receiver.try_recv(), Ok(GtkCommand::SessionFlow(FlowAction::Open(id))) if id == key("child"))
     );
+    let graph = panel.scene.borrow().graph.clone();
+    let old = panel.positions();
+    let point = panel.scene.borrow().camera().screen(old[&key("child")]);
+    drag.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+    panel.show_workspace(
+        Some(WorkspaceId::new()),
+        graph.clone(),
+        [key("child")].into(),
+    );
+    drag.emit_by_name::<()>("drag-update", &[&80.0, &0.0]);
+    drag.emit_by_name::<()>("drag-end", &[&80.0, &0.0]);
+    assert_eq!(
+        panel.positions(),
+        old,
+        "late drag crossed workspace context"
+    );
+    assert!(receiver.try_recv().is_err());
+    panel.show_workspace(Some(workspace), graph, [key("child")].into());
     let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();
     let cr = gtk::cairo::Context::new(&surface).unwrap();
     draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());

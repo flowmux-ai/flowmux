@@ -528,7 +528,7 @@ impl WindowController {
                 return self.focus_foreign_flow_session(&key, live).await;
             }
         }
-        let (session, home) = {
+        let (session, mut home) = {
             let catalog = self.flow.catalog.borrow();
             let catalog = catalog.as_ref().ok_or("Session history is still loading")?;
             let session = catalog
@@ -578,6 +578,31 @@ impl WindowController {
         }
         let mut expected_hook_id = None;
         if fork_source.is_some() {
+            let root_pid = self
+                .pane_registry
+                .borrow()
+                .terminals
+                .get(&source.1)
+                .and_then(|terminal| terminal.pid.get())
+                .ok_or("Source process ended")? as u32;
+            let target = SessionTarget {
+                agent: session.agent,
+                focused: Some(FocusedSession {
+                    pane: source.0,
+                    surface: source.1,
+                    root_pid,
+                    session_id: Some(key.id.clone()),
+                }),
+            };
+            let current = gtk::gio::spawn_blocking(move || session_home(&target))
+                .await
+                .map_err(|_| "Source environment reader failed")??;
+            if current.path.canonicalize().map_err(|e| e.to_string())? != key.home {
+                return Err(
+                    "Source session store changed. Refresh Session Flow before forking.".into(),
+                );
+            }
+            home = current;
             let presence = self
                 .store
                 .located_agent_presence(source.1)
