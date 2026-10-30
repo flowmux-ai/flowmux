@@ -281,3 +281,6 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 실제 workspace 간 계보 공유: `/tmp/flowmux-session-flow-real-shared-workspaces.log`에서 `MACOS_SESSION_FLOW_SHARED_WORKSPACES_OK`, `MACOS_SESSION_FLOW_CODEX_REAL_OK`, `MACOS_NATIVE_SMOKE_OK` 및 exit 0을 확인했다. Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e3e-5b0b-7b72-9f34-80983092c327`. Fork와 graph click resume 후 실제 자식 terminal surface를 두 번째 workspace로 옮겼다. 원래 workspace의 graph node 클릭이 새 workspace의 기존 자식 pane으로 이동했고, 두 workspace의 canvas scene이 같은 session/edge 집합을 표시 대상으로 유지하는지 확인했다. Terminal 수는 증가하지 않았고, 자식 PID 및 원본 PID/widget이 유지됐다. Workspace별 camera 저장·복구는 별도 state/canvas 시험 증거이며 이 시나리오를 물리 입력·양쪽 화면 캡처 검증으로 표현하지 않는다.
 
 해당 opt-in native harness의 clippy(`-D warnings`)도 통과했다: `/tmp/flowmux-session-flow-shared-workspaces-clippy.log`. 새 변경은 test-only helper와 provider harness이며 제품 실행 코드는 바뀌지 않았다. 사용자 앱 PID `72789`는 계속 실행 중이다.
+
+
+정확한 tab 전환 검증: `/tmp/flowmux-session-flow-real-exact-tab.log`의 native 시험은 workspace와 pane뿐 아니라 대상 pane의 active surface가 실제 Codex child surface와 일치할 때까지 기다린다. 대상 pane에는 기존 shell tab도 있으므로 pane 포커스만으로 통과하지 않는다. Child `01a18e40-f64a-7130-bcf4-90b5d9d16728`에서 shared-workspace/real-Codex/native-smoke marker와 exit 0을 확인했다.

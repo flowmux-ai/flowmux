@@ -1438,12 +1438,19 @@ pub(super) async fn check_real_codex(
     let terminal_count = controller.pane_registry.borrow().terminals.len();
     assert!(controller.flow.panel.try_click_native_node(&child_key));
     glib::future_with_timeout(Duration::from_secs(10), async {
-        while controller.store.active_workspace().await != Some(other_workspace) {
+        while controller.store.active_workspace().await != Some(other_workspace)
+            || controller.focused_pane.get() != Some(resumed_terminal.id())
+            || controller
+                .pane_registry
+                .borrow()
+                .active_surface(resumed_terminal.id())
+                != Some(resumed_target.surface)
+        {
             glib::timeout_future(Duration::from_millis(20)).await;
         }
     })
     .await
-    .expect("graph selection did not switch to the child's workspace");
+    .expect("graph selection did not focus the child's exact workspace, pane, and tab");
     controller.refresh_session_flow(false).await;
     controller
         .flow
