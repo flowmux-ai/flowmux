@@ -3411,6 +3411,70 @@ fn completed_turn_history_does_not_reopen_a_resolved_permission_request() {
 }
 
 #[test]
+fn composer_drafts_are_not_status_evidence() {
+    for composer in [
+        "› Explain the phrase permission prompt.\n\n  GPT-6-Astra default · /tmp/work",
+        "› Ask Codex to do anything\n\n  GPT-6-Astra default · /tmp/work · Run permission prompt test",
+        "› Explain this text:\n  permission prompt\n  • Working (1s • esc to interrupt)\n  Usage limit reached\n\n  GPT-6-Astra default · /tmp/work",
+        "────────────────\n❯\u{a0}Explain the phrase permission prompt.\n────────────────\n  manual mode on",
+        "────────────────\n❯ Explain this text:\n  permission prompt\n  • Working (1s • esc to interrupt)\n  Usage limit reached\n────────────────\n  manual mode on",
+    ] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(composer), None),
+            Some(AgentStatus::Idle),
+            "{composer}"
+        );
+        assert_eq!(detect_agent_progress_text(Some(composer)), None, "{composer}");
+        assert_eq!(detect_agent_usage_limit_text(Some(composer)), None, "{composer}");
+        for (signal, expected) in [
+            ("• Working (1s • esc to interrupt)", AgentStatus::Working),
+            ("Do you want to approve this command?", AgentStatus::Blocked),
+        ] {
+            for screen in [format!("{signal}\n{composer}"), format!("{composer}\n{signal}")] {
+                assert_eq!(
+                    detect_agent_status_from_signals(Some(&screen), None),
+                    Some(expected),
+                    "{screen}"
+                );
+            }
+        }
+    }
+    // A menu uses the same selection marker, but has no composer frame.
+    let menu = "Would you like to run the following command?\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again\n  3. No, and tell the agent what to do differently\n\n  Press enter to confirm or esc to cancel";
+    assert_eq!(
+        detect_agent_status_from_signals(Some(menu), None),
+        Some(AgentStatus::Blocked)
+    );
+}
+
+#[test]
+fn interrupted_frame_does_not_reopen_transcript_requests() {
+    let composer = "› Ask Codex to do anything\n\n  GPT-6-Astra default · /tmp/work";
+    let screen = format!("› Explain the phrase permission prompt.\n• NEXT\nWorked for 6s • 11:49 AM\n› Explain prime numbers.\n■ Conversation interrupted - use /feedback if something went wrong\n\n{composer}");
+    assert_eq!(
+        detect_agent_status_from_signals(Some(&screen), None),
+        Some(AgentStatus::Idle)
+    );
+    for (signal, expected) in [
+        ("• Working (1s • esc to interrupt)", AgentStatus::Working),
+        ("Do you want to approve this command?", AgentStatus::Blocked),
+    ] {
+        let live = format!("{screen}\n{signal}");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&live), None),
+            Some(expected),
+            "{live}"
+        );
+        let live = screen.replace(composer, &format!("{signal}\n{composer}"));
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&live), None),
+            Some(expected),
+            "{live}"
+        );
+    }
+}
+
+#[test]
 fn detector_handles_variable_action_labels_and_empty_composers() {
     for screen in [
         "✻ Cogitating… (2m 34s · ↓ 6.4k tokens)\n❯",

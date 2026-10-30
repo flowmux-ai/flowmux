@@ -48,12 +48,20 @@ int main(int argc, char **argv) {
         if (!strncmp(line, "screen-approved", 15)) {
             printf("\\033[2J\\033[H"); fputs(APPROVED_FRAME, stdout);
         }
+        if (!strncmp(line, "screen-draft", 12)) {
+            printf("\\033[2J\\033[H"); fputs(DRAFT_FRAME, stdout);
+        }
+        if (!strncmp(line, "screen-interrupted", 18)) {
+            printf("\\033[2J\\033[H"); fputs(INTERRUPTED_FRAME, stdout);
+        }
         fflush(stdout);
     }
 }
 """.replace("WORKING_FRAME", json.dumps(frames["working"], ensure_ascii=False))
        .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False))
-       .replace("APPROVED_FRAME", json.dumps(frames["approved"], ensure_ascii=False)))
+       .replace("APPROVED_FRAME", json.dumps(frames["approved"], ensure_ascii=False))
+       .replace("DRAFT_FRAME", json.dumps(frames["draft"], ensure_ascii=False))
+       .replace("INTERRUPTED_FRAME", json.dumps(frames["interrupted"], ensure_ascii=False)))
 
     def rpc(verb, **fields):
         with socket.socket(socket.AF_UNIX) as stream:
@@ -165,6 +173,14 @@ int main(int argc, char **argv) {
                     hook("stop", "idle")
                 else:
                     hook("session-start", "idle")
+                    rpc("pane_send_keys", pane=pane, keys="screen-draft\r")
+                    deadline = time.monotonic() + 5
+                    while observed()["status"] not in ("idle", "done"):
+                        assert time.monotonic() < deadline, observed()
+                        time.sleep(.05)
+                    time.sleep(1)
+                    assert observed()["status"] in ("idle", "done"), observed()
+                    print("PASS: unsubmitted draft is not an approval request", flush=True)
                     # A shared Codex daemon inherited another, now idle tab's
                     # environment. Every hook must still reach this session.
                     other_root = root / "idle-tab"
@@ -217,6 +233,10 @@ int main(int argc, char **argv) {
                     hook("stop", "idle", turn_id="root-3", stop_hook_active=True)
                     hook("turn-start", "running", turn_id="root-4")
                     hook("interrupt", "idle", turn_id="root-4")
+                    rpc("pane_send_keys", pane=pane, keys="screen-interrupted\r")
+                    time.sleep(1)
+                    assert observed()["status"] in ("idle", "done"), observed()
+                    print("PASS: interruption does not reopen transcript requests", flush=True)
                     hook("turn-start", "running", turn_id="root-5")
                     hook("stop", "running", turn_id="root-4")
                     hook("stop", "idle", turn_id="root-5")

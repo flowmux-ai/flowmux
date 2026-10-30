@@ -6216,12 +6216,17 @@ mod tests {
             );
             let screens: &[&str] = if agent == "codex" {
                 &[
+                    "› Explain the phrase permission prompt.\n  • Working (1s • esc to interrupt)\n  Usage limit reached\n\n  GPT-6-Astra default · /tmp/work",
+                    "› Explain the phrase permission prompt.\n■ Conversation interrupted - use /feedback if something went wrong\n› Ask Codex to do anything\n\n  GPT-6-Astra default · /tmp/work",
                     "Worked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
                     "─ Worked for 3s ─\n›",
                     "›\ngpt-6-astra · ~/work    Goal achieved (16m)",
                 ]
             } else {
-                &["✻ Cooked for 3s\n❯", "✻ Cooked for 3s · done 11:17 AM\n❯"]
+                &[
+                    "────────────────\n❯ Explain the phrase permission prompt.\n  • Working (1s • esc to interrupt)\n  Usage limit reached\n────────────────\n  manual mode on",
+                    "✻ Cooked for 3s\n❯", "✻ Cooked for 3s · done 11:17 AM\n❯",
+                ]
             };
             for screen in screens {
                 store

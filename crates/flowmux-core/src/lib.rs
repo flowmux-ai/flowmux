@@ -2779,12 +2779,7 @@ pub fn detect_agent_status_from_signals(
     }
 
     let text = screen_text.unwrap_or_default();
-    let recent = || {
-        text.lines()
-            .rev()
-            .filter(|line| !line.trim().is_empty())
-            .take(12)
-    };
+    let recent = || agent_status_screen_lines(text);
     // A verified completed-turn footer separates transcript history from live
     // controls. Old approval prose above it must not reopen a resolved wait.
     let live_lines = detect_agent_completion(screen_text)
@@ -2899,33 +2894,105 @@ fn starts_with_elapsed_duration(text: &str) -> bool {
 }
 
 pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
-    screen_text?
-        .lines()
-        .rev()
-        .filter(|line| !line.trim().is_empty())
-        .take(12)
-        .find_map(|line| {
-            is_agent_working_status_line(line).then(|| {
-                let trimmed = trim_agent_status_prefix(line);
-                trimmed
-                    .split("? for shortcuts")
-                    .next()
-                    .unwrap_or(trimmed)
-                    .trim()
-            })
+    agent_status_screen_lines(screen_text?).find_map(|line| {
+        is_agent_working_status_line(line).then(|| {
+            let trimmed = trim_agent_status_prefix(line);
+            trimmed
+                .split("? for shortcuts")
+                .next()
+                .unwrap_or(trimmed)
+                .trim()
         })
+    })
 }
 
 pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> {
-    screen_text?
-        .lines()
+    agent_status_screen_lines(screen_text?).find_map(|line| {
+        let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
+        is_agent_usage_limit_status_line(line).then_some(line)
+    })
+}
+
+/// Exclude editable composer text only when its surrounding TUI frame is known.
+/// A selection marker alone is insufficient: approval menus use it too.
+fn agent_status_screen_lines(text: &str) -> impl Iterator<Item = &str> {
+    let lines: Vec<_> = text.lines().collect();
+    let draft = lines
+        .iter()
+        .rposition(|line| {
+            line.strip_prefix(['›', '❯'])
+                .is_some_and(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+        })
+        .and_then(|start| {
+            let end = if lines[start].starts_with('›') {
+                // The model/cwd row is outside the composer. Approval menus
+                // instead end with their Enter/Escape controls.
+                lines[start + 1..].iter().position(|line| {
+                    line.starts_with("  ")
+                        && line.split_once(" · ").is_some_and(|(model, cwd)| {
+                            !model.trim().is_empty() && cwd.starts_with(['/', '~'])
+                        })
+                })?
+            } else {
+                let separator = |line: &&str| {
+                    let line = line.trim();
+                    line.chars().take(3).count() == 3
+                        && line.chars().all(|ch| matches!(ch, '─' | '━'))
+                };
+                let above = lines[..start]
+                    .iter()
+                    .rfind(|line| !line.trim().is_empty())?;
+                if !separator(above) {
+                    return None;
+                }
+                lines[start + 1..].iter().position(separator)?
+            };
+            Some(start..start + 1 + end)
+        });
+    let metadata = draft
+        .as_ref()
+        .filter(|draft| lines[draft.start].starts_with('›'))
+        .map(|draft| draft.end);
+    // A visible interruption next to the composer also ends transcript status
+    // evidence. This is not a lifecycle completion and cannot settle a new turn.
+    let history_end = draft.as_ref().and_then(|draft| {
+        let index = lines[..draft.start]
+            .iter()
+            .rposition(|line| !line.trim().is_empty())?;
+        (lines[draft.start].starts_with('›')
+            && lines[index].trim()
+                == "■ Conversation interrupted - use /feedback if something went wrong")
+            .then_some(index)
+    });
+    lines
+        .into_iter()
+        .enumerate()
         .rev()
+        .map(move |(index, line)| {
+            if metadata == Some(index) {
+                // User-named sessions and paths are not status evidence. Keep
+                // the explicit goal badge for the existing live-control guard.
+                return line.find("  Goal achieved (").map_or("", |at| &line[at..]);
+            }
+            if history_end.is_some_and(|end| index < end) {
+                return "";
+            }
+            if let Some(draft) = &draft {
+                if index == draft.start {
+                    return if line.starts_with('›') {
+                        "›"
+                    } else {
+                        "❯"
+                    };
+                }
+                if draft.contains(&index) {
+                    return "";
+                }
+            }
+            line
+        })
         .filter(|line| !line.trim().is_empty())
         .take(12)
-        .find_map(|line| {
-            let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
-            is_agent_usage_limit_status_line(line).then_some(line)
-        })
 }
 
 fn is_agent_usage_limit_status_line(line: &str) -> bool {

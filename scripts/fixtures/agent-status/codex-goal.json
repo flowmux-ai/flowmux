@@ -7,6 +7,8 @@
   "source": "Minimal synthetic frames preserving the reported Goal achieved footer and trailing hints; cwd redacted.",
   "working": "• Working (1s • esc to interrupt)\n› Ask Codex to do anything\n",
   "approved_provider_version": "0.166.0",
-  "approved": "For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\nWorked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work\n",
+  "draft": "› Explain the phrase permission prompt. Do not use tools.\n\n  GPT-6-Astra default · /tmp/work · Run permission prompt test\n",
+  "interrupted": "› Explain the phrase permission prompt.\nNEXT\nWorked for 6s • 11:49 AM\n› Explain prime numbers.\n■ Conversation interrupted - use /feedback if something went wrong\n\n› Ask Codex to do anything\n\n  GPT-6-Astra default · /tmp/work · Run permission prompt test\n",
+  "approved": "For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\nWorked for 28s • 11:18 AM\n› Ask Codex to do anything\n  GPT-6-Astra default · /tmp/work · Run permission prompt test\n",
   "completed": "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view\n"
 }
