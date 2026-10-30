@@ -31,6 +31,9 @@ impl WindowController {
         }
 
         match cmd {
+            GtkCommand::ChildExited { exit, .. } => {
+                tracing::info!(pane = %exit.pane, status = exit.status, "child exited");
+            }
             GtkCommand::TeamSpawn {
                 pane,
                 cwd,

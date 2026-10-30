@@ -475,6 +475,12 @@ pub enum GtkCommand {
         ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Close a pane-local surface tab.
+    ChildExited {
+        exit: crate::ui::pane_terminal::ChildExit,
+        scope_unit: Option<String>,
+        cgroup_dir: Option<std::path::PathBuf>,
+        isolation_unavailable: Option<String>,
+    },
     CloseSurface {
         pane: PaneId,
         surface: SurfaceId,

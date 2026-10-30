@@ -242,9 +242,12 @@ pub(crate) fn build_ssh_panel(
     let mut scoped = callbacks.clone();
     let weak = Rc::downgrade(&runtime);
     let id = surface.id;
+    let cleanup = scoped.on_child_exited.clone();
     scoped.on_child_exited = Rc::new(RefCell::new(
-        move |exit: crate::ui::pane_terminal::ChildExit| {
+        move |mut exit: crate::ui::pane_terminal::ChildExit| {
             let status = exit.status;
+            exit.closing = true;
+            (cleanup.borrow_mut())(exit);
             if let Some(runtime) = weak.upgrade() {
                 let mut state = runtime.borrow_mut();
                 if state.generation == generation && state.instances.get(&id) == Some(&instance) {
@@ -1051,9 +1054,12 @@ impl WindowController {
         callbacks.on_terminal_contents_changed = Rc::new(RefCell::new(|_| {}));
         let weak = Rc::downgrade(&runtime);
         let bridge = self.bridge.clone();
+        let cleanup = callbacks.on_child_exited.clone();
         callbacks.on_child_exited = Rc::new(RefCell::new(
-            move |exit: crate::ui::pane_terminal::ChildExit| {
+            move |mut exit: crate::ui::pane_terminal::ChildExit| {
                 let status = exit.status;
+                exit.closing = true;
+                (cleanup.borrow_mut())(exit);
                 if let Some(runtime) = weak.upgrade() {
                     let mut state = runtime.borrow_mut();
                     if state.generation == generation

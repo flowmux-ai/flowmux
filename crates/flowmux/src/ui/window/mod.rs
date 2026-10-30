@@ -605,6 +605,11 @@ pub struct WindowController {
     pane_zoom: PaneZoomState,
     workspace_overview: workspace_overview::WorkspaceOverviewState,
     content_overlay: gtk::Overlay,
+    tokio_handle: Option<tokio::runtime::Handle>,
+    #[cfg(target_os = "linux")]
+    scope_isolation: Rc<RefCell<Option<crate::process_scope::ScopeIsolation>>>,
+    #[cfg(target_os = "linux")]
+    pane_scopes: Rc<RefCell<HashMap<SurfaceId, Result<crate::process_scope::PaneScope, String>>>>,
     callbacks: PaneCallbacks,
     bridge: Bridge,
     /// Currently applied visual theme. Swapped in place by
@@ -1273,6 +1278,7 @@ mod notification_coordinator;
 mod pane_callbacks;
 mod pane_commands;
 mod polling;
+mod process_lifecycle;
 mod review;
 mod sessions;
 pub(crate) mod ssh;
@@ -1927,7 +1933,7 @@ impl WindowController {
 
         register_workspace_actions(&window, &store, &bridge);
 
-        let controller = Self {
+        let mut controller = Self {
             window,
             focused_pane,
             workspace_presenter: workspace_presenter::WorkspacePresenter::new(
@@ -1967,6 +1973,11 @@ impl WindowController {
             agent_office: Rc::new(RefCell::new(None)),
             workspace_overview: workspace_overview::WorkspaceOverviewState::default(),
             content_overlay,
+            tokio_handle: tokio_handle.clone(),
+            #[cfg(target_os = "linux")]
+            scope_isolation: Rc::new(RefCell::new(None)),
+            #[cfg(target_os = "linux")]
+            pane_scopes: Rc::new(RefCell::new(HashMap::new())),
             callbacks,
             bridge,
             theme: Rc::new(RefCell::new(theme)),
@@ -1984,6 +1995,7 @@ impl WindowController {
             cwd_poll_generation: Rc::new(Cell::new(0)),
             window_close: WindowCloseState::default(),
         };
+        controller.install_process_callbacks();
         controller.install_state_flush_on_close();
         controller.install_cwd_polling_fallback();
         controller.install_editor_session_persistence();
@@ -2975,7 +2987,8 @@ impl WindowController {
             | GtkCommand::ActivateWorkspace { .. }) => {
                 self.dispatch_workspace_command(command).await;
             }
-            command @ (GtkCommand::SplitPane { .. }
+            command @ (GtkCommand::ChildExited { .. }
+            | GtkCommand::SplitPane { .. }
             | GtkCommand::TeamSpawn { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
