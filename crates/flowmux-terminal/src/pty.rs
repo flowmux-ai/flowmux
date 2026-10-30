@@ -127,10 +127,7 @@ impl Pty {
         };
         let c_oom_path = CString::new("/proc/self/oom_score_adj").expect("static path");
 
-        // Serialize "create gate pipe + fork": a child forked while another
-        // thread's gate pipe exists inherits that pipe's write end, and two
-        // concurrent spawns could then each hold the other's write end while
-        // parked, deadlocking both. Held until this function returns.
+        // Keep concurrent PTY spawns out of the pipe/master FD_CLOEXEC setup windows.
         let _spawn_guard = SPAWN_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -186,7 +183,7 @@ impl Pty {
                 {
                     let _ = (&c_oom_value, &c_oom_path);
                 }
-                // Park until the parent closes (or drops) its write end.
+                // Park until the parent writes the release byte or all writers close (EOF).
                 let mut byte = 0u8;
                 loop {
                     let n = libc::read(gate_read, &mut byte as *mut u8 as *mut libc::c_void, 1);
