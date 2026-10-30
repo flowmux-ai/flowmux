@@ -2380,7 +2380,11 @@ impl WindowController {
         let window = self.window.clone();
         // Let native WebViews unrealize before the window is destroyed.
         glib::idle_add_local_once(move || {
-            glib::idle_add_local_once(move || window.destroy());
+            glib::idle_add_local_once(move || {
+                tracing::debug!("destroying saved window");
+                window.destroy();
+                tracing::debug!("saved window destroyed");
+            });
         });
     }
 

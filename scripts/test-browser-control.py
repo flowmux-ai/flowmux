@@ -1472,8 +1472,13 @@ def main():
                 try:
                     process.wait(timeout=15)
                 except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                    try:
+                        if sys.platform == "darwin":
+                            subprocess.run(["sample", str(process.pid), "1", "1"],
+                                           stdout=log, stderr=log, timeout=10)
+                    finally:
+                        process.kill()
+                        process.wait()
                     raise AssertionError("test GUI did not stop")
                 finally:
                     server.shutdown()

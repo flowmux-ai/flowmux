@@ -481,7 +481,9 @@ fn main() -> anyhow::Result<()> {
         });
     }
     let exit_code = app.run_with_args::<&str>(&[]);
+    tracing::debug!("GTK application stopped; shutting down runtime");
     drop(rt);
+    tracing::debug!("runtime stopped");
     drop(log_guard);
     std::process::exit(exit_code.into());
 }
