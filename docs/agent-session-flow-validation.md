@@ -205,7 +205,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
 | 전체 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
-| Linux coverage·원격 CI | `a1ceb185` macOS는 기존 PTY 압력 fixture에서 실패, Linux는 실행 중; Sanitizers·License success. Fixture 수정 `ecc97ae2`의 Test `41112091385` 재실행 중. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
+| Linux coverage·원격 CI | `a1ceb185` macOS는 기존 PTY 압력 fixture에서 실패, Linux 테스트·coverage는 success; Sanitizers·License success. Fixture 수정 `ecc97ae2`의 Test `41112091385` 재실행 중. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
 
@@ -261,3 +261,18 @@ macOS CI `41108551043`의 browser-control은 통과했다. 이후 CLI의 `pty_te
 이 시험은 history worker 완료 플래그만 기다리지 않고 graph에 해당 node가 렌더링 가능한 상태로 들어온 뒤 클릭한다. 물리 입력 검증은 아니며 실제 provider와 GTK event/dispatch 경로의 결합 검증이다. 신규 코드는 `test + macOS + native-smoke` 조건의 검증 helper와 opt-in provider harness에만 적용되며 제품 실행 코드는 바뀌지 않았다.
 
 해당 native harness의 `cargo clippy -p flowmux --test macos_native --features native-smoke --locked -- -D warnings`도 통과했다. 로그: `/tmp/flowmux-session-flow-graph-click-clippy.log`.
+
+
+Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료됐다. Workspace 테스트와 모든 후속 live GUI/SSH 검사를 포함한 coverage phase가 1,542.546초에 통과했으며 JSON, HTML, threshold 단계도 통과했다. GUI 단위 테스트는 907 passed / 기존 ignored 4개이고 `canvas_controls_preserve_panes_and_never_launch_during_navigation`도 통과했다. `BROWSER_CONTROL_OK`와 `IDLE_STABILITY_OK`를 확인했다. 원본 job 로그: `/tmp/flowmux-session-flow-linux-final-a1.log`. GitHub artifact `linux-test-evidence` (`13004441704`)의 JSON과 HTML도 내려받아 확인했다.
+
+| Linux 측정 범위 | Lines | Regions | Functions |
+| --- | ---: | ---: | ---: |
+| 전체 저장소 | 86.91% | 86.84% | 85.83% |
+| 요구 기준 | 79% | 78% | 78% |
+| Session Flow core | 97.97% | 98.85% | 100.00% |
+| Session Flow state | 97.79% | 93.68% | 97.30% |
+| Native process identity | 81.03% | 84.35% | 87.50% |
+| Canvas | 81.77% | 82.84% | 75.38% |
+| Window orchestration | 38.89% | 37.88% | 29.76% |
+
+전체 기준은 통과했으나 window orchestration의 Linux 계측 범위는 낮다. 별도 macOS native/provider 시험은 Linux coverage에 합산되지 않는다. 위 수치에는 빌드된 테스트 코드도 포함되며 branch coverage는 수집하지 않았다. 전체 수치로 개별 실행 경로의 검증 완료를 주장하지 않는다. 집계 원본과 식별자는 [coverage JSON](design-assets/session-flow-coverage-a1ceb185.json)에 보존했다. 해당 workflow 전체는 macOS PTY fixture 실패로 failure이며 Linux job 성공과 구분한다. 수정된 fixture를 포함한 Test `41112091385`는 계속 실행 중이다.
