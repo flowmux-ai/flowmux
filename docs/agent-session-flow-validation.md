@@ -4,6 +4,8 @@
 
 상태: 구현·검증 진행 중. 아래 항목은 수용 조건이며 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
+최신 제품 커밋은 `7cc0c176`이다. [Test 41116487881](https://github.com/flowmux-ai/flowmux/actions/runs/41116487881)와 [Sanitizers 41116492686](https://github.com/flowmux-ai/flowmux/actions/runs/41116492686)는 진행 중이다. 이전 `ecc97ae2`의 Test workflow는 전체 성공했으며 최신 변경의 검증 완료와 구분한다.
+
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
 ## 공통 시험 데이터
@@ -195,7 +197,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 범위 | 결과 | 증거 |
 | --- | --- | --- |
 | Core 모델 | 178 passed; 1만 노드·20개 계보, 긴 chain, projection, cycle/namespace, geometry | `/tmp/flowmux-session-flow-domain-tests.log` |
-| State | 79 passed 및 별도 integration 통과; transaction, 동시 writer, PID 재사용, stale refresh, native 증거 기반 복구 | 같은 domain log |
+| State | 81 passed 및 integration 1+2+13개 통과; transaction, 동시 writer, PID 재사용, stale refresh, native 증거 기반 복구, 잘못된 관계 격리 | `/tmp/flowmux-session-flow-partial-state-full.log` |
 | Daemon | 211 passed, 기존 ignored 1개; source/surface 검증과 증분 split | `/tmp/flowmux-session-flow-headless.log` |
 | 정적 검사 | workspace check, all-target clippy `-D warnings`, format, diff check 통과 | `/tmp/flowmux-session-flow-check.log`, `/tmp/flowmux-session-flow-menu-key-clippy.log` |
 | Hook·capability·해제 | Codex installer 25 passed/기존 ignored 1개; stderr help/실패 응답 및 제한된 PATH, fork callback registry 해제 테스트 통과 | `/tmp/flowmux-session-flow-hook-tests.log`, `/tmp/flowmux-session-flow-capability-final.log`, `/tmp/flowmux-session-flow-weak-registry.log` |
@@ -206,7 +208,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
 | 원격 macOS gate | `ecc97ae2`의 46개 phase 모두 passed; 수정된 PTY 압력 테스트, Session Flow native smoke, 기존 browser/editor/WebDriver 회귀 포함 | Test `41112091385`, job `124256538732`; [phase JSON](design-assets/session-flow-macos-gate-ecc97ae2.json) |
 | 로컬 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
-| Linux coverage·원격 CI | `a1ceb185` macOS는 기존 PTY 압력 fixture에서 실패, Linux 테스트·coverage는 success; Sanitizers·License success. Fixture 수정 `ecc97ae2`의 Test `41112091385` 재실행 중. 이전 `738b1e8d`에서 lines 82.26%, regions 82.33%, functions 81.12%로 기준 충족했으나 테스트 2건 실패. registry 강한 참조와 env PATH 조회 문제를 수정하여 재실행 | Test `41108551043`, Sanitizers `41108555435`, License `41108559323`; `/tmp/flowmux-session-flow-linux-job.log` |
+| Linux coverage·원격 CI | `ecc97ae2` Test 전체 success: lines 86.92%, regions 86.85%, functions 85.85%. 제품 보완 `7cc0c176`의 Test·Sanitizers는 진행 중. 이전 `a1ceb185` Sanitizers·License success | 기준 Test `41112091385`; 최신 Test `41116487881`, Sanitizers `41116492686`; `/tmp/flowmux-session-flow-linux-ecc97ae2.log` |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
 
@@ -300,3 +302,6 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 
 
 부분 계보 보완 이후 실제 Codex 회귀도 통과했다(`/tmp/flowmux-session-flow-partial-real-codex.log`, exit 0). Source `01a18ddc-a51f-7472-ab63-045abb779243`, child `01a18e4e-88e7-7ae0-a75d-fefca0788c42`; 실제 메뉴 fork, graph click resume, 중복 방지, workspace 간 공유 계보와 정확한 active tab 전환, 원본/자식 PID 보존 marker를 확인했다.
+
+
+기준 실행 종료 기록: `ecc97ae2`의 Test `41112091385`는 workflow 전체 success다. Linux job `124256539183`은 coverage phase 1,648.592초 및 JSON/HTML/threshold 단계 모두 passed였으며 GUI 907 passed / 기존 ignored 4개와 수정된 PTY 압력 시험 통과를 확인했다. Lines 86.92%, regions 86.85%, functions 85.85%로 기준을 충족했다. Linux artifact `13005333927`, 원본 로그 `/tmp/flowmux-session-flow-linux-ecc97ae2.log`. 아래 실행 당시의 진행 중 표기는 역사 기록이며 현재 최종 검증 대상은 상단의 `7cc0c176`이다.
