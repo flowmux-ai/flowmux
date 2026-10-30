@@ -4,8 +4,8 @@
 //! (Stop / Notification / SessionStart / …).
 //!
 //! Payload helpers extract notification summaries and lifecycle metadata
-//! for the command handlers. Notifications travel through `Request::Notify`;
-//! activity and correlated lifecycle reports use their own IPC requests.
+//! for the command handlers. Correlated lifecycle reports carry their notification
+//! effects; standalone notifications retain their own IPC requests.
 
 use flowmux_core::{AgentActivity, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{
@@ -336,6 +336,7 @@ pub fn build_agent_lifecycle_update(
     lifecycle: AgentLifecycleEvent,
 ) -> Request {
     Request::AgentLifecycleUpdate {
+        notification: None,
         pane,
         surface,
         agent: agent.to_ascii_lowercase(),
@@ -463,21 +464,79 @@ pub fn claude_notification_needs_input(notification_type: Option<&str>) -> bool 
 /// Send a request and ignore non-fatal errors. Hooks must not fail
 /// loudly — Claude/OpenCode/Codex propagate non-zero exits to the
 /// agent and surface them to the user as a hook error.
-pub async fn send_best_effort(client: &Client, req: Request) {
-    send_best_effort_with_timeout(client, req, HOOK_NOTIFY_TIMEOUT).await;
-}
-
-async fn send_best_effort_with_timeout(client: &Client, req: Request, timeout: Duration) {
+async fn send_best_effort_with_timeout(
+    client: &Client,
+    req: Request,
+    timeout: Duration,
+) -> Option<Response> {
     match tokio::time::timeout(timeout, client.call(req)).await {
         Ok(Ok(Response::Error(e))) => {
             tracing::debug!(?e, "hook notify rejected by daemon");
+            None
         }
-        Ok(Ok(_)) => {}
+        Ok(Ok(response)) => Some(response),
         Ok(Err(e)) => {
             tracing::debug!(error = %e, "hook notify failed");
+            None
         }
         Err(_) => {
             tracing::debug!(?timeout, "hook notify timed out");
+            None
+        }
+    }
+}
+
+pub async fn send_hook_requests(client: &Client, requests: Vec<Request>) {
+    send_hook_requests_with_timeout(client, requests, HOOK_NOTIFY_TIMEOUT).await;
+}
+
+async fn send_hook_requests_with_timeout(
+    client: &Client,
+    requests: Vec<Request>,
+    timeout: Duration,
+) {
+    let mut requests = requests.into_iter().peekable();
+    while let Some(mut request) = requests.next() {
+        // Only adjacent effects with identical explicit targets belong to this
+        // event. Unattributed/background notifications stay independent.
+        let fallback = match (&mut request, requests.peek()) {
+            (
+                Request::AgentLifecycleUpdate {
+                    pane,
+                    surface,
+                    notification,
+                    ..
+                },
+                Some(Request::Notify {
+                    pane: target_pane,
+                    surface: Some(target_surface),
+                    title,
+                    body,
+                    level,
+                }),
+            ) if pane == target_pane && surface == target_surface && notification.is_none() => {
+                *notification = Some(flowmux_ipc::protocol::AgentLifecycleNotification {
+                    title: title.clone(),
+                    body: body.clone(),
+                    level: *level,
+                });
+                requests.next()
+            }
+            _ => None,
+        };
+        // Preserve the combined delivery budget of the two former requests.
+        let request_timeout = if fallback.is_some() {
+            timeout.saturating_mul(2)
+        } else {
+            timeout
+        };
+        let response = send_best_effort_with_timeout(client, request, request_timeout).await;
+        if let Some(fallback) = fallback {
+            // Only an explicit legacy Ok proves the optional effect was ignored.
+            // A timeout/disconnect may follow application; never replay then.
+            if matches!(response, Some(Response::Ok)) {
+                let _ = send_best_effort_with_timeout(client, fallback, timeout).await;
+            }
         }
     }
 }
@@ -1462,6 +1521,104 @@ mod tests {
     fn parse_claude_hook_payload_handles_empty_object() {
         let parsed: ClaudeHookInput = serde_json::from_str("{}").unwrap();
         assert!(parsed.session_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_notification_delivery_requires_a_receipt_or_explicit_legacy_ok() {
+        use flowmux_ipc::protocol::{Envelope, Payload};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        for mode in 0..7 {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("flowmux.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let pane = PaneId::new();
+            let surface = SurfaceId::new();
+            let target = match mode {
+                5 => Some(SurfaceId::new()),
+                6 => None,
+                _ => Some(surface),
+            };
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read, mut write) = stream.into_split();
+                let mut reader = tokio::io::BufReader::new(read);
+                let mut requests = Vec::new();
+                loop {
+                    let mut line = String::new();
+                    match tokio::time::timeout(
+                        Duration::from_millis(150),
+                        reader.read_line(&mut line),
+                    )
+                    .await
+                    {
+                        Ok(Ok(n)) if n > 0 => {}
+                        _ => break,
+                    }
+                    let envelope: Envelope = serde_json::from_str(&line).unwrap();
+                    let Payload::Request(request) = envelope.payload else {
+                        panic!("expected request")
+                    };
+                    requests.push(request);
+                    if mode == 4 {
+                        continue;
+                    }
+                    let response = Envelope {
+                        id: envelope.id,
+                        payload: Payload::Response(match mode {
+                            0 | 1 => Response::AgentLifecycleReceipt { applied: mode == 0 },
+                            3 => Response::Pong,
+                            _ => Response::Ok,
+                        }),
+                    };
+                    let wire = serde_json::to_string(&response).unwrap() + "\n";
+                    write.write_all(wire.as_bytes()).await.unwrap();
+                }
+                requests
+            });
+            let client = Client::connect(&socket).await.unwrap();
+            send_hook_requests_with_timeout(
+                &client,
+                vec![
+                    build_agent_lifecycle_update(
+                        "agent",
+                        None,
+                        Some(pane),
+                        surface,
+                        "session",
+                        AgentLifecycleEvent::PermissionWaitStarted {
+                            reason: flowmux_core::AgentWaitReason::Approval,
+                            message: None,
+                            status_text: "Waiting".into(),
+                            scope: None,
+                        },
+                    ),
+                    build_notification_notify("Agent", Some("Review request"), Some(pane), target),
+                ],
+                Duration::from_millis(50),
+            )
+            .await;
+            let requests = server.await.unwrap();
+            assert_eq!(
+                requests.len(),
+                if matches!(mode, 2 | 5 | 6) { 2 } else { 1 },
+                "mode {mode}"
+            );
+            let Request::AgentLifecycleUpdate { notification, .. } = &requests[0] else {
+                panic!("expected lifecycle")
+            };
+            assert_eq!(notification.is_some(), mode < 5);
+            if let Some(notification) = notification {
+                assert_eq!(notification.body, "Review request");
+                assert_eq!(notification.level, NotificationLevel::NeedsInput);
+            }
+            if requests.len() == 2 {
+                assert!(
+                    matches!(&requests[1], Request::Notify { pane: p, surface: s, body, .. }
+                    if *p == Some(pane) && *s == target && body == "Review request")
+                );
+            }
+        }
     }
 
     #[tokio::test]

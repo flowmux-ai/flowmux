@@ -1131,6 +1131,7 @@ impl GuiHandler {
             }
 
             Request::AgentLifecycleUpdate {
+                notification,
                 pane,
                 surface,
                 agent,
@@ -1169,6 +1170,7 @@ impl GuiHandler {
                         )
                         .await;
                 }
+                let mut accepted_pane = None;
                 if let Some(ws_id) = outcome.workspace {
                     if let Some(store) = self.session_store.as_ref() {
                         if let Err(error) = store.record(&agent, surface, &session_id) {
@@ -1181,10 +1183,31 @@ impl GuiHandler {
                         .await;
                     if let Some(located) = self.inner.store().located_agent_presence(surface).await
                     {
+                        if located.presence.name.eq_ignore_ascii_case(&agent)
+                            && located.presence.session_id.as_deref() == Some(session_id.as_str())
+                        {
+                            accepted_pane = Some(located.pane);
+                        }
                         if let Some(entry) = ActivityEntry::from_hook_presence(located) {
                             let _ = self.bridge.send(GtkCommand::AddActivity { entry }).await;
                         }
                     }
+                }
+                if let Some(notification) = notification {
+                    if let Some(pane) = accepted_pane {
+                        let _ = self
+                            .handle_notification_verb(Request::Notify {
+                                pane: Some(pane),
+                                surface: Some(surface),
+                                title: notification.title,
+                                body: notification.body,
+                                level: notification.level,
+                            })
+                            .await;
+                    }
+                    return Response::AgentLifecycleReceipt {
+                        applied: outcome.workspace.is_some(),
+                    };
                 }
                 if outcome.completed {
                     let display_agent = if agent.eq_ignore_ascii_case("codex") {

@@ -401,6 +401,14 @@ pub enum SshRequest {
     },
 }
 
+/// An effect of an accepted lifecycle event, routed to that event's surface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentLifecycleNotification {
+    pub title: String,
+    pub body: String,
+    pub level: NotificationLevel,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Request {
@@ -762,6 +770,8 @@ pub enum Request {
     /// processes cannot clear another tool's wait or finish a Codex parent
     /// while an observed child is still active.
     AgentLifecycleUpdate {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notification: Option<AgentLifecycleNotification>,
         #[serde(default)]
         pane: Option<PaneId>,
         surface: SurfaceId,
@@ -1089,6 +1099,12 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    /// Returned only when a lifecycle request includes a notification. Legacy
+    /// servers ignore that optional field and return Ok, allowing the client
+    /// to deliver the notification through its older standalone request.
+    AgentLifecycleReceipt {
+        applied: bool,
+    },
     Ssh {
         value: serde_json::Value,
     },

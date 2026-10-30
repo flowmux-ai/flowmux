@@ -489,3 +489,63 @@ disappearance. The same failing binary passed the complete focused scenario
 The full gate is running from that frozen commit in
 `/tmp/fm-outcomes-c4-linux-final.log`; it excludes this wait-context change.
 Final full cross-platform verification remains outstanding.
+
+
+## Lifecycle notification admission (2026-10-30)
+
+A hook's notification now accompanies its lifecycle request when both carry the
+same explicit pane and surface. The GUI emits that effect only after accepting
+the lifecycle report and confirming the current session at its exact surface.
+Rejected stale, duplicate-sequence, foreign-session, and missing-surface reports
+produce an unapplied receipt and no notification. A stale pane hint cannot
+redirect an accepted surface's notification.
+
+The optional wire field preserves older request shapes. An explicit legacy
+`Ok` response permits the CLI's former standalone notification path; an applied
+or rejected receipt does not. Timeouts, transport errors, and unexpected replies
+never trigger a replay because the server may already have applied the effect.
+The bound request retains the former pair's combined delivery budget. This is
+admission control, not causal deduplication: newer reports of the same pending
+request can still produce repeated notifications with different message text.
+
+The focused regression failed before the change with `Ok` instead of the
+expected unapplied receipt (`/tmp/fm-notify-admission-red2.log`). The earlier
+`red.log` used malformed test JSON and is not product regression evidence.
+Final validation passed 68 GUI IPC handler tests on Linux, isolated agent unit
+suites on both platforms, 78 IPC unit tests, five protocol samples, four IPC
+stress tests, and full workspace/all-targets Clippy with native-smoke. Logs:
+`/tmp/fm-notify-admission-linux-handler.log`,
+`/tmp/fm-notify-admission-unit-final.log`,
+`/tmp/fm-notify-admission-linux-unit.log`, `/tmp/fm-notify-admission-ipc.log`, and
+`/tmp/fm-notify-admission-clippy-final.log`.
+
+The native main-thread replay passed hook transitions, stale bound approval and
+error rejection, and evidence tooltips (`/tmp/fm-notify-admission-native.log`,
+`LIVE_NATIVE_HOOK_MATRIX_OK`, `MACOS_AGENT_EVIDENCE_TOOLTIPS_OK`, and
+`MACOS_NATIVE_AGENT_HOOKS_OK`). These replayed events are synthetic.
+
+Actual agents A 2.1.314 and B 0.166.0 ran against application PID 9278 in
+`/tmp/fm-atn-tz8dqd_7`, with isolated state, socket, and private hook settings.
+Both passed plain responses, question or one-time harmless command approval,
+interruption, recovery, and unsubmitted status-like drafts. Question and
+approval notifications retained their exact workspace/pane/surface. Native
+screens showed the two wait reasons and later canceled versus unconfirmed
+outcomes. A synthetic stale bound event injected into each actual waiting
+session returned unapplied, created no notification, and left the wait intact.
+This injection is distinct from actual native hook generation.
+
+The visual checkpoint timer expired while inspection was pending; the test
+continued from the existing waiting sessions without restarting either agent.
+The continued matrix passed (`/tmp/fm-notify-admission-resume.log`,
+`LIVE_NOTIFICATION_ADMISSION_MATRIX_OK`); initial evidence remains in
+`/tmp/fm-notify-admission-live.log`. State, notification, draft, and final CLI
+JSON are retained under the isolated root. Application and CLI SHA-256:
+
+`ac25d746f6074474acb6bd10757e1bd7ef6b7c876fd59c85f51f09520cd7b8c5`
+
+`939f529fd08259b0a0e022a7dc3f9d1b7b2643a9aa1dc7e66c25e48e545bbbb2`
+
+Original application PID 72789 and independent user agent PID 1401 remained
+alive; the permanent vendor executable link stayed unchanged. The frozen
+`c4c4c486` Linux full gate is still running and excludes this change. Final full
+cross-platform verification and causal notification deduplication remain open.

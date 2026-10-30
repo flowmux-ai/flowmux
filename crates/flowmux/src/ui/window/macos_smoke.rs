@@ -790,6 +790,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         let client = Client::connect(&socket).await.unwrap();
         for request in [
             Request::AgentLifecycleUpdate {
+                notification: None,
                 pane: Some(terminal_pane),
                 surface: agent_surface,
                 agent: "claude".into(),

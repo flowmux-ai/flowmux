@@ -836,9 +836,7 @@ pub(crate) async fn run_claude_hook_event(
         }
     };
     if let Some(client) = hooks::connect_daemon(socket).await {
-        for req in reqs {
-            hooks::send_best_effort(&client, req).await;
-        }
+        hooks::send_hook_requests(&client, reqs).await;
     }
     Ok(())
 }
@@ -1309,9 +1307,7 @@ pub(crate) async fn run_generic_agent_hook_event(
         None => hooks::connect_daemon(socket).await,
     };
     if let Some(client) = client {
-        for req in reqs {
-            hooks::send_best_effort(&client, req).await;
-        }
+        hooks::send_hook_requests(&client, reqs).await;
     }
     Ok(())
 }

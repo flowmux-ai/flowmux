@@ -651,9 +651,79 @@ async fn agent_activity_visibility_query_is_bounded_when_gtk_does_not_ack() {
 }
 
 #[tokio::test]
+async fn lifecycle_notifications_follow_admission_and_keep_the_exact_surface() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    handler
+        .inner
+        .store()
+        .report_agent_lifecycle_with_visibility(
+            surface,
+            "claude",
+            None,
+            Some(10),
+            "session",
+            AgentLifecycleEvent::TurnStarted {
+                turn_id: None,
+                status_text: "Working".into(),
+            },
+            false,
+        )
+        .await;
+    for (seq, session, target, expected) in [
+        (9, "session", surface, false),
+        (11, "session", surface, true),
+        (11, "session", surface, false),
+        (12, "other-session", surface, false),
+        (13, "session", SurfaceId::new(), false),
+    ] {
+        let request = serde_json::from_value(serde_json::json!({
+                "verb":"agent_lifecycle_update",
+                "pane":if expected { PaneId::new() } else { pane }, "surface":target, "agent":"claude", "seq":seq,
+                "session_id":session,
+                "lifecycle":{"event":"permission_wait_started", "status_text":"Waiting"},
+                "notification":{"title":"Input required", "body":"Review request", "level":"needs_input"}
+        })).unwrap();
+        let response = handler.handle(request);
+        tokio::pin!(response);
+        let mut notifications = 0;
+        let response = loop {
+            tokio::select! {
+                response = &mut response => break response,
+                command = rx.recv() => match command.unwrap() {
+                    GtkCommand::QueryAgentSurfaceVisible { ack, .. } => { ack.send(false).unwrap(); }
+                    GtkCommand::SetAgentStatus { .. } | GtkCommand::AddActivity { .. } => {}
+                    GtkCommand::AddNotification { pane: destination, surface: tab, title, body, level, ack, .. } => {
+                        assert_eq!(destination, Some(pane));
+                        assert_eq!(tab, Some(surface));
+                        assert_eq!(title, "Input required");
+                        assert_eq!(body, "Review request");
+                        assert_eq!(level, NotificationLevel::NeedsInput);
+                        notifications += 1;
+                        ack.send(None).unwrap();
+                    }
+                    other => panic!("unexpected lifecycle command: {other:?}"),
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => panic!("lifecycle receipt timed out"),
+            }
+        };
+        assert_eq!(
+            notifications,
+            usize::from(expected),
+            "sequence {seq}, session {session}"
+        );
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({"agent_lifecycle_receipt":{"applied":expected}})
+        );
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[tokio::test]
 async fn codex_stop_settlement_rechecks_visibility_after_ingress_grace() {
     let (handler, rx, pane, surface) = single_pane_handler().await;
     let response = handler.handle(Request::AgentLifecycleUpdate {
+        notification: None,
         pane: Some(pane),
         surface,
         agent: "codex".into(),
@@ -752,6 +822,7 @@ async fn codex_lifecycle_notifies_only_after_the_last_observed_subagent_stops() 
         ),
     ] {
         let response = handler.handle(Request::AgentLifecycleUpdate {
+            notification: None,
             pane: Some(pane),
             surface,
             agent: "codex".into(),
@@ -785,6 +856,7 @@ async fn codex_lifecycle_notifies_only_after_the_last_observed_subagent_stops() 
     }
 
     let response = handler.handle(Request::AgentLifecycleUpdate {
+        notification: None,
         pane: Some(pane),
         surface,
         agent: "codex".into(),
@@ -889,6 +961,7 @@ async fn delayed_new_root_during_last_child_grace_suppresses_completion_notifica
     // before that root hook reached the daemon. It must begin grace without
     // consuming the parent Stop or publishing completion.
     let child_response = handler.handle(Request::AgentLifecycleUpdate {
+        notification: None,
         pane: Some(pane),
         surface,
         agent: "codex".into(),
@@ -915,6 +988,7 @@ async fn delayed_new_root_during_last_child_grace_suppresses_completion_notifica
     }
 
     let root_response = handler.handle(Request::AgentLifecycleUpdate {
+        notification: None,
         pane: Some(pane),
         surface,
         agent: "codex".into(),

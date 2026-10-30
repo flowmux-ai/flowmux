@@ -171,6 +171,15 @@ int main(int argc, char **argv) {
                 if name == "claude":
                     hook("session-start", "idle")
                     hook("prompt-submit", "running")
+                    for level in ("needs_input", "error"):
+                        rejected = rpc("agent_lifecycle_update", pane=pane, surface=surface,
+                            agent=name, seq=1, session_id=f"fixture-{name}",
+                            lifecycle={"event":"permission_wait_started", "status_text":"Stale wait"},
+                            notification={"title":"Rejected lifecycle fixture", "body":level, "level":level})
+                        assert rejected["agent_lifecycle_receipt"]["applied"] is False, rejected
+                        entries = rpc("notifications_list", unread_only=False)["notifications"]["entries"]
+                        assert all(e["title"] != "Rejected lifecycle fixture" for e in entries), entries
+                        assert observed()["activity"] == "running"
                     question = dict(tool_name="AskUserQuestion", tool_use_id="a")
                     hook("pre-tool-use", "needs_input", **question)
                     initial_wait = expect_waits([("tool", "question", 1)], "Waiting for answer")

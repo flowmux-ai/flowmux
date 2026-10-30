@@ -409,3 +409,30 @@ fn wait_context_is_optional_and_future_values_do_not_invent_user_action() {
         AgentLifecycleEvent::SessionWaitStarted { context: None, .. }
     ));
 }
+
+#[test]
+fn lifecycle_notification_absence_keeps_the_legacy_wire_shape() {
+    use flowmux_ipc::protocol::{Request, Response};
+    let legacy = serde_json::json!({
+        "verb":"agent_lifecycle_update", "surface":"00000000-0000-0000-0000-000000000001",
+        "agent":"agent", "session_id":"session",
+        "lifecycle":{"event":"progress_observed", "status_text":"Working"}
+    });
+    let request: Request = serde_json::from_value(legacy).unwrap();
+    assert!(matches!(
+        &request,
+        Request::AgentLifecycleUpdate {
+            notification: None,
+            ..
+        }
+    ));
+    assert!(serde_json::to_value(request)
+        .unwrap()
+        .get("notification")
+        .is_none());
+    let value = serde_json::to_value(Response::AgentLifecycleReceipt { applied: false }).unwrap();
+    assert!(matches!(
+        serde_json::from_value::<Response>(value).unwrap(),
+        Response::AgentLifecycleReceipt { applied: false }
+    ));
+}
