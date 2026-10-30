@@ -229,6 +229,34 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    #[cfg(target_os = "linux")]
+    let scope_isolation = rt.block_on(async {
+        let options = flowmux_config::options::load();
+        let isolation = process_scope::probe(
+            options.process_isolation == flowmux_config::options::ProcessIsolation::Auto,
+        )
+        .await;
+        if let Some(reason) = isolation.unavailable_reason() {
+            info!(%reason, "terminal process isolation unavailable");
+        } else {
+            let maintenance = async {
+                if let Err(error) = process_scope::sweep_failed_scopes(&isolation).await {
+                    tracing::warn!(%error, "could not reset stale terminal scopes");
+                }
+                if let Err(error) = process_scope::avoid_managed_oom_for_self(&isolation).await {
+                    tracing::warn!(%error, "could not set GUI OOM preference");
+                }
+            };
+            if tokio::time::timeout(std::time::Duration::from_secs(1), maintenance)
+                .await
+                .is_err()
+            {
+                tracing::warn!("scope maintenance timed out");
+            }
+        }
+        isolation
+    });
+
     // Each process claims only workspaces left by exited owners. Every save
     // briefly locks state.json, reloads it, replaces this window's slice, and
     // preserves slices owned by other live windows.
@@ -397,6 +425,16 @@ fn main() -> anyhow::Result<()> {
             provider,
             Some(tokio_handle_for_activate.clone()),
         );
+        #[cfg(target_os = "linux")]
+        {
+            ui::ghostty_pane::set_spawn_policy(spawn_policy_for(
+                scope_isolation.unavailable_reason().is_none(),
+                initial_options.child_oom_score_adj_or_none(),
+            ));
+            controller.use_process_isolation(scope_isolation.clone());
+        }
+        #[cfg(not(target_os = "linux"))]
+        ui::ghostty_pane::set_spawn_policy(ui::ghostty_pane::SpawnPolicy::default());
         controller.use_shared_notifier(shared_notifier_for_activate.clone());
         #[cfg(target_os = "linux")]
         if webkit_automation {
@@ -431,10 +469,35 @@ fn main() -> anyhow::Result<()> {
     });
 
     // GUI-only flags must not reach GApplication's option parser.
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        let app = app.downgrade();
+        gtk::glib::unix_signal_add_local(signal, move || {
+            if let Some(app) = app.upgrade() {
+                if let Some(window) = app.active_window() {
+                    window.close();
+                }
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    }
     let exit_code = app.run_with_args::<&str>(&[]);
     drop(rt);
     drop(log_guard);
     std::process::exit(exit_code.into());
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn spawn_policy_for(
+    isolation_available: bool,
+    child_oom_score_adj: Option<i32>,
+) -> ui::ghostty_pane::SpawnPolicy {
+    ui::ghostty_pane::SpawnPolicy {
+        oom_score_adj: if isolation_available {
+            None
+        } else {
+            child_oom_score_adj
+        },
+    }
 }
 
 /// Build the libadwaita application with the flags every other piece of the
@@ -779,6 +842,16 @@ fn gtk_im_module_is_ibus(current: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spawn_policy_raises_oom_score_only_without_isolation() {
+        assert_eq!(super::spawn_policy_for(true, Some(500)).oom_score_adj, None);
+        assert_eq!(
+            super::spawn_policy_for(false, Some(500)).oom_score_adj,
+            Some(500)
+        );
+        assert_eq!(super::spawn_policy_for(false, None).oom_score_adj, None);
+    }
+
     use super::*;
     #[cfg(not(target_os = "macos"))]
     use gtk::gio::ApplicationFlags;

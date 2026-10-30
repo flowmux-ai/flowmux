@@ -23,6 +23,8 @@ impl WaitKind {
     }
 }
 
+// Confirmed OOM evidence is available only from Linux systemd/cgroups.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OomEvidence {
     SystemdResult,

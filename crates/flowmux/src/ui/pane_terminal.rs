@@ -49,6 +49,8 @@ pub struct ChildExit {
     pub command: String,
 }
 
+// Scope metadata is consumed only by the Linux backend.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct ChildSpawned {
     pub pane: PaneId,
     pub surface: SurfaceId,
