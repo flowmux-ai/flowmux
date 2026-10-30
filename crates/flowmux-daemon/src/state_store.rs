@@ -2683,6 +2683,125 @@ mod tests {
             .expect("expected active surface")
     }
 
+    #[tokio::test]
+    async fn pending_notification_claim_survives_repeats_and_ends_with_its_request() {
+        use flowmux_core::AgentWaitReason;
+        for kind in 0..3 {
+            let store = StateStore::new_lazy(State::default());
+            let workspace = store
+                .create_workspace(Some("notification claim".into()), "/tmp".into())
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+            let wait = match kind {
+                0 => AgentLifecycleEvent::WaitStarted {
+                    reason: AgentWaitReason::Question,
+                    item_id: "question".into(),
+                    message: None,
+                    status_text: "Question".into(),
+                },
+                1 => AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: AgentWaitReason::Approval,
+                    scope: None,
+                    message: None,
+                    status_text: "Permission".into(),
+                },
+                _ => AgentLifecycleEvent::SessionWaitStarted {
+                    reason: AgentWaitReason::Quota,
+                    context: None,
+                    outcome: None,
+                    scope: Some("quota".into()),
+                    message: None,
+                    status_text: "Quota".into(),
+                },
+            };
+            let first = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(1),
+                    "session",
+                    wait.clone(),
+                    false,
+                )
+                .await
+                .notification_id
+                .unwrap();
+            assert!(
+                store
+                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .await
+            );
+            assert!(
+                !store
+                    .claim_agent_wait_notification(surface, "claude", "other-session", first)
+                    .await
+            );
+            let repeated = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(2),
+                    "session",
+                    wait.clone(),
+                    false,
+                )
+                .await;
+            // Tool ids are rejected as duplicates; scope reminders may update their
+            // text, but keep the same effect identity and already-claimed bit.
+            if kind == 0 {
+                assert!(repeated.workspace.is_none());
+            } else {
+                assert_eq!(repeated.notification_id, Some(first));
+            }
+            assert!(
+                !store
+                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .await
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(3),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Next turn".into(),
+                    },
+                    false,
+                )
+                .await;
+            let next = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(4),
+                    "session",
+                    wait,
+                    false,
+                )
+                .await
+                .notification_id
+                .unwrap();
+            assert_ne!(first, next);
+            assert!(
+                !store
+                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .await,
+                "a delayed effect cannot claim a replacement request"
+            );
+            assert!(
+                store
+                    .claim_agent_wait_notification(surface, "claude", "session", next)
+                    .await
+            );
+        }
+    }
+
     async fn assert_agent_lifecycle(agent: &str, initial_status: AgentStatus) {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store

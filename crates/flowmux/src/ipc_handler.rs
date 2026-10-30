@@ -1194,15 +1194,28 @@ impl GuiHandler {
                     }
                 }
                 if let Some(notification) = notification {
-                    if let Some(pane) = accepted_pane {
+                    let deliver = if accepted_pane.is_none() {
+                        false
+                    } else if let Some(id) = outcome.notification_id {
+                        self.inner
+                            .store()
+                            .claim_agent_wait_notification(surface, &agent, &session_id, id)
+                            .await
+                    } else {
+                        true
+                    };
+                    if let Some(pane) = accepted_pane.filter(|_| deliver) {
                         let _ = self
-                            .handle_notification_verb(Request::Notify {
-                                pane: Some(pane),
-                                surface: Some(surface),
-                                title: notification.title,
-                                body: notification.body,
-                                level: notification.level,
-                            })
+                            .handle_notification_verb_with_id(
+                                Request::Notify {
+                                    pane: Some(pane),
+                                    surface: Some(surface),
+                                    title: notification.title,
+                                    body: notification.body,
+                                    level: notification.level,
+                                },
+                                outcome.notification_id,
+                            )
                             .await;
                     }
                     return Response::AgentLifecycleReceipt {
@@ -1340,6 +1353,14 @@ impl GuiHandler {
 
     /// Dispatch for the notification verb group (split out of the `handle` match).
     async fn handle_notification_verb(&self, req: Request) -> Response {
+        self.handle_notification_verb_with_id(req, None).await
+    }
+
+    async fn handle_notification_verb_with_id(
+        &self,
+        req: Request,
+        id: Option<flowmux_core::NotificationId>,
+    ) -> Response {
         match req {
             Request::Notify {
                 pane,
@@ -1411,6 +1432,7 @@ impl GuiHandler {
                 let _ = self
                     .bridge
                     .send(GtkCommand::AddNotification {
+                        id,
                         pane,
                         surface,
                         workspace,

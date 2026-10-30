@@ -61,6 +61,7 @@ impl WindowController {
                 self.open_activity_target(workspace, pane, surface).await;
             }
             GtkCommand::AddNotification {
+                id,
                 pane,
                 surface,
                 workspace,
@@ -137,7 +138,7 @@ impl WindowController {
                 });
                 let Some((entry_id, evicted_desktop_id)) = self
                     .notifications
-                    .push(title, body, level, pane, surface, workspace)
+                    .push_with_id(id, title, body, level, pane, surface, workspace)
                 else {
                     // Near-duplicate of an entry pushed within
                     // `DUP_WINDOW`: the OSC path and the lifecycle

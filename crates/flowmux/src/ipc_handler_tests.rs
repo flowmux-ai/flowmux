@@ -438,6 +438,7 @@ async fn notify_dispatches_add_notification_before_desktop_delivery() {
         command = rx.recv() => command.expect("notify should dispatch AddNotification"),
     };
     let GtkCommand::AddNotification {
+        id: None,
         pane: command_pane,
         surface: command_surface,
         workspace,
@@ -669,12 +670,13 @@ async fn lifecycle_notifications_follow_admission_and_keep_the_exact_surface() {
             false,
         )
         .await;
-    for (seq, session, target, expected) in [
-        (9, "session", surface, false),
-        (11, "session", surface, true),
-        (11, "session", surface, false),
-        (12, "other-session", surface, false),
-        (13, "session", SurfaceId::new(), false),
+    for (seq, session, target, expected, expected_notification) in [
+        (9, "session", surface, false, false),
+        (11, "session", surface, true, true),
+        (11, "session", surface, false, false),
+        (12, "other-session", surface, false, false),
+        (13, "session", SurfaceId::new(), false, false),
+        (14, "session", surface, true, false),
     ] {
         let request = serde_json::from_value(serde_json::json!({
                 "verb":"agent_lifecycle_update",
@@ -708,14 +710,24 @@ async fn lifecycle_notifications_follow_admission_and_keep_the_exact_surface() {
         };
         assert_eq!(
             notifications,
-            usize::from(expected),
+            usize::from(expected_notification),
             "sequence {seq}, session {session}"
         );
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             serde_json::json!({"agent_lifecycle_receipt":{"applied":expected}})
         );
-        assert!(rx.try_recv().is_err());
+        // A valid reminder still refreshes state/activity, but has no notification
+        // acknowledgement to hold its response until those updates are drained.
+        while let Ok(command) = rx.try_recv() {
+            assert!(
+                matches!(
+                    command,
+                    GtkCommand::SetAgentStatus { .. } | GtkCommand::AddActivity { .. }
+                ),
+                "unexpected deferred command: {command:?}"
+            );
+        }
     }
 }
 

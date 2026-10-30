@@ -10888,6 +10888,7 @@ mod tests {
         let (ack_tx, ack_rx) = oneshot::channel();
         controller
             .dispatch(GtkCommand::AddNotification {
+                id: None,
                 pane,
                 surface: None,
                 workspace,

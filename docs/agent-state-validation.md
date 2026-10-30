@@ -549,3 +549,71 @@ Original application PID 72789 and independent user agent PID 1401 remained
 alive; the permanent vendor executable link stayed unchanged. The frozen
 `c4c4c486` Linux full gate is still running and excludes this change. Final full
 cross-platform verification and causal notification deduplication remain open.
+
+
+## Pending request notification identity (2026-10-30)
+
+Pending tool, permission, and session waits now own an opaque notification ID
+and a once-only claim. An accepted reminder can update state text without
+creating another row or toast. The claim stays with the active request when
+notification history is cleared or evicted; it ends with that request's existing
+resolution/turn/session boundary. Delayed effects cannot claim a replacement
+request's identity. Different identified requests keep separate rows even when
+their text matches within eight seconds.
+
+Unknown-to-known classification retains the same request identity. A change
+between known reasons, or an explicit automatic-to-manual retry transition,
+opens a new notification cause. Existing wait ownership, sequence checks,
+resolution scopes, and public status are unchanged. The new claim is runtime
+only and at-most-once: it does not introduce a durable delivery/retry queue.
+Completion correlation and anonymous notification pairing remain separate
+follow-up work.
+
+The failing regression reproduced a second notification from a newer report of
+the same pending permission (`/tmp/fm-pending-notify-red.log`). Final Linux GUI
+checks passed 68 IPC handler and 31 notification-store tests
+(`/tmp/fm-pending-notify-linux-gui-verified.log`). Isolated unit suites passed on
+both platforms; the final Linux run included 195 daemon tests. macOS ran the
+full earlier suite plus the two focused claim/identity tests after their
+addition (`/tmp/fm-pending-notify-unit.log`,
+`/tmp/fm-pending-notify-claim-unit.log`,
+`/tmp/fm-pending-notify-linux-unit.log`). Full workspace/all-targets Clippy with
+native-smoke passed (`/tmp/fm-pending-notify-clippy-verified.log`). Native GTK
+hook replay and evidence tooltip checks passed
+(`/tmp/fm-pending-notify-native.log`, `MACOS_NATIVE_SMOKE_OK`).
+
+Actual agents A 2.1.314 and B 0.166.0 used isolated application PID 17652 in
+`/tmp/fm-atn-ypcslfed`. A's actual permission reminder updated its hook metadata
+while its question still had exactly one notification. Both agents passed plain
+responses, question or one-time harmless command approval, interruption,
+recovery, and unsubmitted status-like drafts. A later actual question produced
+a different notification ID with the same text; both questions completed with
+no remaining waits. Screenshots verified request and interruption states.
+
+A synthetic history-clear probe initially omitted its reason and therefore
+used the protocol's approval default, changing the known question reason and
+correctly opening a new cause. The test restored the question reason and
+repeated with explicit unknown classification: after clearing history, the
+accepted reminder created no row and the question remained pending. This probe
+is synthetic, separate from the real reminder observation. A hidden terminal
+viewport also omitted B's approval menu; focusing the exact isolated workspace
+made the menu observable, and only the displayed one-time command was approved.
+Neither agent was restarted during these test continuations.
+
+Evidence: `/tmp/fm-pending-notify-live.log`,
+`/tmp/fm-pending-notify-resume.log` (`PENDING_CAUSE_RETAINED_AFTER_CLEAR`), and
+`/tmp/fm-pending-notify-resume2.log` (`LIVE_PENDING_NOTIFICATION_MATRIX_OK`).
+The isolated root retains wait/final notifications, draft checks, final agent
+JSON, and `distinct-question-notifications.json`. Application and CLI SHA-256:
+
+`4e65d1aa1dfe693145e8bf5ec841532086770e139f6ecd3684ef553c1e2edd2b`
+
+`939f529fd08259b0a0e022a7dc3f9d1b7b2643a9aa1dc7e66c25e48e545bbbb2`
+
+Original application PID 72789 and independent user agent PID 1401 remained
+alive, and the permanent vendor executable link remained unchanged.
+The frozen `c4c4c486` full Linux gate ended with failure while waiting for the
+editor synchronization-error dialog, despite passing coverage thresholds.
+Its reports are archived at `/tmp/fm-outcomes-c4c4c486-reports.tar.gz`.
+Focused reruns of that exact binary passed; the full-gate fixture failure is
+still under investigation. This is not a completed cross-platform gate.

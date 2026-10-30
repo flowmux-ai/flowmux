@@ -678,6 +678,7 @@ pub enum GtkCommand {
     /// surface already focused) — the IPC handler interprets this as
     /// "do not fire the desktop toast either".
     AddNotification {
+        id: Option<NotificationId>,
         pane: Option<PaneId>,
         surface: Option<SurfaceId>,
         workspace: Option<WorkspaceId>,
@@ -1057,6 +1058,7 @@ mod tests {
                 workspace: WorkspaceId::new(),
             },
             GtkCommand::AddNotification {
+                id: None,
                 pane: None,
                 surface: None,
                 workspace: None,

@@ -13,6 +13,7 @@ async fn push(controller: &WindowController) -> NotificationId {
     let (ack, reply) = oneshot::channel();
     controller
         .dispatch(GtkCommand::AddNotification {
+            id: None,
             pane: None,
             surface: None,
             workspace: None,

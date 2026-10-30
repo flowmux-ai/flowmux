@@ -11,8 +11,9 @@ use flowmux_core::{
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_status_from_signals, detect_agent_usage_limit_text,
     select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport,
-    AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope, AgentWaitSummary, Pane,
-    PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
+    AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope, AgentWaitSummary,
+    NotificationId, Pane, PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace,
+    WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
@@ -102,6 +103,8 @@ const SESSION_WAIT_SCOPE: &str = "session";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PendingAgentWait {
+    notification_id: NotificationId,
+    notification_claimed: bool,
     reason: AgentWaitReason,
     context: AgentWaitContext,
     since: chrono::DateTime<chrono::Utc>,
@@ -110,6 +113,8 @@ pub(super) struct PendingAgentWait {
 impl PendingAgentWait {
     fn new(reason: AgentWaitReason) -> Self {
         Self {
+            notification_id: NotificationId::new(),
+            notification_claimed: false,
             reason,
             context: AgentWaitContext {
                 actor: reason.actor(),
@@ -130,6 +135,10 @@ fn record_scope_wait(
         .entry(scope)
         .and_modify(|wait| {
             if reason != AgentWaitReason::Unknown && reason != wait.reason {
+                if wait.reason != AgentWaitReason::Unknown {
+                    wait.notification_id = NotificationId::new();
+                    wait.notification_claimed = false;
+                }
                 wait.reason = reason;
                 wait.context = AgentWaitContext {
                     actor: reason.actor(),
@@ -139,6 +148,12 @@ fn record_scope_wait(
         })
         .or_insert_with(|| PendingAgentWait::new(reason));
     if let Some(context) = context {
+        if wait.context.retry == flowmux_core::AgentRetryState::Automatic
+            && context.retry == flowmux_core::AgentRetryState::Manual
+        {
+            wait.notification_id = NotificationId::new();
+            wait.notification_claimed = false;
+        }
         wait.context = context;
     }
 }
@@ -267,6 +282,8 @@ pub(super) struct PendingCodexStop {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentLifecycleResult {
+    /// Stable identity of the pending request; independent of notification retention.
+    pub notification_id: Option<NotificationId>,
     pub workspace: Option<WorkspaceId>,
     pub completed: bool,
     pub completion_message: Option<String>,
@@ -552,6 +569,50 @@ fn clear_agent_lifecycle_runtime(
 }
 
 impl StateStore {
+    /// Claim an accepted pending request's effect once. Keeping this bit with the
+    /// wait preserves deduplication after the bounded notification log is cleared
+    /// or evicted. A resolved/replaced request cannot claim its successor's effect.
+    pub async fn claim_agent_wait_notification(
+        &self,
+        surface: SurfaceId,
+        agent: &str,
+        session: &str,
+        notification_id: NotificationId,
+    ) -> bool {
+        let mut runtime = self.agents.lifecycle.lock().await;
+        let key = (surface, agent.to_ascii_lowercase(), session.to_owned());
+        let AgentLifecycleRuntime {
+            waits,
+            permission_waits,
+            session_waits,
+            ..
+        } = &mut *runtime;
+        let candidate = waits
+            .get_mut(&key)
+            .into_iter()
+            .flat_map(HashMap::values_mut)
+            .filter_map(Option::as_mut)
+            .chain(
+                permission_waits
+                    .get_mut(&key)
+                    .into_iter()
+                    .flat_map(HashMap::values_mut),
+            )
+            .chain(
+                session_waits
+                    .get_mut(&key)
+                    .into_iter()
+                    .flat_map(HashMap::values_mut),
+            )
+            .find(|wait| wait.notification_id == notification_id);
+        if let Some(wait) = candidate.filter(|wait| !wait.notification_claimed) {
+            wait.notification_claimed = true;
+            true
+        } else {
+            false
+        }
+    }
+
     pub async fn is_ssh_surface(&self, surface: SurfaceId) -> bool {
         let state = self.inner.lock().await;
         state
@@ -1114,6 +1175,22 @@ impl StateStore {
                 runtime.boundary_seq.insert(wait_key.clone(), seq);
             }
         }
+        let notification_scope = match &lifecycle_event {
+            AgentLifecycleEvent::WaitStarted { item_id, .. } => {
+                Some((AgentWaitScope::Tool, item_id.clone()))
+            }
+            AgentLifecycleEvent::PermissionWaitStarted { scope, .. } => Some((
+                AgentWaitScope::Permission,
+                scope
+                    .clone()
+                    .unwrap_or_else(|| SESSION_PERMISSION_SCOPE.into()),
+            )),
+            AgentLifecycleEvent::SessionWaitStarted { scope, .. } => Some((
+                AgentWaitScope::Session,
+                scope.clone().unwrap_or_else(|| SESSION_WAIT_SCOPE.into()),
+            )),
+            _ => None,
+        };
         let waits_before = pending_wait_summary(&runtime, &wait_key);
         let mut completed = false;
         let mut turn_finished = false;
@@ -1737,8 +1814,29 @@ impl StateStore {
         if workspace.is_some() {
             self.allow_agent_screen_restore(surface_id).await;
         }
+        let notification_id = notification_scope
+            .and_then(|(kind, scope)| {
+                let wait = match kind {
+                    AgentWaitScope::Tool => runtime
+                        .waits
+                        .get(&wait_key)
+                        .and_then(|waits| waits.get(&scope))
+                        .and_then(Option::as_ref),
+                    AgentWaitScope::Permission => runtime
+                        .permission_waits
+                        .get(&wait_key)
+                        .and_then(|waits| waits.get(&scope)),
+                    AgentWaitScope::Session => runtime
+                        .session_waits
+                        .get(&wait_key)
+                        .and_then(|waits| waits.get(&scope)),
+                };
+                wait.map(|wait| wait.notification_id)
+            })
+            .filter(|_| workspace.is_some());
         drop(runtime);
         AgentLifecycleResult {
+            notification_id,
             workspace,
             completed,
             completion_message,
@@ -2044,6 +2142,7 @@ impl StateStore {
         self.allow_agent_screen_restore(surface_id).await;
         drop(runtime);
         AgentLifecycleResult {
+            notification_id: None,
             workspace,
             completed: pending.notify_completion,
             completion_message: pending
@@ -2903,6 +3002,62 @@ mod tests {
             !log.contains("private-"),
             "diagnostics leaked payload: {log}"
         );
+    }
+
+    #[test]
+    fn pending_notification_identity_changes_only_for_a_new_action() {
+        use flowmux_core::{AgentRetryState, AgentWaitActor};
+        let mut scopes = HashMap::new();
+        record_scope_wait(&mut scopes, "scope".into(), AgentWaitReason::Unknown, None);
+        let first = scopes["scope"].notification_id;
+        scopes.get_mut("scope").unwrap().notification_claimed = true;
+        record_scope_wait(&mut scopes, "scope".into(), AgentWaitReason::Approval, None);
+        assert_eq!(scopes["scope"].notification_id, first);
+        assert!(
+            scopes["scope"].notification_claimed,
+            "classification does not create another request"
+        );
+        record_scope_wait(&mut scopes, "scope".into(), AgentWaitReason::Unknown, None);
+        assert_eq!(scopes["scope"].notification_id, first);
+        record_scope_wait(
+            &mut scopes,
+            "scope".into(),
+            AgentWaitReason::Authentication,
+            None,
+        );
+        assert_ne!(scopes["scope"].notification_id, first);
+        assert!(!scopes["scope"].notification_claimed);
+        let automatic = AgentWaitContext {
+            actor: AgentWaitActor::External,
+            retry: AgentRetryState::Automatic,
+        };
+        record_scope_wait(
+            &mut scopes,
+            "quota".into(),
+            AgentWaitReason::Quota,
+            Some(automatic),
+        );
+        let retry = scopes["quota"].notification_id;
+        scopes.get_mut("quota").unwrap().notification_claimed = true;
+        record_scope_wait(
+            &mut scopes,
+            "quota".into(),
+            AgentWaitReason::Quota,
+            Some(automatic),
+        );
+        assert_eq!(scopes["quota"].notification_id, retry);
+        assert!(scopes["quota"].notification_claimed);
+        record_scope_wait(
+            &mut scopes,
+            "quota".into(),
+            AgentWaitReason::Quota,
+            Some(AgentWaitContext {
+                actor: AgentWaitActor::User,
+                retry: AgentRetryState::Manual,
+            }),
+        );
+        assert_ne!(scopes["quota"].notification_id, retry);
+        assert!(!scopes["quota"].notification_claimed);
     }
 
     #[test]

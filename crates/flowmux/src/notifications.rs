@@ -24,6 +24,7 @@ const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 
 #[derive(Debug, Clone)]
 pub struct NotificationEntry {
+    causal: bool,
     pub id: NotificationId,
     pub title: String,
     pub agent: Option<String>,
@@ -81,6 +82,7 @@ impl NotificationStore {
     /// an entry pushed inside [`DUP_WINDOW`] (see the constant for
     /// why both the OSC sniffer and the lifecycle hook fire on the
     /// same Stop event).
+    #[cfg(test)]
     pub fn push(
         &self,
         title: String,
@@ -90,16 +92,36 @@ impl NotificationStore {
         surface: Option<SurfaceId>,
         workspace: Option<WorkspaceId>,
     ) -> Option<(NotificationId, Option<String>)> {
+        self.push_with_id(None, title, body, level, pane, surface, workspace)
+    }
+
+    /// Lifecycle requests supply an identity reserved by their runtime ledger.
+    /// Distinct identified requests must not merge merely because text matches.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_with_id(
+        &self,
+        id: Option<NotificationId>,
+        title: String,
+        body: String,
+        level: NotificationLevel,
+        pane: Option<PaneId>,
+        surface: Option<SurfaceId>,
+        workspace: Option<WorkspaceId>,
+    ) -> Option<(NotificationId, Option<String>)> {
         let now = chrono::Utc::now();
         let mut entries = self.inner.borrow_mut();
+        if id.is_some_and(|id| entries.iter().any(|entry| entry.id == id)) {
+            return None;
+        }
         // Without both pane and surface, unrelated callers cannot be deduplicated safely.
-        if pane.is_some() && surface.is_some() {
+        if id.is_none() && pane.is_some() && surface.is_some() {
             if let Some(last) = entries
                 .iter_mut()
                 .rev()
                 .find(|e| e.pane == pane && e.surface == surface)
             {
-                if now.signed_duration_since(last.created_at) < DUP_WINDOW
+                if !last.causal
+                    && now.signed_duration_since(last.created_at) < DUP_WINDOW
                     && ((level == last.level && title == last.title && body == last.body)
                         // shortcut: no completion identity in the protocol; revisit this
                         // time-based OSC/hook pairing when callers provide one.
@@ -121,7 +143,8 @@ impl NotificationStore {
                 }
             }
         }
-        let id = NotificationId::new();
+        let causal = id.is_some();
+        let id = id.unwrap_or_default();
         let evicted_desktop_id = if entries.len() >= MAX_RETAINED {
             let index = entries.iter().position(|entry| entry.read).unwrap_or(0);
             entries
@@ -132,6 +155,7 @@ impl NotificationStore {
             None
         };
         entries.push_back(NotificationEntry {
+            causal,
             id,
             title,
             agent: None,
@@ -642,6 +666,31 @@ mod tests {
                 "urgent notification must not be hidden by a recent info entry"
             );
         }
+    }
+
+    #[test]
+    fn identified_requests_preserve_equal_text_and_do_not_merge_with_anonymous_rows() {
+        let s = store();
+        let pane = Some(PaneId::new());
+        let surface = Some(SurfaceId::new());
+        let first = NotificationId::new();
+        let second = NotificationId::new();
+        let push = |id| {
+            s.push_with_id(
+                id,
+                "Agent".into(),
+                "Review request".into(),
+                NotificationLevel::NeedsInput,
+                pane,
+                surface,
+                None,
+            )
+        };
+        assert_eq!(push(Some(first)).unwrap().0, first);
+        assert_eq!(push(Some(second)).unwrap().0, second);
+        assert!(push(Some(first)).is_none());
+        assert!(push(None).is_some());
+        assert_eq!(s.entries().len(), 3);
     }
 
     #[test]
