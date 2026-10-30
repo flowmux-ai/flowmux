@@ -16,6 +16,7 @@ mod ipc_handler;
 mod keybindings;
 mod notifications;
 mod platform;
+mod termination;
 mod theme;
 mod ui;
 mod update;
