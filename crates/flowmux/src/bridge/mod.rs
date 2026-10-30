@@ -393,6 +393,7 @@ pub enum GtkCommand {
         pane: Option<PaneId>,
     },
     SessionPanel(crate::ui::session_panel::SessionPanelAction),
+    SessionFlow(crate::ui::session_flow::FlowAction),
     OpenDiffReview {
         pane: Option<PaneId>,
     },

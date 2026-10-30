@@ -126,6 +126,10 @@ FLOWMUX_SESSION_PATHS_SMOKE_ONLY=1 run_phase session-paths 180 cargo test -p flo
     2>&1 | tee "$report_dir/session-paths.log"
 grep -q '^MACOS_SESSION_PATHS_OK$' "$report_dir/session-paths.log"
 
+FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1 run_phase session-flow 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/session-flow.log"
+grep -q '^MACOS_SESSION_FLOW_LAYOUT_OK$' "$report_dir/session-flow.log"
+
 run_phase markdown 180 cargo test -p flowmux-md-viewer --locked -- --test-threads=1 \
     2>&1 | tee "$report_dir/markdown.log"
 grep -q '^MACOS_MARKDOWN_NATIVE_OK$' "$report_dir/markdown.log"

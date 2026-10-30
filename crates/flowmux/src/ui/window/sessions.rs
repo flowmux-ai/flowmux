@@ -8,16 +8,26 @@ use flowmux_state::session_history::{list_sessions, HistorySession, SessionAgent
 #[cfg(target_os = "macos")]
 mod macos;
 
-struct SessionHome {
-    path: PathBuf,
-    environment: std::collections::BTreeMap<String, String>,
-    arguments: Vec<String>,
+#[derive(Clone)]
+pub(super) struct SessionHome {
+    pub(super) path: PathBuf,
+    pub(super) environment: std::collections::BTreeMap<String, String>,
+    pub(super) arguments: Vec<String>,
 }
 
-fn resume_shell_line(
+pub(super) fn resume_shell_line(
     session: &HistorySession,
     home: &SessionHome,
     yolo: bool,
+) -> Result<String, String> {
+    session_shell_line(session, home, yolo, false)
+}
+
+pub(super) fn session_shell_line(
+    session: &HistorySession,
+    home: &SessionHome,
+    yolo: bool,
+    fork: bool,
 ) -> Result<String, String> {
     let cwd = session
         .cwd
@@ -78,22 +88,27 @@ fn resume_shell_line(
     Ok(format!(
         "cd {} && env {unset} {environment} {} {arguments} {permissions}",
         shell_quote(cwd),
-        session.resume_command().map_err(|e| e.to_string())?
+        if fork {
+            session.fork_command()
+        } else {
+            session.resume_command()
+        }
+        .map_err(|e| e.to_string())?
     ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SessionTarget {
-    agent: SessionAgent,
-    focused: Option<FocusedSession>,
+pub(super) struct SessionTarget {
+    pub(super) agent: SessionAgent,
+    pub(super) focused: Option<FocusedSession>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct FocusedSession {
-    pane: PaneId,
-    surface: SurfaceId,
-    root_pid: u32,
-    session_id: Option<String>,
+pub(super) struct FocusedSession {
+    pub(super) pane: PaneId,
+    pub(super) surface: SurfaceId,
+    pub(super) root_pid: u32,
+    pub(super) session_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -112,7 +127,7 @@ impl SessionPanelState {
 }
 
 /// Resolve the actual agent's home, including overrides set inside the shell.
-fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
+pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
     let Some(focused) = &target.focused else {
         let environment: std::collections::BTreeMap<_, _> = target
             .agent

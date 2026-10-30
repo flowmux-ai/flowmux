@@ -2,9 +2,9 @@
 
 # Flowmux Session Flow 설계
 
-상태: 구현 전 설계안. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
+상태: `feat/session-flow`에서 구현·검증 중. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
 
-에이전트 화면의 **Fork session**은 그 pane을 좌우로 분할하고 오른쪽에 새 분기 세션을 연다. Workspace의 **Session Flow**은 현재 열린 세션들이 속한 전체 fork 계보를 상단 약 1/3의 캔버스에 표시한다. 다른 원본에서 분기된 세션을 resume하면 별도의 그래프가 추가된다. 노드를 선택하면 아래 pane 영역에서 해당 세션을 열고, 재개할 수 없는 노드는 관계만 표시한다.
+에이전트 화면의 **Fork session**은 그 pane을 좌우로 분할하고 오른쪽에 새 분기 세션을 연다. Workspace의 **Session Flow**는 현재 열린 세션들이 속한 전체 fork 계보를 상단 약 1/3의 캔버스에 표시한다. 다른 원본에서 분기된 세션을 resume하면 별도의 그래프가 추가된다. 노드를 선택하면 아래 pane 영역에서 해당 세션을 열고, 재개할 수 없는 노드는 관계만 표시한다.
 
 참조: [인터랙션 목업](design-assets/agent-session-flow-mockup.html), [테스트와 검증 계획](agent-session-flow-validation.md), [현재 세션 기능](agent-sessions.md). 목업은 예시 데이터로 구성한 UI 기준이며 실제 에이전트 연동, 상태 복구, 접근성, 성능을 증명하지 않는다.
 
@@ -123,7 +123,7 @@ Flowmux 소유의 `session-flow.sqlite`를 기존 XDG data 경로 helper 아래�
 - 새 schema를 이해하지 못하는 구버전은 계보 기능을 비활성화한다. 기존 terminal/session 기능은 정상 동작해야 한다.
 - 전체 transcript는 복제하지 않는다. 계보, 최소 metadata, 작업 상태만 저장한다. 삭제된 기록의 관계 보존과 보관 정책은 사용자에게 설명 가능해야 한다.
 
-`WorkspaceFlowView`는 기존 window/workspace 복원 상태에 optional 필드로 추가하고 기본값을 둔다. 관계 DB와 UI 위치 저장을 하나의 transaction으로 묶을 필요는 없다. UI 위치를 잃어도 관계나 실행 결과는 바뀌지 않아야 한다.
+`WorkspaceFlowView`는 관계 DB의 별도 `views` 테이블에 workspace UUID별 UI 설정으로 저장한다. 기존 workspace 복원 schema는 변경하지 않는다. 이 테이블은 계보 조회·edge 생성에 참여하지 않는다. 관계 DB와 UI 위치 저장을 하나의 transaction으로 묶을 필요는 없다. UI 위치를 잃어도 관계나 실행 결과는 바뀌지 않아야 한다.
 
 ## 세션 계보와 Workspace에서 표시할 범위
 

@@ -25,6 +25,7 @@ pub mod overlay_menu;
 pub mod pane_terminal;
 pub mod popover_pos;
 pub(crate) mod review_window;
+pub(crate) mod session_flow;
 pub mod session_panel;
 pub mod show_in_folder;
 pub mod sidebar;

@@ -220,6 +220,22 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::CopySurfaceText { pane, surface });
                 }))
             },
+            can_fork_session: {
+                let registry = pane_registry.clone();
+                Rc::new(move |surface| registry.borrow().session_flow_forkable.contains(&surface))
+            },
+            on_fork_session: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane, surface| {
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::Fork {
+                            pane,
+                            surface,
+                        }),
+                    );
+                }))
+            },
             on_copy_surface_session_id: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, surface| {

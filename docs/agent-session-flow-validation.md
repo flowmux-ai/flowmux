@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 전 검증 설계. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현·검증 진행 중. 아래 항목은 수용 조건이며 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -187,3 +187,11 @@ bash scripts/test-ci.sh macos
 - 목업, fixture, local test, real provider, native GUI, remote CI 결과를 구분해 출시 기록에 남겼다.
 
 본 설계 문서와 HTML 목업의 확인 범위는 문서·상호작용 설계다. 제품 구현과 위 매트릭스 실행은 다음 작업이다.
+
+## 현재 확보한 증거 (2026-10-31, 구현 중)
+
+- Core 177개, state 74개, daemon 211개 통과(기존 ignored 1개). 계보 projection, cycle/namespace 격리, transaction/idempotency, UI 설정 roundtrip, split target 재검증을 포함한다.
+- `cargo check --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` 통과.
+- `FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1` macOS main-thread harness: `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK` 확인. 상단 패널, 삭제된 세션 비활성, 확대 좌표, 분할 전후 기존 terminal widget/PID 보존을 검증했다.
+- 이 native GUI 검사는 fixture 계보를 사용한다. 실제 provider fork/resume, 동시 창 소유권 조정, 전체 회귀·coverage gate는 아직 완료되지 않았다. 위 결과로 이를 통과했다고 간주하지 않는다.
+- 활성 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다. GUI 검증은 `/tmp/fm-native-*`의 독립 XDG/runtime 상태를 사용했다.

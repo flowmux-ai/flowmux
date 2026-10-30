@@ -213,6 +213,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
+    if std::env::var_os("FLOWMUX_SESSION_FLOW_SMOKE_ONLY").is_some() {
+        session_flow::check_native(&controller, workspace, terminal_pane, root).await;
+        controller.window.destroy();
+        return;
+    }
+
     if std::env::var_os("FLOWMUX_SESSION_PATHS_SMOKE_ONLY").is_some() {
         session_paths::check(&controller, terminal_pane, root).await;
         controller.window.destroy();

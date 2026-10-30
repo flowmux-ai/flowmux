@@ -195,6 +195,12 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
+    pub(crate) fn set_flow_available(&self, workspace: WorkspaceId, available: bool) {
+        if let Some(row) = self.row_widgets.borrow().get(&workspace) {
+            row.flow_button.set_visible(available);
+        }
+    }
+
     pub fn new<S, C, N>(
         on_select: S,
         on_close: C,
@@ -1685,6 +1691,7 @@ impl WorkspaceRowRenderState {
 
 #[derive(Clone)]
 struct WorkspaceRowWidget {
+    flow_button: gtk::Button,
     root: gtk::Widget,
     badge: gtk::Box,
     content: gtk::Box,
@@ -1853,6 +1860,22 @@ fn row_widget(
     close_btn.connect_clicked(move |_| on_close_for_click(id));
     row.add_overlay(&close_btn);
 
+    let flow_button = gtk::Button::from_icon_name("view-grid-symbolic");
+    flow_button.set_widget_name("flowmux-workspace-session-flow");
+    flow_button.add_css_class("flat");
+    flow_button.set_tooltip_text(Some("Session Flow"));
+    flow_button.set_halign(gtk::Align::End);
+    flow_button.set_valign(gtk::Align::Center);
+    flow_button.set_margin_end(38);
+    flow_button.set_visible(false);
+    let flow_bridge = bridge.clone();
+    flow_button.connect_clicked(move |_| {
+        let _ = flow_bridge.tx.try_send(GtkCommand::SessionFlow(
+            crate::ui::session_flow::FlowAction::Toggle(id),
+        ));
+    });
+    row.add_overlay(&flow_button);
+
     let motion = gtk::EventControllerMotion::new();
     let btn_enter = close_btn.clone();
     let hover_enter = workspace_hover_handler.clone();
@@ -2009,6 +2032,7 @@ fn row_widget(
     row.add_controller(click);
 
     WorkspaceRowWidget {
+        flow_button,
         root: row.upcast(),
         badge: notification_badge,
         content,

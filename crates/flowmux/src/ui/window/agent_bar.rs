@@ -56,6 +56,7 @@ impl WindowController {
             self.refresh_review_targets().await;
         }
         self.refresh_session_panel(false).await;
+        self.refresh_session_flow(false).await;
         let model = self.store.agent_bar_model().await;
         if let Some(office) = self.agent_office.borrow().as_ref() {
             office

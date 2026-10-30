@@ -750,6 +750,67 @@ impl StateStore {
         None
     }
 
+    /// Split a still-current local terminal for a native session operation.
+    /// The caller reserves the new surface ID before this atomic layout change.
+    pub async fn split_session_pane(
+        &self,
+        target: PaneId,
+        expected_surface: SurfaceId,
+        expected_session: Option<&str>,
+        new_surface: SurfaceId,
+        cwd: std::path::PathBuf,
+    ) -> Result<(WorkspaceId, PaneId), String> {
+        if !cwd.is_absolute() || !cwd.is_dir() {
+            return Err("Session project directory is unavailable".into());
+        }
+        let mut state = self.inner.lock().await;
+        for workspace in &mut state.workspaces {
+            if workspace.location.ssh().is_some() {
+                continue;
+            }
+            for surface in &mut workspace.surfaces {
+                let Some(source) = surface.root_pane.find_surface_ref(target, expected_surface)
+                else {
+                    continue;
+                };
+                if !matches!(source.kind, SurfaceKind::Terminal { .. })
+                    || surface.root_pane.active_surface_id(target) != Some(expected_surface)
+                {
+                    return Err("Session Flow source terminal changed".into());
+                }
+                if let Some(expected) = expected_session {
+                    if !source.agent.as_ref().is_some_and(|p| {
+                        p.session_id.as_deref() == Some(expected)
+                            && matches!(
+                                p.status,
+                                flowmux_core::AgentStatus::Idle | flowmux_core::AgentStatus::Done
+                            )
+                    }) {
+                        return Err("Fork source is no longer the same idle session".into());
+                    }
+                }
+                let mut tab = flowmux_core::PaneSurface::terminal(
+                    terminal_tab_title_for_cwd(Some(&cwd)),
+                    Some(cwd),
+                );
+                tab.id = new_surface;
+                let content = PaneContent::Tabs {
+                    active: new_surface,
+                    surfaces: vec![tab],
+                };
+                let pane = surface
+                    .root_pane
+                    .split_leaf(target, SplitDirection::Vertical, 0.5, content)
+                    .ok_or("Cannot split session source")?;
+                let id = workspace.id;
+                drop(state);
+                self.mark_dirty();
+                return Ok((id, pane));
+            }
+        }
+        Err("Session Flow source terminal is no longer available".into())
+    }
+
     /// Team workers start in the split's sole terminal tab; check the type under the same lock.
     pub async fn spawn_team_worker(
         &self,
@@ -9765,6 +9826,140 @@ Do you want to continue?";
             Pane::Split { first, second, .. } => find_browser_pane_url(first, target)
                 .or_else(|| find_browser_pane_url(second, target)),
         }
+    }
+
+    #[tokio::test]
+    async fn session_flow_split_preserves_source_tabs_and_checks_identity_atomically() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store
+            .create_workspace(Some("flow".into()), root.path().into())
+            .await;
+        let ws = store.get_workspace(workspace).await.unwrap();
+        let pane = first_pane(&ws);
+        let source = ws.surfaces[0].root_pane.active_surface_id(pane).unwrap();
+        let mut agent =
+            flowmux_core::AgentPresence::new("Codex", flowmux_core::AgentActivity::Idle, None);
+        agent.session_id = Some("source-id".into());
+        store
+            .set_agent_activity(source, Some(agent.clone()))
+            .await
+            .unwrap();
+        let source_before = store.get_workspace(workspace).await.unwrap().surfaces[0]
+            .root_pane
+            .find_surface(pane, source)
+            .unwrap();
+        for (expected_surface, expected_session) in
+            [(SurfaceId::new(), None), (source, Some("wrong-id"))]
+        {
+            assert!(store
+                .split_session_pane(
+                    pane,
+                    expected_surface,
+                    expected_session,
+                    SurfaceId::new(),
+                    root.path().into()
+                )
+                .await
+                .is_err());
+            assert_eq!(
+                collect_leaves(
+                    &store.get_workspace(workspace).await.unwrap().surfaces[0].root_pane
+                ),
+                [pane]
+            );
+        }
+        let child_surface = SurfaceId::new();
+        let (result_workspace, child) = store
+            .split_session_pane(
+                pane,
+                source,
+                Some("source-id"),
+                child_surface,
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(workspace, result_workspace);
+        let after = store.get_workspace(workspace).await.unwrap();
+        assert_eq!(
+            pane_split_direction(&after.surfaces[0].root_pane),
+            Some(SplitDirection::Vertical)
+        );
+        assert_eq!(
+            serde_json::to_value(after.surfaces[0].root_pane.find_surface(pane, source)).unwrap(),
+            serde_json::to_value(Some(source_before)).unwrap()
+        );
+        assert_eq!(
+            after.surfaces[0].root_pane.active_surface_id(child),
+            Some(child_surface)
+        );
+        agent.status = flowmux_core::AgentStatus::Working;
+        store.set_agent_activity(source, Some(agent)).await.unwrap();
+        assert!(store
+            .split_session_pane(
+                pane,
+                source,
+                Some("source-id"),
+                SurfaceId::new(),
+                root.path().into()
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            collect_leaves(&store.get_workspace(workspace).await.unwrap().surfaces[0].root_pane)
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn session_flow_resume_requires_the_same_active_local_terminal_and_valid_cwd() {
+        let root = tempfile::tempdir().unwrap();
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, root.path().into()).await;
+        let ws = store.get_workspace(workspace).await.unwrap();
+        let pane = first_pane(&ws);
+        let first = ws.surfaces[0].root_pane.active_surface_id(pane).unwrap();
+        let (_, active) = store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        assert!(store
+            .split_session_pane(pane, first, None, SurfaceId::new(), root.path().into())
+            .await
+            .is_err());
+        assert!(store
+            .split_session_pane(
+                pane,
+                active,
+                None,
+                SurfaceId::new(),
+                root.path().join("missing")
+            )
+            .await
+            .is_err());
+        assert!(store
+            .split_session_pane(
+                PaneId::new(),
+                active,
+                None,
+                SurfaceId::new(),
+                root.path().into()
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            collect_leaves(&store.get_workspace(workspace).await.unwrap().surfaces[0].root_pane),
+            [pane]
+        );
+        let (_, child) = store
+            .split_session_pane(pane, active, None, SurfaceId::new(), root.path().into())
+            .await
+            .unwrap();
+        let after = store.get_workspace(workspace).await.unwrap();
+        assert_eq!(after.surfaces[0].root_pane.surface_count(pane), Some(2));
+        assert_eq!(after.surfaces[0].root_pane.surface_count(child), Some(1));
     }
 
     #[tokio::test]

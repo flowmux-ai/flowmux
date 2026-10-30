@@ -598,6 +598,7 @@ pub struct WindowController {
     sidebar_split: gtk::Paned,
     worktrees: WorktreePanelState,
     sessions: sessions::SessionPanelState,
+    flow: session_flow::FlowState,
     reviews:
         Rc<RefCell<std::collections::HashMap<PaneId, Rc<crate::ui::review_window::ReviewWindow>>>>,
     file_browser: FileBrowserState,
@@ -1287,6 +1288,7 @@ mod pane_commands;
 mod polling;
 mod process_lifecycle;
 mod review;
+mod session_flow;
 mod sessions;
 pub(crate) mod ssh;
 mod surface_ops;
@@ -1749,7 +1751,8 @@ impl WindowController {
         let content_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content_box.set_hexpand(true);
         content_box.set_vexpand(true);
-        content_box.append(&stack);
+        let flow_panel = crate::ui::session_flow::FlowPanel::new(&stack, bridge.clone());
+        content_box.append(&flow_panel.host);
         content_box.append(&agent_bar.root);
         content_box.append(&sidebar.usage.bar.root);
 
@@ -1953,6 +1956,7 @@ impl WindowController {
             ),
             sidebar_split: split,
             sessions: sessions::SessionPanelState::new(session_panel),
+            flow: session_flow::FlowState::new(flow_panel),
             reviews: Rc::new(RefCell::new(std::collections::HashMap::new())),
             worktrees: WorktreePanelState {
                 source_pane: worktree_source_pane,
@@ -3054,6 +3058,7 @@ impl WindowController {
                 self.dispatch_pane_command(command).await;
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
+            GtkCommand::SessionFlow(action) => self.dispatch_session_flow(action).await,
             GtkCommand::OpenDiffReview { pane } => self.open_diff_review(pane).await,
             GtkCommand::RefreshReviewTargets => self.refresh_review_targets().await,
             GtkCommand::FocusReviewTarget {

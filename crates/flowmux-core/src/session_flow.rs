@@ -105,7 +105,7 @@ impl Point {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub origin: Point,
     pub zoom: f64,

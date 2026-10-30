@@ -3,7 +3,7 @@
 //! All methods perform blocking I/O and belong on a worker thread.
 
 use crate::session_history::{HistorySession, SessionAgent};
-use flowmux_core::session_flow::{Lineage, Point, SessionKey};
+use flowmux_core::session_flow::{Camera, Lineage, Point, SessionKey};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
 
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionRecord {
@@ -92,6 +92,24 @@ pub struct Operation {
     pub target_surface: Uuid,
 }
 
+/// Persisted presentation only. These rows never contribute graph membership or edges.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SavedView {
+    pub camera: Camera,
+    pub selected: Option<SessionKey>,
+    pub initialized: bool,
+    pub open: bool,
+    pub height: i32,
+}
+
+impl SavedView {
+    fn valid(&self) -> bool {
+        self.camera.origin.finite()
+            && (0.1..=4.0).contains(&self.camera.zoom)
+            && (0..=16384).contains(&self.height)
+    }
+}
+
 pub struct FlowStore {
     connection: Connection,
 }
@@ -148,8 +166,42 @@ impl FlowStore {
                  PRAGMA user_version = 1;"
             ).map_err(io::Error::other)?;
         }
+        if version < 2 {
+            transaction.execute_batch("CREATE TABLE views (workspace TEXT PRIMARY KEY, state TEXT NOT NULL); PRAGMA user_version = 2;").map_err(io::Error::other)?;
+        }
         transaction.commit().map_err(io::Error::other)?;
         Ok(Self { connection })
+    }
+
+    pub fn views(&self) -> io::Result<BTreeMap<Uuid, SavedView>> {
+        let mut query = self
+            .connection
+            .prepare("SELECT workspace,state FROM views")
+            .map_err(io::Error::other)?;
+        let rows = query
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(io::Error::other)?;
+        let mut result = BTreeMap::new();
+        for row in rows {
+            let (workspace, state) = row.map_err(io::Error::other)?;
+            if let (Ok(id), Ok(view)) = (Uuid::parse_str(&workspace), decode::<SavedView>(&state)) {
+                if view.valid() {
+                    result.insert(id, view);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn save_views(&mut self, views: &BTreeMap<Uuid, SavedView>) -> io::Result<()> {
+        if views.values().any(|v| !v.valid()) {
+            return Err(invalid("Invalid Session Flow view"));
+        }
+        let tx = self.connection.transaction().map_err(io::Error::other)?;
+        for (workspace, view) in views {
+            tx.execute("INSERT INTO views(workspace,state) VALUES(?1,?2) ON CONFLICT(workspace) DO UPDATE SET state=excluded.state", params![workspace.to_string(), encode(view)?]).map_err(io::Error::other)?;
+        }
+        tx.commit().map_err(io::Error::other)
     }
 
     pub fn snapshot(&self) -> io::Result<Snapshot> {
@@ -670,5 +722,49 @@ mod tests {
         }
         assert!(db.snapshot().unwrap().lineage.is_empty());
         db.import(&[], &[]).unwrap();
+    }
+    #[test]
+    fn view_preferences_roundtrip_without_changing_shared_lineage() {
+        let (dir, mut db) = store();
+        let id = Uuid::new_v4();
+        db.import(&[], &[(key("a"), key("b"))]).unwrap();
+        let graph = db.snapshot().unwrap().lineage;
+        let view = SavedView {
+            camera: Camera {
+                origin: Point { x: 42.0, y: -99.0 },
+                zoom: 1.7,
+            },
+            selected: Some(key("b")),
+            initialized: true,
+            open: true,
+            height: 240,
+        };
+        db.save_views(&[(id, view.clone())].into()).unwrap();
+        drop(db);
+        let mut db = FlowStore::open(&dir.path().join("flow.sqlite")).unwrap();
+        assert_eq!(db.views().unwrap()[&id], view);
+        assert_eq!(db.snapshot().unwrap().lineage, graph);
+        let mut bad = view;
+        bad.camera.zoom = 0.0;
+        assert!(db.save_views(&[(id, bad)].into()).is_err());
+        assert_eq!(db.views().unwrap()[&id].camera.zoom, 1.7);
+    }
+
+    #[test]
+    fn v1_migration_preserves_relations_and_unknown_view_content_is_ignored() {
+        let (dir, db) = store();
+        db.connection
+            .execute_batch("DROP TABLE views; PRAGMA user_version = 1;")
+            .unwrap();
+        drop(db);
+        let db = FlowStore::open(&dir.path().join("flow.sqlite")).unwrap();
+        db.connection
+            .execute(
+                "INSERT INTO views VALUES (?1,'not json')",
+                [Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        assert!(db.views().unwrap().is_empty());
+        assert!(db.snapshot().unwrap().lineage.is_empty());
     }
 }
