@@ -151,6 +151,24 @@ jobs:
           cargo fmt --all -- --check
       - name: Install native dependencies
         run: brew install pkg-config gtk4 libadwaita vte3 meson ninja ffmpeg
+      # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
+      # Keep fatal-critical checks enabled on the verified 4.22.3 baseline.
+      - name: Install compatible GTK for native popup checks
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew tap-new --no-git flowmux/ci
+          formula="$(brew --repository flowmux/ci)/Formula/gtk4.rb"
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/c84201a409ee9fd5588cad21e51a5e4ca3379271/Formula/g/gtk4.rb \
+            --output "$formula"
+          # The copied formula must fetch its checksummed bottles from the original tap.
+          sed -i '' '/  bottle do/a\
+              root_url "https://ghcr.io/v2/homebrew/core"
+          ' "$formula"
+          brew uninstall --ignore-dependencies gtk4
+          brew install --force-bottle flowmux/ci/gtk4
+          test "$(pkg-config --modversion gtk4)" = 4.22.3
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
       - name: Run macOS tests and native smoke (same script as local)
