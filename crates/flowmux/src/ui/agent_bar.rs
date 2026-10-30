@@ -16,7 +16,7 @@ use std::str::FromStr;
 pub(crate) struct AgentBar {
     pub(crate) root: gtk::Box,
     items: gtk::Box,
-    item_buttons: Rc<RefCell<HashMap<SurfaceId, gtk::Button>>>,
+    item_buttons: Rc<RefCell<HashMap<SurfaceId, AgentBarItemWidget>>>,
     item_order: Rc<RefCell<Vec<SurfaceId>>>,
     bridge: Bridge,
 }
@@ -59,107 +59,74 @@ impl AgentBar {
         attention_surfaces: &HashSet<SurfaceId>,
         focused_surface: Option<SurfaceId>,
     ) {
-        while let Some(child) = self.items.first_child() {
-            self.items.remove(&child);
-        }
-        self.item_buttons.borrow_mut().clear();
-
+        let mut buttons = self.item_buttons.borrow_mut();
+        buttons.retain(|surface, item| {
+            let keep = model.visible && model.items.iter().any(|item| item.surface == *surface);
+            if !keep {
+                self.items.remove(&item.button);
+            }
+            keep
+        });
+        self.root.set_visible(model.visible);
         if !model.visible {
-            self.root.set_visible(false);
             return;
         }
 
-        self.root.set_visible(true);
-        let ordered_items = self.ordered_items(model);
-        for item in ordered_items {
-            let button = self.item_button(item);
-            if attention_surfaces.contains(&item.surface) {
-                button.add_css_class("flowmux-attention");
+        let mut previous: Option<gtk::Widget> = None;
+        for item in self.ordered_items(model) {
+            let widget = buttons.entry(item.surface).or_insert_with(|| {
+                let widget = self.item_button(item);
+                self.items.append(&widget.button);
+                widget
+            });
+            widget.update(item);
+            for (class, enabled) in [
+                (
+                    "flowmux-attention",
+                    attention_surfaces.contains(&item.surface),
+                ),
+                ("focused", focused_surface == Some(item.surface)),
+            ] {
+                if enabled {
+                    widget.button.add_css_class(class);
+                } else {
+                    widget.button.remove_css_class(class);
+                }
             }
-            if focused_surface == Some(item.surface) {
-                button.add_css_class("focused");
+            if widget.button.prev_sibling() != previous {
+                self.items
+                    .reorder_child_after(&widget.button, previous.as_ref());
             }
-            self.item_buttons
-                .borrow_mut()
-                .insert(item.surface, button.clone());
-            self.items.append(&button);
+            previous = Some(widget.button.clone().upcast());
         }
     }
 
     pub(crate) fn mark_attention(&self, surface: SurfaceId) {
         if let Some(button) = self.item_buttons.borrow().get(&surface) {
-            button.add_css_class("flowmux-attention");
+            button.button.add_css_class("flowmux-attention");
         }
     }
 
     pub(crate) fn clear_attention(&self, surface: SurfaceId) {
         if let Some(button) = self.item_buttons.borrow().get(&surface) {
-            button.remove_css_class("flowmux-attention");
+            button.button.remove_css_class("flowmux-attention");
         }
     }
 
-    fn item_button(&self, item: &AgentBarItem) -> gtk::Button {
+    fn item_button(&self, item: &AgentBarItem) -> AgentBarItemWidget {
         let button = gtk::Button::new();
         button.add_css_class("flat");
         button.add_css_class("flowmux-agent-bar-item");
-        if item.status == AgentStatus::Working {
-            button.add_css_class("flowmux-agent-bar-working");
-        }
         button.set_size_request(AGENT_BAR_ITEM_MAX_WIDTH_PX as i32, -1);
         button.set_hexpand(false);
-        button.set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
-            &item.agent_name,
-            &item.status_text,
-            item.status_evidence,
-            &item.pending_waits,
-        )));
-
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        row.set_valign(gtk::Align::Center);
-
-        let stripe = color_stripe(&item.color);
-        row.append(&stripe);
-
-        row.append(&agent_status_indicator(item.status, item.seen));
-
-        let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        text.set_hexpand(true);
-
-        let heading = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        heading.append(&agent_icon(&item.agent_name));
-
-        let name = gtk::Label::new(Some(item.agent_name.as_str()));
-        name.set_halign(gtk::Align::Start);
-        name.set_xalign(0.0);
-        name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        name.set_single_line_mode(true);
-        name.set_lines(1);
-        name.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 10) as i32);
-        name.add_css_class("caption-heading");
-        heading.append(&name);
-        text.append(&heading);
-
-        let status = gtk::Label::new(Some(item.status_text.as_str()));
-        status.set_halign(gtk::Align::Start);
-        status.set_xalign(0.0);
-        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        status.set_single_line_mode(true);
-        status.set_lines(1);
-        status.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 8) as i32);
-        status.add_css_class("caption");
-        status.add_css_class(agent_status_css_class(item.status, item.seen));
-        text.append(&status);
-
-        row.append(&text);
-        button.set_child(Some(&row));
-
+        button.set_child(Some(&item_content(item)));
+        let target = Rc::new(Cell::new((item.workspace, item.pane, item.surface)));
         let activated = Rc::new(Cell::new(false));
         let bridge = self.bridge.clone();
-        let workspace = item.workspace;
-        let pane = item.pane;
-        let surface = item.surface;
+        let clicked_target = target.clone();
         let activated_for_button = activated.clone();
         button.connect_clicked(move |_| {
+            let (workspace, pane, surface) = clicked_target.get();
             open_agent_bar_item(
                 bridge.clone(),
                 activated_for_button.clone(),
@@ -173,7 +140,9 @@ impl AgentBar {
         click.set_button(gtk::gdk::BUTTON_PRIMARY);
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         let bridge = self.bridge.clone();
+        let released_target = target.clone();
         click.connect_released(move |gesture, _n_press, _x, _y| {
+            let (workspace, pane, surface) = released_target.get();
             gesture.set_state(gtk::EventSequenceState::Claimed);
             open_agent_bar_item(bridge.clone(), activated.clone(), workspace, pane, surface);
         });
@@ -181,7 +150,13 @@ impl AgentBar {
 
         self.attach_dnd_handlers(&button, item.surface);
 
-        button
+        let widget = AgentBarItemWidget {
+            button,
+            item: item.clone(),
+            target,
+        };
+        widget.refresh_status(item);
+        widget
     }
 
     fn ordered_items<'a>(&self, model: &'a AgentBarModel) -> Vec<&'a AgentBarItem> {
@@ -308,6 +283,79 @@ impl AgentBar {
     }
 }
 
+struct AgentBarItemWidget {
+    button: gtk::Button,
+    item: AgentBarItem,
+    target: Rc<Cell<(flowmux_core::WorkspaceId, flowmux_core::PaneId, SurfaceId)>>,
+}
+
+impl AgentBarItemWidget {
+    fn update(&mut self, item: &AgentBarItem) {
+        if self.item != *item {
+            self.button.set_child(Some(&item_content(item)));
+            self.refresh_status(item);
+            self.item = item.clone();
+        }
+        self.target.set((item.workspace, item.pane, item.surface));
+    }
+
+    fn refresh_status(&self, item: &AgentBarItem) {
+        if item.status == AgentStatus::Working {
+            self.button.add_css_class("flowmux-agent-bar-working");
+        } else {
+            self.button.remove_css_class("flowmux-agent-bar-working");
+        }
+        self.button
+            .set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
+                &item.agent_name,
+                &item.status_text,
+                item.status_evidence,
+                &item.pending_waits,
+            )));
+    }
+}
+
+fn item_content(item: &AgentBarItem) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row.set_valign(gtk::Align::Center);
+
+    let stripe = color_stripe(&item.color);
+    row.append(&stripe);
+
+    row.append(&agent_status_indicator(item.status, item.seen));
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    text.set_hexpand(true);
+
+    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    heading.append(&agent_icon(&item.agent_name));
+
+    let name = gtk::Label::new(Some(item.agent_name.as_str()));
+    name.set_halign(gtk::Align::Start);
+    name.set_xalign(0.0);
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    name.set_single_line_mode(true);
+    name.set_lines(1);
+    name.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 10) as i32);
+    name.add_css_class("caption-heading");
+    heading.append(&name);
+    text.append(&heading);
+
+    let status = gtk::Label::new(Some(item.status_text.as_str()));
+    status.set_halign(gtk::Align::Start);
+    status.set_xalign(0.0);
+    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    status.set_single_line_mode(true);
+    status.set_lines(1);
+    status.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 8) as i32);
+    status.add_css_class("caption");
+    status.add_css_class(agent_status_css_class(item.status, item.seen));
+    text.append(&status);
+
+    row.append(&text);
+    row
+}
+
 fn reordered_agent_bar_order(
     order: &[SurfaceId],
     source: SurfaceId,
@@ -336,12 +384,13 @@ fn reordered_agent_bar_order(
 
 fn reorder_item_widgets(
     items: &gtk::Box,
-    buttons: &HashMap<SurfaceId, gtk::Button>,
+    buttons: &HashMap<SurfaceId, AgentBarItemWidget>,
     order: &[SurfaceId],
 ) {
     let mut previous: Option<gtk::Widget> = None;
     for surface in order {
-        if let Some(button) = buttons.get(surface) {
+        if let Some(widget) = buttons.get(surface) {
+            let button = &widget.button;
             items.reorder_child_after(button, previous.as_ref());
             previous = Some(button.clone().upcast());
         }
@@ -392,6 +441,160 @@ fn color_stripe(color: &str) -> gtk::DrawingArea {
         let _ = cr.fill();
     });
     stripe
+}
+
+#[cfg(test)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) async fn check_stable_agent_bar_items() {
+    let (bridge, rx) = Bridge::new();
+    let bar = AgentBar::new(bridge);
+    let mut model = AgentBarModel {
+        visible: true,
+        items: (0..24)
+            .map(|_| AgentBarItem {
+                workspace: flowmux_core::WorkspaceId::new(),
+                pane: flowmux_core::PaneId::new(),
+                surface: SurfaceId::new(),
+                surface_label: "Test task".into(),
+                agent_name: "test agent".into(),
+                status: AgentStatus::Working,
+                visual_status: flowmux_core::AgentBarVisualStatus::Working,
+                seen: true,
+                status_text: "Running tests".into(),
+                status_evidence: None,
+                pending_waits: Vec::new(),
+                color: "#abcdef".into(),
+            })
+            .collect(),
+    };
+    let surface = model.items[0].surface;
+    bar.render(&model, &HashSet::from([surface]), Some(surface));
+    let window = gtk::Window::builder()
+        .default_width(600)
+        .default_height(120)
+        .child(&bar.root)
+        .build();
+    window.present();
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    let button = bar.item_buttons.borrow()[&surface].button.clone();
+    assert!(button.grab_focus());
+    assert!(button.is_focus());
+    let content = button.child().unwrap();
+    let controller_count = button.observe_controllers().n_items();
+    let scroll = bar
+        .root
+        .last_child()
+        .unwrap()
+        .downcast::<gtk::ScrolledWindow>()
+        .unwrap();
+    let adjustment = scroll.hadjustment();
+    assert!(adjustment.upper() - adjustment.page_size() > 120.0);
+    adjustment.set_value(120.0);
+    gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+    let scroll_before = adjustment.value();
+    bar.render(&model, &HashSet::from([surface]), Some(surface));
+    assert_eq!(bar.items.first_child(), Some(button.clone().upcast()));
+    assert_eq!(
+        button.child(),
+        Some(content.clone()),
+        "unchanged content must survive a refresh"
+    );
+    let old_content = content.downgrade();
+    drop(content);
+
+    model.items[0].status = AgentStatus::Blocked;
+    model.items[0].visual_status = flowmux_core::AgentBarVisualStatus::Waiting;
+    model.items[0].status_text = "Waiting for answer".into();
+    model.items[0].workspace = flowmux_core::WorkspaceId::new();
+    model.items[0].pane = flowmux_core::PaneId::new();
+    let target = (model.items[0].workspace, model.items[0].pane, surface);
+    bar.render(&model, &HashSet::new(), None);
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    assert_eq!(bar.items.first_child(), Some(button.clone().upcast()));
+    assert!(
+        button.is_focus(),
+        "status refresh must preserve keyboard focus"
+    );
+    assert!(
+        (adjustment.value() - scroll_before).abs() < 1.0,
+        "status refresh moved horizontal scroll"
+    );
+    assert!(old_content.upgrade().is_none());
+    assert!(button
+        .tooltip_text()
+        .unwrap()
+        .contains("Waiting for answer"));
+    assert!(!button.has_css_class("flowmux-agent-bar-working"));
+    assert!(!button.has_css_class("flowmux-attention"));
+    assert!(!button.has_css_class("focused"));
+    assert_eq!(button.observe_controllers().n_items(), controller_count);
+    let drop_button = bar.item_buttons.borrow()[&model.items[1].surface]
+        .button
+        .clone();
+    let controllers = drop_button.observe_controllers();
+    let drop_target = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)
+                .unwrap()
+                .downcast::<gtk::DropTarget>()
+                .ok()
+        })
+        .unwrap();
+    assert!(drop_target.emit_by_name::<bool>(
+        "drop",
+        &[
+            &gtk::glib::BoxedValue(surface.to_string().to_value()),
+            &(drop_button.width() as f64 - 1.0),
+            &0.0f64,
+        ]
+    ));
+    drop(drop_target);
+    drop(controllers);
+    drop(drop_button);
+    bar.render(&model, &HashSet::new(), None);
+    assert_eq!(
+        bar.items.first_child().unwrap().next_sibling(),
+        Some(button.clone().upcast())
+    );
+    assert!(button.is_focus(), "reordering must preserve keyboard focus");
+    button.emit_clicked();
+    button.emit_clicked();
+    let command = gtk::glib::future_with_timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(command, GtkCommand::OpenAgentBarItem { workspace, pane, surface }
+        if (workspace, pane, surface) == target),
+        "reused button must route to current location"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "one activation must not navigate twice"
+    );
+    let weak = button.downgrade();
+    drop(button);
+    model.items.remove(0);
+    bar.render(&model, &HashSet::new(), None);
+    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    assert!(
+        weak.upgrade().is_none(),
+        "removed surfaces must release widgets and handlers"
+    );
+    assert!(!bar.item_order.borrow().contains(&surface));
+    bar.render(
+        &AgentBarModel {
+            visible: false,
+            items: Vec::new(),
+        },
+        &HashSet::new(),
+        None,
+    );
+    assert!(bar.item_buttons.borrow().is_empty());
+    assert!(bar.items.first_child().is_none());
+    assert!(!bar.root.is_visible());
+    window.destroy();
 }
 
 #[cfg(test)]
@@ -460,12 +663,18 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
+    async fn refreshing_agent_bar_preserves_live_buttons() {
+        check_stable_agent_bar_items().await;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     fn working_item_uses_spinner_and_highlight_class() {
         let (bridge, _rx) = Bridge::new();
         let bar = AgentBar::new(bridge);
         let item = working_item();
 
-        let button = bar.item_button(&item);
+        let button = bar.item_button(&item).button;
         assert!(button.has_css_class("flowmux-agent-bar-working"));
         let row = button.child().unwrap().downcast::<gtk::Box>().unwrap();
         let spinner = row
@@ -517,7 +726,7 @@ mod tests {
             &HashSet::new(),
             None,
         );
-        let weak = bar.item_buttons.borrow()[&item.surface].downgrade();
+        let weak = bar.item_buttons.borrow()[&item.surface].button.downgrade();
 
         bar.render(
             &AgentBarModel {
@@ -545,7 +754,7 @@ mod tests {
             &HashSet::new(),
             None,
         );
-        let button = bar.item_buttons.borrow()[&item.surface].downgrade();
+        let button = bar.item_buttons.borrow()[&item.surface].button.downgrade();
         let items = bar.items.downgrade();
 
         drop(bar);

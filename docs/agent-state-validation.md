@@ -800,3 +800,56 @@ and independent user agent PID 1401 stayed alive; the permanent vendor
 executable link and hash stayed unchanged. Account/billing/model settings were
 unchanged. Full cross-platform gates and the remaining attention UI/protocol
 work are still outstanding.
+
+
+## Stable horizontal agent bar (2026-10-30)
+
+The horizontal bar now retains each live surface's button and its activation
+and drag/drop handlers. Unchanged content is reused; changed status, evidence,
+color, and labels update inside the same button. Activation reads the current
+workspace/pane/surface, and existing same-frame duplicate-click suppression
+remains. Attention and focus styling can be removed as well as added. Removing
+a surface or hiding the bar releases its widgets; manual order is retained
+across ordinary status refreshes.
+
+The new regression failed on the previous implementation because an unchanged
+refresh replaced its button (`/tmp/fm-stable-bar-red.log`). The shared GTK check
+uses 24 items and verifies unchanged content, focus, horizontal scroll, status
+and tooltip updates, controller count, current navigation target, duplicate
+activation, and widget release. It invokes the retained drop handler with a
+valid surface payload, verifies the resulting order survives another refresh,
+and checks that keyboard focus remains on the moved item. This signal-level
+check does not prove delivery of a native drag gesture.
+
+All ten Linux bar and window-integration tests passed
+(`/tmp/fm-stable-bar-linux-final.log`). Full workspace/all-targets Clippy with
+native-smoke passed (`/tmp/fm-stable-bar-clippy-final.log`), as did the canonical
+application build (`/tmp/fm-stable-bar-build.log`). The final macOS main-thread
+harness passed the strengthened bar check, stable side-panel rows, evidence
+tooltips, and native hook replay (`/tmp/fm-stable-bar-native-final.log`,
+`MACOS_STABLE_AGENT_BAR_OK`, `MACOS_NATIVE_SMOKE_OK`). Hook replay is synthetic.
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 used isolated application
+PID 48073 in `/tmp/fm-atn-0mn07y4l`, with bar mode enabled only in its private
+configuration. B passed consecutive responses, a displayed one-time harmless
+approval, interruption, and recovery. A's actual quota wait changed from
+automatic to manual retry after Escape, retaining native evidence and the
+pending request. Both agents' unsubmitted status-like drafts left state
+unchanged. Native screenshots confirmed working, approval, interruption,
+completed response, and retry labels in the bar. Clicking its updated A and B
+items opened the correct actual tabs. Log: `/tmp/fm-stable-bar-live.log`
+(`LIVE_STABLE_BAR_MATRIX_OK`), with state/screen/draft evidence under the root.
+Application and CLI SHA-256:
+
+`0d9754c8cb00aa3f568db348585ac72ddbbba0882f18de72289e587c60bc58cb`
+
+`f05f50e0ce54a9d1493352926a333381a5399be82fc61522c11fa30230eeee13`
+
+Native drag automation did not visibly reorder items in either this build or
+the previous isolated build (PID 44944). Its event delivery remains unverified;
+the passing retained-handler test is not presented as native drag proof.
+A's normal response/question/recovery coverage remains quota-blocked. Original
+application PID 72789 and independent user agent PID 1401 remained alive, and
+the permanent vendor executable stayed unchanged. Shared attention
+counts/priorities, delivery diagnostics, protocol support, and final full
+cross-platform gates remain outstanding.

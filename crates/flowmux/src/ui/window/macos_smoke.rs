@@ -395,6 +395,8 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         println!("MACOS_AGENT_EVIDENCE_TOOLTIPS_OK");
         crate::ui::sidebar::check_stable_activity_rows().await;
         println!("MACOS_STABLE_ACTIVITY_ROWS_OK");
+        crate::ui::agent_bar::check_stable_agent_bar_items().await;
+        println!("MACOS_STABLE_AGENT_BAR_OK");
         server.abort();
         controller.window.destroy();
         println!("MACOS_NATIVE_AGENT_HOOKS_OK");
