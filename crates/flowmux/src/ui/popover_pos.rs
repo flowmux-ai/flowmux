@@ -233,6 +233,24 @@ pub(crate) async fn menu_toggle_smoke() {
         .await
         .expect("menu state did not settle");
     }
+    async fn presented(widget: &impl IsA<gtk::Widget>) {
+        #[cfg(target_os = "macos")]
+        {
+            // Mapping/allocation precedes the native display-link callback. A
+            // fixed sleep can hide/remap a popup while its frame is still pending.
+            let clock = widget.frame_clock().expect("mapped widget frame clock");
+            let previous = clock.frame_counter();
+            widget.queue_draw();
+            ready(|| clock.frame_counter() > previous).await;
+            let frame = clock.current_timings().expect("requested frame timing");
+            ready(|| frame.is_complete()).await;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = widget;
+            gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        }
+    }
     let window = gtk::Window::builder()
         .default_width(500)
         .default_height(300)
@@ -254,6 +272,7 @@ pub(crate) async fn menu_toggle_smoke() {
     window.set_child(Some(&content));
     window.present();
     ready(|| menu.is_mapped() && menu.width() > 0).await;
+    presented(&window).await;
     let count = window.observe_controllers().n_items();
     let opens = Rc::new(Cell::new(0));
     let observed = opens.clone();
@@ -266,7 +285,7 @@ pub(crate) async fn menu_toggle_smoke() {
     for expected in 1..=4 {
         button.emit_clicked();
         ready(|| popover.is_mapped() && popover.width() > 0 && popover.height() > 0).await;
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        presented(&popover).await;
         assert!(menu.is_active());
         let at = button
             .compute_point(&window, &graphene::Point::new(4.0, 4.0))
@@ -282,15 +301,13 @@ pub(crate) async fn menu_toggle_smoke() {
         assert!(menu.is_active());
         button.emit_clicked();
         ready(|| !popover.is_mapped()).await;
-        // Synthetic signals bypass the normal event/frame cadence. Let the
-        // native popup finish unmapping before opening its surface again.
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        presented(&window).await;
         assert!(!menu.is_active());
         assert_eq!(opens.get(), expected, "closing must not reopen the popup");
     }
     menu.popup();
     ready(|| popover.is_mapped() && popover.width() > 0 && popover.height() > 0).await;
-    gtk::glib::timeout_future(Duration::from_millis(50)).await;
+    presented(&popover).await;
     let at = entry
         .compute_point(&window, &graphene::Point::new(4.0, 4.0))
         .unwrap();
@@ -302,9 +319,7 @@ pub(crate) async fn menu_toggle_smoke() {
         at.y() as f64,
     );
     ready(|| !popover.is_mapped()).await;
-    // Synthetic signals bypass the normal event/frame cadence. Let the
-    // native popup finish unmapping before opening its surface again.
-    gtk::glib::timeout_future(Duration::from_millis(50)).await;
+    presented(&window).await;
     assert!(!menu.is_active());
     assert!(entry.grab_focus());
     entry.set_text("input after dismissal");
@@ -313,26 +328,30 @@ pub(crate) async fn menu_toggle_smoke() {
     for _ in 0..3 {
         menu.popup();
         ready(|| popover.is_mapped() && popover.width() > 0 && popover.height() > 0).await;
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        presented(&popover).await;
         menu.set_visible(false);
         assert!(!menu.is_active());
         assert_eq!(window.observe_controllers().n_items(), count - 1);
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        ready(|| !popover.is_mapped()).await;
+        presented(&window).await;
         menu.set_visible(true);
         ready(|| menu.is_mapped()).await;
+        presented(&window).await;
         assert_eq!(window.observe_controllers().n_items(), count);
     }
     menu.popup();
     ready(|| popover.is_mapped()).await;
-    gtk::glib::timeout_future(Duration::from_millis(50)).await;
+    presented(&popover).await;
     other_menu.popup();
     ready(|| other_popup.is_mapped()).await;
     assert!(
         !menu.is_active(),
         "keyboard opening must dismiss the previous menu"
     );
+    presented(&other_popup).await;
     other_menu.popdown();
-    gtk::glib::timeout_future(Duration::from_millis(50)).await;
+    ready(|| !other_popup.is_mapped()).await;
+    presented(&window).await;
     window.destroy();
     println!("MENU_BUTTON_TOGGLE_DISMISS_REMAP_OK");
 }
