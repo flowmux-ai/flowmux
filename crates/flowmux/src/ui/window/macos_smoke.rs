@@ -73,12 +73,25 @@ pub(crate) fn run() {
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     app.register(None::<&gtk::gio::Cancellable>).unwrap();
+    let soak_seconds = if std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_HOME").is_some() {
+        std::env::var("FLOWMUX_SESSION_FLOW_SOAK_SECONDS")
+            .ok()
+            .map(|seconds| {
+                let seconds: u64 = seconds.parse().expect("soak duration must be seconds");
+                assert!((1..=1800).contains(&seconds));
+                seconds
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let deadline = Duration::from_secs(300 + soak_seconds);
     glib::MainContext::default().block_on(async {
         // Theme and Code Review scenarios now run before the browser/editor/IPC checks.
         // Allow time for the whole suite; individual UI waits remain bounded at 30s.
-        glib::future_with_timeout(Duration::from_secs(300), check(&app, isolated.path()))
+        glib::future_with_timeout(deadline, check(&app, isolated.path()))
             .await
-            .expect("native smoke exceeded 300 seconds");
+            .expect("native smoke exceeded its bounded deadline");
     });
     println!("MACOS_NATIVE_SMOKE_OK");
 }

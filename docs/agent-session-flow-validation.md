@@ -305,3 +305,8 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 
 
 기준 실행 종료 기록: `ecc97ae2`의 Test `41112091385`는 workflow 전체 success다. Linux job `124256539183`은 coverage phase 1,648.592초 및 JSON/HTML/threshold 단계 모두 passed였으며 GUI 907 passed / 기존 ignored 4개와 수정된 PTY 압력 시험 통과를 확인했다. Lines 86.92%, regions 86.85%, functions 85.85%로 기준을 충족했다. Linux artifact `13005333927`, 원본 로그 `/tmp/flowmux-session-flow-linux-ecc97ae2.log`. 아래 실행 당시의 진행 중 표기는 역사 기록이며 현재 최종 검증 대상은 상단의 `7cc0c176`이다.
+
+
+지속 사용 검증 harness: 실제 provider용 native 시험에 `FLOWMUX_SESSION_FLOW_SOAK_SECONDS`(1–1800)를 추가했다. 지정된 임시 Codex profile에서만 실행하며, 일반 native suite의 300초 제한은 유지하고 이 opt-in 경로만 요청된 지속 시간만큼 deadline을 늘린다. 약 10초마다 두 workspace를 전환하고 패널을 닫았다 열며, 같은 계보·정확한 active surface·terminal 수·원본과 자식 PID를 검사한다. 각 회차의 RSS, snapshot 준비 대기, offscreen snapshot/render 호출 시간을 따로 기록한다. 물리 입력이나 디스플레이 frame 지연 측정이 아니다.
+
+첫 지속 시험은 52초 부근에서 고정 20ms 대기 후 snapshot이 없어 실패했다(`/tmp/flowmux-session-flow-soak-1800.log`). 준비된 snapshot을 최대 5초까지 조건으로 기다리도록 바꾼 90초/9회 시험은 통과했고, 해당 시점의 준비 대기는 약 376ms였다(`/tmp/flowmux-session-flow-soak-readiness.log`). 90초 결과를 30분 결과로 대체하지 않는다. Native harness clippy도 통과했다(`/tmp/flowmux-session-flow-soak-final-clippy.log`). 새 코드는 opt-in 시험에만 적용하며 제품 실행 코드는 `7cc0c176`에서 바뀌지 않았다.

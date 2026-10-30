@@ -1532,6 +1532,118 @@ pub(super) async fn check_real_codex(
     assert_eq!(terminal.pid.get(), original_pid);
     assert_eq!(terminal.widget, original_widget);
     println!("MACOS_SESSION_FLOW_SHARED_WORKSPACES_OK");
+    if let Ok(seconds) = std::env::var("FLOWMUX_SESSION_FLOW_SOAK_SECONDS") {
+        let seconds: u64 = seconds.parse().expect("soak duration must be seconds");
+        assert!((1..=1800).contains(&seconds));
+        let started = Instant::now();
+        let duration = Duration::from_secs(seconds);
+        let mut iteration = 0;
+        while started.elapsed() < duration {
+            let (target, target_pane, target_surface) = if iteration % 2 == 0 {
+                (workspace, pane, source)
+            } else {
+                (
+                    other_workspace,
+                    resumed_terminal.id(),
+                    resumed_target.surface,
+                )
+            };
+            controller
+                .activate_workspace_at(target, Some((target_pane, Some(target_surface))))
+                .await;
+            if !controller.flow.panel.root.is_visible() {
+                controller.flow.panel.toggle(target);
+            }
+            controller.flow.panel.toggle(target);
+            glib::timeout_future(Duration::from_millis(20)).await;
+            controller.flow.panel.toggle(target);
+            controller.refresh_session_flow(false).await;
+            controller.flow.panel.assert_native_graph(target, &family);
+            assert_eq!(
+                controller
+                    .pane_registry
+                    .borrow()
+                    .active_surface(target_pane),
+                Some(target_surface)
+            );
+            assert_eq!(
+                controller.pane_registry.borrow().terminals.len(),
+                terminal_count
+            );
+            assert_eq!(terminal.pid.get(), original_pid);
+            assert_eq!(resumed_terminal.pid.get(), resumed_pid);
+            // A mapped, offscreen render measures the drawing call, not display/input latency.
+            let paintable = gtk::WidgetPaintable::new(Some(&controller.flow.panel.root));
+            let snapshot_started = Instant::now();
+            let (node, snapshot_ms) = glib::future_with_timeout(Duration::from_secs(5), async {
+                loop {
+                    let drawing_started = Instant::now();
+                    let drawing = gtk::Snapshot::new();
+                    paintable.snapshot(
+                        &drawing,
+                        controller.flow.panel.root.width() as f64,
+                        controller.flow.panel.root.height() as f64,
+                    );
+                    if let Some(node) = drawing.to_node() {
+                        break (node, drawing_started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    glib::timeout_future(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "soak canvas was not ready: visible={} mapped={} size={}x{}",
+                    controller.flow.panel.root.is_visible(),
+                    controller.flow.panel.root.is_mapped(),
+                    controller.flow.panel.root.width(),
+                    controller.flow.panel.root.height()
+                )
+            });
+            let snapshot_wait_ms = snapshot_started.elapsed().as_secs_f64() * 1000.0;
+            let render_started = Instant::now();
+            let texture = controller
+                .window
+                .renderer()
+                .unwrap()
+                .render_texture(&node, None);
+            assert!(texture.width() > 0 && texture.height() > 0);
+            let render_ms = snapshot_ms + render_started.elapsed().as_secs_f64() * 1000.0;
+            drop((texture, node, paintable));
+            let rss_kib = gtk::gio::spawn_blocking(|| {
+                let output = std::process::Command::new("/bin/ps")
+                    .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                String::from_utf8(output.stdout)
+                    .unwrap()
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+            iteration += 1;
+            println!(
+                "SESSION_FLOW_SOAK_SAMPLE={}",
+                serde_json::json!({
+                    "iteration": iteration, "elapsed_seconds": started.elapsed().as_secs_f64(),
+                    "rss_kib": rss_kib, "offscreen_render_ms": render_ms,
+                    "snapshot_wait_ms": snapshot_wait_ms,
+                    "terminals": terminal_count, "nodes": family.nodes().len()
+                })
+            );
+            let remaining = duration.saturating_sub(started.elapsed());
+            if !remaining.is_zero() {
+                glib::timeout_future(remaining.min(Duration::from_secs(10))).await;
+            }
+        }
+        if seconds == 1800 {
+            assert!(iteration >= 100, "too few workspace changes during soak");
+        }
+        println!("MACOS_SESSION_FLOW_SOAK_OK seconds={seconds} iterations={iteration}");
+    }
     println!("MACOS_SESSION_FLOW_CODEX_REAL_OK source={source_id} child={child_id}");
     server.abort();
 }
