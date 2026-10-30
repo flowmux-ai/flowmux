@@ -2,9 +2,9 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현·검증 진행 중. 아래 항목은 수용 조건이며 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현 및 자동 회귀·coverage 검증 완료. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)는 macOS 46개 phase와 editor/headless 작업이 성공했고 Linux coverage는 진행 중이다. [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 전체 성공했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
+최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -192,7 +192,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 
 ## 요구사항별 현재 증거와 남은 확인
 
-이 표는 완료 감사용이다. 소스의 조건문 존재, 단위 테스트, GTK event 경로, 실제 provider 실행은 서로 다른 증거다. 최신 CI 종료 전에는 전체 통과로 해석하지 않는다.
+이 표는 완료 감사용이다. 소스의 조건문 존재, 단위 테스트, GTK event 경로, 실제 provider 실행은 서로 다른 증거다. CI 전체 성공도 아래 미확인 실기 항목까지 통과했다는 뜻은 아니다.
 
 | 요구 | 현재 확인된 증거 | 추가 확인 또는 적용 한계 |
 | --- | --- | --- |
@@ -229,9 +229,9 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | 실제 Claude Code 2.1.314 | source `8683a908-3515-4cc9-a35a-1da44cf7a563` → child `21fcba07-00f6-4ea1-9749-24b6cbde520d`; `FLOW_NATIVE_731` 상속; resume 같은 child ID | `/tmp/flowmux-session-flow-claude-evidence.json` |
 | 실제 OpenCode 1.17.18 | source `ses_e720557a7ffehEpgE0O7ocPC90` → child `ses_e7202b093ffeGhjCBP9bu4Du0H`; 원본 메시지 복제. 모델 호출은 401로 blocked | `/tmp/fm-flow-providers-h_ja_8_6/opencode*.log`, 격리된 SQLite |
 | 라이선스 생성 | 고정된 cargo-about 0.9.2로 재생성 후 committed notices와 차이 없음 | `/tmp/flowmux-session-flow-licenses.log` |
-| 원격 macOS gate | `ecc97ae2`의 46개 phase 모두 passed; 수정된 PTY 압력 테스트, Session Flow native smoke, 기존 browser/editor/WebDriver 회귀 포함 | Test `41112091385`, job `124256538732`; [phase JSON](design-assets/session-flow-macos-gate-ecc97ae2.json) |
+| 원격 macOS gate | `9116d3bb`의 46개 phase 모두 passed; IPC 포화 hook 전송, PTY 압력 시험, Session Flow native smoke, 기존 browser/editor/WebDriver 회귀 포함 | Test `41119193884`, job `124281231198`; [phase JSON](design-assets/session-flow-macos-gate-9116d3bb.json) |
 | 로컬 macOS gate | 화면 잠금(`CGSSessionScreenIsLocked=Yes`) 상태에서 browser-control의 stable pointer 및 editor-keyboard의 window active 대기 실패. 기존 설치 버전에서도 browser 실패 재현. 별도 실행한 remaining 14개 중 13개, tail 21개 중 17개 통과. 실패 목록은 아래 참고; 전체 통과 아님 | `/tmp/flowmux-session-flow-macos-gate.log`, `/tmp/flowmux-session-flow-browser-baseline.log`, `/tmp/flowmux-session-flow-macos-remaining.log`, `/tmp/flowmux-session-flow-macos-tail.log` |
-| Linux coverage·원격 CI | `ecc97ae2` Test 전체 success: lines 86.92%, regions 86.85%, functions 85.85%. 제품 보완 `7cc0c176`의 Test·Sanitizers는 진행 중. 이전 `a1ceb185` Sanitizers·License success | 기준 Test `41112091385`; 최신 Test `41116487881`, Sanitizers `41116492686`; `/tmp/flowmux-session-flow-linux-ecc97ae2.log` |
+| Linux coverage·원격 CI | `9116d3bb` Test·Sanitizers 전체 success: lines 86.93%, regions 86.86%, functions 85.86%. 변경 없는 dependency/license 집합의 License audit도 success | Test `41119193884`, Sanitizers `41119199156`, License `41108559323`; [coverage JSON](design-assets/session-flow-coverage-9116d3bb.json) |
 
 Native GUI는 별도 `/tmp/fm-native-*` XDG/runtime 및 테스트 소켓을 사용했다. Codex는 임시 history/config profile을 사용했다. Claude는 임시 프로젝트의 새 session ID와 기존 로그인을 사용했으며, `--setting-sources ''`, 빈 MCP 설정, 도구 비활성으로 기존 사용자 hook·도구 실행을 제외했다. 사용자 세션에 입력을 보내거나 사용자 앱을 종료하지 않았다.
 
@@ -354,3 +354,23 @@ Linux job `124244615365` (`a1ceb185`, Test `41108551043`)는 success로 완료�
 RSS는 초기 최대 602,896 KiB, 시작 60초 이후 247,280–248,016 KiB, 종료 247,904 KiB였다. 관측값이며 메모리 누수가 없다는 보편적 결론은 아니다. 물리 입력·실제 화면 frame 지연·1,000노드 UI 성능을 측정한 것이 아니다. 진행 중 headless 빌드/검사가 같은 호스트에서 실행됐다. 이 바이너리에는 이후 IPC 수정이 포함되지 않았으며 해당 변경은 별도 최신 native/CI로 검증한다.
 
 3세대 실제 Codex 검증: 최신 제품 코드와 추가 opt-in harness의 `/tmp/flowmux-session-flow-real-refork-final.log`는 exit 0이며 shared-workspace/refork/real-Codex/native-smoke marker를 모두 남겼다. Source `01a18ddc-a51f-7472-ab63-045abb779243` → child `01a18e7a-2962-7462-aa52-5beb822f94e9` → grandchild `01a18e7a-422b-7360-a3a2-c52e772bf11a`. Resume한 child를 다른 workspace에서 우클릭 메뉴 callback으로 다시 fork했다. 새 edge가 child에 연결되고 root에 직접 연결되지 않음, root와 grandchild의 전체 family projection 일치, 기존 source/child PID 유지, terminal 1개만 증가함을 확인했다. 물리 클릭 증거는 아니며 실제 provider와 GTK event/bridge 경로의 결합 검증이다. Native harness clippy와 formatting도 통과했다(`/tmp/flowmux-session-flow-refork-clippy.log`).
+
+
+최종 Linux·workflow 종료: `9116d3bb`의 Linux job `124281231441`과 Test `41119193884`는 모두 success다. GUI 907 passed / 기존 ignored 4개, IPC 포화 100회 회귀 시험을 확인했다. Coverage phase 1,611.284초, JSON 78.235초, HTML 81.910초, threshold 94.165초 모두 passed다. Artifact `13008864151`의 LLVM JSON과 원본 로그 `/tmp/flowmux-session-flow-linux-9116d3bb.log`를 확인했으며 [최종 coverage JSON](design-assets/session-flow-coverage-9116d3bb.json)에 원본 hash와 집계를 보존했다.
+
+| 최종 Linux 계측 | Lines | Regions | Functions |
+| --- | ---: | ---: | ---: |
+| 전체 저장소 | 86.93% | 86.86% | 85.86% |
+| 요구 기준 | 79% | 78% | 78% |
+| Session Flow core | 97.97% | 98.85% | 100.00% |
+| Session Flow state | 98.06% | 94.45% | 97.47% |
+| Native process identity | 81.03% | 84.35% | 87.50% |
+| Canvas | 81.77% | 82.84% | 75.38% |
+| Window orchestration | 38.96% | 38.29% | 29.41% |
+| IPC client | 96.68% | 94.00% | 95.45% |
+
+Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기지 않는다. 별도 macOS fixture·실제 Codex 3세대 fork/resume 및 30분 지속 시험은 별도 증거이며 위 수치에 합산하지 않는다. Branch coverage와 물리 입력·접근성 수동 검증은 수행하지 않았다.
+
+최종 소스·문서 점검: 분리된 `feat/session-flow`에서 `4d5929f8`까지 31개 커밋의 author/committer가 모두 지정된 `JunsuChoi <jsuya.choi@samsung.com>`인지 확인했고 co-author trailer와 외부 URL이 없음을 확인했다. 원격과 로컬 HEAD가 일치했고 문서의 로컬 링크 32개 및 검증 JSON도 유효했다. 이 기록 이후의 문서·증거 커밋은 제품 코드 변경이 아니다. 사용자 앱 PID `72789`는 계속 실행 중이며 종료·재시작하지 않았다.
+
+남은 검증 경계: 로컬 `CGSSessionScreenIsLocked=Yes`를 재확인했다. 물리 마우스/trackpad/키보드 및 VoiceOver/AT-SPI 확인은 수행하지 못했다. 실제 Claude GUI, OpenCode의 인증 성공 상태를 포함한 전체 GUI 경로, 두 독립 GUI 프로세스의 실기 전환, provider crash/restart 전체 시나리오를 통과했다고 주장하지 않는다. 위 요구사항별 표의 미확인 항목과 도구별 지원 제한은 유지한다.

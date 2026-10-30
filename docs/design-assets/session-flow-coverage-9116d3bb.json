@@ -1,0 +1,144 @@
+{
+  "commit": "9116d3bbb43b2d9e58900c99d326a4f85c79e4cb",
+  "workflow_run": 41119193884,
+  "workflow_conclusion": "success",
+  "job": 124281231441,
+  "job_conclusion": "success",
+  "artifact": 13008864151,
+  "platform": "Linux",
+  "scope": "Repository coverage including compiled test code. macOS native/provider results are separate; branch coverage was not collected.",
+  "source_sha256": "3aac9a7491bbfb33dc3008140c90cd0487f5416e2ade41bbcb5496c534f81d7e",
+  "thresholds_percent": {
+    "lines": 79,
+    "regions": 78,
+    "functions": 78
+  },
+  "totals": {
+    "lines": {
+      "count": 118542,
+      "covered": 103054,
+      "percent": 86.93458858463667
+    },
+    "regions": {
+      "count": 196191,
+      "covered": 170403,
+      "notcovered": 25788,
+      "percent": 86.85566616205637
+    },
+    "functions": {
+      "count": 10937,
+      "covered": 9390,
+      "percent": 85.85535338758343
+    }
+  },
+  "session_flow_and_ipc_files": {
+    "flowmux-core/src/session_flow.rs": {
+      "lines": {
+        "count": 395,
+        "covered": 387,
+        "percent": 97.97468354430382
+      },
+      "regions": {
+        "count": 781,
+        "covered": 772,
+        "notcovered": 9,
+        "percent": 98.84763124199743
+      },
+      "functions": {
+        "count": 40,
+        "covered": 40,
+        "percent": 100.0
+      }
+    },
+    "flowmux-ipc/src/client.rs": {
+      "lines": {
+        "count": 271,
+        "covered": 262,
+        "percent": 96.67896678966791
+      },
+      "regions": {
+        "count": 433,
+        "covered": 407,
+        "notcovered": 26,
+        "percent": 93.99538106235565
+      },
+      "functions": {
+        "count": 22,
+        "covered": 21,
+        "percent": 95.45454545454545
+      }
+    },
+    "flowmux-state/src/session_flow.rs": {
+      "lines": {
+        "count": 980,
+        "covered": 961,
+        "percent": 98.06122448979592
+      },
+      "regions": {
+        "count": 2072,
+        "covered": 1957,
+        "notcovered": 115,
+        "percent": 94.44980694980694
+      },
+      "functions": {
+        "count": 79,
+        "covered": 77,
+        "percent": 97.46835443037975
+      }
+    },
+    "flowmux-state/src/session_flow/process.rs": {
+      "lines": {
+        "count": 58,
+        "covered": 47,
+        "percent": 81.03448275862068
+      },
+      "regions": {
+        "count": 115,
+        "covered": 97,
+        "notcovered": 18,
+        "percent": 84.34782608695653
+      },
+      "functions": {
+        "count": 8,
+        "covered": 7,
+        "percent": 87.5
+      }
+    },
+    "flowmux/src/ui/session_flow.rs": {
+      "lines": {
+        "count": 894,
+        "covered": 731,
+        "percent": 81.76733780760627
+      },
+      "regions": {
+        "count": 1638,
+        "covered": 1357,
+        "notcovered": 281,
+        "percent": 82.84493284493287
+      },
+      "functions": {
+        "count": 65,
+        "covered": 49,
+        "percent": 75.38461538461539
+      }
+    },
+    "flowmux/src/ui/window/session_flow.rs": {
+      "lines": {
+        "count": 829,
+        "covered": 323,
+        "percent": 38.96260554885404
+      },
+      "regions": {
+        "count": 1379,
+        "covered": 528,
+        "notcovered": 851,
+        "percent": 38.288614938361135
+      },
+      "functions": {
+        "count": 85,
+        "covered": 25,
+        "percent": 29.411764705882355
+      }
+    }
+  }
+}
