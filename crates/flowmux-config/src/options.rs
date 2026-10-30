@@ -131,8 +131,49 @@ impl AgentSortMode {
     }
 }
 
+pub const CHILD_OOM_SCORE_ADJ_DEFAULT: i32 = 500;
+pub const CHILD_OOM_SCORE_ADJ_MAX: i32 = 1000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProcessIsolation {
+    #[default]
+    Auto,
+    Off,
+}
+
+fn default_child_oom_score_adj() -> i32 {
+    CHILD_OOM_SCORE_ADJ_DEFAULT
+}
+
+/// Sizes use binary multiples; invalid or overflowing values disable the limit.
+pub fn parse_memory_size(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let end = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let value: u64 = text[..end].parse().ok()?;
+    let multiplier = match text[end..].to_ascii_uppercase().as_str() {
+        "" | "B" => 1,
+        "K" | "KB" | "KIB" => 1 << 10,
+        "M" | "MB" | "MIB" => 1 << 20,
+        "G" | "GB" | "GIB" => 1 << 30,
+        "T" | "TB" | "TIB" => 1 << 40,
+        _ => return None,
+    };
+    value.checked_mul(multiplier)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Options {
+    #[serde(default)]
+    pub process_isolation: ProcessIsolation,
+    #[serde(default = "default_child_oom_score_adj")]
+    pub child_oom_score_adj: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_memory_high: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_memory_max: Option<String>,
     #[serde(default = "default_zoom")]
     pub zoom_percent: u16,
     #[serde(default)]
@@ -310,6 +351,10 @@ fn default_cursor_blink_interval() -> u32 {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            process_isolation: ProcessIsolation::Auto,
+            child_oom_score_adj: CHILD_OOM_SCORE_ADJ_DEFAULT,
+            pane_memory_high: None,
+            pane_memory_max: None,
             zoom_percent: ZOOM_DEFAULT,
             default_browser_engine: BrowserEngine::default(),
             focus_border_color: default_focus_color(),
@@ -381,6 +426,23 @@ impl ThemeOverrides {
 }
 
 impl Options {
+    pub fn clamp_child_oom_score_adj(value: i32) -> i32 {
+        value.clamp(0, CHILD_OOM_SCORE_ADJ_MAX)
+    }
+
+    pub fn child_oom_score_adj_or_none(&self) -> Option<i32> {
+        let value = Self::clamp_child_oom_score_adj(self.child_oom_score_adj);
+        (value != 0).then_some(value)
+    }
+
+    pub fn pane_memory_high_bytes(&self) -> Option<u64> {
+        self.pane_memory_high.as_deref().and_then(parse_memory_size)
+    }
+
+    pub fn pane_memory_max_bytes(&self) -> Option<u64> {
+        self.pane_memory_max.as_deref().and_then(parse_memory_size)
+    }
+
     /// Percentage clamped to `[ZOOM_MIN, ZOOM_MAX]`.
     pub fn clamp_zoom(p: u16) -> u16 {
         p.clamp(ZOOM_MIN, ZOOM_MAX)
@@ -682,6 +744,54 @@ fn write_options(path: &Path, value: &serde_json::Value) -> std::io::Result<()> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn isolation_options_have_spec_defaults() {
+        let o = Options::default();
+        assert_eq!(o.process_isolation, ProcessIsolation::Auto);
+        assert_eq!(o.child_oom_score_adj, 500);
+        assert_eq!(o.pane_memory_high, None);
+        assert_eq!(o.pane_memory_max, None);
+        let parsed: Options = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed.process_isolation, ProcessIsolation::Auto);
+        assert_eq!(parsed.child_oom_score_adj, 500);
+    }
+
+    #[test]
+    fn isolation_options_round_trip_and_clamp() {
+        let parsed: Options = serde_json::from_str(
+            r#"{"process_isolation":"off","child_oom_score_adj":5000,"pane_memory_max":"64M"}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.process_isolation, ProcessIsolation::Off);
+        assert_eq!(parsed.child_oom_score_adj_or_none(), Some(1000));
+        assert_eq!(parsed.pane_memory_max_bytes(), Some(64 * 1024 * 1024));
+        assert_eq!(Options::clamp_child_oom_score_adj(-7), 0);
+        let zero = Options {
+            child_oom_score_adj: 0,
+            ..Options::default()
+        };
+        assert_eq!(zero.child_oom_score_adj_or_none(), None);
+        let json = serde_json::to_string(&parsed).unwrap();
+        assert!(json.contains("\"process_isolation\":\"off\""));
+        assert!(!json.contains("pane_memory_high"));
+    }
+
+    #[test]
+    fn parse_memory_size_accepts_binary_suffixes_only() {
+        assert_eq!(parse_memory_size("512"), Some(512));
+        assert_eq!(parse_memory_size(" 4g "), Some(4 << 30));
+        assert_eq!(parse_memory_size("64MiB"), Some(64 << 20));
+        assert_eq!(parse_memory_size("1T"), Some(1 << 40));
+        assert_eq!(parse_memory_size("12KB"), Some(12 << 10));
+        assert_eq!(parse_memory_size("-1"), None);
+        assert_eq!(parse_memory_size("4 G"), None);
+        assert_eq!(parse_memory_size("lots"), None);
+        assert_eq!(parse_memory_size(""), None);
+        assert_eq!(parse_memory_size("18446744073709551615T"), None);
+        assert_eq!(parse_memory_size("+4G"), None);
+        assert_eq!(parse_memory_size("0"), Some(0));
+    }
+
     use super::*;
 
     fn with_xdg<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {

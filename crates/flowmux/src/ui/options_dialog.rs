@@ -209,6 +209,7 @@ fn build_dialog(
         let theme_state = theme_state.clone();
         let agent_notification_target = current.agent_notification_target;
         let agent_sort_mode = current.agent_sort_mode;
+        let current = current.clone();
         Rc::new(move || {
             let kb = kb_state.borrow().clone();
             let conflicts = crate::ui::keybindings_panel::detect_conflicts(&kb);
@@ -219,6 +220,7 @@ fn build_dialog(
                 );
             }
             on_apply(collect_options(
+                &current,
                 &zoom_picker,
                 &browser_engine,
                 &focus_color_btn,
@@ -991,6 +993,7 @@ fn valid_zoom_percentages(font_size: f64) -> Vec<u16> {
 /// focus color from GdkRGBA to six-digit `#rrggbb`.
 #[allow(clippy::too_many_arguments)]
 fn collect_options(
+    current: &Options,
     zoom_picker: &ZoomPicker,
     browser_engine: &BrowserEngine,
     focus_color: &gtk::ColorDialogButton,
@@ -1076,6 +1079,7 @@ fn collect_options(
         theme: theme_selection.theme.clone(),
         theme_overrides: theme_selection.overrides.clone(),
         keybindings: keybindings.clone(),
+        ..current.clone()
     }
 }
 

@@ -18,6 +18,7 @@ directory when `XDG_STATE_HOME` is unset, including an `XDG_DATA_HOME` override.
 
 `zoom_percent`, `default_browser_engine`, `focus_border_color`,
 `focus_border_opacity`, `focus_border_auto`, `persist_browser_session`, `auto_resume_agent_sessions`,
+`process_isolation`, `child_oom_score_adj`, `pane_memory_high`, `pane_memory_max`,
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
 `terminal_minimap_enabled`, `terminal_minimap_width`, `terminal_minimap_opacity`,
 `system_notifications_enabled`, `agent_bar_mode`, `agent_sort_mode`,
@@ -54,6 +55,17 @@ label. Legacy `default_browser_engine` values are preserved for existing profile
 storage compatibility and do not launch Chrome/Firefox or import their cookies.
 `scrollback_lines` defaults to 5,000 and is
 clamped to `1,000..=1,000,000` for newly created terminal tabs.
+
+`process_isolation` defaults to `auto`: each terminal tab uses its own systemd
+scope on Linux when the user service manager is available. `off` disables it;
+macOS does not use systemd. Restart Flowmux after changing this option.
+`child_oom_score_adj` defaults to 500 (clamped to `0..=1000`, `0` disables it)
+and applies on Linux only when a tab runs without its own scope.
+`pane_memory_high` and `pane_memory_max` accept binary sizes such as `64M`,
+`4G`, or `64MiB`, and set `MemoryHigh`/`MemoryMax` for new tab scopes on Linux.
+Limits are disabled by default; invalid or overflowing sizes are ignored.
+A hard limit also disables swap in that scope. These options have no effect
+when scope isolation is unavailable.
 
 `terminal_minimap_enabled` defaults to `true`. It reserves a right gutter and
 draws terminal cells as pixels without covering terminal text. Scrolling over
