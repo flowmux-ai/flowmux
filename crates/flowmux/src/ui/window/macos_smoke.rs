@@ -17,6 +17,7 @@ mod process_args;
 mod restored_roots;
 mod session_paths;
 mod teams_ack;
+mod termination_dialog;
 mod zoom_reorder;
 
 pub(crate) fn run() {
@@ -393,6 +394,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         return;
     }
 
+    termination_dialog::check(&controller, workspace, terminal_pane).await;
     check_theme_focus(&controller).await;
     check_theme_sources(&controller).await;
     crate::ui::review_window::smoke(&controller.window).await;
