@@ -842,11 +842,14 @@ impl Pane {
                     surface
                         .agent
                         .as_ref()
-                        .and_then(|agent| agent.screen_working_base)
+                        .and_then(|agent| agent.screen_working_base.clone())
                 } else {
                     None
                 };
-                let status = screen_base.map(|base| base.status).unwrap_or(status);
+                let status = screen_base
+                    .as_ref()
+                    .map(|base| base.status)
+                    .unwrap_or(status);
                 let name = incoming_name
                     .or_else(|| surface.agent.as_ref().map(|agent| agent.name.clone()))?;
                 let same_status = surface
@@ -854,6 +857,7 @@ impl Pane {
                     .as_ref()
                     .filter(|agent| agent.status == status);
                 let report = AgentStatusReport {
+                    pending_waits: None,
                     name,
                     status: Some(status),
                     activity: Some(status.to_activity()),
@@ -893,14 +897,24 @@ impl Pane {
                                     status: base_status,
                                     seen: before.seen,
                                     evidence: before.status_evidence,
+                                    pending_waits: before.pending_waits.clone(),
                                 });
                             } else if agent.status != AgentStatus::Working
                                 && before.status == AgentStatus::Working
                             {
                                 if let Some(base) = screen_base {
                                     agent.status_evidence = base.restored_evidence();
+                                    agent.pending_waits = base.pending_waits;
                                     if base.status == AgentStatus::Blocked {
                                         agent.seen = base.seen || visible;
+                                    }
+                                } else if agent.status == AgentStatus::Blocked {
+                                    if let Some(base) = before
+                                        .screen_working_base
+                                        .as_ref()
+                                        .filter(|base| base.status == AgentStatus::Blocked)
+                                    {
+                                        agent.pending_waits = base.pending_waits.clone();
                                     }
                                 }
                                 agent.screen_working_base = None;
@@ -1029,7 +1043,7 @@ impl Pane {
                     }
                     source => {
                         let screen_base = agent.screen_working_base.take();
-                        let next = screen_base.map(|base| base.status).or_else(|| {
+                        let next = screen_base.as_ref().map(|base| base.status).or_else(|| {
                             (source == Some(AGENT_SOURCE_PROC) && agent.status != AgentStatus::Idle)
                                 .then_some(AgentStatus::Idle)
                         });
@@ -1039,10 +1053,14 @@ impl Pane {
                         let prev = agent.status;
                         agent.status = next;
                         agent.activity = next.to_activity();
-                        agent.status_evidence = screen_base.map_or_else(
+                        agent.status_evidence = screen_base.as_ref().map_or_else(
                             || Some(AgentStatusEvidence::new(AgentEvidenceSource::Screen)),
                             |base| base.restored_evidence(),
                         );
+                        agent.pending_waits = screen_base
+                            .as_ref()
+                            .map(|base| base.pending_waits.clone())
+                            .unwrap_or_default();
                         agent.message = None;
                         agent.custom_status = None;
                         if next == AgentStatus::Blocked {
@@ -2250,6 +2268,8 @@ pub struct AgentStatusReport {
     pub seq: Option<u64>,
     pub message: Option<String>,
     pub custom_status: Option<String>,
+    /// An authoritative snapshot; None leaves same-state fallback details intact.
+    pub pending_waits: Option<Vec<AgentWaitSummary>>,
     pub session_id: Option<String>,
     pub session_name: Option<String>,
     pub messaging_socket: Option<String>,
@@ -2270,6 +2290,7 @@ impl AgentStatusReport {
             seq: None,
             message: None,
             custom_status: None,
+            pending_waits: None,
             session_id: None,
             session_name: None,
             messaging_socket: None,
@@ -2334,6 +2355,7 @@ pub struct AgentBarItem {
     pub seen: bool,
     pub status_text: String,
     pub status_evidence: Option<AgentStatusEvidence>,
+    pub pending_waits: Vec<AgentWaitSummary>,
     pub color: String,
 }
 
@@ -2357,6 +2379,7 @@ impl AgentBarItem {
             visual_status,
             seen: agent.seen,
             status_evidence: agent.status_evidence,
+            pending_waits: agent.pending_waits.clone(),
             status_text: agent
                 .status_text()
                 .map(str::to_string)
@@ -2523,6 +2546,49 @@ fn reconcile_surface_process_agent(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWaitReason {
+    Approval,
+    Question,
+    Authentication,
+    Quota,
+    ApiFailure,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl AgentWaitReason {
+    pub fn status_text(self) -> Option<&'static str> {
+        match self {
+            Self::Approval => Some("Waiting for approval"),
+            Self::Question => Some("Waiting for answer"),
+            Self::Authentication => Some("Authentication required"),
+            Self::Quota => Some("Usage limit reached"),
+            Self::ApiFailure => Some("API request failed"),
+            Self::Unknown => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWaitScope {
+    Tool,
+    Permission,
+    Session,
+}
+
+/// Aggregated live evidence. Permission/session scopes are not per-request IDs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentWaitSummary {
+    pub scope: AgentWaitScope,
+    pub reason: AgentWaitReason,
+    pub count: u32,
+    pub since: chrono::DateTime<chrono::Utc>,
+}
+
 /// What established the displayed activity, independently of identity ownership.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -2563,32 +2629,49 @@ pub fn agent_status_tooltip(
     name: &str,
     status_text: &str,
     evidence: Option<AgentStatusEvidence>,
+    pending_waits: &[AgentWaitSummary],
 ) -> String {
     let heading = format!("{name}: {status_text}");
-    let Some(evidence) = evidence else {
-        return format!("{heading}\nStatus evidence unavailable");
+    let mut text = if let Some(evidence) = evidence {
+        let basis = match evidence.source {
+            AgentEvidenceSource::Hook => "Hook-reported state",
+            AgentEvidenceSource::Screen => "Screen-inferred state",
+            AgentEvidenceSource::Process => "Process detected; activity unconfirmed",
+            AgentEvidenceSource::Unknown => "Status evidence unavailable",
+        };
+        format!(
+            "{heading}\n{basis}\nEvidence since {}",
+            evidence.since.format("%Y-%m-%d %H:%M:%S UTC")
+        )
+    } else {
+        format!("{heading}\nStatus evidence unavailable")
     };
-    let basis = match evidence.source {
-        AgentEvidenceSource::Hook => "Hook-reported state",
-        AgentEvidenceSource::Screen => "Screen-inferred state",
-        AgentEvidenceSource::Process => "Process detected; activity unconfirmed",
-        AgentEvidenceSource::Unknown => "Status evidence unavailable",
-    };
-    format!(
-        "{heading}\n{basis}\nEvidence since {}",
-        evidence.since.format("%Y-%m-%d %H:%M:%S UTC")
-    )
+    for wait in pending_waits {
+        let scope = match wait.scope {
+            AgentWaitScope::Tool => "Tool requests",
+            AgentWaitScope::Permission => "Permission scopes",
+            AgentWaitScope::Session => "Session waits",
+        };
+        text.push_str(&format!(
+            "\n{scope}: {} · {} · since {}",
+            wait.count,
+            wait.reason.status_text().unwrap_or("Reason unavailable"),
+            wait.since.format("%H:%M:%S UTC")
+        ));
+    }
+    text
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ScreenWorkingBase {
     status: AgentStatus,
     seen: bool,
     evidence: Option<AgentStatusEvidence>,
+    pending_waits: Vec<AgentWaitSummary>,
 }
 
 impl ScreenWorkingBase {
-    fn restored_evidence(self) -> Option<AgentStatusEvidence> {
+    fn restored_evidence(&self) -> Option<AgentStatusEvidence> {
         if self.status == AgentStatus::Idle {
             // A newly observed completion cannot borrow an earlier Ready/Idle hook.
             Some(AgentStatusEvidence::new(AgentEvidenceSource::Screen))
@@ -2614,6 +2697,8 @@ pub struct AgentPresence {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_evidence: Option<AgentStatusEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_waits: Vec<AgentWaitSummary>,
     /// Lifecycle status hidden by the current screen-derived Working state.
     /// Internal restoration context; never persisted or exposed over IPC.
     #[serde(skip)]
@@ -2647,6 +2732,7 @@ impl AgentPresence {
             pid,
             source: None,
             status_evidence: None,
+            pending_waits: Vec::new(),
             screen_working_base: None,
             seq: None,
             message: None,
@@ -2668,6 +2754,7 @@ impl AgentPresence {
         presence.seq = report.seq;
         presence.message = report.message;
         presence.custom_status = report.custom_status;
+        presence.pending_waits = report.pending_waits.unwrap_or_default();
         presence.session_id = report.session_id;
         presence.session_name = report.session_name;
         presence.messaging_socket = report.messaging_socket;
@@ -2687,6 +2774,20 @@ impl AgentPresence {
     }
 
     pub fn status_text(&self) -> Option<&str> {
+        if self.status == AgentStatus::Blocked {
+            if let Some(first) = self.pending_waits.first() {
+                if self
+                    .pending_waits
+                    .iter()
+                    .any(|wait| wait.reason != first.reason)
+                {
+                    return Some("Multiple waits");
+                }
+                if let Some(label) = first.reason.status_text() {
+                    return Some(label);
+                }
+            }
+        }
         self.custom_status
             .as_deref()
             .filter(|text| !text.trim().is_empty())
@@ -2818,6 +2919,14 @@ impl AgentPresence {
         }
         self.message = report.message;
         self.custom_status = report.custom_status;
+        if let Some(waits) = report.pending_waits {
+            self.pending_waits = waits;
+        } else if (!same_session && !screen_defers_to_authoritative)
+            || next != AgentStatus::Blocked
+            || hook_session_start
+        {
+            self.pending_waits.clear();
+        }
         if report.session_id.is_some() {
             self.session_id = report.session_id;
         }

@@ -413,6 +413,14 @@ pub(crate) async fn run_claude_hook_event(
                     surface,
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        reason: if matches!(
+                            input.error.as_deref(),
+                            Some("rate_limit" | "usage_limit")
+                        ) {
+                            flowmux_core::AgentWaitReason::Quota
+                        } else {
+                            flowmux_core::AgentWaitReason::ApiFailure
+                        },
                         message: message.clone(),
                         status_text: status_text.to_string(),
                         scope: Some(
@@ -488,12 +496,18 @@ pub(crate) async fn run_claude_hook_event(
                     {
                         let lifecycle = if batch_wait {
                             AgentLifecycleEvent::PermissionWaitStarted {
+                                reason: flowmux_core::AgentWaitReason::Unknown,
                                 message: msg.clone(),
                                 status_text: status_text.to_string(),
                                 scope: None,
                             }
                         } else {
                             AgentLifecycleEvent::SessionWaitStarted {
+                                reason: if notification_type == Some("quota_auto_resume_stale") {
+                                    flowmux_core::AgentWaitReason::Quota
+                                } else {
+                                    flowmux_core::AgentWaitReason::Unknown
+                                },
                                 message: msg.clone(),
                                 status_text: status_text.to_string(),
                                 scope: Some(
@@ -545,6 +559,15 @@ pub(crate) async fn run_claude_hook_event(
                     surface,
                     session_id,
                     AgentLifecycleEvent::PermissionWaitStarted {
+                        reason: if input
+                            .tool_name
+                            .as_deref()
+                            .is_some_and(|name| name.eq_ignore_ascii_case("AskUserQuestion"))
+                        {
+                            flowmux_core::AgentWaitReason::Question
+                        } else {
+                            flowmux_core::AgentWaitReason::Approval
+                        },
                         message: msg.clone(),
                         status_text: "Waiting for approval".into(),
                         scope: None,
@@ -630,6 +653,15 @@ pub(crate) async fn run_claude_hook_event(
                         surface,
                         session_id,
                         AgentLifecycleEvent::WaitStarted {
+                            reason: if input
+                                .tool_name
+                                .as_deref()
+                                .is_some_and(|name| name.eq_ignore_ascii_case("AskUserQuestion"))
+                            {
+                                flowmux_core::AgentWaitReason::Question
+                            } else {
+                                flowmux_core::AgentWaitReason::Approval
+                            },
                             item_id: tool_use_id.to_string(),
                             message: None,
                             status_text: status_text.clone(),
@@ -645,6 +677,15 @@ pub(crate) async fn run_claude_hook_event(
                         surface,
                         session_id,
                         AgentLifecycleEvent::SessionWaitStarted {
+                            reason: if input
+                                .tool_name
+                                .as_deref()
+                                .is_some_and(|name| name.eq_ignore_ascii_case("AskUserQuestion"))
+                            {
+                                flowmux_core::AgentWaitReason::Question
+                            } else {
+                                flowmux_core::AgentWaitReason::Approval
+                            },
                             message: None,
                             status_text: status_text.clone(),
                             scope: Some("tool_input".into()),
@@ -1035,6 +1076,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                         surface,
                         session_id,
                         AgentLifecycleEvent::PermissionWaitStarted {
+                            reason: flowmux_core::AgentWaitReason::Approval,
                             message: msg.clone(),
                             status_text: status_text.to_string(),
                             scope: input.turn_id.as_deref().map(|turn_id| {

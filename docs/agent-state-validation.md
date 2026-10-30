@@ -244,3 +244,103 @@ and 188 daemon tests), as did five Agent Bar tests and the live activity-model
 projection test. Full Linux coverage for this change remains pending. Logs are
 `/tmp/fm-evidence-linux-unit.log`, `/tmp/fm-evidence-linux-bar.log`, and
 `/tmp/fm-evidence-linux-activity.log`.
+
+
+## Typed pending waits and partial resolution — 2026-10-30
+
+Pending wait records now extend the existing tool-ID, permission-scope, and
+session-scope ledgers. Resolved tool IDs remain tombstones; sequence and root/child
+boundaries retain their existing authority. A partial resolution publishes the
+remaining reasons even when the public state stays Blocked. It does not emit a
+completion notification or restart the status-evidence timestamp.
+
+The read-only projection groups records by scope and reason, reporting a count
+and the earliest still-pending start time. Tool counts refer to distinct tool
+IDs. Permission/session counts refer to scopes, not an exact number of prompts.
+One question can appear in both tool and permission scopes; those counts must
+not be added together as a total request count. Generic notifications preserve
+an already known scope reason and start time.
+
+Question, approval, usage-limit, and API-failure events receive typed reasons.
+Unknown or legacy events retain a fallback; no authentication or automatic-retry
+state is inferred from missing data. The data model can represent authentication
+when a future adapter has explicit evidence. Mixed reasons display Multiple
+waits. Both live Agent lists share scope/reason/count details in their tooltips;
+tree JSON and `flowmux --json agents` expose `pending_waits` and the derived
+`status_text` while preserving raw `custom_status` for existing consumers.
+
+The new regression failed against the parent commit because pending waits were
+not inspectable (`/tmp/fm-wait-reasons-baseline-red.log`). The final isolated agent
+unit runner passed 166 core and 190 daemon tests, including parallel partial
+resolution, replay suppression, duplicate age/reason preservation, read state,
+screen restoration, checkpoint rollback, and child ordering for multiple reasons.
+IPC tests cover absent and future reason values. Full all-targets Clippy with the
+native-smoke feature passed. The final test changes also passed the isolated
+runner and Clippy. Logs: `/tmp/fm-waits-unit-last.log`,
+`/tmp/fm-waits-ipc.log`, `/tmp/fm-waits-clippy-final.log`.
+
+The expanded native hook replay passed with typed question/approval/quota
+assertions, parallel request counts, and clearing after resolution. It also
+verified evidence descriptions attached to live GTK rows. Log:
+`/tmp/fm-waits-native.log` (`LIVE_NATIVE_HOOK_MATRIX_OK`,
+`MACOS_AGENT_EVIDENCE_TOOLTIPS_OK`, `MACOS_NATIVE_AGENT_HOOKS_OK`). Quota coverage
+is synthetic; no real rate limit was induced. The later Linux replay passed
+the added API-failure and plan-approval assertions, both provider matrices,
+hidden/focused completion, interrupted drafts, and stale/ambiguous Stop cases:
+`/tmp/fm-waits-linux-replay.log` (`LINUX_TYPED_WAITS_REPLAY_OK`). API failures
+were synthetic; no real API outage was induced.
+
+Actual-agent verification used application PID 61046 in
+`/tmp/fm-atn-rf8dbxa2`, separate Flowmux state/socket directories, private hook
+settings, and dedicated terminal sessions. Native-hook agent B also used a
+private agent home. The original application PID 72789 remained running.
+
+| Scenario | Observed result |
+| --- | --- |
+| Native-hook agent A 2.1.314, question | Waiting for answer in both visible lists; one tool question and one permission question scope |
+| Native-hook agent B 0.166.0, command approval | Waiting for approval; one permission scope; reading retained the warning |
+| Answer/one-time approval | Working then Idle/Done; pending waits cleared |
+| Both agents, plain response and foreground shell | Hook-backed Working and completed response |
+| Agent A, immediate interruption | Hook identity retained with screen-backed Idle/Done; no old wait reopened |
+| Agent B, native interruption | Turn interrupted with hook evidence and no pending wait |
+| Both agents, recovery | Fresh Working followed by the expected response marker |
+| Both agents, unsubmitted approval/quota/progress/interruption wording | Idle/Done, evidence timestamp, and empty pending waits remained unchanged |
+
+Actual JSON evidence and draft observations are in `pending-waits.json`,
+`draft-evidence.json`, and the two state logs under the isolated root. Visual
+inspection confirmed the distinct question/approval labels and read warnings.
+The question's two scopes are evidence of the same native interaction, not two
+user questions. Agent A's immediate-interruption label still says Completed;
+explicit outcome semantics remain subsequent work.
+
+Verified application SHA-256:
+`4e2fa80feeba631cdc9ac00c0e9f6c8724ac418977ba74728ec2ae4d4c2564b9`.
+
+Verified CLI SHA-256:
+`30158bc033cb90aaf9909e92534bf4606859b9b8c579903c1c646393816d15c8`.
+
+The Linux agent unit runner, five Agent Bar tests, and the activity projection
+test passed. Logs: `/tmp/fm-waits-linux-unit.log` and
+`/tmp/fm-waits-linux-ui-result.log`.
+
+Full macOS verification failed in native browser pointer delivery in
+`/tmp/fm-waits-macos-ci.log`. A focused repeat and the previous verified binary
+both reproduced pointer-completion timeouts. Read-only failure capture observed
+a hidden, unfocused document and no delivered canvas events in
+`/tmp/fm-waits-browser-diagnostic.log`. This narrows the failure to the native
+visibility/input path; it does not establish its cause or a product fix. The
+temporary diagnostic logging was removed, and the canonical binary rebuilt.
+Full macOS verification remains outstanding while foreground availability is
+being coordinated; no failed run is counted as passing.
+
+The earlier three-commit Linux gate finished with `CI_GATE_EXIT=1` after the
+editor I/O GUI scenario timed out waiting for `surface_focus`; coverage thresholds
+passed, but the gate did not. Its reports were archived before the next run.
+The evidence-only Linux gate also finished with `CI_GATE_EXIT=1`. Editor I/O
+passed there, but the remote review Send fixture failed: its long placeholder
+wrapped, leaving the cursor on a continuation row. The existing input guard
+correctly refused to overwrite that state. A separate test correction draws a
+bare empty prompt and retains the draft/busy/blocked rejection cases. The same
+binary then passed all remote Send scenarios in
+`/tmp/fm-waits-ssh-send-recheck.log`; product input protection was unchanged.
+Full Linux validation of this pending-wait change is still outstanding.

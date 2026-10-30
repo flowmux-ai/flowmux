@@ -1094,6 +1094,7 @@ dependencies = [
  "flowmux-procmon",
  "flowmux-state",
  "flowmux-vcs",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",

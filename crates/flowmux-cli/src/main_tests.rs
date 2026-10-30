@@ -857,6 +857,12 @@ fn render_tree_marks_active_tab_and_indents() {
                     kind: "terminal".into(),
                     active: false,
                     agent: Some(TreeAgent {
+                        pending_waits: vec![serde_json::from_value(serde_json::json!({
+                            "scope": "tool", "reason": "question", "count": 2,
+                            "since": "2026-10-30T00:00:00Z"
+                        }))
+                        .unwrap()],
+                        status_text: Some("Waiting for answer".into()),
                         status_evidence: Some(
                             serde_json::from_value(serde_json::json!({
                                 "source": "screen",
@@ -907,13 +913,18 @@ fn render_tree_marks_active_tab_and_indents() {
     assert_eq!(rows[0]["identity_source"], "flowmux:hook");
     assert_eq!(rows[0]["status_evidence"]["source"], "screen");
     assert_eq!(rows[0]["status_evidence"]["since"], "2026-10-30T00:00:00Z");
+    assert_eq!(rows[0]["status_text"], "Waiting for answer");
+    assert_eq!(rows[0]["pending_waits"][0]["reason"], "question");
+    assert_eq!(rows[0]["pending_waits"][0]["count"], 2);
     let mut legacy =
         serde_json::to_value(workspaces[0].panes[0].tabs[0].agent.as_ref().unwrap()).unwrap();
-    legacy.as_object_mut().unwrap().remove("status_evidence");
-    assert!(serde_json::from_value::<TreeAgent>(legacy)
-        .unwrap()
-        .status_evidence
-        .is_none());
+    for field in ["status_evidence", "pending_waits", "status_text"] {
+        legacy.as_object_mut().unwrap().remove(field);
+    }
+    let legacy: TreeAgent = serde_json::from_value(legacy).unwrap();
+    assert!(legacy.status_evidence.is_none());
+    assert!(legacy.pending_waits.is_empty());
+    assert!(legacy.status_text.is_none());
 }
 
 #[test]

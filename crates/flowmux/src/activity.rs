@@ -33,6 +33,7 @@ pub struct ActivityNowEntry {
     pub status: AgentStatus,
     pub status_text: String,
     pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
+    pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
     pub seen: bool,
     pub workspace: WorkspaceId,
     pub pane: PaneId,
@@ -51,6 +52,7 @@ pub fn current_activity_entries(model: &flowmux_core::AgentBarModel) -> Vec<Acti
             status: item.status,
             status_text: item.status_text,
             status_evidence: item.status_evidence,
+            pending_waits: item.pending_waits,
             seen: item.seen,
             workspace: item.workspace,
             pane: item.pane,
@@ -320,6 +322,7 @@ mod tests {
         let store = ActivityStore::new();
         let now = || ActivityNowEntry {
             status_evidence: None,
+            pending_waits: Vec::new(),
             agent: "codex".into(),
             status: AgentStatus::Idle,
             status_text: String::new(),

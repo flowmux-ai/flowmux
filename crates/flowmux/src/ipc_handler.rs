@@ -1259,6 +1259,7 @@ impl GuiHandler {
                         let session_binding = session_id.clone();
                         let session_agent = agent.clone();
                         let report = AgentStatusReport {
+                            pending_waits: None,
                             name: agent,
                             status,
                             activity,

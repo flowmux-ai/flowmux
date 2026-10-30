@@ -10,12 +10,13 @@ use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_completion, detect_agent_idle_name_from_signals,
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_status_from_signals, detect_agent_usage_limit_text,
-    select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport, Pane,
-    PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
+    select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport, AgentWaitReason,
+    AgentWaitScope, AgentWaitSummary, Pane, PaneContent, PaneId, PaneSurface, SurfaceId,
+    SurfaceKind, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use tokio::sync::Mutex;
@@ -99,17 +100,47 @@ type AgentScopeSequences = HashMap<AgentLifecycleKey, HashMap<String, u64>>;
 const SESSION_PERMISSION_SCOPE: &str = "session";
 const SESSION_WAIT_SCOPE: &str = "session";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PendingAgentWait {
+    reason: AgentWaitReason,
+    since: chrono::DateTime<chrono::Utc>,
+}
+
+impl PendingAgentWait {
+    fn new(reason: AgentWaitReason) -> Self {
+        Self {
+            reason,
+            since: chrono::Utc::now(),
+        }
+    }
+}
+
+fn record_scope_wait(
+    scopes: &mut HashMap<String, PendingAgentWait>,
+    scope: String,
+    reason: AgentWaitReason,
+) {
+    scopes
+        .entry(scope)
+        .and_modify(|wait| {
+            if reason != AgentWaitReason::Unknown {
+                wait.reason = reason;
+            }
+        })
+        .or_insert_with(|| PendingAgentWait::new(reason));
+}
+
 #[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
     /// Local process polls found neither an agent nor an out-of-tree transport.
     screen_absent: HashSet<SurfaceId>,
-    /// One state per tool-use id: true while waiting, false once resolved.
+    /// One record per tool-use id: Some while waiting, None once resolved.
     /// Keep resolved ids until the turn boundary so duplicate or reordered
     /// hook deliveries cannot reopen them. Distinct calls keep distinct ids.
-    pub(super) waits: HashMap<AgentLifecycleKey, HashMap<String, bool>>,
-    pub(super) permission_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
+    pub(super) waits: HashMap<AgentLifecycleKey, HashMap<String, Option<PendingAgentWait>>>,
+    pub(super) permission_waits: HashMap<AgentLifecycleKey, HashMap<String, PendingAgentWait>>,
     pub(super) permission_event_seq: AgentScopeSequences,
-    pub(super) session_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
+    pub(super) session_waits: HashMap<AgentLifecycleKey, HashMap<String, PendingAgentWait>>,
     pub(super) session_wait_event_seq: AgentScopeSequences,
     /// Highest non-child event observed, used to reject delayed terminal
     /// boundaries and native SessionStart. Codex child ordering is tracked by
@@ -128,10 +159,10 @@ pub(super) struct AgentLifecycleRuntime {
 // sessions and bounded tombstones never participate in a per-event copy.
 struct LifecycleCheckpoint {
     key: AgentLifecycleKey,
-    waits: Option<HashMap<String, bool>>,
-    permission_waits: Option<HashSet<String>>,
+    waits: Option<HashMap<String, Option<PendingAgentWait>>>,
+    permission_waits: Option<HashMap<String, PendingAgentWait>>,
     permission_event_seq: Option<HashMap<String, u64>>,
-    session_waits: Option<HashSet<String>>,
+    session_waits: Option<HashMap<String, PendingAgentWait>>,
     session_wait_event_seq: Option<HashMap<String, u64>>,
     last_seq: Option<u64>,
     boundary_seq: Option<u64>,
@@ -311,11 +342,53 @@ fn remember_ended_agent_lifecycle(
     }
 }
 
+fn pending_wait_summary(
+    runtime: &AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+) -> Vec<AgentWaitSummary> {
+    let mut summary: BTreeMap<(AgentWaitScope, AgentWaitReason), AgentWaitSummary> =
+        BTreeMap::new();
+    let tool = runtime
+        .waits
+        .get(key)
+        .into_iter()
+        .flat_map(|waits| waits.values())
+        .flatten()
+        .map(|wait| (AgentWaitScope::Tool, wait));
+    let permission = runtime
+        .permission_waits
+        .get(key)
+        .into_iter()
+        .flat_map(|waits| waits.values())
+        .map(|wait| (AgentWaitScope::Permission, wait));
+    let session = runtime
+        .session_waits
+        .get(key)
+        .into_iter()
+        .flat_map(|waits| waits.values())
+        .map(|wait| (AgentWaitScope::Session, wait));
+    for (scope, wait) in tool.chain(permission).chain(session) {
+        summary
+            .entry((scope, wait.reason))
+            .and_modify(|entry| {
+                entry.count = entry.count.saturating_add(1);
+                entry.since = entry.since.min(wait.since);
+            })
+            .or_insert(AgentWaitSummary {
+                scope,
+                reason: wait.reason,
+                count: 1,
+                since: wait.since,
+            });
+    }
+    summary.into_values().collect()
+}
+
 fn lifecycle_has_waits(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> bool {
     runtime
         .waits
         .get(key)
-        .is_some_and(|waits| waits.values().any(|waiting| *waiting))
+        .is_some_and(|waits| waits.values().any(Option::is_some))
         || runtime
             .permission_waits
             .get(key)
@@ -334,11 +407,11 @@ fn clear_permission_scope(
     let removed = runtime
         .permission_waits
         .get_mut(key)
-        .is_some_and(|scopes| scopes.remove(scope));
+        .is_some_and(|scopes| scopes.remove(scope).is_some());
     if runtime
         .permission_waits
         .get(key)
-        .is_some_and(HashSet::is_empty)
+        .is_some_and(HashMap::is_empty)
     {
         runtime.permission_waits.remove(key);
     }
@@ -382,7 +455,7 @@ fn clear_codex_root_permission_scopes(
     key: &AgentLifecycleKey,
 ) {
     if let Some(scopes) = runtime.permission_waits.get_mut(key) {
-        scopes.retain(|scope| !scope.starts_with("root:"));
+        scopes.retain(|scope, _| !scope.starts_with("root:"));
         if scopes.is_empty() {
             runtime.permission_waits.remove(key);
         }
@@ -404,11 +477,11 @@ fn clear_session_wait_scope(
     let removed = runtime
         .session_waits
         .get_mut(key)
-        .is_some_and(|scopes| scopes.remove(scope));
+        .is_some_and(|scopes| scopes.remove(scope).is_some());
     if runtime
         .session_waits
         .get(key)
-        .is_some_and(HashSet::is_empty)
+        .is_some_and(HashMap::is_empty)
     {
         runtime.session_waits.remove(key);
     }
@@ -1026,6 +1099,7 @@ impl StateStore {
                 runtime.boundary_seq.insert(wait_key.clone(), seq);
             }
         }
+        let waits_before = pending_wait_summary(&runtime, &wait_key);
         let mut completed = false;
         let mut turn_finished = false;
         let turn_boundary_seq = seq;
@@ -1104,6 +1178,7 @@ impl StateStore {
                 (!lifecycle_has_waits(&runtime, &wait_key)).then_some((Running, None, status_text))
             }
             AgentLifecycleEvent::PermissionWaitStarted {
+                reason,
                 message,
                 status_text,
                 scope,
@@ -1129,17 +1204,21 @@ impl StateStore {
                             .or_default()
                             .insert(scope.to_string(), seq);
                     }
-                    runtime
-                        .permission_waits
-                        .entry(wait_key.clone())
-                        .or_default()
-                        .insert(scope);
+                    record_scope_wait(
+                        runtime
+                            .permission_waits
+                            .entry(wait_key.clone())
+                            .or_default(),
+                        scope,
+                        reason,
+                    );
                     Some((NeedsInput, message, status_text))
                 } else {
                     None
                 }
             }
             AgentLifecycleEvent::SessionWaitStarted {
+                reason,
                 message,
                 status_text,
                 scope,
@@ -1165,11 +1244,11 @@ impl StateStore {
                             .or_default()
                             .insert(scope.to_string(), seq);
                     }
-                    runtime
-                        .session_waits
-                        .entry(wait_key.clone())
-                        .or_default()
-                        .insert(scope);
+                    record_scope_wait(
+                        runtime.session_waits.entry(wait_key.clone()).or_default(),
+                        scope,
+                        reason,
+                    );
                     Some((NeedsInput, message, status_text))
                 } else {
                     None
@@ -1249,13 +1328,14 @@ impl StateStore {
                 }
             }
             AgentLifecycleEvent::WaitStarted {
+                reason,
                 item_id,
                 message,
                 status_text,
             } => {
                 let waits = runtime.waits.entry(wait_key.clone()).or_default();
                 if let std::collections::hash_map::Entry::Vacant(wait) = waits.entry(item_id) {
-                    wait.insert(true);
+                    wait.insert(Some(PendingAgentWait::new(reason)));
                     Some((NeedsInput, message, status_text))
                 } else {
                     None
@@ -1263,7 +1343,7 @@ impl StateStore {
             }
             AgentLifecycleEvent::WaitResolved { item_id } => {
                 let waits = runtime.waits.entry(wait_key.clone()).or_default();
-                let resolved_active = waits.insert(item_id, false) == Some(true);
+                let resolved_active = waits.insert(item_id, None).flatten().is_some();
                 if resolved_active && !lifecycle_has_waits(&runtime, &wait_key) {
                     Some((Running, None, "Working".into()))
                 } else {
@@ -1564,6 +1644,21 @@ impl StateStore {
             }
         }
 
+        let pending_waits = pending_wait_summary(&runtime, &wait_key);
+        // A partial resolution changes the visible reasons even while activity
+        // stays blocked. Duplicate deliveries leave both facts and UI untouched.
+        let decision = decision.or_else(|| {
+            (pending_waits != waits_before && !pending_waits.is_empty()).then(|| {
+                let presence = current.as_ref().map(|located| &located.presence);
+                (
+                    NeedsInput,
+                    presence.and_then(|p| p.message.clone()),
+                    presence
+                        .and_then(|p| p.custom_status.clone())
+                        .unwrap_or_else(|| "Waiting for input".into()),
+                )
+            })
+        });
         let Some((activity, message, custom_status)) = decision else {
             let reason = if lifecycle_has_waits(&runtime, &wait_key) {
                 "pending_waits"
@@ -1594,6 +1689,7 @@ impl StateStore {
             seq: report_seq,
             message,
             custom_status: Some(custom_status),
+            pending_waits: Some(pending_waits),
             session_id: Some(session_id.to_string()),
             session_name: None,
             messaging_socket: None,
@@ -1889,6 +1985,7 @@ impl StateStore {
             runtime.boundary_seq.insert(wait_key.clone(), seq);
         }
         let report = AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: None,
             activity: Some(Idle),
@@ -2294,7 +2391,7 @@ impl StateStore {
         }
         if status != AgentStatus::Blocked
             && (lifecycle.waits.iter().any(|((surface, _, _), waits)| {
-                *surface == surface_id && waits.values().any(|waiting| *waiting)
+                *surface == surface_id && waits.values().any(Option::is_some)
             }) || lifecycle
                 .permission_waits
                 .iter()
@@ -2431,7 +2528,7 @@ impl StateStore {
         if lifecycle.codex_turns.iter().any(|((surface, _), ledger)| {
             *surface == surface_id && !ledger.active_children.is_empty()
         }) || lifecycle.waits.iter().any(|((surface, _, _), waits)| {
-            *surface == surface_id && waits.values().any(|waiting| *waiting)
+            *surface == surface_id && waits.values().any(Option::is_some)
         }) || lifecycle
             .permission_waits
             .iter()
@@ -2773,9 +2870,10 @@ mod tests {
         let mut runtime = AgentLifecycleRuntime::default();
         let key = (SurfaceId::new(), "codex".into(), "target".into());
         let other = (SurfaceId::new(), "claude".into(), "other".into());
+        let wait = PendingAgentWait::new(AgentWaitReason::Question);
         runtime
             .waits
-            .insert(key.clone(), HashMap::from([("tool".into(), true)]));
+            .insert(key.clone(), HashMap::from([("tool".into(), Some(wait))]));
         runtime
             .permission_event_seq
             .insert(key.clone(), HashMap::from([("scope".into(), 7)]));
@@ -2795,17 +2893,20 @@ mod tests {
         clear_agent_lifecycle_runtime(&mut runtime, key.0, None, None, None);
         runtime
             .permission_waits
-            .insert(key.clone(), HashSet::from(["new".into()]));
+            .insert(key.clone(), HashMap::from([("new".into(), wait)]));
         runtime
             .session_waits
-            .insert(key.clone(), HashSet::from(["new".into()]));
+            .insert(key.clone(), HashMap::from([("new".into(), wait)]));
         runtime.boundary_seq.insert(key.clone(), 99);
         runtime
             .waits
-            .insert(other.clone(), HashMap::from([("unrelated".into(), false)]));
+            .insert(other.clone(), HashMap::from([("unrelated".into(), None)]));
         remember_ended_agent_lifecycle(&mut runtime, other.clone(), None, Some(12), false);
         before.restore(&mut runtime);
-        assert_eq!(runtime.waits[&key], HashMap::from([("tool".into(), true)]));
+        assert_eq!(
+            runtime.waits[&key],
+            HashMap::from([("tool".into(), Some(wait))])
+        );
         assert_eq!(runtime.permission_event_seq[&key]["scope"], 7);
         assert_eq!(runtime.session_wait_event_seq[&key]["quota"], 8);
         assert_eq!(runtime.last_seq[&key], 8);
@@ -2815,7 +2916,7 @@ mod tests {
         let turn = &runtime.codex_turns[&(key.0, key.2.clone())];
         assert_eq!(turn.current_parent_turn.as_deref(), Some("turn"));
         assert_eq!(turn.active_children["child"], "child-turn");
-        assert!(!runtime.waits[&other]["unrelated"]);
+        assert!(runtime.waits[&other]["unrelated"].is_none());
         assert_eq!(runtime.ended[&other].seq, Some(12));
         assert_eq!(runtime.ended_order.back(), Some(&other));
     }
@@ -2830,18 +2931,19 @@ mod tests {
             .active_surface_id(pane.first_leaf_id().unwrap())
             .unwrap();
         let key = (surface, "claude".into(), "session".into());
-        store
-            .agents
-            .lifecycle
-            .lock()
-            .await
-            .waits
-            .insert(key.clone(), HashMap::from([("unresolved".into(), true)]));
+        store.agents.lifecycle.lock().await.waits.insert(
+            key.clone(),
+            HashMap::from([(
+                "unresolved".into(),
+                Some(PendingAgentWait::new(AgentWaitReason::Unknown)),
+            )]),
+        );
         // Ready metadata with no activity/status cannot create a presence.
         let result = store
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "claude".into(),
                     status: None,
                     activity: None,
@@ -2859,7 +2961,7 @@ mod tests {
             .await;
         assert!(result.is_none());
         let runtime = store.agents.lifecycle.lock().await;
-        assert!(runtime.waits[&key]["unresolved"]);
+        assert!(runtime.waits[&key]["unresolved"].is_some());
         assert!(!runtime.last_seq.contains_key(&key));
     }
 
@@ -2879,7 +2981,14 @@ mod tests {
                 for index in 0..unrelated_sessions {
                     runtime.waits.insert(
                         (SurfaceId::new(), "claude".into(), format!("other-{index}")),
-                        (0..32).map(|item| (format!("tool-{item}"), true)).collect(),
+                        (0..32)
+                            .map(|item| {
+                                (
+                                    format!("tool-{item}"),
+                                    Some(PendingAgentWait::new(AgentWaitReason::Unknown)),
+                                )
+                            })
+                            .collect(),
                     );
                 }
             }

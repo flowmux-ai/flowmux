@@ -1142,6 +1142,7 @@ fn activity_now_row(
         &entry.agent,
         &entry.status_text,
         entry.status_evidence,
+        &entry.pending_waits,
     )));
     if entry.status == AgentStatus::Working {
         row.add_css_class("flowmux-agent-bar-working");
@@ -2815,6 +2816,7 @@ mod tests {
         let surface = SurfaceId::new();
         let current = [ActivityNowEntry {
             status_evidence: None,
+            pending_waits: Vec::new(),
             agent: "codex".into(),
             status: AgentStatus::Working,
             status_text: "Running tests".into(),
@@ -3108,6 +3110,7 @@ mod tests {
         let surface = SurfaceId::new();
         let mut current = [ActivityNowEntry {
             status_evidence: None,
+            pending_waits: Vec::new(),
             agent: "codex".into(),
             status: AgentStatus::Working,
             status_text: "Running tests".into(),

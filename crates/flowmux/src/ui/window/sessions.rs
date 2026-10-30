@@ -819,6 +819,7 @@ mod tests {
                 .report_agent_status(
                     surface,
                     flowmux_core::AgentStatusReport {
+                        pending_waits: None,
                         name: "codex".into(),
                         status: Some(status),
                         activity: None,

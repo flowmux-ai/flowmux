@@ -1683,6 +1683,7 @@ fn agent_presence_ignores_stale_seq() {
     presence.seq = Some(20);
     let applied = presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(AgentActivity::Idle),
@@ -1711,6 +1712,7 @@ fn repeated_session_start_does_not_regress_active_hook_lifecycle() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
             activity: None,
@@ -1743,6 +1745,7 @@ fn native_session_start_resets_completed_same_session_to_ready() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
             activity: None,
@@ -1774,6 +1777,7 @@ fn native_session_start_resets_blocked_same_session_to_ready() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Unknown),
             activity: None,
@@ -1803,6 +1807,7 @@ fn apply_report_screen_scan_keeps_proc_owned_identity() {
     presence.source = Some(AGENT_SOURCE_PROC.to_string());
     let applied = presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "cline".into(),
             status: Some(AgentStatus::Working),
             activity: Some(AgentActivity::Running),
@@ -1836,6 +1841,7 @@ fn working_to_idle_in_hidden_surface_becomes_done_until_seen() {
     presence.seq = Some(1);
     let applied = presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(AgentActivity::Idle),
@@ -1863,6 +1869,7 @@ fn hidden_blocked_attention_survives_acknowledgement_until_resolved() {
     let surface_id = surface.id;
     surface.agent = AgentPresence::from_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Blocked),
             activity: Some(AgentActivity::NeedsInput),
@@ -1947,6 +1954,7 @@ fn blocked_attention_is_independent_of_visibility_and_other_acknowledged_tabs() 
 fn initial_idle_agent_report_in_hidden_surface_stays_idle() {
     let presence = AgentPresence::from_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "cline".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(AgentActivity::Idle),
@@ -1978,6 +1986,7 @@ fn agent_presence_replaces_transient_message_metadata() {
 
     let applied = presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
             activity: Some(AgentActivity::Running),
@@ -2009,6 +2018,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
             activity: Some(AgentActivity::Running),
@@ -2027,6 +2037,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
 
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(AgentActivity::Idle),
@@ -2049,6 +2060,7 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
     presence.messaging_socket = Some("/tmp/claude-2.sock".into());
     assert!(presence.apply_report(
         AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(AgentActivity::Idle),
@@ -2083,6 +2095,7 @@ fn hook_report_identity_wins_over_stale_surface_title() {
         pane.report_surface_agent(
             surface_id,
             AgentStatusReport {
+                pending_waits: None,
                 name: "codex".into(),
                 status: Some(AgentStatus::Idle),
                 activity: Some(AgentActivity::Idle),
@@ -2918,6 +2931,7 @@ fn codex_screen_completion_survives_tool_progress_but_not_a_new_turn() {
             pane.report_surface_agent(
                 surface_id,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(status),
                     activity: None,
@@ -3030,6 +3044,13 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         presence.seen = seen;
         presence.status_evidence = Some(AgentStatusEvidence::new(AgentEvidenceSource::Hook));
         let original_evidence = presence.status_evidence;
+        let wait = AgentWaitSummary {
+            scope: AgentWaitScope::Tool,
+            reason: AgentWaitReason::Question,
+            count: 2,
+            since: chrono::Utc::now(),
+        };
+        presence.pending_waits = vec![wait];
         surface.agent = Some(presence);
         let mut pane = Pane::Leaf {
             id: PaneId::new(),
@@ -3067,6 +3088,8 @@ fn screen_working_restores_blocked_acknowledgement_state() {
         }
         let agent = pane.agent_presence_for_surface(surface_id).unwrap();
         assert_eq!(agent.status, AgentStatus::Blocked);
+        assert_eq!(agent.pending_waits, vec![wait]);
+        assert_eq!(agent.status_text(), Some("Waiting for answer"));
         assert_eq!(agent.seen, expected_seen);
         if final_status == Some(AgentStatus::Blocked) {
             assert_eq!(
@@ -4679,9 +4702,11 @@ fn status_evidence_roundtrips_old_and_future_payloads() {
         AgentEvidenceSource::Unknown
     );
     assert!(
-        agent_status_tooltip("agent", "Idle", future.status_evidence)
+        agent_status_tooltip("agent", "Idle", future.status_evidence, &[])
             .contains("Status evidence unavailable")
     );
     let process = AgentStatusEvidence::new(AgentEvidenceSource::Process);
-    assert!(agent_status_tooltip("agent", "Idle", Some(process)).contains("activity unconfirmed"));
+    assert!(
+        agent_status_tooltip("agent", "Idle", Some(process), &[]).contains("activity unconfirmed")
+    );
 }

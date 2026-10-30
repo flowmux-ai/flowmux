@@ -333,3 +333,36 @@ fn protocol_envelopes_survive_round_trip() {
         start.elapsed()
     );
 }
+
+#[test]
+fn wait_reason_defaults_preserve_legacy_and_future_hook_payloads() {
+    use flowmux_core::AgentWaitReason;
+    use flowmux_ipc::protocol::AgentLifecycleEvent;
+    for (event, expected) in [
+        ("permission_wait_started", AgentWaitReason::Approval),
+        ("session_wait_started", AgentWaitReason::Unknown),
+        ("wait_started", AgentWaitReason::Unknown),
+    ] {
+        for future in [false, true] {
+            let mut value = serde_json::json!({"event":event, "item_id":"tool", "status_text":"Waiting for input"});
+            if future {
+                value["reason"] = "future_reason".into();
+            }
+            let event: AgentLifecycleEvent = serde_json::from_value(value).unwrap();
+            let reason = match event {
+                AgentLifecycleEvent::PermissionWaitStarted { reason, .. }
+                | AgentLifecycleEvent::SessionWaitStarted { reason, .. }
+                | AgentLifecycleEvent::WaitStarted { reason, .. } => reason,
+                _ => panic!("expected wait event"),
+            };
+            assert_eq!(
+                reason,
+                if future {
+                    AgentWaitReason::Unknown
+                } else {
+                    expected
+                }
+            );
+        }
+    }
+}

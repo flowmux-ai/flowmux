@@ -2528,6 +2528,7 @@ mod tests {
             .await
             .is_none());
         let report = AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Working),
             activity: None,
@@ -2693,6 +2694,7 @@ mod tests {
         let surface = first_pane_active_surface(&ws);
 
         let report = |status, activity, seq| AgentStatusReport {
+            pending_waits: None,
             name: agent.into(),
             status: Some(status),
             activity,
@@ -2883,6 +2885,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Working),
                     activity: Some(flowmux_core::AgentActivity::Running),
@@ -2920,6 +2923,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Blocked),
                     activity: Some(flowmux_core::AgentActivity::NeedsInput),
@@ -2969,6 +2973,7 @@ mod tests {
         let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
         let pid = std::process::id();
         let start = |seq| AgentStatusReport {
+            pending_waits: None,
             name: "claude".into(),
             status: Some(AgentStatus::Idle),
             activity: Some(flowmux_core::AgentActivity::Idle),
@@ -3041,6 +3046,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Idle),
                     activity: Some(flowmux_core::AgentActivity::Idle),
@@ -3064,6 +3070,7 @@ mod tests {
                 Some(2),
                 "outer-session",
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: Some("outer approval".into()),
                     status_text: "Waiting for permission".into(),
                     scope: None,
@@ -3095,6 +3102,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
                     activity: None,
@@ -3185,6 +3193,7 @@ mod tests {
         let outer_pid = std::process::id();
         let inner_pid = u32::MAX;
         let start = |session: &str, pid, seq| AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Unknown),
             activity: None,
@@ -3281,6 +3290,219 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_wait_reasons_follow_partial_resolution_and_ignore_replays() {
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store
+            .create_workspace(Some("waits".into()), "/tmp/waits".into())
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        let events = [
+            serde_json::json!({"event":"wait_started", "item_id":"question", "reason":"question", "status_text":"Waiting for input"}),
+            serde_json::json!({"event":"permission_wait_started", "reason":"approval", "status_text":"Waiting for input"}),
+            serde_json::json!({"event":"session_wait_started", "scope":"quota", "reason":"quota", "status_text":"Limit reached"}),
+        ];
+        for (index, event) in events.into_iter().enumerate() {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(index as u64 + 1),
+                    "session",
+                    serde_json::from_value(event).unwrap(),
+                    false,
+                )
+                .await;
+        }
+        let before = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        let before_json = serde_json::to_value(&before).unwrap();
+        let waits = before_json["pending_waits"]
+            .as_array()
+            .expect("live waits must be inspectable");
+        assert_eq!(waits.len(), 3);
+        for (scope, reason) in [
+            ("tool", "question"),
+            ("permission", "approval"),
+            ("session", "quota"),
+        ] {
+            let wait = waits.iter().find(|wait| wait["scope"] == scope).unwrap();
+            assert_eq!(wait["reason"], reason);
+            assert_eq!(wait["count"], 1);
+            assert!(wait["since"].is_string());
+        }
+        for (seq, event, remaining) in [
+            (
+                4,
+                serde_json::json!({"event":"tool_batch_finished", "status_text":"Working"}),
+                2,
+            ),
+            (
+                5,
+                serde_json::json!({"event":"wait_resolved", "item_id":"question"}),
+                1,
+            ),
+        ] {
+            let result = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(seq),
+                    "session",
+                    serde_json::from_value(event).unwrap(),
+                    false,
+                )
+                .await;
+            assert_eq!(
+                result.workspace,
+                Some(workspace),
+                "remaining reasons must refresh the UI"
+            );
+            assert!(!result.completed);
+            let presence = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(presence.status, AgentStatus::Blocked);
+            assert_eq!(presence.status_evidence, before.status_evidence);
+            assert_eq!(
+                serde_json::to_value(&presence).unwrap()["pending_waits"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                remaining
+            );
+        }
+        let remaining = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(remaining.status_text(), Some("Usage limit reached"));
+        let duplicate = serde_json::json!({"event":"wait_started", "item_id":"question", "reason":"question", "status_text":"Waiting for input"});
+        let result = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(6),
+                "session",
+                serde_json::from_value(duplicate).unwrap(),
+                false,
+            )
+            .await;
+        assert_eq!(result, AgentLifecycleResult::default());
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence,
+            remaining
+        );
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(7),
+                "session",
+                AgentLifecycleEvent::SessionWaitResolved {
+                    scope: Some("quota".into()),
+                    status_text: "Working".into(),
+                    resume: true,
+                },
+                false,
+            )
+            .await;
+        let resumed = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(resumed.status, AgentStatus::Working);
+        assert!(serde_json::to_value(&resumed)
+            .unwrap()
+            .get("pending_waits")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn duplicate_wait_notifications_preserve_reason_age_and_read_state() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let ws_id = store
+            .create_workspace(None, std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let payloads = [
+            serde_json::json!({"event":"wait_started", "item_id":"one", "reason":"question", "status_text":"Waiting for input"}),
+            serde_json::json!({"event":"wait_started", "item_id":"two", "reason":"question", "status_text":"Waiting for input"}),
+            serde_json::json!({"event":"permission_wait_started", "reason":"question", "status_text":"Waiting for approval"}),
+        ];
+        for (index, event) in payloads.into_iter().enumerate() {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(index as u64 + 1),
+                    "session",
+                    serde_json::from_value(event).unwrap(),
+                    false,
+                )
+                .await;
+        }
+        let before = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(before.status_text(), Some("Waiting for answer"));
+        assert_eq!(before.pending_waits.len(), 2);
+        assert_eq!(before.pending_waits[0].count, 2);
+        assert_eq!(before.pending_waits[1].count, 1);
+        // Generic permission notifications cannot turn a known question into
+        // an approval or restart the age of the pending scope.
+        for seq in [4, 5] {
+            let event = serde_json::json!({"event":"permission_wait_started", "reason":"unknown", "status_text":"Waiting for input"});
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(seq),
+                    "session",
+                    serde_json::from_value(event).unwrap(),
+                    true,
+                )
+                .await;
+        }
+        let after = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(after.pending_waits, before.pending_waits);
+        assert_eq!(after.status_text(), Some("Waiting for answer"));
+        assert_eq!(after.status_evidence, before.status_evidence);
+        assert!(after.seen);
+        assert_eq!(after.status, AgentStatus::Blocked);
+        let tooltip = flowmux_core::agent_status_tooltip(
+            "agent",
+            after.status_text().unwrap(),
+            after.status_evidence,
+            &after.pending_waits,
+        );
+        assert!(tooltip.contains("Tool requests: 2"));
+        assert!(tooltip.contains("Permission scopes: 1"));
+    }
+
+    #[tokio::test]
     async fn correlated_claude_waits_resolve_only_the_matching_tool() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
@@ -3297,6 +3519,7 @@ mod tests {
                     Some(seq),
                     "session-1",
                     AgentLifecycleEvent::WaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Unknown,
                         item_id: item_id.into(),
                         message: None,
                         status_text: "Waiting for approval".into(),
@@ -3329,7 +3552,8 @@ mod tests {
                 false,
             )
             .await;
-        assert_eq!(first, AgentLifecycleResult::default());
+        assert_eq!(first.workspace, Some(ws_id));
+        assert!(!first.completed);
         assert_eq!(
             store
                 .located_agent_presence(surface)
@@ -3403,6 +3627,7 @@ mod tests {
                 let duplicate = if start { started || resolved } else { resolved };
                 let event = if start {
                     AgentLifecycleEvent::WaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Unknown,
                         item_id: "tool-a".into(),
                         message: None,
                         status_text: "Waiting for input".into(),
@@ -3445,6 +3670,7 @@ mod tests {
                 (
                     101,
                     AgentLifecycleEvent::WaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Unknown,
                         item_id: "tool-a".into(),
                         message: None,
                         status_text: "Waiting for input".into(),
@@ -3507,6 +3733,7 @@ mod tests {
                 Some(20),
                 "session-1",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,
                     status_text: "Waiting for quota".into(),
                     scope: Some("quota".into()),
@@ -3958,6 +4185,7 @@ mod tests {
             (
                 101,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Unknown,
                     message: Some("child approval".into()),
                     status_text: "Waiting for child permission".into(),
                     scope: Some("child:child-1:child-turn-1".into()),
@@ -4280,6 +4508,7 @@ mod tests {
                     Some(20),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
                         status_text: "Delayed quota failure".into(),
                         scope: Some("quota".into()),
@@ -4303,6 +4532,7 @@ mod tests {
                     Some(seq),
                     session_id,
                     AgentLifecycleEvent::SessionWaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Unknown,
                         message: None,
                         status_text: format!("Waiting for {scope}"),
                         scope: Some(scope.into()),
@@ -4327,14 +4557,17 @@ mod tests {
                     true,
                 )
                 .await,
-            AgentLifecycleResult::default()
+            AgentLifecycleResult {
+                workspace: Some(ws_id),
+                ..AgentLifecycleResult::default()
+            }
         );
         {
             let runtime = store.agents.lifecycle.lock().await;
             let key = (surface, "claude".to_string(), session_id.to_string());
             let scopes = runtime.session_waits.get(&key).unwrap();
             assert_eq!(scopes.len(), 1);
-            assert!(scopes.contains("ask_user"));
+            assert!(scopes.contains_key("ask_user"));
         }
         assert_eq!(
             store.workspace_agent_status(ws_id).await,
@@ -4383,6 +4616,7 @@ mod tests {
                 .report_agent_status_with_visibility(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "claude".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -4489,6 +4723,7 @@ mod tests {
             (
                 2,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: Some("Approve tool?".into()),
                     status_text: "Waiting for permission".into(),
                     scope: None,
@@ -4497,6 +4732,7 @@ mod tests {
             (
                 3,
                 AgentLifecycleEvent::SessionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Unknown,
                     message: Some("Answer question".into()),
                     status_text: "Waiting for input".into(),
                     scope: Some("ask_user".into()),
@@ -4551,7 +4787,10 @@ mod tests {
                     true,
                 )
                 .await,
-            AgentLifecycleResult::default()
+            AgentLifecycleResult {
+                workspace: Some(ws_id),
+                ..AgentLifecycleResult::default()
+            }
         );
         assert_eq!(
             store.workspace_agent_status(ws_id).await,
@@ -4564,7 +4803,7 @@ mod tests {
             assert!(runtime
                 .session_waits
                 .get(&key)
-                .is_some_and(|scopes| scopes.contains("ask_user")));
+                .is_some_and(|scopes| scopes.contains_key("ask_user")));
         }
 
         let resolved = store
@@ -4870,6 +5109,7 @@ mod tests {
             (
                 3,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: Some("Approve root tool?".into()),
                     status_text: "Waiting for permission".into(),
                     scope: Some("root:root-1".into()),
@@ -4878,6 +5118,7 @@ mod tests {
             (
                 4,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: Some("Approve child tool?".into()),
                     status_text: "Waiting for permission".into(),
                     scope: Some("child:child-1:child-turn-1".into()),
@@ -4914,14 +5155,17 @@ mod tests {
                     true,
                 )
                 .await,
-            AgentLifecycleResult::default()
+            AgentLifecycleResult {
+                workspace: Some(ws_id),
+                ..AgentLifecycleResult::default()
+            }
         );
         {
             let runtime = store.agents.lifecycle.lock().await;
             let key = (surface, "codex".to_string(), session_id.to_string());
             let scopes = runtime.permission_waits.get(&key).unwrap();
             assert_eq!(scopes.len(), 1);
-            assert!(scopes.contains("child:child-1:child-turn-1"));
+            assert!(scopes.contains_key("child:child-1:child-turn-1"));
         }
         assert_eq!(
             store.workspace_agent_status(ws_id).await,
@@ -4994,6 +5238,7 @@ mod tests {
             (
                 3,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: None,
                     status_text: "Waiting for child permission".into(),
                     scope: Some("child:child-1:child-turn-1".into()),
@@ -5002,6 +5247,7 @@ mod tests {
             (
                 4,
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: None,
                     status_text: "Waiting for root permission".into(),
                     scope: Some("root:root-1".into()),
@@ -5044,6 +5290,7 @@ mod tests {
                     Some(5),
                     session_id,
                     AgentLifecycleEvent::PermissionWaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Approval,
                         message: None,
                         status_text: "Delayed child permission".into(),
                         scope: Some("child:child-1:child-turn-1".into()),
@@ -5080,6 +5327,7 @@ mod tests {
                     Some(7),
                     session_id,
                     AgentLifecycleEvent::PermissionWaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Approval,
                         message: None,
                         status_text: "Delayed root permission".into(),
                         scope: Some("root:root-1".into()),
@@ -5339,6 +5587,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Idle),
                     activity: Some(flowmux_core::AgentActivity::Idle),
@@ -5656,6 +5905,7 @@ mod tests {
 
         // A tab that reported the session matches whatever its title says.
         let report = AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Working),
             activity: Some(flowmux_core::AgentActivity::Running),
@@ -5699,6 +5949,7 @@ mod tests {
             .reconcile_process_agents(&[(other, Some("codex"))])
             .await;
         let report = AgentStatusReport {
+            pending_waits: None,
             name: "codex".into(),
             status: Some(AgentStatus::Working),
             activity: Some(flowmux_core::AgentActivity::Running),
@@ -5767,6 +6018,7 @@ mod tests {
                     .report_agent_status(
                         surface,
                         AgentStatusReport {
+                            pending_waits: None,
                             name: "codex".into(),
                             status: Some(AgentStatus::Idle),
                             activity: None,
@@ -5850,6 +6102,7 @@ mod tests {
                 Some(7),
                 "codex-session",
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: Some("approval required".into()),
                     status_text: "Waiting for permission".into(),
                     scope: Some("root:root-turn".into()),
@@ -5920,6 +6173,7 @@ mod tests {
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
                     activity: None,
@@ -6130,6 +6384,7 @@ mod tests {
             (
                 "codex",
                 AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Approval,
                     message: None,
                     status_text: "Waiting for approval".into(),
                     scope: Some("root:turn".into()),
@@ -6139,6 +6394,7 @@ mod tests {
             (
                 "claude",
                 AgentLifecycleEvent::WaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Unknown,
                     item_id: "question".into(),
                     message: None,
                     status_text: "Waiting for input".into(),
@@ -6148,6 +6404,7 @@ mod tests {
             (
                 "claude",
                 AgentLifecycleEvent::SessionWaitStarted {
+                    reason: flowmux_core::AgentWaitReason::Unknown,
                     message: None,
                     status_text: "API error".into(),
                     scope: None,
@@ -6350,6 +6607,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "opencode".into(),
                     status: Some(AgentStatus::Working),
                     activity: None,
@@ -6709,6 +6967,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -6760,6 +7019,7 @@ Do you want to continue?";
         let session_id = "claude-session";
         let report =
             |activity: flowmux_core::AgentActivity, seq, custom_status: &str| AgentStatusReport {
+                pending_waits: None,
                 name: "claude".into(),
                 status: Some(activity.status()),
                 activity: Some(activity),
@@ -6890,6 +7150,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "cline".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -6941,6 +7202,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -6962,6 +7224,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -6999,6 +7262,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "opencode".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -7078,6 +7342,7 @@ Do you want to continue?";
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Working),
                     activity: Some(flowmux_core::AgentActivity::Running),
@@ -7147,6 +7412,7 @@ Do you want to continue?";
             .report_agent_status_with_visibility(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "codex".into(),
                     status: Some(AgentStatus::Unknown),
                     activity: None,
@@ -7242,6 +7508,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Working),
                         activity: Some(flowmux_core::AgentActivity::Running),
@@ -7281,6 +7548,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),
@@ -7323,6 +7591,7 @@ Do you want to continue?";
             .report_agent_status(
                 surface,
                 AgentStatusReport {
+                    pending_waits: None,
                     name: "claude".into(),
                     status: Some(AgentStatus::Working),
                     activity: None,
@@ -7382,6 +7651,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "codex".into(),
                         status: Some(AgentStatus::Working),
                         activity: None,
@@ -7432,6 +7702,7 @@ Do you want to continue?";
                 .report_agent_status(
                     surface,
                     AgentStatusReport {
+                        pending_waits: None,
                         name: "claude".into(),
                         status: Some(AgentStatus::Idle),
                         activity: Some(flowmux_core::AgentActivity::Idle),

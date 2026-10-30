@@ -1118,6 +1118,7 @@ mod tests {
             items: (0..8)
                 .map(|_| AgentBarItem {
                     status_evidence: None,
+                    pending_waits: Vec::new(),
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId::new(),
@@ -1208,6 +1209,7 @@ mod tests {
         let (bridge, _receiver) = Bridge::new();
         let item = AgentBarItem {
             status_evidence: None,
+            pending_waits: Vec::new(),
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),
@@ -1246,6 +1248,7 @@ mod tests {
         let rooms = [(workspace, "Large team".into())];
         let item = |id| AgentBarItem {
             status_evidence: None,
+            pending_waits: Vec::new(),
             workspace,
             pane: PaneId::new(),
             surface: SurfaceId(uuid::Uuid::from_u128(id)),
@@ -1325,6 +1328,7 @@ mod tests {
             items: (1..=3)
                 .map(|id| AgentBarItem {
                     status_evidence: None,
+                    pending_waits: Vec::new(),
                     workspace,
                     pane: PaneId::new(),
                     surface: SurfaceId(uuid::Uuid::from_u128(id)),

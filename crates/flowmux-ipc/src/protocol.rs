@@ -114,6 +114,10 @@ pub struct TreeAgent {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_evidence: Option<flowmux_core::AgentStatusEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,6 +177,8 @@ fn collect_leaf_panes(pane: &Pane, out: &mut Vec<TreePane>) {
                             activity: agent.activity,
                             source: agent.source.clone(),
                             status_evidence: agent.status_evidence,
+                            pending_waits: agent.pending_waits.clone(),
+                            status_text: agent.status_text().map(str::to_owned),
                             seq: agent.seq,
                             message: agent.message.clone(),
                             custom_status: agent.custom_status.clone(),
@@ -262,6 +268,8 @@ pub enum AgentLifecycleEvent {
     /// Claude permission prompts have no tool-use id. Track one idempotent
     /// marker for the current parallel tool batch until `PostToolBatch`.
     PermissionWaitStarted {
+        #[serde(default = "default_permission_wait_reason")]
+        reason: flowmux_core::AgentWaitReason,
         #[serde(default)]
         message: Option<String>,
         status_text: String,
@@ -274,6 +282,8 @@ pub enum AgentLifecycleEvent {
     /// authoritative until the next root turn, turn completion, or session
     /// teardown so unrelated progress cannot hide a real user wait.
     SessionWaitStarted {
+        #[serde(default)]
+        reason: flowmux_core::AgentWaitReason,
         #[serde(default)]
         message: Option<String>,
         status_text: String,
@@ -296,6 +306,8 @@ pub enum AgentLifecycleEvent {
         status_text: String,
     },
     WaitStarted {
+        #[serde(default)]
+        reason: flowmux_core::AgentWaitReason,
         item_id: String,
         #[serde(default)]
         message: Option<String>,
@@ -343,6 +355,10 @@ pub enum AgentLifecycleEvent {
         turn_id: String,
         status_text: String,
     },
+}
+
+fn default_permission_wait_reason() -> flowmux_core::AgentWaitReason {
+    flowmux_core::AgentWaitReason::Approval
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

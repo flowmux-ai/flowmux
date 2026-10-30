@@ -111,6 +111,7 @@ impl AgentBar {
             &item.agent_name,
             &item.status_text,
             item.status_evidence,
+            &item.pending_waits,
         )));
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -401,6 +402,7 @@ mod tests {
     fn working_item() -> AgentBarItem {
         AgentBarItem {
             status_evidence: None,
+            pending_waits: Vec::new(),
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface: SurfaceId::new(),

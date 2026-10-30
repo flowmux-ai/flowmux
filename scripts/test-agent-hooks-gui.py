@@ -147,15 +147,30 @@ int main(int argc, char **argv) {
                     assert other.get("session_id") == other_session_id, other
                 evidence.write(json.dumps(dict(agent=name, event=event, payload=payload, observed=value)) + "\n")
 
+            def expect_waits(expected, status_text=None):
+                deadline = time.monotonic() + 5
+                while True:
+                    value = observed()
+                    waits = [(w["scope"], w["reason"], w["count"])
+                             for w in value.get("pending_waits", [])]
+                    if waits == expected and (status_text is None or value.get("status_text") == status_text):
+                        return value.get("pending_waits", [])
+                    assert time.monotonic() < deadline, (expected, status_text, value)
+                    time.sleep(.05)
+
             try:
                 if name == "claude":
                     hook("session-start", "idle")
                     hook("prompt-submit", "running")
                     question = dict(tool_name="AskUserQuestion", tool_use_id="a")
                     hook("pre-tool-use", "needs_input", **question)
+                    initial_wait = expect_waits([("tool", "question", 1)], "Waiting for answer")
                     hook("pre-tool-use", "needs_input", **question)
+                    assert expect_waits([("tool", "question", 1)]) == initial_wait
                     hook("pre-tool-use", "needs_input", tool_name="AskUserQuestion", tool_use_id="b")
+                    expect_waits([("tool", "question", 2)], "Waiting for answer")
                     hook("post-tool-use", "needs_input", **question)
+                    expect_waits([("tool", "question", 1)], "Waiting for answer")
                     hook("post-tool-use", "needs_input", **question)
                     hook("pre-tool-use", "needs_input", **question)
                     hook("post-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="b")
@@ -163,15 +178,26 @@ int main(int argc, char **argv) {
                     hook("post-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="early")
                     hook("pre-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="early")
                     hook("permission-request", "needs_input", tool_name="Bash")
+                    expect_waits([("permission", "approval", 1)], "Waiting for approval")
                     hook("post-tool-use", "needs_input", tool_name="Bash", tool_use_id="ordinary")
                     hook("post-tool-batch", "running")
                     hook("stop-failure", "needs_input", error="rate_limit")
+                    expect_waits([("session", "quota", 1)], "Usage limit reached")
                     hook("post-tool-batch", "needs_input")
                     hook("notification", "running", notification_type="quota_auto_resume_fired")
+                    expect_waits([])
+                    hook("stop-failure", "needs_input", error="api_error")
+                    expect_waits([("session", "api_failure", 1)], "API request failed")
                     hook("stop", "idle", last_assistant_message="Completed fixture")
+                    expect_waits([])
                     hook("prompt-submit", "running")
                     hook("pre-tool-use", "needs_input", **question)
                     hook("post-tool-use", "running", **question)
+                    hook("pre-tool-use", "needs_input", tool_name="ExitPlanMode", tool_use_id="plan")
+                    expect_waits([("tool", "approval", 1)], "Waiting for approval")
+                    hook("post-tool-use", "running", tool_name="ExitPlanMode", tool_use_id="plan")
+                    expect_waits([])
+                    print("PASS: typed wait reasons, partial resolution, and scope counts", flush=True)
                     hook("stop", "idle")
                 else:
                     hook("session-start", "idle")
