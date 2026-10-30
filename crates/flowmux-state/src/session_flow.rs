@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
 
-const SCHEMA: i64 = 2;
+mod process;
+pub use process::codex_process_session;
+
+const SCHEMA: i64 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionRecord {
@@ -110,6 +113,29 @@ impl SavedView {
     }
 }
 
+/// A live binding belongs to its process and surface, not to the lineage.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveSession {
+    pub owner: Uuid,
+    pub pid: u32,
+    pub started: Option<u64>,
+    pub workspace: Uuid,
+    pub pane: Uuid,
+    pub surface: Uuid,
+    pub socket: PathBuf,
+}
+
+impl LiveSession {
+    pub fn is_alive(&self) -> bool {
+        flowmux_procmon::pid_alive(self.pid)
+            && match (self.started, flowmux_procmon::process_start_time(self.pid)) {
+                (Some(expected), Some(actual)) => expected == actual,
+                // An unreadable birth marker is uncertain, not permission to duplicate a writer.
+                _ => true,
+            }
+    }
+}
+
 pub struct FlowStore {
     connection: Connection,
 }
@@ -169,8 +195,70 @@ impl FlowStore {
         if version < 2 {
             transaction.execute_batch("CREATE TABLE views (workspace TEXT PRIMARY KEY, state TEXT NOT NULL); PRAGMA user_version = 2;").map_err(io::Error::other)?;
         }
+        if version < 3 {
+            transaction.execute_batch("CREATE TABLE live_sessions (key TEXT NOT NULL, owner TEXT NOT NULL, surface TEXT NOT NULL, binding TEXT NOT NULL, PRIMARY KEY(key,owner,surface)); PRAGMA user_version = 3;").map_err(io::Error::other)?;
+        }
         transaction.commit().map_err(io::Error::other)?;
         Ok(Self { connection })
+    }
+
+    pub fn sync_live_sessions(
+        &mut self,
+        owner: Uuid,
+        sessions: &[(SessionKey, LiveSession)],
+    ) -> io::Result<()> {
+        let baseline = self.live_sessions()?;
+        if self.sync_live_sessions_if_unchanged(owner, sessions, &baseline)? {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "Session ownership changed during refresh",
+            ))
+        }
+    }
+
+    /// A slow metadata refresh must not erase a binding published by a newer launch.
+    pub fn sync_live_sessions_if_unchanged(
+        &mut self,
+        owner: Uuid,
+        sessions: &[(SessionKey, LiveSession)],
+        baseline: &BTreeMap<SessionKey, Vec<LiveSession>>,
+    ) -> io::Result<bool> {
+        if sessions.iter().any(|(_, live)| live.owner != owner) {
+            return Err(invalid("Live session owner mismatch"));
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(io::Error::other)?;
+        let owned = |all: &BTreeMap<SessionKey, Vec<LiveSession>>| {
+            all.iter()
+                .flat_map(|(key, bindings)| {
+                    bindings
+                        .iter()
+                        .filter(|live| live.owner == owner)
+                        .map(move |live| ((key.clone(), live.surface), live.clone()))
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        if owned(&read_live_sessions(&tx)?) != owned(baseline) {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM live_sessions WHERE owner=?1",
+            [owner.to_string()],
+        )
+        .map_err(io::Error::other)?;
+        for (key, live) in sessions {
+            insert_live_session(&tx, key, live)?;
+        }
+        tx.commit().map_err(io::Error::other)?;
+        Ok(true)
+    }
+
+    pub fn live_sessions(&self) -> io::Result<BTreeMap<SessionKey, Vec<LiveSession>>> {
+        read_live_sessions(&self.connection)
     }
 
     pub fn views(&self) -> io::Result<BTreeMap<Uuid, SavedView>> {
@@ -272,6 +360,14 @@ impl FlowStore {
             }
             return Ok(false);
         }
+        if operation.kind == OperationKind::Resume
+            && read_live_sessions(&tx)?.contains_key(&operation.source)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "This session is already open in a Flowmux window",
+            ));
+        }
         tx.execute(
             "INSERT INTO operations(request,source,intent,state) VALUES(?1,?2,?3,'pending')",
             params![
@@ -300,6 +396,29 @@ impl FlowStore {
     /// The caller must observe this exact native identity on the reserved surface.
     /// Publishing the fork and finishing the operation happen in one commit.
     pub fn complete(&mut self, operation: &Operation, observed: &SessionKey) -> io::Result<()> {
+        self.complete_inner(operation, observed, None)
+    }
+
+    pub fn complete_running(
+        &mut self,
+        operation: &Operation,
+        observed: &SessionKey,
+        live: &LiveSession,
+    ) -> io::Result<()> {
+        if live.owner != operation.owner || live.surface != operation.target_surface {
+            return Err(invalid(
+                "Completed session binding does not match its reservation",
+            ));
+        }
+        self.complete_inner(operation, observed, Some(live))
+    }
+
+    fn complete_inner(
+        &mut self,
+        operation: &Operation,
+        observed: &SessionKey,
+        live: Option<&LiveSession>,
+    ) -> io::Result<()> {
         match operation.kind {
             OperationKind::Resume if observed != &operation.source => {
                 return Err(invalid("Resumed session identity does not match"))
@@ -336,12 +455,52 @@ impl FlowStore {
                 .map_err(|e| invalid(format!("Invalid fork: {e:?}")))?;
             insert_edge(&tx, &operation.source, observed)?;
         }
+        if let Some(live) = live {
+            insert_live_session(&tx, observed, live)?;
+        }
         tx.execute(
             "UPDATE operations SET state='complete',result=?2 WHERE request=?1",
             params![operation.request.to_string(), encode(observed)?],
         )
         .map_err(io::Error::other)?;
         tx.commit().map_err(io::Error::other)
+    }
+
+    pub fn reconcile_saved(
+        &mut self,
+        saved: &crate::agent_sessions::AgentSessionStore,
+    ) -> io::Result<usize> {
+        let mut completed = 0;
+        for operation in self.pending()? {
+            let Some(id) = saved.lookup(
+                &operation.source.provider,
+                flowmux_core::SurfaceId(operation.target_surface),
+            ) else {
+                continue;
+            };
+            let Some(agent) = SessionAgent::from_name(&operation.source.provider) else {
+                continue;
+            };
+            let sessions = crate::session_history::list_sessions(agent, &operation.source.home)?;
+            let Some(session) = sessions.iter().find(|session| session.id == id) else {
+                continue;
+            };
+            let observed = SessionKey {
+                id,
+                ..operation.source.clone()
+            };
+            let verified = match operation.kind {
+                OperationKind::Resume => observed == operation.source,
+                OperationKind::Fork => {
+                    session.fork_parent()?.as_deref() == Some(&operation.source.id)
+                }
+            };
+            if verified {
+                self.complete(&operation, &observed)?;
+                completed += 1;
+            }
+        }
+        Ok(completed)
     }
 
     /// Release a failed operation only after its process/target has been reconciled.
@@ -355,6 +514,29 @@ impl FlowStore {
         }
         Ok(())
     }
+}
+
+fn insert_live_session(db: &Connection, key: &SessionKey, live: &LiveSession) -> io::Result<()> {
+    db.execute("INSERT INTO live_sessions(key,owner,surface,binding) VALUES(?1,?2,?3,?4) ON CONFLICT(key,owner,surface) DO UPDATE SET binding=excluded.binding", params![encode(key)?, live.owner.to_string(), live.surface.to_string(), encode(live)?]).map_err(io::Error::other)?;
+    Ok(())
+}
+
+fn read_live_sessions(db: &Connection) -> io::Result<BTreeMap<SessionKey, Vec<LiveSession>>> {
+    let mut query = db
+        .prepare("SELECT key,binding FROM live_sessions")
+        .map_err(io::Error::other)?;
+    let rows = query
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(io::Error::other)?;
+    let mut result: BTreeMap<SessionKey, Vec<LiveSession>> = BTreeMap::new();
+    for row in rows {
+        let (key, binding) = row.map_err(io::Error::other)?;
+        let live: LiveSession = decode(&binding)?;
+        if live.is_alive() {
+            result.entry(decode(&key)?).or_default().push(live);
+        }
+    }
+    Ok(result)
 }
 
 fn insert_edge(db: &Connection, parent: &SessionKey, child: &SessionKey) -> io::Result<()> {
@@ -754,7 +936,7 @@ mod tests {
     fn v1_migration_preserves_relations_and_unknown_view_content_is_ignored() {
         let (dir, db) = store();
         db.connection
-            .execute_batch("DROP TABLE views; PRAGMA user_version = 1;")
+            .execute_batch("DROP TABLE views; DROP TABLE live_sessions; PRAGMA user_version = 1;")
             .unwrap();
         drop(db);
         let db = FlowStore::open(&dir.path().join("flow.sqlite")).unwrap();
@@ -766,5 +948,105 @@ mod tests {
             .unwrap();
         assert!(db.views().unwrap().is_empty());
         assert!(db.snapshot().unwrap().lineage.is_empty());
+    }
+    fn live(owner: Uuid, surface: Uuid) -> LiveSession {
+        let pid = std::process::id();
+        LiveSession {
+            owner,
+            surface,
+            pid,
+            started: flowmux_procmon::process_start_time(pid),
+            workspace: Uuid::new_v4(),
+            pane: Uuid::new_v4(),
+            socket: "/tmp/isolated.sock".into(),
+        }
+    }
+
+    #[test]
+    fn active_writer_blocks_other_windows_and_release_is_scoped_to_the_owner() {
+        let (dir, mut a) = store();
+        let mut b = FlowStore::open(&dir.path().join("flow.sqlite")).unwrap();
+        let owner = Uuid::new_v4();
+        let binding = live(owner, Uuid::new_v4());
+        a.sync_live_sessions(owner, &[(key("parent"), binding.clone())])
+            .unwrap();
+        assert_eq!(
+            b.begin(&operation(OperationKind::Resume))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        b.sync_live_sessions(Uuid::new_v4(), &[]).unwrap();
+        assert_eq!(a.live_sessions().unwrap()[&key("parent")], [binding]);
+        assert!(a.begin(&operation(OperationKind::Fork)).unwrap());
+        a.sync_live_sessions(owner, &[]).unwrap();
+        assert!(b.live_sessions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn slow_refresh_cannot_erase_a_newly_completed_writer() {
+        let (_dir, mut db) = store();
+        let baseline = db.live_sessions().unwrap();
+        let op = operation(OperationKind::Fork);
+        db.begin(&op).unwrap();
+        db.complete_running(&op, &key("child"), &live(op.owner, op.target_surface))
+            .unwrap();
+        assert!(!db
+            .sync_live_sessions_if_unchanged(op.owner, &[], &baseline)
+            .unwrap());
+        assert!(db.live_sessions().unwrap().contains_key(&key("child")));
+    }
+
+    #[test]
+    fn crash_recovery_requires_saved_surface_and_explicit_native_parent() {
+        let (dir, mut db) = store();
+        let home = dir.path().join("codex");
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        let parent = Uuid::new_v4().to_string();
+        let child = Uuid::new_v4().to_string();
+        let path = home.join("sessions").join(format!("{child}.jsonl"));
+        let write = |parent: &str| {
+            std::fs::write(&path, serde_json::json!({"type":"session_meta","payload":{"id":child,"cwd":dir.path(),"source":"cli","forked_from_id":parent}}).to_string()).unwrap()
+        };
+        write(&parent);
+        let mut op = operation(OperationKind::Fork);
+        op.source = session_key(SessionAgent::Codex, &home, &parent).unwrap();
+        db.begin(&op).unwrap();
+        let saved = crate::agent_sessions::AgentSessionStore::new(dir.path().join("saved"));
+        assert_eq!(db.reconcile_saved(&saved).unwrap(), 0);
+        saved
+            .record("codex", flowmux_core::SurfaceId(op.target_surface), &child)
+            .unwrap();
+        write(&Uuid::new_v4().to_string());
+        assert_eq!(db.reconcile_saved(&saved).unwrap(), 0);
+        write(&parent);
+        assert_eq!(db.reconcile_saved(&saved).unwrap(), 1);
+        assert!(db.pending().unwrap().is_empty());
+        assert_eq!(db.snapshot().unwrap().lineage.edges().count(), 1);
+        assert_eq!(db.reconcile_saved(&saved).unwrap(), 0);
+    }
+
+    #[test]
+    fn completion_publishes_writer_with_edge_and_pid_reuse_cannot_own_a_session() {
+        let (_dir, mut db) = store();
+        let op = operation(OperationKind::Fork);
+        db.begin(&op).unwrap();
+        let binding = live(op.owner, op.target_surface);
+        db.complete_running(&op, &key("child"), &binding).unwrap();
+        assert_eq!(
+            db.live_sessions().unwrap()[&key("child")].as_slice(),
+            std::slice::from_ref(&binding)
+        );
+        let mut resume = operation(OperationKind::Resume);
+        resume.source = key("child");
+        assert!(db.begin(&resume).is_err());
+        let mut stale = binding;
+        stale.started = Some(stale.started.unwrap_or(0).wrapping_add(1));
+        db.sync_live_sessions(op.owner, &[(key("child"), stale)])
+            .unwrap();
+        if flowmux_procmon::process_start_time(std::process::id()).is_some() {
+            assert!(db.begin(&resume).unwrap());
+        }
+        assert_eq!(db.snapshot().unwrap().lineage.edges().count(), 1);
     }
 }
