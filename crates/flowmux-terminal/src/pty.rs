@@ -28,10 +28,10 @@ pub struct Pty {
 
 /// Holds the forked child before `exec` until released or dropped.
 ///
-/// The child blocks reading the pipe whose write end this owns; closing the
-/// write end (via [`SpawnGate::release`] or `Drop`) lets it proceed. Another
-/// child forked while a gate is open inherits its write end until that
-/// child's own `exec` (the fd is `CLOEXEC`), which can delay release.
+/// The child blocks reading the pipe whose write end this owns. Release (via
+/// [`SpawnGate::release`] or `Drop`) writes one byte and then closes the write
+/// end, so it does not depend on any other process that may have inherited a
+/// duplicate of the write end (the child proceeds on the byte or on EOF).
 pub struct SpawnGate(Option<OwnedFd>);
 
 impl SpawnGate {
@@ -39,12 +39,26 @@ impl SpawnGate {
     pub fn release(self) {
         drop(self);
     }
+
+    #[cfg(test)]
+    fn raw_fd(&self) -> RawFd {
+        use std::os::fd::AsRawFd;
+        self.0.as_ref().expect("gate fd").as_raw_fd()
+    }
 }
 
 impl Drop for SpawnGate {
     fn drop(&mut self) {
-        // Dropping the OwnedFd closes the write end exactly once.
-        self.0.take();
+        use std::os::fd::AsRawFd;
+        if let Some(fd) = self.0.take() {
+            let byte = 1u8;
+            // SAFETY: valid fd and buffer. The result is ignored: EPIPE after
+            // the child died is harmless (Rust ignores SIGPIPE).
+            unsafe {
+                libc::write(fd.as_raw_fd(), &byte as *const u8 as *const libc::c_void, 1);
+            }
+            // Dropping the OwnedFd closes the write end exactly once.
+        }
     }
 }
 
@@ -116,7 +130,7 @@ impl Pty {
         // Serialize "create gate pipe + fork": a child forked while another
         // thread's gate pipe exists inherits that pipe's write end, and two
         // concurrent spawns could then each hold the other's write end while
-        // parked, deadlocking both. Held until the parent closes `gate_read`.
+        // parked, deadlocking both. Held until this function returns.
         let _spawn_guard = SPAWN_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -403,7 +417,15 @@ fn create_gate_pipe() -> io::Result<(RawFd, RawFd)> {
             return Err(io::Error::last_os_error());
         }
         for fd in fds {
-            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+            // SAFETY: fd was just created by pipe.
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+                let err = io::Error::last_os_error();
+                unsafe {
+                    libc::close(fds[0]);
+                    libc::close(fds[1]);
+                }
+                return Err(err);
+            }
         }
     }
     Ok((fds[0], fds[1]))
@@ -528,6 +550,11 @@ mod tests {
             !poll_readable(pty.master_fd(), 300),
             "child must be parked before exec"
         );
+        #[cfg(target_os = "linux")]
+        {
+            let comm = std::fs::read_to_string(format!("/proc/{}/comm", pty.child_pid())).unwrap();
+            assert_ne!(comm.trim(), "sh", "child must not have exec'd yet");
+        }
         gate.release();
         assert!(
             poll_readable(pty.master_fd(), 5000),
@@ -547,6 +574,24 @@ mod tests {
         let mut buf = [0u8; 64];
         let n = pty.read(&mut buf).expect("read");
         assert!(String::from_utf8_lossy(&buf[..n]).contains("go"));
+    }
+
+    #[test]
+    fn release_works_while_another_holder_keeps_the_write_end() {
+        let (mut pty, gate) =
+            Pty::spawn_gated(&["sh", "-c", "printf held"], None, &[], 40, 8, None).expect("spawn");
+        // SAFETY: duplicating a valid fd; the dup simulates a foreign holder.
+        let dup = unsafe { libc::dup(gate.raw_fd()) };
+        assert!(dup >= 0);
+        gate.release();
+        assert!(
+            poll_readable(pty.master_fd(), 5000),
+            "child must run despite a foreign write-end holder"
+        );
+        let mut buf = [0u8; 64];
+        let n = pty.read(&mut buf).expect("read");
+        assert!(String::from_utf8_lossy(&buf[..n]).contains("held"));
+        unsafe { libc::close(dup) };
     }
 
     #[cfg(target_os = "linux")]
@@ -575,9 +620,19 @@ mod tests {
 
         let own = std::fs::read_to_string("/proc/self/oom_score_adj").unwrap();
         let (pty, gate) = Pty::spawn_gated(&["sleep", "5"], None, &[], 40, 8, None).expect("spawn");
-        let adj = read_adj_eventually(pty.child_pid(), own.trim());
+        gate.release();
+        let comm = format!("/proc/{}/comm", pty.child_pid());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::fs::read_to_string(&comm)
+            .map(|c| c.trim() != "sleep")
+            .unwrap_or(true)
+        {
+            assert!(Instant::now() < deadline, "child never exec'd sleep");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let adj =
+            std::fs::read_to_string(format!("/proc/{}/oom_score_adj", pty.child_pid())).unwrap();
         assert_eq!(adj.trim(), own.trim());
-        drop(gate);
         drop(pty);
     }
 
