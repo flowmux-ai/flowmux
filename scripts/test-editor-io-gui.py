@@ -59,7 +59,10 @@ def main():
                      FM_ARCH_RECOVERY_FLAG=str(recovery_flag),
                      FM_ARCH_RECOVERY_ENTERED=str(recovery_entered))
         h.env["GTK_A11Y"] = "atspi"
+        h.env.pop("AT_SPI_BUS_ADDRESS", None)
         h.start_display()
+        os.environ["DISPLAY"] = h.env["DISPLAY"]
+        os.environ.pop("AT_SPI_BUS_ADDRESS", None)
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
         import gi
         gi.require_version("Atspi", "2.0")
