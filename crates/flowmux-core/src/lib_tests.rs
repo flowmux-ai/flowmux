@@ -1787,7 +1787,7 @@ fn working_to_idle_in_hidden_surface_becomes_done_until_seen() {
 }
 
 #[test]
-fn hidden_blocked_alert_clears_on_workspace_acknowledgement_without_losing_status() {
+fn hidden_blocked_attention_survives_acknowledgement_until_resolved() {
     let mut surface = PaneSurface::terminal("codex", None);
     let surface_id = surface.id;
     surface.agent = AgentPresence::from_report(
@@ -1818,8 +1818,58 @@ fn hidden_blocked_alert_clears_on_workspace_acknowledgement_without_losing_statu
     assert_eq!(pane.agent_attention_rollup(), Some(AgentStatus::Blocked));
     assert!(pane.mark_all_agents_seen());
     assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Blocked));
-    assert_eq!(pane.agent_attention_rollup(), None);
+    assert_eq!(pane.agent_attention_rollup(), Some(AgentStatus::Blocked));
     assert!(!pane.mark_all_agents_seen());
+    assert_eq!(
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Working,
+            "flowmux:hook",
+            Some("codex"),
+            None,
+            true,
+        ),
+        Some(true)
+    );
+    assert_eq!(pane.agent_attention_rollup(), None);
+}
+
+#[test]
+fn blocked_attention_is_independent_of_visibility_and_other_acknowledged_tabs() {
+    for visible in [false, true] {
+        let mut blocked = PaneSurface::terminal("request", None);
+        let blocked_id = blocked.id;
+        let mut presence = AgentPresence::new("agent", AgentActivity::NeedsInput, None);
+        presence.seen = visible;
+        blocked.agent = Some(presence);
+        let mut completed = PaneSurface::terminal("result", None);
+        let completed_id = completed.id;
+        let mut presence = AgentPresence::new("agent", AgentActivity::Idle, None);
+        presence.seen = false;
+        completed.agent = Some(presence);
+        let pane_id = PaneId::new();
+        let mut pane = Pane::Leaf {
+            id: pane_id,
+            content: PaneContent::Tabs {
+                active: completed_id,
+                surfaces: vec![blocked, completed],
+            },
+        };
+        assert_eq!(pane.agent_attention_rollup(), Some(AgentStatus::Blocked));
+        assert!(pane.mark_all_agents_seen());
+        assert_eq!(pane.agent_attention_rollup(), Some(AgentStatus::Blocked));
+        assert_eq!(
+            pane.agent_presence_for_surface(completed_id)
+                .unwrap()
+                .public_status(),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            pane.close_surface_in_leaf(pane_id, blocked_id),
+            CloseSurfaceOutcome::SurfaceRemoved
+        );
+        assert_eq!(pane.agent_attention_rollup(), None);
+    }
 }
 
 #[test]
@@ -3275,6 +3325,14 @@ fn agent_status_rollup_uses_blocked_done_working_idle_unknown_order() {
 fn completion_footer_requires_the_matching_live_composer() {
     for (screen, expected) in [
         (
+            "Worked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
+            Some("codex"),
+        ),
+        ("✻ Cogitated for 5s · done 11:17 AM\n❯\n? for shortcuts", Some("claude")),
+        ("Worked for 28s • 11:18 AM\n›", None),
+        ("Worked for 28s • 99:99 AM\n›\nGPT-6-Astra · /tmp/work", None),
+        ("✻ Cogitated for 5s · done later\n❯", None),
+        (
             "─ Worked for 6m 15s ─────\n› Ask Codex to do anything\ngpt-6-astra",
             Some("codex"),
         ),
@@ -3321,6 +3379,34 @@ fn completion_footer_requires_the_matching_live_composer() {
         ("─ Worked for 2s ─\nordinary shell output\n$", None),
     ] {
         assert_eq!(detect_agent_completion(Some(screen)), expected, "{screen}");
+    }
+}
+
+#[test]
+fn completed_turn_history_does_not_reopen_a_resolved_permission_request() {
+    for footer in [
+        "Worked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
+        "─ Worked for 28s ─\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
+        "✻ Cogitated for 5s · done 11:17 AM\n❯\n? for shortcuts",
+    ] {
+        let screen = format!("For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\n{footer}");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&screen), None),
+            Some(AgentStatus::Idle),
+            "{screen}"
+        );
+        let waiting = format!("{footer}\nDo you want to approve this command?");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&waiting), None),
+            Some(AgentStatus::Blocked),
+            "{waiting}"
+        );
+        let working = format!("{footer}\n• Working (1s • esc to interrupt)");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&working), None),
+            Some(AgentStatus::Working),
+            "{working}"
+        );
     }
 }
 

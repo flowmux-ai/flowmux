@@ -2752,8 +2752,8 @@ mod tests {
         store.set_active_workspace(Some(ws_id)).await;
         assert_eq!(
             store.workspace_agent_attention_status(ws_id).await,
-            None,
-            "{agent}: opening the workspace acknowledges the alert"
+            Some(AgentStatus::Blocked),
+            "{agent}: opening the workspace does not resolve the request"
         );
         assert_eq!(
             store.workspace_agent_status(ws_id).await,
@@ -2907,7 +2907,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workspace_activation_acknowledges_blocked_alert_but_keeps_blocked_status() {
+    async fn workspace_activation_keeps_unresolved_blocked_attention() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -2940,7 +2940,10 @@ mod tests {
             Some(AgentStatus::Blocked)
         );
         store.set_active_workspace(Some(ws_id)).await;
-        assert_eq!(store.workspace_agent_attention_status(ws_id).await, None);
+        assert_eq!(
+            store.workspace_agent_attention_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
         assert_eq!(
             store.workspace_agent_status(ws_id).await,
             Some(AgentStatus::Blocked)
@@ -6005,6 +6008,7 @@ mod tests {
     #[tokio::test]
     async fn completed_codex_screen_recovers_without_observing_a_spinner() {
         for screen in [
+            "For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\nWorked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
             "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view",
             "• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work",
             "─ Conversation recap ─\n전체 사용량 0일 때 숨김 처리 여부는 확인이 필요합니다.\n› Ask Codex to do anything\ngpt-6-astra high fast · ~/work    Goal achieved (16m)",
@@ -6098,6 +6102,7 @@ mod tests {
                 (screen.to_string(), "focused work"),
                 (format!("\n{screen}\n\n"), "focused work"),
                 (screen.replace('\n', "  \n  "), "focused work"),
+                (screen.replace("› Ask Codex to do anything", "› a new draft\n  continued draft"), "focused work"),
             ] {
                 store.report_agent_screen_signals_with_visibility(surface,
                     Some(&frame), Some(title), true).await;
@@ -6107,7 +6112,7 @@ mod tests {
                     "old completion changed only its presentation: {frame:?}"
                 );
             }
-            let next = screen.replace("11m", "12m").replace("6m 15s", "6m 16s").replace("16m", "17m");
+            let next = screen.replace("11m", "12m").replace("6m 15s", "6m 16s").replace("16m", "17m").replace("28s", "29s");
             assert_ne!(next, screen);
             store.report_agent_screen_signals_with_visibility(surface,
                 Some(&next), Some("focused work"), false).await;
@@ -6211,11 +6216,12 @@ mod tests {
             );
             let screens: &[&str] = if agent == "codex" {
                 &[
+                    "Worked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work",
                     "─ Worked for 3s ─\n›",
                     "›\ngpt-6-astra · ~/work    Goal achieved (16m)",
                 ]
             } else {
-                &["✻ Cooked for 3s\n❯"]
+                &["✻ Cooked for 3s\n❯", "✻ Cooked for 3s · done 11:17 AM\n❯"]
             };
             for screen in screens {
                 store

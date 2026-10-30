@@ -241,14 +241,24 @@ fn agent_screen_fingerprint(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     if completed {
-        // Mapping a terminal can change padding/title without a new completion.
-        for line in screen_text
+        // Draft edits and footer metadata do not represent a new completion.
+        let lines: Vec<_> = screen_text
             .unwrap_or_default()
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
-        {
+            .collect();
+        let prompt = lines
+            .iter()
+            .rposition(|line| line.starts_with('›') || line.starts_with('❯'))
+            .unwrap_or(lines.len());
+        for line in &lines[..prompt] {
             line.hash(&mut hasher);
+        }
+        for line in &lines[prompt..] {
+            if let Some((_, elapsed)) = line.rsplit_once("  Goal achieved (") {
+                elapsed.hash(&mut hasher);
+            }
         }
     } else {
         screen_text.hash(&mut hasher);

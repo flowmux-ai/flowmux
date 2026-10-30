@@ -45,11 +45,15 @@ int main(int argc, char **argv) {
         if (!strncmp(line, "screen-completed", 16)) {
             printf("\\033[2J\\033[H"); fputs(COMPLETED_FRAME, stdout);
         }
+        if (!strncmp(line, "screen-approved", 15)) {
+            printf("\\033[2J\\033[H"); fputs(APPROVED_FRAME, stdout);
+        }
         fflush(stdout);
     }
 }
 """.replace("WORKING_FRAME", json.dumps(frames["working"], ensure_ascii=False))
-       .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False)))
+       .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False))
+       .replace("APPROVED_FRAME", json.dumps(frames["approved"], ensure_ascii=False)))
 
     def rpc(verb, **fields):
         with socket.socket(socket.AF_UNIX) as stream:
@@ -227,7 +231,7 @@ int main(int argc, char **argv) {
                     for visibility in ("hidden", "focused"):
                         focused = other_ws["id"] if visibility == "hidden" else workspace
                         rpc("workspace_focus", workspace=focused)
-                        for completion in ("footer", "native"):
+                        for completion in ("footer", "native", "approved"):
                             turn = f"{visibility}-{completion}"
                             hook("turn-start", "running", turn_id=turn)
                             # An unchanged old footer must not settle a new turn.
@@ -247,14 +251,19 @@ int main(int argc, char **argv) {
                             else:
                                 # Recover the final parsed grid without Stop
                                 # or any focus change/additional output.
-                                rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                                frame = "screen-approved" if completion == "approved" else "screen-completed"
+                                rpc("pane_send_keys", pane=pane, keys=frame + "\r")
                             deadline = time.monotonic() + 5
                             while observed()["status"] not in ("idle", "done"):
                                 assert time.monotonic() < deadline, (
                                     observed(), rpc("pane_read_screen", pane=pane))
                                 time.sleep(.05)
-                            if completion == "footer":
+                            if completion != "native":
                                 assert observed()["custom_status"] == "Completed", observed()
+                            if completion == "approved":
+                                # Outlast polling so a stale approval phrase cannot reopen the wait.
+                                time.sleep(1)
+                                assert observed()["status"] in ("idle", "done"), observed()
                             hook("turn-start", "running", turn_id=f"after-{turn}")
                             rpc("pane_send_keys", pane=pane, keys="screen-working\r")
                             time.sleep(.3)

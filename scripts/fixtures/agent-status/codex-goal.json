@@ -6,5 +6,7 @@
   "platform": "macOS",
   "source": "Minimal synthetic frames preserving the reported Goal achieved footer and trailing hints; cwd redacted.",
   "working": "• Working (1s • esc to interrupt)\n› Ask Codex to do anything\n",
+  "approved_provider_version": "0.166.0",
+  "approved": "For a permission prompt test, request approval.\nYou approved the command.\nAPPROVED\nWorked for 28s • 11:18 AM\n› Ask Codex to do anything\nGPT-6-Astra default · /tmp/work\n",
   "completed": "Worked for 1m 58s • 6:09 PM\n› Ask Codex to do anything\nGPT-6-Astra high fast · ~/work    Goal achieved (11m)\n← for agents · ? for shortcuts    ⚠ 4 warnings · f2 to view\n"
 }

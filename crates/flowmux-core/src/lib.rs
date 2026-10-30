@@ -1121,11 +1121,10 @@ impl Pane {
                 ..
             } => rollup_agent_statuses(surfaces.iter().filter_map(|surface| {
                 let agent = surface.agent.as_ref()?;
-                if agent.seen {
-                    return None;
-                }
                 match agent.public_status() {
-                    AgentStatus::Blocked | AgentStatus::Done => Some(agent.public_status()),
+                    // Acknowledgement does not resolve a pending input request.
+                    AgentStatus::Blocked => Some(AgentStatus::Blocked),
+                    AgentStatus::Done if !agent.seen => Some(AgentStatus::Done),
                     _ => None,
                 }
             })),
@@ -2786,7 +2785,14 @@ pub fn detect_agent_status_from_signals(
             .filter(|line| !line.trim().is_empty())
             .take(12)
     };
-    let newest_blocked = recent().position(|line| {
+    // A verified completed-turn footer separates transcript history from live
+    // controls. Old approval prose above it must not reopen a resolved wait.
+    let live_lines = detect_agent_completion(screen_text)
+        // A goal badge below the composer can coexist with live controls above it.
+        .filter(|_| !recent().any(|line| line.contains("  Goal achieved (")))
+        .and_then(|_| recent().position(is_agent_idle_prompt_line))
+        .unwrap_or(12);
+    let newest_blocked = recent().take(live_lines).position(|line| {
         is_agent_usage_limit_status_line(line)
             || [
                 "do you want to",
@@ -2808,7 +2814,9 @@ pub fn detect_agent_status_from_signals(
             .into_iter()
             .any(|needle| contains_ascii_case_insensitive(line, needle))
     });
-    let newest_working = recent().position(is_agent_working_status_line);
+    let newest_working = recent()
+        .take(live_lines)
+        .position(is_agent_working_status_line);
     match (newest_blocked, newest_working) {
         (Some(blocked), Some(working)) if working < blocked => return Some(AgentStatus::Working),
         (Some(_), _) => return Some(AgentStatus::Blocked),
@@ -3085,16 +3093,37 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
         .trim_start()
         .strip_prefix("Worked for ")
     {
-        if !footer.starts_with('─') || !lines[prompt].starts_with('›') {
+        if !lines[prompt].starts_with('›') {
             return None;
         }
-        ("codex", rest.trim_end_matches(['─', ' ']))
+        let elapsed = if footer.starts_with('─') {
+            rest.trim_end_matches(['─', ' '])
+        } else {
+            // Timestamped footers require the model/cwd row below the composer.
+            if !lines[..prompt].iter().any(|line| line.contains(" · ")) {
+                return None;
+            }
+            let (elapsed, clock) = rest.split_once(" • ")?;
+            if !is_agent_completion_clock(clock) {
+                return None;
+            }
+            elapsed
+        };
+        ("codex", elapsed)
     } else {
         if !lines[prompt].starts_with('❯') || !footer.starts_with(['✢', '✳', '✶', '✻', '✽'])
         {
             return None;
         }
         let (_, elapsed) = footer.split_once(" for ")?;
+        let elapsed = if let Some((elapsed, clock)) = elapsed.split_once(" · done ") {
+            if !is_agent_completion_clock(clock) {
+                return None;
+            }
+            elapsed
+        } else {
+            elapsed
+        };
         ("claude", elapsed)
     };
     let mut tokens = elapsed.split_whitespace().peekable();
@@ -3109,6 +3138,24 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
         return None;
     }
     Some(agent)
+}
+
+fn is_agent_completion_clock(clock: &str) -> bool {
+    let Some((time, period)) = clock.split_once(' ') else {
+        return false;
+    };
+    let Some((hour, minute)) = time.split_once(':') else {
+        return false;
+    };
+    matches!(period, "AM" | "PM")
+        && (1..=2).contains(&hour.len())
+        && minute.len() == 2
+        && hour.bytes().all(|byte| byte.is_ascii_digit())
+        && minute.bytes().all(|byte| byte.is_ascii_digit())
+        && hour
+            .parse::<u8>()
+            .is_ok_and(|hour| (1..=12).contains(&hour))
+        && minute.parse::<u8>().is_ok_and(|minute| minute < 60)
 }
 
 fn is_agent_idle_prompt_line(line: &str) -> bool {

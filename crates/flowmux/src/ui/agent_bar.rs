@@ -436,13 +436,17 @@ mod tests {
     }
 
     #[test]
-    fn acknowledged_blocked_agent_keeps_status_without_alert_color() {
+    fn acknowledged_blocked_agent_keeps_warning_color() {
         assert_eq!(
             agent_status_css_class(AgentStatus::Blocked, false),
             "flowmux-sidebar-agent-blocked"
         );
         assert_eq!(
             agent_status_css_class(AgentStatus::Blocked, true),
+            "flowmux-sidebar-agent-blocked"
+        );
+        assert_eq!(
+            agent_status_css_class(AgentStatus::Done, true),
             "flowmux-sidebar-agent-idle"
         );
     }
