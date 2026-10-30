@@ -616,6 +616,7 @@ pub struct WindowController {
         Rc<RefCell<std::collections::VecDeque<crate::termination::TerminationReport>>>,
     termination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
     termination_presenting: Rc<Cell<bool>>,
+    torn_off_terminals: Rc<RefCell<HashMap<SurfaceId, termination_dialog::TornOffTerminal>>>,
     callbacks: PaneCallbacks,
     bridge: Bridge,
     /// Currently applied visual theme. Swapped in place by
@@ -1989,6 +1990,7 @@ impl WindowController {
             termination_reports: Rc::new(RefCell::new(std::collections::VecDeque::new())),
             termination_dialog: Rc::new(RefCell::new(None)),
             termination_presenting: Rc::new(Cell::new(false)),
+            torn_off_terminals: Rc::new(RefCell::new(HashMap::new())),
             callbacks,
             bridge,
             theme: Rc::new(RefCell::new(theme)),
@@ -2999,8 +3001,7 @@ impl WindowController {
             | GtkCommand::ActivateWorkspace { .. }) => {
                 self.dispatch_workspace_command(command).await;
             }
-            command @ (GtkCommand::ChildExited { .. }
-            | GtkCommand::SplitPane { .. }
+            command @ (GtkCommand::SplitPane { .. }
             | GtkCommand::TeamSpawn { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }

@@ -649,16 +649,28 @@ impl WindowController {
         set_window_content(&window, &content_overlay);
         *window_ref.borrow_mut() = Some(window.downgrade());
         if let Some(terminal) = terminal {
+            self.torn_off_terminals.borrow_mut().insert(
+                surface_id,
+                termination_dialog::TornOffTerminal {
+                    window: window.downgrade(),
+                    title: title.clone(),
+                    pid: terminal.pid.clone(),
+                },
+            );
             // The widget alone does not own the PTY; release it on either close path.
             let terminal = Rc::new(RefCell::new(Some(terminal)));
             let terminal_for_close = terminal.clone();
+            let torn_off = self.torn_off_terminals.clone();
             window.connect_close_request(move |_| {
+                torn_off.borrow_mut().remove(&surface_id);
                 if let Some(terminal) = terminal_for_close.borrow_mut().take() {
                     terminal.close_pty();
                 }
                 glib::Propagation::Proceed
             });
+            let torn_off = self.torn_off_terminals.clone();
             window.connect_destroy(move |_| {
+                torn_off.borrow_mut().remove(&surface_id);
                 if let Some(terminal) = terminal.borrow_mut().take() {
                     terminal.close_pty();
                 }

@@ -32,14 +32,6 @@ impl WindowController {
         }
 
         match cmd {
-            GtkCommand::ChildExited {
-                exit,
-                scope_unit,
-                cgroup_dir,
-                isolation_unavailable,
-            } => {
-                self.handle_child_exit(exit, scope_unit, cgroup_dir, isolation_unavailable);
-            }
             GtkCommand::CloseTerminatedSurface { pane, surface, ack } => {
                 let current_pane = self
                     .pane_registry

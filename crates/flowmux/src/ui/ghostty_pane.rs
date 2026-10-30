@@ -38,6 +38,17 @@ pub fn spawn_policy() -> SpawnPolicy {
     SPAWN_POLICY.get()
 }
 
+#[cfg(all(test, not(target_os = "macos")))]
+pub(crate) fn bypass_pty_tee_for_test() -> impl Drop {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_BYPASS_PTY_TEE.set(self.0);
+        }
+    }
+    Restore(TEST_BYPASS_PTY_TEE.replace(true))
+}
+
 #[derive(Clone)]
 pub struct GhosttyPane {
     id: Rc<Cell<PaneId>>,
@@ -3439,7 +3450,7 @@ mod tests {
         callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
             *sink.borrow_mut() = Some(exit);
         }));
-        TEST_BYPASS_PTY_TEE.set(true);
+        let direct_pty = bypass_pty_tee_for_test();
         let pane = GhosttyPane::spawn(
             PaneId::new(),
             SurfaceId::new(),
@@ -3450,7 +3461,7 @@ mod tests {
             callbacks,
         )
         .unwrap();
-        TEST_BYPASS_PTY_TEE.set(false);
+        drop(direct_pty);
         pane.close_pty();
         let exit = wait_for_exit(&slot).await;
         assert!(exit.closing);
@@ -3468,7 +3479,7 @@ mod tests {
             *sink.borrow_mut() = Some(exit);
         }));
         let surface = SurfaceId::new();
-        TEST_BYPASS_PTY_TEE.set(true);
+        let direct_pty = bypass_pty_tee_for_test();
         let _pane = GhosttyPane::spawn(
             PaneId::new(),
             surface,
@@ -3479,7 +3490,7 @@ mod tests {
             callbacks,
         )
         .unwrap();
-        TEST_BYPASS_PTY_TEE.set(false);
+        drop(direct_pty);
         let exit = wait_for_exit(&slot).await;
         assert!(!exit.closing);
         assert_eq!(exit.surface, surface);
@@ -3505,7 +3516,7 @@ mod tests {
         callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
             *exit_sink.borrow_mut() = Some(exit);
         }));
-        TEST_BYPASS_PTY_TEE.set(true);
+        let direct_pty = bypass_pty_tee_for_test();
         let _pane = GhosttyPane::spawn(
             PaneId::new(),
             SurfaceId::new(),
@@ -3516,7 +3527,7 @@ mod tests {
             callbacks,
         )
         .unwrap();
-        TEST_BYPASS_PTY_TEE.set(false);
+        drop(direct_pty);
         let s = spawned
             .borrow_mut()
             .take()

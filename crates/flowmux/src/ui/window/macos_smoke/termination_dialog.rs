@@ -72,5 +72,45 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     rx.await.unwrap().unwrap();
     glib::timeout_future(Duration::from_millis(500)).await;
     assert!(controller.current_termination_dialog().is_none());
+
+    let (_, surface) = controller
+        .store
+        .add_terminal_surface_to_pane(pane, None)
+        .await
+        .unwrap();
+    controller
+        .attach_or_rerender_surface(workspace, pane, surface, None)
+        .await
+        .unwrap();
+    let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+    controller.tear_off_surface(pane, surface).await;
+    let torn = controller.torn_off_terminals.borrow()[&surface]
+        .window
+        .upgrade()
+        .unwrap();
+    terminal.widget.feed_child(b"kill -KILL $$\n");
+    wait_until("torn-off termination explanation", || {
+        controller.current_termination_dialog().is_some()
+    })
+    .await;
+    let dialog = controller.current_termination_dialog().unwrap();
+    assert_eq!(
+        dialog.root().and_downcast::<adw::ApplicationWindow>(),
+        Some(torn.clone())
+    );
+    assert!(terminal.pid.get().is_none());
+    glib::timeout_future(Duration::from_millis(300)).await;
+    dialog.close();
+    wait_until("terminated torn-off window closed", || !torn.is_visible()).await;
+    assert!(!controller
+        .torn_off_terminals
+        .borrow()
+        .contains_key(&surface));
+    assert_eq!(
+        controller.pane_registry.borrow().terminals[&original]
+            .pid
+            .get(),
+        original_pid
+    );
     println!("MACOS_TERMINATION_DIALOG_OK");
 }

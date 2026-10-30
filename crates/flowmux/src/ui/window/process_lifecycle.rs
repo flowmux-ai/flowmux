@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Nonblocking scope attachment and exit forwarding; GTK callbacks remain local.
+//! Nonblocking scope attachment and exit handling on the GTK thread.
 use super::*;
 use crate::ui::pane_terminal::{ChildExit, ChildSpawned};
 
@@ -18,7 +18,8 @@ impl WindowController {
             let options = self.options.clone();
             let handle = self.tokio_handle.clone();
             let warned = Rc::new(RefCell::new(HashSet::new()));
-            let registry = self.pane_registry.clone();
+            let registry = Rc::downgrade(&self.pane_registry);
+            let torn_off = self.torn_off_terminals.clone();
             self.callbacks.on_child_spawned = Rc::new(RefCell::new(move |child: ChildSpawned| {
                 let iso = isolation.borrow().clone();
                 let reason = iso.as_ref().and_then(ScopeIsolation::unavailable_reason);
@@ -39,6 +40,7 @@ impl WindowController {
                 let scopes = scopes.clone();
                 let warned = warned.clone();
                 let registry = registry.clone();
+                let torn_off = torn_off.clone();
                 let unit = process_scope::unit_name(std::process::id(), child.surface);
                 glib::spawn_future_local(async move {
                     // Tokio work stays off GTK, including session-bus connection I/O.
@@ -63,9 +65,14 @@ impl WindowController {
                         .map_err(|e| e.to_string())
                         .and_then(|r| r);
                     // The tab may have been closed while the bus call was pending.
-                    let live = registry
+                    let live = registry.upgrade().is_some_and(|registry| {
+                        registry
+                            .borrow()
+                            .terminals
+                            .get(&child.surface)
+                            .is_some_and(|t| t.pid.get() == Some(child.pid))
+                    }) || torn_off
                         .borrow()
-                        .terminals
                         .get(&child.surface)
                         .is_some_and(|t| t.pid.get() == Some(child.pid));
                     if live {
@@ -92,7 +99,7 @@ impl WindowController {
             self.callbacks.on_child_spawned = Rc::new(RefCell::new(|_: ChildSpawned| {}));
         }
 
-        let bridge = self.bridge.clone();
+        let presenter = self.termination_presenter();
         #[cfg(target_os = "linux")]
         let scopes = self.pane_scopes.clone();
         self.callbacks.on_child_exited = Rc::new(RefCell::new(move |exit: ChildExit| {
@@ -105,12 +112,8 @@ impl WindowController {
                 };
             #[cfg(not(target_os = "linux"))]
             let (scope_unit, cgroup_dir, isolation_unavailable) = (None, None, None);
-            let _ = bridge.tx.try_send(GtkCommand::ChildExited {
-                exit,
-                scope_unit,
-                cgroup_dir,
-                isolation_unavailable,
-            });
+            // VTE already calls us on GTK; do not lose exits to a full or closed command queue.
+            presenter.handle_child_exit(exit, scope_unit, cgroup_dir, isolation_unavailable);
         }));
     }
 }
@@ -120,13 +123,11 @@ mod tests {
     use super::*;
 
     #[gtk::test]
-    async fn callbacks_release_unisolated_gate_and_forward_scope_evidence() {
+    async fn callbacks_release_unisolated_gate_and_consume_scope_metadata() {
         let (mut controller, _, pane) = super::super::tests::build_single_workspace_controller(
             "com.flowmux.App.UiTest.ProcessCallbacks",
         )
         .await;
-        let (bridge, rx) = Bridge::new();
-        controller.bridge = bridge;
         controller.install_process_callbacks();
         let (pty, gate) = flowmux_terminal::pty::Pty::spawn_gated(
             &["sh", "-c", "printf up"],
@@ -170,20 +171,6 @@ mod tests {
             wrapper_pid: Some(1),
             command: "sh".into(),
         });
-        match rx.try_recv().unwrap() {
-            GtkCommand::ChildExited {
-                exit,
-                scope_unit,
-                cgroup_dir,
-                isolation_unavailable,
-            } => {
-                assert_eq!(exit.surface, surface);
-                assert_eq!(scope_unit, Some(scope.unit));
-                assert_eq!(cgroup_dir, Some(scope.cgroup_dir));
-                assert_eq!(isolation_unavailable, None);
-            }
-            _ => panic!("wrong command"),
-        }
         assert!(controller.pane_scopes.borrow().is_empty());
         controller
             .pane_scopes
@@ -197,8 +184,6 @@ mod tests {
             wrapper_pid: None,
             command: "sh".into(),
         });
-        assert!(matches!(rx.try_recv().unwrap(), GtkCommand::ChildExited {
-            isolation_unavailable: Some(reason), ..
-        } if reason == "scope timeout"));
+        assert!(controller.pane_scopes.borrow().is_empty());
     }
 }

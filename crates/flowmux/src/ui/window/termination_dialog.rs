@@ -6,6 +6,30 @@ use crate::termination::OomEvidence;
 use crate::termination::{self, ChildTermination, TerminationContext, TerminationReport, WaitKind};
 use crate::ui::pane_terminal::ChildExit;
 
+pub(super) struct TornOffTerminal {
+    pub window: glib::WeakRef<adw::ApplicationWindow>,
+    pub title: String,
+    pub pid: Rc<Cell<Option<i32>>>,
+}
+
+// Exit callbacks outlive the source window after tear-off; never retain its widget tree.
+#[derive(Clone)]
+pub(super) struct TerminationPresenter {
+    window: glib::WeakRef<adw::ApplicationWindow>,
+    pane_registry: std::rc::Weak<RefCell<PaneRegistry>>,
+    store: StateStore,
+    bridge: Bridge,
+    window_closed: Rc<Cell<bool>>,
+    #[cfg(target_os = "linux")]
+    tokio_handle: Option<tokio::runtime::Handle>,
+    #[cfg(target_os = "linux")]
+    scope_isolation: Rc<RefCell<Option<crate::process_scope::ScopeIsolation>>>,
+    termination_reports: Rc<RefCell<std::collections::VecDeque<TerminationReport>>>,
+    termination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
+    termination_presenting: Rc<Cell<bool>>,
+    torn_off_terminals: Rc<RefCell<HashMap<SurfaceId, TornOffTerminal>>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TerminationChoice {
     Close,
@@ -47,6 +71,31 @@ pub(super) fn build_termination_dialog(
 }
 
 impl WindowController {
+    pub(super) fn termination_presenter(&self) -> TerminationPresenter {
+        TerminationPresenter {
+            window: self.window.downgrade(),
+            pane_registry: Rc::downgrade(&self.pane_registry),
+            store: self.store.clone(),
+            bridge: self.bridge.clone(),
+            window_closed: self.window_close.approved.clone(),
+            #[cfg(target_os = "linux")]
+            tokio_handle: self.tokio_handle.clone(),
+            #[cfg(target_os = "linux")]
+            scope_isolation: self.scope_isolation.clone(),
+            termination_reports: self.termination_reports.clone(),
+            termination_dialog: self.termination_dialog.clone(),
+            termination_presenting: self.termination_presenting.clone(),
+            torn_off_terminals: self.torn_off_terminals.clone(),
+        }
+    }
+
+    #[cfg(any(test, feature = "native-smoke"))]
+    pub(super) fn current_termination_dialog(&self) -> Option<adw::AlertDialog> {
+        self.termination_dialog.borrow().clone()
+    }
+}
+
+impl TerminationPresenter {
     pub(super) fn handle_child_exit(
         &self,
         exit: ChildExit,
@@ -54,13 +103,13 @@ impl WindowController {
         cgroup_dir: Option<PathBuf>,
         isolation_unavailable: Option<String>,
     ) {
-        let controller = self.clone();
+        let presenter = self.clone();
         glib::spawn_future_local(async move {
             #[cfg(target_os = "linux")]
             let oom = {
-                let iso = controller.scope_isolation.borrow().clone();
+                let iso = presenter.scope_isolation.borrow().clone();
                 let unit = scope_unit.clone();
-                match (controller.tokio_handle.clone(), iso, unit) {
+                match (presenter.tokio_handle.clone(), iso, unit) {
                     (Some(handle), Some(iso), Some(unit)) => handle
                         .spawn(async move {
                             let result = tokio::time::timeout(
@@ -97,7 +146,7 @@ impl WindowController {
                 let _ = cgroup_dir;
                 None
             };
-            if exit.closing || controller.window_close.approved.get() {
+            if exit.closing {
                 return;
             }
             #[cfg(target_os = "macos")]
@@ -111,25 +160,35 @@ impl WindowController {
                 return;
             }
             // A tab can move or close while evidence is collected.
-            let pane = controller
-                .pane_registry
+            let torn_title = presenter
+                .torn_off_terminals
                 .borrow()
-                .pane_for_surface(exit.surface);
-            let Some(pane) = pane else {
-                return;
-            };
-            let workspace = controller.pane_registry.borrow().workspace_of_pane(pane);
-            let Some(workspace) = workspace else {
-                return;
-            };
-            let Some(ws) = controller.store.get_workspace(workspace).await else {
-                return;
-            };
-            let Some(tab_name) = controller.store.surface_title(pane, exit.surface).await else {
-                return;
+                .get(&exit.surface)
+                .filter(|t| t.window.upgrade().is_some())
+                .map(|t| t.title.clone());
+            let (pane, workspace_name, tab_name) = if let Some(title) = torn_title {
+                (exit.pane, title.clone(), title)
+            } else {
+                if presenter.window_closed.get() {
+                    return;
+                }
+                let Some(registry) = presenter.pane_registry.upgrade() else {
+                    return;
+                };
+                let pane = registry.borrow().pane_for_surface(exit.surface);
+                let Some(pane) = pane else { return };
+                let workspace = registry.borrow().workspace_of_pane(pane);
+                let Some(workspace) = workspace else { return };
+                let Some(ws) = presenter.store.get_workspace(workspace).await else {
+                    return;
+                };
+                let Some(tab_name) = presenter.store.surface_title(pane, exit.surface).await else {
+                    return;
+                };
+                (pane, ws.display_title().to_string(), tab_name)
             };
             let context = TerminationContext {
-                workspace_name: ws.display_title().to_string(),
+                workspace_name,
                 pane_label: pane.to_string()[..8].to_string(),
                 tab_name,
                 command: exit.command,
@@ -141,7 +200,7 @@ impl WindowController {
                 scope_unit,
                 isolation_unavailable,
             };
-            controller.enqueue_termination_report(TerminationReport {
+            presenter.enqueue_termination_report(TerminationReport {
                 pane,
                 surface: exit.surface,
                 termination,
@@ -156,29 +215,36 @@ impl WindowController {
         if self.termination_presenting.replace(true) {
             return;
         }
-        let controller = self.clone();
+        let presenter = self.clone();
         glib::spawn_future_local(async move {
             loop {
-                let report = controller.termination_reports.borrow_mut().pop_front();
+                let report = presenter.termination_reports.borrow_mut().pop_front();
                 let Some(mut report) = report else {
                     break;
                 };
-                if controller.window_close.approved.get() {
-                    break;
-                }
-                let pane = controller
-                    .pane_registry
+                let torn_window = presenter
+                    .torn_off_terminals
                     .borrow()
-                    .pane_for_surface(report.surface);
-                let Some(pane) = pane else {
+                    .get(&report.surface)
+                    .and_then(|t| t.window.upgrade());
+                if torn_window.is_none() && presenter.window_closed.get() {
+                    continue;
+                }
+                let pane = presenter
+                    .pane_registry
+                    .upgrade()
+                    .and_then(|registry| registry.borrow().pane_for_surface(report.surface));
+                let Some(pane) = pane.or(torn_window.as_ref().map(|_| report.pane)) else {
                     continue;
                 };
                 report.pane = pane;
-                let last = if controller.store.tab_count_in_pane(pane).await == Some(1) {
+                let last = if torn_window.is_some() {
+                    Some(report.context.workspace_name.clone())
+                } else if presenter.store.tab_count_in_pane(pane).await == Some(1) {
                     if let Some((workspace, 1)) =
-                        controller.store.workspace_pane_count_for(pane).await
+                        presenter.store.workspace_pane_count_for(pane).await
                     {
-                        controller
+                        presenter
                             .store
                             .get_workspace(workspace)
                             .await
@@ -190,21 +256,39 @@ impl WindowController {
                     None
                 };
                 let (dialog, rx) = build_termination_dialog(&report, last.as_deref());
-                *controller.termination_dialog.borrow_mut() = Some(dialog.clone());
+                let Some(window) = torn_window.clone().or_else(|| presenter.window.upgrade())
+                else {
+                    continue;
+                };
+                *presenter.termination_dialog.borrow_mut() = Some(dialog.clone());
                 let choice = {
                     let _native_suspend =
                         crate::ui::browser_pane::suspend_native_browser_views_for_window(
-                            controller.window.upcast_ref(),
+                            window.upcast_ref(),
                         );
-                    dialog.present(Some(&controller.window));
+                    dialog.present(Some(&window));
                     let choice = rx.await;
                     dialog.close();
                     choice
                 };
-                controller.termination_dialog.borrow_mut().take();
+                presenter.termination_dialog.borrow_mut().take();
                 if matches!(choice, Ok(TerminationChoice::Close)) {
+                    if let Some(window) = torn_window {
+                        let dead = presenter
+                            .torn_off_terminals
+                            .borrow()
+                            .get(&report.surface)
+                            .is_some_and(|t| {
+                                t.pid.get().is_none()
+                                    && t.window.upgrade().as_ref() == Some(&window)
+                            });
+                        if dead {
+                            window.close();
+                        }
+                        continue;
+                    }
                     let (ack, rx) = oneshot::channel();
-                    if controller
+                    if presenter
                         .bridge
                         .tx
                         .send(GtkCommand::CloseTerminatedSurface {
@@ -219,13 +303,8 @@ impl WindowController {
                     }
                 }
             }
-            controller.termination_presenting.set(false);
+            presenter.termination_presenting.set(false);
         });
-    }
-
-    #[cfg(any(test, feature = "native-smoke"))]
-    pub(super) fn current_termination_dialog(&self) -> Option<adw::AlertDialog> {
-        self.termination_dialog.borrow().clone()
     }
 }
 
@@ -264,8 +343,8 @@ mod tests {
         closing: bool,
     ) {
         c.pane_registry.borrow().terminals[&surface].pid.set(None);
-        c.dispatch(GtkCommand::ChildExited {
-            exit: ChildExit {
+        c.termination_presenter().handle_child_exit(
+            ChildExit {
                 pane,
                 surface,
                 status,
@@ -273,11 +352,10 @@ mod tests {
                 wrapper_pid: Some(1),
                 command: "sh".into(),
             },
-            scope_unit: None,
-            cgroup_dir: None,
-            isolation_unavailable: None,
-        })
-        .await;
+            None,
+            None,
+            None,
+        );
     }
 
     async fn dialog(c: &WindowController) -> adw::AlertDialog {
@@ -507,6 +585,128 @@ mod tests {
         respond(&second, "close");
         settled(&c).await;
         assert_eq!(c.store.tab_count_in_pane(pane).await, Some(1));
+        c.window.destroy();
+    }
+
+    #[gtk::test]
+    async fn child_exit_reports_even_when_command_queue_is_full() {
+        let (mut c, _, pane) = super::super::tests::build_single_workspace_controller(
+            "com.flowmux.App.UiTest.TerminationFullQueue",
+        )
+        .await;
+        let (bridge, _rx) = Bridge::new();
+        c.bridge = bridge;
+        let registry_owners = Rc::strong_count(&c.pane_registry);
+        c.install_process_callbacks();
+        assert_eq!(Rc::strong_count(&c.pane_registry), registry_owners);
+        c.window.present();
+        while c
+            .bridge
+            .tx
+            .try_send(GtkCommand::TogglePaneZoom { pane })
+            .is_ok()
+        {}
+        let surface = c.pane_registry.borrow().active_surface(pane).unwrap();
+        c.pane_scopes
+            .borrow_mut()
+            .insert(surface, Err("test scope unavailable".into()));
+        (c.callbacks.on_child_exited.borrow_mut())(ChildExit {
+            pane,
+            surface,
+            status: libc::SIGKILL,
+            closing: false,
+            wrapper_pid: Some(123),
+            command: "sh".into(),
+        });
+        let d = dialog(&c).await;
+        assert!(d.body().contains("test scope unavailable"));
+        assert!(d.body().contains("Wrapper pid: 123"));
+        assert!(!c.pane_scopes.borrow().contains_key(&surface));
+        respond(&d, "keep");
+        settled(&c).await;
+        c.window.destroy();
+    }
+
+    #[gtk::test]
+    async fn torn_off_terminal_reports_in_its_window_after_source_closes() {
+        use vte::prelude::*;
+        // Exercise VTE exits without depending on an installed flowmuxctl version.
+        let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+        let (c, ws, pane) = setup("com.flowmux.App.UiTest.TerminationTearOff").await;
+        let original = c.pane_registry.borrow().active_surface(pane).unwrap();
+        let original_pid = c.pane_registry.borrow().terminals[&original].pid.get();
+        let surface = add_tab(&c, ws, pane).await;
+        let terminal = c.pane_registry.borrow().terminals[&surface].clone();
+        c.tear_off_surface(pane, surface).await;
+        let torn = c.torn_off_terminals.borrow()[&surface]
+            .window
+            .upgrade()
+            .unwrap();
+        terminal.widget.feed_child(b"kill -KILL $$\n");
+        let d = dialog(&c).await;
+        assert_eq!(
+            d.root().and_downcast::<adw::ApplicationWindow>(),
+            Some(torn.clone())
+        );
+        assert!(terminal.pid.get().is_none());
+        respond(&d, "keep");
+        settled(&c).await;
+        assert!(torn.is_visible());
+        assert_eq!(
+            c.pane_registry.borrow().terminals[&original].pid.get(),
+            original_pid
+        );
+        torn.close();
+        assert!(!c.torn_off_terminals.borrow().contains_key(&surface));
+
+        let surface = add_tab(&c, ws, pane).await;
+        let terminal = c.pane_registry.borrow().terminals[&surface].clone();
+        c.tear_off_surface(pane, surface).await;
+        let torn = c.torn_off_terminals.borrow()[&surface]
+            .window
+            .upgrade()
+            .unwrap();
+        c.bridge.tx.send(GtkCommand::CloseWindow).await.unwrap();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !c.window_close.approved.get() || !c.bridge.tx.is_closed() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("source window dispatcher did not close");
+        terminal.widget.feed_child(b"kill -KILL $$\n");
+        let d = dialog(&c).await;
+        assert_eq!(
+            d.root().and_downcast::<adw::ApplicationWindow>(),
+            Some(torn.clone())
+        );
+        respond(&d, "close");
+        settled(&c).await;
+        assert!(!torn.is_visible());
+        assert!(c.torn_off_terminals.borrow().is_empty());
+    }
+
+    #[gtk::test]
+    async fn manually_closing_torn_off_terminal_stays_silent() {
+        let (c, ws, pane) = setup("com.flowmux.App.UiTest.TerminationTearOffClose").await;
+        let surface = add_tab(&c, ws, pane).await;
+        let terminal = c.pane_registry.borrow().terminals[&surface].clone();
+        c.tear_off_surface(pane, surface).await;
+        let torn = c.torn_off_terminals.borrow()[&surface]
+            .window
+            .upgrade()
+            .unwrap();
+        torn.close();
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while terminal.pid.get().is_some() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("closed terminal did not exit");
+        settled(&c).await;
+        assert!(c.current_termination_dialog().is_none());
+        assert!(c.torn_off_terminals.borrow().is_empty());
         c.window.destroy();
     }
 
