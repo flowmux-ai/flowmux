@@ -17,6 +17,7 @@ pub struct SessionKey {
 pub struct Lineage {
     /// Child -> parent. A fork has one source; subagent relationships do not belong here.
     parents: BTreeMap<SessionKey, SessionKey>,
+    branches: BTreeSet<SessionKey>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,11 +45,15 @@ impl Lineage {
             if cursor == &child {
                 return Err(LinkError::Cycle);
             }
+            if !self.branches.contains(&child) {
+                break;
+            }
             match self.parents.get(cursor) {
                 Some(next) => cursor = next,
                 None => break,
             }
         }
+        self.branches.insert(parent.clone());
         self.parents.insert(child, parent);
         Ok(())
     }
@@ -74,14 +79,41 @@ impl Lineage {
                 }
             }
         }
+        let parents: BTreeMap<_, _> = self
+            .parents
+            .iter()
+            .filter(|(child, _)| seen.contains(child))
+            .map(|(child, parent)| (child.clone(), parent.clone()))
+            .collect();
         Self {
-            parents: self
-                .parents
-                .iter()
-                .filter(|(child, _)| seen.contains(child))
-                .map(|(child, parent)| (child.clone(), parent.clone()))
-                .collect(),
+            branches: parents.values().cloned().collect(),
+            parents,
         }
+    }
+
+    /// Stable family membership, independent of any workspace or selected node.
+    pub fn families(&self) -> Vec<BTreeSet<SessionKey>> {
+        let mut children: BTreeMap<&SessionKey, Vec<&SessionKey>> = BTreeMap::new();
+        for (parent, child) in self.edges() {
+            children.entry(parent).or_default().push(child);
+        }
+        let mut families = Vec::new();
+        for root in self
+            .branches
+            .iter()
+            .filter(|key| !self.parents.contains_key(*key))
+        {
+            let mut nodes = BTreeSet::new();
+            let mut queue = VecDeque::from([root]);
+            while let Some(key) = queue.pop_front() {
+                nodes.insert(key.clone());
+                if let Some(next) = children.get(key) {
+                    queue.extend(next.iter().copied());
+                }
+            }
+            families.push(nodes);
+        }
+        families
     }
 
     pub fn nodes(&self) -> BTreeSet<&SessionKey> {
@@ -178,29 +210,41 @@ impl Camera {
 pub struct Layout {
     pub positions: BTreeMap<SessionKey, Point>,
     velocity: BTreeMap<SessionKey, Point>,
+    centers: BTreeMap<SessionKey, Point>,
     ticks: usize,
 }
 
 impl Layout {
     pub fn sync(&mut self, lineage: &Lineage) {
-        for key in lineage.nodes() {
-            self.positions.entry(key.clone()).or_insert_with(|| {
-                // Fixed FNV seed, unlike randomized HashMap seeds. No workspace ID involved.
-                let hash = key
-                    .provider
-                    .bytes()
-                    .chain(key.home.to_string_lossy().bytes())
-                    .chain(key.id.bytes())
-                    .fold(2166136261u64, |h, b| {
-                        (h ^ u64::from(b)).wrapping_mul(16777619)
-                    });
-                let angle = (hash % 62832) as f64 / 10000.0;
-                let radius = 120.0 + ((hash >> 16) % 400) as f64;
-                Point {
-                    x: angle.cos() * radius,
-                    y: angle.sin() * radius,
-                }
-            });
+        let mut offset = 0.0;
+        self.centers.clear();
+        for family in lineage.families() {
+            let radius = 180.0 + (family.len() as f64).sqrt() * 45.0;
+            let center = Point {
+                x: offset + radius,
+                y: 0.0,
+            };
+            offset += radius * 2.0 + 320.0;
+            for key in family {
+                self.centers.insert(key.clone(), center);
+                self.positions.entry(key.clone()).or_insert_with(|| {
+                    // Fixed FNV seed, unlike randomized HashMap seeds. No workspace ID involved.
+                    let hash = key
+                        .provider
+                        .bytes()
+                        .chain(key.home.to_string_lossy().bytes())
+                        .chain(key.id.bytes())
+                        .fold(2166136261u64, |h, b| {
+                            (h ^ u64::from(b)).wrapping_mul(16777619)
+                        });
+                    let angle = (hash % 62832) as f64 / 10000.0;
+                    let distance = radius * (0.3 + ((hash >> 16) % 700) as f64 / 1000.0);
+                    Point {
+                        x: center.x + angle.cos() * distance,
+                        y: center.y + angle.sin() * distance,
+                    }
+                });
+            }
         }
         self.wake();
     }
@@ -236,9 +280,10 @@ impl Layout {
             grid.entry(((p.x / 240.0).floor() as i64, (p.y / 240.0).floor() as i64))
                 .or_default()
                 .push(i);
+            let center = self.centers.get(*key).copied().unwrap_or_default();
             forces[i] = Point {
-                x: -p.x * 0.0008,
-                y: -p.y * 0.0008,
+                x: (center.x - p.x) * 0.0008,
+                y: (center.y - p.y) * 0.0008,
             };
         }
         for (i, key) in keys.iter().enumerate() {
@@ -253,6 +298,7 @@ impl Layout {
                         .into_iter()
                         .flatten()
                         .filter(|j| **j > i)
+                        .take(64)
                     {
                         let q = self.positions[keys[*j]];
                         let (mut x, y) = (p.x - q.x, p.y - q.y);
@@ -345,6 +391,44 @@ mod tests {
         assert_eq!(g.link(key("a"), key("b")), Ok(()));
         assert_eq!(g, before);
     }
+    #[test]
+    fn large_forest_layout_keeps_families_separate_and_work_bounded() {
+        let started = std::time::Instant::now();
+        let mut graph = Lineage::default();
+        for family in 0..20 {
+            for node in 1..500 {
+                graph
+                    .link(
+                        key(&format!("{family:02}-{previous:03}", previous = node - 1)),
+                        key(&format!("{family:02}-{node:03}")),
+                    )
+                    .unwrap();
+            }
+        }
+        let families = graph.families();
+        assert_eq!(families.len(), 20);
+        assert!(families.iter().all(|family| family.len() == 500));
+        let mut layout = Layout::default();
+        layout.sync(&graph);
+        let mut previous_max = f64::NEG_INFINITY;
+        for family in families {
+            let min = family
+                .iter()
+                .map(|key| layout.positions[key].x)
+                .fold(f64::INFINITY, f64::min);
+            let max = family
+                .iter()
+                .map(|key| layout.positions[key].x)
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert!(min > previous_max);
+            previous_max = max;
+        }
+        layout.step(&graph, None);
+        assert!(layout.positions.values().all(|point| point.finite()));
+        assert_eq!(layout.positions.len(), 10_000);
+        eprintln!("SESSION_FLOW_10000_NODES elapsed={:?}", started.elapsed());
+    }
+
     #[test]
     fn zoom_keeps_cursor_world_position_and_clamps_invalid_input() {
         let mut camera = Camera::default();
