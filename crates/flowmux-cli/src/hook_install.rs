@@ -1249,7 +1249,7 @@ const CODEX_EVENTS: &[CodexEvent] = &[
     CodexEvent {
         name: "SessionStart",
         subcommand: "session-start",
-        matcher: "^(startup|resume|clear)$",
+        matcher: "^(startup|resume|clear|fork)$",
         timeout_secs: 5,
     },
     CodexEvent {
@@ -3843,7 +3843,7 @@ mod tests {
         }
         assert_eq!(
             root["hooks"]["SessionStart"][0]["matcher"],
-            "^(startup|resume|clear)$"
+            "^(startup|resume|clear|fork)$"
         );
     }
 
