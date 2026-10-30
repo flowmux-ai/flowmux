@@ -186,7 +186,7 @@ pub fn dialog_body(report: &TerminationReport, last_tab_in_workspace: Option<&st
             "This is the last tab in workspace {name}; closing it closes the workspace."
         ));
     }
-    lines.push("Flowmux and your other tabs and panes were not affected.".into());
+    lines.push("Keep tab preserves its output; it does not restart the terminated process.".into());
     lines.join("\n")
 }
 
@@ -352,7 +352,7 @@ mod tests {
             "Time: 12:00:00",
             "systemd reported oom-kill for flowmux-1-abc.scope",
             "This is the last tab in workspace ws; closing it closes the workspace.",
-            "Flowmux and your other tabs and panes were not affected.",
+            "Keep tab preserves its output; it does not restart the terminated process.",
         ] {
             assert!(
                 body.lines().any(|l| l == line),
