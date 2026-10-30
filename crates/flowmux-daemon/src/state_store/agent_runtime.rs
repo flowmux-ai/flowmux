@@ -158,8 +158,17 @@ fn record_scope_wait(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct CompletionNotification {
+    id: NotificationId,
+    claimed: bool,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
+    /// One receipt per session's most recently completed response. Accepted new
+    /// work retires it; notification-log retention does not.
+    completion_notifications: HashMap<AgentLifecycleKey, CompletionNotification>,
     /// Local process polls found neither an agent nor an out-of-tree transport.
     screen_absent: HashSet<SurfaceId>,
     /// One record per tool-use id: Some while waiting, None once resolved.
@@ -187,6 +196,7 @@ pub(super) struct AgentLifecycleRuntime {
 // sessions and bounded tombstones never participate in a per-event copy.
 struct LifecycleCheckpoint {
     key: AgentLifecycleKey,
+    completion_notification: Option<CompletionNotification>,
     waits: Option<HashMap<String, Option<PendingAgentWait>>>,
     permission_waits: Option<HashMap<String, PendingAgentWait>>,
     permission_event_seq: Option<HashMap<String, u64>>,
@@ -201,6 +211,7 @@ impl LifecycleCheckpoint {
     fn capture(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> Self {
         Self {
             key: key.clone(),
+            completion_notification: runtime.completion_notifications.get(key).copied(),
             waits: runtime.waits.get(key).cloned(),
             permission_waits: runtime.permission_waits.get(key).cloned(),
             permission_event_seq: runtime.permission_event_seq.get(key).cloned(),
@@ -213,6 +224,11 @@ impl LifecycleCheckpoint {
     }
 
     fn restore(self, runtime: &mut AgentLifecycleRuntime) {
+        restore_entry(
+            &mut runtime.completion_notifications,
+            &self.key,
+            self.completion_notification,
+        );
         restore_entry(&mut runtime.waits, &self.key, self.waits);
         restore_entry(
             &mut runtime.permission_waits,
@@ -282,7 +298,7 @@ pub(super) struct PendingCodexStop {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentLifecycleResult {
-    /// Stable identity of the pending request; independent of notification retention.
+    /// Stable pending-request or completed-response identity, independent of log retention.
     pub notification_id: Option<NotificationId>,
     pub workspace: Option<WorkspaceId>,
     pub completed: bool,
@@ -539,6 +555,9 @@ fn clear_agent_lifecycle_runtime(
             || agent.is_some_and(|agent| !key_agent.eq_ignore_ascii_case(agent))
             || session_id.is_some_and(|session| key_session != session)
     };
+    lifecycle
+        .completion_notifications
+        .retain(|key, _| keep_wait_key(key));
     lifecycle.waits.retain(|key, _| keep_wait_key(key));
     lifecycle
         .permission_waits
@@ -569,10 +588,10 @@ fn clear_agent_lifecycle_runtime(
 }
 
 impl StateStore {
-    /// Claim an accepted pending request's effect once. Keeping this bit with the
-    /// wait preserves deduplication after the bounded notification log is cleared
-    /// or evicted. A resolved/replaced request cannot claim its successor's effect.
-    pub async fn claim_agent_wait_notification(
+    /// Claim an accepted request or response effect once, independently of the
+    /// bounded notification log. Resolved requests and superseded responses
+    /// cannot claim a successor's effect.
+    pub async fn claim_agent_notification(
         &self,
         surface: SurfaceId,
         agent: &str,
@@ -581,6 +600,13 @@ impl StateStore {
     ) -> bool {
         let mut runtime = self.agents.lifecycle.lock().await;
         let key = (surface, agent.to_ascii_lowercase(), session.to_owned());
+        if let Some(completion) = runtime
+            .completion_notifications
+            .get_mut(&key)
+            .filter(|completion| completion.id == notification_id)
+        {
+            return !std::mem::replace(&mut completion.claimed, true);
+        }
         let AgentLifecycleRuntime {
             waits,
             permission_waits,
@@ -1812,6 +1838,9 @@ impl StateStore {
             completion_message = None;
         }
         if workspace.is_some() {
+            if activity != Idle {
+                runtime.completion_notifications.remove(&wait_key);
+            }
             self.allow_agent_screen_restore(surface_id).await;
         }
         let notification_id = notification_scope
@@ -1833,7 +1862,16 @@ impl StateStore {
                 };
                 wait.map(|wait| wait.notification_id)
             })
-            .filter(|_| workspace.is_some());
+            .filter(|_| workspace.is_some())
+            .or_else(|| {
+                (workspace.is_some() && completed).then(|| {
+                    runtime
+                        .completion_notifications
+                        .entry(wait_key)
+                        .or_default()
+                        .id
+                })
+            });
         drop(runtime);
         AgentLifecycleResult {
             notification_id,
@@ -2001,12 +2039,19 @@ impl StateStore {
                 tracing::debug!(target: "flowmux_agent", reason = "stale_sequence", changed = false, "agent decision");
                 return None;
             }
+            let resumed_work = matches!(
+                report.effective_status(),
+                Some(AgentStatus::Working | AgentStatus::Blocked)
+            );
             let terminal_idle = report.effective_status() == Some(AgentStatus::Idle);
             let report_seq = report.seq;
             let accepted = self
                 .apply_agent_status_report(surface_id, report, surface_visible)
                 .await;
             if accepted.is_some() {
+                if resumed_work {
+                    lifecycle.completion_notifications.remove(&key);
+                }
                 if let Some(seq) = report_seq {
                     lifecycle
                         .last_seq
@@ -2140,9 +2185,16 @@ impl StateStore {
             return AgentLifecycleResult::default();
         }
         self.allow_agent_screen_restore(surface_id).await;
+        let notification_id = pending.notify_completion.then(|| {
+            runtime
+                .completion_notifications
+                .entry(wait_key)
+                .or_default()
+                .id
+        });
         drop(runtime);
         AgentLifecycleResult {
-            notification_id: None,
+            notification_id,
             workspace,
             completed: pending.notify_completion,
             completion_message: pending
@@ -2639,6 +2691,21 @@ impl StateStore {
                         previous = ?previous.as_ref().map(|p| p.status), detected = ?status,
                         next = ?surface.root_pane.agent_presence_for_surface(surface_id).map(|p| p.status),
                         changed = applied, reason = "screen_result", "agent decision");
+                    if applied && status != AgentStatus::Idle {
+                        if let Some(presence) =
+                            surface.root_pane.agent_presence_for_surface(surface_id)
+                        {
+                            if presence.activity != flowmux_core::AgentActivity::Idle {
+                                if let Some(session) = presence.session_id {
+                                    lifecycle.completion_notifications.remove(&(
+                                        surface_id,
+                                        presence.name.to_ascii_lowercase(),
+                                        session,
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     found = true;
                     changed = applied;
                     break;
@@ -3130,8 +3197,13 @@ mod tests {
                 ..Default::default()
             },
         );
+        let completion = CompletionNotification::default();
+        runtime
+            .completion_notifications
+            .insert(key.clone(), completion);
         let before = LifecycleCheckpoint::capture(&runtime, &key);
         clear_agent_lifecycle_runtime(&mut runtime, key.0, None, None, None);
+        assert!(!runtime.completion_notifications.contains_key(&key));
         runtime
             .permission_waits
             .insert(key.clone(), HashMap::from([("new".into(), wait)]));
@@ -3144,6 +3216,7 @@ mod tests {
             .insert(other.clone(), HashMap::from([("unrelated".into(), None)]));
         remember_ended_agent_lifecycle(&mut runtime, other.clone(), None, Some(12), false);
         before.restore(&mut runtime);
+        assert_eq!(runtime.completion_notifications[&key].id, completion.id);
         assert_eq!(
             runtime.waits[&key],
             HashMap::from([("tool".into(), Some(wait))])

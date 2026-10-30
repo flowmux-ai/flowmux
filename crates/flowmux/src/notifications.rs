@@ -18,8 +18,8 @@ use std::rc::Rc;
 /// 9 stream) can otherwise grow this unbounded over a long session.
 const MAX_RETAINED: usize = 50;
 
-/// Deduplicate exact repeats and paired OSC Info / hook TurnCompleted reports
-/// on the same pane and surface within eight seconds.
+/// Deduplicate only exact anonymous repeats on the same pane and surface
+/// within eight seconds. Identified lifecycle effects use runtime receipts.
 const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 
 #[derive(Debug, Clone)]
@@ -79,9 +79,7 @@ impl NotificationStore {
     /// or the oldest unread entry if none are read, to keep memory bounded.
     /// Returns the assigned id and any evicted desktop id to withdraw,
     /// or `None` when the entry was suppressed as a near-duplicate of
-    /// an entry pushed inside [`DUP_WINDOW`] (see the constant for
-    /// why both the OSC sniffer and the lifecycle hook fire on the
-    /// same Stop event).
+    /// an anonymous entry pushed inside [`DUP_WINDOW`].
     #[cfg(test)]
     pub fn push(
         &self,
@@ -122,23 +120,10 @@ impl NotificationStore {
             {
                 if !last.causal
                     && now.signed_duration_since(last.created_at) < DUP_WINDOW
-                    && ((level == last.level && title == last.title && body == last.body)
-                        // shortcut: no completion identity in the protocol; revisit this
-                        // time-based OSC/hook pairing when callers provide one.
-                        || matches!(
-                            (last.level, level),
-                            (NotificationLevel::Info, NotificationLevel::TurnCompleted)
-                                | (NotificationLevel::TurnCompleted, NotificationLevel::Info)
-                        ))
+                    && level == last.level
+                    && title == last.title
+                    && body == last.body
                 {
-                    // Keep the hook's completion kind when its OSC notification arrived first.
-                    if last.level == NotificationLevel::Info
-                        && level == NotificationLevel::TurnCompleted
-                    {
-                        last.level = level;
-                        last.title = title;
-                        last.body = body;
-                    }
                     return None;
                 }
             }
@@ -713,14 +698,9 @@ mod tests {
                     let suppressed = s
                         .push(title.into(), body.into(), second, pane, surface, None)
                         .is_none();
-                    let completion_pair = matches!(
-                        (first, second),
-                        (NotificationLevel::Info, NotificationLevel::TurnCompleted)
-                            | (NotificationLevel::TurnCompleted, NotificationLevel::Info)
-                    );
                     assert_eq!(
                         suppressed,
-                        completion_pair || (first == second && title == "first" && body == "first"),
+                        first == second && title == "first" && body == "first",
                         "{first:?} -> {second:?}, title={title}, body={body}"
                     );
                 }
@@ -729,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_pair_keeps_hook_details_and_existing_read_state() {
+    fn anonymous_info_and_completion_keep_separate_content_and_read_state() {
         for read in [false, true] {
             for hook_first in [false, true] {
                 let s = store();
@@ -767,12 +747,12 @@ mod tests {
                         surface,
                         None
                     )
-                    .is_none());
+                    .is_some());
                 let after = s.find(id).unwrap();
-                assert_eq!(s.entries().len(), 1);
-                assert_eq!(after.level, NotificationLevel::TurnCompleted);
-                assert_eq!(after.title, hook.0);
-                assert_eq!(after.body, hook.1);
+                assert_eq!(s.entries().len(), 2);
+                assert_eq!(after.level, first.2);
+                assert_eq!(after.title, first.0);
+                assert_eq!(after.body, first.1);
                 assert_eq!(after.read, read);
                 assert_eq!(after.created_at, before.created_at);
                 assert_eq!(after.desktop_id, before.desktop_id);

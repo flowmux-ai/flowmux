@@ -2684,6 +2684,279 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_notification_identity_tracks_accepted_work_boundaries() {
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, "/tmp".into()).await;
+        let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+        let stop = || AgentLifecycleEvent::TurnStopped {
+            message: Some("same response".into()),
+            status_text: "Completed".into(),
+        };
+        let first = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(1),
+                "session",
+                stop(),
+                false,
+            )
+            .await
+            .notification_id
+            .expect("completion needs a causal identity");
+        assert!(
+            store
+                .claim_agent_notification(surface, "claude", "session", first)
+                .await
+        );
+        let repeat = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(2),
+                "session",
+                stop(),
+                false,
+            )
+            .await;
+        assert_eq!(repeat.notification_id, Some(first));
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", first)
+                .await
+        );
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(3),
+                "session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Starting turn".into(),
+                },
+                false,
+            )
+            .await;
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", first)
+                .await
+        );
+        let second = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(4),
+                "session",
+                stop(),
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert_ne!(
+            first, second,
+            "equal response text in a new turn must remain distinct"
+        );
+        // Leave the second effect unclaimed, then observe fresh work without a
+        // native prompt hook. Its delayed effect must not fire during new work.
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(5),
+                "session",
+                AgentLifecycleEvent::ProgressObserved {
+                    status_text: "Working".into(),
+                },
+                false,
+            )
+            .await;
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", second)
+                .await
+        );
+        let third = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(6),
+                "session",
+                stop(),
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert_ne!(second, third);
+        assert!(
+            store
+                .claim_agent_notification(surface, "claude", "session", third)
+                .await
+        );
+        store
+            .report_agent_screen_signals_with_visibility(
+                surface,
+                Some("Claude Code\n• Working (1s • esc to interrupt)\n❯"),
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .activity,
+            flowmux_core::AgentActivity::Idle
+        );
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", third)
+                .await
+        );
+        let fourth = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(7),
+                "session",
+                stop(),
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert_eq!(
+            third, fourth,
+            "a rejected screen spinner must not reopen completion"
+        );
+        let progress = AgentStatusReport {
+            name: "claude".into(),
+            activity: Some(flowmux_core::AgentActivity::Running),
+            source: Some("flowmux:hook".into()),
+            session_id: Some("session".into()),
+            seq: Some(8),
+            status: None,
+            pid: None,
+            message: None,
+            custom_status: None,
+            pending_waits: None,
+            turn_outcome: None,
+            session_name: None,
+            messaging_socket: None,
+        };
+        store
+            .report_agent_status_with_visibility(surface, progress, false)
+            .await;
+        assert!(
+            !store
+                .claim_agent_notification(surface, "claude", "session", fourth)
+                .await
+        );
+        let fifth = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                None,
+                Some(9),
+                "session",
+                stop(),
+                false,
+            )
+            .await
+            .notification_id
+            .unwrap();
+        assert_ne!(fourth, fifth);
+    }
+
+    #[tokio::test]
+    async fn completion_claim_respects_screen_settlement_guards() {
+        for new_work in [false, true] {
+            let store = StateStore::new_lazy(State::default());
+            let workspace = store.create_workspace(None, "/tmp".into()).await;
+            let surface = first_pane_active_surface(&store.get_workspace(workspace).await.unwrap());
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    None,
+                    Some(1),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("turn".into()),
+                        status_text: "Starting turn".into(),
+                    },
+                    false,
+                )
+                .await;
+            let old_screen = "Codex\n• Working (0s • esc to interrupt)";
+            store
+                .report_agent_screen_signals_with_visibility(surface, Some(old_screen), None, false)
+                .await;
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    None,
+                    Some(2),
+                    "session",
+                    AgentLifecycleEvent::CodexTurnStopped {
+                        turn_id: "turn".into(),
+                        message: None,
+                        status_text: "Completed".into(),
+                        stop_hook_active: false,
+                    },
+                    false,
+                )
+                .await;
+            let id = store
+                .settle_codex_turn_after_grace(surface, None, Some(2), "session", "turn", false)
+                .await
+                .notification_id
+                .unwrap();
+            let screen = if new_work {
+                "Codex\n• Working (1s • esc to interrupt)"
+            } else {
+                old_screen
+            };
+            store
+                .report_agent_screen_signals_with_visibility(surface, Some(screen), None, false)
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .activity,
+                if new_work {
+                    flowmux_core::AgentActivity::Running
+                } else {
+                    flowmux_core::AgentActivity::Idle
+                }
+            );
+            assert_eq!(
+                store
+                    .claim_agent_notification(surface, "codex", "session", id)
+                    .await,
+                !new_work,
+                "only accepted new work can invalidate a delayed completion effect"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn pending_notification_claim_survives_repeats_and_ends_with_its_request() {
         use flowmux_core::AgentWaitReason;
         for kind in 0..3 {
@@ -2729,12 +3002,12 @@ mod tests {
                 .unwrap();
             assert!(
                 store
-                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .claim_agent_notification(surface, "claude", "session", first)
                     .await
             );
             assert!(
                 !store
-                    .claim_agent_wait_notification(surface, "claude", "other-session", first)
+                    .claim_agent_notification(surface, "claude", "other-session", first)
                     .await
             );
             let repeated = store
@@ -2757,7 +3030,7 @@ mod tests {
             }
             assert!(
                 !store
-                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .claim_agent_notification(surface, "claude", "session", first)
                     .await
             );
             store
@@ -2790,13 +3063,13 @@ mod tests {
             assert_ne!(first, next);
             assert!(
                 !store
-                    .claim_agent_wait_notification(surface, "claude", "session", first)
+                    .claim_agent_notification(surface, "claude", "session", first)
                     .await,
                 "a delayed effect cannot claim a replacement request"
             );
             assert!(
                 store
-                    .claim_agent_wait_notification(surface, "claude", "session", next)
+                    .claim_agent_notification(surface, "claude", "session", next)
                     .await
             );
         }

@@ -1132,7 +1132,7 @@ impl GuiHandler {
 
             Request::AgentLifecycleUpdate {
                 notification,
-                pane,
+                pane: _,
                 surface,
                 agent,
                 pid,
@@ -1199,7 +1199,7 @@ impl GuiHandler {
                     } else if let Some(id) = outcome.notification_id {
                         self.inner
                             .store()
-                            .claim_agent_wait_notification(surface, &agent, &session_id, id)
+                            .claim_agent_notification(surface, &agent, &session_id, id)
                             .await
                     } else {
                         true
@@ -1222,7 +1222,18 @@ impl GuiHandler {
                         applied: outcome.workspace.is_some(),
                     };
                 }
-                if outcome.completed {
+                if outcome.completed && accepted_pane.is_some() {
+                    let Some(id) = outcome.notification_id else {
+                        return Response::Ok;
+                    };
+                    if !self
+                        .inner
+                        .store()
+                        .claim_agent_notification(surface, &agent, &session_id, id)
+                        .await
+                    {
+                        return Response::Ok;
+                    }
                     let display_agent = if agent.eq_ignore_ascii_case("codex") {
                         "Codex"
                     } else if agent.eq_ignore_ascii_case("claude") {
@@ -1235,13 +1246,16 @@ impl GuiHandler {
                         .filter(|message| !message.trim().is_empty())
                         .unwrap_or_else(|| "task complete".into());
                     let _ = self
-                        .handle_notification_verb(Request::Notify {
-                            pane,
-                            surface: Some(surface),
-                            title: format!("{display_agent} ready"),
-                            body,
-                            level: flowmux_core::NotificationLevel::TurnCompleted,
-                        })
+                        .handle_notification_verb_with_id(
+                            Request::Notify {
+                                pane: accepted_pane,
+                                surface: Some(surface),
+                                title: format!("{display_agent} ready"),
+                                body,
+                                level: flowmux_core::NotificationLevel::TurnCompleted,
+                            },
+                            Some(id),
+                        )
                         .await;
                 }
                 Response::Ok

@@ -617,3 +617,70 @@ editor synchronization-error dialog, despite passing coverage thresholds.
 Its reports are archived at `/tmp/fm-outcomes-c4c4c486-reports.tar.gz`.
 Focused reruns of that exact binary passed; the full-gate fixture failure is
 still under investigation. This is not a completed cross-platform gate.
+
+
+## Completed-response notification identity (2026-10-30)
+
+The most recently completed response now owns a runtime notification receipt.
+Repeated accepted completion reports share that receipt until accepted new work
+starts. Clearing or evicting notification history does not reset the claim.
+Delayed effects cannot claim a superseded response. Existing lifecycle, screen
+settlement, sequence, and ownership guards still decide whether work is accepted;
+rejected spinner repaint cannot reopen a completed response. Notifications route
+through the accepted surface's current pane instead of a stale pane hint.
+
+Anonymous notifications retain eight-second suppression only for an exact
+level/title/body repeat on the same pane and surface. Information and completion
+entries no longer merge by timing alone, so unrelated information retains its
+content and read state. Identified responses bypass that anonymous time window.
+This remains runtime-only, at-most-once correlation. It cannot reconstruct a
+missing native turn ID or identify an old completion newly stamped after an
+unrelated accepted work boundary; it is not a durable delivery queue.
+
+The focused regression failed before implementation because completion lacked
+a notification identity (`/tmp/fm-completion-cause-red.log`). Final isolated
+agent unit suites passed on both platforms, including 197 daemon tests. Full
+workspace/all-targets Clippy with native-smoke and the canonical application
+build passed. Logs: `/tmp/fm-completion-cause-unit-final2.log`,
+`/tmp/fm-completion-cause-linux-unit.log`,
+`/tmp/fm-completion-cause-clippy-final2.log`, and
+`/tmp/fm-completion-cause-build-final2.log`. A test initially expected an old
+screen spinner to override a hook-owned idle state; the existing guard correctly
+rejected it. The test was corrected, and no status guard was weakened.
+
+Linux passed 68 GUI IPC tests, 31 notification-store tests, and the complete
+notification GUI fixture, including filters, read/delete actions, exact source
+navigation, closed-source handling, and distinct information/completion content
+(`/tmp/fm-completion-cause-linux-verified.log`). Native main-thread hook replay
+and evidence tooltips passed (`/tmp/fm-completion-cause-native-final2.log`,
+`MACOS_NATIVE_SMOKE_OK`). Replay events are synthetic.
+
+Actual native-hook agents A 2.1.314 and B 0.166.0 ran against isolated application
+PID 29802 in `/tmp/fm-atn-q9ghxxso`. Identical consecutive actual responses kept
+two distinct completion IDs for each agent, with intervals of 3.109 and 2.654
+seconds respectively. Both passed question or one-time harmless command
+approval, interruption, recovery, and unsubmitted status-like drafts. A later
+question opened a new request and completed with no remaining waits. Native
+screens showed question versus approval and canceled versus unconfirmed result.
+
+Synthetic completion retransmissions into A's actual completed session, after
+the eight-second window and again after history clearing, created no new row
+(`COMPLETION_REPLAY_AFTER_WINDOW_AND_CLEAR_OK`). Synthetic stale wait events
+created no effect, and a repeated current wait remained claimed after clearing
+history. These injections are separate from actual native hook observations.
+The replacement-question hook arrived before its menu rendered, causing an
+immediate screen assertion to fail. The driver now waits for the displayed
+option; verification resumed in the same session without restarting agents and
+completed successfully. Evidence: `/tmp/fm-completion-cause-live.log` and
+`/tmp/fm-completion-cause-resume.log` (`LIVE_COMPLETION_CAUSE_MATRIX_OK`), plus
+notification, draft, final-agent, and per-scenario JSON under the isolated root.
+Application and CLI SHA-256:
+
+`7efc37ed21d4fdf124d3ee56eb027dd23f33c16a3a8f6f17beb9e2426cdc322a`
+
+`939f529fd08259b0a0e022a7dc3f9d1b7b2643a9aa1dc7e66c25e48e545bbbb2`
+
+Original application PID 72789 and independent user agent PID 1401 stayed alive;
+the permanent vendor executable link stayed unchanged. Final full Linux/macOS
+gates remain outstanding, including the previously recorded editor-dialog and
+browser-input fixture failures. Focused passing checks do not close those gates.

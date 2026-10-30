@@ -107,10 +107,12 @@ input prompt. It does not jump to an earlier conversation position. A closed or
 missing source shows an explanation and leaves the notification unread.
 
 The in-memory history retains at most 50 entries, removing read entries first.
-It is not restored after restart. Identical same-tab messages within eight seconds
-are suppressed; OSC information and hook completion reports are also paired within
-that window, keeping the hook's Completed kind and message whichever arrives first.
-Distinct input requests and errors are retained.
+It is not restored after restart. Identical anonymous same-tab messages within eight
+seconds are suppressed. Correlated hook requests and responses use runtime identities:
+repeated reports do not create new notifications, even after history is cleared;
+new requests or responses remain separate even when their text matches. Accepted
+new work starts a new response identity. Anonymous information and completion reports
+remain separate because they do not establish a shared cause.
 `system_notifications_enabled` controls OS delivery independently of this list.
 
 ## Theme file

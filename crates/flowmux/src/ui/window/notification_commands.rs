@@ -140,18 +140,14 @@ impl WindowController {
                     .notifications
                     .push_with_id(id, title, body, level, pane, surface, workspace)
                 else {
-                    // Near-duplicate of an entry pushed within
-                    // `DUP_WINDOW`: the OSC path and the lifecycle
-                    // hook both fired for the same Stop event. Ack
-                    // with None so the IPC handler also skips the
-                    // desktop toast — one row, one toast per event.
+                    // An exact anonymous repeat or an already retained identity.
+                    // Skip its desktop toast along with the duplicate row.
                     tracing::info!(
                         ?pane,
                         ?surface,
                         ?level,
                         "AddNotification: reusing recent in-app entry; skipping desktop toast"
                     );
-                    // Deduplication can upgrade an OSC row to the hook's completion kind.
                     self.refresh_launcher_badge();
                     let _ = ack.send(None);
                     return;

@@ -401,7 +401,7 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     assert current() == observer, 'Closed source must not switch to a fallback workspace'
     assert not next(e for e in snapshot()['entries'] if e['id'] == other)['read']
     h.pass_check('Actual mouse click opens the source and preserves other tabs; closed sources explain why they cannot open')
-    # OSC first, completion hook second: refresh the existing row and its kind.
+    # Anonymous information and completion reports have no shared cause identity.
     info = notify('Terminal update', 'info', pane_b, tab_b)
     root = open_bell(snapshot()['unread_count'])
     select_kind('Information')
@@ -409,15 +409,17 @@ def exercise(h, fixture, Atspi, display, X, xtest, Image):
     find('Terminal update', root)
     rpc('notify', title='Codex completed update', body='Ready for review',
         level='turn_completed', pane=pane_b, surface=tab_b)
-    fixture.wait_for(lambda: next(e for e in snapshot()['entries'] if e['id'] == info)['level'] == 'turn_completed',
-                     'existing notification promoted to completion')
-    counts(root, (0, 0))
+    fixture.wait_for(lambda: any(e['title'] == 'Codex completed update' for e in snapshot()['entries']),
+                     'separate completion notification')
+    assert next(e for e in snapshot()['entries'] if e['id'] == info)['level'] == 'info'
+    counts(root, (1, 1))
+    find('Terminal update', root)
     select_kind('Completed')
     counts(root, (1, 1))
     find('Codex completed update', root)
     find('Ready for review', root)
-    screenshot('notifications-promoted-completion.png')
-    h.pass_check('Completion hook upgrades the earlier OSC row and refreshes its kind, title, body and filter counts')
+    screenshot('notifications-distinct-completion.png')
+    h.pass_check('Information and completion retain distinct rows, content and filter counts')
     (h.root / 'final-notifications.json').write_text(json.dumps(snapshot(), indent=2))
     h.close_window(process)
 
