@@ -58,7 +58,13 @@ def main():
                      FM_ARCH_RECOVERY=str(h.root / "state/flowmux/editor-recovery") + "/",
                      FM_ARCH_RECOVERY_FLAG=str(recovery_flag),
                      FM_ARCH_RECOVERY_ENTERED=str(recovery_entered))
+        h.env["GTK_A11Y"] = "atspi"
         h.start_display()
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
+        import gi
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+
         process, path = h.window("editor-io")
         workspace = h.rpc(path, "workspace_create", name="Editor I/O", root=str(work))["workspace_created"]["id"]
         h.rpc(path, "workspace_focus", workspace=workspace)
@@ -102,6 +108,17 @@ def main():
                         data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0]),
                     ))
             connection.sync()
+
+        def sync_error_visible():
+            def walk(node):
+                yield node
+                for index in range(node.get_child_count()):
+                    child = node.get_child_at_index(index)
+                    if child:
+                        yield from walk(child)
+            return any(node.get_name() == "Could not synchronize changes"
+                       and node.get_state_set().contains(Atspi.StateType.SHOWING)
+                       for node in walk(Atspi.get_desktop(0)))
 
         gui.wait_for(focus_window, "mapped editor test window")
         time.sleep(0.5)
@@ -156,12 +173,13 @@ def main():
             # Closing must fail safely while the ordered document flush cannot
             # finish. The error dialog remains interactive on the GTK thread.
             request_close()
-            time.sleep(2.5)
+            gui.wait_for(sync_error_visible, "blocked document synchronization error")
             assert process.poll() is None, "window closed before pending document I/O finished"
             # WM close dismisses the modal without depending on WebKit keyboard
-            # focus in bare Xvfb. Allow the libadwaita close animation to finish.
+            # focus in bare Xvfb. Sending it before the dialog appears only hits
+            # the already pending window-close request and leaves the modal open.
             request_close()
-            time.sleep(0.5)
+            gui.wait_for(lambda: not sync_error_visible(), "synchronization error dismissed")
             responsive(terminal)
         finally:
             def release():
