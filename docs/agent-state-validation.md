@@ -1397,3 +1397,77 @@ capability negotiation, foreground-command boundaries without OSC 133 A,
 SSH reconnect compatibility, measured latency/load, and the full shared GUI
 suites. This transport commit does not claim full protocol support or closure
 of those previously outstanding gates.
+
+
+### 2026-10-30: terminal state projection and simpler agent rows
+
+Terminal reports now feed one read projection used by workspace rollups, the
+agent bar, the activity list, IPC tree output, and agent explanations. Native
+hook evidence and unresolved native waits take precedence. The projection does
+not overwrite the stored native lifecycle, process identity, or notification
+receipts. A newly accepted native event retires the older terminal projection;
+an already-delivered snapshot revision cannot reattach it. Clear/reset restores
+the latest underlying observation rather than a saved older state.
+
+Blocked reports aggregate permission/question/auth reasons, retain read state
+when an existing request is removed, and mark a genuinely new request unread.
+Reported errors request review; reported done is an unconfirmed outcome rather
+than proof of successful work. The existing serialized wait-scope values are
+preserved. Source evidence and optional terminal metadata carry the distinction.
+Report ids, app identities, states, and progress are exposed for diagnosis;
+free-text messages and titles are not copied into the agent presentation.
+
+Agent rows now have one navigation target. The adjacent information icon,
+per-agent details popup, and duplicate terminal-opening action are removed,
+including their unused bridge commands and popup polling. The existing row click,
+keyboard navigation, status indication, and tooltip evidence remain. Detailed
+native/child/terminal diagnosis remains available through `flowmux agents
+--explain` and its JSON form. Primary labels describe activity or the required
+response rather than the reporting mechanism.
+
+All eight program-runtime tests passed, covering shared UI/IPC projection,
+read-only explanation queries, partial request clearing, new request attention,
+latest-screen restoration, native ownership, and stale snapshot rejection.
+The read-state test first reproduced an unwanted unread reset after removing
+one of two read requests, then passed with attention keyed to newly introduced
+records (`/tmp/fm-program-display-read-red.log` and `runtime-final.log`).
+The macOS and Linux agent-unit runners and IPC tests passed. Final workspace
+all-target Clippy with native-smoke and denied warnings, application/CLI builds,
+formatting, and whitespace checks passed.
+
+The final native main-thread harness passed hook replay, tooltip evidence,
+stable activity/bar rows, and real PTY transport with projected states.
+Linux passed the same protocol fixture, six agent-bar tests, stable activity
+rows, and workspace/pane/surface activation. Both row tests assert one button
+without an adjacent control. The initial Linux fixture had no control workspace,
+so its visible completion was correctly acknowledged instead of requiring
+review. The fixture now creates a control workspace first, preserving the
+intended hidden-output scenario. Final protocol artifacts are
+`/tmp/fm-program-xoch_eu8` and Linux `/tmp/fm-program-6rolv81x`.
+Logs use the `/tmp/fm-program-display-` prefix: `agents.log`, `ipc.log`,
+`linux-final.log`, `ui-linux.log`, `native-final.log`, and `clippy-last.log`.
+
+Actual native-hook agents A and B ran in `/tmp/fm-atn-xwhul5w6`, PID 63820,
+bundle `com.flowmux.AttentionVerify33`. Both completed an ordinary reply and a
+new reply after a uniquely marked streaming response was interrupted. Each
+completion remained idle/Completed/Hook for six seconds. A's real question was
+kept pending while its hidden terminal received working, done, idle, blocked,
+and clear reports. Native requests and Hook evidence remained primary; the
+CLI exposed the supplemental reports. The native answer resolved the requests
+and completed the turn. Logs: `live-start.log`, `live-interrupt.log`, and
+`live-question.log`; detailed records and `display-final-state.json` remain
+under the isolated root.
+
+Native screenshots confirmed the information icons were absent. Clicking B's
+visible activity row switched from A to B's exact workspace and terminal,
+verified through the rendered terminal and IPC (`row-navigation.json`).
+The signed GUI SHA-256 is
+`a3779a2e2fe4025fad78daa794efca6ade2f1197a4769217d75aa736e11a9a88`;
+source/bundle UUID comparisons are in `binary-evidence.json`. Original PIDs
+72789 and 1401 and the permanent agent binary were preserved. The original
+running app was not replaced or restarted.
+
+Probe replies/capability negotiation, foreground-command boundaries without
+OSC 133 A, SSH reconnect compatibility, measured latency/load, and full shared
+GUI suites remain open. This commit completes the common presentation path
+and row simplification, not the complete protocol or the overall plan.

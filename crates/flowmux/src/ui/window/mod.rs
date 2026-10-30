@@ -115,7 +115,6 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
             | GtkCommand::OpenActivityTarget { .. }
-            | GtkCommand::OpenAgentTerminal { .. }
             | GtkCommand::OpenAgentBarItem { .. }
             | GtkCommand::OpenNotification { .. }
             | GtkCommand::OpenNotificationWithAck { .. }
@@ -2968,15 +2967,13 @@ impl WindowController {
             | GtkCommand::OpenBrowserPopup { .. }) => {
                 self.dispatch_browser_command(command).await;
             }
-            command @ (GtkCommand::QueryAgentExplanation { .. }
-            | GtkCommand::AddNotification { .. }
+            command @ (GtkCommand::AddNotification { .. }
             | GtkCommand::AddActivity { .. }
             | GtkCommand::SetAgentBarMode { .. }
             | GtkCommand::SetAgentSortMode { .. }
             | GtkCommand::SetUsageBarEnabled { .. }
             | GtkCommand::SetUsageBarPins { .. }
             | GtkCommand::OpenActivityTarget { .. }
-            | GtkCommand::OpenAgentTerminal { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::OpenNotification { .. }
             | GtkCommand::ListNotifications { .. }
@@ -10894,70 +10891,6 @@ mod tests {
         assert!(
             agent_bar_visible(&controller),
             "precondition: Agent Bar is visible before clicking an item"
-        );
-
-        let mut presence = flowmux_core::AgentPresence::new(
-            "test agent",
-            flowmux_core::AgentActivity::NeedsInput,
-            Some(42),
-        );
-        presence.session_id = Some("detail-session-one".into());
-        presence.seen = false;
-        store
-            .set_agent_activity(surface_b, Some(presence.clone()))
-            .await;
-        let before = serde_json::to_value(store.snapshot().await).unwrap();
-        let (ack, response) = oneshot::channel();
-        controller
-            .dispatch(GtkCommand::QueryAgentExplanation {
-                surface: surface_b,
-                ack,
-            })
-            .await;
-        let explanation = response.await.unwrap().unwrap();
-        assert!(!explanation.seen);
-        assert_eq!(
-            serde_json::to_value(store.snapshot().await).unwrap(),
-            before,
-            "reading details must preserve status, visibility and unread state"
-        );
-        presence.session_id = Some("detail-session-two".into());
-        store.set_agent_activity(surface_b, Some(presence)).await;
-        controller
-            .dispatch(GtkCommand::OpenAgentTerminal {
-                surface: surface_b,
-                session_key: explanation.session_key,
-            })
-            .await;
-        assert_eq!(
-            store.snapshot().await.active_workspace,
-            Some(ws_a),
-            "a stale detail must not navigate to a replacement session"
-        );
-        let current = store.explain_agents(Some(surface_b)).await.remove(0);
-        controller
-            .dispatch(GtkCommand::OpenAgentTerminal {
-                surface: surface_b,
-                session_key: current.session_key,
-            })
-            .await;
-        assert_eq!(store.snapshot().await.active_workspace, Some(ws_b));
-        assert_eq!(
-            controller.pane_registry.borrow().active_surface(pane_b),
-            Some(surface_b)
-        );
-        controller.activate_workspace(ws_a).await;
-        store.set_agent_activity(surface_b, None).await;
-        controller
-            .dispatch(GtkCommand::OpenAgentTerminal {
-                surface: surface_b,
-                session_key: current.session_key,
-            })
-            .await;
-        assert_eq!(
-            store.snapshot().await.active_workspace,
-            Some(ws_a),
-            "an ended agent must not fall back to its workspace"
         );
 
         controller

@@ -107,12 +107,6 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     crate::ui::browser_control::check_controls();
     crate::keybindings::check_quit_dialog(app).await;
     #[cfg(test)]
-    if std::env::var_os("FLOWMUX_AGENT_DETAILS_SMOKE_ONLY").is_some() {
-        crate::ui::agent_details::check_agent_details().await;
-        println!("MACOS_AGENT_DETAILS_OK");
-        return;
-    }
-    #[cfg(test)]
     if std::env::var_os("FLOWMUX_AGENT_TEXT_SMOKE_ONLY").is_some() {
         crate::ui::ghostty_pane::check_normal_agent_status_below_cursor().await;
         return;
@@ -433,8 +427,6 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         println!("MACOS_STABLE_ACTIVITY_ROWS_OK");
         crate::ui::agent_bar::check_stable_agent_bar_items().await;
         println!("MACOS_STABLE_AGENT_BAR_OK");
-        crate::ui::agent_details::check_agent_details().await;
-        println!("MACOS_AGENT_DETAILS_OK");
         let output = tokio::process::Command::new("python3")
             .arg(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

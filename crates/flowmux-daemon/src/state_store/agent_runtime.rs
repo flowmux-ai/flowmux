@@ -721,6 +721,10 @@ impl StateStore {
                 collect(&workspace_surface.root_pane, surface, &mut agents);
             }
             for (pane, surface, agent) in agents {
+                let terminal_report = agent.terminal_report.clone();
+                let terminal_report_primary = agent.terminal_report_is_primary();
+                let children = explain_agent_children(&lifecycle, surface, agent);
+                let agent = agent.display_presence();
                 result.push(AgentExplanation {
                     workspace: workspace.id,
                     pane,
@@ -735,7 +739,9 @@ impl StateStore {
                     sequence: agent.seq,
                     session_key: trace_key(agent.session_id.as_deref()),
                     pending_waits: agent.pending_waits.clone(),
-                    children: explain_agent_children(&lifecycle, surface, agent),
+                    children,
+                    terminal_report,
+                    terminal_report_primary,
                 });
             }
         }

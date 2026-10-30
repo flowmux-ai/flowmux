@@ -158,7 +158,9 @@ impl AgentBar {
 
         self.attach_dnd_handlers(&button, item.surface);
 
-        let root = crate::ui::agent_details::row(&button, item.surface, self.bridge.clone());
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        button.set_hexpand(true);
+        root.append(&button);
         let widget = AgentBarItemWidget {
             root,
             button,
@@ -490,6 +492,14 @@ pub(crate) async fn check_stable_agent_bar_items() {
     window.present();
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
     let button = bar.item_buttons.borrow()[&surface].button.clone();
+    assert_eq!(
+        button.parent().unwrap().first_child(),
+        Some(button.clone().upcast())
+    );
+    assert!(
+        button.next_sibling().is_none(),
+        "an agent row has one navigation target"
+    );
     assert!(button.grab_focus());
     assert!(button.is_focus());
     let content = button.child().unwrap();

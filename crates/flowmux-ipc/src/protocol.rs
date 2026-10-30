@@ -170,6 +170,10 @@ pub struct AgentExplanation {
     pub pending_waits: Vec<flowmux_core::AgentWaitSummary>,
     /// None means no child observation ledger is available, not zero children.
     pub children: Option<AgentChildrenExplanation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_report: Option<flowmux_core::AgentTerminalReport>,
+    #[serde(default)]
+    pub terminal_report_primary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,21 +228,24 @@ fn collect_leaf_panes(pane: &Pane, out: &mut Vec<TreePane>) {
                         title: s.title.clone(),
                         kind: surface_kind_label(&s.kind).to_string(),
                         active: s.id == *active,
-                        agent: s.agent.as_ref().map(|agent| TreeAgent {
-                            name: agent.name.clone(),
-                            status: agent.public_status(),
-                            activity: agent.activity,
-                            source: agent.source.clone(),
-                            status_evidence: agent.status_evidence,
-                            turn_outcome: agent.turn_outcome,
-                            pending_waits: agent.pending_waits.clone(),
-                            status_text: agent.status_text().map(str::to_owned),
-                            seq: agent.seq,
-                            message: agent.message.clone(),
-                            custom_status: agent.custom_status.clone(),
-                            session_id: agent.session_id.clone(),
-                            session_name: agent.session_name.clone(),
-                            messaging_socket: agent.messaging_socket.clone(),
+                        agent: s.agent.as_ref().map(|agent| {
+                            let agent = agent.display_presence();
+                            TreeAgent {
+                                name: agent.name.clone(),
+                                status: agent.public_status(),
+                                activity: agent.activity,
+                                source: agent.source.clone(),
+                                status_evidence: agent.status_evidence,
+                                turn_outcome: agent.turn_outcome,
+                                pending_waits: agent.pending_waits.clone(),
+                                status_text: agent.status_text().map(str::to_owned),
+                                seq: agent.seq,
+                                message: agent.message.clone(),
+                                custom_status: agent.custom_status.clone(),
+                                session_id: agent.session_id.clone(),
+                                session_name: agent.session_name.clone(),
+                                messaging_socket: agent.messaging_socket.clone(),
+                            }
                         }),
                     })
                     .collect(),

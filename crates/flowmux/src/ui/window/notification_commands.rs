@@ -6,38 +6,6 @@ use super::*;
 impl WindowController {
     pub(super) async fn dispatch_notification_command(&self, cmd: GtkCommand) {
         match cmd {
-            GtkCommand::QueryAgentExplanation { surface, ack } => {
-                let _ = ack.send(
-                    self.store
-                        .explain_agents(Some(surface))
-                        .await
-                        .into_iter()
-                        .next(),
-                );
-            }
-            GtkCommand::OpenAgentTerminal {
-                surface,
-                session_key,
-            } => {
-                if let Some(agent) = self
-                    .store
-                    .explain_agents(Some(surface))
-                    .await
-                    .into_iter()
-                    .next()
-                {
-                    let valid = {
-                        let registry = self.pane_registry.borrow();
-                        agent.session_key == session_key
-                            && registry.workspace_of_pane(agent.pane) == Some(agent.workspace)
-                            && registry.pane_for_surface(surface) == Some(agent.pane)
-                    };
-                    if valid {
-                        self.open_activity_target(agent.workspace, agent.pane, surface)
-                            .await;
-                    }
-                }
-            }
             GtkCommand::AddActivity { entry } => {
                 if self.activities.push(entry) {
                     self.refresh_activity_panel().await;

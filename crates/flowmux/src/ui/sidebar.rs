@@ -1126,7 +1126,9 @@ impl ActivityRowWidget {
         let (content, when) = activity_row_content(entry);
         button.set_child(Some(&content));
         let target = Rc::new(Cell::new((entry.workspace, entry.pane, entry.surface)));
-        let root = crate::ui::agent_details::row(&button, entry.surface, bridge.clone());
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        button.set_hexpand(true);
+        root.append(&button);
         let click_target = target.clone();
         button.connect_clicked(move |_| {
             let (workspace, pane, surface) = click_target.get();
@@ -1304,6 +1306,14 @@ pub(crate) async fn check_stable_activity_rows() {
     window.present();
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
     let button = rows.borrow()[&surface].button.clone();
+    assert_eq!(
+        button.parent().unwrap().first_child(),
+        Some(button.clone().upcast())
+    );
+    assert!(
+        button.next_sibling().is_none(),
+        "an agent row has one navigation target"
+    );
     let removed_content = button.child().unwrap().downgrade();
     assert!(button.grab_focus());
     assert!(button.is_focus());

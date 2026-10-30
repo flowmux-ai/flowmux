@@ -717,14 +717,6 @@ pub enum GtkCommand {
         pane: PaneId,
         surface: SurfaceId,
     },
-    QueryAgentExplanation {
-        surface: SurfaceId,
-        ack: oneshot::Sender<Option<flowmux_ipc::protocol::AgentExplanation>>,
-    },
-    OpenAgentTerminal {
-        surface: SurfaceId,
-        session_key: Option<u64>,
-    },
     /// Tell the GUI store which `org.gtk.Notifications` id was
     /// assigned to a previously-added entry. Used by the bell popover
     /// to ask the daemon to withdraw the toast (and shrink the dock
@@ -968,7 +960,6 @@ impl Bridge {
     ) -> Result<(), async_channel::SendError<GtkCommand>> {
         let control = match &command {
             GtkCommand::PaneReadScreen { .. }
-            | GtkCommand::QueryAgentExplanation { .. }
             | GtkCommand::ListNotifications { .. }
             | GtkCommand::QueryAgentSurfaceVisible { .. }
             | GtkCommand::QueryTerminalAgentPids { .. }

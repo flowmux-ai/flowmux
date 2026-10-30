@@ -487,6 +487,15 @@ impl WindowController {
                     }
                     None => self.store.forget_terminal_program_status(surface).await,
                 }
+                let workspace = self
+                    .pane_registry
+                    .borrow()
+                    .surface_workspace
+                    .get(&surface)
+                    .copied();
+                if let Some(workspace) = workspace {
+                    self.sync_workspace_agent_status(workspace).await;
+                }
             }
             GtkCommand::TerminalProgramStatusObserved {
                 surface,
@@ -505,12 +514,27 @@ impl WindowController {
                     });
                 let result = if matches {
                     self.store
-                        .report_terminal_program_status(surface, snapshot)
+                        .report_terminal_program_status_with_visibility(
+                            surface,
+                            snapshot,
+                            self.is_agent_surface_visible(surface),
+                        )
                         .await
                         .map(|_| ())
                 } else {
                     Err("terminal report belongs to a different or ended PTY".into())
                 };
+                if result.is_ok() {
+                    let workspace = self
+                        .pane_registry
+                        .borrow()
+                        .surface_workspace
+                        .get(&surface)
+                        .copied();
+                    if let Some(workspace) = workspace {
+                        self.sync_workspace_agent_status(workspace).await;
+                    }
+                }
                 let _ = ack.send(result);
             }
             GtkCommand::TerminalOutputObserved {

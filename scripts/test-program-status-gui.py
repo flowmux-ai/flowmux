@@ -84,6 +84,8 @@ def main():
         return result
 
     original_workspace = rpc('workspace_current')['workspace_current']['id']
+    if original_workspace is None:
+        original_workspace = rpc('workspace_create', name='Protocol control', root=str(root))['workspace_created']['id']
     workspace = rpc('workspace_create', name='Program status transport', root=str(root))['workspace_created']['id']
     tree = rpc('workspace_tree')['tree']['workspaces']
     ws = next(w for w in tree if w['id'] == workspace)
@@ -94,6 +96,11 @@ def main():
 
     def current():
         return rpc('terminal_program_status_query', surface=surface)['terminal_program_status']['snapshot']
+
+    def display():
+        entries = rpc('agent_explain', surface=surface)['agent_explanations']['agents']
+        assert len(entries) == 1, entries
+        return entries[0]
 
     def wait(predicate, label):
         end = time.monotonic()+15
@@ -122,6 +129,13 @@ def main():
     first = wait(lambda s: s and len(s['records']) == 2, 'initial')
     assert not json.loads((root/'child.json').read_text())['generation_exposed']
     assert any('kind=question' in record for record in first['records'])
+    shown = display()
+    assert shown['status'] == 'blocked' and shown['attention'] == 'input_required', shown
+    assert shown['terminal_report_primary'] and shown['status_evidence']['source'] == 'program', shown
+    assert shown['pending_waits'][0]['reason'] == 'question', shown
+    assert shown['terminal_report']['records'][1]['app'] == 'fixture', shown
+    (root/'initial-display.json').write_text(json.dumps(shown, indent=2))
+    assert display() == shown, 'details read changed the projected state'
     assert rpc('workspace_current')['workspace_current']['id'] == before_focus
     for _ in range(10): assert current() == first, 'query changed state'
 
@@ -141,11 +155,13 @@ def main():
     assert current() == cleared, 'delayed snapshot revived the child'
     send('prompt')
     results = wait(lambda s: s and s['records'] == ['7501;state=done:id=result', '7501;state=error:id=error'], 'prompt-boundary')
+    assert display()['attention'] == 'failure_review', display()
     send('screens'); time.sleep(.2)
     assert current() == results, 'screen switch or soft reset erased records'
     send('reset'); wait(lambda s: s and not s['records'], 'full-reset')
     send('flood')
     flooded = wait(lambda s: s and s['records'] == ['7501;state=blocked:app=fixture:kind=permission'], 'coalesced-flood')
+    assert display()['attention'] == 'input_required' and display()['pending_waits'][0]['reason'] == 'approval', display()
     send('probe')
     probe = json.loads((root/'probe.json').read_text())
     assert probe['sentinel'] and not probe['status_reply'], probe
@@ -159,6 +175,7 @@ def main():
         time.sleep(.1)
     else: raise AssertionError('ended PTY still accepted reports')
     assert current()['records'] == final['records']
+    assert display()['turn_outcome'] == 'unknown' and not display()['pending_waits'], display()
     assert rpc('workspace_current')['workspace_current']['id'] == before_focus
 
     # Kill only the wrapper just created for this fixture. The GUI's own child

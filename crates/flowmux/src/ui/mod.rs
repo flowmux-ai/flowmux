@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pub mod agent_bar;
-mod agent_details;
 pub(crate) mod agent_office;
 mod browser_bookmarks;
 mod browser_capture;

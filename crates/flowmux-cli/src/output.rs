@@ -40,6 +40,26 @@ pub(crate) fn render_agent_explanations(
                 wait.context_evidence
             );
         }
+        if let Some(report) = &agent.terminal_report {
+            let _ = writeln!(
+                text,
+                "  terminal reports: {} ({}) since={}",
+                report.records.len(),
+                if agent.terminal_report_primary {
+                    "displayed"
+                } else {
+                    "supplemental"
+                },
+                report.since
+            );
+            for record in &report.records {
+                let _ = writeln!(
+                    text,
+                    "    id={:?} state={} app={:?} progress={:?} reason={:?}",
+                    record.id, record.state, record.app, record.progress, record.reason
+                );
+            }
+        }
         match &agent.children {
             Some(children) => {
                 let _ = writeln!(

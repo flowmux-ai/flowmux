@@ -1215,6 +1215,7 @@ impl Pane {
                     let Some(agent) = &surface.agent else {
                         continue;
                     };
+                    let agent = agent.display_presence();
                     let status = agent.public_status();
                     let cwd = match &surface.kind {
                         SurfaceKind::SshTerminal { cwd, .. } => cwd.clone(),
@@ -2399,6 +2400,7 @@ impl AgentBarItem {
         agent: &AgentPresence,
         workspace_color: Option<&str>,
     ) -> Option<Self> {
+        let agent = agent.display_presence();
         let status = agent.public_status();
         let visual_status = agent_bar_visual_status(status)?;
         Some(Self {
@@ -2549,8 +2551,11 @@ fn reconcile_surface_process_agent(
             // subtree" is not evidence the agent exited, and dropping the
             // presence every sweep leaves the Agent Bar empty for exactly the
             // agents only the screen scan can find.
-            let screen_owned = existing.source.as_deref() == Some("flowmux:screen");
-            if existing.pid.is_none() && !screen_owned {
+            let report_owned = matches!(
+                existing.source.as_deref(),
+                Some("flowmux:screen" | "flowmux:program")
+            );
+            if existing.pid.is_none() && !report_owned {
                 *slot = None;
                 true
             } else {
@@ -2565,7 +2570,10 @@ fn reconcile_surface_process_agent(
             // Reclaim screen-owned presence even when its name was right so a
             // later process exit can remove it. A same-identity hook presence
             // remains under the hook's lifecycle.
-            let screen_owned = existing.source.as_deref() == Some("flowmux:screen");
+            let screen_owned = matches!(
+                existing.source.as_deref(),
+                Some("flowmux:screen" | "flowmux:program")
+            );
             let identity_changed = existing.name != name;
             if identity_changed {
                 let mut replacement = AgentPresence::new(name, AgentActivity::Idle, None);
@@ -2858,6 +2866,7 @@ impl AgentAttentionSummary {
 #[serde(rename_all = "snake_case")]
 pub enum AgentEvidenceSource {
     Hook,
+    Program,
     Screen,
     Process,
     #[serde(other)]
@@ -2899,6 +2908,7 @@ pub fn agent_status_tooltip(
     let mut text = if let Some(evidence) = evidence {
         let basis = match evidence.source {
             AgentEvidenceSource::Hook => "Hook-reported state",
+            AgentEvidenceSource::Program => "Terminal-reported state",
             AgentEvidenceSource::Screen => "Screen-inferred state",
             AgentEvidenceSource::Process => "Process detected; activity unconfirmed",
             AgentEvidenceSource::Unknown => "Status evidence unavailable",
@@ -2914,6 +2924,11 @@ pub fn agent_status_tooltip(
         let scope = match wait.scope {
             AgentWaitScope::Tool => "Tool requests",
             AgentWaitScope::Permission => "Permission scopes",
+            AgentWaitScope::Session
+                if evidence.is_some_and(|e| e.source == AgentEvidenceSource::Program) =>
+            {
+                "Terminal reports"
+            }
             AgentWaitScope::Session => "Session waits",
         };
         text.push_str(&format!(
@@ -2952,6 +2967,28 @@ struct ScreenWorkingBase {
     evidence: Option<AgentStatusEvidence>,
     pending_waits: Vec<AgentWaitSummary>,
     turn_outcome: Option<AgentTurnOutcome>,
+}
+
+/// Bounded terminal reports supplement the native lifecycle; never feed this
+/// presentation state back into hook correlation or process reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTerminalReport {
+    pub status: AgentStatus,
+    pub since: chrono::DateTime<chrono::Utc>,
+    pub pending_waits: Vec<AgentWaitSummary>,
+    pub outcome: Option<AgentTurnOutcome>,
+    pub seen: bool,
+    pub label: String,
+    pub records: Vec<AgentTerminalRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTerminalRecord {
+    pub id: Option<String>,
+    pub app: Option<String>,
+    pub state: String,
+    pub progress: Option<u8>,
+    pub reason: Option<AgentWaitReason>,
 }
 
 impl ScreenWorkingBase {
@@ -2993,6 +3030,8 @@ pub struct AgentPresence {
     pub pending_waits: Vec<AgentWaitSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_outcome: Option<AgentTurnOutcome>,
+    #[serde(skip)]
+    pub terminal_report: Option<AgentTerminalReport>,
     /// Lifecycle status hidden by the current screen-derived Working state.
     /// Internal restoration context; never persisted or exposed over IPC.
     #[serde(skip)]
@@ -3018,12 +3057,43 @@ fn agent_presence_seen_default() -> bool {
 }
 
 impl AgentPresence {
+    pub fn terminal_report_is_primary(&self) -> bool {
+        self.terminal_report.is_some()
+            && self.pending_waits.is_empty()
+            && !self
+                .status_evidence
+                .is_some_and(|e| e.source == AgentEvidenceSource::Hook)
+    }
+
+    /// A shared read projection for UI and IPC. The stored hook lifecycle stays
+    /// intact, so clear/reset restores the current native or screen basis.
+    pub fn display_presence(&self) -> std::borrow::Cow<'_, Self> {
+        if !self.terminal_report_is_primary() {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut display = self.clone();
+        let report = display.terminal_report.take().unwrap();
+        display.status = report.status;
+        display.activity = report.status.to_activity();
+        display.status_evidence = Some(AgentStatusEvidence {
+            source: AgentEvidenceSource::Program,
+            since: report.since,
+        });
+        display.pending_waits = report.pending_waits;
+        display.turn_outcome = report.outcome;
+        display.seen = report.seen;
+        display.custom_status = Some(report.label);
+        display.message = None;
+        std::borrow::Cow::Owned(display)
+    }
+
     pub fn attention(&self) -> AgentAttention {
+        let display = self.display_presence();
         agent_attention(
-            self.public_status(),
-            self.seen,
-            self.turn_outcome,
-            &self.pending_waits,
+            display.public_status(),
+            display.seen,
+            display.turn_outcome,
+            &display.pending_waits,
         )
     }
 
@@ -3037,6 +3107,7 @@ impl AgentPresence {
             status_evidence: None,
             pending_waits: Vec::new(),
             turn_outcome: None,
+            terminal_report: None,
             screen_working_base: None,
             seq: None,
             message: None,
@@ -3071,6 +3142,14 @@ impl AgentPresence {
     }
 
     pub fn public_status(&self) -> AgentStatus {
+        if self.terminal_report_is_primary() {
+            let report = self.terminal_report.as_ref().unwrap();
+            return if report.status == AgentStatus::Idle && !report.seen {
+                AgentStatus::Done
+            } else {
+                report.status
+            };
+        }
         if self.status == AgentStatus::Idle && !self.seen {
             AgentStatus::Done
         } else {
@@ -3079,6 +3158,18 @@ impl AgentPresence {
     }
 
     pub fn status_text(&self) -> Option<&str> {
+        if self.terminal_report_is_primary() {
+            return self
+                .terminal_report
+                .as_ref()
+                .map(|report| report.label.as_str());
+        }
+        if self
+            .status_evidence
+            .is_some_and(|e| e.source == AgentEvidenceSource::Program)
+        {
+            return self.custom_status.as_deref();
+        }
         if self.status == AgentStatus::Idle {
             if let Some(outcome) = self.turn_outcome {
                 return Some(outcome.status_text());
@@ -3165,6 +3256,11 @@ impl AgentPresence {
             }
             return true;
         }
+        if report.source.as_deref() == Some("flowmux:hook") || !same_session && !from_screen {
+            // A newly accepted native event supersedes the older terminal
+            // observation. An old snapshot revision cannot reattach it.
+            self.terminal_report = None;
+        }
         if !same_session {
             self.session_name = None;
             self.messaging_socket = None;
@@ -3178,7 +3274,7 @@ impl AgentPresence {
         let screen_defers_to_authoritative = report.source.as_deref() == Some("flowmux:screen")
             && matches!(
                 self.source.as_deref(),
-                Some("flowmux:hook") | Some(AGENT_SOURCE_PROC)
+                Some("flowmux:hook") | Some(AGENT_SOURCE_PROC) | Some("flowmux:program")
             );
         let keep_hook_outcome = from_screen
             && prev == next
@@ -3280,7 +3376,11 @@ impl AgentPresence {
     }
 
     pub fn mark_seen(&mut self) -> bool {
-        let changed = !self.seen;
+        let mut changed = !self.seen;
+        if let Some(report) = &mut self.terminal_report {
+            changed |= !report.seen;
+            report.seen = true;
+        }
         self.seen = true;
         changed
     }
