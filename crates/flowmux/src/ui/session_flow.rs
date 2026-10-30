@@ -43,6 +43,9 @@ struct Scene {
     drag_origin: Point,
     held: Option<SessionKey>,
     moved: bool,
+    drag_active: bool,
+    pan_mode: bool,
+    fit_during_settle: bool,
 }
 
 impl Scene {
@@ -60,14 +63,15 @@ impl Scene {
         self.graph
             .nodes()
             .into_iter()
-            .find(|key| {
-                self.layout.positions.get(*key).is_some_and(|point| {
-                    let p = camera.screen(*point);
-                    (p.x - cursor.x).hypot(p.y - cursor.y) <= 18.0
-                })
+            .filter_map(|key| {
+                let p = camera.screen(*self.layout.positions.get(key)?);
+                let distance = (p.x - cursor.x).hypot(p.y - cursor.y);
+                (distance <= 18.0).then_some((key, distance))
             })
-            .cloned()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(key, _)| key.clone())
     }
+
     fn fit(&mut self, width: f64, height: f64) {
         let mut camera = self.camera();
         camera.fit(
@@ -139,6 +143,16 @@ impl FlowPanel {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_widget_name("flowmux-session-flow");
         root.set_visible(false);
+        let css = gtk::CssProvider::new();
+        css.load_from_string("#flowmux-session-flow { background: #070a16; color: #d9e3fa; } #flowmux-session-flow button { color: #d9e3fa; } #flowmux-session-flow button:hover, #flowmux-session-flow button:checked { background: #202a46; }");
+        gtk::style_context_add_provider_for_display(
+            &root.display(),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        root.connect_destroy(move |root| {
+            gtk::style_context_remove_provider_for_display(&root.display(), &css);
+        });
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         toolbar.set_margin_start(12);
         toolbar.set_margin_end(8);
@@ -195,6 +209,7 @@ impl FlowPanel {
                     return;
                 };
                 if action <= 2 {
+                    p.scene.borrow_mut().fit_during_settle = false;
                     p.schedule_save();
                 }
                 match action {
@@ -225,6 +240,18 @@ impl FlowPanel {
             });
             toolbar.append(&button);
         }
+        let pan = gtk::ToggleButton::with_label("Pan");
+        pan.add_css_class("flat");
+        pan.set_tooltip_text(Some(
+            "Pan mode: dragging over nodes moves the view; clicking never opens a session",
+        ));
+        let weak = panel.downgrade();
+        pan.connect_toggled(move |button| {
+            if let Some(panel) = weak.upgrade() {
+                panel.scene.borrow_mut().pan_mode = button.is_active();
+            }
+        });
+        toolbar.insert_child_after(&pan, Some(&panel.status));
         panel.connect_canvas();
         panel
     }
@@ -253,6 +280,9 @@ impl FlowPanel {
         anchors: BTreeSet<SessionKey>,
     ) {
         let mut scene = self.scene.borrow_mut();
+        if scene.workspace != workspace {
+            scene.fit_during_settle = false;
+        }
         scene.workspace = workspace;
         scene.graph = graph;
         scene.anchors = anchors;
@@ -327,6 +357,9 @@ impl FlowPanel {
 
     fn activate(&self, key: SessionKey) {
         let mut scene = self.scene.borrow_mut();
+        if scene.pan_mode {
+            return;
+        }
         let node = scene.nodes.get(&key).cloned();
         if let Some(node) = node {
             self.status.set_text(&node.detail);
@@ -335,6 +368,7 @@ impl FlowPanel {
                     view.selected = Some(key.clone());
                 }
                 drop(scene);
+                self.schedule_save();
                 self.send(FlowAction::Open(key));
             }
         }
@@ -351,6 +385,7 @@ impl FlowPanel {
         self.animating.set(true);
         let scene = self.scene.clone();
         let running = self.animating.clone();
+        let bridge = self.bridge.clone();
         self.area.add_tick_callback(move |area, _| {
             if !area.is_mapped() || !area.settings().is_gtk_enable_animations() {
                 running.set(false);
@@ -361,11 +396,18 @@ impl FlowPanel {
                 layout, all, held, ..
             } = &mut *scene;
             let active = layout.step(all, held.as_ref());
+            if scene.fit_during_settle {
+                scene.fit(area.width() as f64, area.height() as f64);
+                scene.fit_during_settle = active;
+            }
             area.queue_draw();
             if active {
                 glib::ControlFlow::Continue
             } else {
                 running.set(false);
+                let _ = bridge
+                    .tx
+                    .try_send(GtkCommand::SessionFlow(FlowAction::SaveView));
                 glib::ControlFlow::Break
             }
         });
@@ -377,6 +419,7 @@ impl FlowPanel {
             let mut scene = scene.borrow_mut();
             if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {
                 scene.fit(width as f64, height as f64);
+                scene.fit_during_settle = true;
             }
             draw(area, cr, width, height, &scene);
         });
@@ -386,13 +429,17 @@ impl FlowPanel {
                 p.animate();
             }
         });
-        let scene = self.scene.clone();
+        let weak = self.downgrade();
         self.host.connect_position_notify(move |host| {
-            if let Some(view) = scene.borrow_mut().view() {
-                if view.open {
+            let Some(panel) = weak.upgrade() else {
+                return;
+            };
+            if let Some(view) = panel.scene.borrow_mut().view() {
+                if view.open && view.height != host.position() {
                     view.height = host.position();
+                    panel.schedule_save();
                 }
-            }
+            };
         });
         let motion = gtk::EventControllerMotion::new();
         let scene = self.scene.clone();
@@ -425,6 +472,7 @@ impl FlowPanel {
                 panel.schedule_save();
             }
             let mut scene = scene.borrow_mut();
+            scene.fit_during_settle = false;
             let cursor = scene.cursor;
             if let Some(v) = scene.view() {
                 v.camera.zoom_at(cursor, (-dy * 0.15).exp());
@@ -444,8 +492,14 @@ impl FlowPanel {
             };
             p.area.grab_focus();
             let mut s = p.scene.borrow_mut();
+            s.fit_during_settle = false;
+            s.drag_active = true;
             s.drag_start = Point { x, y };
-            s.held = s.hit(s.drag_start);
+            s.held = if s.pan_mode {
+                None
+            } else {
+                s.hit(s.drag_start)
+            };
             s.moved = false;
             s.drag_origin = s
                 .held
@@ -460,7 +514,7 @@ impl FlowPanel {
                 return;
             };
             let mut s = p.scene.borrow_mut();
-            if x.hypot(y) < 4.0 && !s.moved {
+            if !s.drag_active || (x.hypot(y) < 4.0 && !s.moved) {
                 return;
             }
             s.moved = true;
@@ -491,7 +545,8 @@ impl FlowPanel {
             };
             let mut s = p.scene.borrow_mut();
             let key = s.held.take();
-            let moved = s.moved;
+            let moved = s.moved || !s.drag_active;
+            s.drag_active = false;
             p.schedule_save();
             drop(s);
             if !moved {
@@ -505,8 +560,17 @@ impl FlowPanel {
             let mut s = scene.borrow_mut();
             s.held = None;
             s.moved = false;
+            s.drag_active = false;
         });
         self.area.add_controller(drag);
+        let focus = gtk::EventControllerFocus::new();
+        let scene = self.scene.clone();
+        focus.connect_leave(move |_| {
+            let mut scene = scene.borrow_mut();
+            scene.drag_active = false;
+            scene.held = None;
+        });
+        self.area.add_controller(focus);
         let keys = gtk::EventControllerKey::new();
         let p = self.downgrade();
         keys.connect_key_pressed(move |_, key, _, _| {
@@ -539,11 +603,14 @@ impl FlowPanel {
                     };
                     if let Some(node) = s.nodes.get(&nodes[index]) {
                         p.status.set_text(&node.detail);
+                        p.area
+                            .update_property(&[gtk::accessible::Property::Label(&node.detail)]);
                     }
                     if let Some(v) = s.view() {
                         v.selected = Some(nodes[index].clone());
                     }
                     drop(s);
+                    p.schedule_save();
                     p.area.queue_draw();
                 }
                 Key::Escape => {
@@ -612,7 +679,9 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
         .workspace
         .and_then(|id| scene.views.get(&id))
         .and_then(|v| v.selected.as_ref());
-    for key in scene.graph.nodes() {
+    let keys = scene.graph.nodes();
+    let show_all_labels = keys.len() <= 50;
+    for key in keys {
         let Some(point) = scene.layout.positions.get(key) else {
             continue;
         };
@@ -650,6 +719,9 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
             cr.arc(p.x, p.y, 14.0, 0.0, std::f64::consts::TAU);
             let _ = cr.stroke();
         }
+        if !show_all_labels && camera.zoom < 0.6 && !anchor && !focused {
+            continue;
+        }
         let title = node.map(|n| n.title.as_str()).unwrap_or(&key.id);
         let label = if !available {
             format!("{title} · unavailable")
@@ -673,7 +745,7 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
     }
 }
 
-#[cfg(all(target_os = "macos", feature = "native-smoke"))]
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 impl FlowPanel {
     pub(crate) fn check_native_interactions(
         &self,
@@ -696,5 +768,138 @@ impl FlowPanel {
         drop(scene);
         self.activate(unavailable.clone());
         assert_eq!(self.scene.borrow_mut().view().unwrap().selected, selected);
+    }
+}
+
+#[cfg(all(test, any(not(target_os = "macos"), feature = "native-smoke")))]
+pub(crate) fn check_canvas_controls() {
+    let (bridge, receiver) = Bridge::new();
+    let stack = gtk::Stack::new();
+    let existing = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    stack.add_named(&existing, Some("existing"));
+    let panel = FlowPanel::new(&stack, bridge);
+    let key = |id: &str| SessionKey {
+        provider: "codex".into(),
+        home: "/fixture".into(),
+        id: id.into(),
+    };
+    let mut graph = Lineage::default();
+    graph.link(key("parent"), key("child")).unwrap();
+    let nodes = [
+        (
+            key("parent"),
+            Node {
+                title: "기록 없음".into(),
+                detail: "Cannot resume".into(),
+                available: false,
+                running: false,
+            },
+        ),
+        (
+            key("child"),
+            Node {
+                title: "Current experiment".into(),
+                detail: "Open".into(),
+                available: true,
+                running: true,
+            },
+        ),
+    ]
+    .into();
+    panel.set_nodes(graph.clone(), nodes, &BTreeMap::new());
+    let workspace = WorkspaceId::new();
+    panel.show_workspace(Some(workspace), graph, [key("child")].into());
+    panel.toggle(workspace);
+    panel.scene.borrow_mut().fit(800.0, 260.0);
+    let point = panel
+        .scene
+        .borrow()
+        .camera()
+        .screen(panel.positions()[&key("child")]);
+    let controllers = panel.area.observe_controllers();
+    let motion = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerMotion>()
+                .ok()
+        })
+        .unwrap();
+    let scroll = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerScroll>()
+                .ok()
+        })
+        .unwrap();
+    let drag = (0..controllers.n_items())
+        .find_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())
+        .unwrap();
+    motion.emit_by_name::<()>("motion", &[&point.x, &point.y]);
+    let before = panel.scene.borrow().camera().world(point);
+    assert!(scroll.emit_by_name::<bool>("scroll", &[&0.0, &1.0]));
+    let after = panel.scene.borrow().camera().world(point);
+    assert!((before.x - after.x).abs() < 0.00001 && (before.y - after.y).abs() < 0.00001);
+    let point = panel
+        .scene
+        .borrow()
+        .camera()
+        .screen(panel.positions()[&key("child")]);
+    let old = panel.positions()[&key("child")];
+    drag.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+    drag.emit_by_name::<()>("drag-update", &[&40.0, &20.0]);
+    drag.emit_by_name::<()>("drag-end", &[&40.0, &20.0]);
+    assert_ne!(panel.positions()[&key("child")], old);
+    assert!(receiver.try_recv().is_err(), "drag must not open a session");
+    panel.scene.borrow_mut().pan_mode = true;
+    let point = panel
+        .scene
+        .borrow()
+        .camera()
+        .screen(panel.positions()[&key("child")]);
+    let old = panel.positions();
+    let camera = panel.scene.borrow().camera();
+    drag.emit_by_name::<()>("drag-begin", &[&point.x, &point.y]);
+    drag.emit_by_name::<()>("drag-update", &[&50.0, &0.0]);
+    drag.emit_by_name::<()>("drag-end", &[&50.0, &0.0]);
+    assert_eq!(panel.positions(), old);
+    assert_ne!(panel.scene.borrow().camera(), camera);
+    assert!(receiver.try_recv().is_err());
+    panel.activate(key("child"));
+    assert!(
+        receiver.try_recv().is_err(),
+        "pan mode must not activate sessions"
+    );
+    panel.scene.borrow_mut().pan_mode = false;
+    panel.activate(key("parent"));
+    assert!(
+        receiver.try_recv().is_err(),
+        "unavailable sessions must not open"
+    );
+    panel.activate(key("child"));
+    assert!(
+        matches!(receiver.try_recv(), Ok(GtkCommand::SessionFlow(FlowAction::Open(id))) if id == key("child"))
+    );
+    let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();
+    let cr = gtk::cairo::Context::new(&surface).unwrap();
+    draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());
+    for _ in 0..50 {
+        panel.toggle(workspace);
+    }
+    assert_eq!(stack.child_by_name("existing"), Some(existing.upcast()));
+    let weak = panel.area.downgrade();
+    drop((motion, scroll, drag, controllers, panel));
+    assert!(
+        weak.upgrade().is_none(),
+        "canvas controllers must not retain the widget"
+    );
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    #[gtk::test]
+    fn canvas_controls_preserve_panes_and_never_launch_during_navigation() {
+        super::check_canvas_controls();
     }
 }

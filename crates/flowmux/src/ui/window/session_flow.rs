@@ -6,7 +6,9 @@ use super::*;
 use crate::ui::session_flow::{FlowAction, FlowPanel, Node};
 use flowmux_core::session_flow::SessionKey;
 use flowmux_core::AgentStatus;
-use flowmux_state::session_flow::{import_native, session_key, FlowStore, Snapshot};
+use flowmux_state::session_flow::{
+    codex_process_session, import_native, session_key, FlowStore, LiveSession, Snapshot,
+};
 use flowmux_state::session_history::{HistorySession, SessionAgent};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +26,7 @@ struct Catalog {
     bindings: HashMap<SurfaceId, SessionKey>,
     forkable: BTreeSet<SessionKey>,
     views: BTreeMap<uuid::Uuid, flowmux_state::session_flow::SavedView>,
+    live: BTreeMap<SessionKey, Vec<LiveSession>>,
 }
 
 #[derive(Clone)]
@@ -119,9 +122,13 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
     }
 }
 
-fn load_catalog(targets: &[Anchor]) -> Result<Catalog, String> {
+fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String> {
     let mut store = FlowStore::open(&FlowStore::default_path().map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    let live_baseline = store.live_sessions().map_err(|e| e.to_string())?;
+    if let Some(saved) = flowmux_state::agent_sessions::default_agent_session_store() {
+        store.reconcile_saved(&saved).map_err(|e| e.to_string())?;
+    }
     let mut catalog = Catalog {
         snapshot: Snapshot::default(),
         available: BTreeMap::new(),
@@ -130,6 +137,7 @@ fn load_catalog(targets: &[Anchor]) -> Result<Catalog, String> {
         bindings: HashMap::new(),
         forkable: BTreeSet::new(),
         views: store.views().map_err(|e| e.to_string())?,
+        live: BTreeMap::new(),
     };
     let mut namespaces = BTreeSet::new();
     for anchor in targets {
@@ -165,6 +173,29 @@ fn load_catalog(targets: &[Anchor]) -> Result<Catalog, String> {
             }
         }
     }
+    let live: Vec<_> = targets
+        .iter()
+        .filter_map(|anchor| {
+            let focused = anchor.target.focused.as_ref()?;
+            let key = catalog.bindings.get(&focused.surface)?.clone();
+            Some((
+                key,
+                LiveSession {
+                    owner,
+                    pid: focused.root_pid,
+                    started: flowmux_procmon::process_start_time(focused.root_pid),
+                    workspace: anchor.workspace.0,
+                    pane: focused.pane.0,
+                    surface: focused.surface.0,
+                    socket: flowmux_config::paths::runtime_socket_for_pid(std::process::id()),
+                },
+            ))
+        })
+        .collect();
+    store
+        .sync_live_sessions_if_unchanged(owner, &live, &live_baseline)
+        .map_err(|e| e.to_string())?;
+    catalog.live = store.live_sessions().map_err(|e| e.to_string())?;
     catalog.snapshot = store.snapshot().map_err(|e| e.to_string())?;
     Ok(catalog)
 }
@@ -193,10 +224,27 @@ impl WindowController {
         let mut anchors = Vec::new();
         for (workspace, pane, surface, root_pid) in terminals {
             if let Some(located) = self.store.located_agent_presence(surface).await {
-                if let (Some(agent), Some(session_id)) = (
-                    SessionAgent::from_name(&located.presence.name),
-                    located.presence.session_id,
-                ) {
+                let agent = SessionAgent::from_name(&located.presence.name);
+                let mut session_id = located.presence.session_id;
+                if session_id.is_none() && agent == Some(SessionAgent::Codex) {
+                    let target = SessionTarget {
+                        agent: SessionAgent::Codex,
+                        focused: Some(FocusedSession {
+                            pane,
+                            surface,
+                            root_pid,
+                            session_id: None,
+                        }),
+                    };
+                    session_id = gtk::gio::spawn_blocking(move || {
+                        let home = session_home(&target).ok()?;
+                        codex_process_session(root_pid, &home.path).ok().flatten()
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                }
+                if let (Some(agent), Some(session_id)) = (agent, session_id) {
                     anchors.push(Anchor {
                         workspace,
                         target: SessionTarget {
@@ -237,7 +285,9 @@ impl WindowController {
         let controller = self.clone();
         glib::MainContext::default().spawn_local(async move {
             let worker_anchors = anchors.clone();
-            let result = gtk::gio::spawn_blocking(move || load_catalog(&worker_anchors)).await;
+            let owner = controller.flow.owner;
+            let result =
+                gtk::gio::spawn_blocking(move || load_catalog(&worker_anchors, owner)).await;
             controller.flow.loading.set(false);
             if controller.flow_anchors().await != anchors {
                 controller.flow.targets.borrow_mut().clear();
@@ -327,7 +377,8 @@ impl WindowController {
             .into_iter()
             .map(|key| {
                 let record = catalog.snapshot.records.get(key);
-                let available = running.contains(key) || catalog.resumable.contains(key);
+                let is_running = running.contains(key) || catalog.live.contains_key(key);
+                let available = is_running || catalog.resumable.contains(key);
                 let title = record
                     .map(|r| r.title.clone())
                     .unwrap_or_else(|| key.id.clone());
@@ -335,7 +386,7 @@ impl WindowController {
                     "{} · {} · {}",
                     key.provider,
                     title,
-                    if running.contains(key) {
+                    if is_running {
                         "Open session · select to focus"
                     } else if available {
                         "Select to resume in a right split"
@@ -349,7 +400,7 @@ impl WindowController {
                         title,
                         detail,
                         available,
-                        running: running.contains(key),
+                        running: is_running,
                     },
                 )
             })
@@ -450,6 +501,30 @@ impl WindowController {
                 return Ok(());
             }
         }
+        if fork_source.is_none() {
+            let source = key.clone();
+            let live = gtk::gio::spawn_blocking(move || -> std::io::Result<Vec<LiveSession>> {
+                Ok(FlowStore::open(&FlowStore::default_path()?)?
+                    .live_sessions()?
+                    .remove(&source)
+                    .unwrap_or_default())
+            })
+            .await
+            .map_err(|_| "Session ownership reader failed")?
+            .map_err(|e| e.to_string())?;
+            if live.len() > 1 {
+                return Err("This session has multiple live owners; select its existing terminal to continue".into());
+            }
+            if let Some(live) = live.first() {
+                if live.owner == self.flow.owner {
+                    return Err(
+                        "Session ownership is still updating. Refresh Session Flow and try again."
+                            .into(),
+                    );
+                }
+                return self.focus_foreign_flow_session(&key, live).await;
+            }
+        }
         let (session, home) = {
             let catalog = self.flow.catalog.borrow();
             let catalog = catalog.as_ref().ok_or("Session history is still loading")?;
@@ -498,6 +573,7 @@ impl WindowController {
         if self.store.active_workspace().await != Some(workspace) {
             return Err("Target workspace changed; select the session again".into());
         }
+        let mut expected_hook_id = None;
         if fork_source.is_some() {
             let presence = self
                 .store
@@ -505,12 +581,41 @@ impl WindowController {
                 .await
                 .ok_or("Fork source is no longer running")?
                 .presence;
+            expected_hook_id = presence.session_id.clone();
+            let source_id = if presence.session_id.is_none() && session.agent == SessionAgent::Codex
+            {
+                let root_pid = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .get(&source.1)
+                    .and_then(|terminal| terminal.pid.get())
+                    .ok_or("Source process ended")? as u32;
+                let home = home.path.clone();
+                gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home))
+                    .await
+                    .map_err(|_| "Source process reader failed")?
+                    .map_err(|e| e.to_string())?
+            } else {
+                presence.session_id
+            };
             if SessionAgent::from_name(&presence.name) != Some(session.agent)
-                || presence.session_id.as_deref() != Some(&key.id)
+                || source_id.as_deref() != Some(&key.id)
                 || !matches!(presence.status, AgentStatus::Idle | AgentStatus::Done)
             {
                 return Err("Wait for this session's current turn to finish before forking".into());
             }
+        }
+        if self
+            .pane_registry
+            .borrow()
+            .pane_frame(source.0)
+            .is_none_or(|frame| frame.width() < 480)
+        {
+            return Err(
+                "Not enough space for a right split. Enlarge this pane before opening the session."
+                    .into(),
+            );
         }
         let line = sessions::session_shell_line(&session, &home, false, fork_source.is_some())?;
         let surface = SurfaceId::new();
@@ -549,7 +654,7 @@ impl WindowController {
                 .split_session_pane(
                     source.0,
                     source.1,
-                    fork_source.map(|_| key.id.as_str()),
+                    expected_hook_id.as_deref(),
                     surface,
                     session.cwd.clone(),
                 )
@@ -615,8 +720,14 @@ impl WindowController {
                 if !controller.window.is_visible() { return; }
                 let Some(located) = controller.store.located_agent_presence(surface).await else { continue; };
                 if located.pane != pane || SessionAgent::from_name(&located.presence.name) != Some(session.agent) { continue; }
-                let Some(id) = located.presence.session_id else { continue; };
+                let Some(root_pid) = controller.pane_registry.borrow().terminals.get(&surface).and_then(|terminal| terminal.pid.get()).map(|pid| pid as u32) else { continue; };
+                let id = if located.presence.session_id.is_none() && session.agent == SessionAgent::Codex {
+                    let home = home.path.clone();
+                    gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home)).await.ok().and_then(Result::ok).flatten()
+                } else { located.presence.session_id };
+                let Some(id) = id else { continue; };
                 let observed = SessionKey { id, ..key.clone() };
+                let live = LiveSession { owner: operation.owner, pid: root_pid, started: flowmux_procmon::process_start_time(root_pid), workspace: workspace.0, pane: pane.0, surface: surface.0, socket: flowmux_config::paths::runtime_socket_for_pid(std::process::id()) };
                 let operation = operation.clone(); let home = home.clone(); let native = observed.clone();
                 let result = gtk::gio::spawn_blocking(move || -> Result<(), String> {
                     let native_sessions = flowmux_state::session_history::list_sessions(session.agent, &home.path).map_err(|e| e.to_string())?;
@@ -624,7 +735,7 @@ impl WindowController {
                     if operation.kind == OperationKind::Fork && session.agent == SessionAgent::Codex && child.fork_parent().map_err(|e| e.to_string())?.as_deref() != Some(&operation.source.id) { return Err("Fork parent identity has not been confirmed".into()); }
                     let mut store = FlowStore::open(&FlowStore::default_path().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
                     store.import(&[(native.clone(), flowmux_state::session_flow::SessionRecord::from(child))], &[]).map_err(|e| e.to_string())?;
-                    store.complete(&operation, &native).map_err(|e| e.to_string())
+                    store.complete_running(&operation, &native, &live).map_err(|e| e.to_string())
                 }).await;
                 if matches!(result, Ok(Ok(()))) {
                     let _ = controller.bridge.tx.try_send(GtkCommand::SessionFlow(FlowAction::Refresh));
@@ -637,7 +748,7 @@ impl WindowController {
     }
 }
 
-#[cfg(all(target_os = "macos", feature = "native-smoke"))]
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 pub(super) async fn check_native(
     controller: &WindowController,
     workspace: WorkspaceId,
@@ -645,6 +756,7 @@ pub(super) async fn check_native(
     root: &std::path::Path,
 ) {
     use flowmux_state::session_flow::SessionRecord;
+    crate::ui::session_flow::check_canvas_controls();
     let source = controller
         .pane_registry
         .borrow()
@@ -738,6 +850,7 @@ pub(super) async fn check_native(
         bindings: [(source, key(&child))].into(),
         forkable: BTreeSet::new(),
         views: BTreeMap::new(),
+        live: BTreeMap::new(),
     });
     controller
         .render_session_flow(std::slice::from_ref(&anchor))
@@ -843,4 +956,378 @@ pub(super) async fn check_native(
         }
     }
     println!("MACOS_SESSION_FLOW_LAYOUT_OK");
+}
+
+/// Opt-in provider contract test. Uses only the explicitly supplied disposable
+/// history store; ordinary native CI never invokes a paid provider.
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(super) async fn check_real_codex(
+    controller: &WindowController,
+    workspace: WorkspaceId,
+    pane: PaneId,
+) {
+    use vte::prelude::*;
+    let home = PathBuf::from(
+        std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_HOME").expect("disposable Codex home"),
+    );
+    assert!(
+        home.starts_with("/tmp") && home.join("config.toml").is_file(),
+        "real-provider tests require a disposable /tmp store"
+    );
+    let source_id = std::env::var("FLOWMUX_SESSION_FLOW_REAL_ID").expect("native source ID");
+    let cli = std::env::var("FLOWMUX_BUNDLED_CLI_PATH").expect("built helper");
+    std::env::set_var("FLOWMUX_AGENT_TRACE", "1");
+    let _logging = flowmux_config::diagnostics::init_logging("session-flow-test", "warn").unwrap();
+    std::env::set_var("CODEX_HOME", &home);
+    flowmux_cli::hook_install::install(flowmux_cli::hook_install::HookTarget::Codex, &cli).unwrap();
+    flowmux_cli::hook_install::install_agent_shims().unwrap();
+    // Capture native event input in this disposable profile for contract evidence.
+    let hook_path = home.join("hooks.json");
+    let mut hooks: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&hook_path).unwrap()).unwrap();
+    for (event, groups) in hooks["hooks"].as_object_mut().unwrap() {
+        for group in groups.as_array_mut().unwrap() {
+            for hook in group["hooks"].as_array_mut().unwrap() {
+                let command = hook["command"].as_str().unwrap();
+                hook["command"] = serde_json::Value::String(format!(
+                    "tee {} | {command}",
+                    shell_quote(home.join(format!("event-{event}.json")).to_str().unwrap())
+                ));
+            }
+        }
+    }
+    std::fs::write(&hook_path, serde_json::to_vec_pretty(&hooks).unwrap()).unwrap();
+    controller.activate_workspace(workspace).await;
+    controller.focus_pane(pane);
+    let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
+    let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
+        flowmux_daemon::DaemonHandler::new(controller.store.clone()),
+        controller.bridge.clone(),
+    ));
+    let server_socket = socket.clone();
+    let server = tokio::spawn(async move {
+        flowmux_ipc::server::run(&server_socket, handler)
+            .await
+            .unwrap();
+    });
+    for _ in 0..100 {
+        if socket.exists() {
+            break;
+        }
+        glib::timeout_future(Duration::from_millis(20)).await;
+    }
+    assert!(socket.exists());
+    let terminal = controller
+        .pane_registry
+        .borrow()
+        .active_terminal(pane)
+        .unwrap()
+        .clone();
+    let source = controller
+        .pane_registry
+        .borrow()
+        .active_surface(pane)
+        .unwrap();
+    let original_pid = terminal.pid.get();
+    let original_widget = terminal.widget.clone();
+    let source_session = flowmux_state::session_history::list_sessions(SessionAgent::Codex, &home)
+        .unwrap()
+        .into_iter()
+        .find(|session| session.id == source_id)
+        .unwrap();
+    terminal.widget.feed_child(
+        format!(
+            "cd {} && env PATH={}:\"$PATH\" FLOWMUX_AGENT_TRACE=1 CODEX_HOME={} codex resume {}\n",
+            shell_quote(source_session.cwd.to_str().unwrap()),
+            shell_quote(
+                flowmux_config::paths::agent_shim_dir()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            ),
+            shell_quote(home.to_str().unwrap()),
+            source_id
+        )
+        .as_bytes(),
+    );
+    let ready = glib::future_with_timeout(Duration::from_secs(35), async {
+        let mut reviewed_test_hooks = false;
+        loop {
+            // Only this newly generated disposable profile is under test. It
+            // contains no user hook entries or inherited trust decisions.
+            if !reviewed_test_hooks
+                && terminal
+                    .widget
+                    .text_format(vte::Format::Text)
+                    .is_some_and(|text| text.contains("Hooks need review"))
+            {
+                let hooks: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(home.join("hooks.json")).unwrap())
+                        .unwrap();
+                for groups in hooks["hooks"].as_object().unwrap().values() {
+                    for group in groups.as_array().unwrap() {
+                        for hook in group["hooks"].as_array().unwrap() {
+                            let command = hook["command"].as_str().unwrap();
+                            assert!(
+                                command.contains(&cli) && command.contains("flowmux-hook"),
+                                "unexpected hook in disposable profile"
+                            );
+                        }
+                    }
+                }
+                terminal.widget.feed_child(b"\x1b[B\r");
+                reviewed_test_hooks = true;
+            }
+            controller.poll_agent_processes().await;
+            if controller.flow_anchors().await.iter().any(|anchor| {
+                anchor.target.focused.as_ref().is_some_and(|focused| {
+                    focused.surface == source && focused.session_id.as_deref() == Some(&source_id)
+                })
+            }) {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await;
+    if ready.is_err() {
+        eprintln!(
+            "SOURCE_PRESENCE={:?}",
+            controller.store.located_agent_presence(source).await
+        );
+        let mut evidence = String::new();
+        if let Some(logs) = flowmux_config::paths::logs_dir() {
+            if let Ok(entries) = std::fs::read_dir(logs) {
+                for entry in entries.flatten() {
+                    if let Ok(text) = std::fs::read_to_string(entry.path()) {
+                        evidence.push_str(&text);
+                    }
+                }
+            }
+        }
+        std::fs::write(home.parent().unwrap().join("flowmux-trace.log"), evidence).unwrap();
+    }
+    assert!(
+        ready.is_ok(),
+        "native Codex source was not identified: {:?}",
+        terminal.widget.text_format(vte::Format::Text)
+    );
+    println!("CODEX_SOURCE_READY");
+    controller.focus_pane(pane);
+    controller.refresh_session_flow(true).await;
+    let ready = glib::future_with_timeout(Duration::from_secs(15), async {
+        while !controller
+            .pane_registry
+            .borrow()
+            .session_flow_forkable
+            .contains(&source)
+        {
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(
+        ready.is_ok(),
+        "native fork capability: {}",
+        controller.flow.panel.status.text()
+    );
+    let key = session_key(SessionAgent::Codex, &home, &source_id).unwrap();
+    let previous_children: BTreeSet<_> = FlowStore::open(&FlowStore::default_path().unwrap())
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .lineage
+        .edges()
+        .filter(|(parent, _)| *parent == &key)
+        .map(|(_, child)| child.id.clone())
+        .collect();
+    controller
+        .launch_flow_session(key.clone(), Some((pane, source)))
+        .await
+        .unwrap();
+    let (child_pane, child_surface) = {
+        let registry = controller.pane_registry.borrow();
+        let (&surface, term) = registry
+            .terminals
+            .iter()
+            .find(|(id, _)| **id != source)
+            .expect("fork terminal");
+        (term.id(), surface)
+    };
+    let child_id =
+        glib::future_with_timeout(Duration::from_secs(40), async {
+            loop {
+                controller.poll_agent_processes().await;
+                let snapshot = FlowStore::open(&FlowStore::default_path().unwrap())
+                    .unwrap()
+                    .snapshot()
+                    .unwrap();
+                if let Some((_, child)) = snapshot.lineage.edges().find(|(parent, child)| {
+                    *parent == &key && !previous_children.contains(&child.id)
+                }) {
+                    break child.id.clone();
+                }
+                glib::timeout_future(Duration::from_millis(250)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            let child = controller.pane_registry.borrow().terminals[&child_surface].clone();
+            panic!(
+                "native fork was not confirmed: {}; {:?}",
+                controller.flow.panel.status.text(),
+                child.widget.text_format(vte::Format::Text)
+            )
+        });
+    assert_ne!(child_id, source_id);
+    assert_eq!(terminal.pid.get(), original_pid);
+    assert_eq!(terminal.widget, original_widget);
+    controller.store.close_pane(child_pane).await;
+    controller
+        .apply_close_pane_incremental_or_rerender(workspace, child_pane)
+        .await;
+    controller.focus_pane(pane);
+    controller.refresh_session_flow(true).await;
+    while controller.flow.loading.get() {
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
+    let child_key = session_key(SessionAgent::Codex, &home, &child_id).unwrap();
+    controller
+        .launch_flow_session(child_key.clone(), None)
+        .await
+        .unwrap();
+    let resumed = glib::future_with_timeout(Duration::from_secs(35), async {
+        loop {
+            let anchors = controller.flow_anchors().await;
+            if anchors.iter().any(|a| {
+                a.target
+                    .focused
+                    .as_ref()
+                    .and_then(|f| f.session_id.as_deref())
+                    == Some(&child_id)
+            }) {
+                break;
+            }
+            controller.poll_agent_processes().await;
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await;
+    assert!(
+        resumed.is_ok(),
+        "native resume did not retain child identity"
+    );
+    controller.refresh_session_flow(true).await;
+    while controller.flow.loading.get() {
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
+    controller
+        .launch_flow_session(child_key, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        controller.pane_registry.borrow().terminals.len(),
+        2,
+        "selecting an open session duplicated it"
+    );
+    assert_eq!(terminal.pid.get(), original_pid);
+    assert_eq!(terminal.widget, original_widget);
+    let snapshot = FlowStore::open(&FlowStore::default_path().unwrap())
+        .unwrap()
+        .snapshot()
+        .unwrap();
+    assert_eq!(
+        snapshot
+            .lineage
+            .edges()
+            .filter(|(parent, _)| *parent == &key)
+            .count(),
+        previous_children.len() + 1,
+        "resume created a fork edge"
+    );
+    controller.flow.panel.toggle(workspace);
+    println!("MACOS_SESSION_FLOW_CODEX_REAL_OK source={source_id} child={child_id}");
+    server.abort();
+}
+
+impl WindowController {
+    async fn focus_foreign_flow_session(
+        &self,
+        key: &SessionKey,
+        live: &LiveSession,
+    ) -> Result<(), String> {
+        use flowmux_ipc::protocol::{Request, Response};
+        let agent = SessionAgent::from_name(&key.provider).ok_or("Unknown session provider")?;
+        let target = SessionTarget {
+            agent,
+            focused: Some(FocusedSession {
+                pane: PaneId(live.pane),
+                surface: SurfaceId(live.surface),
+                root_pid: live.pid,
+                session_id: Some(key.id.clone()),
+            }),
+        };
+        let pid = live.pid;
+        let (home, process_id) = gtk::gio::spawn_blocking(move || {
+            let home = session_home(&target)?;
+            let process_id = if agent == SessionAgent::Codex {
+                codex_process_session(pid, &home.path).map_err(|e| e.to_string())?
+            } else {
+                None
+            };
+            Ok::<_, String>((home, process_id))
+        })
+        .await
+        .map_err(|_| "Live session reader failed")??;
+        if home.path.canonicalize().map_err(|e| e.to_string())? != key.home {
+            return Err("Live session's native store changed; refresh before opening".into());
+        }
+        let action = async {
+            let client = flowmux_ipc::client::Client::connect(&live.socket)
+                .await
+                .map_err(|e| e.to_string())?;
+            match client
+                .call(Request::AgentSurfaceResolve {
+                    agent: key.provider.clone(),
+                    session_id: key.id.clone(),
+                    cwd: None,
+                    session_start: false,
+                })
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                Response::AgentSurface {
+                    pane,
+                    surface,
+                    session_id,
+                } if pane.0 == live.pane
+                    && surface.0 == live.surface
+                    && session_id.as_deref() == Some(&key.id) => {}
+                _ if process_id.as_deref() == Some(&key.id) => {}
+                _ => return Err("Existing session identity changed; refresh Session Flow".into()),
+            }
+            for request in [
+                Request::WorkspaceFocus {
+                    workspace: WorkspaceId(live.workspace),
+                },
+                Request::SurfaceFocus {
+                    pane: PaneId(live.pane),
+                    surface: SurfaceId(live.surface),
+                },
+            ] {
+                if !matches!(
+                    client.call(request).await.map_err(|e| e.to_string())?,
+                    Response::Ok
+                ) {
+                    return Err("Existing session could not be focused".into());
+                }
+            }
+            Ok(())
+        };
+        tokio::time::timeout(Duration::from_secs(3), action)
+            .await
+            .map_err(|_| {
+                "Existing session window did not answer; no duplicate was started".to_string()
+            })?
+    }
 }
