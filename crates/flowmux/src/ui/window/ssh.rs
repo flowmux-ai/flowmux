@@ -242,18 +242,21 @@ pub(crate) fn build_ssh_panel(
     let mut scoped = callbacks.clone();
     let weak = Rc::downgrade(&runtime);
     let id = surface.id;
-    scoped.on_child_exited = Rc::new(RefCell::new(move |_, status| {
-        if let Some(runtime) = weak.upgrade() {
-            let mut state = runtime.borrow_mut();
-            if state.generation == generation && state.instances.get(&id) == Some(&instance) {
-                state.tabs.insert(id, format!("exited ({status})"));
-                let _ = state
-                    .bridge
-                    .tx
-                    .try_send(GtkCommand::TerminalContentsChanged { surface: id });
+    scoped.on_child_exited = Rc::new(RefCell::new(
+        move |exit: crate::ui::pane_terminal::ChildExit| {
+            let status = exit.status;
+            if let Some(runtime) = weak.upgrade() {
+                let mut state = runtime.borrow_mut();
+                if state.generation == generation && state.instances.get(&id) == Some(&instance) {
+                    state.tabs.insert(id, format!("exited ({status})"));
+                    let _ = state
+                        .bridge
+                        .tx
+                        .try_send(GtkCommand::TerminalContentsChanged { surface: id });
+                }
             }
-        }
-    }));
+        },
+    ));
     // Use live OSC titles only as screen evidence, never as local paths or
     // cached tab labels. Contents retain the usual throttled refresh callback.
     let bridge = runtime.borrow().bridge.clone();
@@ -1048,23 +1051,27 @@ impl WindowController {
         callbacks.on_terminal_contents_changed = Rc::new(RefCell::new(|_| {}));
         let weak = Rc::downgrade(&runtime);
         let bridge = self.bridge.clone();
-        callbacks.on_child_exited = Rc::new(RefCell::new(move |_, status| {
-            if let Some(runtime) = weak.upgrade() {
-                let mut state = runtime.borrow_mut();
-                if state.generation == generation
-                    && matches!(state.state, "connecting" | "connected")
-                {
-                    state.expire_previews();
-                    state.state = "failed";
-                    state.error = Some(format!("SSH exited ({status}); see authentication output"));
-                    state.forwards.clear();
-                    let _ = bridge.tx.try_send(GtkCommand::SshRefresh {
-                        workspace,
-                        generation,
-                    });
+        callbacks.on_child_exited = Rc::new(RefCell::new(
+            move |exit: crate::ui::pane_terminal::ChildExit| {
+                let status = exit.status;
+                if let Some(runtime) = weak.upgrade() {
+                    let mut state = runtime.borrow_mut();
+                    if state.generation == generation
+                        && matches!(state.state, "connecting" | "connected")
+                    {
+                        state.expire_previews();
+                        state.state = "failed";
+                        state.error =
+                            Some(format!("SSH exited ({status}); see authentication output"));
+                        state.forwards.clear();
+                        let _ = bridge.tx.try_send(GtkCommand::SshRefresh {
+                            workspace,
+                            generation,
+                        });
+                    }
                 }
-            }
-        }));
+            },
+        ));
         let pane = PaneId::new();
         let surface = SurfaceId::new();
         let opts = (self.callbacks.read_options)();

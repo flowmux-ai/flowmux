@@ -39,12 +39,30 @@ pub enum TabDropCommand {
     },
 }
 
+#[derive(Debug)]
+pub struct ChildExit {
+    pub pane: PaneId,
+    pub surface: SurfaceId,
+    pub status: i32,
+    pub closing: bool,
+    pub wrapper_pid: Option<i32>,
+    pub command: String,
+}
+
+pub struct ChildSpawned {
+    pub pane: PaneId,
+    pub surface: SurfaceId,
+    pub pid: i32,
+    pub gate: flowmux_terminal::pty::SpawnGate,
+}
+
 /// Per-pane callbacks the surface backends invoke to drive the window
 /// controller (focus, tab/pane menu actions, title changes, …). Shared by
 /// the terminal and browser panes.
 #[derive(Clone)]
 pub struct PaneCallbacks {
-    pub on_child_exited: Rc<RefCell<dyn FnMut(PaneId, i32)>>,
+    pub on_child_exited: Rc<RefCell<dyn FnMut(ChildExit)>>,
+    pub on_child_spawned: Rc<RefCell<dyn FnMut(ChildSpawned)>>,
     pub on_focus: Rc<RefCell<dyn FnMut(PaneId)>>,
     /// The embedded editor keeps ordinary keys inside Monaco and reports only
     /// plain Alt+arrow so the window can move focus through the pane tree.
@@ -171,7 +189,8 @@ impl PaneCallbacks {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn noop_for_test() -> Self {
         Self {
-            on_child_exited: Rc::new(RefCell::new(|_, _| {})),
+            on_child_exited: Rc::new(RefCell::new(|_| {})),
+            on_child_spawned: Rc::new(RefCell::new(|_| {})),
             on_focus: Rc::new(RefCell::new(|_| {})),
             on_editor_focus_direction: Rc::new(RefCell::new(|_, _| {})),
             on_close_pane: Rc::new(RefCell::new(|_| {})),

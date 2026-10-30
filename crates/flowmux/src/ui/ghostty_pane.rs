@@ -5,7 +5,7 @@
 //! notifications and hidden-tab output events; VTE renders the terminal and
 //! reports focus, title, directory, and child-exit changes.
 
-use crate::ui::pane_terminal::PaneCallbacks;
+use crate::ui::pane_terminal::{ChildExit, ChildSpawned, PaneCallbacks};
 use crate::ui::terminal_minimap::TerminalMinimap;
 use crate::ui::terminal_scrollback::{
     normalize_plain_text_snapshot, replay_bytes, snapshot_from_vte_html,
@@ -20,9 +20,28 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 use vte::prelude::*;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpawnPolicy {
+    pub oom_score_adj: Option<i32>,
+}
+
+thread_local! {
+    static SPAWN_POLICY: Cell<SpawnPolicy> = Cell::new(SpawnPolicy::default());
+    #[cfg(test)]
+    static TEST_BYPASS_PTY_TEE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn set_spawn_policy(policy: SpawnPolicy) {
+    SPAWN_POLICY.set(policy);
+}
+pub fn spawn_policy() -> SpawnPolicy {
+    SPAWN_POLICY.get()
+}
+
 #[derive(Clone)]
 pub struct GhosttyPane {
     id: Rc<Cell<PaneId>>,
+    closing: Rc<Cell<bool>>,
     /// SSH terminals must never expose their paths as local filesystem paths.
     pub is_ssh: bool,
     /// The VTE widget itself. Sits inside `container` and owns every
@@ -688,6 +707,13 @@ impl GhosttyPane {
     ) -> Result<Self, TerminalSpawnError> {
         let is_ssh = last_env_value(&extra_env, "FLOWMUX_SSH_TERMINAL") == Some("1");
         let pane_id = Rc::new(Cell::new(id));
+        let closing = Rc::new(Cell::new(false));
+        let argv = if argv.is_empty() {
+            default_shell_argv()
+        } else {
+            argv
+        };
+        let command = argv.first().cloned().unwrap_or_default();
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let scrollback_dirty = Rc::new(Cell::new(false));
         let term = vte::Terminal::new();
@@ -905,12 +931,20 @@ impl GhosttyPane {
             let pane_id = pane_id.clone();
             let pid = pid.clone();
             let pty_slot = pty_slot.clone();
+            let closing = closing.clone();
             term.connect_child_exited(move |_term, status| {
-                pid.set(None);
+                let wrapper_pid = pid.replace(None);
                 if let Some(pty) = pty_slot.borrow_mut().as_mut() {
                     pty.mark_child_exited();
                 }
-                (cb.borrow_mut())(pane_id.get(), status);
+                (cb.borrow_mut())(ChildExit {
+                    pane: pane_id.get(),
+                    surface,
+                    status,
+                    closing: closing.get(),
+                    wrapper_pid,
+                    command: command.clone(),
+                });
             });
         }
 
@@ -1089,11 +1123,6 @@ impl GhosttyPane {
             term.add_controller(click);
         }
 
-        let argv: Vec<String> = if argv.is_empty() {
-            default_shell_argv()
-        } else {
-            argv
-        };
         // Wrap the shell argv with `flowmuxctl pty-tee` so OSC 9/99/777
         // notifications and renderer-independent terminal-output events reach
         // the GUI even when VTE does not signal an unmapped tab/workspace. If
@@ -1131,12 +1160,13 @@ impl GhosttyPane {
         let (init_cols, init_rows): (u16, u16) = (80, 24);
         // Unmapped worker panes need a usable grid before GTK's first allocation.
         term.set_size(init_cols.into(), init_rows.into());
-        let mut pty = flowmux_terminal::pty::Pty::spawn(
+        let (mut pty, gate) = flowmux_terminal::pty::Pty::spawn_gated(
             &argv_refs,
             cwd.as_deref(),
             &extra_env,
             init_cols,
             init_rows,
+            spawn_policy().oom_score_adj,
         )
         .map_err(|error| TerminalSpawnError {
             message: format!("Could not start terminal: {error}"),
@@ -1171,9 +1201,16 @@ impl GhosttyPane {
         pty.set_external_child_watch();
         *pty_slot.borrow_mut() = Some(pty);
         term.watch_child(glib::Pid(child_pid));
+        (callbacks.on_child_spawned.borrow_mut())(ChildSpawned {
+            pane: id,
+            surface,
+            pid: child_pid,
+            gate,
+        });
 
         Ok(Self {
             id: pane_id,
+            closing,
             is_ssh,
             widget: term,
             container,
@@ -1354,6 +1391,7 @@ impl GhosttyPane {
     }
 
     pub fn close_pty(&self) {
+        self.closing.set(true);
         if let Some(pty) = self._pty.borrow_mut().take() {
             pty.close_async();
         }
@@ -1361,6 +1399,10 @@ impl GhosttyPane {
 }
 
 fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -> Vec<String> {
+    #[cfg(test)]
+    if TEST_BYPASS_PTY_TEE.get() {
+        return argv;
+    }
     let Some(ctl) = flowmux_terminal::find_flowmuxctl() else {
         tracing::warn!(
             "flowmuxctl not found next to the GUI binary; terminal-side \
@@ -3375,6 +3417,134 @@ except (ChildProcessError, ValueError):
 
 #[cfg(test)]
 mod tests {
+    async fn wait_for_exit(slot: &Rc<RefCell<Option<ChildExit>>>) -> ChildExit {
+        glib::future_with_timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Some(exit) = slot.borrow_mut().take() {
+                    return exit;
+                }
+                glib::timeout_future(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("child-exited never arrived")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn child_exit_after_close_pty_is_marked_closing() {
+        let slot: Rc<RefCell<Option<ChildExit>>> = Rc::new(RefCell::new(None));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let sink = slot.clone();
+        callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
+            *sink.borrow_mut() = Some(exit);
+        }));
+        TEST_BYPASS_PTY_TEE.set(true);
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            1000,
+            callbacks,
+        )
+        .unwrap();
+        TEST_BYPASS_PTY_TEE.set(false);
+        pane.close_pty();
+        let exit = wait_for_exit(&slot).await;
+        assert!(exit.closing);
+        assert_eq!(exit.command, "/bin/sh");
+        assert!(exit.wrapper_pid.is_some());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn child_killed_by_signal_reports_a_signal_status_and_not_closing() {
+        let slot: Rc<RefCell<Option<ChildExit>>> = Rc::new(RefCell::new(None));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let sink = slot.clone();
+        callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
+            *sink.borrow_mut() = Some(exit);
+        }));
+        let surface = SurfaceId::new();
+        TEST_BYPASS_PTY_TEE.set(true);
+        let _pane = GhosttyPane::spawn(
+            PaneId::new(),
+            surface,
+            vec!["/bin/sh".into(), "-c".into(), "kill -KILL $$".into()],
+            None,
+            Vec::new(),
+            1000,
+            callbacks,
+        )
+        .unwrap();
+        TEST_BYPASS_PTY_TEE.set(false);
+        let exit = wait_for_exit(&slot).await;
+        assert!(!exit.closing);
+        assert_eq!(exit.surface, surface);
+        assert_eq!(
+            crate::termination::WaitKind::from_status(exit.status),
+            crate::termination::WaitKind::Signaled {
+                signal: libc::SIGKILL
+            }
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn spawn_hands_the_gate_to_on_child_spawned_and_runs_after_release() {
+        let spawned: Rc<RefCell<Option<ChildSpawned>>> = Rc::new(RefCell::new(None));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let sink = spawned.clone();
+        callbacks.on_child_spawned = Rc::new(RefCell::new(move |s| {
+            *sink.borrow_mut() = Some(s);
+        }));
+        let slot: Rc<RefCell<Option<ChildExit>>> = Rc::new(RefCell::new(None));
+        let exit_sink = slot.clone();
+        callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
+            *exit_sink.borrow_mut() = Some(exit);
+        }));
+        TEST_BYPASS_PTY_TEE.set(true);
+        let _pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into(), "-c".into(), "exit 7".into()],
+            None,
+            Vec::new(),
+            1000,
+            callbacks,
+        )
+        .unwrap();
+        TEST_BYPASS_PTY_TEE.set(false);
+        let s = spawned
+            .borrow_mut()
+            .take()
+            .expect("on_child_spawned must fire synchronously");
+        assert!(s.pid > 0);
+        glib::timeout_future(std::time::Duration::from_millis(300)).await;
+        assert!(
+            slot.borrow().is_none(),
+            "gated child must not exit before release"
+        );
+        s.gate.release();
+        let exit = wait_for_exit(&slot).await;
+        assert_eq!(
+            crate::termination::WaitKind::from_status(exit.status),
+            crate::termination::WaitKind::Exited { code: 7 }
+        );
+    }
+
+    #[test]
+    fn spawn_policy_defaults_to_no_score_change() {
+        assert_eq!(spawn_policy(), SpawnPolicy::default());
+        set_spawn_policy(SpawnPolicy {
+            oom_score_adj: Some(500),
+        });
+        assert_eq!(spawn_policy().oom_score_adj, Some(500));
+        set_spawn_policy(SpawnPolicy::default());
+    }
+
     use super::*;
 
     #[cfg(not(target_os = "macos"))]
