@@ -72,6 +72,9 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
     let Ok(stdout) = output.try_clone() else {
         return (false, false);
     };
+    let Ok(stderr) = output.try_clone() else {
+        return (false, false);
+    };
     let mut cmd = Command::new(shell);
     let environment = home
         .environment
@@ -79,11 +82,11 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
         .map(|(key, value)| shell_quote(&format!("{key}={value}")))
         .collect::<Vec<_>>()
         .join(" ");
-    let command = format!("env {environment} {command}");
+    let command = format!("exec env {environment} {command}");
     cmd.args(["-lc", &command])
         .stdin(Stdio::null())
         .stdout(stdout)
-        .stderr(Stdio::null());
+        .stderr(stderr);
     cmd.envs(&home.environment);
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("FLOWMUX_") {
@@ -1329,5 +1332,30 @@ impl WindowController {
             .map_err(|_| {
                 "Existing session window did not answer; no duplicate was started".to_string()
             })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capability_probe_reads_stderr_and_rejects_failed_help() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let cli = root.path().join("opencode");
+        let home = SessionHome {
+            path: root.path().into(),
+            environment: [("PATH".into(), root.path().to_str().unwrap().into())].into(),
+            arguments: Vec::new(),
+        };
+        for (body, expected) in [
+            ("printf '%s' '--session --fork' >&2", (true, true)),
+            ("printf '%s' '--session'", (true, false)),
+            ("printf '%s' '--session --fork'; exit 1", (false, false)),
+        ] {
+            std::fs::write(&cli, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(probe_agent(SessionAgent::OpenCode, &home), expected);
+        }
     }
 }

@@ -92,7 +92,7 @@ python3 -c 'import hashlib, pathlib, sys; print("CLI_SHA256=" + hashlib.sha256(p
 run_phase agent-unit 960 python3 scripts/test-agent-unit.py 2>&1 | tee "$report_dir/agent-unit.log"
 run_phase ipc 300 cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
 run_phase bridge 180 cargo test -p flowmux --bin flowmux --locked bridge::tests
-run_phase session-path-unit 180 cargo test -p flowmux --bin flowmux --locked ui::window::sessions::
+run_phase session-path-unit 180 cargo test -p flowmux --bin flowmux --locked ui::window::session
 export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_phase native 600 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/native-smoke.log"
