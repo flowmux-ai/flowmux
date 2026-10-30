@@ -54,7 +54,10 @@ try:
             if mode == 'blocked':
                 title = 'Codex Action Required'
                 body += 'Do you want to approve this command?\r\n'
-            body += '› existing user draft' if mode == 'draft' else '› Ask Codex to do anything'
+            # A painted placeholder wraps in the narrow review split and puts
+            # this fixture's cursor on its continuation row. Draw an empty
+            # composer so the Send test exercises the empty-input contract.
+            body += '› existing user draft' if mode == 'draft' else '› '
             cursor = '\r\x1b[21C' if mode == 'draft' else '\r\x1b[2C'
             if title == 'Codex source':
                 title, body, cursor = 'Source receiver', 'Source receiver\r\n> ', ''
