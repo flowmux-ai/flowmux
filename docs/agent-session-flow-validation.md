@@ -756,3 +756,5 @@ Test `41168599342`도 최종 전체 **success**로 종료됐다. Linux artifact 
 최종 release 제품을 별도 `Flowmux Session Flow GSK.app`으로 패키징하고 PID `71474`로 실행했다. `/tmp/fmsgsk-jcur3b1x`의 별도 XDG·Codex 프로필에 실제 3세대 기록만 복사했다. 시험용 placeholder 인증 정보와 loopback responses endpoint를 사용하고 모델 turn은 요청하지 않았다. Codex의 모델 목록 갱신은 별도 vendor endpoint에서 placeholder 자격으로 401을 기록했으므로 이를 완전한 네트워크 격리라고 표현하지 않는다.
 
 CUA의 실제 sidebar 클릭으로 상단 cosmic 그래프가 열리고 3개 native ID와 두 관계가 표시되는 것을 확인했다. 이후 scroll 호출은 사용자 입력 감지를 반환하여 자동 조작을 중지하고 최신 화면을 다시 읽었다. 저장된 camera·노드 위치·선택이 변경됐지만 입력 출처와 실제 held-button 동작은 사용자 확인을 기다린다. 두 resume operation은 complete였으나 후속 pane tree에는 원본만 남아 있어 자식 pane이 닫힌 경위가 확인되기 전까지 성공한 resume UI 검증으로 계산하지 않는다. 새 앱도 사용자가 직접 확인할 수 있도록 유지한다. [실제 앱·소스/binary hash·전후 저장 상태·판정 범위](design-assets/session-flow-gsk-live-ui-461a4f9b.json).
+
+Sanitizers `41171844578`의 최종 전체 결론은 **success**다. Linux headless·native Lottie·GUI ASan/LSan과 ThorVG ASan/UBSan/LSan의 job/step 결과 및 전체 로그를 확인했다. [최종 결론·로그 hash·검사 범위](design-assets/session-flow-sanitizers-461a4f9b.json). Test `41171842039`의 macOS/Linux gate와 coverage는 별도 진행 중이다.

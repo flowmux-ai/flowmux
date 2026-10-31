@@ -674,7 +674,10 @@
       {
         "name": "Sanitizers",
         "id": 41171844578,
-        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171844578"
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171844578",
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "session-flow-sanitizers-461a4f9b.json"
       },
       {
         "name": "License audit",
