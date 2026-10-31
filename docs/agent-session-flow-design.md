@@ -158,7 +158,7 @@ Provider가 자식 열거를 제공하지 않으면 해당 namespace의 경량 m
 
 ### 그래프와 camera
 
-Native GTK `DrawingArea`의 Cairo/Pango 벡터 scene과 노드별 hit 영역을 기본 구현으로 선택한다. 목업의 HTML/SVG 구현을 그대로 런타임으로 옮기지 않는다. 새 WebView나 그래프 서비스를 도입하지 않고도 이미지처럼 렌더링된 그래프를 확대·이동할 수 있다.
+Native GTK `DrawingArea`를 기반으로 입력 controller와 노드별 hit 영역을 유지하고, GSK snapshot으로 그래프를 그린다. 연결선·노드·선택 테두리·Pango 라벨은 GTK 그래픽 노드로 제출한다. 우주 배경은 크기가 같으면 재사용하고, 화살표는 화면 배율별 작은 texture로 재사용한다. 전체 canvas의 Cairo callback을 반복 제출하지 않는다. 목업의 HTML/SVG 구현을 그대로 런타임으로 옮기지 않으며, 새 WebView나 그래프 서비스를 추가하지 않는다.
 
 - 우주를 연상시키는 짙은 남색 배경, 정적인 별 점, 명확한 노드와 연결선을 사용한다. 배경은 저대비로 두고 선택과 불가 상태는 글자·테두리로 함께 구분한다.
 - [Obsidian Graph view](https://help.obsidian.md/plugins/graph)의 center/repel/link force와 link distance 개념을 참고한다. 노드 드래그는 해당 노드를 이동하고 인접 노드는 연결 힘에 따라 반응한다. 빈 공간 또는 이동 모드 드래그는 camera를 이동한다.
@@ -302,7 +302,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 
 **과거 계보 조회의 한계:** Codex의 명시적 native fork metadata와 Flowmux가 직접 확인하여 기록한 관계를 표시한다. 도구가 원본 ID를 보관하지 않은 외부 fork는 자동 복원할 수 없다. 임의의 부모를 연결하지 않으며, 여섯 도구의 모든 과거 fork를 같은 수준으로 복원한다고 발표하지 않는다.
 
-**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 더 큰 그래프·더 긴 기간의 지속 사용과 실제 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 목표는 측정 결과와 구분한다. 화면 접근 회복 후 현재 제품의 1,000노드 release/GL 내부 frame p95를 재측정한 결과 33.57–34.27ms로 목표 ≤33ms를 충족하지 못했다. GSK 연결선·화살표 후보와 노드·라벨까지 확장한 후보도 같은 조건에서 목표 미달이어서 원복했다. [기준/후보 비교와 프로파일 기록](design-assets/session-flow-gsk-desktop-recheck.json)은 실제 화면 접근 전후 관찰을 포함하지만, 연속 compositor 표시와 물리 입력 검증을 대체하지 않는다. 실제 Codex의 17노드·3terminal을 유지한 30분/159회 전환 시험은 통과했으며 offscreen render와 snapshot 준비 대기를 별도로 기록했다. 실제 표시 frame 지연 측정은 아니다.
+**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 더 큰 그래프·더 긴 기간의 지속 사용과 실제 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 목표는 측정 결과와 구분한다. 이전 Cairo 구현의 1,000노드 release/GL 내부 frame p95는 33.57–34.27ms로 목표 ≤33ms에 미달했고, 초기 GSK 후보들도 원복했다. 이후 화살표 texture 재사용과 전체 canvas Cairo 경로 제거를 함께 적용한 prototype은 17.08–17.39ms를 기록했다. 다만 종료 시 화면 잠금이 확인됐으므로 최종 화면 성능 수용은 보류한다. 정리된 구현의 native·실제 Codex 동시 GUI 검증과 [측정 범위·남은 확인](design-assets/session-flow-gsk-retained-validation.json)을 구분해 기록한다. [기준/후보 비교와 프로파일 기록](design-assets/session-flow-gsk-desktop-recheck.json)은 실제 화면 접근 전후 관찰을 포함하지만, 연속 compositor 표시와 물리 입력 검증을 대체하지 않는다. 실제 Codex의 17노드·3terminal을 유지한 30분/159회 전환 시험은 통과했으며 offscreen render와 snapshot 준비 대기를 별도로 기록했다. 실제 표시 frame 지연 측정은 아니다.
 
 테스트와 실제 provider 증거는 [검증 기록](agent-session-flow-validation.md#실행-기록)에 모은다. 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다.
 

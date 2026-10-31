@@ -203,7 +203,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | CUA native sidebar pointer 클릭과 실제 상단 panel 추가 확인; 사람의 하드웨어 조작은 미확인 |
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
 | R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
-| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI 미확인. 내부 frame p95 목표 미달이며 잠금 해제 상태의 최종 화면 성능 검증도 남음 |
+| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI 미확인. 이전 Cairo 구현은 내부 frame p95 목표 미달. GSK prototype은 17.08–17.39ms였으나 종료 시 화면 잠금이 확인되어 최종 화면 성능 수용은 보류 |
 | R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인. 실제 독립 GUI 2개와 Codex writer의 동시 선택·기존 owner focus도 확인 | 다른 provider의 다중 GUI와 물리 입력까지 일반화하지 않음 |
 | R10 | Native disabled node 입력이 launch를 만들지 않음; 실제 비활성 Codex 기록을 임시 이동한 뒤 CUA pointer 클릭도 operation·pane 증가 없음; 기록 복원 완료 | 수동 접근성 검증 미확인 |
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
@@ -725,3 +725,16 @@ CUA로 보존된 복구 앱 PID `30374`의 화면에 다시 접근할 수 있음
 Sanitizers `41168601343`은 최종 전체 **success**다. Linux headless·native Lottie·GUI ASan/LSan과 ThorVG ASan/UBSan/LSan의 실제 job/step 결론 및 전체 로그를 확인했다. [최종 결론과 로그 hash](design-assets/session-flow-sanitizers-b8d84f65.json). Test의 Linux coverage 결과는 아직 대기 중이다.
 
 Test `41168599342`도 최종 전체 **success**로 종료됐다. Linux artifact `13031271470`의 12개 phase 모두 passed/exit 0이며, 실제 coverage는 lines **86.9082%**, regions **86.8115%**, functions **85.8393%**로 기준 79/78/78%를 충족한다. macOS 46개 phase, Sanitizers 및 License audit의 최종 결론과 함께 [전체 gate 기록](design-assets/session-flow-ci-b8d84f65.json)에 연결했다. 이는 제품 `54a44d89`와 시험 `b8d84f65`에 대한 CI이며, 이후 작업 중인 GSK 렌더러 후보의 최종 CI를 대신하지 않는다.
+
+
+## 2026-10-31 GSK snapshot 렌더러와 최종 재검증
+
+전체 화면을 매 프레임 Cairo로 다시 제출하던 경로를 GSK snapshot으로 교체했다. 배경 RenderNode와 배율별 화살표 texture를 재사용하고, 연결선·노드·선택 링·라벨을 GTK 그래픽 노드로 그린다. 기존 gesture controller, hit region, 세션 모델과 fork/resume 경로는 유지한다. 저장된 f64 좌표가 GSK f32 범위를 넘는 경우를 실제 snapshot 회귀 검사에 포함했다. 더 이상 사용하지 않는 pangocairo 의존성 두 개와 해당 라이선스 목록만 제거했다.
+
+화살표 texture만 바꾼 중간 후보는 p95 33.18–33.61ms로 목표에 미달했다. 빈 inherited Cairo snapshot까지 제거한 후보는 같은 release/GL·1,000노드·20개 family·10초×5회에서 p95 **17.08–17.39ms**, 전체 snapshot CPU p95 2.67–2.91ms를 기록했다. 그러나 종료 시 잠금이 확인됐고 이후 좌표 경계 검사·의존성 정리가 반영됐으므로, **현재 소스의 접근 가능한 데스크톱 재측정 전까지 성능 수용은 대기**다. CPU timer는 renderer 제출·GPU·compositor 시간을 포함하지 않는다.
+
+최종 소스의 fmt, all-targets/native-smoke clippy, native Session Flow 회귀, 라이선스 notice 시험 4개와 cargo-about 0.9.2 재생성이 통과했다. 실제 Codex 두 GUI 시험은 각각 79.615ms·44.726ms 간격으로 동시 선택하여 두 번 연속 통과했다. 대상 writer와 resume operation은 하나, 비소유 창의 재선택은 기존 정확한 pane/surface를 focus했으며 원본 terminal을 보존했다. Cairo backend에서 실행한 이 시험은 GL 성능·물리 입력 증거를 대신하지 않는다.
+
+앞선 한 실행은 Codex hook 확인 화면의 선택 항목이 바뀌기 전에 Enter를 보내 원본 세션 ID를 얻지 못했다(exit 101). graph resume 전의 시험 준비 실패로 기록했으며, 시험 전용 코드를 선택 항목 관측 후 Enter를 보내도록 수정한 commit `76680062` 이후 위 두 실행이 통과했다. 사용자 프로필이나 hook 신뢰 설정은 변경하지 않았다.
+
+[프로토타입 전체 수치·patch·최종 source hash·로컬 검사·실제 두 GUI 결과·실패 기록](design-assets/session-flow-gsk-retained-validation.json)과 [native texture 캡처](design-assets/session-flow-gsk-retained-prototype.png)를 보존한다. 이전 renderer의 녹색 CI와 구분하여 새 commit의 Test/Sanitizers/License audit를 별도로 실행한다. 실제 포인터·트랙패드·접근성 검증은 여전히 별도 항목이다.

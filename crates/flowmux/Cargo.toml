@@ -95,7 +95,6 @@ sha2 = { workspace = true }
 zbus = { workspace = true }
 
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
-pangocairo = "0.20"
 tempfile = "3"
 adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 # System VTE >= 0.76 provides the text extraction API used by read-screen.

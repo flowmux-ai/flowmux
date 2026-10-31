@@ -1,0 +1,658 @@
+{
+  "checked_at": "2026-10-31T05:13:30.987789+00:00",
+  "baseline_evidence": "session-flow-gsk-desktop-recheck.json",
+  "prototype_measurements": {
+    "gsk-texture-arrow": {
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "draw_cpu_scope": "Empty inherited callback only; all graph snapshot work is outside this timer. Do not use draw_cpu_ms to compare render cost.",
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 33.9795,
+              "p50": 17.65325,
+              "p95": 33.607083,
+              "samples": 412
+            },
+            "draw_cpu_ms": {
+              "max": 0.00041600000000000003,
+              "p50": 4.2e-05,
+              "p95": 0.000167,
+              "samples": 413
+            },
+            "duration_seconds": 10.108986333,
+            "input_batches": 592,
+            "signal_to_after_paint_ms": {
+              "max": 33.943833,
+              "p50": 17.003959,
+              "p95": 33.484874999999995,
+              "samples": 413
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.129459000000004,
+              "p50": 17.405125,
+              "p95": 33.588,
+              "samples": 437
+            },
+            "draw_cpu_ms": {
+              "max": 0.003666,
+              "p50": 4.2e-05,
+              "p95": 0.000167,
+              "samples": 438
+            },
+            "duration_seconds": 10.108973084,
+            "input_batches": 593,
+            "signal_to_after_paint_ms": {
+              "max": 34.0875,
+              "p50": 16.563292,
+              "p95": 33.450958,
+              "samples": 438
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.028959,
+              "p50": 17.464417,
+              "p95": 33.602,
+              "samples": 437
+            },
+            "draw_cpu_ms": {
+              "max": 0.00041600000000000003,
+              "p50": 4.2e-05,
+              "p95": 0.000167,
+              "samples": 438
+            },
+            "duration_seconds": 10.109088375,
+            "input_batches": 594,
+            "signal_to_after_paint_ms": {
+              "max": 33.918083,
+              "p50": 16.645958,
+              "p95": 33.379375,
+              "samples": 438
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 33.962375,
+              "p50": 16.826625,
+              "p95": 33.373208,
+              "samples": 508
+            },
+            "draw_cpu_ms": {
+              "max": 0.000334,
+              "p50": 4.2e-05,
+              "p95": 0.000166,
+              "samples": 509
+            },
+            "duration_seconds": 10.105346584,
+            "input_batches": 593,
+            "signal_to_after_paint_ms": {
+              "max": 33.832916999999995,
+              "p50": 15.504875,
+              "p95": 32.952667,
+              "samples": 509
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.083416,
+              "p50": 16.719041999999998,
+              "p95": 33.183709,
+              "samples": 543
+            },
+            "draw_cpu_ms": {
+              "max": 0.000375,
+              "p50": 4.2e-05,
+              "p95": 0.000125,
+              "samples": 544
+            },
+            "duration_seconds": 10.103444792,
+            "input_batches": 598,
+            "signal_to_after_paint_ms": {
+              "max": 33.824875,
+              "p50": 6.6095,
+              "p95": 31.732708999999996,
+              "samples": 544
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "native_exit_code": 0,
+      "report_sha256": "895837a16ec9f9451d52f46a1232c5c9a4f3a99738a75dd985faf59fcc26abbf",
+      "log_sha256": "8d5a429987a722093246fd095bc4d6afef747e9b1306e6c1ccf2cffb92440f8b",
+      "source_patch_sha256": "e7818e9d9468b51699b4ac805cbaf71abdf2289b1e4e6dbcf15a6145d4cd91ef",
+      "source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..3c27d3af 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -33,6 +33,8 @@ pub(crate) struct Node {\n \n use flowmux_state::session_flow::SavedView as View;\n \n+mod canvas;\n+\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n mod performance;\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n@@ -176,7 +178,8 @@ impl FlowPanel {\n         status.add_css_class(\"caption\");\n         toolbar.append(&status);\n         root.append(&toolbar);\n-        let area = gtk::DrawingArea::new();\n+        let scene = Rc::new(RefCell::new(Scene::default()));\n+        let area = canvas::Canvas::new(scene.clone()).upcast::<gtk::DrawingArea>();\n         area.set_widget_name(\"flowmux-session-flow-canvas\");\n         area.set_hexpand(true);\n         area.set_vexpand(true);\n@@ -198,7 +201,7 @@ impl FlowPanel {\n             root,\n             area,\n             status,\n-            scene: Rc::new(RefCell::new(Scene::default())),\n+            scene,\n             animating: Rc::new(Cell::new(false)),\n             bridge,\n             save_pending: Rc::new(Cell::new(false)),\n@@ -435,15 +438,7 @@ impl FlowPanel {\n     }\n \n     fn connect_canvas(&self) {\n-        let scene = self.scene.clone();\n-        self.area.set_draw_func(move |area, cr, width, height| {\n-            let mut scene = scene.borrow_mut();\n-            if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n-                scene.fit(width as f64, height as f64);\n-                scene.fit_during_settle = true;\n-            }\n-            draw(area, cr, width, height, &scene);\n-        });\n+        self.area.set_draw_func(|_, _, _, _| {});\n         let p = self.downgrade();\n         self.area.connect_map(move |_| {\n             if let Some(p) = p.upgrade() {\n@@ -778,7 +773,7 @@ fn layout_labels<'a>(\n     labels\n }\n \n-fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, scene: &Scene) {\n+fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {\n     cr.set_source_rgb(0.025, 0.035, 0.08);\n     let _ = cr.paint();\n     for i in 0..150u32 {\n@@ -794,37 +789,16 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         );\n         let _ = cr.fill();\n     }\n+}\n+\n+fn draw_foreground(\n+    area: &gtk::DrawingArea,\n+    cr: &gtk::cairo::Context,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n     let camera = scene.camera();\n-    cr.set_line_width(1.2);\n-    for (parent, child) in scene.graph.edges() {\n-        let (Some(p), Some(c)) = (\n-            scene.layout.positions.get(parent),\n-            scene.layout.positions.get(child),\n-        ) else {\n-            continue;\n-        };\n-        let (p, c) = (camera.screen(*p), camera.screen(*c));\n-        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n-        cr.move_to(p.x, p.y);\n-        cr.line_to(c.x, c.y);\n-        let _ = cr.stroke();\n-        let angle = (c.y - p.y).atan2(c.x - p.x);\n-        let tip = Point {\n-            x: c.x - angle.cos() * 14.0,\n-            y: c.y - angle.sin() * 14.0,\n-        };\n-        cr.move_to(tip.x, tip.y);\n-        cr.line_to(\n-            tip.x - (angle - 0.45).cos() * 7.0,\n-            tip.y - (angle - 0.45).sin() * 7.0,\n-        );\n-        cr.line_to(\n-            tip.x - (angle + 0.45).cos() * 7.0,\n-            tip.y - (angle + 0.45).sin() * 7.0,\n-        );\n-        cr.close_path();\n-        let _ = cr.fill();\n-    }\n     let selected = scene\n         .workspace\n         .and_then(|id| scene.views.get(&id))\n@@ -1222,7 +1196,7 @@ pub(crate) fn check_canvas_controls() {\n     panel.show_workspace(Some(workspace), graph, [key(\"child\")].into());\n     let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();\n     let cr = gtk::cairo::Context::new(&surface).unwrap();\n-    draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n+    draw_foreground(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n     for _ in 0..50 {\n         panel.toggle(workspace);\n     }\ndiff --git a/crates/flowmux/src/ui/session_flow/performance.rs b/crates/flowmux/src/ui/session_flow/performance.rs\nindex 0ad1a861..f483e64e 100644\n--- a/crates/flowmux/src/ui/session_flow/performance.rs\n+++ b/crates/flowmux/src/ui/session_flow/performance.rs\n@@ -91,16 +91,19 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         })\n         .unwrap();\n     let empty_draw = std::env::var_os(\"FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW\").is_some();\n+    panel\n+        .area\n+        .clone()\n+        .downcast::<canvas::Canvas>()\n+        .unwrap()\n+        .set_empty_draw(empty_draw);\n     let draw_times = Rc::new(RefCell::new(Vec::<f64>::new()));\n     let times = draw_times.clone();\n-    let scene = panel.scene.clone();\n-    panel.area.set_draw_func(move |area, cr, width, height| {\n+    panel.area.set_draw_func(move |_, cr, _, _| {\n         let start = Instant::now();\n         if empty_draw {\n             cr.set_source_rgb(0.02, 0.03, 0.08);\n             cr.paint().unwrap();\n-        } else {\n-            draw(area, cr, width, height, &scene.borrow());\n         }\n         times\n             .borrow_mut()\n@@ -182,6 +185,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         \"screen_lock_observation\":{\"source\":\"ioreg -n Root -d1\",\"start\":screen_lock_start,\"end\":screen_lock_end,\n             \"scope\":\"Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.\"},\n         \"diagnostic_empty_draw\":empty_draw,\"scale_factor\":panel.area.scale_factor(),\"renderer\":std::env::var(\"GSK_RENDERER\").ok(),\"debug_assertions\":cfg!(debug_assertions),\n+        \"draw_cpu_scope\":\"Empty inherited callback only; all graph snapshot work is outside this timer. Do not use draw_cpu_ms to compare render cost.\",\n         \"measurement\":\"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.\",\n         \"trials\":trials});\n     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();\ndiff --git a/crates/flowmux/src/ui/session_flow/canvas.rs b/crates/flowmux/src/ui/session_flow/canvas.rs\nnew file mode 100644\nindex 00000000..61d5c111\n--- /dev/null\n+++ b/crates/flowmux/src/ui/session_flow/canvas.rs\n@@ -0,0 +1,222 @@\n+// SPDX-License-Identifier: GPL-3.0-or-later\n+//! Keep the canvas input widget while submitting straight edges to GSK.\n+\n+use super::*;\n+use gtk::subclass::prelude::*;\n+use std::cell::OnceCell;\n+\n+mod imp {\n+    use super::*;\n+\n+    #[derive(Default)]\n+    pub struct Canvas {\n+        pub(super) scene: OnceCell<Rc<RefCell<Scene>>>,\n+        pub(super) empty_draw: Cell<bool>,\n+        background: RefCell<Option<((i32, i32), gtk::gsk::RenderNode)>>,\n+        arrow: RefCell<Option<(i32, gtk::gdk::Texture)>>,\n+    }\n+\n+    #[glib::object_subclass]\n+    impl ObjectSubclass for Canvas {\n+        const NAME: &'static str = \"FlowmuxSessionFlowCanvas\";\n+        type Type = super::Canvas;\n+        type ParentType = gtk::DrawingArea;\n+    }\n+\n+    impl ObjectImpl for Canvas {}\n+    impl DrawingAreaImpl for Canvas {}\n+\n+    impl WidgetImpl for Canvas {\n+        fn snapshot(&self, snapshot: &gtk::Snapshot) {\n+            let area = self.obj();\n+            let (width, height) = (area.width(), area.height());\n+            if width <= 0 || height <= 0 {\n+                return;\n+            }\n+            let bounds = gtk::graphene::Rect::new(0.0, 0.0, width as f32, height as f32);\n+            snapshot.push_clip(&bounds);\n+            if !self.empty_draw.get() {\n+                let mut scene = self.scene.get().unwrap().borrow_mut();\n+                if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n+                    scene.fit(width as f64, height as f64);\n+                    scene.fit_during_settle = true;\n+                }\n+                let mut background = self.background.borrow_mut();\n+                if background.as_ref().map(|(size, _)| *size) != Some((width, height)) {\n+                    let layer = gtk::Snapshot::new();\n+                    {\n+                        let cr = layer.append_cairo(&bounds);\n+                        draw_background(&cr, width, height);\n+                    }\n+                    *background = layer.to_node().map(|node| ((width, height), node));\n+                }\n+                if let Some((_, node)) = background.as_ref() {\n+                    snapshot.append_node(node);\n+                }\n+                drop(background);\n+                let camera = scene.camera();\n+                let color = gtk::gdk::RGBA::new(0.39, 0.51, 0.78, 0.55);\n+                let scale = area.scale_factor().max(1);\n+                let mut arrow = self.arrow.borrow_mut();\n+                if arrow.as_ref().map(|(old_scale, _)| *old_scale) != Some(scale) {\n+                    let mut surface = gtk::cairo::ImageSurface::create(\n+                        gtk::cairo::Format::ARgb32,\n+                        8 * scale,\n+                        8 * scale,\n+                    )\n+                    .unwrap();\n+                    {\n+                        let cr = gtk::cairo::Context::new(&surface).unwrap();\n+                        cr.scale(scale as f64, scale as f64);\n+                        cr.translate(7.0, 4.0);\n+                        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n+                        cr.move_to(0.0, 0.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, -0.45_f64.sin() * 7.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, 0.45_f64.sin() * 7.0);\n+                        cr.close_path();\n+                        let _ = cr.fill();\n+                    }\n+                    let stride = surface.stride() as usize;\n+                    let bytes = glib::Bytes::from_owned(surface.data().unwrap().to_vec());\n+                    #[cfg(target_endian = \"little\")]\n+                    let format = gtk::gdk::MemoryFormat::B8g8r8a8Premultiplied;\n+                    #[cfg(target_endian = \"big\")]\n+                    let format = gtk::gdk::MemoryFormat::A8r8g8b8Premultiplied;\n+                    let texture =\n+                        gtk::gdk::MemoryTexture::new(8 * scale, 8 * scale, format, &bytes, stride);\n+                    *arrow = Some((scale, texture.upcast()));\n+                }\n+                let arrow = &arrow.as_ref().unwrap().1;\n+                for (parent, child) in scene.graph.edges() {\n+                    let (Some(p), Some(c)) = (\n+                        scene.layout.positions.get(parent),\n+                        scene.layout.positions.get(child),\n+                    ) else {\n+                        continue;\n+                    };\n+                    let (p, c) = (camera.screen(*p), camera.screen(*c));\n+                    let length = (c.x - p.x).hypot(c.y - p.y);\n+                    if length == 0.0 {\n+                        continue;\n+                    }\n+                    snapshot.save();\n+                    snapshot.translate(&gtk::graphene::Point::new(p.x as f32, p.y as f32));\n+                    snapshot.rotate((c.y - p.y).atan2(c.x - p.x).to_degrees() as f32);\n+                    snapshot.append_color(\n+                        &color,\n+                        &gtk::graphene::Rect::new(0.0, -0.6, length as f32, 1.2),\n+                    );\n+                    snapshot.translate(&gtk::graphene::Point::new((length - 14.0) as f32, 0.0));\n+                    snapshot.append_texture(arrow, &gtk::graphene::Rect::new(-7.0, -4.0, 8.0, 8.0));\n+                    snapshot.restore();\n+                }\n+                draw_nodes(snapshot, area.upcast_ref(), width, height, &scene);\n+            }\n+            // The inherited callback is empty except in the diagnostic control.\n+            self.parent_snapshot(snapshot);\n+            snapshot.pop();\n+        }\n+    }\n+}\n+\n+fn draw_nodes(\n+    snapshot: &gtk::Snapshot,\n+    area: &gtk::DrawingArea,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n+    let camera = scene.camera();\n+    let selected = scene\n+        .workspace\n+        .and_then(|id| scene.views.get(&id))\n+        .and_then(|v| v.selected.as_ref());\n+    let circle = |x: f32, y: f32, radius: f32, color: &gtk::gdk::RGBA| {\n+        let rect = gtk::graphene::Rect::new(x - radius, y - radius, radius * 2.0, radius * 2.0);\n+        snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(rect, radius));\n+        snapshot.append_color(color, &rect);\n+        snapshot.pop();\n+    };\n+    for key in scene.graph.nodes() {\n+        let Some(point) = scene.layout.positions.get(key) else {\n+            continue;\n+        };\n+        let p = camera.screen(*point);\n+        if p.x < -140.0 || p.y < -50.0 || p.x > width as f64 + 140.0 || p.y > height as f64 + 50.0 {\n+            continue;\n+        }\n+        let available = scene.nodes.get(key).is_some_and(|n| n.available);\n+        let anchor = scene.anchors.contains(key);\n+        let focused = selected == Some(key);\n+        let rgb = if !available {\n+            (0.40, 0.43, 0.53)\n+        } else if anchor {\n+            (0.43, 0.86, 0.94)\n+        } else {\n+            (0.65, 0.57, 0.95)\n+        };\n+        let color = gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 1.0);\n+        let (x, y) = (p.x as f32, p.y as f32);\n+        if anchor || focused {\n+            circle(x, y, 20.0, &gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 0.12));\n+        }\n+        circle(x, y, if anchor { 8.0 } else { 6.0 }, &color);\n+        let stroke = if available {\n+            color\n+        } else {\n+            gtk::gdk::RGBA::new(0.82, 0.84, 0.90, 1.0)\n+        };\n+        if !available {\n+            snapshot.save();\n+            snapshot.translate(&gtk::graphene::Point::new(x - 5.0, y + 5.0));\n+            snapshot.rotate(-45.0);\n+            snapshot.append_color(\n+                &stroke,\n+                &gtk::graphene::Rect::new(0.0, -0.75, 10.0 * 2.0_f32.sqrt(), 1.5),\n+            );\n+            snapshot.restore();\n+        }\n+        if focused {\n+            let rect = gtk::graphene::Rect::new(x - 14.75, y - 14.75, 29.5, 29.5);\n+            snapshot.append_border(\n+                &gtk::gsk::RoundedRect::from_rect(rect, 14.75),\n+                &[1.5; 4],\n+                &[stroke; 4],\n+            );\n+        }\n+    }\n+    for label in layout_labels(area, scene, width, height) {\n+        let available = scene.nodes.get(label.key).is_some_and(|n| n.available);\n+        let color = if available {\n+            gtk::gdk::RGBA::new(0.83, 0.86, 0.94, 1.0)\n+        } else {\n+            gtk::gdk::RGBA::new(0.55, 0.57, 0.64, 1.0)\n+        };\n+        snapshot.save();\n+        snapshot.translate(&gtk::graphene::Point::new(\n+            (label.bounds.x() + 2) as f32,\n+            (label.bounds.y() + 2) as f32,\n+        ));\n+        snapshot.append_layout(&label.layout, &color);\n+        snapshot.restore();\n+    }\n+}\n+\n+glib::wrapper! {\n+    pub struct Canvas(ObjectSubclass<imp::Canvas>)\n+        @extends gtk::DrawingArea, gtk::Widget,\n+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;\n+}\n+\n+impl Canvas {\n+    pub(super) fn new(scene: Rc<RefCell<Scene>>) -> Self {\n+        let area: Self = glib::Object::new();\n+        assert!(area.imp().scene.set(scene).is_ok());\n+        area\n+    }\n+\n+    #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+    pub(super) fn set_empty_draw(&self, empty: bool) {\n+        self.imp().empty_draw.set(empty);\n+    }\n+}\n",
+      "meets_internal_frame_limit": false
+    },
+    "gsk-snapshot": {
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "draw_cpu_scope": "Whole GTK graph snapshot CPU time; renderer submission, GPU work and compositor presentation are excluded.",
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": true,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 32.812666,
+              "p50": 16.668625,
+              "p95": 17.332,
+              "samples": 593
+            },
+            "draw_cpu_ms": {
+              "max": 3.10525,
+              "p50": 2.4814160000000003,
+              "p95": 2.674625,
+              "samples": 594
+            },
+            "duration_seconds": 10.102966584,
+            "input_batches": 598,
+            "signal_to_after_paint_ms": {
+              "max": 32.76875,
+              "p50": 6.242916,
+              "p95": 16.562791,
+              "samples": 594
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 31.106291000000002,
+              "p50": 16.668041000000002,
+              "p95": 17.385458,
+              "samples": 598
+            },
+            "draw_cpu_ms": {
+              "max": 2.840667,
+              "p50": 2.492833,
+              "p95": 2.6602919999999997,
+              "samples": 599
+            },
+            "duration_seconds": 10.1033715,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 19.951208,
+              "p50": 16.534416999999998,
+              "p95": 17.057583,
+              "samples": 599
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 33.113208,
+              "p50": 16.688499999999998,
+              "p95": 17.119208,
+              "samples": 597
+            },
+            "draw_cpu_ms": {
+              "max": 2.892083,
+              "p50": 2.6315,
+              "p95": 2.8022080000000003,
+              "samples": 598
+            },
+            "duration_seconds": 10.102485625,
+            "input_batches": 598,
+            "signal_to_after_paint_ms": {
+              "max": 22.53675,
+              "p50": 6.492915999999999,
+              "p95": 16.701207999999998,
+              "samples": 598
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 24.793916,
+              "p50": 16.676625,
+              "p95": 17.101833,
+              "samples": 598
+            },
+            "draw_cpu_ms": {
+              "max": 3.0284169999999997,
+              "p50": 2.6761250000000003,
+              "p95": 2.865375,
+              "samples": 599
+            },
+            "duration_seconds": 10.101758791,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 13.612875,
+              "p50": 6.292292,
+              "p95": 6.754084,
+              "samples": 599
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 33.05575,
+              "p50": 16.678124999999998,
+              "p95": 17.075709,
+              "samples": 597
+            },
+            "draw_cpu_ms": {
+              "max": 3.023208,
+              "p50": 2.6987080000000003,
+              "p95": 2.911084,
+              "samples": 598
+            },
+            "duration_seconds": 10.108145959,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 33.023666999999996,
+              "p50": 5.951625,
+              "p95": 14.560875,
+              "samples": 598
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "native_exit_code": 0,
+      "report_sha256": "e46bf01bb7a14a01f341045ef6321a27399c2abca4c5ab692279b9203c54f4f7",
+      "log_sha256": "3d366fa9ee72c518d77d144721a6b76efb6b8d540ee19a4480890f3c46c3e86f",
+      "source_patch_sha256": "355325afd4ab3850301898eb5ce70d7de425e316d18d3fc4309b179f126d4263",
+      "source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..da89c67f 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -33,6 +33,8 @@ pub(crate) struct Node {\n \n use flowmux_state::session_flow::SavedView as View;\n \n+mod canvas;\n+\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n mod performance;\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n@@ -176,7 +178,8 @@ impl FlowPanel {\n         status.add_css_class(\"caption\");\n         toolbar.append(&status);\n         root.append(&toolbar);\n-        let area = gtk::DrawingArea::new();\n+        let scene = Rc::new(RefCell::new(Scene::default()));\n+        let area = canvas::Canvas::new(scene.clone()).upcast::<gtk::DrawingArea>();\n         area.set_widget_name(\"flowmux-session-flow-canvas\");\n         area.set_hexpand(true);\n         area.set_vexpand(true);\n@@ -198,7 +201,7 @@ impl FlowPanel {\n             root,\n             area,\n             status,\n-            scene: Rc::new(RefCell::new(Scene::default())),\n+            scene,\n             animating: Rc::new(Cell::new(false)),\n             bridge,\n             save_pending: Rc::new(Cell::new(false)),\n@@ -435,15 +438,6 @@ impl FlowPanel {\n     }\n \n     fn connect_canvas(&self) {\n-        let scene = self.scene.clone();\n-        self.area.set_draw_func(move |area, cr, width, height| {\n-            let mut scene = scene.borrow_mut();\n-            if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n-                scene.fit(width as f64, height as f64);\n-                scene.fit_during_settle = true;\n-            }\n-            draw(area, cr, width, height, &scene);\n-        });\n         let p = self.downgrade();\n         self.area.connect_map(move |_| {\n             if let Some(p) = p.upgrade() {\n@@ -778,7 +772,7 @@ fn layout_labels<'a>(\n     labels\n }\n \n-fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, scene: &Scene) {\n+fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {\n     cr.set_source_rgb(0.025, 0.035, 0.08);\n     let _ = cr.paint();\n     for i in 0..150u32 {\n@@ -794,37 +788,16 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         );\n         let _ = cr.fill();\n     }\n+}\n+\n+fn draw_foreground(\n+    area: &gtk::DrawingArea,\n+    cr: &gtk::cairo::Context,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n     let camera = scene.camera();\n-    cr.set_line_width(1.2);\n-    for (parent, child) in scene.graph.edges() {\n-        let (Some(p), Some(c)) = (\n-            scene.layout.positions.get(parent),\n-            scene.layout.positions.get(child),\n-        ) else {\n-            continue;\n-        };\n-        let (p, c) = (camera.screen(*p), camera.screen(*c));\n-        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n-        cr.move_to(p.x, p.y);\n-        cr.line_to(c.x, c.y);\n-        let _ = cr.stroke();\n-        let angle = (c.y - p.y).atan2(c.x - p.x);\n-        let tip = Point {\n-            x: c.x - angle.cos() * 14.0,\n-            y: c.y - angle.sin() * 14.0,\n-        };\n-        cr.move_to(tip.x, tip.y);\n-        cr.line_to(\n-            tip.x - (angle - 0.45).cos() * 7.0,\n-            tip.y - (angle - 0.45).sin() * 7.0,\n-        );\n-        cr.line_to(\n-            tip.x - (angle + 0.45).cos() * 7.0,\n-            tip.y - (angle + 0.45).sin() * 7.0,\n-        );\n-        cr.close_path();\n-        let _ = cr.fill();\n-    }\n     let selected = scene\n         .workspace\n         .and_then(|id| scene.views.get(&id))\n@@ -1222,7 +1195,7 @@ pub(crate) fn check_canvas_controls() {\n     panel.show_workspace(Some(workspace), graph, [key(\"child\")].into());\n     let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();\n     let cr = gtk::cairo::Context::new(&surface).unwrap();\n-    draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n+    draw_foreground(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n     for _ in 0..50 {\n         panel.toggle(workspace);\n     }\ndiff --git a/crates/flowmux/src/ui/session_flow/performance.rs b/crates/flowmux/src/ui/session_flow/performance.rs\nindex 0ad1a861..8637db47 100644\n--- a/crates/flowmux/src/ui/session_flow/performance.rs\n+++ b/crates/flowmux/src/ui/session_flow/performance.rs\n@@ -91,21 +91,19 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         })\n         .unwrap();\n     let empty_draw = std::env::var_os(\"FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW\").is_some();\n+    panel\n+        .area\n+        .clone()\n+        .downcast::<canvas::Canvas>()\n+        .unwrap()\n+        .set_empty_draw(empty_draw);\n     let draw_times = Rc::new(RefCell::new(Vec::<f64>::new()));\n-    let times = draw_times.clone();\n-    let scene = panel.scene.clone();\n-    panel.area.set_draw_func(move |area, cr, width, height| {\n-        let start = Instant::now();\n-        if empty_draw {\n-            cr.set_source_rgb(0.02, 0.03, 0.08);\n-            cr.paint().unwrap();\n-        } else {\n-            draw(area, cr, width, height, &scene.borrow());\n-        }\n-        times\n-            .borrow_mut()\n-            .push(start.elapsed().as_secs_f64() * 1000.0);\n-    });\n+    panel\n+        .area\n+        .clone()\n+        .downcast::<canvas::Canvas>()\n+        .unwrap()\n+        .set_snapshot_times(draw_times.clone());\n     let clock = panel.area.frame_clock().unwrap();\n     let last_paint = Rc::new(Cell::new(None::<Instant>));\n     let pending_input = Rc::new(Cell::new(None::<Instant>));\n@@ -182,6 +180,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         \"screen_lock_observation\":{\"source\":\"ioreg -n Root -d1\",\"start\":screen_lock_start,\"end\":screen_lock_end,\n             \"scope\":\"Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.\"},\n         \"diagnostic_empty_draw\":empty_draw,\"scale_factor\":panel.area.scale_factor(),\"renderer\":std::env::var(\"GSK_RENDERER\").ok(),\"debug_assertions\":cfg!(debug_assertions),\n+        \"draw_cpu_scope\":\"Whole GTK graph snapshot CPU time; renderer submission, GPU work and compositor presentation are excluded.\",\n         \"measurement\":\"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.\",\n         \"trials\":trials});\n     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();\ndiff --git a/crates/flowmux/src/ui/session_flow/canvas.rs b/crates/flowmux/src/ui/session_flow/canvas.rs\nnew file mode 100644\nindex 00000000..cfb2587c\n--- /dev/null\n+++ b/crates/flowmux/src/ui/session_flow/canvas.rs\n@@ -0,0 +1,237 @@\n+// SPDX-License-Identifier: GPL-3.0-or-later\n+//! Keep the canvas input widget while submitting straight edges to GSK.\n+\n+use super::*;\n+use gtk::subclass::prelude::*;\n+use std::cell::OnceCell;\n+\n+mod imp {\n+    use super::*;\n+\n+    #[derive(Default)]\n+    pub struct Canvas {\n+        pub(super) scene: OnceCell<Rc<RefCell<Scene>>>,\n+        pub(super) empty_draw: Cell<bool>,\n+        background: RefCell<Option<((i32, i32), gtk::gsk::RenderNode)>>,\n+        arrow: RefCell<Option<(i32, gtk::gdk::Texture)>>,\n+        #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+        pub(super) snapshot_times: RefCell<Option<Rc<RefCell<Vec<f64>>>>>,\n+    }\n+\n+    #[glib::object_subclass]\n+    impl ObjectSubclass for Canvas {\n+        const NAME: &'static str = \"FlowmuxSessionFlowCanvas\";\n+        type Type = super::Canvas;\n+        type ParentType = gtk::DrawingArea;\n+    }\n+\n+    impl ObjectImpl for Canvas {}\n+    impl DrawingAreaImpl for Canvas {}\n+\n+    impl WidgetImpl for Canvas {\n+        fn snapshot(&self, snapshot: &gtk::Snapshot) {\n+            #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+            let started = std::time::Instant::now();\n+            let area = self.obj();\n+            let (width, height) = (area.width(), area.height());\n+            if width <= 0 || height <= 0 {\n+                return;\n+            }\n+            let bounds = gtk::graphene::Rect::new(0.0, 0.0, width as f32, height as f32);\n+            snapshot.push_clip(&bounds);\n+            if self.empty_draw.get() {\n+                snapshot.append_color(&gtk::gdk::RGBA::new(0.02, 0.03, 0.08, 1.0), &bounds);\n+            } else {\n+                let mut scene = self.scene.get().unwrap().borrow_mut();\n+                if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n+                    scene.fit(width as f64, height as f64);\n+                    scene.fit_during_settle = true;\n+                }\n+                let mut background = self.background.borrow_mut();\n+                if background.as_ref().map(|(size, _)| *size) != Some((width, height)) {\n+                    let layer = gtk::Snapshot::new();\n+                    {\n+                        let cr = layer.append_cairo(&bounds);\n+                        draw_background(&cr, width, height);\n+                    }\n+                    *background = layer.to_node().map(|node| ((width, height), node));\n+                }\n+                if let Some((_, node)) = background.as_ref() {\n+                    snapshot.append_node(node);\n+                }\n+                drop(background);\n+                let camera = scene.camera();\n+                let color = gtk::gdk::RGBA::new(0.39, 0.51, 0.78, 0.55);\n+                let scale = area.scale_factor().max(1);\n+                let mut arrow = self.arrow.borrow_mut();\n+                if arrow.as_ref().map(|(old_scale, _)| *old_scale) != Some(scale) {\n+                    let mut surface = gtk::cairo::ImageSurface::create(\n+                        gtk::cairo::Format::ARgb32,\n+                        8 * scale,\n+                        8 * scale,\n+                    )\n+                    .unwrap();\n+                    {\n+                        let cr = gtk::cairo::Context::new(&surface).unwrap();\n+                        cr.scale(scale as f64, scale as f64);\n+                        cr.translate(7.0, 4.0);\n+                        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n+                        cr.move_to(0.0, 0.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, -0.45_f64.sin() * 7.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, 0.45_f64.sin() * 7.0);\n+                        cr.close_path();\n+                        let _ = cr.fill();\n+                    }\n+                    let stride = surface.stride() as usize;\n+                    let bytes = glib::Bytes::from_owned(surface.data().unwrap().to_vec());\n+                    #[cfg(target_endian = \"little\")]\n+                    let format = gtk::gdk::MemoryFormat::B8g8r8a8Premultiplied;\n+                    #[cfg(target_endian = \"big\")]\n+                    let format = gtk::gdk::MemoryFormat::A8r8g8b8Premultiplied;\n+                    let texture =\n+                        gtk::gdk::MemoryTexture::new(8 * scale, 8 * scale, format, &bytes, stride);\n+                    *arrow = Some((scale, texture.upcast()));\n+                }\n+                let arrow = &arrow.as_ref().unwrap().1;\n+                for (parent, child) in scene.graph.edges() {\n+                    let (Some(p), Some(c)) = (\n+                        scene.layout.positions.get(parent),\n+                        scene.layout.positions.get(child),\n+                    ) else {\n+                        continue;\n+                    };\n+                    let (p, c) = (camera.screen(*p), camera.screen(*c));\n+                    let length = (c.x - p.x).hypot(c.y - p.y);\n+                    if length == 0.0 {\n+                        continue;\n+                    }\n+                    snapshot.save();\n+                    snapshot.translate(&gtk::graphene::Point::new(p.x as f32, p.y as f32));\n+                    snapshot.rotate((c.y - p.y).atan2(c.x - p.x).to_degrees() as f32);\n+                    snapshot.append_color(\n+                        &color,\n+                        &gtk::graphene::Rect::new(0.0, -0.6, length as f32, 1.2),\n+                    );\n+                    snapshot.translate(&gtk::graphene::Point::new((length - 14.0) as f32, 0.0));\n+                    snapshot.append_texture(arrow, &gtk::graphene::Rect::new(-7.0, -4.0, 8.0, 8.0));\n+                    snapshot.restore();\n+                }\n+                draw_nodes(snapshot, area.upcast_ref(), width, height, &scene);\n+            }\n+            snapshot.pop();\n+            #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+            if let Some(times) = self.snapshot_times.borrow().as_ref() {\n+                times\n+                    .borrow_mut()\n+                    .push(started.elapsed().as_secs_f64() * 1000.0);\n+            }\n+        }\n+    }\n+}\n+\n+fn draw_nodes(\n+    snapshot: &gtk::Snapshot,\n+    area: &gtk::DrawingArea,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n+    let camera = scene.camera();\n+    let selected = scene\n+        .workspace\n+        .and_then(|id| scene.views.get(&id))\n+        .and_then(|v| v.selected.as_ref());\n+    let circle = |x: f32, y: f32, radius: f32, color: &gtk::gdk::RGBA| {\n+        let rect = gtk::graphene::Rect::new(x - radius, y - radius, radius * 2.0, radius * 2.0);\n+        snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(rect, radius));\n+        snapshot.append_color(color, &rect);\n+        snapshot.pop();\n+    };\n+    for key in scene.graph.nodes() {\n+        let Some(point) = scene.layout.positions.get(key) else {\n+            continue;\n+        };\n+        let p = camera.screen(*point);\n+        if p.x < -140.0 || p.y < -50.0 || p.x > width as f64 + 140.0 || p.y > height as f64 + 50.0 {\n+            continue;\n+        }\n+        let available = scene.nodes.get(key).is_some_and(|n| n.available);\n+        let anchor = scene.anchors.contains(key);\n+        let focused = selected == Some(key);\n+        let rgb = if !available {\n+            (0.40, 0.43, 0.53)\n+        } else if anchor {\n+            (0.43, 0.86, 0.94)\n+        } else {\n+            (0.65, 0.57, 0.95)\n+        };\n+        let color = gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 1.0);\n+        let (x, y) = (p.x as f32, p.y as f32);\n+        if anchor || focused {\n+            circle(x, y, 20.0, &gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 0.12));\n+        }\n+        circle(x, y, if anchor { 8.0 } else { 6.0 }, &color);\n+        let stroke = if available {\n+            color\n+        } else {\n+            gtk::gdk::RGBA::new(0.82, 0.84, 0.90, 1.0)\n+        };\n+        if !available {\n+            snapshot.save();\n+            snapshot.translate(&gtk::graphene::Point::new(x - 5.0, y + 5.0));\n+            snapshot.rotate(-45.0);\n+            snapshot.append_color(\n+                &stroke,\n+                &gtk::graphene::Rect::new(0.0, -0.75, 10.0 * 2.0_f32.sqrt(), 1.5),\n+            );\n+            snapshot.restore();\n+        }\n+        if focused {\n+            let rect = gtk::graphene::Rect::new(x - 14.75, y - 14.75, 29.5, 29.5);\n+            snapshot.append_border(\n+                &gtk::gsk::RoundedRect::from_rect(rect, 14.75),\n+                &[1.5; 4],\n+                &[stroke; 4],\n+            );\n+        }\n+    }\n+    for label in layout_labels(area, scene, width, height) {\n+        let available = scene.nodes.get(label.key).is_some_and(|n| n.available);\n+        let color = if available {\n+            gtk::gdk::RGBA::new(0.83, 0.86, 0.94, 1.0)\n+        } else {\n+            gtk::gdk::RGBA::new(0.55, 0.57, 0.64, 1.0)\n+        };\n+        snapshot.save();\n+        snapshot.translate(&gtk::graphene::Point::new(\n+            (label.bounds.x() + 2) as f32,\n+            (label.bounds.y() + 2) as f32,\n+        ));\n+        snapshot.append_layout(&label.layout, &color);\n+        snapshot.restore();\n+    }\n+}\n+\n+glib::wrapper! {\n+    pub struct Canvas(ObjectSubclass<imp::Canvas>)\n+        @extends gtk::DrawingArea, gtk::Widget,\n+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;\n+}\n+\n+impl Canvas {\n+    pub(super) fn new(scene: Rc<RefCell<Scene>>) -> Self {\n+        let area: Self = glib::Object::new();\n+        assert!(area.imp().scene.set(scene).is_ok());\n+        area\n+    }\n+\n+    #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+    pub(super) fn set_empty_draw(&self, empty: bool) {\n+        self.imp().empty_draw.set(empty);\n+    }\n+\n+    #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+    pub(super) fn set_snapshot_times(&self, times: Rc<RefCell<Vec<f64>>>) {\n+        *self.imp().snapshot_times.borrow_mut() = Some(times);\n+    }\n+}\n",
+      "meets_internal_frame_limit": true
+    }
+  },
+  "performance_acceptance": "pending: improved internal frame p95 is 17.08–17.39ms, but the run ended with explicit screen lock and CUA cgWindowNotFound. Final bounds/dependency cleanup also requires an exact-source release remeasurement with an accessible desktop.",
+  "measurement_scope": "GTK frame-clock/controller signals, not hardware input or compositor presentation. Snapshot CPU timing now includes the complete graph snapshot, excluding renderer submission.",
+  "source_sha256": {
+    "Cargo.lock": "b13893412aead9be98d0685f9abd4e246307ba969ec6c11f5c62417ccd6f903f",
+    "crates/flowmux/Cargo.toml": "6e028a5cd4eb48304b2f0ff33271cb407349802591dc04e5862680cf574ec47c",
+    "crates/flowmux/src/ui/session_flow.rs": "306d353c3ef8b24916bce103e9632c688246993d3c577c2bc12bc5bd1040c618",
+    "crates/flowmux/src/ui/session_flow/canvas.rs": "64e8afaaa088a15bc1e80609878af849948232b4a1a3e517a4b4c5706c12cd8e",
+    "crates/flowmux/src/ui/session_flow/performance.rs": "660a0e52e4f6027f408cdfc78e2d883c3dc18a16f48d0c66ab6c2a2adca7d024",
+    "crates/flowmux/src/ui/window/session_flow.rs": "a12ad2031ea2611f480a92c865c4eef487e971baed233d44e0851813121f3972",
+    "docs/legal/THIRD_PARTY_LICENSES.md": "ab3af6ed1e17927e1ba4dac983f1df61bef14d08753d412436752d68f7d4d26e"
+  },
+  "local_validation": {
+    "clippy": {
+      "exit_code": 0,
+      "log_sha256": "4b5d591ff006ab6dda2fff6e426ef44cbd4afe6484d949abdbdda38a133dae3a"
+    },
+    "native_regression": {
+      "exit_code": 0,
+      "log_sha256": "2bd7d8521da2120e49f5b47eb6c904ea6d57d9a6ee838e1d1842e71ff517f0f4",
+      "scope": "Includes input/pane preservation, actual GSK snapshot and extreme finite f64 coordinate regression. Executed before the test-only hook readiness change."
+    },
+    "format_exit_code": 0,
+    "license_notice_tests": {
+      "exit_code": 0,
+      "tests": 4
+    },
+    "license_generation": {
+      "tool": "cargo-about 0.9.2",
+      "isolated_tool_root": "/tmp/flowmux-session-flow-license-tools",
+      "exit_code": 0,
+      "log_sha256": "274f1b264ff08e780bbfd6d6df1edd4853fe46ef94b72270845e3dba6c153ccc"
+    },
+    "real_codex_multi_gui": [
+      {
+        "result": {
+          "status": "passed",
+          "root": "/tmp/fmsmulti-3cuw0yeh",
+          "source_ids": [
+            "01a18ddc-a51f-7472-ab63-045abb779243",
+            "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b"
+          ],
+          "target_id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+          "ready": {
+            "a": {
+              "database": "/tmp/fmsmulti-3cuw0yeh/data/flowmux/session-flow.sqlite",
+              "owner": "dca80255-e1aa-485c-9d7e-c32684ba9044",
+              "pid": 52925,
+              "socket": "/tmp/fm-native-Dj2KqD/run/flowmux-52925.sock",
+              "source": {
+                "home": "/private/tmp/fmsmulti-3cuw0yeh/codex",
+                "id": "01a18ddc-a51f-7472-ab63-045abb779243",
+                "provider": "codex"
+              },
+              "source_pane": "995ad9c8-235d-422b-a570-122a70a3fbd0",
+              "source_surface": "8444dc0b-7953-46dd-acb4-23474fadc001",
+              "target": {
+                "home": "/private/tmp/fmsmulti-3cuw0yeh/codex",
+                "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+                "provider": "codex"
+              },
+              "workspace": "fcd98991-e7b0-4ac9-a766-531bd0cc822e"
+            },
+            "b": {
+              "database": "/tmp/fmsmulti-3cuw0yeh/data/flowmux/session-flow.sqlite",
+              "owner": "e457391c-ac76-4879-9d62-289bde2f8162",
+              "pid": 53315,
+              "socket": "/tmp/fm-native-exD2ck/run/flowmux-53315.sock",
+              "source": {
+                "home": "/private/tmp/fmsmulti-3cuw0yeh/codex",
+                "id": "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b",
+                "provider": "codex"
+              },
+              "source_pane": "160b839f-ed5c-4ca1-ba7b-acb52a0361ae",
+              "source_surface": "ba0b3d21-e540-4918-b76e-05098c6573cf",
+              "target": {
+                "home": "/private/tmp/fmsmulti-3cuw0yeh/codex",
+                "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+                "provider": "codex"
+              },
+              "workspace": "c37ef3e1-9c0b-487f-8405-d1326de41dc9"
+            }
+          },
+          "opened": {
+            "a": {
+              "clicked_at_unix_micros": 1793423531735198,
+              "live": {
+                "owner": "dca80255-e1aa-485c-9d7e-c32684ba9044",
+                "pane": "7b662cc8-a5d5-4514-ab20-0c564f4e7c0f",
+                "pid": 53513,
+                "socket": "/tmp/fm-native-Dj2KqD/run/flowmux-52925.sock",
+                "started": 1793423531819891,
+                "surface": "d4242288-1052-4d92-876d-7216f22bb1df",
+                "workspace": "fcd98991-e7b0-4ac9-a766-531bd0cc822e"
+              },
+              "original_pid": 53156,
+              "original_surface": "8444dc0b-7953-46dd-acb4-23474fadc001",
+              "owns_target": true,
+              "pid": 52925,
+              "status": "Reading session relationships…",
+              "terminals": 2
+            },
+            "b": {
+              "clicked_at_unix_micros": 1793423531814813,
+              "live": {
+                "owner": "dca80255-e1aa-485c-9d7e-c32684ba9044",
+                "pane": "7b662cc8-a5d5-4514-ab20-0c564f4e7c0f",
+                "pid": 53513,
+                "socket": "/tmp/fm-native-Dj2KqD/run/flowmux-52925.sock",
+                "started": 1793423531819891,
+                "surface": "d4242288-1052-4d92-876d-7216f22bb1df",
+                "workspace": "fcd98991-e7b0-4ac9-a766-531bd0cc822e"
+              },
+              "original_pid": 53335,
+              "original_surface": "ba0b3d21-e540-4918-b76e-05098c6573cf",
+              "owns_target": false,
+              "pid": 53315,
+              "status": "3 sessions · scroll to zoom · drag nodes or space",
+              "terminals": 1
+            }
+          },
+          "click_start_skew_ms": 79.615,
+          "native_writers": {
+            "01a18ddc-a51f-7472-ab63-045abb779243": [
+              {
+                "pid": 53160,
+                "path": "/private/tmp/fmsmulti-3cuw0yeh/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl"
+              }
+            ],
+            "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b": [
+              {
+                "pid": 53344,
+                "path": "/private/tmp/fmsmulti-3cuw0yeh/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-07-01a18ffc-6daf-76a1-b8b2-32fc5a6a110b.jsonl"
+              }
+            ],
+            "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f": [
+              {
+                "pid": 53518,
+                "path": "/private/tmp/fmsmulti-3cuw0yeh/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-12-01a18ffc-82ad-7f81-aa35-aaab46ab0f3f.jsonl"
+              }
+            ]
+          },
+          "operations": [
+            [
+              "aaeea155-0379-4ee1-93bb-5e02282e7a1a",
+              "{\"request\":\"aaeea155-0379-4ee1-93bb-5e02282e7a1a\",\"owner\":\"dca80255-e1aa-485c-9d7e-c32684ba9044\",\"owner_pid\":52925,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-3cuw0yeh/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"},\"kind\":\"Resume\",\"target_surface\":\"d4242288-1052-4d92-876d-7216f22bb1df\"}",
+              "complete",
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-3cuw0yeh/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}"
+            ]
+          ],
+          "bindings": [
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-3cuw0yeh/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+              "{\"owner\":\"e457391c-ac76-4879-9d62-289bde2f8162\",\"pid\":53335,\"started\":1793423528109695,\"workspace\":\"c37ef3e1-9c0b-487f-8405-d1326de41dc9\",\"pane\":\"160b839f-ed5c-4ca1-ba7b-acb52a0361ae\",\"surface\":\"ba0b3d21-e540-4918-b76e-05098c6573cf\",\"socket\":\"/tmp/fm-native-exD2ck/run/flowmux-53315.sock\"}"
+            ],
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-3cuw0yeh/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+              "{\"owner\":\"dca80255-e1aa-485c-9d7e-c32684ba9044\",\"pid\":53156,\"started\":1793423522833681,\"workspace\":\"fcd98991-e7b0-4ac9-a766-531bd0cc822e\",\"pane\":\"995ad9c8-235d-422b-a570-122a70a3fbd0\",\"surface\":\"8444dc0b-7953-46dd-acb4-23474fadc001\",\"socket\":\"/tmp/fm-native-Dj2KqD/run/flowmux-52925.sock\"}"
+            ],
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-3cuw0yeh/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+              "{\"owner\":\"dca80255-e1aa-485c-9d7e-c32684ba9044\",\"pid\":53513,\"started\":1793423531819891,\"workspace\":\"fcd98991-e7b0-4ac9-a766-531bd0cc822e\",\"pane\":\"7b662cc8-a5d5-4514-ab20-0c564f4e7c0f\",\"surface\":\"d4242288-1052-4d92-876d-7216f22bb1df\",\"socket\":\"/tmp/fm-native-Dj2KqD/run/flowmux-52925.sock\"}"
+            ]
+          ],
+          "foreign_focus": {
+            "owner_pid": 52925,
+            "pane": "7b662cc8-a5d5-4514-ab20-0c564f4e7c0f",
+            "surface": "d4242288-1052-4d92-876d-7216f22bb1df"
+          },
+          "protected_pids": [
+            72789,
+            95986,
+            61360,
+            30374
+          ],
+          "scope": "Two real native GUI processes and real Codex writers; test controller gestures and IPC focus, not physical pointer or compositor proof. No model request; test-only placeholder credential and loopback endpoint.",
+          "native_exit_codes": {
+            "a": 0,
+            "b": 0
+          }
+        },
+        "driver_exit_code": 0,
+        "driver_log_sha256": "19bf81b7eeb35d4d31d9c56671d2dcbaa475675e89018d6f359d88a19e6bb938",
+        "native_log_sha256": {
+          "a": "92fda8ea2e09a834026f39a8cf5cfdc8e454b6dd46c0a68b8770762b1ce68c3b",
+          "b": "37d0060b73d3aa1dc355b1a241f3485a64e38e4167e15856961e52bffdc1c8d0"
+        }
+      },
+      {
+        "result": {
+          "status": "passed",
+          "root": "/tmp/fmsmulti-b6pdv63z",
+          "source_ids": [
+            "01a18ddc-a51f-7472-ab63-045abb779243",
+            "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b"
+          ],
+          "target_id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+          "ready": {
+            "a": {
+              "database": "/tmp/fmsmulti-b6pdv63z/data/flowmux/session-flow.sqlite",
+              "owner": "7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5",
+              "pid": 53848,
+              "socket": "/tmp/fm-native-7DwCzA/run/flowmux-53848.sock",
+              "source": {
+                "home": "/private/tmp/fmsmulti-b6pdv63z/codex",
+                "id": "01a18ddc-a51f-7472-ab63-045abb779243",
+                "provider": "codex"
+              },
+              "source_pane": "a32ff2c5-6ca6-44b6-8f61-808e8d3555b5",
+              "source_surface": "483cf9e0-8cd5-458e-82a3-73ef3a5b0473",
+              "target": {
+                "home": "/private/tmp/fmsmulti-b6pdv63z/codex",
+                "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+                "provider": "codex"
+              },
+              "workspace": "6d364584-e4b7-4102-9af6-a8f4606baac4"
+            },
+            "b": {
+              "database": "/tmp/fmsmulti-b6pdv63z/data/flowmux/session-flow.sqlite",
+              "owner": "0d3119b2-fbd0-46ba-ba32-9d102bf3a9bb",
+              "pid": 54034,
+              "socket": "/tmp/fm-native-nE4Uok/run/flowmux-54034.sock",
+              "source": {
+                "home": "/private/tmp/fmsmulti-b6pdv63z/codex",
+                "id": "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b",
+                "provider": "codex"
+              },
+              "source_pane": "8375db6f-0c7f-4c21-8966-aa51161f58d5",
+              "source_surface": "8b9487bc-82a9-4d29-a42d-ad40b3e27d13",
+              "target": {
+                "home": "/private/tmp/fmsmulti-b6pdv63z/codex",
+                "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+                "provider": "codex"
+              },
+              "workspace": "21d0f1cb-92cf-4dc6-9fe3-13f30c2d92d9"
+            }
+          },
+          "opened": {
+            "a": {
+              "clicked_at_unix_micros": 1793423546334281,
+              "live": {
+                "owner": "7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5",
+                "pane": "04166e4f-66d4-412d-bc08-22be483fc3ec",
+                "pid": 54212,
+                "socket": "/tmp/fm-native-7DwCzA/run/flowmux-53848.sock",
+                "started": 1793423546429817,
+                "surface": "c5fc4ffa-dbf0-424e-8d57-73d85dadf3a7",
+                "workspace": "6d364584-e4b7-4102-9af6-a8f4606baac4"
+              },
+              "original_pid": 53856,
+              "original_surface": "483cf9e0-8cd5-458e-82a3-73ef3a5b0473",
+              "owns_target": true,
+              "pid": 53848,
+              "status": "Reading session relationships…",
+              "terminals": 2
+            },
+            "b": {
+              "clicked_at_unix_micros": 1793423546379007,
+              "live": {
+                "owner": "7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5",
+                "pane": "04166e4f-66d4-412d-bc08-22be483fc3ec",
+                "pid": 54212,
+                "socket": "/tmp/fm-native-7DwCzA/run/flowmux-53848.sock",
+                "started": 1793423546429817,
+                "surface": "c5fc4ffa-dbf0-424e-8d57-73d85dadf3a7",
+                "workspace": "6d364584-e4b7-4102-9af6-a8f4606baac4"
+              },
+              "original_pid": 54045,
+              "original_surface": "8b9487bc-82a9-4d29-a42d-ad40b3e27d13",
+              "owns_target": false,
+              "pid": 54034,
+              "status": "3 sessions · scroll to zoom · drag nodes or space",
+              "terminals": 1
+            }
+          },
+          "click_start_skew_ms": 44.726,
+          "native_writers": {
+            "01a18ddc-a51f-7472-ab63-045abb779243": [
+              {
+                "pid": 53860,
+                "path": "/private/tmp/fmsmulti-b6pdv63z/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl"
+              }
+            ],
+            "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b": [
+              {
+                "pid": 54051,
+                "path": "/private/tmp/fmsmulti-b6pdv63z/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-07-01a18ffc-6daf-76a1-b8b2-32fc5a6a110b.jsonl"
+              }
+            ],
+            "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f": [
+              {
+                "pid": 54217,
+                "path": "/private/tmp/fmsmulti-b6pdv63z/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-12-01a18ffc-82ad-7f81-aa35-aaab46ab0f3f.jsonl"
+              }
+            ]
+          },
+          "operations": [
+            [
+              "2ffb1988-cdb5-4869-be84-34f4eb3c1796",
+              "{\"request\":\"2ffb1988-cdb5-4869-be84-34f4eb3c1796\",\"owner\":\"7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5\",\"owner_pid\":53848,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-b6pdv63z/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"},\"kind\":\"Resume\",\"target_surface\":\"c5fc4ffa-dbf0-424e-8d57-73d85dadf3a7\"}",
+              "complete",
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-b6pdv63z/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}"
+            ]
+          ],
+          "bindings": [
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-b6pdv63z/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+              "{\"owner\":\"7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5\",\"pid\":53856,\"started\":1793423537653485,\"workspace\":\"6d364584-e4b7-4102-9af6-a8f4606baac4\",\"pane\":\"a32ff2c5-6ca6-44b6-8f61-808e8d3555b5\",\"surface\":\"483cf9e0-8cd5-458e-82a3-73ef3a5b0473\",\"socket\":\"/tmp/fm-native-7DwCzA/run/flowmux-53848.sock\"}"
+            ],
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-b6pdv63z/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+              "{\"owner\":\"7cf270dc-42cc-4f5a-abee-f4eb0ccd00c5\",\"pid\":54212,\"started\":1793423546429817,\"workspace\":\"6d364584-e4b7-4102-9af6-a8f4606baac4\",\"pane\":\"04166e4f-66d4-412d-bc08-22be483fc3ec\",\"surface\":\"c5fc4ffa-dbf0-424e-8d57-73d85dadf3a7\",\"socket\":\"/tmp/fm-native-7DwCzA/run/flowmux-53848.sock\"}"
+            ],
+            [
+              "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-b6pdv63z/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+              "{\"owner\":\"0d3119b2-fbd0-46ba-ba32-9d102bf3a9bb\",\"pid\":54045,\"started\":1793423542825670,\"workspace\":\"21d0f1cb-92cf-4dc6-9fe3-13f30c2d92d9\",\"pane\":\"8375db6f-0c7f-4c21-8966-aa51161f58d5\",\"surface\":\"8b9487bc-82a9-4d29-a42d-ad40b3e27d13\",\"socket\":\"/tmp/fm-native-nE4Uok/run/flowmux-54034.sock\"}"
+            ]
+          ],
+          "foreign_focus": {
+            "owner_pid": 53848,
+            "pane": "04166e4f-66d4-412d-bc08-22be483fc3ec",
+            "surface": "c5fc4ffa-dbf0-424e-8d57-73d85dadf3a7"
+          },
+          "protected_pids": [
+            72789,
+            95986,
+            61360,
+            30374
+          ],
+          "scope": "Two real native GUI processes and real Codex writers; test controller gestures and IPC focus, not physical pointer or compositor proof. No model request; test-only placeholder credential and loopback endpoint.",
+          "native_exit_codes": {
+            "a": 0,
+            "b": 0
+          }
+        },
+        "driver_exit_code": 0,
+        "driver_log_sha256": "c776c40b82463b5d70688bc3a66f080ca9329585fb525907f2e8524de81222ff",
+        "native_log_sha256": {
+          "a": "4ec42d38a7117628edd58149e879af02fcfa1fa2d4d10bf0fbe8561baf43bc15",
+          "b": "7b81047f3ac43b8a3ebd17f115966fbb56574f6103acb35b7c968aa6f5530e3c"
+        }
+      }
+    ]
+  },
+  "hook_readiness_failure": {
+    "root": "/tmp/fmsmulti-fb4y6iap",
+    "native_exit_code": 101,
+    "driver_exit_code": 1,
+    "log_sha256": "fa233e38e56e0b7654aabd4f3d67ee1740d30f79a3b4bb4426db25728f2226bd",
+    "observed": "Codex remained at Hooks need review, option 1 selected, source session ID absent. No graph resume attempt began.",
+    "test_fix_commit": "76680062",
+    "change": "Validate the complete prompt and generated disposable hook entries; send Down, observe option 2 selected, then send Enter. No user profile/trust decisions modified.",
+    "followup": "Two independent disposable multi-GUI runs passed after the change."
+  },
+  "native_capture": {
+    "file": "session-flow-gsk-retained-prototype.png",
+    "sha256": "5eae28ba8426be97fabd659e6db30234ae4e5d1f975127092b792c3fac7eb783",
+    "scope": "Visually inspected GTK renderer texture of the prototype three-node fixture; not a desktop or hardware input capture."
+  },
+  "remote_ci": {
+    "status": "pending",
+    "scope": "b8d84f65 gates passed for the previous renderer; they do not validate this implementation."
+  }
+}

@@ -91,21 +91,19 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
         })
         .unwrap();
     let empty_draw = std::env::var_os("FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW").is_some();
+    panel
+        .area
+        .clone()
+        .downcast::<canvas::Canvas>()
+        .unwrap()
+        .set_empty_draw(empty_draw);
     let draw_times = Rc::new(RefCell::new(Vec::<f64>::new()));
-    let times = draw_times.clone();
-    let scene = panel.scene.clone();
-    panel.area.set_draw_func(move |area, cr, width, height| {
-        let start = Instant::now();
-        if empty_draw {
-            cr.set_source_rgb(0.02, 0.03, 0.08);
-            cr.paint().unwrap();
-        } else {
-            draw(area, cr, width, height, &scene.borrow());
-        }
-        times
-            .borrow_mut()
-            .push(start.elapsed().as_secs_f64() * 1000.0);
-    });
+    panel
+        .area
+        .clone()
+        .downcast::<canvas::Canvas>()
+        .unwrap()
+        .set_snapshot_times(draw_times.clone());
     let clock = panel.area.frame_clock().unwrap();
     let last_paint = Rc::new(Cell::new(None::<Instant>));
     let pending_input = Rc::new(Cell::new(None::<Instant>));
@@ -182,6 +180,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
         "screen_lock_observation":{"source":"ioreg -n Root -d1","start":screen_lock_start,"end":screen_lock_end,
             "scope":"Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency."},
         "diagnostic_empty_draw":empty_draw,"scale_factor":panel.area.scale_factor(),"renderer":std::env::var("GSK_RENDERER").ok(),"debug_assertions":cfg!(debug_assertions),
+        "draw_cpu_scope":"Whole GTK graph snapshot CPU time; renderer submission, GPU work and compositor presentation are excluded.",
         "measurement":"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
         "trials":trials});
     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();

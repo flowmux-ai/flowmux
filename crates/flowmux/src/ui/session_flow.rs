@@ -33,6 +33,8 @@ pub(crate) struct Node {
 
 use flowmux_state::session_flow::SavedView as View;
 
+mod canvas;
+
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 mod performance;
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
@@ -176,7 +178,8 @@ impl FlowPanel {
         status.add_css_class("caption");
         toolbar.append(&status);
         root.append(&toolbar);
-        let area = gtk::DrawingArea::new();
+        let scene = Rc::new(RefCell::new(Scene::default()));
+        let area = canvas::Canvas::new(scene.clone()).upcast::<gtk::DrawingArea>();
         area.set_widget_name("flowmux-session-flow-canvas");
         area.set_hexpand(true);
         area.set_vexpand(true);
@@ -198,7 +201,7 @@ impl FlowPanel {
             root,
             area,
             status,
-            scene: Rc::new(RefCell::new(Scene::default())),
+            scene,
             animating: Rc::new(Cell::new(false)),
             bridge,
             save_pending: Rc::new(Cell::new(false)),
@@ -435,15 +438,6 @@ impl FlowPanel {
     }
 
     fn connect_canvas(&self) {
-        let scene = self.scene.clone();
-        self.area.set_draw_func(move |area, cr, width, height| {
-            let mut scene = scene.borrow_mut();
-            if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {
-                scene.fit(width as f64, height as f64);
-                scene.fit_during_settle = true;
-            }
-            draw(area, cr, width, height, &scene);
-        });
         let p = self.downgrade();
         self.area.connect_map(move |_| {
             if let Some(p) = p.upgrade() {
@@ -778,7 +772,7 @@ fn layout_labels<'a>(
     labels
 }
 
-fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, scene: &Scene) {
+fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {
     cr.set_source_rgb(0.025, 0.035, 0.08);
     let _ = cr.paint();
     for i in 0..150u32 {
@@ -793,98 +787,6 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
             std::f64::consts::TAU,
         );
         let _ = cr.fill();
-    }
-    let camera = scene.camera();
-    cr.set_line_width(1.2);
-    for (parent, child) in scene.graph.edges() {
-        let (Some(p), Some(c)) = (
-            scene.layout.positions.get(parent),
-            scene.layout.positions.get(child),
-        ) else {
-            continue;
-        };
-        let (p, c) = (camera.screen(*p), camera.screen(*c));
-        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);
-        cr.move_to(p.x, p.y);
-        cr.line_to(c.x, c.y);
-        let _ = cr.stroke();
-        let angle = (c.y - p.y).atan2(c.x - p.x);
-        let tip = Point {
-            x: c.x - angle.cos() * 14.0,
-            y: c.y - angle.sin() * 14.0,
-        };
-        cr.move_to(tip.x, tip.y);
-        cr.line_to(
-            tip.x - (angle - 0.45).cos() * 7.0,
-            tip.y - (angle - 0.45).sin() * 7.0,
-        );
-        cr.line_to(
-            tip.x - (angle + 0.45).cos() * 7.0,
-            tip.y - (angle + 0.45).sin() * 7.0,
-        );
-        cr.close_path();
-        let _ = cr.fill();
-    }
-    let selected = scene
-        .workspace
-        .and_then(|id| scene.views.get(&id))
-        .and_then(|v| v.selected.as_ref());
-    let keys = scene.graph.nodes();
-    for key in keys {
-        let Some(point) = scene.layout.positions.get(key) else {
-            continue;
-        };
-        let p = camera.screen(*point);
-        if p.x < -140.0 || p.y < -50.0 || p.x > width as f64 + 140.0 || p.y > height as f64 + 50.0 {
-            continue;
-        }
-        let node = scene.nodes.get(key);
-        let available = node.is_some_and(|n| n.available);
-        let anchor = scene.anchors.contains(key);
-        let focused = selected == Some(key);
-        let color = if !available {
-            (0.40, 0.43, 0.53)
-        } else if anchor {
-            (0.43, 0.86, 0.94)
-        } else {
-            (0.65, 0.57, 0.95)
-        };
-        if anchor || focused {
-            cr.set_source_rgba(color.0, color.1, color.2, 0.12);
-            cr.arc(p.x, p.y, 20.0, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-        }
-        cr.set_source_rgb(color.0, color.1, color.2);
-        cr.arc(
-            p.x,
-            p.y,
-            if anchor { 8.0 } else { 6.0 },
-            0.0,
-            std::f64::consts::TAU,
-        );
-        let _ = cr.fill();
-        if !available {
-            cr.set_source_rgb(0.82, 0.84, 0.90);
-            cr.set_line_width(1.5);
-            cr.move_to(p.x - 5.0, p.y + 5.0);
-            cr.line_to(p.x + 5.0, p.y - 5.0);
-            let _ = cr.stroke();
-        }
-        if focused {
-            cr.set_line_width(1.5);
-            cr.arc(p.x, p.y, 14.0, 0.0, std::f64::consts::TAU);
-            let _ = cr.stroke();
-        }
-    }
-    for label in layout_labels(area, scene, width, height) {
-        let available = scene.nodes.get(label.key).is_some_and(|n| n.available);
-        cr.set_source_rgb(
-            if available { 0.83 } else { 0.55 },
-            if available { 0.86 } else { 0.57 },
-            if available { 0.94 } else { 0.64 },
-        );
-        cr.move_to((label.bounds.x() + 2) as f64, (label.bounds.y() + 2) as f64);
-        pangocairo::functions::show_layout(cr, &label.layout);
     }
 }
 
@@ -1220,9 +1122,7 @@ pub(crate) fn check_canvas_controls() {
     );
     assert!(receiver.try_recv().is_err());
     panel.show_workspace(Some(workspace), graph, [key("child")].into());
-    let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();
-    let cr = gtk::cairo::Context::new(&surface).unwrap();
-    draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());
+    canvas::check_snapshot(&panel.area);
     for _ in 0..50 {
         panel.toggle(workspace);
     }
