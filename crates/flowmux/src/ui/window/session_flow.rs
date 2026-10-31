@@ -1220,26 +1220,57 @@ pub(super) async fn check_native(
     println!("MACOS_SESSION_FLOW_LAYOUT_OK");
 }
 
-/// Opt-in live Claude check; the explicit source must be a disposable test
-/// conversation. Reuses existing hooks without modifying the user's settings.
+/// Opt-in live provider check using an explicit disposable test conversation.
+/// Hooks must already be installed; this never modifies user settings.
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
-pub(super) async fn check_real_claude(
+pub(super) async fn check_real_provider(
     controller: &WindowController,
     workspace: WorkspaceId,
     pane: PaneId,
 ) {
     use vte::prelude::*;
-    let source_id = std::env::var("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").unwrap();
-    let user_home = PathBuf::from(std::env::var_os("HOME").unwrap());
-    let home = user_home.join(".claude");
-    let session = flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
+    let (agent, source_id, home, environment) = if let Ok(id) =
+        std::env::var("FLOWMUX_SESSION_FLOW_REAL_OPENCODE_ID")
+    {
+        let root =
+            PathBuf::from(std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_OPENCODE_ROOT").unwrap());
+        assert!(root.starts_with("/tmp") || root.starts_with("/private/tmp"));
+        let environment = format!(
+            "env -u OPENCODE_CONFIG -u OPENCODE_CONFIG_DIR -u OPENCODE_TUI_CONFIG HOME={} XDG_CONFIG_HOME={} XDG_DATA_HOME={} XDG_CACHE_HOME={} XDG_STATE_HOME={}",
+            shell_quote(root.join("home").to_str().unwrap()),
+            shell_quote(root.join("config").to_str().unwrap()),
+            shell_quote(root.join("data").to_str().unwrap()),
+            shell_quote(root.join("cache").to_str().unwrap()),
+            shell_quote(root.join("state").to_str().unwrap()),
+        );
+        (
+            SessionAgent::OpenCode,
+            id,
+            root.join("data/opencode"),
+            environment,
+        )
+    } else {
+        let id = std::env::var("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").unwrap();
+        let user_home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let environment = format!(
+            "env -u CLAUDE_CONFIG_DIR HOME={}",
+            shell_quote(user_home.to_str().unwrap())
+        );
+        (
+            SessionAgent::Claude,
+            id,
+            user_home.join(".claude"),
+            environment,
+        )
+    };
+    let session = flowmux_state::session_history::list_sessions(agent, &home)
         .unwrap()
         .into_iter()
         .find(|s| s.id == source_id)
         .unwrap();
     assert!(
         session.cwd.starts_with("/tmp") || session.cwd.starts_with("/private/tmp"),
-        "explicit Claude source must belong to a disposable test project"
+        "explicit provider source must belong to a disposable test project"
     );
     let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
     let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
@@ -1274,11 +1305,21 @@ pub(super) async fn check_real_claude(
         .unwrap();
     let original_pid = terminal.pid.get();
     let original_widget = terminal.widget.clone();
-    terminal.widget.feed_child(format!(
-        "cd {} && env -u CLAUDE_CONFIG_DIR HOME={} claude --resume {} --tools '' --strict-mcp-config\n",
-        shell_quote(session.cwd.to_str().unwrap()), shell_quote(user_home.to_str().unwrap()),
-        shell_quote(&source_id),
-    ).as_bytes());
+    let extra = if agent == SessionAgent::Claude {
+        " --tools '' --strict-mcp-config"
+    } else {
+        ""
+    };
+    terminal.widget.feed_child(
+        format!(
+            "cd {} && {} {}{}\n",
+            shell_quote(session.cwd.to_str().unwrap()),
+            environment,
+            session.resume_command().unwrap(),
+            extra,
+        )
+        .as_bytes(),
+    );
     glib::future_with_timeout(Duration::from_secs(40), async {
         loop {
             controller.poll_agent_processes().await;
@@ -1295,8 +1336,13 @@ pub(super) async fn check_real_claude(
         }
     })
     .await
-    .expect("Claude source identity and fork capability");
-    let key = session_key(SessionAgent::Claude, &home, &source_id).unwrap();
+    .unwrap_or_else(|_| {
+        panic!(
+            "provider source identity/capability: {:?}",
+            terminal.widget.text_format(vte::Format::Text)
+        )
+    });
+    let key = session_key(agent, &home, &source_id).unwrap();
     assert_eq!(
         controller
             .pane_registry
@@ -1321,14 +1367,16 @@ pub(super) async fn check_real_claude(
         }
     })
     .await
-    .expect("Claude fork edge before first input");
+    .expect("provider fork edge before first input");
     assert_ne!(child, key);
-    assert!(
-        flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
-            .unwrap()
-            .iter()
-            .all(|s| s.id != child.id),
-        "test must exercise deferred native history"
+    let persisted = flowmux_state::session_history::list_sessions(agent, &home)
+        .unwrap()
+        .iter()
+        .any(|s| s.id == child.id);
+    assert_eq!(
+        persisted,
+        agent == SessionAgent::OpenCode,
+        "native child persistence contract"
     );
     controller.refresh_session_flow(true).await;
     while controller.flow.loading.get() {
@@ -1419,17 +1467,47 @@ pub(super) async fn check_real_claude(
         .flow
         .panel
         .assert_native_graph(workspace, &family);
-    assert!(
-        !controller.flow.panel.try_click_native_node(&child),
-        "missing native history must not resume"
-    );
-    assert_eq!(controller.pane_registry.borrow().terminals.len(), 1);
+    if agent == SessionAgent::Claude {
+        assert!(
+            !controller.flow.panel.try_click_native_node(&child),
+            "missing native history must not resume"
+        );
+        assert_eq!(controller.pane_registry.borrow().terminals.len(), 1);
+    } else {
+        controller.focus_pane(pane);
+        assert!(controller.flow.panel.try_click_native_node(&child));
+        glib::future_with_timeout(Duration::from_secs(40), async {
+            loop {
+                controller.poll_agent_processes().await;
+                if controller.flow_anchors().await.iter().any(|a| {
+                    a.target
+                        .focused
+                        .as_ref()
+                        .is_some_and(|f| f.session_id.as_deref() == Some(&child.id))
+                }) && db.pending().unwrap().is_empty()
+                {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(250)).await;
+            }
+        })
+        .await
+        .expect("OpenCode resume must retain the child ID");
+        assert_eq!(controller.pane_registry.borrow().terminals.len(), 2);
+        assert_eq!(db.snapshot().unwrap().lineage, family);
+    }
     assert_eq!(terminal.pid.get(), original_pid);
     assert_eq!(terminal.widget, original_widget);
     assert!(db.pending().unwrap().is_empty());
     println!(
-        "MACOS_SESSION_FLOW_CLAUDE_DEFERRED_OK source={} child={}",
-        source_id, child.id
+        "{} source={} child={}",
+        if agent == SessionAgent::Claude {
+            "MACOS_SESSION_FLOW_CLAUDE_DEFERRED_OK"
+        } else {
+            "MACOS_SESSION_FLOW_OPENCODE_REAL_OK"
+        },
+        source_id,
+        child.id
     );
     server.abort();
 }

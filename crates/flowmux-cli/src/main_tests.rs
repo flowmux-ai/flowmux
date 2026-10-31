@@ -1851,6 +1851,62 @@ fn hooks_opencode_session_start_accepts_context_and_session_payload() {
 }
 
 #[test]
+fn hooks_opencode_initial_status_is_not_a_turn_completion() {
+    use flowmux_core::{AgentActivity, AgentStatus};
+    for (agent, source, status, expected) in [
+        ("opencode", "tui-route", "idle", Some(AgentActivity::Idle)),
+        (
+            "opencode",
+            "tui-route",
+            "busy",
+            Some(AgentActivity::Running),
+        ),
+        (
+            "opencode",
+            "tui-route",
+            "retry",
+            Some(AgentActivity::Running),
+        ),
+        (
+            "opencode",
+            "tui-route",
+            "needs_input",
+            Some(AgentActivity::NeedsInput),
+        ),
+        ("opencode", "tui-route", "unexpected", None),
+        ("opencode", "server", "idle", None),
+        ("codex", "tui-route", "idle", None),
+    ] {
+        let input = serde_json::from_value(serde_json::json!({
+            "source": source, "session_status": status, "session_id": "native-session"
+        }))
+        .unwrap();
+        let request = crate::cmd_hooks::build_generic_session_start_request(
+            agent, agent, &input, None, None, None,
+        );
+        let flowmux_ipc::protocol::Request::AgentActivityUpdate {
+            activity,
+            status,
+            session_id,
+            ..
+        } = request
+        else {
+            panic!("initial state must only update activity, never notify completion");
+        };
+        assert_eq!(activity, expected);
+        assert_eq!(
+            status,
+            Some(
+                expected
+                    .map(AgentActivity::status)
+                    .unwrap_or(AgentStatus::Unknown)
+            )
+        );
+        assert_eq!(session_id.as_deref(), Some("native-session"));
+    }
+}
+
+#[test]
 fn hooks_opencode_stop_keeps_trailing_payload_after_flags() {
     // The plugin always emits flags before the optional JSON
     // payload (Codex-compat) so clap can split them cleanly. Make

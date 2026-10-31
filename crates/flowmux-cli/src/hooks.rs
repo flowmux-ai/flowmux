@@ -54,6 +54,9 @@ pub struct ClaudeHookInput {
     /// Native SessionStart matcher (startup/resume/clear), not a turn completion.
     #[serde(default)]
     pub source: Option<String>,
+    /// OpenCode TUI's authoritative initial status, not a turn completion.
+    #[serde(default)]
+    pub session_status: Option<String>,
     /// Set when `Notification` fires for permission/info popups.
     #[serde(default)]
     pub message: Option<String>,

@@ -56,6 +56,7 @@ impl SessionAgent {
                 "XDG_CACHE_HOME",
                 "OPENCODE_CONFIG",
                 "OPENCODE_CONFIG_DIR",
+                "OPENCODE_TUI_CONFIG",
             ],
             Self::Antigravity => &["HOME"],
             Self::Cline => &[

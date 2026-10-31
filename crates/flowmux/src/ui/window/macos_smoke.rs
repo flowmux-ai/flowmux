@@ -52,6 +52,7 @@ pub(crate) fn run() {
     if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some()
         || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_HOME").is_some()
         || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").is_some()
+        || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_OPENCODE_ID").is_some()
     {
         // The native test executable lives in target/debug/deps, outside the
         // GUI's bundled helper directory. Use the same built CLI for its PTYs
@@ -229,8 +230,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .clone();
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
-    if std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").is_some() {
-        session_flow::check_real_claude(&controller, workspace, terminal_pane).await;
+    if std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").is_some()
+        || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_OPENCODE_ID").is_some()
+    {
+        session_flow::check_real_provider(&controller, workspace, terminal_pane).await;
         controller.window.destroy();
         return;
     }

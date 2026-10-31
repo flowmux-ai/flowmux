@@ -31,8 +31,10 @@ pub const FLOWMUX_HOOK_MARKER: &str = "flowmux-hook";
 
 /// Plugin source-marker for the OpenCode JS plugin file. Lets a re-run
 /// detect that the file is owned by flowmux and may be overwritten.
-pub const FLOWMUX_OPENCODE_PLUGIN_MARKER: &str = "flowmux-opencode-session-plugin v5";
+pub const FLOWMUX_OPENCODE_PLUGIN_MARKER: &str = "flowmux-opencode-session-plugin v6";
 const FLOWMUX_OPENCODE_PLUGIN_MARKER_PREFIX: &str = "flowmux-opencode-session-plugin";
+const OPENCODE_TUI_PLUGIN: &str = include_str!("opencode_session_tui.js");
+const OPENCODE_TUI_SPEC: &str = "./flowmux-session-tui.js";
 
 /// Supported targets for hook installation and cleanup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -278,6 +280,25 @@ fn check_opencode() -> HookCheckEntry {
         let opencode_json = home.join("opencode.json");
         all_paths.push(plugin_path.clone());
         all_paths.push(opencode_json.clone());
+        let tui_path = home.join("flowmux-session-tui.js");
+        let tui_config = home.join("tui.json");
+        all_paths.extend([tui_path.clone(), tui_config.clone()]);
+        let tui_registered = match read_json_or_empty_object(&tui_config) {
+            Ok(config) => config
+                .get("plugin")
+                .and_then(Value::as_array)
+                .is_some_and(|plugins| {
+                    plugins.iter().filter(|p| opencode_tui_entry(p)).count() == 1
+                }),
+            Err(error) => {
+                return entry(
+                    HookTarget::OpenCode,
+                    HookCheckStatus::Error(error.to_string()),
+                    all_paths,
+                )
+            }
+        };
+        let tui_current = fs::read_to_string(&tui_path).is_ok_and(|s| s == OPENCODE_TUI_PLUGIN);
 
         let plugin_exists = plugin_path.exists();
         let plugin_ok = plugin_exists
@@ -309,8 +330,10 @@ fn check_opencode() -> HookCheckEntry {
         } else {
             false
         };
-        let this_installed = plugin_ok && !registered && !legacy_owned;
-        let this_missing = !plugin_exists && !registered && !legacy_owned;
+        let this_installed =
+            plugin_ok && !registered && !legacy_owned && tui_current && tui_registered;
+        let this_missing =
+            !plugin_exists && !registered && !legacy_owned && !tui_path.exists() && !tui_registered;
         every_installed &= this_installed;
         every_missing &= this_missing;
     }
@@ -2353,6 +2376,28 @@ fn install_opencode_in(home: &Path, plugin_src: &str) -> Result<Vec<PathBuf>> {
     let plugin_dir = home.join("plugins");
     let plugin_path = plugin_dir.join("flowmux-session.js");
     let legacy_path = plugin_dir.join("flowmux-session.mjs");
+    let tui_path = home.join("flowmux-session-tui.js");
+    if tui_path.exists() && !fs::read_to_string(&tui_path).is_ok_and(|s| opencode_tui_owned(&s)) {
+        return Err(anyhow!(
+            "{} exists and is not managed by flowmux",
+            tui_path.display()
+        ));
+    }
+    let tui_config = home.join("tui.json");
+    let mut config = read_json_or_empty_object(&tui_config)?;
+    let object = config
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("{} must contain an object", tui_config.display()))?;
+    let plugins = object
+        .entry("plugin")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("{} plugin must be an array", tui_config.display()))?;
+    if !plugins.iter().any(opencode_tui_entry) {
+        plugins.push(json!(OPENCODE_TUI_SPEC));
+    }
+    let mut seen = false;
+    plugins.retain(|plugin| !opencode_tui_entry(plugin) || !std::mem::replace(&mut seen, true));
     for path in [&plugin_path, &legacy_path] {
         let existing = fs::read_to_string(path).ok();
         if existing
@@ -2379,6 +2424,45 @@ fn install_opencode_in(home: &Path, plugin_src: &str) -> Result<Vec<PathBuf>> {
     if unregister_opencode_plugin(&opencode_json, "flowmux-session")? {
         touched.push(opencode_json);
     }
+    if write_atomic(&tui_path, OPENCODE_TUI_PLUGIN.as_bytes())? {
+        touched.push(tui_path);
+    }
+    if write_json(&tui_config, &config)? {
+        touched.push(tui_config);
+    }
+    Ok(touched)
+}
+
+fn opencode_tui_owned(source: &str) -> bool {
+    source.contains("// flowmux-opencode-tui-plugin ")
+}
+
+fn opencode_tui_entry(value: &Value) -> bool {
+    value
+        .as_str()
+        .or_else(|| value.as_array()?.first()?.as_str())
+        == Some(OPENCODE_TUI_SPEC)
+}
+
+fn uninstall_opencode_tui(home: &Path) -> Result<Vec<PathBuf>> {
+    let mut touched = Vec::new();
+    let path = home.join("flowmux-session-tui.js");
+    if path.exists() && !fs::read_to_string(&path).is_ok_and(|s| opencode_tui_owned(&s)) {
+        return Ok(touched);
+    }
+    let config_path = home.join("tui.json");
+    let mut config = read_json_or_empty_object(&config_path)?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+        touched.push(path);
+    }
+    if let Some(plugins) = config.get_mut("plugin").and_then(Value::as_array_mut) {
+        let before = plugins.len();
+        plugins.retain(|p| !opencode_tui_entry(p));
+        if plugins.len() != before && write_json(&config_path, &config)? {
+            touched.push(config_path);
+        }
+    }
     Ok(touched)
 }
 
@@ -2392,6 +2476,7 @@ fn uninstall_opencode() -> Result<HookInstallReport> {
     }
     let mut touched: Vec<PathBuf> = Vec::with_capacity(homes.len() * 2);
     for home in &homes {
+        touched.extend(uninstall_opencode_tui(home)?);
         for name in ["flowmux-session.js", "flowmux-session.mjs"] {
             let plugin_path = home.join("plugins").join(name);
             if fs::read_to_string(&plugin_path)
@@ -2487,7 +2572,7 @@ function buildSpawnArgs(event, payload) {{
 
 let pendingHook = Promise.resolve();
 
-function fireFlowmuxHook(event, payload) {{
+export function fireFlowmuxHook(event, payload) {{
   const args = buildSpawnArgs(event, payload);
   // CLI sequence numbers are assigned at delivery time. Preserve event order
   // so a slow busy hook cannot overwrite a newer completion or session end.
@@ -2577,6 +2662,7 @@ fn unregister_opencode_plugin(path: &Path, plugin_name: &str) -> Result<bool> {
 
 fn opencode_plugin_is_current(source: &str) -> bool {
     source.contains(FLOWMUX_OPENCODE_PLUGIN_MARKER)
+        && source.contains("export function fireFlowmuxHook")
         && source.contains("session.created")
         && source.contains("session.deleted")
         && source.contains("session.status")
@@ -4949,6 +5035,65 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn opencode_tui_observes_native_identity_without_completion_events() {
+        let dir = tmp();
+        let plugin = dir.path().join("flowmux-session-tui.mjs");
+        fs::write(&plugin, OPENCODE_TUI_PLUGIN).unwrap();
+        let output = match std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/opencode_tui_identity.mjs"
+            ))
+            .arg(&plugin)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipping OpenCode TUI execution: node is not installed");
+                return;
+            }
+            Err(error) => panic!("run OpenCode TUI test: {error}"),
+        };
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn opencode_tui_install_and_remove_preserve_user_configuration() {
+        let home = tmp();
+        let config = home.path().join("tui.json");
+        let user = json!({"theme":"user-theme", "plugin":[["user-plugin", {"key": 1}]], "plugin_enabled":{"user-plugin":false}});
+        write_json(&config, &user).unwrap();
+        let source = opencode_plugin_source("flowmux");
+        install_opencode_in(home.path(), &source).unwrap();
+        assert!(install_opencode_in(home.path(), &source)
+            .unwrap()
+            .is_empty());
+        let installed = read_json_or_empty_object(&config).unwrap();
+        assert_eq!(installed["plugin"][0], user["plugin"][0]);
+        assert_eq!(installed["plugin"][1], OPENCODE_TUI_SPEC);
+        assert_eq!(
+            fs::read_to_string(home.path().join("flowmux-session-tui.js")).unwrap(),
+            OPENCODE_TUI_PLUGIN
+        );
+        uninstall_opencode_tui(home.path()).unwrap();
+        assert_eq!(read_json_or_empty_object(&config).unwrap(), user);
+        assert!(uninstall_opencode_tui(home.path()).unwrap().is_empty());
+        fs::write(home.path().join("flowmux-session-tui.js"), "user-owned").unwrap();
+        assert!(install_opencode_in(home.path(), &source).is_err());
+        assert!(uninstall_opencode_tui(home.path()).unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(home.path().join("flowmux-session-tui.js")).unwrap(),
+            "user-owned"
+        );
+        assert_eq!(read_json_or_empty_object(&config).unwrap(), user);
     }
 
     #[test]

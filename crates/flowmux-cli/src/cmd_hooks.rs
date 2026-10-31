@@ -1366,16 +1366,16 @@ pub(crate) async fn run_generic_agent_hook_event(
                 ));
             }
         }
-        // Codex / OpenCode register presence on session start without claiming
-        // a turn is idle. The wrapper PID, when available, lets the liveness
-        // sweep clear sessions that have no SessionEnd hook.
+        // Generic starts retain unknown activity. OpenCode's selected TUI route
+        // can also provide an authoritative initial status without a completion.
         AgentHookEvent::SessionStart { .. } => {
-            reqs.push(build_unknown_activity_update_with_session(
+            reqs.push(build_generic_session_start_request(
+                reported_agent,
                 &agent,
+                &input,
                 pid,
                 pane,
                 surface,
-                input.session_id.as_deref(),
             ));
         }
         AgentHookEvent::SessionEnd { .. } => {
@@ -1399,4 +1399,45 @@ pub(crate) async fn run_generic_agent_hook_event(
         hooks::send_hook_requests(&client, reqs).await;
     }
     Ok(())
+}
+
+pub(crate) fn build_generic_session_start_request(
+    reported_agent: &str,
+    agent: &str,
+    input: &hooks::ClaudeHookInput,
+    pid: Option<u32>,
+    pane: Option<flowmux_core::PaneId>,
+    surface: Option<flowmux_core::SurfaceId>,
+) -> Request {
+    use flowmux_core::AgentActivity;
+    let activity = match input.session_status.as_deref() {
+        Some("idle") => Some(AgentActivity::Idle),
+        Some("busy" | "retry") => Some(AgentActivity::Running),
+        Some("needs_input") => Some(AgentActivity::NeedsInput),
+        _ => None,
+    }
+    .filter(|_| {
+        reported_agent.eq_ignore_ascii_case("opencode")
+            && input.source.as_deref() == Some("tui-route")
+    });
+    if let Some(activity) = activity {
+        hooks::build_activity_update_with_metadata(
+            agent,
+            Some(activity),
+            pid,
+            pane,
+            surface,
+            None,
+            None,
+            input.session_id.as_deref(),
+        )
+    } else {
+        hooks::build_unknown_activity_update_with_session(
+            agent,
+            pid,
+            pane,
+            surface,
+            input.session_id.as_deref(),
+        )
+    }
 }
