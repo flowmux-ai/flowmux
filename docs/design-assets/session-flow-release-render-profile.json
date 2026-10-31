@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-31",
+  "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+  "harness_commit": "11b6e104",
+  "isolated_native_pid": 87654,
+  "profile_duration_seconds": 10,
+  "sample_interval_ms": 1,
+  "renderer": "GL, observed gsk_gl_frame_submit in sampled stack",
+  "native_exit_code": 0,
+  "profiler_exit_code": 0,
+  "raw_profile": "/tmp/flowmux-session-flow-release-profile.txt",
+  "raw_sha256": "db5ae1a74d613aa6ba21bfd902eeda121e8bcf22513feb1936dbc380863417be",
+  "nested_main_thread_samples": {
+    "main_thread": 6245,
+    "gsk_gpu_renderer_render": 1515,
+    "gsk_gpu_upload_cairo_op_draw": 1226,
+    "cairo_recording_surface_replay_with_clip": 1226
+  },
+  "interpretation": "Cairo recording replay and rasterization during GL upload consume substantial sampled main-thread work outside the measured DrawingArea draw callback. Counts are nested samples, not additive CPU milliseconds or a proof of the sole frame pacing cause.",
+  "next_investigation": "Reduce repeated shape rasterization while preserving node hit targets, geometry, state colors, and labels; compare full graph frames and visual output before accepting a change.",
+  "limitations": [
+    "Sampling can perturb runtime; instrumented frame timings are excluded from performance acceptance.",
+    "Release Rust symbols are stripped; this identifies downstream GTK/Cairo paths, not individual Rust callsites.",
+    "No hardware input or compositor presentation measurement."
+  ]
+}

@@ -564,3 +564,11 @@ cargo test -p flowmux --release --test macos_native --features native-smoke --lo
 ```
 
 [Release·대조군 원본 수치와 환경](design-assets/session-flow-release-frame-comparison.json). 실제 hardware mouse/trackpad 입력과 compositor presentation 시각은 여전히 미측정이다. 최초 측정에 사용한 Cairo는 CI 설정이고, macOS 제품 기본값 GL은 [platform renderer 설정](../crates/flowmux/src/main.rs)에 근거한다. 기존 사용자 Flowmux PID 72789와 수동 입력 확인 앱 PID 95986은 유지했다.
+
+### Release/GL 호출 스택 조사
+
+동일 native harness의 별도 격리 프로세스 PID 87654를 `/usr/bin/sample`로 10초 조사했다. Profiler와 native test 모두 exit 0으로 종료했다. Main thread의 6,245개 sample 중 `gsk_gpu_renderer_render` 경로가 1,515개, 그 하위 `gsk_gpu_upload_cairo_op_draw` 및 Cairo recording replay 경로가 1,226개였다. 이 수치는 중첩 sample이며 합산한 CPU 시간이나 단일 원인의 증명으로 해석하지 않는다.
+
+DrawingArea draw callback 이후에도 GL upload 과정에서 Cairo path의 재래스터화 비용이 발생함을 확인했다. 따라서 앞의 draw CPU p95만으로 프레임 비용을 설명할 수 없다. 다음 최적화 후보는 반복 도형의 래스터화 비용이며, node 위치·hit target·상태 구분·label과 실제 frame 결과를 보존하는지 함께 비교해야 한다. 아직 제품 최적화 성공으로 기록하지 않는다.
+
+[샘플링 범위·중첩 count·원본 hash](design-assets/session-flow-release-render-profile.json). 원본은 `/tmp/flowmux-session-flow-release-profile.txt`다. Profiler를 켠 실행의 frame 수치는 성능 수용 기준에 사용하지 않는다.
