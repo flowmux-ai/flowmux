@@ -620,3 +620,5 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 [전후 증거·실제 ID·프로세스·파일·로그 hash](design-assets/session-flow-codex-publication-recovery.json). 잠긴 화면에서 실행했으므로 렌더링된 최종 화면·물리 입력·접근성을 통과했다고 주장하지 않는다. 기존 사용자 PID 72789와 보존된 검증 앱 PID 95986·61360은 계속 유지했다. `4cff2a5d`의 이전 CI는 이번 제품 수정의 최종 CI 증거가 아니다.
 
 현재 CI: checkout `6f62e807`의 [Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831), [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)을 시작했고 두 workflow의 `in_progress`를 확인했다. 최종 결론과 이번 수정의 coverage 산출물은 아직 대기 중이다.
+
+제품 `54a44d89`의 macOS job `124428723552`는 success다. Artifact `13028968110`을 내려받아 46개 phase JSON 모두 passed/exit 0, `session-flow`의 native marker 및 두 `observed_identity` 회귀 시험 통과를 확인했다. [검사별 산출물 기록](design-assets/session-flow-macos-gate-54a44d89.json). Linux coverage와 전체 workflow 결론은 아직 대기 중이므로 macOS 성공을 전체 CI 성공으로 취급하지 않는다.
