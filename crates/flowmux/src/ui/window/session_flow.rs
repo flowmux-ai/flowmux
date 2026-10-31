@@ -1220,6 +1220,220 @@ pub(super) async fn check_native(
     println!("MACOS_SESSION_FLOW_LAYOUT_OK");
 }
 
+/// Opt-in live Claude check; the explicit source must be a disposable test
+/// conversation. Reuses existing hooks without modifying the user's settings.
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(super) async fn check_real_claude(
+    controller: &WindowController,
+    workspace: WorkspaceId,
+    pane: PaneId,
+) {
+    use vte::prelude::*;
+    let source_id = std::env::var("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").unwrap();
+    let user_home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let home = user_home.join(".claude");
+    let session = flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == source_id)
+        .unwrap();
+    assert!(
+        session.cwd.starts_with("/tmp") || session.cwd.starts_with("/private/tmp"),
+        "explicit Claude source must belong to a disposable test project"
+    );
+    let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
+    let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
+        flowmux_daemon::DaemonHandler::new(controller.store.clone()),
+        controller.bridge.clone(),
+    ));
+    let server_socket = socket.clone();
+    let server = tokio::spawn(async move {
+        flowmux_ipc::server::run(&server_socket, handler)
+            .await
+            .unwrap();
+    });
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !socket.exists() {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    controller.activate_workspace(workspace).await;
+    controller.focus_pane(pane);
+    let terminal = controller
+        .pane_registry
+        .borrow()
+        .active_terminal(pane)
+        .unwrap()
+        .clone();
+    let source = controller
+        .pane_registry
+        .borrow()
+        .active_surface(pane)
+        .unwrap();
+    let original_pid = terminal.pid.get();
+    let original_widget = terminal.widget.clone();
+    terminal.widget.feed_child(format!(
+        "cd {} && env -u CLAUDE_CONFIG_DIR HOME={} claude --resume {} --tools '' --strict-mcp-config\n",
+        shell_quote(session.cwd.to_str().unwrap()), shell_quote(user_home.to_str().unwrap()),
+        shell_quote(&source_id),
+    ).as_bytes());
+    glib::future_with_timeout(Duration::from_secs(40), async {
+        loop {
+            controller.poll_agent_processes().await;
+            controller.refresh_session_flow(true).await;
+            if controller
+                .pane_registry
+                .borrow()
+                .session_flow_forkable
+                .contains_key(&source)
+            {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .expect("Claude source identity and fork capability");
+    let key = session_key(SessionAgent::Claude, &home, &source_id).unwrap();
+    assert_eq!(
+        controller
+            .pane_registry
+            .borrow()
+            .session_flow_forkable
+            .get(&source),
+        Some(&key)
+    );
+    let fork = native_fork_button(&terminal.widget);
+    assert!(fork.is_sensitive());
+    fork.emit_clicked();
+    let child = glib::future_with_timeout(Duration::from_secs(40), async {
+        loop {
+            controller.poll_agent_processes().await;
+            let db = FlowStore::open(&FlowStore::default_path().unwrap()).unwrap();
+            let snapshot = db.snapshot().unwrap();
+            if let Some((_, child)) = snapshot.lineage.edges().find(|(parent, _)| *parent == &key) {
+                assert!(db.pending().unwrap().is_empty());
+                break child.clone();
+            }
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .expect("Claude fork edge before first input");
+    assert_ne!(child, key);
+    assert!(
+        flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
+            .unwrap()
+            .iter()
+            .all(|s| s.id != child.id),
+        "test must exercise deferred native history"
+    );
+    controller.refresh_session_flow(true).await;
+    while controller.flow.loading.get() {
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
+    let target = controller
+        .flow_anchors()
+        .await
+        .into_iter()
+        .find_map(|a| {
+            a.target
+                .focused
+                .filter(|f| f.session_id.as_deref() == Some(&child.id))
+        })
+        .unwrap();
+    controller.flow.panel.toggle(workspace);
+    controller.focus_pane(pane);
+    glib::future_with_timeout(Duration::from_secs(10), async {
+        while !controller.flow.panel.try_click_native_node(&child) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while controller.focused_pane.get() != Some(target.pane) {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("live deferred-history node focuses its existing pane");
+    assert_eq!(
+        controller
+            .pane_registry
+            .borrow()
+            .active_surface(target.pane),
+        Some(target.surface)
+    );
+    assert_eq!(controller.pane_registry.borrow().terminals.len(), 2);
+    let db = FlowStore::open(&FlowStore::default_path().unwrap()).unwrap();
+    let family = db.snapshot().unwrap().lineage.project([&key]);
+    assert_eq!(family.nodes().len(), 2);
+    controller
+        .flow
+        .panel
+        .assert_native_graph(workspace, &family);
+    if let Ok(path) = std::env::var("FLOWMUX_SESSION_FLOW_CAPTURE") {
+        // Let the force layout settle before capturing the actual Fit control.
+        glib::timeout_future(Duration::from_secs(2)).await;
+        let toolbar = controller.flow.panel.root.first_child().unwrap();
+        let mut child = toolbar.first_child();
+        let mut fit = None;
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            if let Ok(button) = widget.downcast::<gtk::Button>() {
+                if button.label().as_deref() == Some("Fit") {
+                    fit = Some(button);
+                    break;
+                }
+            }
+        }
+        fit.expect("Fit toolbar button").emit_clicked();
+        glib::timeout_future(Duration::from_millis(100)).await;
+        let paintable = gtk::WidgetPaintable::new(Some(&controller.flow.panel.root));
+        let snapshot = gtk::Snapshot::new();
+        paintable.snapshot(
+            &snapshot,
+            controller.flow.panel.root.width() as f64,
+            controller.flow.panel.root.height() as f64,
+        );
+        controller
+            .window
+            .renderer()
+            .unwrap()
+            .render_texture(snapshot.to_node().unwrap(), None)
+            .save_to_png(path)
+            .unwrap();
+    }
+    controller.store.close_pane(target.pane).await;
+    controller
+        .apply_close_pane_incremental_or_rerender(workspace, target.pane)
+        .await;
+    controller.refresh_session_flow(true).await;
+    while controller.flow.loading.get() {
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
+    controller
+        .flow
+        .panel
+        .assert_native_graph(workspace, &family);
+    assert!(
+        !controller.flow.panel.try_click_native_node(&child),
+        "missing native history must not resume"
+    );
+    assert_eq!(controller.pane_registry.borrow().terminals.len(), 1);
+    assert_eq!(terminal.pid.get(), original_pid);
+    assert_eq!(terminal.widget, original_widget);
+    assert!(db.pending().unwrap().is_empty());
+    println!(
+        "MACOS_SESSION_FLOW_CLAUDE_DEFERRED_OK source={} child={}",
+        source_id, child.id
+    );
+    server.abort();
+}
+
 /// Opt-in provider contract test. Uses only the explicitly supplied disposable
 /// history store; ordinary native CI never invokes a paid provider.
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
