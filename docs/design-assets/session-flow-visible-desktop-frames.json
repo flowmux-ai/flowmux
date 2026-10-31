@@ -1,0 +1,151 @@
+{
+  "observed_at": "2026-10-31T03:54:52.328531+00:00",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "harness": "current source, release native-smoke; no renderer changes",
+  "native_exit_code": 0,
+  "acceptance": {
+    "frame_p95_limit_ms": 33,
+    "passed": false
+  },
+  "desktop_observation": "CUA captured and interacted with the preserved recovery GUI before measurement and captured it again afterward. ioreg omitted an explicit screen-lock value at both endpoints; report retains null. This does not establish continuous presentation or physical input latency.",
+  "report": {
+    "area_logical_size": [
+      1280,
+      266
+    ],
+    "debug_assertions": false,
+    "diagnostic_empty_draw": false,
+    "families": 20,
+    "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+    "nodes": 1000,
+    "renderer": "gl",
+    "scale_factor": 2,
+    "screen_lock_observation": {
+      "end": null,
+      "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+      "source": "ioreg -n Root -d1",
+      "start": null
+    },
+    "trials": [
+      {
+        "after_paint_interval_ms": {
+          "max": 34.859375,
+          "p50": 33.366040999999996,
+          "p95": 34.381208,
+          "samples": 300
+        },
+        "draw_cpu_ms": {
+          "max": 2.939375,
+          "p50": 2.551625,
+          "p95": 2.733584,
+          "samples": 301
+        },
+        "duration_seconds": 10.102941208,
+        "input_batches": 579,
+        "signal_to_after_paint_ms": {
+          "max": 34.405375,
+          "p50": 31.227583,
+          "p95": 33.648875000000004,
+          "samples": 301
+        },
+        "trial": 1
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 34.826917,
+          "p50": 33.327166,
+          "p95": 34.268625,
+          "samples": 300
+        },
+        "draw_cpu_ms": {
+          "max": 2.926042,
+          "p50": 2.575958,
+          "p95": 2.761834,
+          "samples": 301
+        },
+        "duration_seconds": 10.102135083,
+        "input_batches": 577,
+        "signal_to_after_paint_ms": {
+          "max": 34.400124999999996,
+          "p50": 30.446541,
+          "p95": 33.814959,
+          "samples": 301
+        },
+        "trial": 2
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 35.257749999999994,
+          "p50": 33.3595,
+          "p95": 34.395500000000006,
+          "samples": 300
+        },
+        "draw_cpu_ms": {
+          "max": 2.9475830000000003,
+          "p50": 2.606,
+          "p95": 2.7835,
+          "samples": 301
+        },
+        "duration_seconds": 10.110431417,
+        "input_batches": 578,
+        "signal_to_after_paint_ms": {
+          "max": 34.524542,
+          "p50": 31.078667,
+          "p95": 33.576,
+          "samples": 301
+        },
+        "trial": 3
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 35.007834,
+          "p50": 33.300917,
+          "p95": 34.138957999999995,
+          "samples": 305
+        },
+        "draw_cpu_ms": {
+          "max": 3.199125,
+          "p50": 2.6165,
+          "p95": 2.8495,
+          "samples": 306
+        },
+        "duration_seconds": 10.1062815,
+        "input_batches": 586,
+        "signal_to_after_paint_ms": {
+          "max": 34.402209000000006,
+          "p50": 31.731707999999998,
+          "p95": 33.714667,
+          "samples": 306
+        },
+        "trial": 4
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 34.784124999999996,
+          "p50": 16.888542,
+          "p95": 33.75575,
+          "samples": 452
+        },
+        "draw_cpu_ms": {
+          "max": 2.96175,
+          "p50": 2.5443330000000004,
+          "p95": 2.8088330000000004,
+          "samples": 453
+        },
+        "duration_seconds": 10.112890875,
+        "input_batches": 592,
+        "signal_to_after_paint_ms": {
+          "max": 34.721459,
+          "p50": 16.726833,
+          "p95": 33.342625,
+          "samples": 453
+        },
+        "trial": 5
+      }
+    ]
+  },
+  "report_sha256": "016b588c3d3222631a94ef56811212ecdc0714c213610dc3e063121aaa037871",
+  "log_sha256": "c7fe05374e84171bf78885f8417675de8df77d3e5dbfd0f7f480ed93def08d0d",
+  "local_build_completed_before_measurement": true,
+  "source_rendering_changed": false
+}

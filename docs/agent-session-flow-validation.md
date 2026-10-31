@@ -632,3 +632,11 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 Fork session 메뉴 좌표 클릭은 `durationMs=200`에서도 메뉴만 닫혀 성공으로 기록하지 않았다. 실제 held-button drag·trackpad·VoiceOver 검증도 남아 있다. 앞의 잠긴 화면 시험 기록은 당시 조건대로 유지하며, 이번 화면 확인으로 그 전체 실행 구간이 잠금 해제 상태였다고 소급하지 않는다.
 
 Sanitizers `41164400861`은 최종 전체 success다. Linux ASan/LSan의 headless·native Lottie·GUI 단계와 ThorVG ASan/UBSan/LSan job을 모두 확인했다. [최종 job/step 결론과 로그 hash](design-assets/session-flow-sanitizers-54a44d89.json). Linux 테스트·커버리지 workflow의 결론은 아직 대기 중이다.
+
+## 2026-10-31 화면 접근 복구 후 release 기준 재측정
+
+최신 제품 `54a44d89`의 release/native-smoke executable을 다시 빌드한 뒤 GL 기준으로 1,000노드·20개 family를 10초씩 5회 측정했다. 빌드는 측정 전에 완료됐고 제품 렌더링은 변경하지 않았다. 실행은 exit 0이며 기존 Session Flow 회귀 및 측정 무결성 marker를 통과했다.
+
+프레임 간격 p95는 **34.3812 / 34.2686 / 34.3955 / 34.1390 / 33.7558 ms**로 다섯 번 모두 목표 ≤33ms에 미달했다. Draw callback CPU p95는 2.73–2.85ms다. 내부 측정 완료를 성능 수용 통과로 해석하지 않는다. [전체 측정·목표 판정·로그 hash](design-assets/session-flow-visible-desktop-frames.json).
+
+측정 전에는 보존된 복구 앱을 CUA로 캡처하고 조작할 수 있었고, 측정 후에도 같은 창을 캡처했다. ioreg 양 끝 관측은 명시적 잠금 필드가 없어 `null`이며 이를 `false`로 바꾸지 않았다. CUA 관찰은 화면 접근이 회복된 증거지만 측정 구간 전체의 compositor 표시나 물리 입력 지연을 증명하지 않는다. 화면 잠금만을 기존 목표 미달의 원인으로 단정할 근거도 없다.
