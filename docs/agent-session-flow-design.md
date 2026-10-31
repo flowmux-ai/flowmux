@@ -306,3 +306,6 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 실제 GTK fixture 캡처(3개 테스트 세션이며 실제 provider 실행 화면과 구분):
 
 ![Session Flow native fixture](design-assets/agent-session-flow-native.png)
+
+
+Claude의 첫 입력 전 fork: Claude Code 2.1.314는 fork된 TUI와 SessionStart ID를 먼저 만들고 대화 파일은 나중에 기록할 수 있다. Flowmux가 예약한 surface에서 provider와 새 ID를 확인한 실행 중 fork는 파일이 없어도 연결을 확정한다. 가상의 대화 파일이나 resume 가능 기록은 만들지 않는다. 해당 노드는 실행 중에는 기존 pane으로 이동하며, native history가 없는 채 실행이 끝나면 연결을 유지한 비활성 노드가 된다. Native history가 나타나면 기존 import로 제목·resume 가능 여부를 갱신한다. 이 예외는 Claude의 현재 실행 중 fork에만 적용하며, Codex의 명시적 parent 검증과 모든 resume의 native history 확인은 유지한다.

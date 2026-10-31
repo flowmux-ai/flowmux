@@ -206,6 +206,38 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
     Ok(catalog)
 }
 
+// The identity has already been observed on the operation's reserved live surface.
+fn complete_observed_session(
+    store: &mut FlowStore,
+    operation: &flowmux_state::session_flow::Operation,
+    native: &SessionKey,
+    live: &LiveSession,
+) -> Result<(), String> {
+    use flowmux_state::session_flow::{OperationKind, SessionRecord};
+    let agent = SessionAgent::from_name(&native.provider).ok_or("Unknown session provider")?;
+    let sessions = flowmux_state::session_history::list_sessions(agent, &native.home)
+        .map_err(|e| e.to_string())?;
+    if let Some(child) = sessions.iter().find(|s| s.id == native.id) {
+        if operation.kind == OperationKind::Fork
+            && agent == SessionAgent::Codex
+            && child.fork_parent().map_err(|e| e.to_string())?.as_deref()
+                != Some(&operation.source.id)
+        {
+            return Err("Fork parent identity has not been confirmed".into());
+        }
+        store
+            .import(&[(native.clone(), SessionRecord::from(child))], &[])
+            .map_err(|e| e.to_string())?;
+    } else if agent != SessionAgent::Claude || operation.kind != OperationKind::Fork {
+        return Err("Native session record is not yet available".into());
+    }
+    // Claude defers a fork's history file until input. Its live hook identity proves
+    // the edge; without a native record the node can only focus its existing pane.
+    store
+        .complete_running(operation, native, live)
+        .map_err(|e| e.to_string())
+}
+
 impl WindowController {
     async fn flow_anchors(&self) -> Vec<Anchor> {
         let terminals: Vec<_> = self
@@ -787,14 +819,10 @@ impl WindowController {
                 let Some(id) = id else { continue; };
                 let observed = SessionKey { id, ..key.clone() };
                 let live = LiveSession { owner: operation.owner, pid: root_pid, started: flowmux_procmon::process_start_time(root_pid), workspace: workspace.0, pane: pane.0, surface: surface.0, socket: flowmux_config::paths::runtime_socket_for_pid(std::process::id()) };
-                let operation = operation.clone(); let home = home.clone(); let native = observed.clone();
+                let operation = operation.clone(); let native = observed.clone();
                 let result = gtk::gio::spawn_blocking(move || -> Result<(), String> {
-                    let native_sessions = flowmux_state::session_history::list_sessions(session.agent, &home.path).map_err(|e| e.to_string())?;
-                    let child = native_sessions.iter().find(|s| s.id == native.id).ok_or("Native session record is not yet available")?;
-                    if operation.kind == OperationKind::Fork && session.agent == SessionAgent::Codex && child.fork_parent().map_err(|e| e.to_string())?.as_deref() != Some(&operation.source.id) { return Err("Fork parent identity has not been confirmed".into()); }
                     let mut store = FlowStore::open(&FlowStore::default_path().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-                    store.import(&[(native.clone(), flowmux_state::session_flow::SessionRecord::from(child))], &[]).map_err(|e| e.to_string())?;
-                    store.complete_running(&operation, &native, &live).map_err(|e| e.to_string())
+                    complete_observed_session(&mut store, &operation, &native, &live)
                 }).await;
                 if matches!(result, Ok(Ok(()))) {
                     let _ = controller.bridge.tx.try_send(GtkCommand::SessionFlow(FlowAction::Refresh));
@@ -1842,6 +1870,105 @@ impl WindowController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn claude_live_fork_is_visible_before_history_is_written() {
+        use flowmux_state::session_flow::{Operation, OperationKind};
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("claude");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        let source = session_key(SessionAgent::Claude, &home, "parent").unwrap();
+        let child = SessionKey {
+            id: "child".into(),
+            ..source.clone()
+        };
+        let operation = Operation {
+            request: uuid::Uuid::new_v4(),
+            owner: uuid::Uuid::new_v4(),
+            owner_pid: std::process::id(),
+            source: source.clone(),
+            kind: OperationKind::Fork,
+            target_surface: uuid::Uuid::new_v4(),
+        };
+        let live = LiveSession {
+            owner: operation.owner,
+            pid: std::process::id(),
+            started: flowmux_procmon::process_start_time(std::process::id()),
+            workspace: uuid::Uuid::new_v4(),
+            pane: uuid::Uuid::new_v4(),
+            surface: operation.target_surface,
+            socket: root.path().join("test.sock"),
+        };
+        let mut db = FlowStore::open(&root.path().join("flow.sqlite")).unwrap();
+        assert!(db.begin(&operation).unwrap());
+        assert!(complete_observed_session(&mut db, &operation, &source, &live).is_err());
+        let foreign_surface = LiveSession {
+            surface: uuid::Uuid::new_v4(),
+            ..live.clone()
+        };
+        assert!(complete_observed_session(&mut db, &operation, &child, &foreign_surface).is_err());
+        assert!(db.snapshot().unwrap().lineage.is_empty());
+        complete_observed_session(&mut db, &operation, &child, &live).unwrap();
+        assert!(db.pending().unwrap().is_empty());
+        let snapshot = db.snapshot().unwrap();
+        assert_eq!(snapshot.lineage.project([&source]).nodes().len(), 2);
+        assert!(
+            !snapshot.records.contains_key(&child),
+            "do not invent resumable history"
+        );
+        assert_eq!(db.live_sessions().unwrap().get(&child), Some(&vec![live]));
+        assert!(
+            flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_history_still_blocks_resume_and_other_provider_forks() {
+        use flowmux_state::session_flow::{Operation, OperationKind};
+        let root = tempfile::tempdir().unwrap();
+        let mut db = FlowStore::open(&root.path().join("flow.sqlite")).unwrap();
+        for (agent, kind) in [
+            (SessionAgent::Claude, OperationKind::Resume),
+            (SessionAgent::Codex, OperationKind::Fork),
+            (SessionAgent::OpenCode, OperationKind::Fork),
+        ] {
+            let home = root.path().join(agent.name());
+            std::fs::create_dir_all(&home).unwrap();
+            let source = session_key(agent, &home, "parent").unwrap();
+            let operation = Operation {
+                request: uuid::Uuid::new_v4(),
+                owner: uuid::Uuid::new_v4(),
+                owner_pid: std::process::id(),
+                source: source.clone(),
+                kind,
+                target_surface: uuid::Uuid::new_v4(),
+            };
+            let observed = SessionKey {
+                id: if kind == OperationKind::Fork {
+                    "child"
+                } else {
+                    "parent"
+                }
+                .into(),
+                ..source
+            };
+            let live = LiveSession {
+                owner: operation.owner,
+                pid: std::process::id(),
+                started: flowmux_procmon::process_start_time(std::process::id()),
+                workspace: uuid::Uuid::new_v4(),
+                pane: uuid::Uuid::new_v4(),
+                surface: operation.target_surface,
+                socket: root.path().join("test.sock"),
+            };
+            assert!(db.begin(&operation).unwrap());
+            assert!(complete_observed_session(&mut db, &operation, &observed, &live).is_err());
+            assert!(db.pending().unwrap().contains(&operation));
+            assert!(db.snapshot().unwrap().lineage.is_empty());
+        }
+    }
+
     #[test]
     fn capability_probe_reads_stderr_and_rejects_failed_help() {
         use std::os::unix::fs::PermissionsExt;
