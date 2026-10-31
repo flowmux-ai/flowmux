@@ -183,5 +183,12 @@
     "Native controller gestures and actual IPC/state/process evidence while screen is locked; not physical input or compositor verification.",
     "Two Codex GUIs sharing one disposable store. Other providers and larger process counts are not established by this run.",
     "Simultaneous activation means the measured click-start skew, not proof of same-instruction execution or exhaustive scheduling."
-  ]
+  ],
+  "ci": {
+    "status": "in_progress",
+    "tested_head": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
+    "test": 41168599342,
+    "sanitizers": 41168601343,
+    "scope": "Local real-provider opt-in test passed. Remote gates compile/check the harness and run the default regression suite; they do not execute the disposable real Codex driver."
+  }
 }
