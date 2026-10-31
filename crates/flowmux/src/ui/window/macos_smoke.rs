@@ -246,6 +246,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
 
     if std::env::var_os("FLOWMUX_SESSION_FLOW_SMOKE_ONLY").is_some() {
         session_flow::check_native(&controller, workspace, terminal_pane, root).await;
+        if let Some(path) = std::env::var_os("FLOWMUX_SESSION_FLOW_FRAME_REPORT") {
+            crate::ui::session_flow::check_native_performance(std::path::Path::new(&path)).await;
+        }
         controller.window.destroy();
         return;
     }

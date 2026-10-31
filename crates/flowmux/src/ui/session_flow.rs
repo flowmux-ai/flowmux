@@ -33,6 +33,11 @@ pub(crate) struct Node {
 
 use flowmux_state::session_flow::SavedView as View;
 
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+mod performance;
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) use performance::check_native_performance;
+
 #[derive(Default)]
 struct Scene {
     layout: Layout,
