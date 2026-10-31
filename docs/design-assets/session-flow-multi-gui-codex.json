@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-31",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "provider_version": "codex-cli 0.166.0",
+  "result": {
+    "status": "passed",
+    "root": "/tmp/fmsmulti-1n42i6em",
+    "source_ids": [
+      "01a18ddc-a51f-7472-ab63-045abb779243",
+      "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b"
+    ],
+    "target_id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+    "ready": {
+      "a": {
+        "database": "/tmp/fmsmulti-1n42i6em/data/flowmux/session-flow.sqlite",
+        "owner": "9f31ecb1-2961-4243-ad53-ca3188891ff6",
+        "pid": 89256,
+        "socket": "/tmp/fm-native-BL87Kj/run/flowmux-89256.sock",
+        "source": {
+          "home": "/private/tmp/fmsmulti-1n42i6em/codex",
+          "id": "01a18ddc-a51f-7472-ab63-045abb779243",
+          "provider": "codex"
+        },
+        "source_pane": "2c08c0a1-e4aa-4764-9e44-5e1a9a92d8aa",
+        "source_surface": "b8814604-5695-42d2-a6fa-889349232525",
+        "target": {
+          "home": "/private/tmp/fmsmulti-1n42i6em/codex",
+          "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+          "provider": "codex"
+        },
+        "workspace": "a89fcdfe-87dc-4748-af57-ef9bfc64e14a"
+      },
+      "b": {
+        "database": "/tmp/fmsmulti-1n42i6em/data/flowmux/session-flow.sqlite",
+        "owner": "bc082895-1b5c-4424-9820-0f11555a7626",
+        "pid": 89348,
+        "socket": "/tmp/fm-native-41Ymon/run/flowmux-89348.sock",
+        "source": {
+          "home": "/private/tmp/fmsmulti-1n42i6em/codex",
+          "id": "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b",
+          "provider": "codex"
+        },
+        "source_pane": "d5cae104-0d8e-4a1b-859d-ba58f983028f",
+        "source_surface": "4036bcf8-20b4-49eb-a238-9da3b0c6eb7c",
+        "target": {
+          "home": "/private/tmp/fmsmulti-1n42i6em/codex",
+          "id": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+          "provider": "codex"
+        },
+        "workspace": "ca02d2c3-ffe2-4b92-92b6-fe0ee6646632"
+      }
+    },
+    "opened": {
+      "a": {
+        "clicked_at_unix_micros": 1793420752053328,
+        "live": {
+          "owner": "9f31ecb1-2961-4243-ad53-ca3188891ff6",
+          "pane": "cff83aa1-7fc3-450d-a90a-865f57e15f31",
+          "pid": 89527,
+          "socket": "/tmp/fm-native-BL87Kj/run/flowmux-89256.sock",
+          "started": 1793420752143061,
+          "surface": "1534c1ee-b074-4e87-b426-a5556168a7dc",
+          "workspace": "a89fcdfe-87dc-4748-af57-ef9bfc64e14a"
+        },
+        "original_pid": 89264,
+        "original_surface": "b8814604-5695-42d2-a6fa-889349232525",
+        "owns_target": true,
+        "pid": 89256,
+        "status": "Reading session relationships\u2026",
+        "terminals": 2
+      },
+      "b": {
+        "clicked_at_unix_micros": 1793420752122530,
+        "live": {
+          "owner": "9f31ecb1-2961-4243-ad53-ca3188891ff6",
+          "pane": "cff83aa1-7fc3-450d-a90a-865f57e15f31",
+          "pid": 89527,
+          "socket": "/tmp/fm-native-BL87Kj/run/flowmux-89256.sock",
+          "started": 1793420752143061,
+          "surface": "1534c1ee-b074-4e87-b426-a5556168a7dc",
+          "workspace": "a89fcdfe-87dc-4748-af57-ef9bfc64e14a"
+        },
+        "original_pid": 89363,
+        "original_surface": "4036bcf8-20b4-49eb-a238-9da3b0c6eb7c",
+        "owns_target": false,
+        "pid": 89348,
+        "status": "3 sessions \u00b7 scroll to zoom \u00b7 drag nodes or space",
+        "terminals": 1
+      }
+    },
+    "click_start_skew_ms": 69.202,
+    "native_writers": {
+      "01a18ddc-a51f-7472-ab63-045abb779243": [
+        {
+          "pid": 89271,
+          "path": "/private/tmp/fmsmulti-1n42i6em/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl"
+        }
+      ],
+      "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b": [
+        {
+          "pid": 89369,
+          "path": "/private/tmp/fmsmulti-1n42i6em/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-07-01a18ffc-6daf-76a1-b8b2-32fc5a6a110b.jsonl"
+        }
+      ],
+      "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f": [
+        {
+          "pid": 89534,
+          "path": "/private/tmp/fmsmulti-1n42i6em/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-12-01a18ffc-82ad-7f81-aa35-aaab46ab0f3f.jsonl"
+        }
+      ]
+    },
+    "operations": [
+      [
+        "92e0d4f1-19f9-4ce8-9e99-02f2cb247276",
+        "{\"request\":\"92e0d4f1-19f9-4ce8-9e99-02f2cb247276\",\"owner\":\"9f31ecb1-2961-4243-ad53-ca3188891ff6\",\"owner_pid\":89256,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-1n42i6em/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"},\"kind\":\"Resume\",\"target_surface\":\"1534c1ee-b074-4e87-b426-a5556168a7dc\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-1n42i6em/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}"
+      ]
+    ],
+    "bindings": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-1n42i6em/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"owner\":\"bc082895-1b5c-4424-9820-0f11555a7626\",\"pid\":89363,\"started\":1793420748422952,\"workspace\":\"ca02d2c3-ffe2-4b92-92b6-fe0ee6646632\",\"pane\":\"d5cae104-0d8e-4a1b-859d-ba58f983028f\",\"surface\":\"4036bcf8-20b4-49eb-a238-9da3b0c6eb7c\",\"socket\":\"/tmp/fm-native-41Ymon/run/flowmux-89348.sock\"}"
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-1n42i6em/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"owner\":\"9f31ecb1-2961-4243-ad53-ca3188891ff6\",\"pid\":89527,\"started\":1793420752143061,\"workspace\":\"a89fcdfe-87dc-4748-af57-ef9bfc64e14a\",\"pane\":\"cff83aa1-7fc3-450d-a90a-865f57e15f31\",\"surface\":\"1534c1ee-b074-4e87-b426-a5556168a7dc\",\"socket\":\"/tmp/fm-native-BL87Kj/run/flowmux-89256.sock\"}"
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsmulti-1n42i6em/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "{\"owner\":\"9f31ecb1-2961-4243-ad53-ca3188891ff6\",\"pid\":89264,\"started\":1793420744059834,\"workspace\":\"a89fcdfe-87dc-4748-af57-ef9bfc64e14a\",\"pane\":\"2c08c0a1-e4aa-4764-9e44-5e1a9a92d8aa\",\"surface\":\"b8814604-5695-42d2-a6fa-889349232525\",\"socket\":\"/tmp/fm-native-BL87Kj/run/flowmux-89256.sock\"}"
+      ]
+    ],
+    "foreign_focus": {
+      "owner_pid": 89256,
+      "pane": "cff83aa1-7fc3-450d-a90a-865f57e15f31",
+      "surface": "1534c1ee-b074-4e87-b426-a5556168a7dc"
+    },
+    "protected_pids": [
+      72789,
+      95986,
+      61360,
+      30374
+    ],
+    "scope": "Two real native GUI processes and real Codex writers; test controller gestures and IPC focus, not physical pointer or compositor proof. No model request; test-only placeholder credential and loopback endpoint.",
+    "native_exit_codes": {
+      "a": 0,
+      "b": 0
+    }
+  },
+  "source_sha256": {
+    "crates/flowmux/src/ui/window/session_flow/multi_gui.rs": "46bc25aead6a997171e271c1c00d3bd5c8866a6cedb6c01873fe04953b35338e",
+    "crates/flowmux/src/ui/window/macos_smoke.rs": "4a4d4c6ede6c511c390f0557494d40fe790cb225893c503468e5f36547db7710",
+    "crates/flowmux/src/ui/window/session_flow.rs": "ab6ced42632ff34bc7bcfb40dc83aea8a8b82342832376dc78e690412019206e",
+    "scripts/test-session-flow-multi-gui.py": "3904d1f339824b671cf0c68b117ea510f976ee019851d736f1a59b0b909cd4f1"
+  },
+  "native_logs_sha256": {
+    "a": "50b853cc4e900eb8374ca35d0040424db3b9c40027b749ddef952a355ab07dcd",
+    "b": "4cd1229827ee9a4c99bb2e5e352269b022dfa22849c30063a21bb8b08b29912c"
+  },
+  "baseline_native": {
+    "exit_code": 0,
+    "log_sha256": "0b6ac4529c3d665aab35db7d3e573552e619706672bfdb448a96c90dd538f5ce"
+  },
+  "clippy": {
+    "exit_code": 0,
+    "command": "cargo clippy -p flowmux --all-targets --features native-smoke --locked -- -D warnings",
+    "log_sha256": "1972b39a952e247008bc7e231ac0e4b341c17f0342dbcfe72b6b676273d31dec"
+  },
+  "earlier_runs": [
+    {
+      "root": "/tmp/fmsmulti-a1q244z2",
+      "click_start_skew_ms": 79.746,
+      "driver_exit_code": 0
+    },
+    {
+      "root": "/tmp/fmsmulti-8txfefxh",
+      "click_start_skew_ms": 103.789,
+      "driver_exit_code": 0
+    }
+  ],
+  "limits": [
+    "Native controller gestures and actual IPC/state/process evidence while screen is locked; not physical input or compositor verification.",
+    "Two Codex GUIs sharing one disposable store. Other providers and larger process counts are not established by this run.",
+    "Simultaneous activation means the measured click-start skew, not proof of same-instruction execution or exhaustive scheduling."
+  ]
+}

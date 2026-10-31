@@ -35,6 +35,15 @@ pub(crate) fn run() {
         std::fs::create_dir_all(&path).unwrap();
         std::env::set_var(key, path);
     }
+    if let Some(shared) = std::env::var_os("FLOWMUX_SESSION_FLOW_MULTI_GUI_DIR") {
+        let shared = PathBuf::from(shared);
+        assert!(shared.starts_with("/tmp") && shared.join("test-owned").is_file());
+        let data = shared.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        // Only this opt-in two-process test shares the lineage/ownership database.
+        // Config, window state and IPC sockets remain isolated per GUI process.
+        std::env::set_var("XDG_DATA_HOME", data);
+    }
     // Skill installation must never touch the developer's actual agent folders.
     if std::env::var_os("FLOWMUX_SKILLS_SMOKE_ONLY").is_some() {
         for (key, directory) in [

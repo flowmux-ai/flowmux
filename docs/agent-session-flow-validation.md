@@ -204,7 +204,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
 | R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
 | R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI·화면 frame 지연 미확인 |
-| R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
+| R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인 | 실제 독립 GUI 2개와 Codex writer의 동시 선택·기존 owner focus를 추가 확인. 다른 provider의 다중 GUI와 물리 입력까지 일반화하지 않음 |
 | R10 | Native disabled node 입력이 launch를 만들지 않음; 실제 비활성 Codex 기록을 임시 이동한 뒤 CUA pointer 클릭도 operation·pane 증가 없음; 기록 복원 완료 | 수동 접근성 검증 미확인 |
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
 | R12 | Codex·OpenCode 실제 ID 확인 후 publication 및 같은 ID resume. Claude 실제 새 ID와 첫 입력 전 live focus·종료 후 기록 없는 노드 비활성 검증; stale source·writer/PID 재사용 검증 | provider별 버전 범위는 아래 기록 참조; 외부 writer 원자적 배제 없음 |
@@ -675,3 +675,27 @@ Linux artifact `13028289472`, macOS artifact `13028968110`에서 각각 12개·4
 [원본 보고서·후보 patch·로그 hash](design-assets/session-flow-gsk-experiments.json)에 보존했고, [native fixture 렌더링](design-assets/session-flow-gsk-prototype.png)에서는 선·화살표·활성/비활성 노드·라벨을 확인했다. 이 이미지는 renderer texture 캡처이며 실제 compositor나 물리 입력 증거가 아니다. **후보를 제품에 채택하지 않고 소스를 원복했다.** 최신 CI가 검증한 제품 코드와 동일하며, 원복된 release executable도 다시 빌드한다.
 
 다음 비교는 화면 접근을 먼저 확인한 뒤 동일 baseline과 보존한 후보를 같은 조건에서 실행해야 한다. 실기 pan/drag·메뉴 pointer·접근성과 최종 현재 코드 CI는 별도 검증으로 유지한다. 원본 사용자 앱 PID 72789와 보존된 검증 앱 PID 95986·61360·30374는 모두 실행 중이었다.
+
+## 2026-10-31 실제 Codex 두 GUI의 동시 resume·외부 창 focus
+
+Codex 0.166.0의 실제 3세대 기록을 별도 `/tmp/fmsmulti-*` 프로필로 복사하고 두 native GUI를 실행했다. 두 GUI는 lineage/ownership 데이터만 공유하며 config·window state·IPC socket은 각기 격리한다. A는 원본, B는 그 자식을 열고 둘 다 닫힌 손자 세션을 graph node controller로 선택한다. 이는 mocked provider나 headless daemon만의 시험이 아니다. 실제 Codex PTY와 writable rollout 파일을 확인했으며 모델 요청은 보내지 않았다. 테스트용 placeholder 자격 정보와 loopback endpoint를 사용하고 사용자 OpenAI API 환경값·인증 파일은 가져오지 않는다.
+
+최종 재현 스크립트 실행의 GUI PID는 `89256`, `89348`, 선택 시작 간격은 **69.202ms**였다. 완료 resume operation은 정확히 하나, terminal 수는 소유 창 2개·다른 창 1개였고 동일 임시 프로필에서 원본·자식·대상 ID 각각의 native writable rollout writer가 하나씩이었다. 두 창을 원래 pane으로 돌린 뒤 비소유 창에서 대상 노드를 다시 선택하자 기존 소유 창의 정확한 pane·surface로 이동했다. 새 operation이나 pane은 늘지 않았고 각 원본 terminal widget·PID는 유지됐다.
+
+외부 driver가 증거를 검사한 뒤 자신이 만든 테스트 GUI만 정상 종료를 허용했다. 두 native executable과 driver가 모두 exit 0이며 `MACOS_SESSION_FLOW_MULTI_GUI_OK`, `MACOS_NATIVE_SMOKE_OK`, `SESSION_FLOW_MULTI_GUI_REAL_OK`를 확인했다. 원본 앱과 보존 중인 검증 앱 PID `72789`, `95986`, `61360`, `30374`는 계속 실행 중이었다. 초기 driver 및 인자화 단계에서도 각각 79.746ms, 103.789ms 간격으로 같은 불변식을 통과했다. 이 간격은 두 입력이 같은 CPU 명령에서 실행됐거나 모든 scheduler 순서를 검증했다는 뜻은 아니다.
+
+[최종 결과·실제 writer·operation·외부 focus·로그 hash](design-assets/session-flow-multi-gui-codex.json). 화면 잠금 상태의 native controller·IPC·프로세스 증거이며 물리 포인터나 compositor 표시 증거는 아니다. 다른 provider와 더 많은 GUI 프로세스까지 일반화하지 않는다. 기본 Session Flow native 회귀와 all-targets/native-smoke clippy `-D warnings`도 통과했다. 이번 추가는 opt-in 시험 경로이며 제품 동작 수정은 없다.
+
+재현에는 `/tmp` 아래의 실제 Codex 원본→자식→손자 기록, 그 기록이 참조하는 disposable project, 설치된 Codex CLI가 필요하다. 다음 빌드가 출력한 native executable 경로를 `--native`에 전달한다. `ROOT_ID CHILD_ID TARGET_ID`와 `/path/...`는 해당 fixture·빌드 경로로 바꾼다.
+
+```sh
+cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
+python3 scripts/test-session-flow-multi-gui.py \
+  --seed-home /tmp/disposable-codex-profile \
+  --sessions ROOT_ID CHILD_ID TARGET_ID \
+  --native /path/to/built/macos_native-executable \
+  --cli /path/to/built/flowmuxctl \
+  --codex /path/to/installed/codex
+```
+
+필요하면 `--protected-pid PID`를 여러 번 주어 보존할 앱의 생존을 검사한다. 출력된 임시 root에 barriers·각 GUI log·최종 `result.json`이 남는다. 두 프로세스 동시 실행은 이 격리된 동시성 시험에만 한정한다. 일반 native GUI suite를 병렬 실행하는 설정은 추가하지 않는다.

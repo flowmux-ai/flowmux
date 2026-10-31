@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 mod crash_recovery;
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+mod multi_gui;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Anchor {
@@ -1777,6 +1779,11 @@ pub(super) async fn check_real_codex(
         controller.flow.panel.status.text()
     );
     let key = session_key(SessionAgent::Codex, &home, &source_id).unwrap();
+    if let Some(directory) = std::env::var_os("FLOWMUX_SESSION_FLOW_MULTI_GUI_DIR") {
+        multi_gui::check(controller, workspace, pane, &key, &PathBuf::from(directory)).await;
+        server.abort();
+        return;
+    }
     let previous_children: BTreeSet<_> = FlowStore::open(&FlowStore::default_path().unwrap())
         .unwrap()
         .snapshot()
