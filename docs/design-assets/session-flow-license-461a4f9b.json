@@ -1,0 +1,136 @@
+{
+  "checked_at": "2026-10-31T05:21:54.502652+00:00",
+  "workflow": {
+    "conclusion": "success",
+    "headSha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+    "jobs": [
+      {
+        "completedAt": "2026-10-31T05:20:37Z",
+        "conclusion": "success",
+        "databaseId": 124451283413,
+        "name": "cargo-deny",
+        "startedAt": "2026-10-31T05:15:19Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T05:15:20Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T05:15:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:25Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T05:15:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:26Z",
+            "conclusion": "success",
+            "name": "Install Rust",
+            "number": 3,
+            "startedAt": "2026-10-31T05:15:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:40Z",
+            "conclusion": "success",
+            "name": "Install cargo-deny",
+            "number": 4,
+            "startedAt": "2026-10-31T05:15:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:19:34Z",
+            "conclusion": "success",
+            "name": "Install cargo-about",
+            "number": 5,
+            "startedAt": "2026-10-31T05:17:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:19:37Z",
+            "conclusion": "success",
+            "name": "Check dependency licenses and sources",
+            "number": 6,
+            "startedAt": "2026-10-31T05:19:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:19:38Z",
+            "conclusion": "success",
+            "name": "Check dependency advisories",
+            "number": 7,
+            "startedAt": "2026-10-31T05:19:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:30Z",
+            "conclusion": "success",
+            "name": "Check third-party license notice",
+            "number": 8,
+            "startedAt": "2026-10-31T05:19:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:30Z",
+            "conclusion": "success",
+            "name": "Check asset license notices",
+            "number": 9,
+            "startedAt": "2026-10-31T05:20:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:35Z",
+            "conclusion": "success",
+            "name": "Install editor dependencies",
+            "number": 10,
+            "startedAt": "2026-10-31T05:20:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:35Z",
+            "conclusion": "success",
+            "name": "Check editor dependency notice",
+            "number": 11,
+            "startedAt": "2026-10-31T05:20:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:35Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 22,
+            "startedAt": "2026-10-31T05:20:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:20:35Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 23,
+            "startedAt": "2026-10-31T05:20:35Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171847178/job/124451283413"
+      }
+    ],
+    "name": "License audit",
+    "status": "completed",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171847178"
+  },
+  "log_sha256": "72f8cf54758792a7e6627e4b93e65375006bc3078bbb8071b10dd50995750db0",
+  "verified": [
+    "Dependency license and source check passed",
+    "Dependency advisory check passed",
+    "Four notice tests passed",
+    "Generated THIRD_PARTY_LICENSES.md matched committed file",
+    "Asset license notices passed",
+    "Twelve editor assets verified"
+  ]
+}

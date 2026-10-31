@@ -634,7 +634,17 @@
           "b": "7b81047f3ac43b8a3ebd17f115966fbb56574f6103acb35b7c968aa6f5530e3c"
         }
       }
-    ]
+    ],
+    "final_release": {
+      "head_sha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+      "build_exit_code": 0,
+      "build_log_sha256": "f2c90be397d7bf773a84e9cda39473526c9e287aeeccb5edb878edf2e9b88e2e",
+      "native_exit_code": 0,
+      "native_log_sha256": "8a8dcf366a012a72a8b32d2d0e205402126217b4364fe8c75f25d436661dcd35",
+      "binary_sha256": "ec7eeb16c9687f6affa4fbb4202a3e5ad4d40149a1881a7a2b9fc8ba6ea3eea7",
+      "renderer": "gl",
+      "scope": "Exact committed release source; native Session Flow regression, not performance or physical input acceptance."
+    }
   },
   "hook_readiness_failure": {
     "root": "/tmp/fmsmulti-fb4y6iap",
@@ -652,7 +662,29 @@
     "scope": "Visually inspected GTK renderer texture of the prototype three-node fixture; not a desktop or hardware input capture."
   },
   "remote_ci": {
-    "status": "pending",
-    "scope": "b8d84f65 gates passed for the previous renderer; they do not validate this implementation."
+    "status": "in_progress",
+    "head_sha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+    "checked_at": "2026-10-31T05:15:38.832433+00:00",
+    "runs": [
+      {
+        "name": "Test",
+        "id": 41171842039,
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039"
+      },
+      {
+        "name": "Sanitizers",
+        "id": 41171844578,
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171844578"
+      },
+      {
+        "name": "License audit",
+        "id": 41171847178,
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171847178",
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "session-flow-license-461a4f9b.json"
+      }
+    ],
+    "scope": "Fresh workflows target the retained GSK renderer and hook selection readiness test fix; final conclusions pending."
   }
 }

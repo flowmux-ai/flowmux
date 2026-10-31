@@ -738,3 +738,7 @@ Test `41168599342`도 최종 전체 **success**로 종료됐다. Linux artifact 
 앞선 한 실행은 Codex hook 확인 화면의 선택 항목이 바뀌기 전에 Enter를 보내 원본 세션 ID를 얻지 못했다(exit 101). graph resume 전의 시험 준비 실패로 기록했으며, 시험 전용 코드를 선택 항목 관측 후 Enter를 보내도록 수정한 commit `76680062` 이후 위 두 실행이 통과했다. 사용자 프로필이나 hook 신뢰 설정은 변경하지 않았다.
 
 [프로토타입 전체 수치·patch·최종 source hash·로컬 검사·실제 두 GUI 결과·실패 기록](design-assets/session-flow-gsk-retained-validation.json)과 [native texture 캡처](design-assets/session-flow-gsk-retained-prototype.png)를 보존한다. 이전 renderer의 녹색 CI와 구분하여 새 commit의 Test/Sanitizers/License audit를 별도로 실행한다. 실제 포인터·트랙패드·접근성 검증은 여전히 별도 항목이다.
+
+렌더러 commit `461a4f9b`를 `feat/session-flow`에 push했다. 해당 commit의 release 빌드와 GL native Session Flow 회귀는 exit 0이며 `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`를 확인했다. 새 [Test 41171842039](https://github.com/flowmux-ai/flowmux/actions/runs/41171842039), [Sanitizers 41171844578](https://github.com/flowmux-ai/flowmux/actions/runs/41171844578), [License audit 41171847178](https://github.com/flowmux-ai/flowmux/actions/runs/41171847178)의 head가 모두 이 commit과 일치한다. 최종 remote 결론과 coverage는 진행 중이며, 실제 화면 성능·물리 입력은 잠금 해제 후 확인이 필요하다.
+
+같은 commit의 License audit `41171847178`은 최종 **success**다. dependency license/source·advisory, notice 시험 4개와 재생성 diff 없음, asset notice 및 editor asset 12개 검사를 확인했다. [실제 job/step 결론과 전체 로그 hash](design-assets/session-flow-license-461a4f9b.json). Test와 Sanitizers, 화면 수용 결과는 이 성공과 별개다.
