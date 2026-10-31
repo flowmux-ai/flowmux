@@ -503,3 +503,37 @@ GUI harness 종료 후 동일 격리 native API에 `noReply`로 A/B/C 각각 다
 근거: [복구 전후 ID·operation·binding·tree 기록](design-assets/session-flow-opencode-recovery-4cff2a5d.json). 격리 실행 로그는 `/tmp/fmsrec-c2k2ladv/app-first.log`, `/tmp/fmsrec-c2k2ladv/app-restart.log`에 있다.
 
 같은 점검 중 이전 제품 commit `2b80463a`의 Test run `41156800646`과 Sanitizers run `41156803235`가 모두 전체 success임을 확인했다. 최신 OpenCode 제품 commit `4cff2a5d`의 Test `41159059019`·Sanitizers `41159061021`은 이 기록 시점에 실행 중이므로 최종 성공으로 계산하지 않는다.
+
+## 2026-10-31 완료된 Linux coverage 산출물 확인
+
+제품 commit `2b80463a`의 Test run `41156800646`에서 `linux-test-evidence` artifact `13025764550`을 내려받아 phase JSON 12개가 모두 passed/exit 0인지 확인했다. `llvm-cov/summary.json`의 실제 값은 라인 **86.9247%**, 영역 **86.8449%**, 함수 **85.8435%**다. 기준 79/78/78%를 모두 충족한다. 같은 commit의 Sanitizers `41156803235`도 전체 success다.
+
+[CI 결론·phase·coverage 수치](design-assets/session-flow-ci-2b80463a.json)는 이 commit의 근거이며, 이후 OpenCode 제품 변경 `4cff2a5d`의 최종 CI를 대신하지 않는다.
+
+## 선택 실행: 1,000노드 mapped GTK 측정
+
+기존 main-thread native harness에 별도 테스트 창의 1,000노드·20계보 측정을 추가했다. 실제 provider를 실행하지 않으며 기본 suite에 50초 측정을 강제로 추가하지 않는다. 다음 옵션을 명시한 경우에만 force 수렴 이후 10초 pan/zoom을 5회 반복한다.
+
+```sh
+CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 \
+FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1 \
+FLOWMUX_SESSION_FLOW_FRAME_REPORT=/tmp/session-flow-frames.json \
+GSK_RENDERER=cairo \
+cargo test -p flowmux --test macos_native --features native-smoke --locked
+```
+
+- GTK window를 map한 뒤 실제 작업 영역의 1/3 높이로 panel을 맞춘다.
+- GTK gesture/scroll signal로 camera가 변경되며 노드 좌표는 보존되는지 확인한다. 세션 열기·fork 명령이 발생하면 실패한다.
+- 동일 production draw 함수를 호출하는 mapped DrawingArea callback의 CPU 시간, GDK frame-clock `after-paint` 사이 간격, 입력 signal부터 다음 `after-paint`까지 지연을 따로 기록한다.
+- 각 trial에 충분한 프레임이 있어야 측정 성공 marker를 출력한다. Marker는 수집 성공이며 성능 임계값 통과를 뜻하지 않는다.
+- 실제 하드웨어 입력 지연, compositor presentation 시각, release 빌드, provider discovery, cold force 계산은 이 측정의 범위 밖이다. 실제 drag 전달 문제나 접근성 검증을 대체하지 않는다.
+
+2026-10-31 측정 환경은 Apple M4 Pro·64 GiB·macOS 27.0.1·unoptimized test/Cairo·scale 2, canvas 논리 크기 1280×266이었다. 기존 사용자 앱은 유지했고 최종 측정 중 로컬 빌드를 병행하지 않았다. 5회 합계 1,562개 after-paint 간격을 수집했다.
+
+| 측정 | trial별 p95 범위 | 전체 최대 |
+| --- | --- | --- |
+| Production draw CPU | 5.63–6.00 ms | 6.57 ms |
+| GTK after-paint 간격 | 34.14–35.38 ms | 36.74 ms |
+| Signal → after-paint | 33.50–34.23 ms | 35.96 ms |
+
+Camera 변경·노드 좌표 보존·세션 실행 명령 없음, 기존 native Session Flow 회귀 시험과 clippy `-D warnings`는 통과했다. **프레임 간격 p95 ≤33ms 목표의 달성 증거는 아니다.** 실제 presentation/hardware 입력 및 release 조건은 추가 검증이 필요하다. 100ms 목표보다 작은 signal 지연을 물리 입력 지연 통과로 바꾸지 않는다. [원본 측정 JSON](design-assets/session-flow-native-frame-measurement.json), [선택 실행 시험](../crates/flowmux/src/ui/session_flow/performance.rs).

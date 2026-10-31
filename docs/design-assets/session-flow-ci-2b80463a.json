@@ -1,0 +1,73 @@
+{
+  "checked_at": "2026-10-31T02:32:14.460949+00:00",
+  "product_commit": "2b80463aef655a39f17a80d5885f82e8a1f87f61",
+  "test_run": 41156800646,
+  "sanitizers_run": 41156803235,
+  "workflow_conclusions": [
+    {
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "headless stress probes",
+          "conclusion": "success"
+        },
+        {
+          "name": "cargo test and coverage",
+          "conclusion": "success"
+        },
+        {
+          "name": "macOS build and native smoke",
+          "conclusion": "success"
+        },
+        {
+          "name": "editor web",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "ThorVG ASan, UBSan and LSan",
+          "conclusion": "success"
+        },
+        {
+          "name": "Linux ASan and LSan",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "artifact": {
+    "id": 13025764550,
+    "name": "linux-test-evidence",
+    "phase_count": 12,
+    "all_phases_passed": true
+  },
+  "coverage": {
+    "lines": {
+      "count": 118781,
+      "covered": 103250,
+      "percent": 86.92467650550172
+    },
+    "regions": {
+      "count": 196585,
+      "covered": 170724,
+      "notcovered": 25861,
+      "percent": 86.84487626217667
+    },
+    "functions": {
+      "count": 10949,
+      "covered": 9399,
+      "percent": 85.84345602338112
+    }
+  },
+  "required_percent": {
+    "lines": 79,
+    "regions": 78,
+    "functions": 78
+  }
+}

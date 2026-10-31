@@ -1,0 +1,146 @@
+{
+  "area_logical_size": [
+    1280,
+    266
+  ],
+  "debug_assertions": true,
+  "families": 20,
+  "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+  "nodes": 1000,
+  "renderer": "cairo",
+  "scale_factor": 2,
+  "trials": [
+    {
+      "after_paint_interval_ms": {
+        "max": 35.971708,
+        "p50": 33.422458,
+        "p95": 35.278667,
+        "samples": 300
+      },
+      "draw_cpu_ms": {
+        "max": 6.101083,
+        "p50": 5.500292,
+        "p95": 5.8749579999999995,
+        "samples": 301
+      },
+      "duration_seconds": 10.100728125,
+      "input_batches": 547,
+      "signal_to_after_paint_ms": {
+        "max": 35.877166,
+        "p50": 30.597625,
+        "p95": 34.160834,
+        "samples": 301
+      },
+      "trial": 1
+    },
+    {
+      "after_paint_interval_ms": {
+        "max": 35.946625000000004,
+        "p50": 33.365249999999996,
+        "p95": 35.286125,
+        "samples": 300
+      },
+      "draw_cpu_ms": {
+        "max": 6.5661249999999995,
+        "p50": 5.488416,
+        "p95": 5.829125,
+        "samples": 301
+      },
+      "duration_seconds": 10.108070875,
+      "input_batches": 544,
+      "signal_to_after_paint_ms": {
+        "max": 35.628,
+        "p50": 30.311792,
+        "p95": 33.814,
+        "samples": 301
+      },
+      "trial": 2
+    },
+    {
+      "after_paint_interval_ms": {
+        "max": 36.735707999999995,
+        "p50": 33.355792,
+        "p95": 35.205,
+        "samples": 300
+      },
+      "draw_cpu_ms": {
+        "max": 6.229792,
+        "p50": 5.558667,
+        "p95": 5.914084,
+        "samples": 301
+      },
+      "duration_seconds": 10.110225583,
+      "input_batches": 544,
+      "signal_to_after_paint_ms": {
+        "max": 35.611167,
+        "p50": 30.70325,
+        "p95": 34.2275,
+        "samples": 301
+      },
+      "trial": 3
+    },
+    {
+      "after_paint_interval_ms": {
+        "max": 36.487709,
+        "p50": 33.342875,
+        "p95": 35.375707999999996,
+        "samples": 300
+      },
+      "draw_cpu_ms": {
+        "max": 6.282334,
+        "p50": 5.5420419999999995,
+        "p95": 5.999875,
+        "samples": 301
+      },
+      "duration_seconds": 10.118778708,
+      "input_batches": 553,
+      "signal_to_after_paint_ms": {
+        "max": 35.961458,
+        "p50": 30.263333,
+        "p95": 33.666957999999994,
+        "samples": 301
+      },
+      "trial": 4
+    },
+    {
+      "after_paint_interval_ms": {
+        "max": 35.091875,
+        "p50": 33.018166,
+        "p95": 34.136291,
+        "samples": 362
+      },
+      "draw_cpu_ms": {
+        "max": 5.867666,
+        "p50": 5.25275,
+        "p95": 5.634667,
+        "samples": 363
+      },
+      "duration_seconds": 10.104282083,
+      "input_batches": 581,
+      "signal_to_after_paint_ms": {
+        "max": 34.552,
+        "p50": 27.676667,
+        "p95": 33.497375000000005,
+        "samples": 363
+      },
+      "trial": 5
+    }
+  ],
+  "environment": {
+    "date": "2026-10-31",
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 68719476736,
+    "os": "macOS 27.0.1 (26A434)",
+    "rust": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "build_profile": "unoptimized test, debug symbols disabled",
+    "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+    "active_user_app_preserved": true,
+    "concurrent_local_build_during_final_measurement": false
+  },
+  "limitations": [
+    "Controller signals, not physical mouse/trackpad input.",
+    "after-paint is not compositor presentation timing.",
+    "Warm graph only; does not include discovery or force convergence.",
+    "Debug/Cairo result does not establish release frame target."
+  ]
+}
