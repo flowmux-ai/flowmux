@@ -1699,14 +1699,18 @@ pub(super) async fn check_real_codex(
     );
     let ready = glib::future_with_timeout(Duration::from_secs(35), async {
         let mut reviewed_test_hooks = false;
+        let mut selected_test_hooks = false;
         loop {
             // Only this newly generated disposable profile is under test. It
             // contains no user hook entries or inherited trust decisions.
+            let screen = terminal
+                .widget
+                .text_format(vte::Format::Text)
+                .unwrap_or_default();
             if !reviewed_test_hooks
-                && terminal
-                    .widget
-                    .text_format(vte::Format::Text)
-                    .is_some_and(|text| text.contains("Hooks need review"))
+                && screen.contains("Hooks need review")
+                && screen.contains("enter confirm")
+                && screen.contains("2. Trust all and continue")
             {
                 let hooks: serde_json::Value =
                     serde_json::from_slice(&std::fs::read(home.join("hooks.json")).unwrap())
@@ -1722,8 +1726,15 @@ pub(super) async fn check_real_codex(
                         }
                     }
                 }
-                terminal.widget.feed_child(b"\x1b[B\r");
-                reviewed_test_hooks = true;
+                if !selected_test_hooks && screen.contains("› 1. Review hooks") {
+                    terminal.widget.feed_child(b"\x1b[B");
+                    selected_test_hooks = true;
+                    println!("CODEX_TEST_HOOKS_SELECTION_REQUESTED");
+                } else if selected_test_hooks && screen.contains("› 2. Trust all and continue") {
+                    terminal.widget.feed_child(b"\r");
+                    reviewed_test_hooks = true;
+                    println!("CODEX_TEST_HOOKS_CONFIRMED");
+                }
             }
             controller.poll_agent_processes().await;
             if controller.flow_anchors().await.iter().any(|anchor| {
