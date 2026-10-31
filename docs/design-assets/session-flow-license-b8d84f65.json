@@ -1,0 +1,205 @@
+{
+  "checked_at": "2026-10-31T04:37:55.692800+00:00",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "test_harness_commit": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
+  "workflow": {
+    "conclusion": "success",
+    "createdAt": "2026-10-31T04:31:53Z",
+    "headSha": "3d113787296746a341ac14e5b77be832d02782b0",
+    "jobs": [
+      {
+        "completedAt": "2026-10-31T04:37:09Z",
+        "conclusion": "success",
+        "databaseId": 124442502348,
+        "name": "cargo-deny",
+        "startedAt": "2026-10-31T04:31:56Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T04:31:57Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T04:31:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:32:02Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T04:31:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:32:02Z",
+            "conclusion": "success",
+            "name": "Install Rust",
+            "number": 3,
+            "startedAt": "2026-10-31T04:32:02Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:34:12Z",
+            "conclusion": "success",
+            "name": "Install cargo-deny",
+            "number": 4,
+            "startedAt": "2026-10-31T04:32:02Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:36:06Z",
+            "conclusion": "success",
+            "name": "Install cargo-about",
+            "number": 5,
+            "startedAt": "2026-10-31T04:34:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:36:10Z",
+            "conclusion": "success",
+            "name": "Check dependency licenses and sources",
+            "number": 6,
+            "startedAt": "2026-10-31T04:36:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:36:11Z",
+            "conclusion": "success",
+            "name": "Check dependency advisories",
+            "number": 7,
+            "startedAt": "2026-10-31T04:36:10Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:01Z",
+            "conclusion": "success",
+            "name": "Check third-party license notice",
+            "number": 8,
+            "startedAt": "2026-10-31T04:36:11Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:01Z",
+            "conclusion": "success",
+            "name": "Check asset license notices",
+            "number": 9,
+            "startedAt": "2026-10-31T04:37:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:06Z",
+            "conclusion": "success",
+            "name": "Install editor dependencies",
+            "number": 10,
+            "startedAt": "2026-10-31T04:37:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:07Z",
+            "conclusion": "success",
+            "name": "Check editor dependency notice",
+            "number": 11,
+            "startedAt": "2026-10-31T04:37:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:07Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 22,
+            "startedAt": "2026-10-31T04:37:07Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:37:07Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 23,
+            "startedAt": "2026-10-31T04:37:07Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168940598/job/124442502348"
+      }
+    ],
+    "status": "completed",
+    "updatedAt": "2026-10-31T04:37:09Z",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168940598"
+  },
+  "checks": {
+    "Check dependency licenses and sources": {
+      "conclusion": "success",
+      "log_lines": 9,
+      "tail": [
+        "2026-10-31T04:36:06.2321298Z cargo deny --locked --config packaging/licenses/deny.toml check licenses sources",
+        "2026-10-31T04:36:06.2351651Z shell: /usr/bin/bash -e {0}",
+        "2026-10-31T04:36:06.2352225Z env:",
+        "2026-10-31T04:36:06.2352524Z   CARGO_HOME: /home/runner/.cargo",
+        "2026-10-31T04:36:06.2352794Z   CARGO_INCREMENTAL: 0",
+        "2026-10-31T04:36:06.2353137Z   CARGO_TERM_COLOR: always",
+        "2026-10-31T04:36:06.2353365Z ##[endgroup]",
+        "2026-10-31T04:36:10.4409502Z licenses ok, sources ok"
+      ]
+    },
+    "Check dependency advisories": {
+      "conclusion": "success",
+      "log_lines": 9,
+      "tail": [
+        "2026-10-31T04:36:10.4537364Z cargo deny --locked --config packaging/licenses/deny.toml check advisories",
+        "2026-10-31T04:36:10.4566833Z shell: /usr/bin/bash -e {0}",
+        "2026-10-31T04:36:10.4567093Z env:",
+        "2026-10-31T04:36:10.4567304Z   CARGO_HOME: /home/runner/.cargo",
+        "2026-10-31T04:36:10.4567567Z   CARGO_INCREMENTAL: 0",
+        "2026-10-31T04:36:10.4567793Z   CARGO_TERM_COLOR: always",
+        "2026-10-31T04:36:10.4568018Z ##[endgroup]",
+        "2026-10-31T04:36:11.4833199Z advisories ok"
+      ]
+    },
+    "Check third-party license notice": {
+      "conclusion": "success",
+      "log_lines": 16,
+      "tail": [
+        "2026-10-31T04:36:11.5016976Z   CARGO_TERM_COLOR: always",
+        "2026-10-31T04:36:11.5017194Z ##[endgroup]",
+        "2026-10-31T04:36:11.5803027Z ....",
+        "2026-10-31T04:36:11.5803481Z ----------------------------------------------------------------------",
+        "2026-10-31T04:36:11.5803881Z Ran 4 tests in 0.001s",
+        "2026-10-31T04:36:11.5804038Z ",
+        "2026-10-31T04:36:11.5804123Z OK",
+        "2026-10-31T04:37:01.0484675Z Refreshed docs/legal/THIRD_PARTY_LICENSES.md"
+      ]
+    },
+    "Check asset license notices": {
+      "conclusion": "success",
+      "log_lines": 8,
+      "tail": [
+        "﻿2026-10-31T04:37:01.0842462Z ##[group]Run scripts/check-license-assets.sh",
+        "2026-10-31T04:37:01.0842905Z scripts/check-license-assets.sh",
+        "2026-10-31T04:37:01.0872439Z shell: /usr/bin/bash -e {0}",
+        "2026-10-31T04:37:01.0872692Z env:",
+        "2026-10-31T04:37:01.0872892Z   CARGO_HOME: /home/runner/.cargo",
+        "2026-10-31T04:37:01.0873152Z   CARGO_INCREMENTAL: 0",
+        "2026-10-31T04:37:01.0873367Z   CARGO_TERM_COLOR: always",
+        "2026-10-31T04:37:01.0873587Z ##[endgroup]"
+      ]
+    },
+    "Check editor dependency notice": {
+      "conclusion": "success",
+      "log_lines": 13,
+      "tail": [
+        "2026-10-31T04:37:06.8733102Z   CARGO_INCREMENTAL: 0",
+        "2026-10-31T04:37:06.8733327Z   CARGO_TERM_COLOR: always",
+        "2026-10-31T04:37:06.8733557Z ##[endgroup]",
+        "2026-10-31T04:37:06.9895566Z ",
+        "2026-10-31T04:37:06.9896255Z > flowmux-editor-web@0.1.0 verify",
+        "2026-10-31T04:37:06.9896951Z > node scripts/verify-dist.mjs",
+        "2026-10-31T04:37:06.9897498Z ",
+        "2026-10-31T04:37:07.1516674Z Verified 12 editor assets."
+      ]
+    }
+  },
+  "run_metadata_sha256": "f95aa182e3bf6ae3d3703822506eaafb7ab07f857e2c80b8e5a2395ec8393ec9",
+  "full_log_sha256": "9e13656d10ba991277c17c26114ed80dcc65d20a80f3a3f6c0d5410ca4781751",
+  "scope": "Final license/advisory/notice gate at 3d113787. Product, scripts and workflows are unchanged from b8d84f65. Test and Sanitizers conclusions remain separate; this is not UI/performance acceptance."
+}

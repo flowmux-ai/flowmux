@@ -703,3 +703,5 @@ python3 scripts/test-session-flow-multi-gui.py \
 시험 추가 commit `b8d84f65`를 push하고 [Test 41168599342](https://github.com/flowmux-ai/flowmux/actions/runs/41168599342), [Sanitizers 41168601343](https://github.com/flowmux-ai/flowmux/actions/runs/41168601343)을 시작했다. 두 실행의 head가 일치하고 실제 job들이 진행 중임을 확인했다. 최종 결론은 대기 중이며, remote 기본 gate를 실제 Codex opt-in 시나리오 실행으로 표현하지 않는다.
 
 완료 기준에 명시한 License audit의 기존 성공은 이전 checkout 대상이므로, 최신 문서 head `3d113787`에서 [License audit 41168940598](https://github.com/flowmux-ai/flowmux/actions/runs/41168940598)을 별도로 시작했다. 실제 cargo-deny job의 in_progress를 확인했다. 이 head의 제품·시험 코드는 위 Test/Sanitizers 대상 `b8d84f65`와 동일하다.
+
+해당 License audit는 최종 **success**다. 실제 job/step 결론과 전체 로그를 확인하여 dependency licenses/sources, advisories, third-party notice 시험 4개·재생성 후 차이 없음, asset notice 및 editor asset 12개 검증을 확인했다. [최종 결론·검사별 로그 발췌·전체 로그 hash](design-assets/session-flow-license-b8d84f65.json). 현재 HEAD까지 제품·시험·workflow 코드가 `b8d84f65`와 동일함도 확인했다. Test/Sanitizers와 이번 실행의 coverage는 아직 진행 중이며, License audit 성공을 전체 CI 또는 실제 화면 수용 통과로 취급하지 않는다.

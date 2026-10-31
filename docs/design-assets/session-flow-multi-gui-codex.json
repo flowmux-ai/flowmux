@@ -193,7 +193,9 @@
     "license_audit": {
       "id": 41168940598,
       "tested_head": "3d113787296746a341ac14e5b77be832d02782b0",
-      "status": "in_progress"
+      "status": "completed",
+      "conclusion": "success",
+      "evidence": "session-flow-license-b8d84f65.json"
     }
   }
 }
