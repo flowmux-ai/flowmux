@@ -185,7 +185,7 @@
     "Simultaneous activation means the measured click-start skew, not proof of same-instruction execution or exhaustive scheduling."
   ],
   "ci": {
-    "status": "in_progress",
+    "status": "completed",
     "tested_head": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
     "test": 41168599342,
     "sanitizers": 41168601343,
@@ -200,6 +200,8 @@
     "sanitizers_conclusion": "success",
     "sanitizers_evidence": "session-flow-sanitizers-b8d84f65.json",
     "macos_conclusion": "success",
-    "macos_evidence": "session-flow-macos-gate-b8d84f65.json"
+    "macos_evidence": "session-flow-macos-gate-b8d84f65.json",
+    "conclusion": "success",
+    "evidence": "session-flow-ci-b8d84f65.json"
   }
 }

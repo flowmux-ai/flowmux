@@ -1,0 +1,576 @@
+{
+  "checked_at": "2026-10-31T05:06:12.176493+00:00",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "test_harness_commit": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
+  "test": {
+    "conclusion": "success",
+    "createdAt": "2026-10-31T04:26:48Z",
+    "headSha": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
+    "jobs": [
+      {
+        "completedAt": "2026-10-31T05:03:20Z",
+        "conclusion": "success",
+        "databaseId": 124441461630,
+        "name": "cargo test and coverage",
+        "startedAt": "2026-10-31T04:26:52Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T04:26:53Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T04:26:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:26:58Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T04:26:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:12Z",
+            "conclusion": "success",
+            "name": "Check Rust toolchain and formatting",
+            "number": 3,
+            "startedAt": "2026-10-31T04:26:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:55Z",
+            "conclusion": "success",
+            "name": "Install coverage tool",
+            "number": 4,
+            "startedAt": "2026-10-31T04:27:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:55Z",
+            "conclusion": "success",
+            "name": "Install Node.js for the OpenCode hook integration test",
+            "number": 5,
+            "startedAt": "2026-10-31T04:27:55Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:29:01Z",
+            "conclusion": "success",
+            "name": "Install system dependencies",
+            "number": 6,
+            "startedAt": "2026-10-31T04:27:55Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:29:22Z",
+            "conclusion": "success",
+            "name": "Install ThorVG (image viewer backend, all loaders + C API)",
+            "number": 7,
+            "startedAt": "2026-10-31T04:29:01Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:29:22Z",
+            "conclusion": "success",
+            "name": "Allow WebKit namespaces for the test process",
+            "number": 8,
+            "startedAt": "2026-10-31T04:29:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:03:16Z",
+            "conclusion": "success",
+            "name": "Run Linux tests and coverage (same script as local)",
+            "number": 9,
+            "startedAt": "2026-10-31T04:29:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:03:18Z",
+            "conclusion": "success",
+            "name": "Upload test and coverage evidence",
+            "number": 10,
+            "startedAt": "2026-10-31T05:03:16Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:03:18Z",
+            "conclusion": "success",
+            "name": "Post Install Node.js for the OpenCode hook integration test",
+            "number": 19,
+            "startedAt": "2026-10-31T05:03:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:03:18Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 20,
+            "startedAt": "2026-10-31T05:03:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:03:18Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 21,
+            "startedAt": "2026-10-31T05:03:18Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168599342/job/124441461630"
+      },
+      {
+        "completedAt": "2026-10-31T04:28:19Z",
+        "conclusion": "success",
+        "databaseId": 124441461721,
+        "name": "headless stress probes",
+        "startedAt": "2026-10-31T04:26:51Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T04:26:53Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T04:26:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:26:57Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T04:26:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:05Z",
+            "conclusion": "success",
+            "name": "Install Rust",
+            "number": 3,
+            "startedAt": "2026-10-31T04:26:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:17Z",
+            "conclusion": "success",
+            "name": "Run the separately ignored stress probes",
+            "number": 4,
+            "startedAt": "2026-10-31T04:27:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:17Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 8,
+            "startedAt": "2026-10-31T04:28:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:17Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 9,
+            "startedAt": "2026-10-31T04:28:17Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168599342/job/124441461721"
+      },
+      {
+        "completedAt": "2026-10-31T04:44:53Z",
+        "conclusion": "success",
+        "databaseId": 124441461730,
+        "name": "macOS build and native smoke",
+        "startedAt": "2026-10-31T04:26:52Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T04:26:53Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T04:26:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:26:58Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T04:26:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:08Z",
+            "conclusion": "success",
+            "name": "Check Rust toolchain and formatting",
+            "number": 3,
+            "startedAt": "2026-10-31T04:26:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:05Z",
+            "conclusion": "success",
+            "name": "Install native dependencies",
+            "number": 4,
+            "startedAt": "2026-10-31T04:27:08Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:15Z",
+            "conclusion": "success",
+            "name": "Install compatible GTK and libadwaita for native popup checks",
+            "number": 5,
+            "startedAt": "2026-10-31T04:28:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:28:34Z",
+            "conclusion": "success",
+            "name": "Install compatible ThorVG for native image and Lottie checks",
+            "number": 6,
+            "startedAt": "2026-10-31T04:28:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:44:48Z",
+            "conclusion": "success",
+            "name": "Run macOS tests and native smoke (same script as local)",
+            "number": 7,
+            "startedAt": "2026-10-31T04:28:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:44:50Z",
+            "conclusion": "success",
+            "name": "Upload native smoke evidence",
+            "number": 8,
+            "startedAt": "2026-10-31T04:44:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:44:51Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 16,
+            "startedAt": "2026-10-31T04:44:50Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:44:51Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-31T04:44:51Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168599342/job/124441461730"
+      },
+      {
+        "completedAt": "2026-10-31T04:27:12Z",
+        "conclusion": "success",
+        "databaseId": 124441461740,
+        "name": "editor web",
+        "startedAt": "2026-10-31T04:26:52Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T04:26:53Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T04:26:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:26:57Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T04:26:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:26:58Z",
+            "conclusion": "success",
+            "name": "Install Node.js",
+            "number": 3,
+            "startedAt": "2026-10-31T04:26:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:03Z",
+            "conclusion": "success",
+            "name": "Install dependencies",
+            "number": 4,
+            "startedAt": "2026-10-31T04:26:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:09Z",
+            "conclusion": "success",
+            "name": "Test and rebuild editor assets",
+            "number": 5,
+            "startedAt": "2026-10-31T04:27:03Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:10Z",
+            "conclusion": "success",
+            "name": "Check committed editor assets",
+            "number": 6,
+            "startedAt": "2026-10-31T04:27:09Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:10Z",
+            "conclusion": "success",
+            "name": "Post Install Node.js",
+            "number": 11,
+            "startedAt": "2026-10-31T04:27:10Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:10Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 12,
+            "startedAt": "2026-10-31T04:27:10Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T04:27:10Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "startedAt": "2026-10-31T04:27:10Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168599342/job/124441461740"
+      }
+    ],
+    "status": "completed",
+    "updatedAt": "2026-10-31T05:03:20Z",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41168599342"
+  },
+  "sanitizers_evidence": "session-flow-sanitizers-b8d84f65.json",
+  "license_evidence": "session-flow-license-b8d84f65.json",
+  "macos_evidence": "session-flow-macos-gate-b8d84f65.json",
+  "artifacts": {
+    "linux": 13031271470,
+    "macos": 13030775864
+  },
+  "linux_phases": [
+    {
+      "phase": "agent-runner-tests",
+      "command": [
+        "python3",
+        "-B",
+        "scripts/test-agent-unit-runner.py"
+      ],
+      "timeout_seconds": 120.0,
+      "status": "passed",
+      "pid": 13204,
+      "exit_code": 0,
+      "elapsed_seconds": 0.114
+    },
+    {
+      "phase": "agent-team-tests",
+      "command": [
+        "python3",
+        "scripts/test-agent-team.py"
+      ],
+      "timeout_seconds": 120.0,
+      "status": "passed",
+      "pid": 13206,
+      "exit_code": 0,
+      "elapsed_seconds": 19.256
+    },
+    {
+      "phase": "benchmark-agent-tests",
+      "command": [
+        "python3",
+        "-B",
+        "scripts/benchmark-browser-agent.py",
+        "self-test"
+      ],
+      "timeout_seconds": 60.0,
+      "status": "passed",
+      "pid": 13412,
+      "exit_code": 0,
+      "elapsed_seconds": 0.114
+    },
+    {
+      "phase": "ci-runner-tests",
+      "command": [
+        "python3",
+        "scripts/test-ci-runner.py"
+      ],
+      "timeout_seconds": 300.0,
+      "status": "passed",
+      "pid": 7145,
+      "exit_code": 0,
+      "elapsed_seconds": 142.774
+    },
+    {
+      "phase": "coverage-html",
+      "command": [
+        "cargo",
+        "llvm-cov",
+        "report",
+        "--html"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 69093,
+      "exit_code": 0,
+      "elapsed_seconds": 79.073
+    },
+    {
+      "phase": "coverage-json",
+      "command": [
+        "cargo",
+        "llvm-cov",
+        "report",
+        "--json",
+        "--summary-only",
+        "--output-path",
+        "/home/runner/work/flowmux/flowmux/target/llvm-cov/summary.json"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 69032,
+      "exit_code": 0,
+      "elapsed_seconds": 76.797
+    },
+    {
+      "phase": "coverage-thresholds",
+      "command": [
+        "cargo",
+        "llvm-cov",
+        "report",
+        "--fail-under-lines",
+        "79",
+        "--fail-under-regions",
+        "78",
+        "--fail-under-functions",
+        "78"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 69154,
+      "exit_code": 0,
+      "elapsed_seconds": 93.107
+    },
+    {
+      "phase": "coverage",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "bash",
+        "scripts/test-coverage.sh",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 1800.0,
+      "status": "passed",
+      "pid": 13439,
+      "exit_code": 0,
+      "elapsed_seconds": 1615.224
+    },
+    {
+      "phase": "format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 13416,
+      "exit_code": 0,
+      "elapsed_seconds": 3.271
+    },
+    {
+      "phase": "installer-routing",
+      "command": [
+        "python3",
+        "scripts/test-install.py"
+      ],
+      "timeout_seconds": 60.0,
+      "status": "passed",
+      "pid": 12956,
+      "exit_code": 0,
+      "elapsed_seconds": 1.567
+    },
+    {
+      "phase": "stability-harness-tests",
+      "command": [
+        "python3",
+        "-B",
+        "scripts/test-macos-stability.py",
+        "--self-check"
+      ],
+      "timeout_seconds": 60.0,
+      "status": "passed",
+      "pid": 13414,
+      "exit_code": 0,
+      "elapsed_seconds": 0.064
+    },
+    {
+      "phase": "thorvg-installer",
+      "command": [
+        "python3",
+        "-B",
+        "scripts/test-thorvg-macos.py"
+      ],
+      "timeout_seconds": 60.0,
+      "status": "passed",
+      "pid": 13106,
+      "exit_code": 0,
+      "elapsed_seconds": 1.116
+    }
+  ],
+  "macos_phases_passed": 46,
+  "coverage": {
+    "lines": {
+      "count": 119044,
+      "covered": 103459,
+      "percent": 86.90820200934108
+    },
+    "regions": {
+      "count": 197126,
+      "covered": 171128,
+      "notcovered": 25998,
+      "percent": 86.81148098170713
+    },
+    "functions": {
+      "count": 10974,
+      "covered": 9420,
+      "percent": 85.83925642427556
+    }
+  },
+  "required_percent": {
+    "lines": 79,
+    "regions": 78,
+    "functions": 78
+  },
+  "coverage_summary_sha256": "ef2196d63eee9df067ac4aa6101bdff511511c42f038913a2751b1be04fe440e",
+  "linux_run_log_sha256": "534ef74f76d01d0d065e569cec702b6765255596740e962ce2d96402b11c5b8a",
+  "scope": "All named remote gates succeeded for product 54a44d89 and test harness b8d84f65. Does not cover the subsequent uncommitted GSK renderer candidate. Local real-provider opt-in tests and physical input/performance acceptance remain separate."
+}

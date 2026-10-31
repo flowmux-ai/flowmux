@@ -723,3 +723,5 @@ CUA로 보존된 복구 앱 PID `30374`의 화면에 다시 접근할 수 있음
 두 후보 모두 제품 소스에서 원복했다. [전체 수치·프로파일 요약·후보 patch·로그 hash](design-assets/session-flow-gsk-desktop-recheck.json), [직접 확인한 native fixture 캡처](design-assets/session-flow-gsk-nodes-prototype.png)를 보존한다. 다음 조사는 남은 화살표 Cairo/texture upload 비용을 분리하는 것이다. 현재 증거만으로 그 경로를 단일 원인으로 단정하지 않으며, 그래프 요소를 생략하거나 목표를 완화하지 않는다.
 
 Sanitizers `41168601343`은 최종 전체 **success**다. Linux headless·native Lottie·GUI ASan/LSan과 ThorVG ASan/UBSan/LSan의 실제 job/step 결론 및 전체 로그를 확인했다. [최종 결론과 로그 hash](design-assets/session-flow-sanitizers-b8d84f65.json). Test의 Linux coverage 결과는 아직 대기 중이다.
+
+Test `41168599342`도 최종 전체 **success**로 종료됐다. Linux artifact `13031271470`의 12개 phase 모두 passed/exit 0이며, 실제 coverage는 lines **86.9082%**, regions **86.8115%**, functions **85.8393%**로 기준 79/78/78%를 충족한다. macOS 46개 phase, Sanitizers 및 License audit의 최종 결론과 함께 [전체 gate 기록](design-assets/session-flow-ci-b8d84f65.json)에 연결했다. 이는 제품 `54a44d89`와 시험 `b8d84f65`에 대한 CI이며, 이후 작업 중인 GSK 렌더러 후보의 최종 CI를 대신하지 않는다.
