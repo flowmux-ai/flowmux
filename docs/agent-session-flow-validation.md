@@ -196,20 +196,20 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 
 | 요구 | 현재 확인된 증거 | 추가 확인 또는 적용 한계 |
 | --- | --- | --- |
-| R01 | Native terminal 메뉴의 활성/비활성, stale menu 거절; 실제 Codex 메뉴 callback → fork | CUA native secondary click → 키보드 메뉴 선택 → 실제 fork 추가 확인. 메뉴 pointer 선택은 기존 Split Right에서도 실행되지 않아 미통과; 다른 provider GUI는 미확인 |
-| R02 | 실제 Codex 오른쪽 split과 원본 widget/PID 보존; daemon의 source/surface 검증 및 증분 split | 모든 혼합 pane 조합의 실제 provider fork를 실행한 것은 아님 |
-| R03 | 실제 새 child ID·native parent·edge 확인; resume한 child의 재fork로 3세대 부모 연결 검증; state의 원자적 완료·중복 방지 | 실제 GUI provider 증거는 Codex 기준 |
+| R01 | Native 메뉴 활성/비활성·stale menu 거절; 실제 Codex·Claude·OpenCode 메뉴 callback → fork. Claude·OpenCode는 CUA secondary click → 키보드 선택도 확인 | 메뉴 pointer 선택은 기존 Split Right에서도 실행되지 않아 미통과; 하드웨어 마우스 메뉴 선택은 별도 확인 |
+| R02 | 실제 Codex·Claude·OpenCode 오른쪽 split과 원본 widget/PID 보존; daemon의 source/surface 검증 및 증분 split | 모든 혼합 pane 조합의 실제 provider fork를 실행한 것은 아님 |
+| R03 | 세 provider의 실제 새 child ID·edge 확인; Codex·OpenCode는 resume한 child 재fork로 3세대 연결 검증. OpenCode 분기 후 기록 독립성 확인 | 명시적 native parent 검증은 Codex 기준; OpenCode native parent_id는 NULL. Claude 첫 입력 전 기록 지연은 별도 계약 적용 |
 | R04 | 모든 terminal surface를 anchor로 읽는 구현과 native projection fixture | CUA에서 shell 탭을 활성화해도 흐름 버튼·20개 그래프 유지 확인; node pointer로 원래 비활성 surface 복귀 확인 |
 | R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | CUA native sidebar pointer 클릭과 실제 상단 panel 추가 확인; 사람의 하드웨어 조작은 미확인 |
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
 | R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
-| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처 | CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 충돌 수정 확인. Native drag는 카메라 변화가 없어 미통과; 물리 trackpad·VoiceOver/AT-SPI·화면 frame 지연 미확인 |
+| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI·화면 frame 지연 미확인 |
 | R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
 | R10 | Native disabled node 입력이 launch를 만들지 않음; 실제 비활성 Codex 기록을 임시 이동한 뒤 CUA pointer 클릭도 operation·pane 증가 없음; 기록 복원 완료 | 수동 접근성 검증 미확인 |
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
-| R12 | 실제 Codex native ID 확인 후 publication, 같은 ID resume, stale source·writer/PID 재사용 검증 | Claude GUI 및 OpenCode 전체 provider 경로 미확인; 외부 writer 원자적 배제 없음 |
+| R12 | Codex·OpenCode 실제 ID 확인 후 publication 및 같은 ID resume. Claude 실제 새 ID와 첫 입력 전 live focus·종료 후 기록 없는 노드 비활성 검증; stale source·writer/PID 재사용 검증 | provider별 버전 범위는 아래 기록 참조; 외부 writer 원자적 배제 없음 |
 | R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
-| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 기반 복구 시험 | 새 GUI 프로세스의 실제 provider crash/restart 전체 시나리오와 미확인 작업 수동 정리 UI는 미완료 |
+| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 복구 시험; 실제 OpenCode 완료 fork 후 GUI SIGKILL → 새 프로세스 자동 resume → 동일 그래프 → 닫힌 child pointer resume 확인 | child 생성과 publication 사이 중단의 실제 provider E2E, 다른 provider crash 복구, 미확인 작업 수동 정리 UI는 미완료 |
 
 주요 소스: [모델과 모델 시험](../crates/flowmux-core/src/session_flow.rs), [저장·복구와 시험](../crates/flowmux-state/src/session_flow.rs), [canvas와 입력 시험](../crates/flowmux/src/ui/session_flow.rs), [native orchestration과 실제 Codex harness](../crates/flowmux/src/ui/window/session_flow.rs). 실제 실행 결과와 commit별 CI 범위는 아래 기록을 따른다. 이 표의 미확인 항목을 기존 baseline 성공으로 대체하지 않는다.
 
@@ -487,3 +487,19 @@ Test-only commit `1d268def`는 기존 provider harness에 재개한 B의 native 
 계보는 정확히 A→B, B→C의 edge 2개와 node 3개다. A→C의 잘못된 직접 연결은 없으며 native GTK scene도 같은 graph를 투영한다. 세 terminal과 원래 A 및 재개 B의 PID/widget을 유지했고 pending operation이 없었다. `/tmp/flowmux-session-flow-opencode-three-generations.log`에 `MACOS_SESSION_FLOW_OPENCODE_THREE_GENERATIONS_OK`, `MACOS_SESSION_FLOW_OPENCODE_REAL_OK`, `MACOS_NATIVE_SMOKE_OK`, exit 0을 확인했다. 변경 harness의 clippy `-D warnings`도 통과했다.
 
 GUI harness 종료 후 동일 격리 native API에 `noReply`로 A/B/C 각각 다른 표식을 추가했다. Native SQLite는 읽기 전용으로 검사했다. 세 세션 모두 최초 공통 표식을 포함하지만, 분기 뒤 추가한 각 표식은 해당 세션에만 존재했다. 이 검증은 저장된 대화 맥락의 상속·독립성 증거이며 모델 응답이나 OS drag 성공을 의미하지 않는다. [3세대·분기별 표식 증거](design-assets/session-flow-opencode-three-generations.json).
+
+## 2026-10-31 실제 OpenCode 앱 crash/restart 복구
+
+제품 코드 `4cff2a5d`를 새 격리 앱 `Flowmux Session Flow Recovery`에서 실행했다. 테스트 전용 OpenCode profile을 별도 HOME/XDG에 복사했고, 사용 중인 앱 PID 72789와 수동 입력 확인용 앱 PID 95986은 종료하지 않았다. 모델 요청은 보내지 않았다.
+
+1. 실제 OpenCode 원본 `ses_e7047828fffeppj2xiecn6VJgB`의 native 우클릭 메뉴를 키보드로 선택하여 자식 `ses_e7036db0effedoQs6HxkSg6cYe`를 오른쪽에 fork했다. 패널에 두 노드와 한 연결이 표시됐다.
+2. state·계보·완료 operation이 저장된 것을 읽은 뒤, 실행 경로와 PID가 새 테스트 앱임을 확인하고 그 GUI PID 60875만 SIGKILL했다. 이전 두 terminal PID가 종료된 것도 확인했다.
+3. 같은 격리 profile로 새 GUI PID 61360을 실행했다. 기본 auto-resume으로 동일 workspace·surface·native session ID가 복원됐고, 열린 Session Flow 패널에 같은 두 노드와 연결이 표시됐다. fork와 완료 operation은 재시작 전후 동일했다.
+4. 복원된 child pane을 닫자 노드는 resume 가능한 상태로 바뀌었다. CUA pointer로 노드를 선택하니 새 오른쪽 pane에서 같은 child ID가 재개됐다. 원본 terminal PID 61375는 유지됐다.
+5. 원본·child 노드를 다시 선택하면 해당 pane으로 포커스만 이동했다. pane은 두 개, operation은 Fork 한 개와 Resume 한 개, 연결은 한 개로 유지됐다.
+
+이 실행은 **완료된 fork의 crash/restart** 증거다. child 생성과 publication 사이 강제 종료까지 검증한 것은 아니다. 이전 owner의 live row는 저장소에 남아 있으나, 죽은 PID/socket은 현재 실행 위치로 사용되지 않았고 resume을 막지 않았다. 다른 provider의 crash/restart, 실제 하드웨어 drag 및 접근성 검증으로 확대 해석하지 않는다.
+
+근거: [복구 전후 ID·operation·binding·tree 기록](design-assets/session-flow-opencode-recovery-4cff2a5d.json). 격리 실행 로그는 `/tmp/fmsrec-c2k2ladv/app-first.log`, `/tmp/fmsrec-c2k2ladv/app-restart.log`에 있다.
+
+같은 점검 중 이전 제품 commit `2b80463a`의 Test run `41156800646`과 Sanitizers run `41156803235`가 모두 전체 success임을 확인했다. 최신 OpenCode 제품 commit `4cff2a5d`의 Test `41159059019`·Sanitizers `41159061021`은 이 기록 시점에 실행 중이므로 최종 성공으로 계산하지 않는다.

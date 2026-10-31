@@ -1,0 +1,237 @@
+{
+  "date": "2026-10-31",
+  "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+  "scenario": "real OpenCode completed fork, isolated GUI SIGKILL, new GUI auto-resume, close child, pointer graph resume, focus both nodes",
+  "provider_version": "OpenCode 1.17.18",
+  "isolated_root": "/tmp/fmsrec-c2k2ladv",
+  "app_pids": [
+    60875,
+    61360
+  ],
+  "protected_app_pids": [
+    72789,
+    95986
+  ],
+  "source_id": "ses_e7047828fffeppj2xiecn6VJgB",
+  "child_id": "ses_e7036db0effedoQs6HxkSg6cYe",
+  "workspace": "540221f3-99bb-4f5c-9d6e-7a133460d098",
+  "before": {
+    "forks": [
+      {
+        "child": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}",
+        "parent": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"}"
+      }
+    ],
+    "operations": [
+      {
+        "request": "9bae37f2-eb5d-491f-a2db-6d78d30e00ce",
+        "source": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"}",
+        "intent": "{\"request\":\"9bae37f2-eb5d-491f-a2db-6d78d30e00ce\",\"owner\":\"939c6a95-a374-48d9-94b4-28a7a2cd1571\",\"owner_pid\":60875,\"source\":{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"},\"kind\":\"Fork\",\"target_surface\":\"ebf4a1b6-0f02-46fd-8842-c894275d631e\"}",
+        "state": "complete",
+        "result": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}"
+      }
+    ],
+    "live_sessions": [
+      {
+        "key": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"}",
+        "owner": "939c6a95-a374-48d9-94b4-28a7a2cd1571",
+        "surface": "ae40fcc5-6a2e-411b-ab31-d7fa21104fc2",
+        "binding": "{\"owner\":\"939c6a95-a374-48d9-94b4-28a7a2cd1571\",\"pid\":60932,\"started\":1793413668547518,\"workspace\":\"540221f3-99bb-4f5c-9d6e-7a133460d098\",\"pane\":\"ecaf0df7-b3b7-496a-a3a8-94620ef95dbd\",\"surface\":\"ae40fcc5-6a2e-411b-ab31-d7fa21104fc2\",\"socket\":\"/tmp/fmsrec-c2k2ladv/run/flowmux-60875.sock\"}"
+      },
+      {
+        "key": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}",
+        "owner": "939c6a95-a374-48d9-94b4-28a7a2cd1571",
+        "surface": "ebf4a1b6-0f02-46fd-8842-c894275d631e",
+        "binding": "{\"owner\":\"939c6a95-a374-48d9-94b4-28a7a2cd1571\",\"pid\":61194,\"started\":1793413684051662,\"workspace\":\"540221f3-99bb-4f5c-9d6e-7a133460d098\",\"pane\":\"3cfb9d7f-eeea-4025-97a0-b189419d2696\",\"surface\":\"ebf4a1b6-0f02-46fd-8842-c894275d631e\",\"socket\":\"/tmp/fmsrec-c2k2ladv/run/flowmux-60875.sock\"}"
+      }
+    ]
+  },
+  "after_restart": {
+    "forks_unchanged": true,
+    "operations_unchanged": true,
+    "tree": {
+      "tree": {
+        "workspaces": [
+          {
+            "id": "540221f3-99bb-4f5c-9d6e-7a133460d098",
+            "name": "OC | Session Flow product hook validation",
+            "root": "/private/tmp/fm-flow-providers-h_ja_8_6/project",
+            "location": {
+              "type": "local",
+              "root_dir": "/private/tmp/fm-flow-providers-h_ja_8_6/project"
+            },
+            "panes": [
+              {
+                "id": "ecaf0df7-b3b7-496a-a3a8-94620ef95dbd",
+                "tabs": [
+                  {
+                    "id": "ae40fcc5-6a2e-411b-ab31-d7fa21104fc2",
+                    "title": "OC | Session Flow product hook validation",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "opencode",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:hook",
+                      "status_evidence": {
+                        "source": "hook",
+                        "since": "2026-10-31T02:28:28.748616Z"
+                      },
+                      "seq": 1793413708748117000,
+                      "session_id": "ses_e7047828fffeppj2xiecn6VJgB"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "3cfb9d7f-eeea-4025-97a0-b189419d2696",
+                "tabs": [
+                  {
+                    "id": "ebf4a1b6-0f02-46fd-8842-c894275d631e",
+                    "title": "OC | Session Flow product hook validation ...",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "opencode",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:hook",
+                      "status_evidence": {
+                        "source": "hook",
+                        "since": "2026-10-31T02:28:28.637889Z"
+                      },
+                      "seq": 1793413708637378000,
+                      "session_id": "ses_e7036db0effedoQs6HxkSg6cYe"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "after_graph_resume": {
+    "forks_unchanged": true,
+    "operations": [
+      {
+        "request": "9bae37f2-eb5d-491f-a2db-6d78d30e00ce",
+        "source": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"}",
+        "intent": "{\"request\":\"9bae37f2-eb5d-491f-a2db-6d78d30e00ce\",\"owner\":\"939c6a95-a374-48d9-94b4-28a7a2cd1571\",\"owner_pid\":60875,\"source\":{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7047828fffeppj2xiecn6VJgB\"},\"kind\":\"Fork\",\"target_surface\":\"ebf4a1b6-0f02-46fd-8842-c894275d631e\"}",
+        "state": "complete",
+        "result": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}"
+      },
+      {
+        "request": "ebedece1-5451-458e-8528-e78380ffc139",
+        "source": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}",
+        "intent": "{\"request\":\"ebedece1-5451-458e-8528-e78380ffc139\",\"owner\":\"92ab794d-dbf6-4528-adc7-0e59a1ed743e\",\"owner_pid\":61360,\"source\":{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"},\"kind\":\"Resume\",\"target_surface\":\"3a53fb3e-fe37-4ec0-bdde-3cfa4f051ac0\"}",
+        "state": "complete",
+        "result": "{\"provider\":\"opencode\",\"home\":\"/private/tmp/fmsrec-c2k2ladv/data/opencode\",\"id\":\"ses_e7036db0effedoQs6HxkSg6cYe\"}"
+      }
+    ],
+    "tree": {
+      "tree": {
+        "workspaces": [
+          {
+            "id": "540221f3-99bb-4f5c-9d6e-7a133460d098",
+            "name": "OC | Session Flow product hook validation ...",
+            "root": "/private/tmp/fm-flow-providers-h_ja_8_6/project",
+            "location": {
+              "type": "local",
+              "root_dir": "/private/tmp/fm-flow-providers-h_ja_8_6/project"
+            },
+            "panes": [
+              {
+                "id": "ecaf0df7-b3b7-496a-a3a8-94620ef95dbd",
+                "tabs": [
+                  {
+                    "id": "ae40fcc5-6a2e-411b-ab31-d7fa21104fc2",
+                    "title": "OC | Session Flow product hook validation",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "opencode",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:hook",
+                      "status_evidence": {
+                        "source": "hook",
+                        "since": "2026-10-31T02:28:28.748616Z"
+                      },
+                      "seq": 1793413708748117000,
+                      "session_id": "ses_e7047828fffeppj2xiecn6VJgB"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "884e2562-1d23-49da-b66e-9a2f775a92f4",
+                "tabs": [
+                  {
+                    "id": "3a53fb3e-fe37-4ec0-bdde-3cfa4f051ac0",
+                    "title": "OC | Session Flow product hook validation ...",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "opencode",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:hook",
+                      "status_evidence": {
+                        "source": "hook",
+                        "since": "2026-10-31T02:28:46.279496Z"
+                      },
+                      "seq": 1793413726278953000,
+                      "session_id": "ses_e7036db0effedoQs6HxkSg6cYe"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "current_live_bindings": [
+      {
+        "owner": "92ab794d-dbf6-4528-adc7-0e59a1ed743e",
+        "pid": 61745,
+        "started": 1793413723830867,
+        "workspace": "540221f3-99bb-4f5c-9d6e-7a133460d098",
+        "pane": "884e2562-1d23-49da-b66e-9a2f775a92f4",
+        "surface": "3a53fb3e-fe37-4ec0-bdde-3cfa4f051ac0",
+        "socket": "/tmp/fmsrec-c2k2ladv/run/flowmux-61360.sock"
+      },
+      {
+        "owner": "92ab794d-dbf6-4528-adc7-0e59a1ed743e",
+        "pid": 61375,
+        "started": 1793413706187837,
+        "workspace": "540221f3-99bb-4f5c-9d6e-7a133460d098",
+        "pane": "ecaf0df7-b3b7-496a-a3a8-94620ef95dbd",
+        "surface": "ae40fcc5-6a2e-411b-ab31-d7fa21104fc2",
+        "socket": "/tmp/fmsrec-c2k2ladv/run/flowmux-61360.sock"
+      }
+    ]
+  },
+  "checks": {
+    "both_native_ids_auto_resumed": true,
+    "same_workspace_and_surface_ids_restored": true,
+    "panel_restored_open": true,
+    "two_nodes_one_edge_visible_after_restart": true,
+    "old_terminal_pids_gone": true,
+    "closed_child_became_resumable": true,
+    "pointer_child_resume_same_native_id": true,
+    "reselect_focus_does_not_duplicate_panes_or_operations": true,
+    "resumed_source_pid_preserved_during_child_resume": true,
+    "protected_apps_alive": true,
+    "model_requests_sent": false
+  },
+  "limitations": [
+    "Completed-operation crash only; interruption between child creation and fork publication not exercised by this run.",
+    "Old owner rows remain in storage but failed liveness does not block resume or route to dead socket.",
+    "Original test OpenCode profile copied into a separate test-only profile; no user provider history modified.",
+    "Does not prove hardware drag, accessibility, or other providers crash recovery."
+  ]
+}
