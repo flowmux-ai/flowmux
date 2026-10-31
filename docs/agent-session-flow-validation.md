@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했다. Claude 지연 저장 수정 `2b80463a`의 로컬 회귀·native 검사는 통과했고 최신 전체 CI와 수정 후 실제 Claude 화면 검증은 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했다. Claude 지연 저장 수정 `2b80463a`의 로컬 회귀·native 검사는 통과했고 수정 후 실제 Claude native GTK 통합 검증도 통과했다. 최신 전체 CI는 진행 중이며 OS 포인터 입력 검증은 별도 미확인이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -415,3 +415,21 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 제품 `2b80463a`의 최신 [Test 41156800646](https://github.com/flowmux-ai/flowmux/actions/runs/41156800646), [Sanitizers 41156803235](https://github.com/flowmux-ai/flowmux/actions/runs/41156803235)는 진행 중이다. 이전 `4ab3e76e` 실행도 최종 결과를 따로 확인한다. 사용자 앱 PID `72789`는 종료·재시작하지 않았다.
 
 화면 잠금 해제 후 PID `95986`의 실제 Claude source `21fcba07-00f6-4ea1-9749-24b6cbde520d`가 Ready인 화면을 확인했다. CUA의 screenshot과 Escape는 동작하지만 pointer 호출은 `noWindowsAvailable`로 거절됐다. App 재선택, 창 Raise, CUA runtime reset에서도 동일했다. 제품 오류로 단정하지 않으며, 이 앱에서는 fork 입력 자체가 전달되지 않아 operation 0·edge 0이다. 이전 앱에서 재현한 Claude 지연 저장 오류와 수정 후 화면 검증의 도구 차단을 구분한다.
+
+
+## 실제 Claude native GTK 통합 검증
+
+`acb01be7`은 제품 코드를 바꾸지 않는 opt-in native harness다. 명시한 `/tmp` 테스트 대화만 사용하고 기존 Claude hook 설정을 수정하지 않는다. 일반 CI에서는 provider를 실행하지 않는다. 이전 격리 앱의 테스트 source만 `/exit`로 종료해 중복 실행을 피했으며 사용자 앱과 새 포인터 검증 앱은 유지했다. 새 모델 프롬프트는 보내지 않았다.
+
+실제 Claude Code 2.1.314 source `8683a908-3515-4cc9-a35a-1da44cf7a563`에서 child `980121f1-60e4-4267-8155-4d76306b7db6`, 재검증 child `1bf140e6-fab4-4588-be14-84aef5ec78d0`를 각각 생성했다. 두 실행 모두 다음을 통과했다.
+
+- 실제 GTK context menu callback이 오른쪽 새 terminal을 만들고 새 native ID를 확인했다. 첫 입력 전 child history가 없는 조건에서 operation complete와 edge를 확인했다.
+- 열린 그래프의 child hit target을 통한 기존 pane·정확한 surface 포커스, terminal 수 2개 유지, 두 노드 family 투영을 확인했다.
+- 파일 없는 child pane을 닫은 뒤 두 노드 연결은 유지하고 재개 선택은 비활성화됐다. 원본 terminal PID/widget과 pending 없음도 확인했다.
+- 첫 캡처는 초기 배치 도중 시험용 node click을 즉시 실행해 노드 일부가 화면 밖에 있었다. 후속 시험은 배치 안정 후 실제 Fit 버튼 callback으로 맞추고 두 노드·연결선을 렌더링했다. 이 캡처를 물리 입력이나 화면 frame 성능 증거로 사용하지 않는다.
+
+`/tmp/flowmux-session-flow-claude-real.log`, `/tmp/flowmux-session-flow-claude-real-fit.log`에서 `MACOS_SESSION_FLOW_CLAUDE_DEFERRED_OK`, `MACOS_NATIVE_SMOKE_OK`, exit 0을 확인했다. Native harness 포함 clippy도 통과했다. [증거 JSON](design-assets/session-flow-claude-deferred-2b80463a.json).
+
+![실제 Claude의 native GTK Session Flow](design-assets/session-flow-claude-real.png)
+
+제품 `4ab3e76e`의 macOS job `124403378997`은 success이며 다운로드한 artifact `13025647455`의 46개 phase JSON 모두 passed/exit 0이다. [검사별 기록](design-assets/session-flow-macos-gate-4ab3e76e.json). 최신 제품 `2b80463a`의 전체 CI 결과와 구분한다.

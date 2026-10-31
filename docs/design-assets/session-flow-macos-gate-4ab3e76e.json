@@ -1,0 +1,287 @@
+{
+  "commit": "4ab3e76e5a11bd6761d1c0601b481eac2955f320",
+  "workflow_run": 41156185258,
+  "job": 124403378997,
+  "job_conclusion": "success",
+  "artifact": 13025647455,
+  "platform": "macOS",
+  "scope": "Full shared macOS CI gate after graph title and workspace activation fixes; not the later Claude deferred-history fix. Workflow Linux job was still running when captured.",
+  "phases": [
+    {
+      "phase": "agent-hooks",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 31.295
+    },
+    {
+      "phase": "agent-runner-tests",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.095
+    },
+    {
+      "phase": "agent-team-tests",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 22.411
+    },
+    {
+      "phase": "agent-unit",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 16.33
+    },
+    {
+      "phase": "benchmark-agent-tests",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.085
+    },
+    {
+      "phase": "boot-restore",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 4.897
+    },
+    {
+      "phase": "bridge",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.431
+    },
+    {
+      "phase": "browser-chrome",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 7.719
+    },
+    {
+      "phase": "browser-completion-unit",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.702
+    },
+    {
+      "phase": "browser-control",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 135.494
+    },
+    {
+      "phase": "browser-deadline",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 32.398
+    },
+    {
+      "phase": "build",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 136.095
+    },
+    {
+      "phase": "ci-runner-tests",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 140.939
+    },
+    {
+      "phase": "cli",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 33.152
+    },
+    {
+      "phase": "editor-keyboard",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 9.517
+    },
+    {
+      "phase": "editor-recovery",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 6.636
+    },
+    {
+      "phase": "format",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 2.885
+    },
+    {
+      "phase": "image-routing",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.364
+    },
+    {
+      "phase": "image-unit",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 3.548
+    },
+    {
+      "phase": "image-viewer",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.409
+    },
+    {
+      "phase": "installer-routing",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.566
+    },
+    {
+      "phase": "ipc",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.544
+    },
+    {
+      "phase": "macos-dmg-update",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 65.719
+    },
+    {
+      "phase": "macos-installer",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 16.598
+    },
+    {
+      "phase": "macos-layer",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 33.31
+    },
+    {
+      "phase": "macos-update-options",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.37
+    },
+    {
+      "phase": "macos-update-unit",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.519
+    },
+    {
+      "phase": "markdown",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 75.798
+    },
+    {
+      "phase": "native-state",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 37.282
+    },
+    {
+      "phase": "native",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 59.389
+    },
+    {
+      "phase": "notification-cleanup",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.781
+    },
+    {
+      "phase": "notification-routing",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.449
+    },
+    {
+      "phase": "notifications",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 20.645
+    },
+    {
+      "phase": "office-stability",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 13.782
+    },
+    {
+      "phase": "palette-release",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.946
+    },
+    {
+      "phase": "session-flow",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 2.391
+    },
+    {
+      "phase": "session-path-unit",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.078
+    },
+    {
+      "phase": "session-paths",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 2.046
+    },
+    {
+      "phase": "skills",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 3.689
+    },
+    {
+      "phase": "ssh-preview",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 4.108
+    },
+    {
+      "phase": "stability-harness-tests",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.098
+    },
+    {
+      "phase": "thorvg-installer",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 1.084
+    },
+    {
+      "phase": "thorvg-runtime",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.097
+    },
+    {
+      "phase": "webdriver-address",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.419
+    },
+    {
+      "phase": "webdriver-native",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 4.317
+    },
+    {
+      "phase": "webdriver",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 18.034
+    }
+  ]
+}

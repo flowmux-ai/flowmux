@@ -293,7 +293,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 | 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |
 | --- | --- | --- | --- |
 | Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → workspace 간 기존 tab 포커스 → child 재fork의 3세대 관계 확인. 원본 widget/PID 유지 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
-| Claude Code 2.1.314 | `--resume ID --fork-session`, `--resume ID` | 실제 CLI에서 child ID 분리, 이전 대화 표식 상속, 같은 child ID로 resume | Native GUI 연동은 별도 검증 필요. 외부 fork의 명시적 parent metadata는 확인하지 못함 |
+| Claude Code 2.1.314 | `--resume ID --fork-session`, `--resume ID` | 실제 CLI에서 child ID 분리, 이전 대화 표식 상속, 같은 child ID로 resume | 실제 GTK 메뉴 callback·새 ID·첫 입력 전 그래프·기존 pane 포커스·종료 후 비활성 검증 통과. OS 포인터 전체 경로와 외부 fork parent metadata는 미확인 |
 | OpenCode 1.17.18 | `--session ID --fork`, `--session ID` | Native 저장소에 별도 child 생성과 원본 메시지 복제 | 모델 호출은 token refresh 401로 blocked. GUI 전체 검증 미완료. Native fork의 `parent_id`는 NULL이어서 외부 계보 근거로 쓰지 않음 |
 | Gemini·agy·Cline | 기존 history/resume 재사용 | Parser·명령 및 기존 회귀 테스트 대상 | 비파괴 외부 fork 미확인으로 Fork session 비활성. 실제 provider별 그래프 resume 검증은 별도 |
 
