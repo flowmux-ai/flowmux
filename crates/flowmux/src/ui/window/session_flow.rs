@@ -1495,6 +1495,82 @@ pub(super) async fn check_real_provider(
         .expect("OpenCode resume must retain the child ID");
         assert_eq!(controller.pane_registry.borrow().terminals.len(), 2);
         assert_eq!(db.snapshot().unwrap().lineage, family);
+
+        let resumed = controller
+            .flow_anchors()
+            .await
+            .into_iter()
+            .find_map(|a| {
+                a.target
+                    .focused
+                    .filter(|f| f.session_id.as_deref() == Some(&child.id))
+            })
+            .unwrap();
+        controller.focus_pane(resumed.pane);
+        glib::future_with_timeout(Duration::from_secs(40), async {
+            loop {
+                controller.poll_agent_processes().await;
+                controller.refresh_session_flow(true).await;
+                if controller
+                    .pane_registry
+                    .borrow()
+                    .session_flow_forkable
+                    .contains_key(&resumed.surface)
+                {
+                    break;
+                }
+                glib::timeout_future(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("resumed OpenCode child must become forkable");
+        let resumed_terminal = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(resumed.pane)
+            .unwrap()
+            .clone();
+        let resumed_pid = resumed_terminal.pid.get();
+        let resumed_widget = resumed_terminal.widget.clone();
+        let fork = native_fork_button(&resumed_terminal.widget);
+        assert!(fork.is_sensitive());
+        fork.emit_clicked();
+        let grandchild = glib::future_with_timeout(Duration::from_secs(40), async {
+            loop {
+                controller.poll_agent_processes().await;
+                let snapshot = db.snapshot().unwrap();
+                if let Some((_, target)) = snapshot
+                    .lineage
+                    .edges()
+                    .find(|(parent, _)| *parent == &child)
+                {
+                    break target.clone();
+                }
+                glib::timeout_future(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("OpenCode child must be the native second fork's parent");
+        assert_ne!(grandchild, key);
+        assert_ne!(grandchild, child);
+        controller.refresh_session_flow(true).await;
+        while controller.flow.loading.get() {
+            glib::timeout_future(Duration::from_millis(50)).await;
+        }
+        let graph = db.snapshot().unwrap().lineage.project([&key]);
+        assert_eq!(graph.nodes().len(), 3);
+        assert_eq!(graph.edges().count(), 2);
+        assert!(!graph
+            .edges()
+            .any(|(parent, target)| parent == &key && target == &grandchild));
+        controller.flow.panel.assert_native_graph(workspace, &graph);
+        assert_eq!(controller.pane_registry.borrow().terminals.len(), 3);
+        assert_eq!(resumed_terminal.pid.get(), resumed_pid);
+        assert_eq!(resumed_terminal.widget, resumed_widget);
+        println!(
+            "MACOS_SESSION_FLOW_OPENCODE_THREE_GENERATIONS_OK root={} child={} grandchild={}",
+            key.id, child.id, grandchild.id
+        );
     }
     assert_eq!(terminal.pid.get(), original_pid);
     assert_eq!(terminal.widget, original_widget);
