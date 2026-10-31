@@ -619,7 +619,7 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 
 [전후 증거·실제 ID·프로세스·파일·로그 hash](design-assets/session-flow-codex-publication-recovery.json). 잠긴 화면에서 실행했으므로 렌더링된 최종 화면·물리 입력·접근성을 통과했다고 주장하지 않는다. 기존 사용자 PID 72789와 보존된 검증 앱 PID 95986·61360은 계속 유지했다. `4cff2a5d`의 이전 CI는 이번 제품 수정의 최종 CI 증거가 아니다.
 
-현재 CI: checkout `6f62e807`의 [Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831), [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)을 시작했고 두 workflow의 `in_progress`를 확인했다. 최종 결론과 이번 수정의 coverage 산출물은 아직 대기 중이다.
+CI 시작 당시: checkout `6f62e807`의 [Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831), [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)을 시작했고 두 workflow의 `in_progress`를 확인했다. 최종 결론과 이번 수정의 coverage 산출물은 아직 대기 중이다.
 
 제품 `54a44d89`의 macOS job `124428723552`는 success다. Artifact `13028968110`을 내려받아 46개 phase JSON 모두 passed/exit 0, `session-flow`의 native marker 및 두 `observed_identity` 회귀 시험 통과를 확인했다. [검사별 산출물 기록](design-assets/session-flow-macos-gate-54a44d89.json). Linux coverage와 전체 workflow 결론은 아직 대기 중이므로 macOS 성공을 전체 CI 성공으로 취급하지 않는다.
 
@@ -640,3 +640,22 @@ Sanitizers `41164400861`은 최종 전체 success다. Linux ASan/LSan의 headles
 프레임 간격 p95는 **34.3812 / 34.2686 / 34.3955 / 34.1390 / 33.7558 ms**로 다섯 번 모두 목표 ≤33ms에 미달했다. Draw callback CPU p95는 2.73–2.85ms다. 내부 측정 완료를 성능 수용 통과로 해석하지 않는다. [전체 측정·목표 판정·로그 hash](design-assets/session-flow-visible-desktop-frames.json).
 
 측정 전에는 보존된 복구 앱을 CUA로 캡처하고 조작할 수 있었고, 측정 후에도 같은 창을 캡처했다. ioreg 양 끝 관측은 명시적 잠금 필드가 없어 `null`이며 이를 `false`로 바꾸지 않았다. CUA 관찰은 화면 접근이 회복된 증거지만 측정 구간 전체의 compositor 표시나 물리 입력 지연을 증명하지 않는다. 화면 잠금만을 기존 목표 미달의 원인으로 단정할 근거도 없다.
+
+## 2026-10-31 연결선 렌더링 비용 분리
+
+화면 접근 복구 후 동일 release/GL 장면에서 두 진단 빌드를 순차 실행했다. 원본·노드·라벨·gesture와 데이터는 유지하고 draw의 특정 부분만 임시 생략했다. 각 실행은 10초×5회, exit 0이며 제품 기능으로 채택하지 않고 소스를 원복했다.
+
+- 연결선과 화살표 모두 생략: frame p95 17.28–17.46ms, draw CPU p95 1.94–2.02ms.
+- 화살표만 생략하고 모든 선 유지: frame p95 34.12–35.48ms, draw CPU p95 2.86–3.00ms.
+
+이 비교는 연결선을 그리는 경로를 다음 조사 대상으로 좁힌다. 화살표 제거 자체로 개선됐다는 증거는 없으며, 비용을 줄이려고 계보의 선이나 화살표를 제품에서 제거하지 않는다. Callback 시간과 전체 frame 지연의 관계, 실행 간 변동도 남아 있으므로 모든 지연의 단일 원인을 확정한 것으로 해석하지 않는다. [진단별 전체 수치·임시 source patch·로그 hash](design-assets/session-flow-edge-diagnostics.json).
+
+선의 1.2px 두께·끝점·색을 유지하고 butt-cap stroke 대신 같은 사각형을 fill하는 후보도 비교했다. 모든 선·화살표·노드·라벨을 유지했으나 frame p95 **34.61–35.64ms**, callback CPU p95 3.05–3.27ms로 개선되지 않았다. 후보를 채택하지 않고 소스를 원복했으며 전체 수치와 patch를 위 진단 기록에 추가했다.
+
+## 2026-10-31 제품 `54a44d89` 최종 CI·커버리지
+
+[Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831)와 [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)은 최종 전체 success다. 두 workflow의 checkout은 `6f62e807`이며 이후 변경은 문서뿐이다. 임시 렌더링 진단 소스는 원복했고 `crates`, `scripts`, `.github`의 tested head 대비 diff가 없음을 확인했다.
+
+Linux artifact `13028289472`, macOS artifact `13028968110`에서 각각 12개·46개 phase의 passed/exit 0을 확인했다. 이번 `llvm-cov/summary.json`의 라인 **86.9090%** (103,460/119,044), 영역 **86.8100%** (171,125/197,126), 함수 **85.8301%** (9,419/10,974)는 기준 79/78/78%를 충족한다. 이전 제품의 커버리지를 이번 수정에 재사용하지 않았다. [워크플로·전체 phase·coverage 수치와 hash](design-assets/session-flow-ci-54a44d89.json).
+
+이 결과는 실제 Codex 관측 ID 영속화 수정의 최종 remote gate를 마감한다. 프레임 p95 목표 미달, 실제 held-button drag·메뉴 포인터·접근성, 두 GUI 프로세스 동시 조작의 전체 E2E 등 위 수용 표의 미완료 항목을 전체 CI 성공으로 대체하지 않는다.

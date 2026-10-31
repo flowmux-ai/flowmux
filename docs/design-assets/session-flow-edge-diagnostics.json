@@ -1,0 +1,460 @@
+{
+  "date": "2026-10-31",
+  "baseline": "session-flow-visible-desktop-frames.json",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "scope": "Temporary local diagnostic builds only; no feature omission adopted. Same release/GL 1000-node 20-family frame harness.",
+  "experiments": [
+    {
+      "diagnostic": "edge-ablation",
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 33.389542,
+              "p50": 16.670208,
+              "p95": 17.284750000000003,
+              "samples": 595
+            },
+            "draw_cpu_ms": {
+              "max": 2.083208,
+              "p50": 1.8121669999999999,
+              "p95": 1.960917,
+              "samples": 596
+            },
+            "duration_seconds": 10.102460708,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 33.339667000000006,
+              "p50": 6.2745,
+              "p95": 10.445959,
+              "samples": 596
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 33.175916,
+              "p50": 16.658417,
+              "p95": 17.462875,
+              "samples": 596
+            },
+            "draw_cpu_ms": {
+              "max": 2.062875,
+              "p50": 1.812875,
+              "p95": 1.9530420000000002,
+              "samples": 597
+            },
+            "duration_seconds": 10.118427333,
+            "input_batches": 598,
+            "signal_to_after_paint_ms": {
+              "max": 33.140083000000004,
+              "p50": 16.315165999999998,
+              "p95": 17.10175,
+              "samples": 597
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 32.929709,
+              "p50": 16.652166,
+              "p95": 17.302458,
+              "samples": 597
+            },
+            "draw_cpu_ms": {
+              "max": 2.0174160000000003,
+              "p50": 1.7832919999999999,
+              "p95": 1.9369999999999998,
+              "samples": 598
+            },
+            "duration_seconds": 10.115577458,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 23.425250000000002,
+              "p50": 6.215708,
+              "p95": 13.722417,
+              "samples": 598
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 32.108958,
+              "p50": 16.688833,
+              "p95": 17.36575,
+              "samples": 596
+            },
+            "draw_cpu_ms": {
+              "max": 2.159584,
+              "p50": 1.812583,
+              "p95": 2.006125,
+              "samples": 597
+            },
+            "duration_seconds": 10.101930542,
+            "input_batches": 597,
+            "signal_to_after_paint_ms": {
+              "max": 21.101292,
+              "p50": 14.127583000000001,
+              "p95": 16.963167000000002,
+              "samples": 597
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 32.389292,
+              "p50": 16.659292,
+              "p95": 17.3195,
+              "samples": 598
+            },
+            "draw_cpu_ms": {
+              "max": 2.245292,
+              "p50": 1.812875,
+              "p95": 2.018666,
+              "samples": 599
+            },
+            "duration_seconds": 10.113372833,
+            "input_batches": 599,
+            "signal_to_after_paint_ms": {
+              "max": 22.150458,
+              "p50": 5.2924169999999995,
+              "p95": 16.740042,
+              "samples": 599
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "log_sha256": "aa2230a074729a5459ada616e7318b0f1f1387929238d9925b8a4992b59571ae",
+      "patch_sha256": "d1b4a383e9860dec0b99a0e55bcd206e2b4dc06190d079e232bf9d7d7d2bed40",
+      "source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..b511d6b5 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -795,36 +795,7 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         let _ = cr.fill();\n     }\n     let camera = scene.camera();\n-    cr.set_line_width(1.2);\n-    for (parent, child) in scene.graph.edges() {\n-        let (Some(p), Some(c)) = (\n-            scene.layout.positions.get(parent),\n-            scene.layout.positions.get(child),\n-        ) else {\n-            continue;\n-        };\n-        let (p, c) = (camera.screen(*p), camera.screen(*c));\n-        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n-        cr.move_to(p.x, p.y);\n-        cr.line_to(c.x, c.y);\n-        let _ = cr.stroke();\n-        let angle = (c.y - p.y).atan2(c.x - p.x);\n-        let tip = Point {\n-            x: c.x - angle.cos() * 14.0,\n-            y: c.y - angle.sin() * 14.0,\n-        };\n-        cr.move_to(tip.x, tip.y);\n-        cr.line_to(\n-            tip.x - (angle - 0.45).cos() * 7.0,\n-            tip.y - (angle - 0.45).sin() * 7.0,\n-        );\n-        cr.line_to(\n-            tip.x - (angle + 0.45).cos() * 7.0,\n-            tip.y - (angle + 0.45).sin() * 7.0,\n-        );\n-        cr.close_path();\n-        let _ = cr.fill();\n-    }\n+    // Temporary diagnostic: omit edges and arrowheads; never ship this build.\n     let selected = scene\n         .workspace\n         .and_then(|id| scene.views.get(&id))\n",
+      "frame_p95_ms": [
+        17.284750000000003,
+        17.462875,
+        17.302458,
+        17.36575,
+        17.3195
+      ]
+    },
+    {
+      "diagnostic": "arrow-ablation",
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 36.108916,
+              "p50": 33.390625,
+              "p95": 35.161791,
+              "samples": 302
+            },
+            "draw_cpu_ms": {
+              "max": 2.963041,
+              "p50": 2.638666,
+              "p95": 2.868458,
+              "samples": 303
+            },
+            "duration_seconds": 10.104625459,
+            "input_batches": 566,
+            "signal_to_after_paint_ms": {
+              "max": 36.071875000000006,
+              "p50": 30.480625,
+              "p95": 33.766,
+              "samples": 303
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 36.047999999999995,
+              "p50": 33.372,
+              "p95": 35.477667,
+              "samples": 302
+            },
+            "draw_cpu_ms": {
+              "max": 3.096583,
+              "p50": 2.645,
+              "p95": 2.863042,
+              "samples": 303
+            },
+            "duration_seconds": 10.105635167,
+            "input_batches": 568,
+            "signal_to_after_paint_ms": {
+              "max": 35.9965,
+              "p50": 30.149917,
+              "p95": 34.047209,
+              "samples": 303
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 36.00925,
+              "p50": 33.358792,
+              "p95": 35.4525,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 3.073041,
+              "p50": 2.672042,
+              "p95": 2.927958,
+              "samples": 301
+            },
+            "duration_seconds": 10.107294833,
+            "input_batches": 568,
+            "signal_to_after_paint_ms": {
+              "max": 35.570541999999996,
+              "p50": 30.572833,
+              "p95": 33.749167,
+              "samples": 301
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.904334000000006,
+              "p50": 33.080625000000005,
+              "p95": 35.17075,
+              "samples": 328
+            },
+            "draw_cpu_ms": {
+              "max": 3.2904169999999997,
+              "p50": 2.635125,
+              "p95": 2.997791,
+              "samples": 329
+            },
+            "duration_seconds": 10.107466791,
+            "input_batches": 570,
+            "signal_to_after_paint_ms": {
+              "max": 35.406333,
+              "p50": 28.974667,
+              "p95": 33.55075,
+              "samples": 329
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.476124999999996,
+              "p50": 18.537208,
+              "p95": 34.121291,
+              "samples": 421
+            },
+            "draw_cpu_ms": {
+              "max": 2.9958329999999997,
+              "p50": 2.604709,
+              "p95": 2.865458,
+              "samples": 422
+            },
+            "duration_seconds": 10.104002208,
+            "input_batches": 576,
+            "signal_to_after_paint_ms": {
+              "max": 35.034917,
+              "p50": 16.464333,
+              "p95": 33.173958000000006,
+              "samples": 422
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "log_sha256": "be9f1bfd15801046f4ca21f0cd2babae030e4acd83305ac0d26aea29482bf7b9",
+      "patch_sha256": "3123860977875161fedb5dca018f38a53b8d3e42d0f076f0acf5bbd3fc5d974a",
+      "source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..dc18f5a6 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -808,22 +808,7 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         cr.move_to(p.x, p.y);\n         cr.line_to(c.x, c.y);\n         let _ = cr.stroke();\n-        let angle = (c.y - p.y).atan2(c.x - p.x);\n-        let tip = Point {\n-            x: c.x - angle.cos() * 14.0,\n-            y: c.y - angle.sin() * 14.0,\n-        };\n-        cr.move_to(tip.x, tip.y);\n-        cr.line_to(\n-            tip.x - (angle - 0.45).cos() * 7.0,\n-            tip.y - (angle - 0.45).sin() * 7.0,\n-        );\n-        cr.line_to(\n-            tip.x - (angle + 0.45).cos() * 7.0,\n-            tip.y - (angle + 0.45).sin() * 7.0,\n-        );\n-        cr.close_path();\n-        let _ = cr.fill();\n+        // Temporary diagnostic: omit arrowheads only; retain every line.\n     }\n     let selected = scene\n         .workspace\n",
+      "frame_p95_ms": [
+        35.161791,
+        35.477667,
+        35.4525,
+        35.17075,
+        34.121291
+      ]
+    },
+    {
+      "diagnostic": "line-quad",
+      "outcome": "rejected and source reverted; no frame improvement",
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 36.161458,
+              "p50": 33.385916,
+              "p95": 35.474417,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 3.145917,
+              "p50": 2.793583,
+              "p95": 3.048125,
+              "samples": 301
+            },
+            "duration_seconds": 10.104077834,
+            "input_batches": 563,
+            "signal_to_after_paint_ms": {
+              "max": 36.120625000000004,
+              "p50": 29.835375,
+              "p95": 33.997,
+              "samples": 301
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.984041000000005,
+              "p50": 33.369749999999996,
+              "p95": 35.445834000000005,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 3.264375,
+              "p50": 2.8388340000000003,
+              "p95": 3.066708,
+              "samples": 301
+            },
+            "duration_seconds": 10.105880125,
+            "input_batches": 566,
+            "signal_to_after_paint_ms": {
+              "max": 35.744958,
+              "p50": 30.077541999999998,
+              "p95": 33.958957999999996,
+              "samples": 301
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.959625,
+              "p50": 33.353458,
+              "p95": 35.5475,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 3.2225420000000002,
+              "p50": 2.8424169999999997,
+              "p95": 3.07475,
+              "samples": 301
+            },
+            "duration_seconds": 10.106142917,
+            "input_batches": 566,
+            "signal_to_after_paint_ms": {
+              "max": 35.855709,
+              "p50": 29.879165999999998,
+              "p95": 34.383125,
+              "samples": 301
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 37.356709,
+              "p50": 33.264500000000005,
+              "p95": 35.637417,
+              "samples": 305
+            },
+            "draw_cpu_ms": {
+              "max": 3.631166,
+              "p50": 2.930459,
+              "p95": 3.270292,
+              "samples": 306
+            },
+            "duration_seconds": 10.108645167,
+            "input_batches": 567,
+            "signal_to_after_paint_ms": {
+              "max": 37.297875,
+              "p50": 29.670292,
+              "p95": 33.801584000000005,
+              "samples": 306
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.6715,
+              "p50": 31.436291999999998,
+              "p95": 34.610875,
+              "samples": 387
+            },
+            "draw_cpu_ms": {
+              "max": 3.3747909999999997,
+              "p50": 2.7828340000000003,
+              "p95": 3.148333,
+              "samples": 388
+            },
+            "duration_seconds": 10.117330542,
+            "input_batches": 576,
+            "signal_to_after_paint_ms": {
+              "max": 35.09425,
+              "p50": 23.441666,
+              "p95": 33.495666,
+              "samples": 388
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "frame_p95_ms": [
+        35.474417,
+        35.445834000000005,
+        35.5475,
+        35.637417,
+        34.610875
+      ],
+      "source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..b0ba3543 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -805,9 +805,18 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         };\n         let (p, c) = (camera.screen(*p), camera.screen(*c));\n         cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n-        cr.move_to(p.x, p.y);\n-        cr.line_to(c.x, c.y);\n-        let _ = cr.stroke();\n+        // Diagnostic equivalent of the 1.2px butt-cap stroke: fill its rectangle.\n+        let length = (c.x - p.x).hypot(c.y - p.y);\n+        if length > 0.0 {\n+            let nx = -(c.y - p.y) / length * 0.6;\n+            let ny = (c.x - p.x) / length * 0.6;\n+            cr.move_to(p.x + nx, p.y + ny);\n+            cr.line_to(c.x + nx, c.y + ny);\n+            cr.line_to(c.x - nx, c.y - ny);\n+            cr.line_to(p.x - nx, p.y - ny);\n+            cr.close_path();\n+            let _ = cr.fill();\n+        }\n         let angle = (c.y - p.y).atan2(c.x - p.x);\n         let tip = Point {\n             x: c.x - angle.cos() * 14.0,\n",
+      "patch_sha256": "a68c44a69441a5cff918529507b4ad487c563bf4c428ea6b2944e19922fddf29",
+      "log_sha256": "c369b3f578af3fe2586f90a51b1bb5d4f3b3860fee44669a2700434fa077ffd2"
+    }
+  ],
+  "inference": "Omitting edges and arrowheads brought five p95 frame intervals below 18ms; omitting arrowheads alone did not. Investigate line rendering, while avoiding a claim that this comparison identifies every source of frame latency."
+}

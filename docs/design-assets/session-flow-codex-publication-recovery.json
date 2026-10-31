@@ -323,12 +323,13 @@
   },
   "earlier_validation_note": "A first post-fix driver used an incorrect predicate expecting native IDs in the agents response. That API omits them. A separate verifier confirmed native writable rollout handles; the corrected full driver then passed on a new isolated run recorded here.",
   "ci": {
-    "status": "in_progress",
+    "status": "success",
     "tested_head": "6f62e807a3096cc58fa3e952a09a7a5779e89fa1",
-    "observed_at": "2026-10-31T03:53:10.649809+00:00",
+    "observed_at": "2026-10-31T04:06:45.730532+00:00",
     "test": {
       "id": 41164398831,
-      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164398831"
+      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164398831",
+      "conclusion": "success"
     },
     "sanitizers": {
       "id": 41164400861,
@@ -336,6 +337,24 @@
       "conclusion": "success",
       "evidence": "session-flow-sanitizers-54a44d89.json"
     },
-    "coverage": "Not yet available for this product change; prior product coverage is not substituted."
+    "coverage": {
+      "lines": {
+        "count": 119044,
+        "covered": 103460,
+        "percent": 86.90904203487786
+      },
+      "regions": {
+        "count": 197126,
+        "covered": 171125,
+        "notcovered": 26001,
+        "percent": 86.80995911244584
+      },
+      "functions": {
+        "count": 10974,
+        "covered": 9419,
+        "percent": 85.83014397667213
+      }
+    },
+    "evidence": "session-flow-ci-54a44d89.json"
   }
 }
