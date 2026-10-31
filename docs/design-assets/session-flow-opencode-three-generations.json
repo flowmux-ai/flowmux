@@ -1,0 +1,56 @@
+{
+  "source": "native OpenCode 1.17.18 API noReply writes and read-only native SQLite inspection",
+  "model_requests": false,
+  "sessions": [
+    {
+      "role": "root",
+      "id": "ses_e7047828fffeppj2xiecn6VJgB",
+      "inherited_marker": true,
+      "branch_markers": {
+        "root": true,
+        "child": false,
+        "grandchild": false
+      }
+    },
+    {
+      "role": "child",
+      "id": "ses_e703c80a4ffe0QUlZe2M0Vsxqc",
+      "inherited_marker": true,
+      "branch_markers": {
+        "root": false,
+        "child": true,
+        "grandchild": false
+      }
+    },
+    {
+      "role": "grandchild",
+      "id": "ses_e703c5e33ffeyDu0t12Ws8n4PH",
+      "inherited_marker": true,
+      "branch_markers": {
+        "root": false,
+        "child": false,
+        "grandchild": true
+      }
+    }
+  ],
+  "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+  "test_commit": "1d268def16f2c3a4a9ed98ffed76e24f943e9e2b",
+  "result": "passed",
+  "scope": "Real OpenCode CLI with native GTK menu/node callbacks and native API storage verification. Not OS drag or model response validation.",
+  "checks": [
+    "A forks B into a right split",
+    "B is closed and resumed with its same native ID",
+    "resumed B forks distinct C",
+    "lineage has exactly A->B and B->C, never A->C",
+    "three nodes are projected into the native GTK graph",
+    "three terminals, original A and resumed B PID/widgets preserved",
+    "all operations complete",
+    "original marker retained in A, B and C",
+    "post-fork branch markers remain independent"
+  ],
+  "logs": [
+    "/tmp/flowmux-session-flow-opencode-three-generations.log",
+    "/tmp/flowmux-session-flow-opencode-three-clippy.log",
+    "/tmp/fm-flow-providers-h_ja_8_6/opencode-branch-independence.log"
+  ]
+}

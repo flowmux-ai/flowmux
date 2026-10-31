@@ -474,3 +474,16 @@ Sidebar Session Flow 버튼의 좌표 클릭으로 상단 약 1/3 그래프와 �
 이 결과는 자동 입력이 실제 마우스 drag의 검증 근거로 부족하다는 뜻이며, Session Flow pan이 정상이라는 증거는 아니다. 관측만으로 제품의 drag 처리를 바꾸지 않았다. 실제 그래프 화면으로 복귀해 빈 공간을 실제 마우스로 끄는 수동 확인을 요청했으며 아직 응답을 받지 않았다. 사용자 앱 PID `72789`와 두 Claude source/child 프로세스를 유지했다.
 
 이전 제품 `4ab3e76e`의 [Test 41156185258](https://github.com/flowmux-ai/flowmux/actions/runs/41156185258)는 전체 success로 완료됐다. 최신 제품 `4cff2a5d`의 CI 진행 상태 및 수동 입력 검증과 구분한다.
+
+
+## 실제 OpenCode의 재개 후 재분기와 분기 기록 독립성
+
+Test-only commit `1d268def`는 기존 provider harness에 재개한 B의 native 메뉴로 C를 생성하는 시나리오를 추가한다. 제품 실행 코드는 `4cff2a5d`와 같다. 실제 OpenCode 1.17.18에서 다음 관계를 확인했다.
+
+- A: `ses_e7047828fffeppj2xiecn6VJgB`
+- A에서 fork한 B: `ses_e703c80a4ffe0QUlZe2M0Vsxqc`
+- B를 닫고 graph로 동일 ID resume한 뒤 B에서 fork한 C: `ses_e703c5e33ffeyDu0t12Ws8n4PH`
+
+계보는 정확히 A→B, B→C의 edge 2개와 node 3개다. A→C의 잘못된 직접 연결은 없으며 native GTK scene도 같은 graph를 투영한다. 세 terminal과 원래 A 및 재개 B의 PID/widget을 유지했고 pending operation이 없었다. `/tmp/flowmux-session-flow-opencode-three-generations.log`에 `MACOS_SESSION_FLOW_OPENCODE_THREE_GENERATIONS_OK`, `MACOS_SESSION_FLOW_OPENCODE_REAL_OK`, `MACOS_NATIVE_SMOKE_OK`, exit 0을 확인했다. 변경 harness의 clippy `-D warnings`도 통과했다.
+
+GUI harness 종료 후 동일 격리 native API에 `noReply`로 A/B/C 각각 다른 표식을 추가했다. Native SQLite는 읽기 전용으로 검사했다. 세 세션 모두 최초 공통 표식을 포함하지만, 분기 뒤 추가한 각 표식은 해당 세션에만 존재했다. 이 검증은 저장된 대화 맥락의 상속·독립성 증거이며 모델 응답이나 OS drag 성공을 의미하지 않는다. [3세대·분기별 표식 증거](design-assets/session-flow-opencode-three-generations.json).
