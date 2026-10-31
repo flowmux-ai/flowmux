@@ -150,6 +150,20 @@ keep watching the office.
 
 <img src="resources/screenshot/flowmux-agent-office.gif" alt="AgentOffice: watch agents across workspaces and select a character to open its terminal" width="100%" />
 
+### Session Flow
+
+Try more than one fix without losing the conversation. Right-click a Claude Code,
+Codex, or OpenCode terminal → **Fork session**, and a branch with the same
+history opens in a split on the right. Fork a fork to branch again.
+
+**Session Flow** draws the fork tree for the workspace, so you can see where each
+branch came from and compare their results. Click a node to jump to its pane.
+Closed branches stay in the graph; click one to resume it in a new split. Open
+the panel with **View session flow** from the terminal menu or the button next
+to the **Agents** bar.
+
+<img src="resources/screenshot/flowmux-session-flow.gif" alt="Session Flow: fork an agent session, see the fork tree, and jump to or resume any branch" width="100%" />
+
 ### SSH workspaces
 
 Work on remote hosts with the same tabs and splits. Right-click the side
