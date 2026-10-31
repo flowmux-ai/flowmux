@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-31",
+  "before_product": "4ab3e76e",
+  "after_product": "2b80463a",
+  "source_id": "8683a908-3515-4cc9-a35a-1da44cf7a563",
+  "child_id": "5bfb9a8a-cbfc-4729-b2ee-1ea6d3b99fdd",
+  "native_input": "CUA OS right-click and keyboard Down/Return; not physical input",
+  "before_observed": {
+    "right_split": true,
+    "inherited_transcript_visible": true,
+    "source_pid_preserved": 82598,
+    "source_process_start": 1793410590233958,
+    "child_pid": 86730,
+    "operation_state": "pending",
+    "fork_edge_present": false,
+    "child_history_file_exists": false
+  },
+  "live_bindings": [
+    {
+      "key": {
+        "provider": "claude",
+        "home": "/Users/junsu/.claude",
+        "id": "8683a908-3515-4cc9-a35a-1da44cf7a563"
+      },
+      "binding": {
+        "owner": "2a9ba301-b0c4-406b-9a98-2215970aa8d8",
+        "pid": 82598,
+        "started": 1793410590233958,
+        "workspace": "559ef998-b172-4b9a-aefb-a5bcd546016c",
+        "pane": "bd33c1a3-7e68-41ad-95aa-2d57ec2d0577",
+        "surface": "a1a8bb44-809d-4714-a199-bdec26efd9fa",
+        "socket": "/tmp/fmsws-yqkc7wpk/run/flowmux-82242.sock"
+      }
+    },
+    {
+      "key": {
+        "provider": "claude",
+        "home": "/Users/junsu/.claude",
+        "id": "5bfb9a8a-cbfc-4729-b2ee-1ea6d3b99fdd"
+      },
+      "binding": {
+        "owner": "2a9ba301-b0c4-406b-9a98-2215970aa8d8",
+        "pid": 86730,
+        "started": 1793410886742706,
+        "workspace": "559ef998-b172-4b9a-aefb-a5bcd546016c",
+        "pane": "84346509-9bd5-4be7-a072-223e1fa4983b",
+        "surface": "b2215390-bcdd-4538-9ce8-0ad1f884bc6c",
+        "socket": "/tmp/fmsws-yqkc7wpk/run/flowmux-82242.sock"
+      }
+    }
+  ],
+  "fix": "Complete a reserved live Claude fork using its observed native identity without fabricating persisted history; other providers and resume still require history",
+  "local_checks": {
+    "before_regression": "failed with Native session record is not yet available",
+    "session_unit": "8 passed",
+    "native_canvas": "MACOS_SESSION_FLOW_LAYOUT_OK, MACOS_NATIVE_SMOKE_OK",
+    "clippy": "passed",
+    "build": "passed"
+  },
+  "after_real_gui": "pending: CGSSessionScreenIsLocked=Yes, CUA cgWindowNotFound",
+  "ci": {
+    "test": 41156800646,
+    "sanitizers": 41156803235,
+    "status": "in progress"
+  },
+  "user_app": {
+    "pid": 72789,
+    "preserved": true
+  }
+}

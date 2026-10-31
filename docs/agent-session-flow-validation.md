@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했고 최신 전체 CI는 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했다. Claude 지연 저장 수정 `2b80463a`의 로컬 회귀·native 검사는 통과했고 최신 전체 CI와 수정 후 실제 Claude 화면 검증은 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -402,3 +402,14 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 격리 앱 PID `82242`의 실제 Codex 계보 20개에서 새 workspace 생성→이전 그래프 숨김→native sidebar 클릭 복귀→원래 그래프 표시를 확인했다. `workspace current`와 화면이 일치하고 기존 source PID `82257`의 birth identity도 유지됐다. [재현과 수정 검증 기록](design-assets/session-flow-workspace-4ab3e76e.json).
 
 최신 전체 gate는 [Test 41156185258](https://github.com/flowmux-ai/flowmux/actions/runs/41156185258)와 [Sanitizers 41156187678](https://github.com/flowmux-ai/flowmux/actions/runs/41156187678), 제품 `4ab3e76e` 기준이며 진행 중이다.
+
+
+## Claude 첫 입력 전 fork의 지연 저장 처리
+
+제품 `4ab3e76e`의 격리 앱에서 실제 Claude Code 2.1.314 세션을 우클릭하고 키보드로 Fork session을 실행했다. 원본 PID `82598`을 유지한 채 새 ID `5bfb9a8a-cbfc-4729-b2ee-1ea6d3b99fdd`와 오른쪽 pane이 생기고 이전 대화가 표시됐다. 그러나 첫 입력 전 child의 native JSONL이 없어서 operation이 pending에 남고 계보가 만들어지지 않았다. Native hook ID와 live binding은 이미 존재했다. [관측·수정 기록](design-assets/session-flow-claude-deferred-2b80463a.json).
+
+`2b80463a`는 예약한 live surface에서 확인된 Claude fork ID로 edge와 완료 상태를 기록한다. 가상의 history record는 만들지 않으므로 파일이 없는 세션을 닫은 뒤 resume 가능한 것으로 표시하지 않는다. 같은 원본 ID·다른 target surface는 거절하며, Claude resume와 Codex/OpenCode fork는 native history 조건을 유지한다. Codex의 명시적 parent 검증도 유지한다.
+
+회귀 시험은 수정 전 `Native session record is not yet available`로 실패했고 수정 후 세션 경로 시험 8개가 통과했다. Native Session Flow, clippy `-D warnings`, GUI build도 통과했다. 로그는 `/tmp/flowmux-session-flow-claude-deferred-{before,after,native,clippy,build}.log`다. 새 빌드의 격리 앱 PID `95986`을 준비했지만 화면이 다시 잠겼다(`CGSSessionScreenIsLocked=Yes`, CUA `cgWindowNotFound`). 따라서 수정 후 실제 Claude 그래프 표시·pointer focus는 아직 통과로 기록하지 않는다.
+
+제품 `2b80463a`의 최신 [Test 41156800646](https://github.com/flowmux-ai/flowmux/actions/runs/41156800646), [Sanitizers 41156803235](https://github.com/flowmux-ai/flowmux/actions/runs/41156803235)는 진행 중이다. 이전 `4ab3e76e` 실행도 최종 결과를 따로 확인한다. 사용자 앱 PID `72789`는 종료·재시작하지 않았다.
