@@ -286,7 +286,8 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 - Native discovery는 잘못된 parent metadata, 순환, 충돌 부모를 연결하지 않고 정상 계보를 보존한다. 유효 관계 검증과 publication은 같은 writer transaction에서 이루어지며 기존 확정 부모를 덮어쓰지 않는다. `Incomplete history`와 누락 관계 수, tooltip의 이유(최대 8개)를 표시하고 정상 refresh 후 해제한다. Native history 파일과 기존 strict import의 전체 rollback 계약은 유지한다.
 - Resume 예약과 실행 binding 공개는 DB transaction으로 보호한다. 지연된 갱신은 읽었던 binding snapshot과 현재 값이 다르면 덮어쓰지 않는다. PID가 재사용된 binding은 실행 소유권으로 인정하지 않는다.
 - Codex 0.166.0에서 첫 요청 전의 TUI 시작 hook이 지연되는 것을 확인했다. 이 경우 해당 pane의 프로세스 자손 중 **Codex가 쓰기 모드로 연 native rollout 파일**을 확인한다. Native ID, 저장소, process birth marker가 일치하고 후보가 하나일 때만 식별한다. 최근 파일·제목·유사도는 사용하지 않는다. macOS는 시간·출력 크기가 제한된 `lsof`, Linux는 `/proc/<pid>/fd`와 `fdinfo`를 worker에서 조회한다.
-- `54a44d89`부터 위 프로세스 기반 ID를 기존 재시작용 surface 기록에도 저장한다. 관측 전후 root process birth marker가 같아야 하고, 저장 시 관측 전에 읽은 값이 그대로인 경우에만 갱신한다. 더 최신 hook과 다른 도구의 binding은 덮어쓰지 않으며 hook/lifecycle 이벤트를 만들어내지 않는다. 실제 Codex child 생성 후 관계 publication 실패와 GUI 종료를 주입한 시험에서 같은 ID·surface와 pending 작업의 복구를 확인했다. 화면 잠금 상태의 native callback/프로세스/IPC 증거이며 hardware 입력 검증과 구분한다.
+- `54a44d89`부터 위 프로세스 기반 ID를 기존 재시작용 surface 기록에도 저장한다. 관측 전후 root process birth marker가 같아야 하고, 저장 시 관측 전에 읽은 값이 그대로인 경우에만 갱신한다. 더 최신 hook과 다른 도구의 binding은 덮어쓰지 않으며 hook/lifecycle 이벤트를 만들어내지 않는다. 실제 Codex child 생성 후 관계 publication 실패와 GUI 종료를 주입한 시험에서 같은 ID·surface와 pending 작업의 복구를 확인했다. 초기 장애·복구 시험은 화면 잠금 상태의 native callback/프로세스/IPC 증거다. 이후 보존된 복구 GUI에서 CUA로 그래프 표시·자식 focus·wheel/Fit을 확인했으며, hardware 입력 검증과는 구분한다.
+- 실제 Codex 0.166.0을 사용하는 독립 native GUI 두 개에서도 같은 세션의 graph 선택을 확인했다. 최종 실행의 선택 시작 간격은 69.202ms였으며, 해당 임시 native store의 대상 writer와 완료 resume operation은 하나였다. 비소유 창의 재선택은 기존 소유 창의 정확한 pane/surface로 이동했고 원본 terminal widget/PID를 유지했다. 이는 잠금 상태의 native controller·IPC·프로세스 검증이며, 물리 입력이나 다른 provider 전체의 동시성 보장은 아니다. 재현은 `scripts/test-session-flow-multi-gui.py`와 검증 기록을 따른다.
 - OpenCode 1.17.18은 재개 직후 서버 lifecycle event를 보내지 않을 수 있다. 별도 TUI plugin이 현재 `route.current`와 실제 session 존재를 확인하고 native status API 응답으로 초기 상태를 전달한다. 선택 변경·더 최신 status event·plugin 종료 뒤 늦게 도착한 응답은 버린다. 초기 관측은 완료 알림을 만들지 않는다. `flowmux hooks setup --agent opencode`가 기존 server plugin과 `tui.json`의 TUI plugin을 함께 설치하며 다른 plugin·설정 값은 보존한다. 새 OpenCode 프로세스부터 로드되며 기존 사용자 세션을 재시작하지 않는다. `OPENCODE_TUI_CONFIG`도 fork/resume 환경에 보존한다. 다른 버전의 TUI API 호환성은 별도 검증한다.
 - Codex fork의 parent는 `forked_from_id`를 추가 확인한다. Hook의 `source: fork` 필터도 포함한다. 기존 lifecycle 추정 엔진과 사용자 hook trust 설정은 변경하지 않는다.
 - Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 휠·트랙패드 제스처 확대, 빈 공간·Space·가운데 버튼 팬, 노드 이동·전체 맞춤·Pan 모드·키보드 선택을 제공한다. 재개 불가 노드는 축소 상태에도 사선 표식을 유지한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
@@ -294,14 +295,14 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 
 | 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |
 | --- | --- | --- | --- |
-| Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → workspace 간 기존 tab 포커스 → child 재fork의 3세대 관계 확인. 원본 widget/PID 유지 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
+| Codex 0.166.0 | CLI fork/resume, native parent 읽기 | 실제 Flowmux에서 오른쪽 fork → 다른 child ID → child 닫기 → 같은 ID resume → workspace 간 기존 tab 포커스 → child 재fork의 3세대 관계 확인. 원본 widget/PID 유지. 독립 GUI 2개의 동일 세션 resume·외부 창 exact focus도 확인 | Flowmux 밖 writer와 원격 실행을 전역 잠금으로 통제하지 않음 |
 | Claude Code 2.1.314 | `--resume ID --fork-session`, `--resume ID` | 실제 CLI에서 child ID 분리, 이전 대화 표식 상속, 같은 child ID로 resume | 실제 GTK 메뉴 callback·새 ID·첫 입력 전 그래프·기존 pane 포커스·종료 후 비활성 검증 통과. CUA 우클릭·키보드 메뉴·node focus 추가 확인. 메뉴 pointer 선택·hardware drag·외부 fork parent metadata는 미확인 |
 | OpenCode 1.17.18 | TUI 선택 세션 관측, `--session ID --fork`, `--session ID` | 실제 GTK 메뉴→오른쪽 fork→새 ID·메시지 상속→graph focus→child 닫기→동일 ID resume→child 재fork의 3세대 관계 통과. 분기 후 기록 독립성과 원본 PID/widget 유지 | 격리 GUI crash/restart 후 자동 복원·graph pointer로 동일 ID resume 확인. 메뉴 pointer 선택·hardware drag·모델 응답은 미검증. Native fork의 `parent_id`는 NULL이어서 외부 계보 근거로 쓰지 않음 |
 | Gemini·agy·Cline | 기존 history/resume 재사용 | Parser·명령 및 기존 회귀 테스트 대상 | 비파괴 외부 fork 미확인으로 Fork session 비활성. 실제 provider별 그래프 resume 검증은 별도 |
 
 **과거 계보 조회의 한계:** Codex의 명시적 native fork metadata와 Flowmux가 직접 확인하여 기록한 관계를 표시한다. 도구가 원본 ID를 보관하지 않은 외부 fork는 자동 복원할 수 없다. 임의의 부모를 연결하지 않으며, 여섯 도구의 모든 과거 fork를 같은 수준으로 복원한다고 발표하지 않는다.
 
-**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 더 큰 그래프·더 긴 기간의 지속 사용과 실제 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 목표는 측정 결과와 구분한다. 실제 Codex의 17노드·3terminal을 유지한 30분/159회 전환 시험은 통과했으며 offscreen render와 snapshot 준비 대기를 별도로 기록했다. 실제 표시 frame 지연 측정은 아니다.
+**별도 검증·후속 범위:** VoiceOver/AT-SPI 수동 검증, 더 큰 그래프·더 긴 기간의 지속 사용과 실제 화면 frame p95 측정, 원격 세션, 미확인 작업의 수동 정리 UI, Flowmux 밖 writer의 원자적 배제. 위 성능 목표는 측정 결과와 구분한다. 현재 제품의 1,000노드 release/GL 내부 frame p95 재측정은 33.76–34.40ms로 목표 ≤33ms를 충족하지 못했다. GSK 후보는 화면 재잠금으로 수용 판단을 보류하고 원복했으며, 잠금 해제 상태의 기준/후보 비교와 실제 입력 검증이 남아 있다. 실제 Codex의 17노드·3terminal을 유지한 30분/159회 전환 시험은 통과했으며 offscreen render와 snapshot 준비 대기를 별도로 기록했다. 실제 표시 frame 지연 측정은 아니다.
 
 테스트와 실제 provider 증거는 [검증 기록](agent-session-flow-validation.md#실행-기록)에 모은다. 사용자 Flowmux PID `72789`는 종료·재시작하지 않았다.
 
