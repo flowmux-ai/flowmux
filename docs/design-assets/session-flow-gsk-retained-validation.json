@@ -293,7 +293,7 @@
       "meets_internal_frame_limit": true
     }
   },
-  "performance_acceptance": "pending: improved internal frame p95 is 17.08–17.39ms, but the run ended with explicit screen lock and CUA cgWindowNotFound. Final bounds/dependency cleanup also requires an exact-source release remeasurement with an accessible desktop.",
+  "performance_acceptance": "Exact committed release/GL remeasurement with desktop access before and after passed the internal frame p95 <=33ms target in all five trials (17.54–17.83ms). This does not prove hardware-input or compositor latency.",
   "measurement_scope": "GTK frame-clock/controller signals, not hardware input or compositor presentation. Snapshot CPU timing now includes the complete graph snapshot, excluding renderer submission.",
   "source_sha256": {
     "Cargo.lock": "b13893412aead9be98d0685f9abd4e246307ba969ec6c11f5c62417ccd6f903f",
@@ -686,5 +686,6 @@
       }
     ],
     "scope": "Fresh workflows target the retained GSK renderer and hook selection readiness test fix; final conclusions pending."
-  }
+  },
+  "final_frame_evidence": "session-flow-gsk-final-frames-461a4f9b.json"
 }

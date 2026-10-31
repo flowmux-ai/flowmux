@@ -203,7 +203,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | CUA native sidebar pointer 클릭과 실제 상단 panel 추가 확인; 사람의 하드웨어 조작은 미확인 |
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
 | R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
-| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI 미확인. 이전 Cairo 구현은 내부 frame p95 목표 미달. GSK prototype은 17.08–17.39ms였으나 종료 시 화면 잠금이 확인되어 최종 화면 성능 수용은 보류 |
+| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처; CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 확인 | CUA drag는 별도 입력 측정에서도 이동 중 buttons=0이어서 held-button 동작 증거로 사용할 수 없음. 실제 마우스·trackpad drag, VoiceOver/AT-SPI 미확인. 최종 GSK commit의 release/GL 내부 frame p95는 17.54–17.83ms로 5회 모두 ≤33ms 충족; 측정 전후 CUA 화면 접근 확인. 연속 compositor 표시·하드웨어 입력 지연의 측정은 아님 |
 | R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인. 실제 독립 GUI 2개와 Codex writer의 동시 선택·기존 owner focus도 확인 | 다른 provider의 다중 GUI와 물리 입력까지 일반화하지 않음 |
 | R10 | Native disabled node 입력이 launch를 만들지 않음; 실제 비활성 Codex 기록을 임시 이동한 뒤 CUA pointer 클릭도 operation·pane 증가 없음; 기록 복원 완료 | 수동 접근성 검증 미확인 |
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
@@ -742,3 +742,17 @@ Test `41168599342`도 최종 전체 **success**로 종료됐다. Linux artifact 
 렌더러 commit `461a4f9b`를 `feat/session-flow`에 push했다. 해당 commit의 release 빌드와 GL native Session Flow 회귀는 exit 0이며 `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`를 확인했다. 새 [Test 41171842039](https://github.com/flowmux-ai/flowmux/actions/runs/41171842039), [Sanitizers 41171844578](https://github.com/flowmux-ai/flowmux/actions/runs/41171844578), [License audit 41171847178](https://github.com/flowmux-ai/flowmux/actions/runs/41171847178)의 head가 모두 이 commit과 일치한다. 최종 remote 결론과 coverage는 진행 중이며, 실제 화면 성능·물리 입력은 잠금 해제 후 확인이 필요하다.
 
 같은 commit의 License audit `41171847178`은 최종 **success**다. dependency license/source·advisory, notice 시험 4개와 재생성 diff 없음, asset notice 및 editor asset 12개 검사를 확인했다. [실제 job/step 결론과 전체 로그 hash](design-assets/session-flow-license-461a4f9b.json). Test와 Sanitizers, 화면 수용 결과는 이 성공과 별개다.
+
+
+## 2026-10-31 최종 GSK commit의 화면 접근 후 재측정
+
+`461a4f9b`에서 빌드한 release native executable로 1,000노드·20계보·1280×266·scale 2·GL 조건을 10초씩 5회 측정했다. 측정 전후 CUA로 보존된 복구 앱의 화면에 접근했고, ioreg 양 끝 값은 `null` 그대로 기록했다. 측정 중 다른 로컬 빌드를 실행하지 않았다. Native 실행은 exit 0이며 기존 Session Flow 회귀와 frame 수집 marker를 모두 통과했다.
+
+프레임 간격 p95는 **17.830333 / 17.630667 / 17.582375 / 17.537041 / 17.700333ms**로 5회 모두 목표 ≤33ms를 충족했다. 총 2,982개 after-paint 간격을 수집했고 최대는 32.96425ms다. 전체 snapshot CPU p95는 2.65–2.75ms, controller signal→after-paint p95는 16.09–16.83ms다. 이 지표는 연속 compositor 표시나 실제 hardware 입력 지연의 증거가 아니며 실제 held-button drag·트랙패드·접근성 확인은 남는다.
+
+[원본 수치·목표 판정·최종 binary/log hash·화면 접근 범위](design-assets/session-flow-gsk-final-frames-461a4f9b.json), [확인한 동일 실행의 native texture 캡처](design-assets/session-flow-gsk-final-461a4f9b.png). 캡처에서 cosmic 배경, 선과 화살표, 활성·닫힌·비활성 노드와 제목을 확인했다. CI는 별도 gate다.
+
+
+최종 release 제품을 별도 `Flowmux Session Flow GSK.app`으로 패키징하고 PID `71474`로 실행했다. `/tmp/fmsgsk-jcur3b1x`의 별도 XDG·Codex 프로필에 실제 3세대 기록만 복사했다. 시험용 placeholder 인증 정보와 loopback responses endpoint를 사용하고 모델 turn은 요청하지 않았다. Codex의 모델 목록 갱신은 별도 vendor endpoint에서 placeholder 자격으로 401을 기록했으므로 이를 완전한 네트워크 격리라고 표현하지 않는다.
+
+CUA의 실제 sidebar 클릭으로 상단 cosmic 그래프가 열리고 3개 native ID와 두 관계가 표시되는 것을 확인했다. 이후 scroll 호출은 사용자 입력 감지를 반환하여 자동 조작을 중지하고 최신 화면을 다시 읽었다. 저장된 camera·노드 위치·선택이 변경됐지만 입력 출처와 실제 held-button 동작은 사용자 확인을 기다린다. 두 resume operation은 complete였으나 후속 pane tree에는 원본만 남아 있어 자식 pane이 닫힌 경위가 확인되기 전까지 성공한 resume UI 검증으로 계산하지 않는다. 새 앱도 사용자가 직접 확인할 수 있도록 유지한다. [실제 앱·소스/binary hash·전후 저장 상태·판정 범위](design-assets/session-flow-gsk-live-ui-461a4f9b.json).

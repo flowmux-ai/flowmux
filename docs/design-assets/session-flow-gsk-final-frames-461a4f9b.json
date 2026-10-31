@@ -1,0 +1,158 @@
+{
+  "checked_at": "2026-10-31T05:25:49.941050+00:00",
+  "head_sha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+  "binary_sha256": "ec7eeb16c9687f6affa4fbb4202a3e5ad4d40149a1881a7a2b9fc8ba6ea3eea7",
+  "native_exit_code": 0,
+  "report": {
+    "area_logical_size": [
+      1280,
+      266
+    ],
+    "debug_assertions": false,
+    "diagnostic_empty_draw": false,
+    "draw_cpu_scope": "Whole GTK graph snapshot CPU time; renderer submission, GPU work and compositor presentation are excluded.",
+    "families": 20,
+    "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+    "nodes": 1000,
+    "renderer": "gl",
+    "scale_factor": 2,
+    "screen_lock_observation": {
+      "end": null,
+      "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+      "source": "ioreg -n Root -d1",
+      "start": null
+    },
+    "trials": [
+      {
+        "after_paint_interval_ms": {
+          "max": 32.182417,
+          "p50": 16.674208999999998,
+          "p95": 17.830333,
+          "samples": 596
+        },
+        "draw_cpu_ms": {
+          "max": 3.211125,
+          "p50": 2.464791,
+          "p95": 2.688042,
+          "samples": 597
+        },
+        "duration_seconds": 10.117706458,
+        "input_batches": 597,
+        "signal_to_after_paint_ms": {
+          "max": 21.023083,
+          "p50": 8.63475,
+          "p95": 16.508125,
+          "samples": 597
+        },
+        "trial": 1
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 31.950416,
+          "p50": 16.691709,
+          "p95": 17.630667,
+          "samples": 597
+        },
+        "draw_cpu_ms": {
+          "max": 2.7664590000000002,
+          "p50": 2.493,
+          "p95": 2.6513750000000003,
+          "samples": 598
+        },
+        "duration_seconds": 10.109189042,
+        "input_batches": 598,
+        "signal_to_after_paint_ms": {
+          "max": 19.983708,
+          "p50": 6.349541,
+          "p95": 16.42975,
+          "samples": 598
+        },
+        "trial": 2
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 32.96425,
+          "p50": 16.672333000000002,
+          "p95": 17.582375000000003,
+          "samples": 595
+        },
+        "draw_cpu_ms": {
+          "max": 3.004458,
+          "p50": 2.5,
+          "p95": 2.687208,
+          "samples": 596
+        },
+        "duration_seconds": 10.109278916,
+        "input_batches": 597,
+        "signal_to_after_paint_ms": {
+          "max": 32.920084,
+          "p50": 6.27575,
+          "p95": 16.087917,
+          "samples": 596
+        },
+        "trial": 3
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 32.008833,
+          "p50": 16.689249999999998,
+          "p95": 17.537041,
+          "samples": 597
+        },
+        "draw_cpu_ms": {
+          "max": 2.848584,
+          "p50": 2.559583,
+          "p95": 2.735416,
+          "samples": 598
+        },
+        "duration_seconds": 10.107229958,
+        "input_batches": 598,
+        "signal_to_after_paint_ms": {
+          "max": 21.307291,
+          "p50": 6.158125,
+          "p95": 16.595125,
+          "samples": 598
+        },
+        "trial": 4
+      },
+      {
+        "after_paint_interval_ms": {
+          "max": 32.572458999999995,
+          "p50": 16.674208,
+          "p95": 17.700332999999997,
+          "samples": 597
+        },
+        "draw_cpu_ms": {
+          "max": 2.9091669999999996,
+          "p50": 2.555042,
+          "p95": 2.752167,
+          "samples": 598
+        },
+        "duration_seconds": 10.109711958,
+        "input_batches": 598,
+        "signal_to_after_paint_ms": {
+          "max": 21.476084,
+          "p50": 12.204666,
+          "p95": 16.832458000000003,
+          "samples": 598
+        },
+        "trial": 5
+      }
+    ]
+  },
+  "log_sha256": "467aba7e20e2296f3e6205f1e05a3299c8febf6a84c698aa71a2d3846f546389",
+  "desktop_observation": {
+    "before": "CUA getApp and screenshot succeeded for preserved recovery app PID 30374",
+    "after": "CUA accessibility tree and screenshot succeeded for the same app",
+    "scope": "Endpoint desktop access only; not continuous compositor presentation or physical input latency."
+  },
+  "target": {
+    "frame_p95_max_ms": 33,
+    "all_five_trials_pass": true
+  },
+  "remaining": [
+    "Physical held-button drag and trackpad interaction",
+    "Manual accessibility checks",
+    "Compositor and hardware-input latency are not measured by GTK frame-clock/controller signals"
+  ]
+}

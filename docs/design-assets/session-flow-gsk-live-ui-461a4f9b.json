@@ -1,0 +1,157 @@
+{
+  "checked_at": "2026-10-31T05:29:05.150760+00:00",
+  "product_commit": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+  "app": {
+    "root": "/tmp/fmsgsk-jcur3b1x",
+    "bundle": "/tmp/fmsgsk-jcur3b1x/Flowmux Session Flow GSK.app",
+    "pid": 71474,
+    "socket": "/tmp/fmsgsk-jcur3b1x/run/flowmux-71474.sock",
+    "profile": "/tmp/fmsgsk-jcur3b1x/codex",
+    "ids": [
+      "01a18ddc-a51f-7472-ab63-045abb779243",
+      "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b",
+      "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f"
+    ],
+    "workspace": "46d7f7a3-7cea-445c-a945-d9964ac0782c",
+    "source_pane": "bb34ff4f-1ae2-4d11-84fd-ff44637c10ca",
+    "source_surface": "3484971f-227f-4f1f-a669-c230a75044cf"
+  },
+  "build_exit_code": 0,
+  "build_log_sha256": "d78f60ad9452f4063f0944242b40698c50185087803bb2ad12f7086c6b249d92",
+  "release_binary_sha256": "b67d22725230e7b519dbe56ffafad98b95f3459e1810fea82c47b39cbd9403af",
+  "signed_bundle_binary_sha256": "2b4dc34efece46a51b6279fde5e33af10c767819713c919fafb721c76c23c2a8",
+  "setup_scope": "Disposable copied Codex histories, placeholder credential and loopback endpoint. Original applications and profiles preserved. No model prompt sent.",
+  "observations": [
+    "CUA actual sidebar click opened top Session Flow panel with cosmic background and three native related sessions",
+    "Initial process identity was flowmux:proc; SQLite recorded the exact native source ID and both imported edges",
+    "A later CUA scroll returned user-intervention detection; automatic GUI actions stopped and the current screen was re-read",
+    "Camera origin, node positions and selected node subsequently differed. Input attribution and hardware behavior await user confirmation",
+    "Two resume operations were complete in the observed store, but the later tree had only the source pane; reason for closing child panes is not confirmed, so this is not treated as a successful resume UI gate"
+  ],
+  "before_intervention": {
+    "sessions": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"title\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\",\"cwd\":\"/private/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-12-01a18ffc-82ad-7f81-aa35-aaab46ab0f3f.jsonl\"}",
+        137.53641052818645,
+        3.7898574594067638
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"title\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\",\"cwd\":\"/private/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-07-01a18ffc-6daf-76a1-b8b2-32fc5a6a110b.jsonl\"}",
+        238.8602717271611,
+        -112.37074620550054
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "{\"title\":\"Reply exactly SESSION_FLOW_SOURCE. Do not call tools.\",\"cwd\":\"/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl\"}",
+        332.79900861401575,
+        9.83941869156957
+      ]
+    ],
+    "forks": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}"
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}"
+      ]
+    ],
+    "views": [
+      [
+        "46d7f7a3-7cea-445c-a945-d9964ac0782c",
+        "{\"camera\":{\"origin\":{\"x\":266.78825540316313,\"y\":143.2353776446123},\"zoom\":0.8726187152611301},\"selected\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"},\"initialized\":true,\"open\":true,\"height\":253}"
+      ]
+    ],
+    "live_sessions": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "07910401-8416-46a1-8bff-b741a6cfe33d",
+        "3484971f-227f-4f1f-a669-c230a75044cf",
+        "{\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"pid\":72312,\"started\":1793424445826116,\"workspace\":\"46d7f7a3-7cea-445c-a945-d9964ac0782c\",\"pane\":\"bb34ff4f-1ae2-4d11-84fd-ff44637c10ca\",\"surface\":\"3484971f-227f-4f1f-a669-c230a75044cf\",\"socket\":\"/tmp/fmsgsk-jcur3b1x/run/flowmux-71474.sock\"}"
+      ]
+    ],
+    "operations": [
+      [
+        "e07b75d4-a844-4379-a586-790892385a98",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"request\":\"e07b75d4-a844-4379-a586-790892385a98\",\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"owner_pid\":71474,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"},\"kind\":\"Resume\",\"target_surface\":\"43df6219-ee27-4e24-af27-4cea43bbf873\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}"
+      ],
+      [
+        "b50860fa-5458-45ea-a3c2-14e4c2771564",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"request\":\"b50860fa-5458-45ea-a3c2-14e4c2771564\",\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"owner_pid\":71474,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"},\"kind\":\"Resume\",\"target_surface\":\"a2551cf8-1f22-43c7-9bae-789f2f27917d\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}"
+      ]
+    ]
+  },
+  "after_intervention": {
+    "sessions": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"title\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\",\"cwd\":\"/private/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-12-01a18ffc-82ad-7f81-aa35-aaab46ab0f3f.jsonl\"}",
+        149.0024394339963,
+        20.955685402348838
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"title\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\",\"cwd\":\"/private/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T12-24-07-01a18ffc-6daf-76a1-b8b2-32fc5a6a110b.jsonl\"}",
+        269.8616222614925,
+        -74.45807167721873
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "{\"title\":\"Reply exactly SESSION_FLOW_SOURCE. Do not call tools.\",\"cwd\":\"/tmp/fm-flow-v7ye0ldh/project\",\"path\":\"/tmp/fmsgsk-jcur3b1x/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl\"}",
+        346.5962910807068,
+        59.04339784267179
+      ]
+    ],
+    "forks": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}"
+      ],
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}"
+      ]
+    ],
+    "views": [
+      [
+        "46d7f7a3-7cea-445c-a945-d9964ac0782c",
+        "{\"camera\":{\"origin\":{\"x\":250.88926898934648,\"y\":115.59227312268905},\"zoom\":0.87261871526113},\"selected\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"},\"initialized\":true,\"open\":true,\"height\":253}"
+      ]
+    ],
+    "live_sessions": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "07910401-8416-46a1-8bff-b741a6cfe33d",
+        "3484971f-227f-4f1f-a669-c230a75044cf",
+        "{\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"pid\":72312,\"started\":1793424445826116,\"workspace\":\"46d7f7a3-7cea-445c-a945-d9964ac0782c\",\"pane\":\"bb34ff4f-1ae2-4d11-84fd-ff44637c10ca\",\"surface\":\"3484971f-227f-4f1f-a669-c230a75044cf\",\"socket\":\"/tmp/fmsgsk-jcur3b1x/run/flowmux-71474.sock\"}"
+      ]
+    ],
+    "operations": [
+      [
+        "e07b75d4-a844-4379-a586-790892385a98",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}",
+        "{\"request\":\"e07b75d4-a844-4379-a586-790892385a98\",\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"owner_pid\":71474,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"},\"kind\":\"Resume\",\"target_surface\":\"43df6219-ee27-4e24-af27-4cea43bbf873\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-82ad-7f81-aa35-aaab46ab0f3f\"}"
+      ],
+      [
+        "b50860fa-5458-45ea-a3c2-14e4c2771564",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}",
+        "{\"request\":\"b50860fa-5458-45ea-a3c2-14e4c2771564\",\"owner\":\"07910401-8416-46a1-8bff-b741a6cfe33d\",\"owner_pid\":71474,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"},\"kind\":\"Resume\",\"target_surface\":\"a2551cf8-1f22-43c7-9bae-789f2f27917d\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmsgsk-jcur3b1x/codex\",\"id\":\"01a18ffc-6daf-76a1-b8b2-32fc5a6a110b\"}"
+      ]
+    ]
+  },
+  "manual_input_status": "pending user response",
+  "scope": "Live release UI observation, distinct from native harness, remote CI and hardware-input acceptance."
+}
