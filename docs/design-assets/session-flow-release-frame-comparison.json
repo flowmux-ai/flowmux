@@ -1,0 +1,406 @@
+{
+  "date": "2026-10-31",
+  "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+  "control_harness_commit": "11b6e104521490c9f14e7cae1de6c548b79331cb",
+  "environment": {
+    "cpu": "Apple M4 Pro",
+    "memory_bytes": 68719476736,
+    "os": "macOS 27.0.1 (26A434)",
+    "rust": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "build_profile": "release; thin LTO, codegen-units=1; no profile overrides",
+    "original_user_app_pid_preserved": 72789,
+    "concurrent_local_build_during_measurement": false
+  },
+  "reports": {
+    "release_cairo": {
+      "area_logical_size": [
+        1280,
+        266
+      ],
+      "debug_assertions": false,
+      "families": 20,
+      "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+      "nodes": 1000,
+      "renderer": "cairo",
+      "scale_factor": 2,
+      "trials": [
+        {
+          "after_paint_interval_ms": {
+            "max": 34.886125,
+            "p50": 33.310542,
+            "p95": 34.295583,
+            "samples": 308
+          },
+          "draw_cpu_ms": {
+            "max": 2.996917,
+            "p50": 2.7104160000000004,
+            "p95": 2.900458,
+            "samples": 309
+          },
+          "duration_seconds": 10.11812625,
+          "input_batches": 580,
+          "signal_to_after_paint_ms": {
+            "max": 34.854792,
+            "p50": 30.900707999999998,
+            "p95": 33.540958,
+            "samples": 309
+          },
+          "trial": 1
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 35.052625,
+            "p50": 33.358709,
+            "p95": 34.372917,
+            "samples": 301
+          },
+          "draw_cpu_ms": {
+            "max": 2.9642079999999997,
+            "p50": 2.715,
+            "p95": 2.8849169999999997,
+            "samples": 302
+          },
+          "duration_seconds": 10.108317791,
+          "input_batches": 582,
+          "signal_to_after_paint_ms": {
+            "max": 34.383584,
+            "p50": 31.661250000000003,
+            "p95": 33.522417,
+            "samples": 302
+          },
+          "trial": 2
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 35.312083,
+            "p50": 33.333915999999995,
+            "p95": 34.329834,
+            "samples": 307
+          },
+          "draw_cpu_ms": {
+            "max": 3.1350420000000003,
+            "p50": 2.698791,
+            "p95": 2.908,
+            "samples": 308
+          },
+          "duration_seconds": 10.107189209,
+          "input_batches": 584,
+          "signal_to_after_paint_ms": {
+            "max": 34.279917,
+            "p50": 31.387249999999998,
+            "p95": 33.562625,
+            "samples": 308
+          },
+          "trial": 3
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 34.592042000000006,
+            "p50": 17.102167,
+            "p95": 33.614458,
+            "samples": 442
+          },
+          "draw_cpu_ms": {
+            "max": 3.031041,
+            "p50": 2.582666,
+            "p95": 2.798584,
+            "samples": 443
+          },
+          "duration_seconds": 10.111777667,
+          "input_batches": 591,
+          "signal_to_after_paint_ms": {
+            "max": 33.88375,
+            "p50": 14.282167,
+            "p95": 33.406875,
+            "samples": 443
+          },
+          "trial": 4
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 35.127792,
+            "p50": 16.706,
+            "p95": 32.455583000000004,
+            "samples": 559
+          },
+          "draw_cpu_ms": {
+            "max": 3.032041,
+            "p50": 2.461917,
+            "p95": 2.7799579999999997,
+            "samples": 560
+          },
+          "duration_seconds": 10.108372458,
+          "input_batches": 596,
+          "signal_to_after_paint_ms": {
+            "max": 34.216292,
+            "p50": 5.901458,
+            "p95": 28.743209,
+            "samples": 560
+          },
+          "trial": 5
+        }
+      ]
+    },
+    "empty_cairo_control": {
+      "area_logical_size": [
+        1280,
+        266
+      ],
+      "debug_assertions": false,
+      "diagnostic_empty_draw": true,
+      "families": 20,
+      "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+      "nodes": 1000,
+      "renderer": "cairo",
+      "scale_factor": 2,
+      "trials": [
+        {
+          "after_paint_interval_ms": {
+            "max": 29.019708,
+            "p50": 16.688708,
+            "p95": 17.609917,
+            "samples": 596
+          },
+          "draw_cpu_ms": {
+            "max": 0.012791,
+            "p50": 0.004125,
+            "p95": 0.006791,
+            "samples": 597
+          },
+          "duration_seconds": 10.104305875,
+          "input_batches": 597,
+          "signal_to_after_paint_ms": {
+            "max": 13.395208,
+            "p50": 2.874541,
+            "p95": 7.701708,
+            "samples": 597
+          },
+          "trial": 1
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 28.610042,
+            "p50": 16.68625,
+            "p95": 17.313625,
+            "samples": 597
+          },
+          "draw_cpu_ms": {
+            "max": 0.011417,
+            "p50": 0.003917,
+            "p95": 0.006291000000000001,
+            "samples": 598
+          },
+          "duration_seconds": 10.108177042,
+          "input_batches": 598,
+          "signal_to_after_paint_ms": {
+            "max": 12.655667000000001,
+            "p50": 2.582333,
+            "p95": 3.857,
+            "samples": 598
+          },
+          "trial": 2
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 28.447625000000002,
+            "p50": 16.674667,
+            "p95": 17.260042,
+            "samples": 598
+          },
+          "draw_cpu_ms": {
+            "max": 0.014041,
+            "p50": 0.003708,
+            "p95": 0.0055,
+            "samples": 599
+          },
+          "duration_seconds": 10.110708,
+          "input_batches": 599,
+          "signal_to_after_paint_ms": {
+            "max": 11.655624999999999,
+            "p50": 1.711125,
+            "p95": 3.113458,
+            "samples": 599
+          },
+          "trial": 3
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 28.470375,
+            "p50": 16.700958,
+            "p95": 17.773583,
+            "samples": 597
+          },
+          "draw_cpu_ms": {
+            "max": 0.016333,
+            "p50": 0.004083,
+            "p95": 0.006792,
+            "samples": 598
+          },
+          "duration_seconds": 10.106465959,
+          "input_batches": 598,
+          "signal_to_after_paint_ms": {
+            "max": 11.848542,
+            "p50": 2.688458,
+            "p95": 3.905875,
+            "samples": 598
+          },
+          "trial": 4
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 28.1045,
+            "p50": 16.691584,
+            "p95": 17.331208,
+            "samples": 598
+          },
+          "draw_cpu_ms": {
+            "max": 0.012875,
+            "p50": 0.004,
+            "p95": 0.005834000000000001,
+            "samples": 599
+          },
+          "duration_seconds": 10.107881833,
+          "input_batches": 599,
+          "signal_to_after_paint_ms": {
+            "max": 11.732917,
+            "p50": 2.711,
+            "p95": 3.251459,
+            "samples": 599
+          },
+          "trial": 5
+        }
+      ]
+    },
+    "release_gl": {
+      "area_logical_size": [
+        1280,
+        266
+      ],
+      "debug_assertions": false,
+      "diagnostic_empty_draw": false,
+      "families": 20,
+      "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+      "nodes": 1000,
+      "renderer": "gl",
+      "scale_factor": 2,
+      "trials": [
+        {
+          "after_paint_interval_ms": {
+            "max": 35.390041999999994,
+            "p50": 33.3515,
+            "p95": 34.338958000000005,
+            "samples": 300
+          },
+          "draw_cpu_ms": {
+            "max": 2.872333,
+            "p50": 2.5956249999999996,
+            "p95": 2.760708,
+            "samples": 301
+          },
+          "duration_seconds": 10.117576792,
+          "input_batches": 579,
+          "signal_to_after_paint_ms": {
+            "max": 34.419333,
+            "p50": 31.108417,
+            "p95": 33.906084,
+            "samples": 301
+          },
+          "trial": 1
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 35.156125,
+            "p50": 33.366208,
+            "p95": 34.356333,
+            "samples": 300
+          },
+          "draw_cpu_ms": {
+            "max": 3.077958,
+            "p50": 2.5682080000000003,
+            "p95": 2.742375,
+            "samples": 301
+          },
+          "duration_seconds": 10.10455325,
+          "input_batches": 581,
+          "signal_to_after_paint_ms": {
+            "max": 35.11475,
+            "p50": 30.907207999999997,
+            "p95": 33.837625,
+            "samples": 301
+          },
+          "trial": 2
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 34.678374999999996,
+            "p50": 33.334917,
+            "p95": 34.376292,
+            "samples": 300
+          },
+          "draw_cpu_ms": {
+            "max": 2.811875,
+            "p50": 2.607959,
+            "p95": 2.747625,
+            "samples": 301
+          },
+          "duration_seconds": 10.110782708,
+          "input_batches": 583,
+          "signal_to_after_paint_ms": {
+            "max": 34.586959,
+            "p50": 30.721375,
+            "p95": 33.934582999999996,
+            "samples": 301
+          },
+          "trial": 3
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 35.620542,
+            "p50": 33.22375,
+            "p95": 34.334334,
+            "samples": 318
+          },
+          "draw_cpu_ms": {
+            "max": 2.871542,
+            "p50": 2.590792,
+            "p95": 2.780417,
+            "samples": 319
+          },
+          "duration_seconds": 10.103061958,
+          "input_batches": 589,
+          "signal_to_after_paint_ms": {
+            "max": 34.563,
+            "p50": 32.07975,
+            "p95": 33.753583,
+            "samples": 319
+          },
+          "trial": 4
+        },
+        {
+          "after_paint_interval_ms": {
+            "max": 34.511917000000004,
+            "p50": 16.900875,
+            "p95": 33.669458999999996,
+            "samples": 456
+          },
+          "draw_cpu_ms": {
+            "max": 2.8078339999999997,
+            "p50": 2.519958,
+            "p95": 2.689125,
+            "samples": 457
+          },
+          "duration_seconds": 10.107040167,
+          "input_batches": 592,
+          "signal_to_after_paint_ms": {
+            "max": 34.326916,
+            "p50": 16.573833,
+            "p95": 33.33075,
+            "samples": 457
+          },
+          "trial": 5
+        }
+      ]
+    }
+  },
+  "conclusion": "Release reduces draw callback CPU time; both configured Cairo and GL graph runs do not meet the p95 <= 33 ms frame interval target across all five trials. Empty draw control is faster and is not graph feature evidence. These frame-clock measurements do not identify compositor presentation or physical input latency."
+}

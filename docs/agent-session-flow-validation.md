@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 macOS 46개 phase와 Sanitizers는 성공했으며 Linux coverage는 진행 중이다. 최신 `4cff2a5d`의 전체 CI는 별도 실행 중이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 Test·Sanitizers와 coverage 기준은 모두 통과했다. 최신 `4cff2a5d`는 macOS 46개 phase·editor/headless·Sanitizers가 성공했으며 Linux test/coverage는 실행 중이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 이전 기준 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -537,3 +537,30 @@ cargo test -p flowmux --test macos_native --features native-smoke --locked
 | Signal → after-paint | 33.50–34.23 ms | 35.96 ms |
 
 Camera 변경·노드 좌표 보존·세션 실행 명령 없음, 기존 native Session Flow 회귀 시험과 clippy `-D warnings`는 통과했다. **프레임 간격 p95 ≤33ms 목표의 달성 증거는 아니다.** 실제 presentation/hardware 입력 및 release 조건은 추가 검증이 필요하다. 100ms 목표보다 작은 signal 지연을 물리 입력 지연 통과로 바꾸지 않는다. [원본 측정 JSON](design-assets/session-flow-native-frame-measurement.json), [선택 실행 시험](../crates/flowmux/src/ui/session_flow/performance.rs).
+
+## 2026-10-31 release와 빈 화면 대조 측정
+
+위와 동일한 1,000노드·20계보·1280×266·scale 2 조건에서 배포 `release` profile(thin LTO, codegen-units=1, profile override 없음)을 사용했다. Debug 빌드 탓으로 결과를 단정하지 않기 위해 release/Cairo를 먼저 측정했다. 이어 같은 scene·gesture 입력·GTK frame-clock을 유지하면서 draw callback만 단색 paint로 대체한 대조군을 실행했다. 마지막으로 macOS 제품 기본 렌더러 설정인 `GSK_RENDERER=gl`에서 실제 production draw를 측정했다. 세 실행은 순차적이며 측정 중 다른 로컬 빌드는 하지 않았다.
+
+| 조건 | draw CPU p95 범위 | after-paint 간격 p95 범위 | signal → after-paint p95 범위 |
+| --- | --- | --- | --- |
+| release / Cairo, 실제 graph draw | 2.78–2.91 ms | 32.46–34.37 ms | 28.74–33.56 ms |
+| release / Cairo, 빈 화면 대조 | 0.0055–0.0068 ms | 17.26–17.77 ms | 3.11–7.70 ms |
+| release / GL, 실제 graph draw | 2.69–2.78 ms | 33.67–34.38 ms | 33.33–33.93 ms |
+
+Release에서 draw callback CPU 시간은 감소했다. 그러나 실제 graph draw는 두 renderer 설정 모두 5회 전체에서 frame 간격 p95 ≤33ms를 충족하지 못했다. 빈 화면은 더 빠르므로 이를 GTK 전체의 고정 프레임 제한으로 단정할 근거도 없다. Callback CPU와 전체 frame 간격은 같은 지표가 아니며, 이 결과만으로 병목을 특정하지 않는다. 제품 렌더링 변경이나 성능 목표 완화는 하지 않았다.
+
+모든 실행에서 기본 Session Flow native regression marker, camera 변경·노드 좌표 보존·실행 명령 없음 검사 및 프로세스 exit 0을 확인했다. 대조군 수집 marker는 **그래프가 빠르게 렌더링됐다는 증거가 아니다**. `FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW=1`은 `native-smoke`의 test 전용 대조 옵션이며 제품 실행 경로에는 포함되지 않는다.
+
+```sh
+# Release/GL: 제품 기본 renderer 설정의 실제 graph draw
+CARGO_INCREMENTAL=0 FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1 \
+FLOWMUX_SESSION_FLOW_FRAME_REPORT=/tmp/session-flow-release-gl.json \
+GSK_RENDERER=gl \
+cargo test -p flowmux --release --test macos_native --features native-smoke --locked
+
+# 빈 화면 대조: 위 명령에서 GSK_RENDERER=cairo로 변경하고
+# FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW=1을 추가한다.
+```
+
+[Release·대조군 원본 수치와 환경](design-assets/session-flow-release-frame-comparison.json). 실제 hardware mouse/trackpad 입력과 compositor presentation 시각은 여전히 미측정이다. 최초 측정에 사용한 Cairo는 CI 설정이고, macOS 제품 기본값 GL은 [platform renderer 설정](../crates/flowmux/src/main.rs)에 근거한다. 기존 사용자 Flowmux PID 72789와 수동 입력 확인 앱 PID 95986은 유지했다.
