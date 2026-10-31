@@ -76,12 +76,18 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
                 .ok()
         })
         .unwrap();
+    let empty_draw = std::env::var_os("FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW").is_some();
     let draw_times = Rc::new(RefCell::new(Vec::<f64>::new()));
     let times = draw_times.clone();
     let scene = panel.scene.clone();
     panel.area.set_draw_func(move |area, cr, width, height| {
         let start = Instant::now();
-        draw(area, cr, width, height, &scene.borrow());
+        if empty_draw {
+            cr.set_source_rgb(0.02, 0.03, 0.08);
+            cr.paint().unwrap();
+        } else {
+            draw(area, cr, width, height, &scene.borrow());
+        }
         times
             .borrow_mut()
             .push(start.elapsed().as_secs_f64() * 1000.0);
@@ -158,7 +164,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
     }
     clock.disconnect(handler);
     let report = serde_json::json!({"nodes":1000,"families":20,"area_logical_size":[panel.area.width(),panel.area.height()],
-        "scale_factor":panel.area.scale_factor(),"renderer":std::env::var("GSK_RENDERER").ok(),"debug_assertions":cfg!(debug_assertions),
+        "diagnostic_empty_draw":empty_draw,"scale_factor":panel.area.scale_factor(),"renderer":std::env::var("GSK_RENDERER").ok(),"debug_assertions":cfg!(debug_assertions),
         "measurement":"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
         "trials":trials});
     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
