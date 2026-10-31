@@ -153,5 +153,25 @@
     ]
   },
   "manual_input_status": "pending user response",
-  "scope": "Live release UI observation, distinct from native harness, remote CI and hardware-input acceptance."
+  "scope": "Live release UI observation, distinct from native harness, remote CI and hardware-input acceptance.",
+  "latest_process_observation": {
+    "checked_at": "2026-10-31T05:33:12.542350+00:00",
+    "running": [
+      21870,
+      30374,
+      71474,
+      72789,
+      95986
+    ],
+    "not_found": [
+      61360,
+      65831,
+      72353,
+      82242
+    ],
+    "original_user_app_pid": 72789,
+    "original_user_app_running": true,
+    "new_release_app_running": true,
+    "scope": "Some older verification app PIDs are no longer present. Cause is not established; this turn sent no close or termination command to them. They were not restarted."
+  }
 }
