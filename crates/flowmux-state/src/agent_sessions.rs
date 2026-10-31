@@ -240,6 +240,44 @@ impl AgentSessionStore {
         })
     }
 
+    /// Persist process-observed identity only if no newer binding replaced the
+    /// value read before observation. Never displace another provider's hook.
+    pub fn record_observed(
+        &self,
+        agent: &str,
+        surface: SurfaceId,
+        session_id: &str,
+        expected: Option<&str>,
+    ) -> io::Result<bool> {
+        let agent = Self::normalize_agent(agent).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "unsupported resumable agent")
+        })?;
+        if session_id.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "empty agent session id",
+            ));
+        }
+        self.with_exclusive_lock(|| {
+            let surface = surface.to_string();
+            for other in RESUMABLE_AGENTS.into_iter().filter(|other| *other != agent) {
+                if self.load(other)?.contains_key(&surface) {
+                    return Ok(false);
+                }
+            }
+            let mut map = self.load(agent)?;
+            if map.get(&surface).map(String::as_str) != expected {
+                return Ok(false);
+            }
+            if expected != Some(session_id) {
+                map.insert(surface, session_id.to_string());
+                let bytes = serde_json::to_vec_pretty(&map).map_err(io::Error::other)?;
+                Self::write_atomic(&self.agent_path(agent), &bytes)?;
+            }
+            Ok(true)
+        })
+    }
+
     /// Return the session id previously recorded for `(agent,
     /// surface)`, or `None` if the agent has never reported one for
     /// that surface (or the file is missing).
@@ -380,6 +418,52 @@ mod tests {
         s.record("claude", surface, "sess-new").unwrap();
         assert_eq!(s.lookup("claude", surface), Some("sess-new".into()));
         assert_eq!(s.len("claude"), 1);
+    }
+
+    #[test]
+    fn observed_identity_does_not_overwrite_newer_hooks_or_other_providers() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        assert!(s.record_observed("codex", surface, "first", None).unwrap());
+        assert!(s
+            .record_observed("codex", surface, "next", Some("first"))
+            .unwrap());
+        assert!(s
+            .record_observed("codex", surface, "next", Some("next"))
+            .unwrap());
+        assert_eq!(s.len("codex"), 1);
+        s.record("codex", surface, "newer-hook").unwrap();
+        assert!(!s
+            .record_observed("codex", surface, "stale", Some("next"))
+            .unwrap());
+        assert_eq!(s.lookup("codex", surface).as_deref(), Some("newer-hook"));
+        s.record("claude", surface, "other-provider").unwrap();
+        assert!(!s.record_observed("codex", surface, "stale", None).unwrap());
+        assert_eq!(s.lookup_surface(surface).unwrap().agent, "claude");
+        assert_eq!(
+            s.lookup("claude", surface).as_deref(),
+            Some("other-provider")
+        );
+        s.forget_surface(surface).unwrap();
+        assert!(!s
+            .record_observed("codex", surface, "stale", Some("newer-hook"))
+            .unwrap());
+        assert_eq!(s.lookup_surface(surface), None);
+    }
+
+    #[test]
+    fn observed_identity_preserves_corrupt_store_and_rejects_invalid_input() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        assert!(s
+            .record_observed("unknown", surface, "session", None)
+            .is_err());
+        assert!(s.record_observed("codex", surface, " ", None).is_err());
+        std::fs::write(s.agent_path("codex"), b"corrupt").unwrap();
+        assert!(s
+            .record_observed("codex", surface, "session", None)
+            .is_err());
+        assert_eq!(std::fs::read(s.agent_path("codex")).unwrap(), b"corrupt");
     }
 
     #[test]

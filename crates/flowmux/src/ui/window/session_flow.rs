@@ -12,6 +12,9 @@ use flowmux_state::session_flow::{
 use flowmux_state::session_history::{HistorySession, SessionAgent};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+mod crash_recovery;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Anchor {
     workspace: WorkspaceId,
@@ -276,7 +279,19 @@ impl WindowController {
                     };
                     session_id = gtk::gio::spawn_blocking(move || {
                         let home = session_home(&target).ok()?;
-                        codex_process_session(root_pid, &home.path).ok().flatten()
+                        let born = flowmux_procmon::process_start_time(root_pid)?;
+                        let saved = flowmux_state::default_agent_session_store();
+                        let expected = saved.as_ref().and_then(|store| store.lookup("codex", surface));
+                        let id = codex_process_session(root_pid, &home.path).ok().flatten()?;
+                        if flowmux_procmon::process_start_time(root_pid) != Some(born) {
+                            return None;
+                        }
+                        if let Some(saved) = saved {
+                            if let Err(error) = saved.record_observed("codex", surface, &id, expected.as_deref()) {
+                                tracing::warn!(%surface, %error, "failed to persist observed Codex session");
+                            }
+                        }
+                        Some(id)
                     })
                     .await
                     .ok()
@@ -1771,6 +1786,10 @@ pub(super) async fn check_real_codex(
         .filter(|(parent, _)| *parent == &key)
         .map(|(_, child)| child.id.clone())
         .collect();
+    let crash_report = std::env::var_os("FLOWMUX_SESSION_FLOW_CRASH_REPORT").map(PathBuf::from);
+    if let Some(path) = &crash_report {
+        crash_recovery::prevent_publication(path);
+    }
     let fork = native_fork_button(&terminal.widget);
     assert!(
         fork.is_sensitive(),
@@ -1793,6 +1812,9 @@ pub(super) async fn check_real_codex(
             .expect("fork terminal");
         (term.id(), surface)
     };
+    if let Some(path) = &crash_report {
+        crash_recovery::await_crash(controller, &key, child_surface, path).await;
+    }
     let child_id =
         glib::future_with_timeout(Duration::from_secs(40), async {
             loop {
