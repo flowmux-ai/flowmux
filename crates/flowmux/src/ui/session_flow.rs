@@ -13,6 +13,8 @@ use std::rc::Rc;
 #[derive(Clone, Debug)]
 pub enum FlowAction {
     Toggle(WorkspaceId),
+    ToggleActive,
+    Show(PaneId),
     Refresh,
     SaveView,
     Open(SessionKey),
@@ -34,11 +36,14 @@ pub(crate) struct Node {
 use flowmux_state::session_flow::SavedView as View;
 
 mod canvas;
+mod stars;
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 mod performance;
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 pub(crate) use performance::check_native_performance;
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) use stars::check_native as check_native_stars;
 
 #[derive(Default)]
 struct Scene {
@@ -55,7 +60,7 @@ struct Scene {
     held: Option<SessionKey>,
     moved: bool,
     drag_active: bool,
-    pan_mode: bool,
+    last_zoom: Option<std::time::Instant>,
     space_pan: bool,
     fit_during_settle: bool,
 }
@@ -156,7 +161,7 @@ impl FlowPanel {
         root.set_widget_name("flowmux-session-flow");
         root.set_visible(false);
         let css = gtk::CssProvider::new();
-        css.load_from_string("#flowmux-session-flow { background: #070a16; color: #d9e3fa; } #flowmux-session-flow button { color: #d9e3fa; } #flowmux-session-flow button:hover, #flowmux-session-flow button:checked { background: #202a46; }");
+        css.load_from_string("#flowmux-session-flow { background: #070a16; }");
         gtk::style_context_add_provider_for_display(
             &root.display(),
             &css,
@@ -165,9 +170,8 @@ impl FlowPanel {
         root.connect_destroy(move |root| {
             gtk::style_context_remove_provider_for_display(&root.display(), &css);
         });
-        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        toolbar.set_margin_start(12);
-        toolbar.set_margin_end(8);
+        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        toolbar.add_css_class("flowmux-session-flow-header");
         let title = gtk::Label::new(Some("Session Flow"));
         title.add_css_class("heading");
         toolbar.append(&title);
@@ -186,7 +190,11 @@ impl FlowPanel {
         area.set_focusable(true);
         area.set_content_height(140);
         area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · Space or middle-drag to pan over nodes · arrows to select · Enter to open"));
-        root.append(&area);
+        let sky = gtk::Overlay::new();
+        sky.set_child(Some(&stars::Stars::new(&scene)));
+        sky.add_overlay(&area);
+        sky.set_measure_overlay(&area, true);
+        root.append(&sky);
         let host = gtk::Paned::new(gtk::Orientation::Vertical);
         host.set_hexpand(true);
         host.set_vexpand(true);
@@ -207,8 +215,6 @@ impl FlowPanel {
             save_pending: Rc::new(Cell::new(false)),
         };
         for (label, tooltip, action) in [
-            ("−", "Zoom out", 0),
-            ("+", "Zoom in", 1),
             ("Fit", "Fit all families", 2),
             ("↻", "Refresh native session history", 3),
             ("×", "Close Session Flow", 4),
@@ -221,22 +227,11 @@ impl FlowPanel {
                 let Some(p) = p.upgrade() else {
                     return;
                 };
-                if action <= 2 {
+                if action == 2 {
                     p.scene.borrow_mut().fit_during_settle = false;
                     p.schedule_save();
                 }
                 match action {
-                    0 | 1 => {
-                        let cursor = Point {
-                            x: p.area.width() as f64 / 2.0,
-                            y: p.area.height() as f64 / 2.0,
-                        };
-                        if let Some(v) = p.scene.borrow_mut().view() {
-                            v.camera
-                                .zoom_at(cursor, if action == 0 { 0.8 } else { 1.25 });
-                        }
-                        p.area.queue_draw();
-                    }
                     2 => {
                         p.scene
                             .borrow_mut()
@@ -253,18 +248,8 @@ impl FlowPanel {
             });
             toolbar.append(&button);
         }
-        let pan = gtk::ToggleButton::with_label("Pan");
-        pan.add_css_class("flat");
-        pan.set_tooltip_text(Some(
-            "Pan mode: dragging over nodes moves the view; clicking never opens a session",
-        ));
-        let weak = panel.downgrade();
-        pan.connect_toggled(move |button| {
-            if let Some(panel) = weak.upgrade() {
-                panel.scene.borrow_mut().pan_mode = button.is_active();
-            }
-        });
-        toolbar.insert_child_after(&pan, Some(&panel.status));
+        let separator = gtk::Separator::new(gtk::Orientation::Vertical);
+        toolbar.insert_child_after(&separator, Some(&panel.status));
         panel.connect_canvas();
         panel
     }
@@ -378,7 +363,7 @@ impl FlowPanel {
 
     fn activate(&self, key: SessionKey) {
         let mut scene = self.scene.borrow_mut();
-        if scene.pan_mode || scene.space_pan {
+        if scene.space_pan {
             return;
         }
         let node = scene.nodes.get(&key).cloned();
@@ -488,6 +473,7 @@ impl FlowPanel {
             }
             let mut scene = scene.borrow_mut();
             scene.fit_during_settle = false;
+            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(v) = scene.view() {
                 v.camera.zoom_at(cursor, (-dy * 0.15).exp());
@@ -513,6 +499,7 @@ impl FlowPanel {
             let factor = scale / last_scale.replace(scale);
             let mut scene = panel.scene.borrow_mut();
             scene.fit_during_settle = false;
+            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(view) = scene.view() {
                 view.camera.zoom_at(cursor, factor);
@@ -535,7 +522,7 @@ impl FlowPanel {
                 s.fit_during_settle = false;
                 s.drag_active = true;
                 s.drag_start = Point { x, y };
-                s.held = if s.pan_mode || s.space_pan || button == 2 {
+                s.held = if s.space_pan || button == 2 {
                     None
                 } else {
                     s.hit(s.drag_start)
@@ -691,13 +678,13 @@ fn layout_labels<'a>(
     scene: &'a Scene,
     width: i32,
     height: i32,
+    mut keys: Vec<&'a SessionKey>,
 ) -> Vec<CanvasLabel<'a>> {
     let camera = scene.camera();
     let selected = scene
         .workspace
         .and_then(|id| scene.views.get(&id))
         .and_then(|v| v.selected.as_ref());
-    let mut keys: Vec<_> = scene.graph.nodes().into_iter().collect();
     let show_all_labels = keys.len() <= 50;
     keys.sort_by_key(|key| (selected != Some(*key), !scene.anchors.contains(*key)));
     let points: Vec<_> = keys
@@ -776,9 +763,17 @@ fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {
     cr.set_source_rgb(0.025, 0.035, 0.08);
     let _ = cr.paint();
     for i in 0..150u32 {
-        let x = ((i.wrapping_mul(2654435761) % 10000) as f64 / 10000.0) * width as f64;
-        let y = ((i.wrapping_mul(2246822519) % 10000) as f64 / 10000.0) * height as f64;
-        cr.set_source_rgba(0.65, 0.76, 1.0, 0.12 + (i % 3) as f64 * 0.06);
+        let (x, y) = stars::star_position(i, width, height);
+        let (x, y) = (x as f64, y as f64);
+        if i % 7 == 0 {
+            let glow = gtk::cairo::RadialGradient::new(x, y, 0.0, x, y, 3.5);
+            glow.add_color_stop_rgba(0.0, 0.70, 0.82, 1.0, 0.28);
+            glow.add_color_stop_rgba(1.0, 0.45, 0.65, 1.0, 0.0);
+            let _ = cr.set_source(&glow);
+            cr.arc(x, y, 3.5, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        cr.set_source_rgba(0.74, 0.84, 1.0, 0.28 + (i % 4) as f64 * 0.10);
         cr.arc(
             x,
             y,
@@ -891,7 +886,13 @@ pub(crate) fn check_canvas_controls() {
         );
     }
     let before = crowded.layout.positions.clone();
-    let labels = layout_labels(&panel.area, &crowded, 800, 260);
+    let labels = layout_labels(
+        &panel.area,
+        &crowded,
+        800,
+        260,
+        crowded.graph.nodes().into_iter().collect(),
+    );
     assert!(!labels.is_empty() && labels.len() < 20);
     assert_eq!(labels[0].key, &key("19"), "selected title has priority");
     for (index, label) in labels.iter().enumerate() {
@@ -919,7 +920,14 @@ pub(crate) fn check_canvas_controls() {
         };
     }
     assert_eq!(
-        layout_labels(&panel.area, &crowded, 4200, 260).len(),
+        layout_labels(
+            &panel.area,
+            &crowded,
+            4200,
+            260,
+            crowded.graph.nodes().into_iter().collect()
+        )
+        .len(),
         20,
         "separated nodes regain their titles"
     );
@@ -927,7 +935,14 @@ pub(crate) fn check_canvas_controls() {
         x: -5000.0,
         y: -5000.0,
     };
-    assert!(layout_labels(&panel.area, &crowded, 800, 260).is_empty());
+    assert!(layout_labels(
+        &panel.area,
+        &crowded,
+        800,
+        260,
+        crowded.graph.nodes().into_iter().collect()
+    )
+    .is_empty());
     let mut graph = Lineage::default();
     graph.link(key("parent"), key("child")).unwrap();
     let nodes = [
@@ -1007,7 +1022,7 @@ pub(crate) fn check_canvas_controls() {
     drag.emit_by_name::<()>("drag-end", &[&40.0, &20.0]);
     assert_ne!(panel.positions()[&key("child")], old);
     assert!(receiver.try_recv().is_err(), "drag must not open a session");
-    panel.scene.borrow_mut().pan_mode = true;
+    panel.scene.borrow_mut().space_pan = true;
     let point = panel
         .scene
         .borrow()
@@ -1024,9 +1039,9 @@ pub(crate) fn check_canvas_controls() {
     panel.activate(key("child"));
     assert!(
         receiver.try_recv().is_err(),
-        "pan mode must not activate sessions"
+        "Space pan must not activate sessions"
     );
-    panel.scene.borrow_mut().pan_mode = false;
+    panel.scene.borrow_mut().space_pan = false;
     let keys = (0..controllers.n_items())
         .find_map(|i| {
             controllers

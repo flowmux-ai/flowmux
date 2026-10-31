@@ -232,6 +232,15 @@ impl PaneCallbackRouter {
                     })
                 })
             },
+            on_view_session_flow: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane| {
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::Show(pane)),
+                    );
+                }))
+            },
             on_fork_session: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, surface, key| {

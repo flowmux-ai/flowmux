@@ -993,6 +993,7 @@ impl GhosttyPane {
             let on_close_pane = callbacks.on_close_pane.clone();
             let on_copy_text = callbacks.on_copy_surface_text.clone();
             let on_copy_session_id = callbacks.on_copy_surface_session_id.clone();
+            let on_view_session_flow = callbacks.on_view_session_flow.clone();
             let on_fork_session = callbacks.on_fork_session.clone();
             let fork_session_key = callbacks.fork_session_key.clone();
             let surface_for_menu = surface;
@@ -1089,6 +1090,17 @@ impl GhosttyPane {
                     }
                 });
                 v.append(&fork);
+
+                let view_flow = mk("View session flow");
+                let pop = popover.downgrade();
+                let cb = on_view_session_flow.clone();
+                view_flow.connect_clicked(move |_| {
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
+                    (cb.borrow_mut())(id);
+                });
+                v.append(&view_flow);
 
                 let split_r = mk("Split Right");
                 let pop = popover.downgrade();

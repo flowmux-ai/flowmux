@@ -2,9 +2,22 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: `feat/session-flow`의 최신 제품 변경은 `461a4f9b`(GSK 그래프 렌더러)이며 이후 변경은 검증 문서다. 아래 시험표는 수용 조건이고 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: `feat/session-flow`에서 하단 Session Flow 버튼과 View session flow 메뉴를 추가했다. 아래 CI 결과는 이전 제품 commit `461a4f9b`(GSK 그래프 렌더러)에 대한 기록이며 이번 UI 변경의 CI 결과가 아니다. 아래 시험표는 수용 조건이고 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-| 현재 gate | 확인한 결과와 근거 |
+2026-10-31 UI 진입점 변경: 격리된 macOS debug/GL 실행에서 하단 Agents bar 바로 오른쪽 배치, workspace 행 버튼 제거, 계보 없는 패널 열기, Fork session 바로 아래 메뉴 배치·동작, 이미 열린 패널 유지, 다른 workspace의 pane을 대상으로 열기, 원본 PTY·surface 유지 검사를 통과했다. `MACOS_SESSION_FLOW_ENTRY_POINTS_OK`, `MACOS_SESSION_FLOW_LAYOUT_OK`, `MACOS_NATIVE_SMOKE_OK`를 확인했다. 재현 명령:
+
+```sh
+cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
+FLOWMUX_SESSION_FLOW_SMOKE_ONLY=1 GSK_RENDERER=gl target/debug/deps/macos_native-<build-hash>
+```
+
+이 검사는 실제 GTK 창과 메뉴 callback/bridge 경로를 실행하며 물리 마우스 입력 검증과는 구분한다. 사용자 실행 창은 재시작하지 않았다.
+
+2026-10-31 별 표현 변경: 별 배경을 독립 GTK 레이어로 분리하고 최대 8개 별의 밝은 중심을 2 logical px 이내로 천천히 변화시킨다. 노드의 색상별 그라데이션·광채는 작은 HiDPI texture 세 개로 재사용한다. Native 검사에서 반짝임 중 그래프 snapshot 재생성 0회, 드래그·줌 우선 처리, 모션 감소·숨김 시 애니메이션 콜백 정지, 폐기된 레이어 해제를 확인했다(`MACOS_SESSION_FLOW_STARS_CACHE_MOTION_OK`). [격리된 native fixture 화면](design-assets/session-flow-starlight.png).
+
+별 효과 성능 기록: macOS debug/GL, 1,000노드·20계보·1280×271 logical px에서 10초씩 5회 측정했다. Trial p95의 중앙값은 그래프 snapshot CPU **7.27→6.27ms**, 프레임 간격 **34.28→35.62ms**였다. 프레임 수는 약 30Hz 수준을 유지했지만 p95 간격은 약 1.3ms 증가했으므로 무부하·무회귀로 단정하지 않는다. 최종 native harness는 활성 창 제한을 검증하기 위해 NSApplication을 명시적으로 활성화하므로 초기 baseline과 foreground 초기화도 다르다. Release·hardware/compositor·CI 성능 검증은 아니다. [소스 hash·측정 범위·전체 trial](design-assets/session-flow-starlight-performance.json).
+
+| 이전 제품 gate (`461a4f9b`) | 확인한 결과와 근거 |
 | --- | --- |
 | 로컬 회귀 | 최종 release/GL native Session Flow, fmt·clippy, 실제 Codex 두 GUI의 동시 resume·기존 owner focus 통과. [소스 hash와 검사별 범위](design-assets/session-flow-gsk-retained-validation.json) |
 | 그래프 성능 | 1,000노드·20계보 release/GL 내부 frame p95 17.54–17.83ms, 5회 모두 ≤33ms. 측정 전후 데스크톱 접근 확인. Hardware 입력·compositor 지연 측정은 아님. [전체 수치](design-assets/session-flow-gsk-final-frames-461a4f9b.json) |
@@ -13,7 +26,7 @@
 | Linux CI·커버리지 | Test `41171842039` 전체 성공, Linux 12개 phase 모두 passed/exit 0. Lines **86.9498%**, regions **86.8873%**, functions **85.8756%**로 기준 79/78/78% 충족. [최종 전체 gate·커버리지](design-assets/session-flow-ci-461a4f9b.json) |
 | 남은 화면 확인 | 메뉴의 물리 포인터 선택, held-button drag·트랙패드, 수동 접근성. 새 release 앱에서 사용자 입력이 감지된 이후의 조작 결과는 확인 대기. [실제 화면과 판정 경계](design-assets/session-flow-gsk-live-ui-461a4f9b.json) |
 
-이전 commit의 성공·실패와 수정 과정은 아래 날짜별 실행 기록으로 보존한다. 현재 완료 판단에는 위 제품 commit의 증거를 사용한다.
+이전 commit의 성공·실패와 수정 과정은 아래 날짜별 실행 기록으로 보존한다. 변경별 완료 판단에는 해당 제품 소스에서 실행한 증거를 사용한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -86,7 +99,7 @@ Operation tests는 결과가 확정되는 단계와 외부 side effect 발생 �
 
 | ID | 요구 | 조작 | 관찰할 결과 |
 | --- | --- | --- | --- |
-| U01 | R04 R05 | 기록 없는 W에서 첫 fork, 흐름 버튼 클릭 | 성공 후 버튼 생성, 자동 panel open 없음, 클릭 후 상단 약 1/3 |
+| U01 | R04 R05 | 기록 없는 W에서 하단 Agents bar 오른쪽 흐름 버튼 클릭, 이후 첫 fork | 버튼 상시 표시, 빈 패널 열림, 클릭 후 상단 약 1/3, 첫 fork만으로 자동 panel open 없음 |
 | U02 | R05 R11 | panel 열기·닫기 50회 | 아래 pane 분할·PID·draft·scroll·side panel 유지 |
 | U03 | R05 | workspace A/B에서 서로 다른 panel 높이·camera | workspace별 상태 복원, 다른 workspace 데이터 유입 없음 |
 | U04 | R08 | 커서 위치 여러 곳에서 wheel in/out | 커서 아래 world 좌표 유지, 배율 clamp, 그래프 밖 휠 동작 보존 |
@@ -100,7 +113,7 @@ Operation tests는 결과가 확정되는 단계와 외부 side effect 발생 �
 | U12 | R11 R13 | pan 중 새로운 fork/status/identity event | camera 유지, drag 상태 보존, 구조 변화만 layout 갱신 |
 | U13 | R08 R10 | 축소·테마 변경·큰 글꼴·긴 제목 | 의미 구분·불가 표식 유지, markup 실행 없음, 텍스트 중첩 최소화 |
 | U14 | R08 | trackpad pinch/scroll, mouse wheel, 가운데 버튼 | OS별 입력 의미 일치, 과도한 점프·앱 전체 확대 없음 |
-| U15 | R04 R05 | 비활성 workspace 아이템의 흐름 버튼 클릭 | 해당 workspace의 그래프와 pane을 일관되게 표시 |
+| U15 | R04 R05 | workspace 전환 후 하단 흐름 버튼 클릭; Fork session 아래 View session flow 선택 | 현재 workspace 그래프 표시; 메뉴는 빈 패널도 열고 이미 열린 패널은 유지 |
 | U16 | R11 | file/worktree/session panel, browser media, unsaved editor와 동시 사용 | 각 패널 상태·미저장 내용·브라우저 상태 보존 |
 
 키보드 탐색의 접근성 이름에는 세션 제목, 도구, 열린 위치 또는 재개 불가 이유를 포함한다. 자동화된 hit-test만으로 접근성 검증을 대체하지 않고 macOS VoiceOver와 Linux의 사용 가능한 접근성 도구로 주요 동작을 확인한다.

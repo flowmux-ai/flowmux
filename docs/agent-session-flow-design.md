@@ -15,11 +15,11 @@
 | R01 | 에이전트 화면 우클릭 메뉴에 `Fork session`을 제공한다. 식별된 세션과 검증된 도구 기능이 있을 때만 활성화한다. |
 | R02 | 우클릭한 pane만 좌우 50:50으로 분할한다. 원본은 왼쪽, 자식은 오른쪽이며 새 세션에 포커스를 둔다. 다른 pane과 원본 입력은 보존한다. |
 | R03 | 첫 fork의 자식 ID가 확인되면 원본과 자식의 관계를 저장한다. 자식에서의 재fork도 이어진다. |
-| R04 | Workspace의 어떤 terminal tab이라도 fork 계보에 속하면 workspace 아이템 오른쪽에 흐름 버튼을 표시한다. 비활성 tab도 포함한다. |
-| R05 | 흐름 버튼은 상단 패널을 토글한다. 처음 열 때 약 1/3을 사용하고 기존 pane들은 아래로 내려온다. 첫 fork만으로 패널을 자동으로 열지는 않는다. |
+| R04 | 왼쪽 side panel 하단의 Agents bar 버튼 바로 오른쪽에 Session Flow 버튼을 항상 표시한다. 활성 workspace의 모든 terminal tab(비활성 tab 포함)을 기준으로 계보를 표시하며, 계보가 없으면 빈 패널을 연다. |
+| R05 | 흐름 버튼은 상단 패널을 토글한다. 처음 열 때 약 1/3을 사용하고 기존 pane들은 아래로 내려온다. 첫 fork만으로 패널을 자동으로 열지는 않는다. Terminal 우클릭의 Fork session 바로 아래 View session flow는 해당 pane의 workspace 패널을 연다. 이미 열린 패널은 유지한다. |
 | R06 | Resume으로 들어온 세션의 조상, 형제, 자손까지 알려진 전체 계보를 표시한다. 이 workspace에서 생성되지 않은 관계도 포함한다. |
 | R07 | 서로 다른 계보는 별도 그래프 덩어리로 표시하고, 같은 계보의 여러 열린 세션은 그래프 하나로 합친다. |
-| R08 | 긴 그래프와 여러 그래프를 한 캔버스에서 휠 확대·축소, 드래그 팬, 이동 모드, 전체 맞춤으로 탐색한다. |
+| R08 | 긴 그래프와 여러 그래프를 한 캔버스에서 휠 확대·축소, 드래그 팬, Space·가운데 버튼 팬, 전체 맞춤으로 탐색한다. |
 | R09 | 재개 가능한 닫힌 노드는 마지막으로 포커스한 아래 pane의 오른쪽 split에서 resume한다. 이미 이 workspace에 열린 노드는 기존 pane·tab으로 이동한다. |
 | R10 | 재개 불가 노드는 보존하되 열기 선택을 비활성화하고 이유를 표시한다. 팬 동작과 관계 탐색은 가능하다. |
 | R11 | 패널 토글, 줌·팬, 그래프 갱신은 실행 중인 PTY·에이전트·브라우저·에디터를 재생성하지 않는다. |
@@ -78,7 +78,7 @@ flowchart TD
     Index --> Projection[Workspace 계보 projection]
     Bindings --> Projection
     Projection --> Scene[계보 배치와 벡터 scene]
-    Scene --> Panel[상단 캔버스와 workspace 버튼]
+    Scene --> Panel[상단 캔버스와 하단 툴바 버튼]
     Panel --> Open[열기 명령과 중복 방지]
     Menu[Fork session 메뉴] --> Fork[Fork 작업 처리]
     Open --> Bridge[GTK bridge와 증분 split]
@@ -147,10 +147,10 @@ Provider가 자식 열거를 제공하지 않으면 해당 namespace의 경량 m
 
 ## UI와 입력 계약
 
-### Workspace 버튼과 상단 패널
+### 하단 툴바 버튼과 상단 패널
 
-- 확정 fork edge가 있는 component에 속한 세션이 있으면 작은 흐름 버튼을 표시한다. 계보 조회 중에는 상태를 구분하며 기록 없음으로 확정하지 않는다.
-- 클릭한 workspace를 대상으로 패널을 연다. 현재 focused workspace의 데이터를 잘못 표시하지 않는다.
+- 하단 Agents bar 버튼 바로 오른쪽에 Session Flow 버튼을 항상 표시한다. 활성 workspace를 대상으로 패널을 토글하며 계보가 없으면 빈 캔버스를 표시한다. 계보 조회 중에는 상태를 구분하며 기록 없음으로 확정하지 않는다.
+- Terminal 우클릭의 Fork session 바로 아래 View session flow를 제공한다. Fork가 비활성인 경우에도 사용할 수 있으며, 클릭한 pane의 workspace 패널을 열고 이미 열려 있으면 유지한다.
 - 최초 높이는 작업 영역의 약 1/3이다. 기존 pane이 사용할 최소 높이를 보장하며 높이 조절과 열림 상태를 workspace별로 기억한다.
 - Graph host는 terminal pane tree의 별도 형제 영역이다. Terminal pane 목록에 가짜 pane으로 등록하지 않는다.
 - File/worktree/session side panel의 열림·너비는 유지한다. Graph 패널은 중앙 workspace pane stack 위에 삽입하고 agent bar와 기존 footer 배치를 보존한다.
@@ -158,10 +158,10 @@ Provider가 자식 열거를 제공하지 않으면 해당 namespace의 경량 m
 
 ### 그래프와 camera
 
-Native GTK `DrawingArea`를 기반으로 입력 controller와 노드별 hit 영역을 유지하고, GSK snapshot으로 그래프를 그린다. 연결선·노드·선택 테두리·Pango 라벨은 GTK 그래픽 노드로 제출한다. 우주 배경은 크기가 같으면 재사용하고, 화살표는 화면 배율별 작은 texture로 재사용한다. 전체 canvas의 Cairo callback을 반복 제출하지 않는다. 목업의 HTML/SVG 구현을 그대로 런타임으로 옮기지 않으며, 새 WebView나 그래프 서비스를 추가하지 않는다.
+Native GTK `DrawingArea`를 기반으로 입력 controller와 노드별 hit 영역을 유지하고, GSK snapshot으로 그래프를 그린다. 연결선·노드·선택 테두리·Pango 라벨은 GTK 그래픽 노드로 제출한다. 우주 배경은 크기가 같으면 재사용하고, 화살표와 노드별 색상 그라데이션·광채는 화면 배율별 작은 texture로 재사용한다. 별 반짝임은 별도 GTK 레이어에서 최대 8개만 GTK 프레임 시계에 맞춰 최대 20Hz로 갱신하며, 밝은 중심의 지름 변화는 2px 이내다. 노드·라벨의 정적 snapshot을 반짝임으로 무효화하지 않으며, 패널 숨김·모션 감소 설정 시 프레임 콜백을 정지한다. 비활성 창, 드래그 중, 줌 입력 직후 200ms에는 반짝임 갱신을 쉬어 그래프 조작을 우선한다. 전체 canvas의 Cairo callback을 반복 제출하지 않는다. 목업의 HTML/SVG 구현을 그대로 런타임으로 옮기지 않으며, 새 WebView나 그래프 서비스를 추가하지 않는다.
 
 - 우주를 연상시키는 짙은 남색 배경, 정적인 별 점, 명확한 노드와 연결선을 사용한다. 배경은 저대비로 두고 선택과 불가 상태는 글자·테두리로 함께 구분한다.
-- [Obsidian Graph view](https://help.obsidian.md/plugins/graph)의 center/repel/link force와 link distance 개념을 참고한다. 노드 드래그는 해당 노드를 이동하고 인접 노드는 연결 힘에 따라 반응한다. 빈 공간 또는 이동 모드 드래그는 camera를 이동한다.
+- [Obsidian Graph view](https://help.obsidian.md/plugins/graph)의 center/repel/link force와 link distance 개념을 참고한다. 노드 드래그는 해당 노드를 이동하고 인접 노드는 연결 힘에 따라 반응한다. 빈 공간 드래그, Space를 누른 드래그 또는 가운데 버튼 드래그는 camera를 이동한다. 상단에는 Fit·새로고침·닫기만 두고 Pan·확대·축소 버튼은 표시하지 않는다.
 - Seed는 세션 key와 관계로 결정한다. 같은 계보는 workspace가 달라도 동일한 기본 배치이며, drag로 바뀐 배치도 같은 계보 view 사이에서 공유한다.
 - Force simulation에는 감쇠, 최대 속도, 유한 좌표 검사, 수렴 기준을 두고 안정되거나 패널이 숨겨지면 frame tick을 멈춘다. 애니메이션 감소 설정에서는 즉시 안정 배치를 사용한다.
 - 부모→자식 방향은 연결선의 작은 방향 표식과 선택 상세로 읽을 수 있게 한다. 물리 배치가 계보 관계를 바꾸지는 않는다.
@@ -290,7 +290,7 @@ P0에서 먼저 Claude·Codex·OpenCode의 후보를 검증한다. 나머지 도
 - 실제 Codex 0.166.0을 사용하는 독립 native GUI 두 개에서도 같은 세션의 graph 선택을 확인했다. 최종 실행의 선택 시작 간격은 69.202ms였으며, 해당 임시 native store의 대상 writer와 완료 resume operation은 하나였다. 비소유 창의 재선택은 기존 소유 창의 정확한 pane/surface로 이동했고 원본 terminal widget/PID를 유지했다. 이는 잠금 상태의 native controller·IPC·프로세스 검증이며, 물리 입력이나 다른 provider 전체의 동시성 보장은 아니다. 재현은 `scripts/test-session-flow-multi-gui.py`와 검증 기록을 따른다.
 - OpenCode 1.17.18은 재개 직후 서버 lifecycle event를 보내지 않을 수 있다. 별도 TUI plugin이 현재 `route.current`와 실제 session 존재를 확인하고 native status API 응답으로 초기 상태를 전달한다. 선택 변경·더 최신 status event·plugin 종료 뒤 늦게 도착한 응답은 버린다. 초기 관측은 완료 알림을 만들지 않는다. `flowmux hooks setup --agent opencode`가 기존 server plugin과 `tui.json`의 TUI plugin을 함께 설치하며 다른 plugin·설정 값은 보존한다. 새 OpenCode 프로세스부터 로드되며 기존 사용자 세션을 재시작하지 않는다. `OPENCODE_TUI_CONFIG`도 fork/resume 환경에 보존한다. 다른 버전의 TUI API 호환성은 별도 검증한다.
 - Codex fork의 parent는 `forked_from_id`를 추가 확인한다. Hook의 `source: fork` 필터도 포함한다. 기존 lifecycle 추정 엔진과 사용자 hook trust 설정은 변경하지 않는다.
-- Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 휠·트랙패드 제스처 확대, 빈 공간·Space·가운데 버튼 팬, 노드 이동·전체 맞춤·Pan 모드·키보드 선택을 제공한다. 재개 불가 노드는 축소 상태에도 사선 표식을 유지한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
+- Canvas는 별 배경, 방향 연결선, 반발·연결 힘·감쇠, 휠·트랙패드 제스처 확대, 빈 공간·Space·가운데 버튼 팬, 노드 이동·전체 맞춤·키보드 선택을 제공한다. 재개 불가 노드는 축소 상태에도 사선 표식을 유지한다. 숨긴 panel과 보이지 않는 계보는 물리 계산에서 제외하고, workspace 전환 시 진행 중인 드래그를 취소한다.
 - 확인된 pending 작업은 저장된 surface/native ID와 native parent 증거로 재조정한다. 증거가 없는 작업은 자동 재실행하지 않고 예약을 유지한다. 미확인 결과를 사용자가 정리하는 전용 UI는 아직 없다.
 
 | 도구 | 현재 연결 경로 | 실제 확인한 범위 | 남은 제한 |

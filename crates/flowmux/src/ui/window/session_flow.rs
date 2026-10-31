@@ -416,11 +416,6 @@ impl WindowController {
             }
         }
         self.pane_registry.borrow_mut().session_flow_forkable = forkable;
-        for (id, _) in self.sidebar.workspace_titles().borrow().iter() {
-            let keys = workspace_anchors.get(id).cloned().unwrap_or_default();
-            self.sidebar
-                .set_flow_available(*id, !catalog.snapshot.lineage.project(&keys).is_empty());
-        }
         let keys = active
             .and_then(|id| workspace_anchors.get(&id).cloned())
             .unwrap_or_default();
@@ -474,10 +469,10 @@ impl WindowController {
                 catalog.warnings.len()
             )
         };
-        self.flow.panel.status.set_text(&format!(
-            "{} sessions{incomplete} · scroll to zoom · drag nodes or space",
-            graph.nodes().len()
-        ));
+        self.flow
+            .panel
+            .status
+            .set_text(&format!("{} sessions{incomplete}", graph.nodes().len()));
         self.flow.panel.status.set_tooltip_text(
             (!catalog.warnings.is_empty())
                 .then(|| {
@@ -517,12 +512,25 @@ impl WindowController {
         match action {
             FlowAction::Refresh => self.refresh_session_flow(true).await,
             FlowAction::SaveView => self.save_flow_view(),
-            FlowAction::Toggle(workspace) => {
+            FlowAction::Toggle(_) | FlowAction::ToggleActive | FlowAction::Show(_) => {
+                let (workspace, toggle) = match action {
+                    FlowAction::Toggle(workspace) => (Some(workspace), true),
+                    FlowAction::ToggleActive => (self.store.active_workspace().await, true),
+                    FlowAction::Show(pane) => {
+                        (self.pane_registry.borrow().workspace_of_pane(pane), false)
+                    }
+                    _ => unreachable!(),
+                };
+                let Some(workspace) = workspace else {
+                    return;
+                };
                 if self.store.active_workspace().await != Some(workspace) {
                     self.activate_workspace(workspace).await;
                 }
                 self.refresh_session_flow(false).await;
-                self.flow.panel.toggle(workspace);
+                if toggle || !self.flow.panel.root.is_visible() {
+                    self.flow.panel.toggle(workspace);
+                }
                 self.save_flow_view();
                 if !self.flow.panel.root.is_visible() {
                     if let Some(pane) = self.focused_pane.get() {
@@ -884,6 +892,17 @@ pub(super) async fn check_native(
     root: &std::path::Path,
 ) {
     use flowmux_state::session_flow::SessionRecord;
+    crate::builtin_icons::install();
+    controller.css_provider.load_from_string(
+        &controller
+            .current_theme()
+            .css_for_options(&controller.options.borrow()),
+    );
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().unwrap(),
+        &controller.css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
     crate::ui::session_flow::check_canvas_controls();
     let source = controller
         .pane_registry
@@ -898,6 +917,80 @@ pub(super) async fn check_native(
         .clone();
     let pid = terminal.pid.get();
     let widget = terminal.widget.clone();
+    // Both entry points work before any session has fork lineage.
+    let mut pending = vec![controller.sidebar.root.clone().upcast::<gtk::Widget>()];
+    let mut flow_button = None;
+    while let Some(widget) = pending.pop() {
+        assert_ne!(widget.widget_name(), "flowmux-workspace-session-flow");
+        if widget.widget_name() == "flowmux-session-flow-button" {
+            assert_eq!(
+                widget.prev_sibling().unwrap().widget_name(),
+                "flowmux-agent-bar-button"
+            );
+            flow_button = Some(widget.clone().downcast::<gtk::Button>().unwrap());
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            pending.push(widget);
+        }
+    }
+    let flow_button = flow_button.expect("footer Session Flow button");
+    assert!(flow_button.is_visible() && flow_button.is_sensitive());
+    let icon_theme = gtk::IconTheme::for_display(&gtk::prelude::WidgetExt::display(&flow_button));
+    assert!(icon_theme.has_icon("flowmux-session-flow-symbolic"));
+    flow_button.emit_clicked();
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !controller.flow.panel.root.is_mapped() {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("footer did not open an empty Session Flow panel");
+    controller
+        .dispatch_session_flow(FlowAction::Show(pane))
+        .await;
+    assert!(
+        controller.flow.panel.root.is_visible(),
+        "View must not toggle a visible panel closed"
+    );
+    controller
+        .dispatch_session_flow(FlowAction::ToggleActive)
+        .await;
+    assert!(!controller.flow.panel.root.is_visible());
+    let fork = native_fork_button(&terminal.widget);
+    assert!(!fork.is_sensitive());
+    let view = fork
+        .next_sibling()
+        .unwrap()
+        .downcast::<gtk::Button>()
+        .unwrap();
+    assert_eq!(view.label().as_deref(), Some("View session flow"));
+    assert!(view.is_sensitive());
+    view.emit_clicked();
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !controller.flow.panel.root.is_mapped() {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("context menu did not open an empty Session Flow panel");
+    controller
+        .dispatch_session_flow(FlowAction::ToggleActive)
+        .await;
+    assert_eq!(terminal.pid.get(), pid);
+    assert_eq!(
+        controller.pane_registry.borrow().active_surface(pane),
+        Some(source)
+    );
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while controller.flow.loading.get() {
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("empty history lookup did not finish");
+    println!("MACOS_SESSION_FLOW_ENTRY_POINTS_OK");
     let home = root.join("flow-history");
     std::fs::create_dir_all(home.join("sessions")).unwrap();
     let parent = uuid::Uuid::new_v4().to_string();
@@ -1178,6 +1271,7 @@ pub(super) async fn check_native(
     assert_eq!(terminal.pid.get(), pid);
     controller.flow.panel.toggle(workspace);
     glib::timeout_future(Duration::from_millis(300)).await;
+    crate::ui::session_flow::check_native_stars(&controller.flow.panel).await;
     if let Ok(path) = std::env::var("FLOWMUX_SESSION_FLOW_CAPTURE") {
         let paintable = gtk::WidgetPaintable::new(Some(&controller.flow.panel.root));
         let snapshot = gtk::Snapshot::new();
@@ -1190,9 +1284,31 @@ pub(super) async fn check_native(
             let renderer = controller.window.renderer().unwrap();
             renderer
                 .render_texture(&node, None)
-                .save_to_png(path)
+                .save_to_png(&path)
                 .unwrap();
         }
+        let sidebar = &controller.sidebar.root;
+        let snapshot = gtk::Snapshot::new();
+        // The sidebar is transparent; include its window's light background in the capture.
+        snapshot.append_color(
+            &gtk::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0),
+            &gtk::graphene::Rect::new(0.0, 0.0, sidebar.width() as f32, sidebar.height() as f32),
+        );
+        gtk::WidgetPaintable::new(Some(sidebar)).snapshot(
+            &snapshot,
+            sidebar.width() as f64,
+            sidebar.height() as f64,
+        );
+        let node = snapshot
+            .to_node()
+            .expect("sidebar renders Session Flow icon");
+        controller
+            .window
+            .renderer()
+            .unwrap()
+            .render_texture(&node, None)
+            .save_to_png(std::path::Path::new(&path).with_extension("sidebar.png"))
+            .unwrap();
     }
     // Creating a workspace must switch the model and the graph together with its panes.
     for via_cli in [true, false] {
@@ -1224,7 +1340,10 @@ pub(super) async fn check_native(
             !controller.flow.panel.root.is_visible(),
             "new workspace must not retain the previous workspace's flow"
         );
-        controller.activate_workspace(workspace).await;
+        controller
+            .dispatch_session_flow(FlowAction::Show(pane))
+            .await;
+        assert_eq!(controller.store.active_workspace().await, Some(workspace));
         controller
             .render_session_flow(std::slice::from_ref(&anchor))
             .await;

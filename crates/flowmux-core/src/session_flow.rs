@@ -219,12 +219,12 @@ impl Layout {
         let mut offset = 0.0;
         self.centers.clear();
         for family in lineage.families() {
-            let radius = 180.0 + (family.len() as f64).sqrt() * 45.0;
+            let radius = 100.0 + (family.len() as f64).sqrt() * 32.0;
             let center = Point {
                 x: offset + radius,
                 y: 0.0,
             };
-            offset += radius * 2.0 + 320.0;
+            offset += radius * 2.0 + 120.0;
             for key in family {
                 self.centers.insert(key.clone(), center);
                 self.positions.entry(key.clone()).or_insert_with(|| {
@@ -306,7 +306,7 @@ impl Layout {
                             x = 1.0;
                         }
                         let d2 = (x * x + y * y).max(100.0);
-                        let scale = 1800.0 / (d2 * d2.sqrt());
+                        let scale = 650.0 / (d2 * d2.sqrt());
                         forces[i].x += x * scale;
                         forces[i].y += y * scale;
                         forces[*j].x -= x * scale;
@@ -321,7 +321,7 @@ impl Layout {
             };
             let (x, y) = (c.x - p.x, c.y - p.y);
             let distance = (x * x + y * y).sqrt().max(1.0);
-            let scale = (distance - 150.0) * 0.008 / distance;
+            let scale = (distance - 105.0) * 0.008 / distance;
             let (i, j) = (indices[parent], indices[child]);
             forces[i].x += x * scale;
             forces[i].y += y * scale;

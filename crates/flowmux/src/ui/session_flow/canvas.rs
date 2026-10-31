@@ -12,7 +12,7 @@ mod imp {
     pub struct Canvas {
         pub(super) scene: OnceCell<Rc<RefCell<Scene>>>,
         pub(super) empty_draw: Cell<bool>,
-        background: RefCell<Option<((i32, i32), gtk::gsk::RenderNode)>>,
+        sprites: RefCell<Option<(i32, [gtk::gdk::Texture; 3])>>,
         arrow: RefCell<Option<(i32, gtk::gdk::Texture)>>,
         #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
         pub(super) snapshot_times: RefCell<Option<Rc<RefCell<Vec<f64>>>>>,
@@ -47,19 +47,6 @@ mod imp {
                     scene.fit(width as f64, height as f64);
                     scene.fit_during_settle = true;
                 }
-                let mut background = self.background.borrow_mut();
-                if background.as_ref().map(|(size, _)| *size) != Some((width, height)) {
-                    let layer = gtk::Snapshot::new();
-                    {
-                        let cr = layer.append_cairo(&bounds);
-                        draw_background(&cr, width, height);
-                    }
-                    *background = layer.to_node().map(|node| ((width, height), node));
-                }
-                if let Some((_, node)) = background.as_ref() {
-                    snapshot.append_node(node);
-                }
-                drop(background);
                 let camera = scene.camera();
                 let color = gtk::gdk::RGBA::new(0.39, 0.51, 0.78, 0.55);
                 let scale = area.scale_factor().max(1);
@@ -122,7 +109,25 @@ mod imp {
                     snapshot.append_texture(arrow, &gtk::graphene::Rect::new(-7.0, -4.0, 8.0, 8.0));
                     snapshot.restore();
                 }
-                draw_nodes(snapshot, area.upcast_ref(), width, height, &scene);
+                let mut sprites = self.sprites.borrow_mut();
+                if sprites.as_ref().map(|(old_scale, _)| *old_scale) != Some(scale) {
+                    *sprites = Some((
+                        scale,
+                        [
+                            star_texture(scale, (0.43, 0.86, 0.94), 8.0, true),
+                            star_texture(scale, (0.65, 0.57, 0.95), 6.0, true),
+                            star_texture(scale, (0.40, 0.43, 0.53), 6.0, false),
+                        ],
+                    ));
+                }
+                draw_nodes(
+                    snapshot,
+                    area.upcast_ref(),
+                    width,
+                    height,
+                    &scene,
+                    &sprites.as_ref().unwrap().1,
+                );
             }
             snapshot.pop();
             #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
@@ -135,25 +140,92 @@ mod imp {
     }
 }
 
+// Three tiny HiDPI sprites are uploaded once per scale factor. Node movement
+// only places existing textures; gradients and glow never run per-node per-frame.
+fn star_texture(
+    scale: i32,
+    rgb: (f64, f64, f64),
+    radius: f64,
+    luminous: bool,
+) -> gtk::gdk::Texture {
+    let size = (radius * 2.6).ceil() as i32 * 2;
+    let mut surface =
+        gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, size * scale, size * scale)
+            .unwrap();
+    {
+        let cr = gtk::cairo::Context::new(&surface).unwrap();
+        cr.scale(scale as f64, scale as f64);
+        cr.translate(size as f64 / 2.0, size as f64 / 2.0);
+        let glow = gtk::cairo::RadialGradient::new(0.0, 0.0, radius * 0.4, 0.0, 0.0, radius * 2.6);
+        glow.add_color_stop_rgba(0.0, rgb.0, rgb.1, rgb.2, if luminous { 0.48 } else { 0.15 });
+        glow.add_color_stop_rgba(
+            0.45,
+            rgb.0,
+            rgb.1,
+            rgb.2,
+            if luminous { 0.15 } else { 0.05 },
+        );
+        glow.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
+        let _ = cr.set_source(&glow);
+        cr.arc(0.0, 0.0, radius * 2.6, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+        if luminous {
+            let _ = cr.save();
+            let ray = gtk::cairo::LinearGradient::new(-radius * 1.8, 0.0, radius * 1.8, 0.0);
+            ray.add_color_stop_rgba(0.0, rgb.0, rgb.1, rgb.2, 0.0);
+            ray.add_color_stop_rgba(0.5, rgb.0, rgb.1, rgb.2, 0.6);
+            ray.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
+            for _ in 0..2 {
+                let _ = cr.set_source(&ray);
+                cr.rectangle(-radius * 1.8, -0.5, radius * 3.6, 1.0);
+                let _ = cr.fill();
+                cr.rotate(std::f64::consts::FRAC_PI_2);
+            }
+            let _ = cr.restore();
+        }
+        let core =
+            gtk::cairo::RadialGradient::new(-radius * 0.2, -radius * 0.25, 0.0, 0.0, 0.0, radius);
+        let white = if luminous { 0.82 } else { 0.25 };
+        core.add_color_stop_rgb(
+            0.0,
+            rgb.0 + (1.0 - rgb.0) * white,
+            rgb.1 + (1.0 - rgb.1) * white,
+            rgb.2 + (1.0 - rgb.2) * white,
+        );
+        core.add_color_stop_rgb(0.42, rgb.0, rgb.1, rgb.2);
+        core.add_color_stop_rgba(0.85, rgb.0 * 0.65, rgb.1 * 0.65, rgb.2 * 0.65, 0.9);
+        core.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
+        let _ = cr.set_source(&core);
+        cr.arc(0.0, 0.0, radius, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    }
+    let stride = surface.stride() as usize;
+    let bytes = glib::Bytes::from_owned(surface.data().unwrap().to_vec());
+    #[cfg(target_endian = "little")]
+    let format = gtk::gdk::MemoryFormat::B8g8r8a8Premultiplied;
+    #[cfg(target_endian = "big")]
+    let format = gtk::gdk::MemoryFormat::A8r8g8b8Premultiplied;
+    gtk::gdk::MemoryTexture::new(size * scale, size * scale, format, &bytes, stride).upcast()
+}
+
 fn draw_nodes(
     snapshot: &gtk::Snapshot,
     area: &gtk::DrawingArea,
     width: i32,
     height: i32,
     scene: &Scene,
+    sprites: &[gtk::gdk::Texture; 3],
 ) {
     let camera = scene.camera();
     let selected = scene
         .workspace
         .and_then(|id| scene.views.get(&id))
         .and_then(|v| v.selected.as_ref());
-    let circle = |x: f32, y: f32, radius: f32, color: &gtk::gdk::RGBA| {
-        let rect = gtk::graphene::Rect::new(x - radius, y - radius, radius * 2.0, radius * 2.0);
-        snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(rect, radius));
-        snapshot.append_color(color, &rect);
-        snapshot.pop();
-    };
-    for key in scene.graph.nodes() {
+    let sizes = sprites
+        .each_ref()
+        .map(|texture| texture.width() as f32 / area.scale_factor().max(1) as f32);
+    let keys: Vec<_> = scene.graph.nodes().into_iter().collect();
+    for &key in &keys {
         let Some(point) = scene.layout.positions.get(key) else {
             continue;
         };
@@ -178,10 +250,18 @@ fn draw_nodes(
         };
         let color = gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 1.0);
         let (x, y) = (p.x as f32, p.y as f32);
-        if anchor || focused {
-            circle(x, y, 20.0, &gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 0.12));
-        }
-        circle(x, y, if anchor { 8.0 } else { 6.0 }, &color);
+        let sprite = if !available {
+            2
+        } else if anchor {
+            0
+        } else {
+            1
+        };
+        let size = sizes[sprite];
+        snapshot.append_texture(
+            &sprites[sprite],
+            &gtk::graphene::Rect::new(x - size / 2.0, y - size / 2.0, size, size),
+        );
         let stroke = if available {
             color
         } else {
@@ -206,7 +286,7 @@ fn draw_nodes(
             );
         }
     }
-    for label in layout_labels(area, scene, width, height) {
+    for label in layout_labels(area, scene, width, height, keys) {
         let available = scene.nodes.get(label.key).is_some_and(|n| n.available);
         let color = if available {
             gtk::gdk::RGBA::new(0.83, 0.86, 0.94, 1.0)
@@ -254,15 +334,18 @@ pub(super) fn check_snapshot(area: &gtk::DrawingArea) {
     let render = || {
         let snapshot = gtk::Snapshot::new();
         canvas.imp().snapshot(&snapshot);
-        let node = snapshot.to_node().expect("graph snapshot must render");
+        let Some(node) = snapshot.to_node() else {
+            return false;
+        };
         let bounds = node.bounds();
         assert!(bounds.x().is_finite() && bounds.y().is_finite());
         assert!(bounds.width().is_finite() && bounds.height().is_finite());
         assert!(bounds.x() >= 0.0 && bounds.y() >= 0.0);
         assert!(bounds.x() + bounds.width() <= 800.0);
         assert!(bounds.y() + bounds.height() <= 260.0);
+        true
     };
-    render();
+    assert!(render());
     let scene = canvas.imp().scene.get().unwrap();
     let positions = scene.borrow().layout.positions.clone();
     // Finite saved f64 positions may overflow GSK's f32 coordinates.

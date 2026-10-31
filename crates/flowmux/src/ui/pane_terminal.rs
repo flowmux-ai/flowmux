@@ -100,6 +100,7 @@ pub struct PaneCallbacks {
     /// the same callback is reused by both terminal and browser
     /// right-click menus.
     pub on_copy_surface_text: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
+    pub on_view_session_flow: Rc<RefCell<dyn FnMut(PaneId)>>,
     pub on_fork_session:
         Rc<RefCell<dyn FnMut(PaneId, SurfaceId, flowmux_core::session_flow::SessionKey)>>,
     pub fork_session_key: Rc<dyn Fn(SurfaceId) -> Option<flowmux_core::session_flow::SessionKey>>,
@@ -212,6 +213,7 @@ impl PaneCallbacks {
             on_rename_surface: Rc::new(RefCell::new(|_, _| {})),
             on_show_surface_folder: Rc::new(RefCell::new(|_, _| {})),
             on_copy_surface_text: Rc::new(RefCell::new(|_, _| {})),
+            on_view_session_flow: Rc::new(RefCell::new(|_| {})),
             on_fork_session: Rc::new(RefCell::new(|_, _, _| {})),
             fork_session_key: Rc::new(|_| None),
             on_copy_surface_session_id: Rc::new(RefCell::new(|_, _| {})),

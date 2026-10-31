@@ -76,7 +76,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
         .borrow_mut()
         .fit(panel.area.width() as f64, panel.area.height() as f64);
     panel.scene.borrow_mut().fit_during_settle = false;
-    panel.scene.borrow_mut().pan_mode = true;
+    panel.scene.borrow_mut().space_pan = true;
     let controllers = panel.area.observe_controllers();
     let drag = (0..controllers.n_items())
         .filter_map(|i| controllers.item(i)?.downcast::<gtk::GestureDrag>().ok())

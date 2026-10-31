@@ -705,6 +705,28 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-pane-tab.flowmux-pane-tab-drop-after {{
     border-right: 2px solid rgba(96, 165, 250, 0.95);
 }}
+.flowmux-session-flow-header {{
+    background-color: {sidebar};
+    color: {fg};
+    border-bottom: 1px solid {border};
+    padding: 0 8px 0 12px;
+}}
+.flowmux-session-flow-header button {{
+    color: {fg};
+    min-height: 22px;
+    min-width: 24px;
+    padding: 0 6px;
+    margin: 3px 0;
+}}
+.flowmux-session-flow-header button:hover,
+.flowmux-session-flow-header button:checked {{
+    background-color: {control_hover};
+}}
+.flowmux-session-flow-header separator {{
+    background-color: {border};
+    min-width: 1px;
+    margin: 7px 4px;
+}}
 .flowmux-file-browser {{
     background-color: {sidebar};
     color: {fg};
