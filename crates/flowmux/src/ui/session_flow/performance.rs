@@ -5,6 +5,20 @@ use super::*;
 use std::time::{Duration, Instant};
 
 pub(crate) async fn check_native_performance(path: &std::path::Path) {
+    assert_eq!(
+        screen_lock_from_ioreg("\"CGSSessionScreenIsLocked\"=Yes"),
+        Some(true)
+    );
+    assert_eq!(
+        screen_lock_from_ioreg("\"CGSSessionScreenIsLocked\"=No"),
+        Some(false)
+    );
+    assert_eq!(
+        screen_lock_from_ioreg("\"kCGSSessionOnConsoleKey\"=Yes"),
+        None
+    );
+    assert_eq!(screen_lock_from_ioreg(""), None);
+    let screen_lock_start = screen_lock_state();
     let (bridge, receiver) = Bridge::new();
     let stack = gtk::Stack::new();
     stack.add_named(
@@ -163,13 +177,37 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {
         }
     }
     clock.disconnect(handler);
+    let screen_lock_end = screen_lock_state();
     let report = serde_json::json!({"nodes":1000,"families":20,"area_logical_size":[panel.area.width(),panel.area.height()],
+        "screen_lock_observation":{"source":"ioreg -n Root -d1","start":screen_lock_start,"end":screen_lock_end,
+            "scope":"Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency."},
         "diagnostic_empty_draw":empty_draw,"scale_factor":panel.area.scale_factor(),"renderer":std::env::var("GSK_RENDERER").ok(),"debug_assertions":cfg!(debug_assertions),
         "measurement":"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
         "trials":trials});
     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     window.destroy();
     println!("MACOS_SESSION_FLOW_FRAME_MEASUREMENT_OK");
+}
+
+fn screen_lock_state() -> Option<bool> {
+    let output = std::process::Command::new("/usr/sbin/ioreg")
+        .args(["-n", "Root", "-d1"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    screen_lock_from_ioreg(std::str::from_utf8(&output.stdout).ok()?)
+}
+
+fn screen_lock_from_ioreg(output: &str) -> Option<bool> {
+    if output.contains("\"CGSSessionScreenIsLocked\"=Yes") {
+        Some(true)
+    } else if output.contains("\"CGSSessionScreenIsLocked\"=No") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn stats(values: &[f64]) -> serde_json::Value {
