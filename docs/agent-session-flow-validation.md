@@ -2,9 +2,9 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했다. Claude 지연 저장 수정 `2b80463a`의 로컬 회귀·native 검사는 통과했고 수정 후 실제 Claude native GTK 통합 검증도 통과했다. 최신 전체 CI는 진행 중이며 OS 포인터 입력 검증은 별도 미확인이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 macOS 46개 phase와 Sanitizers는 성공했으며 Linux coverage는 진행 중이다. 최신 `4cff2a5d`의 전체 CI는 별도 실행 중이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
+이전 기준 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
@@ -433,3 +433,35 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 ![실제 Claude의 native GTK Session Flow](design-assets/session-flow-claude-real.png)
 
 제품 `4ab3e76e`의 macOS job `124403378997`은 success이며 다운로드한 artifact `13025647455`의 46개 phase JSON 모두 passed/exit 0이다. [검사별 기록](design-assets/session-flow-macos-gate-4ab3e76e.json). 최신 제품 `2b80463a`의 전체 CI 결과와 구분한다.
+
+
+## OpenCode 재개 직후 ID 관측과 실제 GTK 검증
+
+제품 `4cff2a5d`는 OpenCode 1.17.18에서 재개된 대화가 화면에 나타나도 첫 입력 전에는 서버 `session.created/status` hook이 발생하지 않는 경우를 수정한다. 실제 대화가 표시된 상태에서 기존 native harness가 source identity/capability 40초 timeout으로 실패했다. 격리 plugin trace에서는 module load와 catalog/plugin event만 관측됐다.
+
+[해당 버전의 TUI 계약](https://github.com/anomalyco/opencode/blob/v1.17.18/packages/opencode/specs/tui-plugins.md)에 따라 별도 TUI plugin을 설치한다. 현재 선택된 native ID와 session 존재를 확인하고 status API가 성공했을 때만 초기 상태를 전송한다. [Native status 저장 계약](https://github.com/anomalyco/opencode/blob/v1.17.18/packages/opencode/src/session/status.ts)의 idle session 생략 규칙을 사용하며, 미로딩 cache를 idle로 해석하지 않는다. 재개를 turn completion으로 처리하거나 완료 알림을 보내지 않는다. 설치·제거·drift 검사, 사용자 plugin과 설정 값 보존, 지연 응답과 dispose 검사를 포함했다.
+
+실제 source `ses_e7047828fffeppj2xiecn6VJgB`에서 child `ses_e704684dbffe8lpmrc3XDUJ4dd`를 생성했다. 실제 GTK 메뉴 callback, 오른쪽 split, 다른 native ID, 두 노드 edge, 정확한 열린 surface focus, child pane 종료 후 graph를 통한 같은 ID resume, 원본 terminal PID/widget 보존과 pending 없음이 통과했다. Native SQLite를 읽기 전용으로 조회해 source와 child 모두 `FLOWMUX_OPENCODE_PRODUCT_GUI_TEST` 표식을 가지고 있음을 확인했다. 표식은 native API의 `noReply`로 생성했으며 모델 응답·토큰 사용은 발생시키지 않았다. 두 native `parent_id`가 NULL이므로 이 값으로 외부 fork 관계를 추정하지 않는다.
+
+검증 결과:
+
+- CLI lib 129 passed/1 ignored, CLI binary 163 passed. 마지막 OpenCode 범위 검사 12+8+2 passed.
+- Session history 12 passed. 기본 Session Flow native GTK와 `-D warnings` clippy 통과.
+- 일반화한 harness로 실제 Claude를 재검증해 child `f07a3d2b-9108-450d-be44-b505b929df3a`의 지연 저장·그래프·종료 후 비활성 검사를 통과했다.
+- 실제 OpenCode 로그 `/tmp/flowmux-session-flow-opencode-product.log`에 `MACOS_SESSION_FLOW_OPENCODE_REAL_OK`, `MACOS_NATIVE_SMOKE_OK`, exit 0. [증거와 로그 목록](design-assets/session-flow-opencode-real-4cff2a5d.json).
+- 최신 제품 CI: [Test 41159059019](https://github.com/flowmux-ai/flowmux/actions/runs/41159059019), [Sanitizers 41159061021](https://github.com/flowmux-ai/flowmux/actions/runs/41159061021). 이 문서 작성 시 진행 중이며 앞선 커밋의 성공으로 대체하지 않는다.
+
+![실제 OpenCode의 native GTK Session Flow](design-assets/session-flow-opencode-real.png)
+
+## Claude OS 입력 검증 재개
+
+기존 격리 앱 PID `95986`(제품 `2b80463a`)에서 CUA 좌표 입력이 다시 가능해졌다. Source `21fcba07-00f6-4ea1-9749-24b6cbde520d`를 우클릭하고 Down/Return으로 Fork session을 선택해 child `e87b0911-5bb6-4a47-b0a6-bbb978591e80`와 오른쪽 pane을 만들었다. Operation 1개 complete, fork edge 1개, live 2개를 읽기 전용 DB 조회로 확인했다. 사용자 원본 앱 PID `72789`는 계속 실행 중이다.
+
+Sidebar Session Flow 버튼의 좌표 클릭으로 상단 약 1/3 그래프와 아래 두 pane을 확인했다. 원본·자식 노드 좌표 클릭에 따라 실제 focused tab의 창 제목이 각각 바뀌었고 pane은 추가되지 않았다. 휠 확대·축소와 Fit도 화면에서 확인했다. 이 결과는 이전의 모든 포인터 입력이 막혔다는 상태를 갱신하지만, 다음 두 항목은 통과로 바꾸지 않는다.
+
+- 메뉴 항목 좌표 클릭은 popup을 닫았으나 fork를 실행하지 않았다. 키보드 선택 경로는 성공했다.
+- 빈 공간과 Pan 모드의 CUA drag에서 이동을 관찰하지 못했다. 같은 도구로 GTK 분할선을 drag한 비교에서도 크기가 바뀌지 않아 원인은 확정하지 않았다. GTK callback 시험을 OS drag 성공으로 대체하지 않는다.
+
+[입력별 결과와 실제 session/operation 기록](design-assets/session-flow-claude-native-input-2b80463a.json).
+
+직전 제품 `2b80463a`의 macOS job `124405280277`은 success이고 artifact `13025744192`의 46개 phase가 모두 passed/exit 0이다. [macOS gate 기록](design-assets/session-flow-macos-gate-2b80463a.json). [Sanitizers 41156803235](https://github.com/flowmux-ai/flowmux/actions/runs/41156803235)도 전체 success다. 이후 OpenCode 변경의 검증과 구분한다.

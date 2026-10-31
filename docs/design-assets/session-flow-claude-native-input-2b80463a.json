@@ -1,0 +1,52 @@
+{
+  "root": "/tmp/fmsclaude-2yprbjod",
+  "bundle": "/tmp/fmsclaude-2yprbjod/Flowmux Session Flow Claude.app",
+  "pid": 95986,
+  "socket": "/tmp/fmsclaude-2yprbjod/run/flowmux-95986.sock",
+  "cli": "/tmp/fmsclaude-2yprbjod/Flowmux Session Flow Claude.app/Contents/MacOS/flowmuxctl",
+  "product_commit": "2b80463aef655a39f17a80d5885f82e8a1f87f61",
+  "source": "21fcba07-00f6-4ea1-9749-24b6cbde520d",
+  "child": "e87b0911-5bb6-4a47-b0a6-bbb978591e80",
+  "input": "CUA native app input",
+  "checks": {
+    "right_click_menu": "passed",
+    "keyboard_fork_selection": "passed",
+    "right_split_and_child": "passed",
+    "sidebar_flow_button": "passed",
+    "top_third_graph": "passed",
+    "source_and_child_node_click_focus": "passed",
+    "wheel_zoom_in_out": "passed",
+    "fit": "passed",
+    "menu_item_coordinate_click": "not_verified: popup dismissed without activation",
+    "drag_pan": "not_verified: no displacement observed; same tool drag on GTK divider also did not resize"
+  },
+  "operations": [
+    [
+      "faa4f9aa-ebe8-432b-976b-8675e9d315e5",
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"21fcba07-00f6-4ea1-9749-24b6cbde520d\"}",
+      "{\"request\":\"faa4f9aa-ebe8-432b-976b-8675e9d315e5\",\"owner\":\"c618afd1-dad1-45a7-82b5-37de4e075fb7\",\"owner_pid\":95986,\"source\":{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"21fcba07-00f6-4ea1-9749-24b6cbde520d\"},\"kind\":\"Fork\",\"target_surface\":\"4fa0e444-d3fb-40a9-ac2e-eedb6617d476\"}",
+      "complete",
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"e87b0911-5bb6-4a47-b0a6-bbb978591e80\"}"
+    ]
+  ],
+  "live": [
+    [
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"e87b0911-5bb6-4a47-b0a6-bbb978591e80\"}",
+      "c618afd1-dad1-45a7-82b5-37de4e075fb7",
+      "4fa0e444-d3fb-40a9-ac2e-eedb6617d476",
+      "{\"owner\":\"c618afd1-dad1-45a7-82b5-37de4e075fb7\",\"pid\":42650,\"started\":1793412786304463,\"workspace\":\"b035961e-31b0-4752-b246-90ee65fe1a82\",\"pane\":\"2e0e21e2-3f84-417b-9037-b932e0a791be\",\"surface\":\"4fa0e444-d3fb-40a9-ac2e-eedb6617d476\",\"socket\":\"/tmp/fmsclaude-2yprbjod/run/flowmux-95986.sock\"}"
+    ],
+    [
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"21fcba07-00f6-4ea1-9749-24b6cbde520d\"}",
+      "c618afd1-dad1-45a7-82b5-37de4e075fb7",
+      "c3d49e87-7f6a-4ac1-bca9-173885599a7d",
+      "{\"owner\":\"c618afd1-dad1-45a7-82b5-37de4e075fb7\",\"pid\":96139,\"started\":1793411059601399,\"workspace\":\"b035961e-31b0-4752-b246-90ee65fe1a82\",\"pane\":\"a31ad6c0-c119-4e42-9c96-5acc637881fc\",\"surface\":\"c3d49e87-7f6a-4ac1-bca9-173885599a7d\",\"socket\":\"/tmp/fmsclaude-2yprbjod/run/flowmux-95986.sock\"}"
+    ]
+  ],
+  "forks": [
+    [
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"e87b0911-5bb6-4a47-b0a6-bbb978591e80\"}",
+      "{\"provider\":\"claude\",\"home\":\"/Users/junsu/.claude\",\"id\":\"21fcba07-00f6-4ea1-9749-24b6cbde520d\"}"
+    ]
+  ]
+}

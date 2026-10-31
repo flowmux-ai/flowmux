@@ -1,0 +1,59 @@
+{
+  "product_commit": "4cff2a5d6da04738739bda9d341c33152566064d",
+  "provider": "OpenCode 1.17.18",
+  "platform": "macOS",
+  "result": "passed",
+  "scope": "Real CLI and native GTK menu/node callbacks; not OS pointer input or a model response. A noReply marker was created through the native HTTP API in an isolated profile. Native SQLite was inspected read-only.",
+  "source": "ses_e7047828fffeppj2xiecn6VJgB",
+  "child": "ses_e704684dbffe8lpmrc3XDUJ4dd",
+  "checks": [
+    "source native route identity before first input",
+    "right split via real GTK menu callback",
+    "distinct child native ID",
+    "source marker inherited in native child",
+    "complete operation and two-node lineage",
+    "graph focuses existing exact pane and surface without duplication",
+    "closed child resumes with same native ID",
+    "resume does not add a fork edge",
+    "source terminal PID and widget preserved",
+    "no pending operations"
+  ],
+  "native_records": [
+    {
+      "id": "ses_e7047828fffeppj2xiecn6VJgB",
+      "marker_inherited": true,
+      "native_parent_id": null,
+      "directory": "/private/tmp/fm-flow-providers-h_ja_8_6/project",
+      "cost": 0.0,
+      "tokens_input": 0,
+      "tokens_output": 0
+    },
+    {
+      "id": "ses_e704684dbffe8lpmrc3XDUJ4dd",
+      "marker_inherited": true,
+      "native_parent_id": null,
+      "directory": "/private/tmp/fm-flow-providers-h_ja_8_6/project",
+      "cost": 0.0,
+      "tokens_input": 0,
+      "tokens_output": 0
+    }
+  ],
+  "logs": [
+    "/tmp/flowmux-session-flow-opencode-product.log",
+    "/tmp/flowmux-session-flow-opencode-final-tests.log",
+    "/tmp/flowmux-session-flow-opencode-cli-regression.log",
+    "/tmp/flowmux-session-flow-opencode-state-regression.log",
+    "/tmp/flowmux-session-flow-opencode-native-regression.log",
+    "/tmp/flowmux-session-flow-opencode-clippy.log"
+  ],
+  "image": "session-flow-opencode-real.png",
+  "limitations": [
+    "native parent_id is null, so external lineage is not inferred",
+    "model generation not run",
+    "other OpenCode versions not validated"
+  ],
+  "contract_sources": [
+    "https://github.com/anomalyco/opencode/blob/v1.17.18/packages/opencode/specs/tui-plugins.md",
+    "https://github.com/anomalyco/opencode/blob/v1.17.18/packages/opencode/src/session/status.ts"
+  ]
+}
