@@ -57,7 +57,7 @@
     "clippy": "passed",
     "build": "passed"
   },
-  "after_real_gui": "pending: CGSSessionScreenIsLocked=Yes, CUA cgWindowNotFound",
+  "after_real_gui": "Pending: screen lock cleared and fresh Claude source is Ready, but CUA pointer calls return noWindowsAvailable after rebind, Raise, and runtime reset. Screenshot and Escape key work. No fork action was sent in the rebuilt app.",
   "ci": {
     "test": 41156800646,
     "sanitizers": 41156803235,
@@ -66,5 +66,13 @@
   "user_app": {
     "pid": 72789,
     "preserved": true
+  },
+  "after_test_app": {
+    "pid": 95986,
+    "workspace": "b035961e-31b0-4752-b246-90ee65fe1a82",
+    "source_id": "21fcba07-00f6-4ea1-9749-24b6cbde520d",
+    "source_surface": "c3d49e87-7f6a-4ac1-bca9-173885599a7d",
+    "operations": 0,
+    "edges": 0
   }
 }

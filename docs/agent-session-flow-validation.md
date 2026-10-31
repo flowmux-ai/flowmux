@@ -413,3 +413,5 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 회귀 시험은 수정 전 `Native session record is not yet available`로 실패했고 수정 후 세션 경로 시험 8개가 통과했다. Native Session Flow, clippy `-D warnings`, GUI build도 통과했다. 로그는 `/tmp/flowmux-session-flow-claude-deferred-{before,after,native,clippy,build}.log`다. 새 빌드의 격리 앱 PID `95986`을 준비했지만 화면이 다시 잠겼다(`CGSSessionScreenIsLocked=Yes`, CUA `cgWindowNotFound`). 따라서 수정 후 실제 Claude 그래프 표시·pointer focus는 아직 통과로 기록하지 않는다.
 
 제품 `2b80463a`의 최신 [Test 41156800646](https://github.com/flowmux-ai/flowmux/actions/runs/41156800646), [Sanitizers 41156803235](https://github.com/flowmux-ai/flowmux/actions/runs/41156803235)는 진행 중이다. 이전 `4ab3e76e` 실행도 최종 결과를 따로 확인한다. 사용자 앱 PID `72789`는 종료·재시작하지 않았다.
+
+화면 잠금 해제 후 PID `95986`의 실제 Claude source `21fcba07-00f6-4ea1-9749-24b6cbde520d`가 Ready인 화면을 확인했다. CUA의 screenshot과 Escape는 동작하지만 pointer 호출은 `noWindowsAvailable`로 거절됐다. App 재선택, 창 Raise, CUA runtime reset에서도 동일했다. 제품 오류로 단정하지 않으며, 이 앱에서는 fork 입력 자체가 전달되지 않아 operation 0·edge 0이다. 이전 앱에서 재현한 Claude 지연 저장 오류와 수정 후 화면 검증의 도구 차단을 구분한다.
