@@ -662,14 +662,17 @@
     "scope": "Visually inspected GTK renderer texture of the prototype three-node fixture; not a desktop or hardware input capture."
   },
   "remote_ci": {
-    "status": "in_progress",
+    "status": "completed",
     "head_sha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
-    "checked_at": "2026-10-31T05:15:38.832433+00:00",
+    "checked_at": "2026-10-31T05:50:35.543525+00:00",
     "runs": [
       {
         "name": "Test",
         "id": 41171842039,
-        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039"
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039",
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "session-flow-ci-461a4f9b.json"
       },
       {
         "name": "Sanitizers",
@@ -688,12 +691,14 @@
         "evidence": "session-flow-license-461a4f9b.json"
       }
     ],
-    "scope": "Fresh workflows target the retained GSK renderer and hook selection readiness test fix; final conclusions pending.",
+    "scope": "All final automated workflows passed for retained GSK renderer 461a4f9b and hook readiness fix 76680062; physical input and manual accessibility are separate.",
     "macos_job": {
       "status": "completed",
       "conclusion": "success",
       "evidence": "session-flow-macos-gate-461a4f9b.json"
-    }
+    },
+    "conclusion": "success",
+    "aggregate_evidence": "session-flow-ci-461a4f9b.json"
   },
   "final_frame_evidence": "session-flow-gsk-final-frames-461a4f9b.json"
 }

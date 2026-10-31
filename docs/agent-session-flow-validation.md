@@ -10,7 +10,7 @@
 | 그래프 성능 | 1,000노드·20계보 release/GL 내부 frame p95 17.54–17.83ms, 5회 모두 ≤33ms. 측정 전후 데스크톱 접근 확인. Hardware 입력·compositor 지연 측정은 아님. [전체 수치](design-assets/session-flow-gsk-final-frames-461a4f9b.json) |
 | macOS CI | Test `41171842039`의 macOS job 성공, artifact의 46개 phase 모두 passed/exit 0. [전체 phase와 로그 hash](design-assets/session-flow-macos-gate-461a4f9b.json) |
 | Sanitizers·License audit | 같은 제품 commit에 대한 전체 성공. [Sanitizers](design-assets/session-flow-sanitizers-461a4f9b.json), [License audit](design-assets/session-flow-license-461a4f9b.json) |
-| Linux CI·커버리지 | [Test 41171842039](https://github.com/flowmux-ai/flowmux/actions/runs/41171842039)의 Linux job 실행 중. 이전 renderer의 coverage 수치를 현재 결과로 재사용하지 않음 |
+| Linux CI·커버리지 | Test `41171842039` 전체 성공, Linux 12개 phase 모두 passed/exit 0. Lines **86.9498%**, regions **86.8873%**, functions **85.8756%**로 기준 79/78/78% 충족. [최종 전체 gate·커버리지](design-assets/session-flow-ci-461a4f9b.json) |
 | 남은 화면 확인 | 메뉴의 물리 포인터 선택, held-button drag·트랙패드, 수동 접근성. 새 release 앱에서 사용자 입력이 감지된 이후의 조작 결과는 확인 대기. [실제 화면과 판정 경계](design-assets/session-flow-gsk-live-ui-461a4f9b.json) |
 
 이전 commit의 성공·실패와 수정 과정은 아래 날짜별 실행 기록으로 보존한다. 현재 완료 판단에는 위 제품 commit의 증거를 사용한다.
@@ -769,3 +769,12 @@ CUA의 실제 sidebar 클릭으로 상단 cosmic 그래프가 열리고 3개 nat
 Sanitizers `41171844578`의 최종 전체 결론은 **success**다. Linux headless·native Lottie·GUI ASan/LSan과 ThorVG ASan/UBSan/LSan의 job/step 결과 및 전체 로그를 확인했다. [최종 결론·로그 hash·검사 범위](design-assets/session-flow-sanitizers-461a4f9b.json). Test `41171842039`의 macOS/Linux gate와 coverage는 별도 진행 중이다.
 
 Test `41171842039`의 macOS job `124451273819`는 최종 **success**다. Artifact `13031716869`를 내려받아 46개 phase가 모두 passed/exit 0임을 확인했다. Session Flow native marker와 observed-identity 회귀 2개도 실제 로그에서 통과했다. [전체 phase·job 결론·로그 hash](design-assets/session-flow-macos-gate-461a4f9b.json). 최종 Linux 커버리지와 전체 Test 결론은 아직 진행 중이다.
+
+
+## 2026-10-31 최종 자동 검증 마감 — 제품 `461a4f9b`
+
+Test `41171842039`, Sanitizers `41171844578`, License audit `41171847178`은 모두 최종 **success**이며 동일 제품 commit을 검증했다. Linux artifact `13031767987`의 12개 phase, macOS artifact `13031716869`의 46개 phase 모두 passed/exit 0이다. 최종 LLVM coverage는 lines **86.9498%** (103,605/119,155), regions **86.8873%** (171,466/197,343), functions **85.8756%** (9,430/10,981)이며 기준 79/78/78%를 모두 충족한다. 이후 HEAD까지 제품·시험·workflow 코드는 동일하고 검증 문서만 추가했다.
+
+[최종 workflow·단계별 결과·coverage·파일 및 로그 hash](design-assets/session-flow-ci-461a4f9b.json). 별도의 release/GL 성능 측정은 내부 frame p95 17.54–17.83ms로 목표 ≤33ms를 통과했다. 이 기록으로 자동 검증을 마감하며 추가 CI를 시작하지 않는다.
+
+전체 수용의 미확인 항목은 실제 메뉴 포인터 선택, held-button drag·트랙패드, 수동 접근성이다. CUA drag는 실제 버튼 유지 입력을 증명하지 못했고, 새 release 앱에서 사용자 입력 감지 후 나타난 조작 결과와 자식 pane이 닫힌 경위는 응답 대기 상태다. 해당 기록을 성공으로 바꾸지 않으며 검증 앱을 유지한다. 구현·자동 검증 완료와 이 수동 수용 대기는 구분한다.

@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 설계
 
-상태: 설계 확정, `feat/session-flow`에 구현 및 단계별 자동 회귀·coverage 검증 진행. 최신 CI와 남은 실기·도구별 검증 경계는 마지막 절과 검증 문서에 명시한다. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
+상태: 설계 확정, `feat/session-flow`에 구현. 제품 `461a4f9b`의 Test·Sanitizers·License audit 및 coverage 기준을 모두 통과했다. [최종 자동 검증](design-assets/session-flow-ci-461a4f9b.json). 실제 메뉴 포인터·held-button drag/트랙패드·수동 접근성은 미확인으로 남으며 전체 수용 완료와 구분한다. 작성일: 2026-10-31. 코드 검토 기준: `01c3d3b96d9bea1f2a8d7eeeb7705c257f9f8fd7`.
 
 에이전트 화면의 **Fork session**은 그 pane을 좌우로 분할하고 오른쪽에 새 분기 세션을 연다. Workspace의 **Session Flow**는 현재 열린 세션들이 속한 전체 fork 계보를 상단 약 1/3의 캔버스에 표시한다. 다른 원본에서 분기된 세션을 resume하면 별도의 그래프가 추가된다. 노드를 선택하면 아래 pane 영역에서 해당 세션을 열고, 재개할 수 없는 노드는 관계만 표시한다.
 

@@ -1,0 +1,727 @@
+{
+  "checked_at": "2026-10-31T05:50:35.543525+00:00",
+  "product_commit": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+  "test": {
+    "conclusion": "success",
+    "headSha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+    "jobs": [
+      {
+        "completedAt": "2026-10-31T05:15:34Z",
+        "conclusion": "success",
+        "databaseId": 124451273667,
+        "name": "editor web",
+        "startedAt": "2026-10-31T05:15:16Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T05:15:18Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T05:15:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:22Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T05:15:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:24Z",
+            "conclusion": "success",
+            "name": "Install Node.js",
+            "number": 3,
+            "startedAt": "2026-10-31T05:15:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:27Z",
+            "conclusion": "success",
+            "name": "Install dependencies",
+            "number": 4,
+            "startedAt": "2026-10-31T05:15:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:31Z",
+            "conclusion": "success",
+            "name": "Test and rebuild editor assets",
+            "number": 5,
+            "startedAt": "2026-10-31T05:15:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:31Z",
+            "conclusion": "success",
+            "name": "Check committed editor assets",
+            "number": 6,
+            "startedAt": "2026-10-31T05:15:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:31Z",
+            "conclusion": "success",
+            "name": "Post Install Node.js",
+            "number": 11,
+            "startedAt": "2026-10-31T05:15:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:31Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 12,
+            "startedAt": "2026-10-31T05:15:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:31Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "startedAt": "2026-10-31T05:15:31Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039/job/124451273667"
+      },
+      {
+        "completedAt": "2026-10-31T05:16:53Z",
+        "conclusion": "success",
+        "databaseId": 124451273748,
+        "name": "headless stress probes",
+        "startedAt": "2026-10-31T05:15:16Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T05:15:24Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T05:15:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:28Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T05:15:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:37Z",
+            "conclusion": "success",
+            "name": "Install Rust",
+            "number": 3,
+            "startedAt": "2026-10-31T05:15:28Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:16:51Z",
+            "conclusion": "success",
+            "name": "Run the separately ignored stress probes",
+            "number": 4,
+            "startedAt": "2026-10-31T05:15:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:16:52Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 8,
+            "startedAt": "2026-10-31T05:16:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:16:52Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 9,
+            "startedAt": "2026-10-31T05:16:52Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039/job/124451273748"
+      },
+      {
+        "completedAt": "2026-10-31T05:49:34Z",
+        "conclusion": "success",
+        "databaseId": 124451273794,
+        "name": "cargo test and coverage",
+        "startedAt": "2026-10-31T05:15:16Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T05:15:19Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T05:15:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:23Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T05:15:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:35Z",
+            "conclusion": "success",
+            "name": "Check Rust toolchain and formatting",
+            "number": 3,
+            "startedAt": "2026-10-31T05:15:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:16:11Z",
+            "conclusion": "success",
+            "name": "Install coverage tool",
+            "number": 4,
+            "startedAt": "2026-10-31T05:15:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:16:11Z",
+            "conclusion": "success",
+            "name": "Install Node.js for the OpenCode hook integration test",
+            "number": 5,
+            "startedAt": "2026-10-31T05:16:11Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:30Z",
+            "conclusion": "success",
+            "name": "Install system dependencies",
+            "number": 6,
+            "startedAt": "2026-10-31T05:16:11Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:51Z",
+            "conclusion": "success",
+            "name": "Install ThorVG (image viewer backend, all loaders + C API)",
+            "number": 7,
+            "startedAt": "2026-10-31T05:17:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:51Z",
+            "conclusion": "success",
+            "name": "Allow WebKit namespaces for the test process",
+            "number": 8,
+            "startedAt": "2026-10-31T05:17:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:49:28Z",
+            "conclusion": "success",
+            "name": "Run Linux tests and coverage (same script as local)",
+            "number": 9,
+            "startedAt": "2026-10-31T05:17:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:49:31Z",
+            "conclusion": "success",
+            "name": "Upload test and coverage evidence",
+            "number": 10,
+            "startedAt": "2026-10-31T05:49:28Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:49:31Z",
+            "conclusion": "success",
+            "name": "Post Install Node.js for the OpenCode hook integration test",
+            "number": 19,
+            "startedAt": "2026-10-31T05:49:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:49:31Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 20,
+            "startedAt": "2026-10-31T05:49:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:49:31Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 21,
+            "startedAt": "2026-10-31T05:49:31Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039/job/124451273794"
+      },
+      {
+        "completedAt": "2026-10-31T05:35:59Z",
+        "conclusion": "success",
+        "databaseId": 124451273819,
+        "name": "macOS build and native smoke",
+        "startedAt": "2026-10-31T05:15:17Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-31T05:15:19Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-31T05:15:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:25Z",
+            "conclusion": "success",
+            "name": "Checkout",
+            "number": 2,
+            "startedAt": "2026-10-31T05:15:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:15:38Z",
+            "conclusion": "success",
+            "name": "Check Rust toolchain and formatting",
+            "number": 3,
+            "startedAt": "2026-10-31T05:15:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:02Z",
+            "conclusion": "success",
+            "name": "Install native dependencies",
+            "number": 4,
+            "startedAt": "2026-10-31T05:15:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:18Z",
+            "conclusion": "success",
+            "name": "Install compatible GTK and libadwaita for native popup checks",
+            "number": 5,
+            "startedAt": "2026-10-31T05:17:02Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:17:48Z",
+            "conclusion": "success",
+            "name": "Install compatible ThorVG for native image and Lottie checks",
+            "number": 6,
+            "startedAt": "2026-10-31T05:17:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:35:51Z",
+            "conclusion": "success",
+            "name": "Run macOS tests and native smoke (same script as local)",
+            "number": 7,
+            "startedAt": "2026-10-31T05:17:48Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:35:53Z",
+            "conclusion": "success",
+            "name": "Upload native smoke evidence",
+            "number": 8,
+            "startedAt": "2026-10-31T05:35:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:35:54Z",
+            "conclusion": "success",
+            "name": "Post Checkout",
+            "number": 16,
+            "startedAt": "2026-10-31T05:35:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-31T05:35:56Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-31T05:35:54Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039/job/124451273819"
+      }
+    ],
+    "name": "Test",
+    "status": "completed",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039"
+  },
+  "linux_artifact": {
+    "id": 13031767987,
+    "name": "linux-test-evidence",
+    "phase_count": 12
+  },
+  "linux_phases": [
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/agent-runner-tests.json",
+      "sha256": "e8c6dd9ef35e107ce3dac45ffc1b0b0e2913ec8dc8576a0115f9ec93df1e8061",
+      "result": {
+        "phase": "agent-runner-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-agent-unit-runner.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 13460,
+        "exit_code": 0,
+        "elapsed_seconds": 0.064
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/agent-team-tests.json",
+      "sha256": "b08e53a17812d44b6c0413f4c72ea823e0e1463ed8b56d469a3281f5ff9c800e",
+      "result": {
+        "phase": "agent-team-tests",
+        "command": [
+          "python3",
+          "scripts/test-agent-team.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 13462,
+        "exit_code": 0,
+        "elapsed_seconds": 17.893
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/benchmark-agent-tests.json",
+      "sha256": "22d1bdcea27223d91faa31020dbb4e3db22102995ffdc47d3dc9a6fc4b68fe7c",
+      "result": {
+        "phase": "benchmark-agent-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/benchmark-browser-agent.py",
+          "self-test"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 13665,
+        "exit_code": 0,
+        "elapsed_seconds": 0.114
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/ci-runner-tests.json",
+      "sha256": "a7c4b64a6344385df27d90cd2f554adf6a0c887636ecd95ba48ffc6b38ae00e5",
+      "result": {
+        "phase": "ci-runner-tests",
+        "command": [
+          "python3",
+          "scripts/test-ci-runner.py"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 7407,
+        "exit_code": 0,
+        "elapsed_seconds": 125.23
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/coverage-html.json",
+      "sha256": "ca9567d788be18f9fe9ac309a564646f6bf4925a44565d5fb6a0eeef60143ce3",
+      "result": {
+        "phase": "coverage-html",
+        "command": [
+          "cargo",
+          "llvm-cov",
+          "report",
+          "--html"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 69103,
+        "exit_code": 0,
+        "elapsed_seconds": 65.767
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/coverage-json.json",
+      "sha256": "4137c48e39c184a4f28f43293b0fbe6a9ce7b42f1571f1f5da4bd395534da588",
+      "result": {
+        "phase": "coverage-json",
+        "command": [
+          "cargo",
+          "llvm-cov",
+          "report",
+          "--json",
+          "--summary-only",
+          "--output-path",
+          "/home/runner/work/flowmux/flowmux/target/llvm-cov/summary.json"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 69046,
+        "exit_code": 0,
+        "elapsed_seconds": 64.158
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/coverage-thresholds.json",
+      "sha256": "ea1ebac7a2337f764a4383c4e5a258ca84e142af53ddfc29352f2c690ee5feef",
+      "result": {
+        "phase": "coverage-thresholds",
+        "command": [
+          "cargo",
+          "llvm-cov",
+          "report",
+          "--fail-under-lines",
+          "79",
+          "--fail-under-regions",
+          "78",
+          "--fail-under-functions",
+          "78"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 69162,
+        "exit_code": 0,
+        "elapsed_seconds": 77.393
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/coverage.json",
+      "sha256": "8639d1653e8d999effad82b1620035eacb7f48b9a6726c4aa53ba1185a6b720a",
+      "result": {
+        "phase": "coverage",
+        "command": [
+          "xvfb-run",
+          "-a",
+          "-s",
+          "-screen 0 1280x1024x24",
+          "dbus-run-session",
+          "--",
+          "env",
+          "FLOWMUX_TEST_X11_LOCKS=1",
+          "bash",
+          "scripts/test-coverage.sh",
+          "--",
+          "--nocapture"
+        ],
+        "timeout_seconds": 1800.0,
+        "status": "passed",
+        "pid": 13694,
+        "exit_code": 0,
+        "elapsed_seconds": 1540.927
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/format.json",
+      "sha256": "5c8fa5e0b4893291c839487d93e7ada770806c77938a7cb6bed4973eeca417f9",
+      "result": {
+        "phase": "format",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 13670,
+        "exit_code": 0,
+        "elapsed_seconds": 2.468
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/installer-routing.json",
+      "sha256": "a5b7e76cdedf5e89c19ee2b92cf5974809af698d563f450a4ff36b1aef301b62",
+      "result": {
+        "phase": "installer-routing",
+        "command": [
+          "python3",
+          "scripts/test-install.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 13211,
+        "exit_code": 0,
+        "elapsed_seconds": 1.266
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/stability-harness-tests.json",
+      "sha256": "f31b28356063e3d66b4c314744cb1fba498d1f89085ed60fa78bea85626ff43a",
+      "result": {
+        "phase": "stability-harness-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-macos-stability.py",
+          "--self-check"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 13668,
+        "exit_code": 0,
+        "elapsed_seconds": 0.064
+      }
+    },
+    {
+      "file": "home/runner/work/flowmux/flowmux/target/ci/linux/thorvg-installer.json",
+      "sha256": "c8a4d65b160cbd9710c8e0637812803b313f083e8def6ee8fa5306c33e55b2e2",
+      "result": {
+        "phase": "thorvg-installer",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-thorvg-macos.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 13362,
+        "exit_code": 0,
+        "elapsed_seconds": 0.865
+      }
+    }
+  ],
+  "linux_log_sha256": {
+    "tmp/fm-gui-pbsq4qk2/polling-delay.log": "26707e8b106cfebee1023b7dce4a5dd42c52d30186d2a1a28143f812b6a5ca3f",
+    "tmp/fm-gui-aq0uzilv/editor-renderer.log": "5797a45129bf24585cf31f747839e697a103f64fc21c5cd54cf08de77000461e",
+    "tmp/fm-gui-4z0xygbq/editor-io.log": "27ad82146663ee1400377bc86dbe89f0bdf315a4d40507caacf9a6d58ffe032c",
+    "tmp/fm-gui-5a1c2731/idle-stability.log": "27000b258f9dacd7a37797d08a1c7ea65c15ea51c71ec639a8bd6a6957749216",
+    "home/runner/work/flowmux/flowmux/target/ci/linux/run.log": "700140c20dcd0aef686b8204d74b83abab440471a44773bedf1f885a3206f9f7"
+  },
+  "coverage": {
+    "file": "home/runner/work/flowmux/flowmux/target/llvm-cov/summary.json",
+    "sha256": "bfeb235cf107ec421492b9e6efa78977dec85b43d871ca00175153e3cc51206f",
+    "totals": {
+      "branches": {
+        "count": 0,
+        "covered": 0,
+        "notcovered": 0,
+        "percent": 0
+      },
+      "functions": {
+        "count": 10981,
+        "covered": 9430,
+        "percent": 85.8756033148165
+      },
+      "instantiations": {
+        "count": 29247,
+        "covered": 15032,
+        "percent": 51.39672445037098
+      },
+      "lines": {
+        "count": 119155,
+        "covered": 103605,
+        "percent": 86.94977130628173
+      },
+      "mcdc": {
+        "count": 0,
+        "covered": 0,
+        "notcovered": 0,
+        "percent": 0
+      },
+      "regions": {
+        "count": 197343,
+        "covered": 171466,
+        "notcovered": 25877,
+        "percent": 86.88729775061694
+      }
+    },
+    "thresholds": {
+      "lines": 79,
+      "regions": 78,
+      "functions": 78
+    },
+    "all_thresholds_passed": true,
+    "changed_renderer_files": [
+      {
+        "file": "crates/flowmux/src/ui/session_flow.rs",
+        "summary": {
+          "branches": {
+            "count": 0,
+            "covered": 0,
+            "notcovered": 0,
+            "percent": 0.0
+          },
+          "mcdc": {
+            "count": 0,
+            "covered": 0,
+            "notcovered": 0,
+            "percent": 0.0
+          },
+          "functions": {
+            "count": 70,
+            "covered": 56,
+            "percent": 80.0
+          },
+          "instantiations": {
+            "count": 188,
+            "covered": 64,
+            "percent": 34.04255319148936
+          },
+          "lines": {
+            "count": 931,
+            "covered": 781,
+            "percent": 83.88829215896885
+          },
+          "regions": {
+            "count": 1629,
+            "covered": 1370,
+            "notcovered": 259,
+            "percent": 84.10067526089625
+          }
+        }
+      },
+      {
+        "file": "crates/flowmux/src/ui/session_flow/canvas.rs",
+        "summary": {
+          "branches": {
+            "count": 0,
+            "covered": 0,
+            "notcovered": 0,
+            "percent": 0.0
+          },
+          "mcdc": {
+            "count": 0,
+            "covered": 0,
+            "notcovered": 0,
+            "percent": 0.0
+          },
+          "functions": {
+            "count": 11,
+            "covered": 11,
+            "percent": 100.0
+          },
+          "instantiations": {
+            "count": 29,
+            "covered": 12,
+            "percent": 41.37931034482759
+          },
+          "lines": {
+            "count": 203,
+            "covered": 195,
+            "percent": 96.05911330049261
+          },
+          "regions": {
+            "count": 435,
+            "covered": 424,
+            "notcovered": 11,
+            "percent": 97.47126436781608
+          }
+        }
+      }
+    ]
+  },
+  "macos_evidence": "session-flow-macos-gate-461a4f9b.json",
+  "sanitizers_evidence": "session-flow-sanitizers-461a4f9b.json",
+  "license_evidence": "session-flow-license-461a4f9b.json",
+  "scope": "All final automated gates passed for this product commit. Physical menu selection, held-button drag/trackpad and manual accessibility remain unconfirmed; CI success does not imply those gates passed."
+}
