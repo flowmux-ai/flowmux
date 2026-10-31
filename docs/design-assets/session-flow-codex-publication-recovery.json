@@ -1,0 +1,326 @@
+{
+  "date": "2026-10-31",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "provider": "Codex 0.166.0",
+  "result": "passed",
+  "proof_scope": "Real native Codex fork, injected Flowmux publication failure, owned native GUI SIGKILL, actual production GUI restart and exact native writable rollout identities. Screen remained locked; no physical-input or rendered-screen claim.",
+  "authentication": "Disposable file credential with a deliberately invalid test key and loopback API base. No model request submitted. Existing user credential stores were not changed.",
+  "reproduction_before_fix": {
+    "root": "/tmp/fmscrash-8uk1lqx2",
+    "native_exit": 101,
+    "source_identified": true,
+    "child_native_id": "01a18ff5-c97f-76d0-9bfd-2e35d6cf3d8c",
+    "fork_parent_confirmed": true,
+    "saved_codex_binding_file_present": false,
+    "failure": "Native child and saved surface identity before publication timed out; source had already been identified through the writable-rollout fallback.",
+    "log": {
+      "path": "/tmp/fmscrash-8uk1lqx2/native.log",
+      "sha256": "9c752c8e8e0161e297c72d8802c712ff1b8c050154db13771cc624bd762cabdb"
+    }
+  },
+  "after_fix": {
+    "status": "passed",
+    "checkpoint": {
+      "checkpoint": "native child and saved surface exist; operation pending; fork unpublished",
+      "child": {
+        "home": "/private/tmp/fmscrash-758zuek9/codex",
+        "id": "01a18ffd-518a-7591-87f6-f0849a7c02c9",
+        "provider": "codex"
+      },
+      "child_pty_pid": 29890,
+      "config_home": "/tmp/fm-native-VdRztR/config",
+      "data_home": "/tmp/fm-native-VdRztR/data",
+      "database": "/tmp/fm-native-VdRztR/data/flowmux/session-flow.sqlite",
+      "operation": {
+        "kind": "Fork",
+        "owner": "eedfb1a6-248f-4ff3-bed5-2d933e598159",
+        "owner_pid": 29525,
+        "request": "48030608-1128-44e3-ba78-ab41669d1fb2",
+        "source": {
+          "home": "/private/tmp/fmscrash-758zuek9/codex",
+          "id": "01a18ddc-a51f-7472-ab63-045abb779243",
+          "provider": "codex"
+        },
+        "target_surface": "0a4bc498-204b-4845-b12a-b447aaf92e1b"
+      },
+      "pid": 29525,
+      "runtime_dir": "/tmp/fm-native-VdRztR/run",
+      "source": {
+        "home": "/private/tmp/fmscrash-758zuek9/codex",
+        "id": "01a18ddc-a51f-7472-ab63-045abb779243",
+        "provider": "codex"
+      },
+      "state_home": "/tmp/fm-native-VdRztR/state",
+      "trigger": "session_flow_test_publication_failure"
+    },
+    "native_exit": "SIGKILL after verified checkpoint",
+    "old_descendants_exited": [
+      29526,
+      29527,
+      29540,
+      29890,
+      29892,
+      29895,
+      29984,
+      29985,
+      29986
+    ],
+    "restart_pid": 30374,
+    "restart_bundle": "/tmp/fmscrash-758zuek9/Flowmux Session Flow Publication Recovery.app",
+    "operations": [
+      [
+        "48030608-1128-44e3-ba78-ab41669d1fb2",
+        "{\"request\":\"48030608-1128-44e3-ba78-ab41669d1fb2\",\"owner\":\"eedfb1a6-248f-4ff3-bed5-2d933e598159\",\"owner_pid\":29525,\"source\":{\"provider\":\"codex\",\"home\":\"/private/tmp/fmscrash-758zuek9/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"},\"kind\":\"Fork\",\"target_surface\":\"0a4bc498-204b-4845-b12a-b447aaf92e1b\"}",
+        "complete",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmscrash-758zuek9/codex\",\"id\":\"01a18ffd-518a-7591-87f6-f0849a7c02c9\"}"
+      ]
+    ],
+    "edges": [
+      [
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmscrash-758zuek9/codex\",\"id\":\"01a18ddc-a51f-7472-ab63-045abb779243\"}",
+        "{\"provider\":\"codex\",\"home\":\"/private/tmp/fmscrash-758zuek9/codex\",\"id\":\"01a18ffd-518a-7591-87f6-f0849a7c02c9\"}"
+      ]
+    ],
+    "bindings": [
+      {
+        "key": {
+          "provider": "codex",
+          "home": "/private/tmp/fmscrash-758zuek9/codex",
+          "id": "01a18ddc-a51f-7472-ab63-045abb779243"
+        },
+        "binding": {
+          "owner": "eedfb1a6-248f-4ff3-bed5-2d933e598159",
+          "pid": 29526,
+          "started": 1793417103773395,
+          "workspace": "4c46723b-eadb-4905-b8ef-b692c5e55ffb",
+          "pane": "a18bb5c0-c007-41bb-9fad-96c2d04ba770",
+          "surface": "84b7fe64-f43b-49a7-8132-d4540feac5d2",
+          "socket": "/tmp/fm-native-VdRztR/run/flowmux-29525.sock"
+        }
+      },
+      {
+        "key": {
+          "provider": "codex",
+          "home": "/private/tmp/fmscrash-758zuek9/codex",
+          "id": "01a18ffd-518a-7591-87f6-f0849a7c02c9"
+        },
+        "binding": {
+          "owner": "34e8f58d-c651-4384-98ac-b9a0ef36e0c6",
+          "pid": 30396,
+          "started": 1793417114920804,
+          "workspace": "4c46723b-eadb-4905-b8ef-b692c5e55ffb",
+          "pane": "77f152d1-ce20-41c1-bd23-f453c650be03",
+          "surface": "0a4bc498-204b-4845-b12a-b447aaf92e1b",
+          "socket": "/tmp/fm-native-VdRztR/run/flowmux-30374.sock"
+        }
+      },
+      {
+        "key": {
+          "provider": "codex",
+          "home": "/private/tmp/fmscrash-758zuek9/codex",
+          "id": "01a18ddc-a51f-7472-ab63-045abb779243"
+        },
+        "binding": {
+          "owner": "34e8f58d-c651-4384-98ac-b9a0ef36e0c6",
+          "pid": 30395,
+          "started": 1793417114911022,
+          "workspace": "4c46723b-eadb-4905-b8ef-b692c5e55ffb",
+          "pane": "a18bb5c0-c007-41bb-9fad-96c2d04ba770",
+          "surface": "84b7fe64-f43b-49a7-8132-d4540feac5d2",
+          "socket": "/tmp/fm-native-VdRztR/run/flowmux-30374.sock"
+        }
+      }
+    ],
+    "native_writers": {
+      "01a18ddc-a51f-7472-ab63-045abb779243": [
+        {
+          "pid": 30401,
+          "path": "/private/tmp/fmscrash-758zuek9/codex/sessions/2026/10/31/rollout-2026-10-31T02-30-10-01a18ddc-a51f-7472-ab63-045abb779243.jsonl",
+          "parent": null
+        }
+      ],
+      "01a18ffd-518a-7591-87f6-f0849a7c02c9": [
+        {
+          "pid": 30407,
+          "path": "/private/tmp/fmscrash-758zuek9/codex/sessions/2026/10/31/rollout-2026-10-31T12-25-05-01a18ffd-518a-7591-87f6-f0849a7c02c9.jsonl",
+          "parent": "01a18ddc-a51f-7472-ab63-045abb779243"
+        }
+      ]
+    },
+    "agents": [
+      {
+        "agent": "codex",
+        "attention": "idle",
+        "identity_source": "flowmux:screen",
+        "messaging": false,
+        "pane": "a18bb5c0-c007-41bb-9fad-96c2d04ba770",
+        "pending_waits": [],
+        "root": "/tmp/fm-native-VdRztR",
+        "session_name": null,
+        "status": "idle",
+        "status_evidence": {
+          "since": "2026-10-31T03:25:15.077214Z",
+          "source": "screen"
+        },
+        "status_text": "Response ended; outcome unconfirmed",
+        "tab": "84b7fe64-f43b-49a7-8132-d4540feac5d2",
+        "turn_outcome": "unknown",
+        "workspace": "project",
+        "workspace_id": "4c46723b-eadb-4905-b8ef-b692c5e55ffb"
+      },
+      {
+        "agent": "codex",
+        "attention": "idle",
+        "identity_source": "flowmux:screen",
+        "messaging": false,
+        "pane": "77f152d1-ce20-41c1-bd23-f453c650be03",
+        "pending_waits": [],
+        "root": "/tmp/fm-native-VdRztR",
+        "session_name": null,
+        "status": "idle",
+        "status_evidence": {
+          "since": "2026-10-31T03:25:15.627376Z",
+          "source": "program"
+        },
+        "status_text": "Idle",
+        "tab": "0a4bc498-204b-4845-b12a-b447aaf92e1b",
+        "turn_outcome": null,
+        "workspace": "project",
+        "workspace_id": "4c46723b-eadb-4905-b8ef-b692c5e55ffb"
+      }
+    ],
+    "tree": {
+      "tree": {
+        "workspaces": [
+          {
+            "id": "4c46723b-eadb-4905-b8ef-b692c5e55ffb",
+            "name": "project",
+            "root": "/tmp/fm-native-VdRztR",
+            "location": {
+              "type": "local",
+              "root_dir": "/tmp/fm-native-VdRztR"
+            },
+            "panes": [
+              {
+                "id": "a18bb5c0-c007-41bb-9fad-96c2d04ba770",
+                "tabs": [
+                  {
+                    "id": "84b7fe64-f43b-49a7-8132-d4540feac5d2",
+                    "title": "project",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "codex",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:screen",
+                      "status_evidence": {
+                        "source": "screen",
+                        "since": "2026-10-31T03:25:15.077214Z"
+                      },
+                      "turn_outcome": "unknown",
+                      "status_text": "Response ended; outcome unconfirmed",
+                      "custom_status": "Completed"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "77f152d1-ce20-41c1-bd23-f453c650be03",
+                "tabs": [
+                  {
+                    "id": "0a4bc498-204b-4845-b12a-b447aaf92e1b",
+                    "title": "project",
+                    "kind": "terminal",
+                    "active": true,
+                    "agent": {
+                      "name": "codex",
+                      "status": "idle",
+                      "activity": "idle",
+                      "source": "flowmux:screen",
+                      "status_evidence": {
+                        "source": "screen",
+                        "since": "2026-10-31T03:25:15.145968Z"
+                      },
+                      "turn_outcome": "unknown",
+                      "status_text": "Response ended; outcome unconfirmed",
+                      "custom_status": "Completed"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "native_rollout_count": 2,
+    "protected_pids": [
+      72789,
+      95986,
+      61360
+    ],
+    "limitations": "Screen locked. Native GTK callback, real Codex PTYs, writable native rollout handles and public IPC/state recovery evidence; not physical input or rendered screen proof. Test-only invalid API credential and loopback API base; no model request submitted."
+  },
+  "checks": {
+    "state_suite": {
+      "unit_passed": 83,
+      "integration_passed": 16,
+      "log": {
+        "path": "/tmp/flowmux-session-flow-observed-state-all.log",
+        "sha256": "34815750f39109ee20bac7c7a7870771f732d4a5a7022f2a9ee2ca37ff092835"
+      }
+    },
+    "conditional_record_final_tests": {
+      "passed": 2,
+      "log": {
+        "path": "/tmp/flowmux-session-flow-observed-state-final.log",
+        "sha256": "6fc73f932efc372e6a1d14e8c43506d0fe9de757b890ef26b77cdd05fb8c54d5"
+      }
+    },
+    "clippy_all_targets_native_smoke": {
+      "exit": 0,
+      "log": {
+        "path": "/tmp/flowmux-session-flow-observed-clippy.log",
+        "sha256": "df229b3203afedd33380dcb13a92ad37bde202496fd5bbf38165f9e2fe63d3e8"
+      }
+    },
+    "native_base": {
+      "exit": 0,
+      "log": {
+        "path": "/tmp/flowmux-session-flow-observed-native-base.log",
+        "sha256": "ad1deb22725c4114efa7eb1d41ed77ec754a1c71cf8ce127549bf57b217073ea"
+      }
+    },
+    "real_codex_three_generations": {
+      "exit": 0,
+      "child": "01a18ffc-6daf-76a1-b8b2-32fc5a6a110b",
+      "grandchild": "01a18ffc-82ad-7f81-aa35-aaab46ab0f3f",
+      "log": {
+        "path": "/tmp/fmscrash-4r3b4s_w/native-happy.log",
+        "sha256": "9ff132abb3c2fd31cb09a3d1b86c23ba727ec996d220e499fe4f535e643f9394"
+      }
+    },
+    "crash_driver": {
+      "exit": 0,
+      "source": {
+        "path": "/tmp/flowmux-session-flow-publication-recovery.py",
+        "sha256": "021cb3959ccfcc40d9846378068a601d667e2af04ed5980c4258974a2d63543a"
+      },
+      "verifier": {
+        "path": "/tmp/flowmux-session-flow-publication-verify.py",
+        "sha256": "5c99b89893272cbd9aa93332467827f13e3747d6bcc2499ecc05b46df3244bca"
+      },
+      "native_checkpoint_log": {
+        "path": "/tmp/fmscrash-758zuek9/native.log",
+        "sha256": "0efe143a3db664e43715a8a6d99ecd7193e441427ba5dbbbfe2169b47db1f519"
+      },
+      "restart_log": {
+        "path": "/tmp/fmscrash-758zuek9/restart.log",
+        "sha256": "4b193297dca9b6a2e1ec440134337a20d02a2262a59addd485fe1bd0a9ceb43c"
+      }
+    }
+  },
+  "earlier_validation_note": "A first post-fix driver used an incorrect predicate expecting native IDs in the agents response. That API omits them. A separate verifier confirmed native writable rollout handles; the corrected full driver then passed on a new isolated run recorded here.",
+  "ci": "New product CI pending; prior 4cff2a5d CI is not evidence for this change."
+}

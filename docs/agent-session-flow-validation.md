@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 Test·Sanitizers와 coverage 기준은 모두 통과했다. 제품 `4cff2a5d`의 Test·Sanitizers는 전체 성공했고 Linux/macOS phase 및 coverage 산출물까지 확인했다. 이후 렌더링 성능 실험은 이 CI 결과에 포함하지 않는다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 최신 제품 `54a44d89`는 Codex의 지연된 시작 hook을 보완한 프로세스 기반 ID를 재시작용 surface 기록에도 저장한다. 저장 직전 값 비교로 더 최신 hook·다른 도구 기록을 보존한다. 관계 publication을 실패시킨 실제 Codex fork 뒤 격리 GUI SIGKILL→재시작→동일 ID 복구, 정상 3세대 fork, 기본 native 회귀, 상태 저장소 시험 및 clippy를 로컬 통과했다. 이 수정의 새 CI는 아직 미완료이며 이전 제품 `4cff2a5d`의 Test·Sanitizers·coverage 성공과 구분한다. 화면 잠금으로 메뉴 좌표 클릭·hardware drag·접근성·잠금 해제 상태의 성능 수용은 미확인이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 이전 기준 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -209,7 +209,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
 | R12 | Codex·OpenCode 실제 ID 확인 후 publication 및 같은 ID resume. Claude 실제 새 ID와 첫 입력 전 live focus·종료 후 기록 없는 노드 비활성 검증; stale source·writer/PID 재사용 검증 | provider별 버전 범위는 아래 기록 참조; 외부 writer 원자적 배제 없음 |
 | R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
-| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 복구 시험; 실제 OpenCode 완료 fork 후 GUI SIGKILL → 새 프로세스 자동 resume → 동일 그래프 → 닫힌 child pointer resume 확인 | child 생성과 publication 사이 중단의 실제 provider E2E, 다른 provider crash 복구, 미확인 작업 수동 정리 UI는 미완료 |
+| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 복구 시험; OpenCode 완료 fork 후 GUI crash 복구; Codex child 생성 후 publication 실패 상태에서 GUI SIGKILL → 새 프로세스의 동일 ID·surface 복원과 관계/작업 재조정, 중복 native writer 없음 확인 | Codex 복구 시험의 실제 화면 조작은 잠금으로 미검증. 다른 provider의 publication 중단 복구와 미확인 작업 수동 정리 UI는 미완료 |
 
 주요 소스: [모델과 모델 시험](../crates/flowmux-core/src/session_flow.rs), [저장·복구와 시험](../crates/flowmux-state/src/session_flow.rs), [canvas와 입력 시험](../crates/flowmux/src/ui/session_flow.rs), [native orchestration과 실제 Codex harness](../crates/flowmux/src/ui/window/session_flow.rs). 실제 실행 결과와 commit별 CI 범위는 아래 기록을 따른다. 이 표의 미확인 항목을 기존 baseline 성공으로 대체하지 않는다.
 
@@ -600,3 +600,21 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 해당 보완은 all-targets/native-smoke clippy `-D warnings` 및 격리된 debug/GL native 시험을 통과했다. 명시적 Yes/No와 누락 필드 해석 검사, 5회 측정, 기존 Session Flow 회귀 marker와 exit 0을 확인했고 생성된 보고서의 시작·종료 잠금 값은 모두 `true`였다. 이 실행은 잠금 정보 수집의 검증이며 release 성능 통과가 아니다. 보고서와 로그 hash는 위 실험 기록의 `context_probe_validation`에 포함한다.
 
 다음 수용 검증은 잠금 해제 후 **원복된 기준 코드**로 release/GL 5회 측정을 먼저 반복하고, 실제 마우스·trackpad pan/drag와 메뉴 좌표 클릭 및 접근성을 별도로 확인하는 것이다. 사용자의 잠금 해제 응답은 아직 없으며, 자동 입력이나 내부 신호 성공으로 해당 항목을 완료 처리하지 않는다.
+
+## 2026-10-31 Codex publication 실패와 재시작 복구
+
+제품 `54a44d89`는 시작 hook이 지연된 Codex 세션을 그래프에서는 식별하면서도 재시작용 surface 기록에는 저장하지 않던 누락을 수정했다. 수정 전 격리 시험에서는 원본 ID 식별과 native child 생성·명시적 parent metadata가 확인됐지만 `agent-sessions/codex.json`이 없어서 checkpoint가 실패했다. 프로세스 기반 ID 관측은 유지하고, 기존 파일 잠금 안에서 관측 전 값과 비교한 뒤 같은 provider 기록만 원자적으로 저장한다. 더 최신 hook·다른 provider·손상 파일을 보존하며 반복 관측은 불필요한 파일 갱신을 하지 않는다.
+
+실제 Codex 0.166.0을 별도 `/tmp` 프로필에서 실행했다. Native 대화 fixture를 복사해 사용했고, 의도적으로 유효하지 않은 테스트 API 자격 정보와 loopback API base를 사용했다. 모델 요청을 보내지 않았으며 모델 응답이나 실제 인증 성공을 검증한 시험은 아니다. 사용자 인증 저장소와 실행 중인 원본 앱을 변경하지 않았다.
+
+1. 테스트 전용 SQLite trigger가 Flowmux `forks` publication을 실패시킨다. Native provider 저장소에는 trigger나 장애를 삽입하지 않는다.
+2. 실제 fork 메뉴 callback으로 자식을 만들고 native parent·saved surface ID가 존재하면서 operation은 pending, edge는 미공개인 checkpoint를 확인한다. 이때 workspace 상태를 저장한다.
+3. 외부 driver가 자신이 시작한 native GUI PID `29525`만 SIGKILL한다. 그 자손이 모두 종료된 뒤 테스트 DB의 trigger를 제거하고 제품 GUI를 새 PID `30374`로 시작한다.
+4. 새 GUI가 원본과 자식을 같은 surface에 resume한다. 기존 request 하나가 complete로 바뀌고 정확한 parent→child edge 하나가 복원된다. 새 fork 요청은 생기지 않는다.
+5. 새 native Codex writer PID `30401`, `30407`이 각각 원본과 자식 rollout을 쓰기 모드로 연 것을 확인했다. 각 ID의 writer는 하나이며 native rollout은 원본·자식 두 개 그대로다. Public IPC tree의 terminal surface 두 개도 저장된 binding과 일치한다.
+
+원본은 `01a18ddc-a51f-7472-ab63-045abb779243`, 자식은 `01a18ffd-518a-7591-87f6-f0849a7c02c9`다. `FLOWMUX_SESSION_FLOW_CRASH_REPORT=/tmp/<new-report>.json`을 기존 opt-in Codex native 시험에 추가하면 checkpoint 모드를 실행한다. 이 모드는 테스트 executable에만 포함되며, 보고서 작성 후 외부 driver의 종료를 최대 60초 기다리고 미종료 시 실패한다. 강제 종료는 harness 자체가 수행하지 않는다. 재시작 전 해당 격리 DB의 `session_flow_test_publication_failure` trigger 제거가 필요하다.
+
+상태 저장소 시험 83개와 integration 16개, 최종 conditional-record 시험 2개, all-targets/native-smoke clippy, 기본 Session Flow native 회귀를 통과했다. 별도 정상 Codex 시험에서도 fork→같은 ID resume→workspace 간 기존 tab focus→재fork의 3세대 관계와 원본 widget/PID 보존을 통과했다. 초기 driver는 `agents` 응답에 native ID가 있다고 잘못 가정했으므로 그 후반부 결과를 성공으로 쓰지 않았다. 실제 writable rollout을 확인하도록 고친 전체 driver를 새 격리 환경에서 재실행해 exit 0을 확인했다.
+
+[전후 증거·실제 ID·프로세스·파일·로그 hash](design-assets/session-flow-codex-publication-recovery.json). 잠긴 화면에서 실행했으므로 렌더링된 최종 화면·물리 입력·접근성을 통과했다고 주장하지 않는다. 기존 사용자 PID 72789와 보존된 검증 앱 PID 95986·61360은 계속 유지했다. `4cff2a5d`의 이전 CI는 이번 제품 수정의 최종 CI 증거가 아니다.
