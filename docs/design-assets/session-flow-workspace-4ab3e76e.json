@@ -1,0 +1,51 @@
+{
+  "product_commit": "4ab3e76e",
+  "date": "2026-10-31",
+  "isolation": {
+    "root": "/tmp/fmsws-yqkc7wpk",
+    "bundle": "/tmp/fmsws-yqkc7wpk/Flowmux Session Flow Workspace.app",
+    "pid": 82242,
+    "socket": "/tmp/fmsws-yqkc7wpk/run/flowmux-82242.sock",
+    "cli": "/tmp/fmsws-yqkc7wpk/Flowmux Session Flow Workspace.app/Contents/MacOS/flowmuxctl"
+  },
+  "reproduction_before": {
+    "product": "06425a31",
+    "visible_workspace": "e4b85504-7128-4930-83c6-972a7148877f",
+    "stored_active_workspace": "c34e3333-3ed3-48a1-a6b7-e5ea6e9bd6c6",
+    "wrong_previous_flow_remained": true,
+    "test_log": "/tmp/flowmux-session-flow-workspace-before.log",
+    "test_failure": "new workspace panes must match the authoritative active workspace"
+  },
+  "after": {
+    "created_workspace": "559ef998-b172-4b9a-aefb-a5bcd546016c",
+    "stored_active_matches_created": true,
+    "previous_graph_hidden": true,
+    "native_sidebar_return_restores_flow": true,
+    "restored_workspace": "7be0b227-3f2b-40c5-949b-f4c774f6edbb",
+    "restored_nodes": 20,
+    "live_bindings_unchanged": true
+  },
+  "live_sessions": [
+    {
+      "key": {
+        "provider": "codex",
+        "home": "/private/tmp/fm-flow-v7ye0ldh/codex",
+        "id": "01a18e5e-4e9e-73a1-bac8-ff16675e74e9"
+      },
+      "owner": "2a9ba301-b0c4-406b-9a98-2215970aa8d8",
+      "pid": 82257,
+      "started": 1793410565109306,
+      "workspace": "7be0b227-3f2b-40c5-949b-f4c774f6edbb",
+      "pane": "02f413cf-d5a8-460a-828a-b28405e30eb4",
+      "surface": "a58ffb73-2251-40c9-ac4a-78e66598d7a6",
+      "socket": "/tmp/fmsws-yqkc7wpk/run/flowmux-82242.sock"
+    }
+  ],
+  "passed_logs": [
+    "/tmp/flowmux-session-flow-workspace-after.log",
+    "/tmp/flowmux-session-flow-workspace-cli.log",
+    "/tmp/flowmux-session-flow-workspace-zoom.log",
+    "/tmp/flowmux-session-flow-workspace-clippy.log",
+    "/tmp/flowmux-session-flow-workspace-build.log"
+  ]
+}

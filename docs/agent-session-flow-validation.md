@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`은 로컬 native 검증을 통과했고 전체 CI는 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`과 workspace 활성화 수정 `4ab3e76e`는 로컬 native 검증을 통과했고 최신 전체 CI는 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -390,4 +390,15 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 - `06425a31`에서 비활성 native 기록 하나를 임시 이동해 회색 금지 표식과 연결 유지, native pointer 클릭의 불가 사유 표시, operation 0·live 1·edge 19 유지까지 확인했다. 기록을 원위치로 복원하고 노드가 다시 활성화되는 화면을 확인했다.
 - 같은 pane에 shell 탭을 추가해 Codex 탭을 비활성으로 만들었다. Sidebar 흐름 버튼과 20개 그래프가 유지됐고 native node 클릭으로 정확한 원래 surface `4bb21dc9-aaf2-4915-a2f9-7cb6ef8e420e`가 활성화됐다. Pane 1개·tab 2개·operation 0 및 Codex process birth identity가 유지됐다. [후속 native 검증 기록](design-assets/session-flow-native-input-06425a31.json).
 
-후속 CI: [Test 41155692283](https://github.com/flowmux-ai/flowmux/actions/runs/41155692283), [Sanitizers 41155694852](https://github.com/flowmux-ai/flowmux/actions/runs/41155694852), 모두 제품 `06425a31` 대상. 기록 시점 진행 중이며 이전 커밋의 성공을 이 변경의 성공으로 대신하지 않는다.
+후속 CI: [Test 41155692283](https://github.com/flowmux-ai/flowmux/actions/runs/41155692283), [Sanitizers 41155694852](https://github.com/flowmux-ai/flowmux/actions/runs/41155694852), 모두 제품 `06425a31` 대상이며 후속 workspace 수정으로 대체하기 위해 취소했다. 성공으로 기록하지 않는다.
+
+
+## Workspace 생성 직후 그래프 불일치 수정
+
+`06425a31`의 실제 GUI에서 CLI로 새 workspace를 만들면 pane과 sidebar는 새 workspace를 표시하지만 `workspace current`는 이전 ID를 반환했다. Session Flow가 저장소의 active ID를 읽어 이전 계보가 새 pane 위에 남았다. `WorkspaceCreated`/`NewWorkspace`는 widget만 만들고 공통 `activate_workspace` 경로를 호출하지 않았으며, 기존 activation도 flow 갱신을 명시적으로 수행하지 않았다.
+
+`4ab3e76e`는 두 생성 경로에서 공통 activation을 호출하고 activation 완료 전에 Session Flow를 갱신한다. 제품 변경은 3줄이다. Native 회귀 시험은 수정 전 active ID 불일치로 실패했고 수정 후 CLI/UI 생성, 이전 그래프 숨김, 원래 workspace 복귀, source PID/widget 보존을 통과했다. 기존 CLI caller path, pane zoom/reorder, clippy 및 build도 통과했다.
+
+격리 앱 PID `82242`의 실제 Codex 계보 20개에서 새 workspace 생성→이전 그래프 숨김→native sidebar 클릭 복귀→원래 그래프 표시를 확인했다. `workspace current`와 화면이 일치하고 기존 source PID `82257`의 birth identity도 유지됐다. [재현과 수정 검증 기록](design-assets/session-flow-workspace-4ab3e76e.json).
+
+최신 전체 gate는 [Test 41156185258](https://github.com/flowmux-ai/flowmux/actions/runs/41156185258)와 [Sanitizers 41156187678](https://github.com/flowmux-ai/flowmux/actions/runs/41156187678), 제품 `4ab3e76e` 기준이며 진행 중이다.
