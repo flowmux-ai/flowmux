@@ -189,6 +189,11 @@
     "tested_head": "b8d84f6511f6e6afff3feffad4e6112f782ac9e3",
     "test": 41168599342,
     "sanitizers": 41168601343,
-    "scope": "Local real-provider opt-in test passed. Remote gates compile/check the harness and run the default regression suite; they do not execute the disposable real Codex driver."
+    "scope": "Local real-provider opt-in test passed. Remote gates compile/check the harness and run the default regression suite; they do not execute the disposable real Codex driver.",
+    "license_audit": {
+      "id": 41168940598,
+      "tested_head": "3d113787296746a341ac14e5b77be832d02782b0",
+      "status": "in_progress"
+    }
   }
 }

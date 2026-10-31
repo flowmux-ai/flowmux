@@ -701,3 +701,5 @@ python3 scripts/test-session-flow-multi-gui.py \
 필요하면 `--protected-pid PID`를 여러 번 주어 보존할 앱의 생존을 검사한다. 출력된 임시 root에 barriers·각 GUI log·최종 `result.json`이 남는다. 두 프로세스 동시 실행은 이 격리된 동시성 시험에만 한정한다. 일반 native GUI suite를 병렬 실행하는 설정은 추가하지 않는다.
 
 시험 추가 commit `b8d84f65`를 push하고 [Test 41168599342](https://github.com/flowmux-ai/flowmux/actions/runs/41168599342), [Sanitizers 41168601343](https://github.com/flowmux-ai/flowmux/actions/runs/41168601343)을 시작했다. 두 실행의 head가 일치하고 실제 job들이 진행 중임을 확인했다. 최종 결론은 대기 중이며, remote 기본 gate를 실제 Codex opt-in 시나리오 실행으로 표현하지 않는다.
+
+완료 기준에 명시한 License audit의 기존 성공은 이전 checkout 대상이므로, 최신 문서 head `3d113787`에서 [License audit 41168940598](https://github.com/flowmux-ai/flowmux/actions/runs/41168940598)을 별도로 시작했다. 실제 cargo-deny job의 in_progress를 확인했다. 이 head의 제품·시험 코드는 위 Test/Sanitizers 대상 `b8d84f65`와 동일하다.
