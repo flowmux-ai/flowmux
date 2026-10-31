@@ -3243,6 +3243,7 @@ impl WindowController {
             self.acknowledge_source_notifications(Some(id), Some(pane), surface);
             self.focus_pane(pane);
         }
+        self.refresh_session_flow(false).await;
         true
     }
 

@@ -1149,6 +1149,46 @@ pub(super) async fn check_native(
                 .unwrap();
         }
     }
+    // Creating a workspace must switch the model and the graph together with its panes.
+    for via_cli in [true, false] {
+        if via_cli {
+            let id = controller.store.create_workspace(None, root.into()).await;
+            let (ack, reply) = tokio::sync::oneshot::channel();
+            controller
+                .dispatch(GtkCommand::WorkspaceCreated { id, ack })
+                .await;
+            reply.await.unwrap().unwrap();
+        } else {
+            controller
+                .dispatch(GtkCommand::NewWorkspace {
+                    root: root.into(),
+                    team: false,
+                })
+                .await;
+        }
+        let shown = WorkspaceId(
+            uuid::Uuid::parse_str(controller.stack.visible_child_name().unwrap().as_str()).unwrap(),
+        );
+        assert_ne!(shown, workspace);
+        assert_eq!(
+            controller.store.active_workspace().await,
+            Some(shown),
+            "new workspace panes must match the authoritative active workspace"
+        );
+        assert!(
+            !controller.flow.panel.root.is_visible(),
+            "new workspace must not retain the previous workspace's flow"
+        );
+        controller.activate_workspace(workspace).await;
+        controller
+            .render_session_flow(std::slice::from_ref(&anchor))
+            .await;
+        assert!(controller.flow.panel.root.is_visible());
+        assert_eq!(terminal.pid.get(), pid);
+        assert_eq!(terminal.widget, widget);
+        controller.store.remove_workspace(shown).await;
+        controller.drop_workspace(shown);
+    }
     println!("MACOS_SESSION_FLOW_LAYOUT_OK");
 }
 

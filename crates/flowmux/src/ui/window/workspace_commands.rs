@@ -14,6 +14,7 @@ impl WindowController {
                 let result = match self.store.get_workspace(id).await {
                     Some(ws) => {
                         self.render_workspace(&ws);
+                        self.activate_workspace(id).await;
                         Ok(())
                     }
                     None => Err("Workspace no longer exists".into()),
@@ -37,6 +38,7 @@ impl WindowController {
                 let id = self.store.create_workspace_kind(None, resolved, team).await;
                 if let Some(ws) = self.store.get_workspace(id).await {
                     self.render_workspace(&ws);
+                    self.activate_workspace(id).await;
                 }
             }
             GtkCommand::RemoveWorkspace { id, confirm, ack } => {
