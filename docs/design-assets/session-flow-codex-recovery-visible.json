@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-10-31T03:51:52.602106+00:00",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "app_pid": 30374,
+  "source_id": "01a18ddc-a51f-7472-ab63-045abb779243",
+  "child_id": "01a18ffd-518a-7591-87f6-f0849a7c02c9",
+  "rendered_observations": [
+    "CUA screenshot shows restored original and child Codex terminals side by side.",
+    "Workspace Session Flow button pointer click shows two-node cosmic graph in top approximately one-third, preserving both terminals below.",
+    "Child node pointer click adds selection ring and highlights existing right Codex agent.",
+    "Wheel zoom changes graph scale. Fit pointer click restores both nodes."
+  ],
+  "state_after_interactions": {
+    "terminal_surfaces": [
+      "0a4bc498-204b-4845-b12a-b447aaf92e1b",
+      "84b7fe64-f43b-49a7-8132-d4540feac5d2"
+    ],
+    "completed_operations": 1,
+    "fork_edges": 1
+  },
+  "not_passed": [
+    "Fork session coordinate click with durationMs=200 dismissed context menu without creating a pane or operation.",
+    "Physical held-button drag, trackpad and VoiceOver are not validated by these CUA actions."
+  ],
+  "screen_lock_note": "Earlier lock condition no longer prevented CUA window capture and interaction. No claim about continuous unlocked interval.",
+  "screenshot_evidence": "CUA tool image responses in this conversation; no separately saved PNG.",
+  "protected_pids_alive": [
+    72789,
+    95986,
+    61360
+  ]
+}

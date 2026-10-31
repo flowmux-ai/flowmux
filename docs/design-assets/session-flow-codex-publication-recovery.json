@@ -325,14 +325,16 @@
   "ci": {
     "status": "in_progress",
     "tested_head": "6f62e807a3096cc58fa3e952a09a7a5779e89fa1",
-    "observed_at": "2026-10-31T03:26:42Z",
+    "observed_at": "2026-10-31T03:53:10.649809+00:00",
     "test": {
       "id": 41164398831,
       "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164398831"
     },
     "sanitizers": {
       "id": 41164400861,
-      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164400861"
+      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164400861",
+      "conclusion": "success",
+      "evidence": "session-flow-sanitizers-54a44d89.json"
     },
     "coverage": "Not yet available for this product change; prior product coverage is not substituted."
   }

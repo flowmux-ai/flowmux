@@ -209,7 +209,7 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
 | R12 | Codex·OpenCode 실제 ID 확인 후 publication 및 같은 ID resume. Claude 실제 새 ID와 첫 입력 전 live focus·종료 후 기록 없는 노드 비활성 검증; stale source·writer/PID 재사용 검증 | provider별 버전 범위는 아래 기록 참조; 외부 writer 원자적 배제 없음 |
 | R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
-| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 복구 시험; OpenCode 완료 fork 후 GUI crash 복구; Codex child 생성 후 publication 실패 상태에서 GUI SIGKILL → 새 프로세스의 동일 ID·surface 복원과 관계/작업 재조정, 중복 native writer 없음 확인 | Codex 복구 시험의 실제 화면 조작은 잠금으로 미검증. 다른 provider의 publication 중단 복구와 미확인 작업 수동 정리 UI는 미완료 |
+| R14 | 저장소 reopen·migration·실패 transaction·saved surface/native parent 복구 시험; OpenCode 완료 fork 후 GUI crash 복구; Codex child 생성 후 publication 실패 상태에서 GUI SIGKILL → 새 프로세스의 동일 ID·surface 복원과 관계/작업 재조정, 중복 native writer 없음 확인. 이후 CUA 실제 복구 화면·sidebar 토글·자식 focus·wheel/Fit 추가 확인 | 다른 provider의 publication 중단 복구와 미확인 작업 수동 정리 UI는 미완료. CUA 조작은 사람의 물리 입력·접근성 검증을 대체하지 않음 |
 
 주요 소스: [모델과 모델 시험](../crates/flowmux-core/src/session_flow.rs), [저장·복구와 시험](../crates/flowmux-state/src/session_flow.rs), [canvas와 입력 시험](../crates/flowmux/src/ui/session_flow.rs), [native orchestration과 실제 Codex harness](../crates/flowmux/src/ui/window/session_flow.rs). 실제 실행 결과와 commit별 CI 범위는 아래 기록을 따른다. 이 표의 미확인 항목을 기존 baseline 성공으로 대체하지 않는다.
 
@@ -622,3 +622,13 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 현재 CI: checkout `6f62e807`의 [Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831), [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)을 시작했고 두 workflow의 `in_progress`를 확인했다. 최종 결론과 이번 수정의 coverage 산출물은 아직 대기 중이다.
 
 제품 `54a44d89`의 macOS job `124428723552`는 success다. Artifact `13028968110`을 내려받아 46개 phase JSON 모두 passed/exit 0, `session-flow`의 native marker 및 두 `observed_identity` 회귀 시험 통과를 확인했다. [검사별 산출물 기록](design-assets/session-flow-macos-gate-54a44d89.json). Linux coverage와 전체 workflow 결론은 아직 대기 중이므로 macOS 성공을 전체 CI 성공으로 취급하지 않는다.
+
+## 2026-10-31 Codex 복구 후 실제 화면 추가 확인
+
+보존한 복구 앱 PID `30374`를 CUA로 다시 조회하자 실제 창을 캡처하고 조작할 수 있었다. 복원된 원본·자식 Codex가 좌우에 표시됐고, workspace의 Session Flow 버튼을 좌표 클릭하면 우주 배경의 두 노드와 연결선이 위쪽 약 1/3에 나타났다. 아래 terminal 두 개는 유지됐다. 자식 노드 클릭 후 선택 테두리와 기존 오른쪽 agent의 포커스 표시를 확인했으며, wheel 확대와 Fit으로 전체 그래프 복귀도 확인했다.
+
+조작 후 public IPC와 SQLite를 다시 읽어 terminal surface 두 개, 완료 operation 하나, 동일 원본→자식 edge 하나가 유지됨을 확인했다. 새 fork나 중복 pane은 생기지 않았다. 원본 사용자 앱과 기존 검증 앱 PID `72789`, `95986`, `61360`은 계속 실행 중이다. [관찰·상태 검증 기록](design-assets/session-flow-codex-recovery-visible.json). 이미지 증거는 이번 대화의 CUA 반환 화면이며 별도 PNG 저장 파일은 없다.
+
+Fork session 메뉴 좌표 클릭은 `durationMs=200`에서도 메뉴만 닫혀 성공으로 기록하지 않았다. 실제 held-button drag·trackpad·VoiceOver 검증도 남아 있다. 앞의 잠긴 화면 시험 기록은 당시 조건대로 유지하며, 이번 화면 확인으로 그 전체 실행 구간이 잠금 해제 상태였다고 소급하지 않는다.
+
+Sanitizers `41164400861`은 최종 전체 success다. Linux ASan/LSan의 headless·native Lottie·GUI 단계와 ThorVG ASan/UBSan/LSan job을 모두 확인했다. [최종 job/step 결론과 로그 hash](design-assets/session-flow-sanitizers-54a44d89.json). Linux 테스트·커버리지 workflow의 결론은 아직 대기 중이다.
