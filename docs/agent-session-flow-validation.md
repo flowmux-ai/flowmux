@@ -705,3 +705,21 @@ python3 scripts/test-session-flow-multi-gui.py \
 완료 기준에 명시한 License audit의 기존 성공은 이전 checkout 대상이므로, 최신 문서 head `3d113787`에서 [License audit 41168940598](https://github.com/flowmux-ai/flowmux/actions/runs/41168940598)을 별도로 시작했다. 실제 cargo-deny job의 in_progress를 확인했다. 이 head의 제품·시험 코드는 위 Test/Sanitizers 대상 `b8d84f65`와 동일하다.
 
 해당 License audit는 최종 **success**다. 실제 job/step 결론과 전체 로그를 확인하여 dependency licenses/sources, advisories, third-party notice 시험 4개·재생성 후 차이 없음, asset notice 및 editor asset 12개 검증을 확인했다. [최종 결론·검사별 로그 발췌·전체 로그 hash](design-assets/session-flow-license-b8d84f65.json). 현재 HEAD까지 제품·시험·workflow 코드가 `b8d84f65`와 동일함도 확인했다. Test/Sanitizers와 이번 실행의 coverage는 아직 진행 중이며, License audit 성공을 전체 CI 또는 실제 화면 수용 통과로 취급하지 않는다.
+
+최신 Test의 macOS job `124441461730`도 최종 success다. Artifact `13030775864`를 내려받아 46개 phase 모두 passed/exit 0, Session Flow native marker와 두 observed-identity 회귀 시험을 확인했다. [검사별 결과와 로그 hash](design-assets/session-flow-macos-gate-b8d84f65.json). Linux coverage와 전체 Test/Sanitizers 결론은 별도 대기 중이며, 아래 로컬 렌더링 후보는 이 CI 대상에 포함되지 않는다.
+
+## 2026-10-31 화면 접근 회복 후 GSK 후보 비교
+
+CUA로 보존된 복구 앱 PID `30374`의 화면에 다시 접근할 수 있음을 확인한 뒤, 동일 release/GL·1,000노드·20개 family·10초×5회 조건으로 순차 측정했다. 각 실행 전후 해당 앱의 화면을 캡처할 수 있었고, ioreg 양 끝 값은 모두 `null`로 유지했다. 이를 연속적인 잠금 해제나 물리 입력·compositor 지연 증거로 확대하지 않는다.
+
+| 구현 | frame p95 범위 | 판단 |
+| --- | --- | --- |
+| 변경 없는 기준 | 33.57–34.27ms | ≤33ms 목표 미달 |
+| 기존 GSK 연결선·캐시 화살표 후보 | 33.99–34.10ms | 목표 미달, 미채택 |
+| GSK 노드·라벨까지 확장한 후보 | 33.94–34.29ms | 목표 미달, 미채택 |
+
+각 native 실행은 exit 0과 기존 Session Flow 회귀 marker를 확인했다. 연결선 후보를 별도로 5초 샘플링한 결과 Cairo recording 재생·fill 및 OpenGL texture upload 경로가 남아 있었다. 이 진단 실행의 시간 수치는 성능 수용에 사용하지 않는다. 이후 노드·라벨을 GSK rounded clip/border/Pango layout으로 변경한 후보도 측정했으나 목표를 통과하지 못했다. 해당 후보의 기존 draw callback은 비어 있으므로 `draw_cpu_ms`를 렌더 비용 개선으로 해석하지 않는다.
+
+두 후보 모두 제품 소스에서 원복했다. [전체 수치·프로파일 요약·후보 patch·로그 hash](design-assets/session-flow-gsk-desktop-recheck.json), [직접 확인한 native fixture 캡처](design-assets/session-flow-gsk-nodes-prototype.png)를 보존한다. 다음 조사는 남은 화살표 Cairo/texture upload 비용을 분리하는 것이다. 현재 증거만으로 그 경로를 단일 원인으로 단정하지 않으며, 그래프 요소를 생략하거나 목표를 완화하지 않는다.
+
+Sanitizers `41168601343`은 최종 전체 **success**다. Linux headless·native Lottie·GUI ASan/LSan과 ThorVG ASan/UBSan/LSan의 실제 job/step 결론 및 전체 로그를 확인했다. [최종 결론과 로그 hash](design-assets/session-flow-sanitizers-b8d84f65.json). Test의 Linux coverage 결과는 아직 대기 중이다.

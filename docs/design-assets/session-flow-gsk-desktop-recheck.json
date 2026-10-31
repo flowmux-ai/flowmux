@@ -1,0 +1,502 @@
+{
+  "checked_at": "2026-10-31T04:52:45.948678+00:00",
+  "product_commit": "54a44d8981c5f518648f466cef6bbdb5f228ab5f",
+  "frame_p95_limit_ms": 33,
+  "runs": {
+    "baseline": {
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 35.048791,
+              "p50": 33.340375,
+              "p95": 34.210583,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 3.024083,
+              "p50": 2.455209,
+              "p95": 2.677208,
+              "samples": 301
+            },
+            "duration_seconds": 10.102836209,
+            "input_batches": 576,
+            "signal_to_after_paint_ms": {
+              "max": 34.999916,
+              "p50": 31.176292,
+              "p95": 33.579917,
+              "samples": 301
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.72775,
+              "p50": 33.342667,
+              "p95": 34.159625,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 2.685791,
+              "p50": 2.4650420000000004,
+              "p95": 2.604834,
+              "samples": 301
+            },
+            "duration_seconds": 10.112114542,
+            "input_batches": 580,
+            "signal_to_after_paint_ms": {
+              "max": 34.263209,
+              "p50": 31.0265,
+              "p95": 33.632334,
+              "samples": 301
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.918290999999996,
+              "p50": 33.350042,
+              "p95": 34.268542,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 2.704666,
+              "p50": 2.481042,
+              "p95": 2.6267080000000003,
+              "samples": 301
+            },
+            "duration_seconds": 10.105748208,
+            "input_batches": 583,
+            "signal_to_after_paint_ms": {
+              "max": 34.554,
+              "p50": 31.411624999999997,
+              "p95": 33.5275,
+              "samples": 301
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.758959,
+              "p50": 33.281333000000004,
+              "p95": 34.231875,
+              "samples": 311
+            },
+            "draw_cpu_ms": {
+              "max": 2.768875,
+              "p50": 2.472459,
+              "p95": 2.6622500000000002,
+              "samples": 312
+            },
+            "duration_seconds": 10.106029,
+            "input_batches": 583,
+            "signal_to_after_paint_ms": {
+              "max": 34.516042,
+              "p50": 31.5985,
+              "p95": 33.625,
+              "samples": 312
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.538541,
+              "p50": 16.913999999999998,
+              "p95": 33.574291,
+              "samples": 459
+            },
+            "draw_cpu_ms": {
+              "max": 2.908375,
+              "p50": 2.412542,
+              "p95": 2.615917,
+              "samples": 460
+            },
+            "duration_seconds": 10.114842708,
+            "input_batches": 591,
+            "signal_to_after_paint_ms": {
+              "max": 34.500333,
+              "p50": 12.981459000000001,
+              "p95": 33.221374999999995,
+              "samples": 460
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "frame_p95_ms": [
+        34.210583,
+        34.159625,
+        34.268542,
+        34.231875,
+        33.574291
+      ],
+      "meets_frame_goal": false,
+      "report_sha256": "6baf939c19dbd423dc786d1261a6cbf28ad94384cddb7e54977d1233fbeb3c5b",
+      "log_sha256": "34a64559056a44bf5ee3fbb1e30722a74900c9ad7eae26585331e87cea46e2fe"
+    },
+    "gsk_edges_arrows": {
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "draw_cpu_scope": "Cairo foreground node/label callback only; background and GSK edges/arrows are outside this timer.",
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 34.722625,
+              "p50": 33.367459000000004,
+              "p95": 34.048916999999996,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 1.784334,
+              "p50": 1.5994169999999999,
+              "p95": 1.702,
+              "samples": 301
+            },
+            "duration_seconds": 10.107653167,
+            "input_batches": 575,
+            "signal_to_after_paint_ms": {
+              "max": 34.680167,
+              "p50": 30.327959,
+              "p95": 33.524917,
+              "samples": 301
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.98075,
+              "p50": 33.352459,
+              "p95": 34.097708999999995,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 1.748334,
+              "p50": 1.598709,
+              "p95": 1.6998339999999998,
+              "samples": 301
+            },
+            "duration_seconds": 10.121591584,
+            "input_batches": 573,
+            "signal_to_after_paint_ms": {
+              "max": 34.339209000000004,
+              "p50": 30.114833,
+              "p95": 33.43745800000001,
+              "samples": 301
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.350792,
+              "p50": 33.362041000000005,
+              "p95": 34.035041,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 1.771209,
+              "p50": 1.5995,
+              "p95": 1.706666,
+              "samples": 301
+            },
+            "duration_seconds": 10.111694541,
+            "input_batches": 572,
+            "signal_to_after_paint_ms": {
+              "max": 34.430333,
+              "p50": 30.17325,
+              "p95": 33.541208000000005,
+              "samples": 301
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.20325,
+              "p50": 33.344875,
+              "p95": 34.0765,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 1.84425,
+              "p50": 1.6183750000000001,
+              "p95": 1.748416,
+              "samples": 301
+            },
+            "duration_seconds": 10.103261375,
+            "input_batches": 573,
+            "signal_to_after_paint_ms": {
+              "max": 34.639875,
+              "p50": 30.768417,
+              "p95": 33.565833000000005,
+              "samples": 301
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 37.031667,
+              "p50": 33.140207999999994,
+              "p95": 33.990292,
+              "samples": 345
+            },
+            "draw_cpu_ms": {
+              "max": 1.8195,
+              "p50": 1.604334,
+              "p95": 1.742625,
+              "samples": 346
+            },
+            "duration_seconds": 10.109224584,
+            "input_batches": 581,
+            "signal_to_after_paint_ms": {
+              "max": 34.309291,
+              "p50": 29.407125,
+              "p95": 33.574792,
+              "samples": 346
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "frame_p95_ms": [
+        34.048916999999996,
+        34.097708999999995,
+        34.035041,
+        34.0765,
+        33.990292
+      ],
+      "meets_frame_goal": false,
+      "report_sha256": "b7e533ffd335f795bd52f8e35642ab0e0bf61be11b003d2167d222062aa6f0d9",
+      "log_sha256": "c3e33efa33d9009e1e8f7eb85c4c3cbda8162f73769261e3cb17683867802665"
+    },
+    "gsk_nodes_labels": {
+      "native_exit_code": 0,
+      "report": {
+        "area_logical_size": [
+          1280,
+          266
+        ],
+        "debug_assertions": false,
+        "diagnostic_empty_draw": false,
+        "draw_cpu_scope": "Empty inherited callback only; all graph snapshot work is outside this timer. Do not use draw_cpu_ms to compare render cost.",
+        "families": 20,
+        "measurement": "Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.",
+        "nodes": 1000,
+        "renderer": "gl",
+        "scale_factor": 2,
+        "screen_lock_observation": {
+          "end": null,
+          "scope": "Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.",
+          "source": "ioreg -n Root -d1",
+          "start": null
+        },
+        "trials": [
+          {
+            "after_paint_interval_ms": {
+              "max": 35.039083,
+              "p50": 33.370083,
+              "p95": 34.16375,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 0.0029579999999999997,
+              "p50": 8.3e-05,
+              "p95": 0.00020800000000000001,
+              "samples": 301
+            },
+            "duration_seconds": 10.107466417,
+            "input_batches": 573,
+            "signal_to_after_paint_ms": {
+              "max": 34.352875,
+              "p50": 30.053041,
+              "p95": 33.638417,
+              "samples": 301
+            },
+            "trial": 1
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.654667,
+              "p50": 33.352875,
+              "p95": 34.082167,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 0.00045900000000000004,
+              "p50": 8.3e-05,
+              "p95": 0.00025,
+              "samples": 301
+            },
+            "duration_seconds": 10.108120958,
+            "input_batches": 576,
+            "signal_to_after_paint_ms": {
+              "max": 34.502375,
+              "p50": 29.730833,
+              "p95": 33.425375,
+              "samples": 301
+            },
+            "trial": 2
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 34.641416,
+              "p50": 33.366125000000004,
+              "p95": 34.292792000000006,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 0.0013340000000000001,
+              "p50": 4.2e-05,
+              "p95": 0.00025,
+              "samples": 301
+            },
+            "duration_seconds": 10.105662,
+            "input_batches": 571,
+            "signal_to_after_paint_ms": {
+              "max": 34.569958,
+              "p50": 30.884708,
+              "p95": 33.633292000000004,
+              "samples": 301
+            },
+            "trial": 3
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.033209,
+              "p50": 33.3615,
+              "p95": 34.111291,
+              "samples": 300
+            },
+            "draw_cpu_ms": {
+              "max": 0.002833,
+              "p50": 4.2e-05,
+              "p95": 0.00020800000000000001,
+              "samples": 301
+            },
+            "duration_seconds": 10.110109625,
+            "input_batches": 578,
+            "signal_to_after_paint_ms": {
+              "max": 34.452584,
+              "p50": 31.030417,
+              "p95": 33.571709,
+              "samples": 301
+            },
+            "trial": 4
+          },
+          {
+            "after_paint_interval_ms": {
+              "max": 35.167542000000005,
+              "p50": 32.895542,
+              "p95": 33.942833,
+              "samples": 376
+            },
+            "draw_cpu_ms": {
+              "max": 0.00275,
+              "p50": 8.3e-05,
+              "p95": 0.00020800000000000001,
+              "samples": 377
+            },
+            "duration_seconds": 10.109924959,
+            "input_batches": 584,
+            "signal_to_after_paint_ms": {
+              "max": 33.974709,
+              "p50": 26.20625,
+              "p95": 33.409041,
+              "samples": 377
+            },
+            "trial": 5
+          }
+        ]
+      },
+      "frame_p95_ms": [
+        34.16375,
+        34.082167,
+        34.292792000000006,
+        34.111291,
+        33.942833
+      ],
+      "meets_frame_goal": false,
+      "report_sha256": "ee534ef4bbd03ad19a1a2daee705eace7154282e725f74a3d3f6fc789c877940",
+      "log_sha256": "18a955cd345b9efcb2232bc3734a45fadfd299cada5acc711122f8750791dc6c"
+    }
+  },
+  "decision": "Both candidates rejected and source restored. No product rendering change adopted. The frame goal remains unmet.",
+  "desktop_observation": "CUA successfully captured preserved recovery GUI PID 30374 before and after each unprofiled measurement. ioreg start/end values remain null, not false. These observations show endpoint desktop accessibility, not continuous compositor presentation or hardware latency.",
+  "profiling": {
+    "candidate": "gsk_edges_arrows",
+    "owned_pid": 19289,
+    "command": "sample 19289 5 1 -file /tmp/flowmux-session-flow-recheck-gsk-profile.txt",
+    "sample_exit_code": 0,
+    "native_exit_code": 0,
+    "profile_sha256": "8cfb496fc561d33fd2d43087a1808557d69ce0d6540758170d4e25402ad1a03c",
+    "report_sha256": "b880a6e0c867130a718352bf0efa5ee78712206b00c7dfd4020495905d069b8a",
+    "log_sha256": "3889a19786b4dc03de4b278e6eb0216ba0bd23a74804acfea45ef2c0087a93c6",
+    "observed_stacks": [
+      {
+        "name": "main thread",
+        "inclusive_samples": 2916
+      },
+      {
+        "name": "gsk_renderer_render",
+        "inclusive_samples": 1279
+      },
+      {
+        "name": "gsk_gpu_upload_op_gl_command_with_area +392 (OpenGL texture upload)",
+        "inclusive_samples": 437
+      },
+      {
+        "name": "gsk_gpu_upload_cairo_op_draw -> Cairo recording replay/fill",
+        "inclusive_samples": 380
+      }
+    ],
+    "interpretation": "Nested inclusive sample counts are not additive and do not isolate a single root cause. Cairo fallback and texture upload remain visible with the edge-only GSK candidate. The second candidate moves nodes and labels to GSK yet also misses the goal.",
+    "acceptance_use": false
+  },
+  "gsk_nodes_patch_sha256": "def167582abf3b725df69a5c260269a2a131b0d61680de81f2c76ba7f6e8857b",
+  "gsk_nodes_source_patch": "diff --git a/crates/flowmux/src/ui/session_flow.rs b/crates/flowmux/src/ui/session_flow.rs\nindex 43ad4e4f..3c27d3af 100644\n--- a/crates/flowmux/src/ui/session_flow.rs\n+++ b/crates/flowmux/src/ui/session_flow.rs\n@@ -33,6 +33,8 @@ pub(crate) struct Node {\n \n use flowmux_state::session_flow::SavedView as View;\n \n+mod canvas;\n+\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n mod performance;\n #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n@@ -176,7 +178,8 @@ impl FlowPanel {\n         status.add_css_class(\"caption\");\n         toolbar.append(&status);\n         root.append(&toolbar);\n-        let area = gtk::DrawingArea::new();\n+        let scene = Rc::new(RefCell::new(Scene::default()));\n+        let area = canvas::Canvas::new(scene.clone()).upcast::<gtk::DrawingArea>();\n         area.set_widget_name(\"flowmux-session-flow-canvas\");\n         area.set_hexpand(true);\n         area.set_vexpand(true);\n@@ -198,7 +201,7 @@ impl FlowPanel {\n             root,\n             area,\n             status,\n-            scene: Rc::new(RefCell::new(Scene::default())),\n+            scene,\n             animating: Rc::new(Cell::new(false)),\n             bridge,\n             save_pending: Rc::new(Cell::new(false)),\n@@ -435,15 +438,7 @@ impl FlowPanel {\n     }\n \n     fn connect_canvas(&self) {\n-        let scene = self.scene.clone();\n-        self.area.set_draw_func(move |area, cr, width, height| {\n-            let mut scene = scene.borrow_mut();\n-            if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n-                scene.fit(width as f64, height as f64);\n-                scene.fit_during_settle = true;\n-            }\n-            draw(area, cr, width, height, &scene);\n-        });\n+        self.area.set_draw_func(|_, _, _, _| {});\n         let p = self.downgrade();\n         self.area.connect_map(move |_| {\n             if let Some(p) = p.upgrade() {\n@@ -778,7 +773,7 @@ fn layout_labels<'a>(\n     labels\n }\n \n-fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, scene: &Scene) {\n+fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {\n     cr.set_source_rgb(0.025, 0.035, 0.08);\n     let _ = cr.paint();\n     for i in 0..150u32 {\n@@ -794,37 +789,16 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i\n         );\n         let _ = cr.fill();\n     }\n+}\n+\n+fn draw_foreground(\n+    area: &gtk::DrawingArea,\n+    cr: &gtk::cairo::Context,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n     let camera = scene.camera();\n-    cr.set_line_width(1.2);\n-    for (parent, child) in scene.graph.edges() {\n-        let (Some(p), Some(c)) = (\n-            scene.layout.positions.get(parent),\n-            scene.layout.positions.get(child),\n-        ) else {\n-            continue;\n-        };\n-        let (p, c) = (camera.screen(*p), camera.screen(*c));\n-        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n-        cr.move_to(p.x, p.y);\n-        cr.line_to(c.x, c.y);\n-        let _ = cr.stroke();\n-        let angle = (c.y - p.y).atan2(c.x - p.x);\n-        let tip = Point {\n-            x: c.x - angle.cos() * 14.0,\n-            y: c.y - angle.sin() * 14.0,\n-        };\n-        cr.move_to(tip.x, tip.y);\n-        cr.line_to(\n-            tip.x - (angle - 0.45).cos() * 7.0,\n-            tip.y - (angle - 0.45).sin() * 7.0,\n-        );\n-        cr.line_to(\n-            tip.x - (angle + 0.45).cos() * 7.0,\n-            tip.y - (angle + 0.45).sin() * 7.0,\n-        );\n-        cr.close_path();\n-        let _ = cr.fill();\n-    }\n     let selected = scene\n         .workspace\n         .and_then(|id| scene.views.get(&id))\n@@ -1222,7 +1196,7 @@ pub(crate) fn check_canvas_controls() {\n     panel.show_workspace(Some(workspace), graph, [key(\"child\")].into());\n     let surface = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 800, 260).unwrap();\n     let cr = gtk::cairo::Context::new(&surface).unwrap();\n-    draw(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n+    draw_foreground(&panel.area, &cr, 800, 260, &panel.scene.borrow());\n     for _ in 0..50 {\n         panel.toggle(workspace);\n     }\ndiff --git a/crates/flowmux/src/ui/session_flow/performance.rs b/crates/flowmux/src/ui/session_flow/performance.rs\nindex 0ad1a861..f483e64e 100644\n--- a/crates/flowmux/src/ui/session_flow/performance.rs\n+++ b/crates/flowmux/src/ui/session_flow/performance.rs\n@@ -91,16 +91,19 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         })\n         .unwrap();\n     let empty_draw = std::env::var_os(\"FLOWMUX_SESSION_FLOW_FRAME_EMPTY_DRAW\").is_some();\n+    panel\n+        .area\n+        .clone()\n+        .downcast::<canvas::Canvas>()\n+        .unwrap()\n+        .set_empty_draw(empty_draw);\n     let draw_times = Rc::new(RefCell::new(Vec::<f64>::new()));\n     let times = draw_times.clone();\n-    let scene = panel.scene.clone();\n-    panel.area.set_draw_func(move |area, cr, width, height| {\n+    panel.area.set_draw_func(move |_, cr, _, _| {\n         let start = Instant::now();\n         if empty_draw {\n             cr.set_source_rgb(0.02, 0.03, 0.08);\n             cr.paint().unwrap();\n-        } else {\n-            draw(area, cr, width, height, &scene.borrow());\n         }\n         times\n             .borrow_mut()\n@@ -182,6 +185,7 @@ pub(crate) async fn check_native_performance(path: &std::path::Path) {\n         \"screen_lock_observation\":{\"source\":\"ioreg -n Root -d1\",\"start\":screen_lock_start,\"end\":screen_lock_end,\n             \"scope\":\"Endpoint observations only. Null means unknown, not unlocked. These observations do not establish compositor presentation or physical input latency.\"},\n         \"diagnostic_empty_draw\":empty_draw,\"scale_factor\":panel.area.scale_factor(),\"renderer\":std::env::var(\"GSK_RENDERER\").ok(),\"debug_assertions\":cfg!(debug_assertions),\n+        \"draw_cpu_scope\":\"Empty inherited callback only; all graph snapshot work is outside this timer. Do not use draw_cpu_ms to compare render cost.\",\n         \"measurement\":\"Mapped GTK frame-clock after-paint intervals and controller-signal-to-after-paint delay. Not hardware input latency or compositor presentation time.\",\n         \"trials\":trials});\n     std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();\ndiff --git a/crates/flowmux/src/ui/session_flow/canvas.rs b/crates/flowmux/src/ui/session_flow/canvas.rs\nnew file mode 100644\nindex 00000000..32d5e909\n--- /dev/null\n+++ b/crates/flowmux/src/ui/session_flow/canvas.rs\n@@ -0,0 +1,205 @@\n+// SPDX-License-Identifier: GPL-3.0-or-later\n+//! Keep the canvas input widget while submitting straight edges to GSK.\n+\n+use super::*;\n+use gtk::subclass::prelude::*;\n+use std::cell::OnceCell;\n+\n+mod imp {\n+    use super::*;\n+\n+    #[derive(Default)]\n+    pub struct Canvas {\n+        pub(super) scene: OnceCell<Rc<RefCell<Scene>>>,\n+        pub(super) empty_draw: Cell<bool>,\n+        background: RefCell<Option<((i32, i32), gtk::gsk::RenderNode)>>,\n+        arrow: OnceCell<gtk::gsk::RenderNode>,\n+    }\n+\n+    #[glib::object_subclass]\n+    impl ObjectSubclass for Canvas {\n+        const NAME: &'static str = \"FlowmuxSessionFlowCanvas\";\n+        type Type = super::Canvas;\n+        type ParentType = gtk::DrawingArea;\n+    }\n+\n+    impl ObjectImpl for Canvas {}\n+    impl DrawingAreaImpl for Canvas {}\n+\n+    impl WidgetImpl for Canvas {\n+        fn snapshot(&self, snapshot: &gtk::Snapshot) {\n+            let area = self.obj();\n+            let (width, height) = (area.width(), area.height());\n+            if width <= 0 || height <= 0 {\n+                return;\n+            }\n+            let bounds = gtk::graphene::Rect::new(0.0, 0.0, width as f32, height as f32);\n+            snapshot.push_clip(&bounds);\n+            if !self.empty_draw.get() {\n+                let mut scene = self.scene.get().unwrap().borrow_mut();\n+                if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {\n+                    scene.fit(width as f64, height as f64);\n+                    scene.fit_during_settle = true;\n+                }\n+                let mut background = self.background.borrow_mut();\n+                if background.as_ref().map(|(size, _)| *size) != Some((width, height)) {\n+                    let layer = gtk::Snapshot::new();\n+                    {\n+                        let cr = layer.append_cairo(&bounds);\n+                        draw_background(&cr, width, height);\n+                    }\n+                    *background = layer.to_node().map(|node| ((width, height), node));\n+                }\n+                if let Some((_, node)) = background.as_ref() {\n+                    snapshot.append_node(node);\n+                }\n+                drop(background);\n+                let camera = scene.camera();\n+                let color = gtk::gdk::RGBA::new(0.39, 0.51, 0.78, 0.55);\n+                let arrow = self.arrow.get_or_init(|| {\n+                    let shape = gtk::Snapshot::new();\n+                    {\n+                        let cr =\n+                            shape.append_cairo(&gtk::graphene::Rect::new(-7.0, -4.0, 8.0, 8.0));\n+                        cr.set_source_rgba(0.39, 0.51, 0.78, 0.55);\n+                        cr.move_to(0.0, 0.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, -0.45_f64.sin() * 7.0);\n+                        cr.line_to(-0.45_f64.cos() * 7.0, 0.45_f64.sin() * 7.0);\n+                        cr.close_path();\n+                        let _ = cr.fill();\n+                    }\n+                    shape.to_node().unwrap()\n+                });\n+                for (parent, child) in scene.graph.edges() {\n+                    let (Some(p), Some(c)) = (\n+                        scene.layout.positions.get(parent),\n+                        scene.layout.positions.get(child),\n+                    ) else {\n+                        continue;\n+                    };\n+                    let (p, c) = (camera.screen(*p), camera.screen(*c));\n+                    let length = (c.x - p.x).hypot(c.y - p.y);\n+                    if length == 0.0 {\n+                        continue;\n+                    }\n+                    snapshot.save();\n+                    snapshot.translate(&gtk::graphene::Point::new(p.x as f32, p.y as f32));\n+                    snapshot.rotate((c.y - p.y).atan2(c.x - p.x).to_degrees() as f32);\n+                    snapshot.append_color(\n+                        &color,\n+                        &gtk::graphene::Rect::new(0.0, -0.6, length as f32, 1.2),\n+                    );\n+                    snapshot.translate(&gtk::graphene::Point::new((length - 14.0) as f32, 0.0));\n+                    snapshot.append_node(arrow);\n+                    snapshot.restore();\n+                }\n+                draw_nodes(snapshot, area.upcast_ref(), width, height, &scene);\n+            }\n+            // The inherited callback is empty except in the diagnostic control.\n+            self.parent_snapshot(snapshot);\n+            snapshot.pop();\n+        }\n+    }\n+}\n+\n+fn draw_nodes(\n+    snapshot: &gtk::Snapshot,\n+    area: &gtk::DrawingArea,\n+    width: i32,\n+    height: i32,\n+    scene: &Scene,\n+) {\n+    let camera = scene.camera();\n+    let selected = scene\n+        .workspace\n+        .and_then(|id| scene.views.get(&id))\n+        .and_then(|v| v.selected.as_ref());\n+    let circle = |x: f32, y: f32, radius: f32, color: &gtk::gdk::RGBA| {\n+        let rect = gtk::graphene::Rect::new(x - radius, y - radius, radius * 2.0, radius * 2.0);\n+        snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(rect, radius));\n+        snapshot.append_color(color, &rect);\n+        snapshot.pop();\n+    };\n+    for key in scene.graph.nodes() {\n+        let Some(point) = scene.layout.positions.get(key) else {\n+            continue;\n+        };\n+        let p = camera.screen(*point);\n+        if p.x < -140.0 || p.y < -50.0 || p.x > width as f64 + 140.0 || p.y > height as f64 + 50.0 {\n+            continue;\n+        }\n+        let available = scene.nodes.get(key).is_some_and(|n| n.available);\n+        let anchor = scene.anchors.contains(key);\n+        let focused = selected == Some(key);\n+        let rgb = if !available {\n+            (0.40, 0.43, 0.53)\n+        } else if anchor {\n+            (0.43, 0.86, 0.94)\n+        } else {\n+            (0.65, 0.57, 0.95)\n+        };\n+        let color = gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 1.0);\n+        let (x, y) = (p.x as f32, p.y as f32);\n+        if anchor || focused {\n+            circle(x, y, 20.0, &gtk::gdk::RGBA::new(rgb.0, rgb.1, rgb.2, 0.12));\n+        }\n+        circle(x, y, if anchor { 8.0 } else { 6.0 }, &color);\n+        let stroke = if available {\n+            color\n+        } else {\n+            gtk::gdk::RGBA::new(0.82, 0.84, 0.90, 1.0)\n+        };\n+        if !available {\n+            snapshot.save();\n+            snapshot.translate(&gtk::graphene::Point::new(x - 5.0, y + 5.0));\n+            snapshot.rotate(-45.0);\n+            snapshot.append_color(\n+                &stroke,\n+                &gtk::graphene::Rect::new(0.0, -0.75, 10.0 * 2.0_f32.sqrt(), 1.5),\n+            );\n+            snapshot.restore();\n+        }\n+        if focused {\n+            let rect = gtk::graphene::Rect::new(x - 14.75, y - 14.75, 29.5, 29.5);\n+            snapshot.append_border(\n+                &gtk::gsk::RoundedRect::from_rect(rect, 14.75),\n+                &[1.5; 4],\n+                &[stroke; 4],\n+            );\n+        }\n+    }\n+    for label in layout_labels(area, scene, width, height) {\n+        let available = scene.nodes.get(label.key).is_some_and(|n| n.available);\n+        let color = if available {\n+            gtk::gdk::RGBA::new(0.83, 0.86, 0.94, 1.0)\n+        } else {\n+            gtk::gdk::RGBA::new(0.55, 0.57, 0.64, 1.0)\n+        };\n+        snapshot.save();\n+        snapshot.translate(&gtk::graphene::Point::new(\n+            (label.bounds.x() + 2) as f32,\n+            (label.bounds.y() + 2) as f32,\n+        ));\n+        snapshot.append_layout(&label.layout, &color);\n+        snapshot.restore();\n+    }\n+}\n+\n+glib::wrapper! {\n+    pub struct Canvas(ObjectSubclass<imp::Canvas>)\n+        @extends gtk::DrawingArea, gtk::Widget,\n+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;\n+}\n+\n+impl Canvas {\n+    pub(super) fn new(scene: Rc<RefCell<Scene>>) -> Self {\n+        let area: Self = glib::Object::new();\n+        assert!(area.imp().scene.set(scene).is_ok());\n+        area\n+    }\n+\n+    #[cfg(all(test, target_os = \"macos\", feature = \"native-smoke\"))]\n+    pub(super) fn set_empty_draw(&self, empty: bool) {\n+        self.imp().empty_draw.set(empty);\n+    }\n+}\n",
+  "native_capture": {
+    "file": "session-flow-gsk-nodes-prototype.png",
+    "sha256": "bd1d075f635993eac831b4bac82f4070face33b35006ea3e5655a480b41670c4",
+    "scope": "GTK renderer texture from three-node fixture; visually inspected. Not a physical desktop screenshot or the 1000-node benchmark."
+  },
+  "next_investigation": "Measure or isolate remaining Cairo arrow/texture upload cost; its exact contribution is not established. Do not remove graph content or relax the frame goal.",
+  "restored_release_build": {
+    "exit_code": 0,
+    "log_sha256": "c55579a3ca446b6040599d9c8195c14ae8abb195adbd55bf941329eb57f38ff6",
+    "source_restored_to": "1df54185",
+    "executable": "target/release/deps/macos_native-411b55f41d8d2d9a"
+  }
+}
