@@ -1,0 +1,1078 @@
+{
+  "checked_at": "2026-10-31T05:38:18.850498+00:00",
+  "head_sha": "461a4f9b6ad6bfc695e5e29edf7cb47f8e86b416",
+  "run_id": 41171842039,
+  "job": {
+    "completedAt": "2026-10-31T05:35:59Z",
+    "conclusion": "success",
+    "databaseId": 124451273819,
+    "name": "macOS build and native smoke",
+    "startedAt": "2026-10-31T05:15:17Z",
+    "status": "completed",
+    "steps": [
+      {
+        "completedAt": "2026-10-31T05:15:19Z",
+        "conclusion": "success",
+        "name": "Set up job",
+        "number": 1,
+        "startedAt": "2026-10-31T05:15:18Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:15:25Z",
+        "conclusion": "success",
+        "name": "Checkout",
+        "number": 2,
+        "startedAt": "2026-10-31T05:15:19Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:15:38Z",
+        "conclusion": "success",
+        "name": "Check Rust toolchain and formatting",
+        "number": 3,
+        "startedAt": "2026-10-31T05:15:25Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:17:02Z",
+        "conclusion": "success",
+        "name": "Install native dependencies",
+        "number": 4,
+        "startedAt": "2026-10-31T05:15:38Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:17:18Z",
+        "conclusion": "success",
+        "name": "Install compatible GTK and libadwaita for native popup checks",
+        "number": 5,
+        "startedAt": "2026-10-31T05:17:02Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:17:48Z",
+        "conclusion": "success",
+        "name": "Install compatible ThorVG for native image and Lottie checks",
+        "number": 6,
+        "startedAt": "2026-10-31T05:17:18Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:35:51Z",
+        "conclusion": "success",
+        "name": "Run macOS tests and native smoke (same script as local)",
+        "number": 7,
+        "startedAt": "2026-10-31T05:17:48Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:35:53Z",
+        "conclusion": "success",
+        "name": "Upload native smoke evidence",
+        "number": 8,
+        "startedAt": "2026-10-31T05:35:51Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:35:54Z",
+        "conclusion": "success",
+        "name": "Post Checkout",
+        "number": 16,
+        "startedAt": "2026-10-31T05:35:53Z",
+        "status": "completed"
+      },
+      {
+        "completedAt": "2026-10-31T05:35:56Z",
+        "conclusion": "success",
+        "name": "Complete job",
+        "number": 17,
+        "startedAt": "2026-10-31T05:35:54Z",
+        "status": "completed"
+      }
+    ],
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41171842039/job/124451273819"
+  },
+  "artifact": {
+    "id": 13031716869,
+    "name": "macos-test-evidence",
+    "phase_count": 46
+  },
+  "phases": [
+    {
+      "file": "agent-hooks.json",
+      "sha256": "2ec4b9d616f82eabc76ccb0814a51c0591a89d8794de155b172e9d197ea30963",
+      "result": {
+        "phase": "agent-hooks",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 44614,
+        "exit_code": 0,
+        "elapsed_seconds": 32.877
+      }
+    },
+    {
+      "file": "agent-runner-tests.json",
+      "sha256": "fddff79613eb905079927215163886ad3119591560e4a1901d5feac3db2b7ca4",
+      "result": {
+        "phase": "agent-runner-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-agent-unit-runner.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 14539,
+        "exit_code": 0,
+        "elapsed_seconds": 0.101
+      }
+    },
+    {
+      "file": "agent-team-tests.json",
+      "sha256": "1cf67800a295c47b502a9ec9ebcaa9297fcf96911527444d15cc068bdd107726",
+      "result": {
+        "phase": "agent-team-tests",
+        "command": [
+          "python3",
+          "scripts/test-agent-team.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 14541,
+        "exit_code": 0,
+        "elapsed_seconds": 23.456
+      }
+    },
+    {
+      "file": "agent-unit.json",
+      "sha256": "8084653eb991e8a49cde5f8905f87d34a3c1bedabf0aeeb32aa3d8bad74ddd24",
+      "result": {
+        "phase": "agent-unit",
+        "command": [
+          "python3",
+          "scripts/test-agent-unit.py"
+        ],
+        "timeout_seconds": 960.0,
+        "status": "passed",
+        "pid": 38130,
+        "exit_code": 0,
+        "elapsed_seconds": 15.43
+      }
+    },
+    {
+      "file": "benchmark-agent-tests.json",
+      "sha256": "f91fa881281949a0a4c63a7c1573dbbe1b43176a15ea434348a9c7f33e32a61e",
+      "result": {
+        "phase": "benchmark-agent-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/benchmark-browser-agent.py",
+          "self-test"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 15260,
+        "exit_code": 0,
+        "elapsed_seconds": 0.119
+      }
+    },
+    {
+      "file": "boot-restore.json",
+      "sha256": "0bfaf6a628a843508e78abe88fcb5ac6f41bd40d441dffe4c8e17f15a5bec7c7",
+      "result": {
+        "phase": "boot-restore",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 43725,
+        "exit_code": 0,
+        "elapsed_seconds": 4.645
+      }
+    },
+    {
+      "file": "bridge.json",
+      "sha256": "50cbd0dadad060eb5df46bf5b795dad74088e3ec278067974d35153d986bc281",
+      "result": {
+        "phase": "bridge",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "bridge::tests"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 38868,
+        "exit_code": 0,
+        "elapsed_seconds": 0.49
+      }
+    },
+    {
+      "file": "browser-chrome.json",
+      "sha256": "0af775d900d6ddd5c43b9e0304d445cea02070c0feefb6a48175b6c046c3d45f",
+      "result": {
+        "phase": "browser-chrome",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 50029,
+        "exit_code": 0,
+        "elapsed_seconds": 6.242
+      }
+    },
+    {
+      "file": "browser-completion-unit.json",
+      "sha256": "89eabcfa7c228dfdd342e5e20dfdbcb03e353c8678d6dc762332f56b2aebb831",
+      "result": {
+        "phase": "browser-completion-unit",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "completion_tests"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 51085,
+        "exit_code": 0,
+        "elapsed_seconds": 0.452
+      }
+    },
+    {
+      "file": "browser-control.json",
+      "sha256": "d50c2a8f037070426861c8f48cfef8353a37435cd0f35b8e444361e4e621ab33",
+      "result": {
+        "phase": "browser-control",
+        "command": [
+          "python3",
+          "scripts/test-browser-control.py",
+          "/Users/runner/work/flowmux/flowmux/target/debug/flowmux"
+        ],
+        "timeout_seconds": 240.0,
+        "status": "passed",
+        "pid": 24079,
+        "exit_code": 0,
+        "elapsed_seconds": 147.187
+      }
+    },
+    {
+      "file": "browser-deadline.json",
+      "sha256": "51ffd892524f5044e17fcd0800724e99566d8b1d45fa0ebc43466d74de830892",
+      "result": {
+        "phase": "browser-deadline",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 51091,
+        "exit_code": 0,
+        "elapsed_seconds": 32.483
+      }
+    },
+    {
+      "file": "build.json",
+      "sha256": "74a189af8efcd1fa4a919dccc51b7089b43e28dd8dc112dd6c1de3865d675226",
+      "result": {
+        "phase": "build",
+        "command": [
+          "cargo",
+          "build",
+          "--workspace",
+          "--locked"
+        ],
+        "timeout_seconds": 900.0,
+        "status": "passed",
+        "pid": 17112,
+        "exit_code": 0,
+        "elapsed_seconds": 151.05
+      }
+    },
+    {
+      "file": "ci-runner-tests.json",
+      "sha256": "151755bb126490d651ee1ab4351674007cd8fb3d8d34f4c85d6994ee9fd9af7b",
+      "result": {
+        "phase": "ci-runner-tests",
+        "command": [
+          "python3",
+          "scripts/test-ci-runner.py"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 5331,
+        "exit_code": 0,
+        "elapsed_seconds": 188.484
+      }
+    },
+    {
+      "file": "cli.json",
+      "sha256": "445c2ad584a630528d5493697a2c5e5a99f28f96e32a5e9e8c36969de6a110f2",
+      "result": {
+        "phase": "cli",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux-cli",
+          "--locked"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 36256,
+        "exit_code": 0,
+        "elapsed_seconds": 43.99
+      }
+    },
+    {
+      "file": "editor-keyboard.json",
+      "sha256": "c299c58b11ad7912e84492d91b2101966b0eaf6d8aa67a13533b8d253bd7d9b3",
+      "result": {
+        "phase": "editor-keyboard",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 44052,
+        "exit_code": 0,
+        "elapsed_seconds": 9.025
+      }
+    },
+    {
+      "file": "editor-recovery.json",
+      "sha256": "fa362d15dacec08a7ae81e222694a5c8f494fbcf297717ca3602b92eb4f3a369",
+      "result": {
+        "phase": "editor-recovery",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 50314,
+        "exit_code": 0,
+        "elapsed_seconds": 4.171
+      }
+    },
+    {
+      "file": "format.json",
+      "sha256": "791e9a11c69391ec20b09112f83ae74c9b3de57862ddce9577a27aa4503ba9e5",
+      "result": {
+        "phase": "format",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 15267,
+        "exit_code": 0,
+        "elapsed_seconds": 3.683
+      }
+    },
+    {
+      "file": "image-routing.json",
+      "sha256": "6b1d1becdd30223befdaf84027c826480005965b03b2c1ec7af31d62e2c9f44f",
+      "result": {
+        "phase": "image-routing",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "macos_terminal_routes_lottie_json_to_the_viewer"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 48471,
+        "exit_code": 0,
+        "elapsed_seconds": 0.811
+      }
+    },
+    {
+      "file": "image-unit.json",
+      "sha256": "79bd637da3115cdd84890d91deba7e7c8dec3af511fa7aafd943d11a952a2741",
+      "result": {
+        "phase": "image-unit",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "ui::image_viewer::tests",
+          "--",
+          "--test-threads=1"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 48210,
+        "exit_code": 0,
+        "elapsed_seconds": 4.982
+      }
+    },
+    {
+      "file": "image-viewer.json",
+      "sha256": "98faa8cdb8adb70c4b663b8f154bb14d1be19ca6d727946ea437c5b354a4f1b2",
+      "result": {
+        "phase": "image-viewer",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 48476,
+        "exit_code": 0,
+        "elapsed_seconds": 1.731
+      }
+    },
+    {
+      "file": "installer-routing.json",
+      "sha256": "d3c198b4c9632ad2a72db7ac4fa8148e3aa7e8127318d55525a68ecc27399ba7",
+      "result": {
+        "phase": "installer-routing",
+        "command": [
+          "python3",
+          "scripts/test-install.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 14268,
+        "exit_code": 0,
+        "elapsed_seconds": 1.648
+      }
+    },
+    {
+      "file": "ipc.json",
+      "sha256": "f8c36376c55e8f0f1f3cf3e4ec52d7ddc0ae36e940cc0ab6b8cadff3f182ffa9",
+      "result": {
+        "phase": "ipc",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "ipc_handler::tests"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 38837,
+        "exit_code": 0,
+        "elapsed_seconds": 1.545
+      }
+    },
+    {
+      "file": "macos-dmg-update.json",
+      "sha256": "047ab694237ad97b76a41758120b234604584ae261ddc9fda12939ed256ae44b",
+      "result": {
+        "phase": "macos-dmg-update",
+        "command": [
+          "python3",
+          "scripts/test-update-macos-dmg.py"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 31148,
+        "exit_code": 0,
+        "elapsed_seconds": 80.864
+      }
+    },
+    {
+      "file": "macos-installer.json",
+      "sha256": "662873e2ed4514af494a1457ab3ce49dc1faab82614f481858455708d7b09fc7",
+      "result": {
+        "phase": "macos-installer",
+        "command": [
+          "python3",
+          "scripts/test-install-macos.py"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 15598,
+        "exit_code": 0,
+        "elapsed_seconds": 13.068
+      }
+    },
+    {
+      "file": "macos-layer.json",
+      "sha256": "0371402e544d84858fe8eeff675cf29ed5ca89fd5bc6e16291f6624e7caf11a8",
+      "result": {
+        "phase": "macos-layer",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "ui::macos_layer::tests"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 29577,
+        "exit_code": 0,
+        "elapsed_seconds": 52.965
+      }
+    },
+    {
+      "file": "macos-update-options.json",
+      "sha256": "1a0ce71618379985a3088eb5615d19622a66b5e27a0cff524d4f29261cf7e76f",
+      "result": {
+        "phase": "macos-update-options",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "dmg_update_tab"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 31145,
+        "exit_code": 0,
+        "elapsed_seconds": 0.434
+      }
+    },
+    {
+      "file": "macos-update-unit.json",
+      "sha256": "7eaab4f32297b0669c85ee99e67232d6794b460c76100d60bfa5ba025d90c7be",
+      "result": {
+        "phase": "macos-update-unit",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "update::"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 31047,
+        "exit_code": 0,
+        "elapsed_seconds": 1.725
+      }
+    },
+    {
+      "file": "markdown.json",
+      "sha256": "8914837cdaa6b8dc4b5025aa7e6928f2979931bea6467bc25ec295433b7b7f6b",
+      "result": {
+        "phase": "markdown",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux-md-viewer",
+          "--locked",
+          "--",
+          "--test-threads=1"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 45785,
+        "exit_code": 0,
+        "elapsed_seconds": 81.127
+      }
+    },
+    {
+      "file": "native-state.json",
+      "sha256": "c7bf40c685b65eb51f7bf3860ce47c674aae0df4cd95a8307727d609c8df2f66",
+      "result": {
+        "phase": "native-state",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux-state",
+          "-p",
+          "flowmux-procmon",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 33436,
+        "exit_code": 0,
+        "elapsed_seconds": 36.52
+      }
+    },
+    {
+      "file": "native.json",
+      "sha256": "4633e354bd4b564f02634f2bf84d70c2d80e2a95df179dd1be16911b419f2ebe",
+      "result": {
+        "phase": "native",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 600.0,
+        "status": "passed",
+        "pid": 38961,
+        "exit_code": 0,
+        "elapsed_seconds": 59.574
+      }
+    },
+    {
+      "file": "notification-cleanup.json",
+      "sha256": "604fb77f587d63f2ac8bba628fe1bdc923b488e96bbb4c46e058d411a6cbef74",
+      "result": {
+        "phase": "notification-cleanup",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 49269,
+        "exit_code": 0,
+        "elapsed_seconds": 1.487
+      }
+    },
+    {
+      "file": "notification-routing.json",
+      "sha256": "669a120a2ee40ba2831fc2fbc75232b9884b936c84ca8f14a18be7d910de6729",
+      "result": {
+        "phase": "notification-routing",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "native_notification_target_opens_the_source_pid_socket"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 49294,
+        "exit_code": 0,
+        "elapsed_seconds": 0.48
+      }
+    },
+    {
+      "file": "notifications.json",
+      "sha256": "b56ac45dff564a3807ef6e81f0cfc6773f7455f9dbb60aac4f230853493e1ae1",
+      "result": {
+        "phase": "notifications",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux-notify",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 48484,
+        "exit_code": 0,
+        "elapsed_seconds": 23.024
+      }
+    },
+    {
+      "file": "office-stability.json",
+      "sha256": "cad21943938ab645687649e0f1d1a97cc192274e3ac38a2a4ba9e84f5789e0bf",
+      "result": {
+        "phase": "office-stability",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 50333,
+        "exit_code": 0,
+        "elapsed_seconds": 12.545
+      }
+    },
+    {
+      "file": "palette-release.json",
+      "sha256": "b7c6222e29cdb6a07a1a7c3c4fde6c32c4106326cc6e9a9d8d5d78cc84ac1ad1",
+      "result": {
+        "phase": "palette-release",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 50304,
+        "exit_code": 0,
+        "elapsed_seconds": 1.393
+      }
+    },
+    {
+      "file": "session-flow.json",
+      "sha256": "2757d3fe0746b63ecdae483b5bfc094c06901a58a5a99a7763ebb5d132a67afd",
+      "result": {
+        "phase": "session-flow",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 45769,
+        "exit_code": 0,
+        "elapsed_seconds": 2.251
+      }
+    },
+    {
+      "file": "session-path-unit.json",
+      "sha256": "6407cf42121fe6271bc0626d0f84ac392b84690b4c24aa36bfc72e96e953ed7f",
+      "result": {
+        "phase": "session-path-unit",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "ui::window::session"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 38872,
+        "exit_code": 0,
+        "elapsed_seconds": 1.141
+      }
+    },
+    {
+      "file": "session-paths.json",
+      "sha256": "00e2c21a372d690aa79d70dbb3673c3276c445060326c78156bd9e65ea304cca",
+      "result": {
+        "phase": "session-paths",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 45740,
+        "exit_code": 0,
+        "elapsed_seconds": 1.851
+      }
+    },
+    {
+      "file": "skills.json",
+      "sha256": "fc656c15e2c7e6d67203172ff51bf50be7e3b04f5ef2a6b82bdc39a32ed5c02d",
+      "result": {
+        "phase": "skills",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 44361,
+        "exit_code": 0,
+        "elapsed_seconds": 3.663
+      }
+    },
+    {
+      "file": "ssh-preview.json",
+      "sha256": "240d073c1ea08e4766654efc926ca5afd8141dec2e2447833c9f45d2be1e6360",
+      "result": {
+        "phase": "ssh-preview",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_native",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 44032,
+        "exit_code": 0,
+        "elapsed_seconds": 3.75
+      }
+    },
+    {
+      "file": "stability-harness-tests.json",
+      "sha256": "01b5f56b7d336ddb19523eda0ea8ace171ef633232015bda1a1f9dcabc7370c8",
+      "result": {
+        "phase": "stability-harness-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-macos-stability.py",
+          "--self-check"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 15265,
+        "exit_code": 0,
+        "elapsed_seconds": 0.107
+      }
+    },
+    {
+      "file": "thorvg-installer.json",
+      "sha256": "f1c703d0c0a6839b2bb21bf1f9632806adc965e78dc2cd89fde03ffd94ce7cc6",
+      "result": {
+        "phase": "thorvg-installer",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-thorvg-macos.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 14430,
+        "exit_code": 0,
+        "elapsed_seconds": 1.218
+      }
+    },
+    {
+      "file": "thorvg-runtime.json",
+      "sha256": "0a78a78fa1c9b9f80e065d214a8dab07ec6b7eff7f1ad624d4b8f26cd84d57b6",
+      "result": {
+        "phase": "thorvg-runtime",
+        "command": [
+          "python3",
+          "scripts/check-thorvg.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 48207,
+        "exit_code": 0,
+        "elapsed_seconds": 0.091
+      }
+    },
+    {
+      "file": "webdriver-address.json",
+      "sha256": "92ecf851869c159fb9c94f1bb82259517ef4e996211cbb37fd35ae3dc93a975e",
+      "result": {
+        "phase": "webdriver-address",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--bin",
+          "flowmux",
+          "--locked",
+          "macos_webdriver::tests"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 49297,
+        "exit_code": 0,
+        "elapsed_seconds": 0.456
+      }
+    },
+    {
+      "file": "webdriver-native.json",
+      "sha256": "e507c59179ec9739a7de8708f6ee5645d5923262b9ddb2d5d572a54a945182c5",
+      "result": {
+        "phase": "webdriver-native",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "flowmux",
+          "--test",
+          "macos_webdriver",
+          "--features",
+          "native-smoke",
+          "--locked"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 49328,
+        "exit_code": 0,
+        "elapsed_seconds": 4.286
+      }
+    },
+    {
+      "file": "webdriver.json",
+      "sha256": "da70de656d3eb31ccca19537cfb5d8c1a340514642813707662a7de17d4369d9",
+      "result": {
+        "phase": "webdriver",
+        "command": [
+          "python3",
+          "scripts/test-macos-webdriver.py",
+          "/Users/runner/work/flowmux/flowmux/target/debug/flowmux"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 49700,
+        "exit_code": 0,
+        "elapsed_seconds": 20.015
+      }
+    }
+  ],
+  "log_sha256": {
+    "webdriver.log": "46eb4afce791e9c73dbf9440845dab0f565307f2f8dafdc89672677c9e49c984",
+    "run.log": "55cb919267ed4e166187d12eab722c2eecdc80be015375830a5c76004fa197f2",
+    "browser-chrome.log": "9160d93ebe552d4eac0983c0cbe96d01b905a9fcb177514b6dcd0ad72d0db684",
+    "skills-smoke.log": "6a14989658939caec30b3ff7bc02f836237a8f61fcf850e614e6ccef181c51e7",
+    "notifications.log": "d2044e37039dc38a8f0d20c12b50308a0672d5bcc7bde00b06991cf76425f8ac",
+    "browser-deadline.log": "ae39f214b7ba23d7b237a3aeaaef4010fea264493f404fe9f566a620114cfd55",
+    "session-flow.log": "9c1d4bf6184925db0318a1a6024141188ef678538fd4ef57831c49b065a16535",
+    "editor-recovery.log": "85f55475881a0af5e0b6e55e5d41271a113f143a10b5d61e74ab2448c2333002",
+    "notification-cleanup.log": "bcde110359b227691e52666b2ab7b08f2e8c8e2491d90a5f0491bbfebfe0950c",
+    "native-smoke.log": "39a25a78920963da46765f6be4f787383e39bf1d7f728612223f9eda146b5ab5",
+    "editor-keyboard-smoke.log": "a05345c2ae141d6c82beda3ee75d6200ad6e2d62b714f24ec42e8a63d9c1476c",
+    "ssh-preview.log": "6f9fda34e484d461d44121b5853eb5e672509a6a34446534d902405f91b46abf",
+    "agent-unit.log": "02d6aa6f74aa8a9ebc5600965e994a89555c4a9ed8361b10aef8076d019f44e0",
+    "image-viewer.log": "608f75b3b97a119349bd8fc7eb94fe9f9f82bc500289bbb4bf151bfc4aaf126d",
+    "agent-hooks.log": "0ae20c0a6570ed1a9951373b511f80de7e780eca859498f1b092ef983413d51b",
+    "palette-release.log": "51d7eb6b478fbf3b48f9d1e9ddfdcd94a72ae2a86a532af64cd38524b45ebe53",
+    "session-paths.log": "bd05dd70a26922082484ae88114ab715c248f81bfc7770cbb8106de8cad733d7",
+    "markdown.log": "9b6f7c48e706634add8b8cc2369cbdcb5257b88663b5540c6881a02c9bd7ac33",
+    "office-stability.log": "49d4c2a19c0f352b2601fa95996b9cb31226a2363ee47b0c7c05dc238f2fe412",
+    "boot-restore.log": "7eeb5a20709e001d3397afa8eca74ddbf330b1bfd2941f4c07a0b7f56055cb93"
+  },
+  "verified_markers": [
+    "MACOS_SESSION_FLOW_LAYOUT_OK",
+    "test agent_sessions::tests::observed_identity_preserves_corrupt_store_and_rejects_invalid_input ... ok",
+    "test agent_sessions::tests::observed_identity_does_not_overwrite_newer_hooks_or_other_providers ... ok"
+  ],
+  "scope": "macOS common gate and Session Flow native regressions; physical mouse/trackpad and accessibility remain separate."
+}

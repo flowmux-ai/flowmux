@@ -688,7 +688,12 @@
         "evidence": "session-flow-license-461a4f9b.json"
       }
     ],
-    "scope": "Fresh workflows target the retained GSK renderer and hook selection readiness test fix; final conclusions pending."
+    "scope": "Fresh workflows target the retained GSK renderer and hook selection readiness test fix; final conclusions pending.",
+    "macos_job": {
+      "status": "completed",
+      "conclusion": "success",
+      "evidence": "session-flow-macos-gate-461a4f9b.json"
+    }
   },
   "final_frame_evidence": "session-flow-gsk-final-frames-461a4f9b.json"
 }
