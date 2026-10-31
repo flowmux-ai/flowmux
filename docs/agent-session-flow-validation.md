@@ -465,3 +465,12 @@ Sidebar Session Flow 버튼의 좌표 클릭으로 상단 약 1/3 그래프와 �
 [입력별 결과와 실제 session/operation 기록](design-assets/session-flow-claude-native-input-2b80463a.json).
 
 직전 제품 `2b80463a`의 macOS job `124405280277`은 success이고 artifact `13025744192`의 46개 phase가 모두 passed/exit 0이다. [macOS gate 기록](design-assets/session-flow-macos-gate-2b80463a.json). [Sanitizers 41156803235](https://github.com/flowmux-ai/flowmux/actions/runs/41156803235)도 전체 success다. 이후 OpenCode 변경의 검증과 구분한다.
+
+
+## 자동 drag 입력의 버튼 상태 진단
+
+동일 격리 앱 `com.flowmux.SessionFlowClaude`의 별도 테스트 workspace에 로컬 WebKit 입력 기록 페이지를 열었다. CUA drag `(1850,1000)→(2190,1100)`를 실행하고 native DOM event를 읽기 전용으로 회수했다. `pointerdown/mousedown`, 이동, `pointerup/mouseup` 6개 event는 `isTrusted=true`였지만 모두 `buttons=0`이었다. 즉 버튼을 누른 채 이동한 event를 이 경로에서 관측하지 못했다. [요청 좌표와 실제 event 기록](design-assets/session-flow-pointer-delivery-2b80463a.json).
+
+이 결과는 자동 입력이 실제 마우스 drag의 검증 근거로 부족하다는 뜻이며, Session Flow pan이 정상이라는 증거는 아니다. 관측만으로 제품의 drag 처리를 바꾸지 않았다. 실제 그래프 화면으로 복귀해 빈 공간을 실제 마우스로 끄는 수동 확인을 요청했으며 아직 응답을 받지 않았다. 사용자 앱 PID `72789`와 두 Claude source/child 프로세스를 유지했다.
+
+이전 제품 `4ab3e76e`의 [Test 41156185258](https://github.com/flowmux-ai/flowmux/actions/runs/41156185258)는 전체 success로 완료됐다. 최신 제품 `4cff2a5d`의 CI 진행 상태 및 수동 입력 검증과 구분한다.

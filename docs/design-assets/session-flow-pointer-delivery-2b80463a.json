@@ -1,0 +1,73 @@
+{
+  "product_commit": "2b80463aef655a39f17a80d5885f82e8a1f87f61",
+  "app": "com.flowmux.SessionFlowClaude",
+  "pid": 95986,
+  "scope": "CUA drag delivery calibration in a local WebKit page in the same isolated app; not Session Flow implementation validation.",
+  "browser_pane": "3947a140-c17b-481e-9178-ad83f802095b",
+  "browser_surface": "71591a44-8044-4741-92e4-07dc7c5a16bf",
+  "requested_drag": {
+    "from": [
+      1850,
+      1000
+    ],
+    "to": [
+      2190,
+      1100
+    ]
+  },
+  "events": [
+    {
+      "type": "pointerdown",
+      "x": 152,
+      "y": 376,
+      "button": 0,
+      "buttons": 0,
+      "trusted": true
+    },
+    {
+      "type": "mousedown",
+      "x": 152,
+      "y": 376,
+      "button": 0,
+      "buttons": 0,
+      "trusted": true
+    },
+    {
+      "type": "pointermove",
+      "x": 322,
+      "y": 426,
+      "button": -1,
+      "buttons": 0,
+      "trusted": true
+    },
+    {
+      "type": "mousemove",
+      "x": 322,
+      "y": 426,
+      "button": 0,
+      "buttons": 0,
+      "trusted": true
+    },
+    {
+      "type": "pointerup",
+      "x": 322,
+      "y": 426,
+      "button": 0,
+      "buttons": 0,
+      "trusted": true
+    },
+    {
+      "type": "mouseup",
+      "x": 322,
+      "y": 426,
+      "button": 0,
+      "buttons": 0,
+      "trusted": true
+    }
+  ],
+  "observation": "Native trusted down, move and up events were observed, but every event had buttons=0. There was no observed move with the left button held.",
+  "conclusion": "This automation input cannot prove real mouse-drag behavior. No graph code was changed from this observation.",
+  "remaining": "Manual real-pointer graph pan and node-drag check; menu item coordinate activation; accessibility checks.",
+  "restored_workspace": "b035961e-31b0-4752-b246-90ee65fe1a82",
+  "preserved_user_app_pid": 72789
+}
