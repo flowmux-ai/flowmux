@@ -618,3 +618,5 @@ Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종�
 상태 저장소 시험 83개와 integration 16개, 최종 conditional-record 시험 2개, all-targets/native-smoke clippy, 기본 Session Flow native 회귀를 통과했다. 별도 정상 Codex 시험에서도 fork→같은 ID resume→workspace 간 기존 tab focus→재fork의 3세대 관계와 원본 widget/PID 보존을 통과했다. 초기 driver는 `agents` 응답에 native ID가 있다고 잘못 가정했으므로 그 후반부 결과를 성공으로 쓰지 않았다. 실제 writable rollout을 확인하도록 고친 전체 driver를 새 격리 환경에서 재실행해 exit 0을 확인했다.
 
 [전후 증거·실제 ID·프로세스·파일·로그 hash](design-assets/session-flow-codex-publication-recovery.json). 잠긴 화면에서 실행했으므로 렌더링된 최종 화면·물리 입력·접근성을 통과했다고 주장하지 않는다. 기존 사용자 PID 72789와 보존된 검증 앱 PID 95986·61360은 계속 유지했다. `4cff2a5d`의 이전 CI는 이번 제품 수정의 최종 CI 증거가 아니다.
+
+현재 CI: checkout `6f62e807`의 [Test 41164398831](https://github.com/flowmux-ai/flowmux/actions/runs/41164398831), [Sanitizers 41164400861](https://github.com/flowmux-ai/flowmux/actions/runs/41164400861)을 시작했고 두 workflow의 `in_progress`를 확인했다. 최종 결론과 이번 수정의 coverage 산출물은 아직 대기 중이다.

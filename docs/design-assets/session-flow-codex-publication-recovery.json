@@ -322,5 +322,18 @@
     }
   },
   "earlier_validation_note": "A first post-fix driver used an incorrect predicate expecting native IDs in the agents response. That API omits them. A separate verifier confirmed native writable rollout handles; the corrected full driver then passed on a new isolated run recorded here.",
-  "ci": "New product CI pending; prior 4cff2a5d CI is not evidence for this change."
+  "ci": {
+    "status": "in_progress",
+    "tested_head": "6f62e807a3096cc58fa3e952a09a7a5779e89fa1",
+    "observed_at": "2026-10-31T03:26:42Z",
+    "test": {
+      "id": 41164398831,
+      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164398831"
+    },
+    "sanitizers": {
+      "id": 41164400861,
+      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/41164400861"
+    },
+    "coverage": "Not yet available for this product change; prior product coverage is not substituted."
+  }
 }
