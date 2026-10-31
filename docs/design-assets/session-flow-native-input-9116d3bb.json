@@ -1,0 +1,105 @@
+{
+  "product_commit": "9116d3bbb43b2d9e58900c99d326a4f85c79e4cb",
+  "checkout_commit": "44acfcef",
+  "date": "2026-10-31",
+  "platform": "macOS",
+  "input": "CUA native OS input, not physical hardware input",
+  "isolation": {
+    "pid": 65831,
+    "root": "/tmp/fmsui-z5s_o9d2",
+    "user_app_pid_preserved": 72789
+  },
+  "operations": [
+    {
+      "request": "94dbb779-1163-4103-9659-95077dd11988",
+      "kind": "Fork",
+      "source_id": "01a18ddc-a51f-7472-ab63-045abb779243",
+      "result_id": "01a18f8f-c2c5-7e51-9b8e-85330f228756",
+      "state": "complete",
+      "target_surface": "ae0aa8b4-2aab-4f45-a23d-7db57343622a"
+    },
+    {
+      "request": "b7956e76-9855-48b4-8eb1-21a3a9c085de",
+      "kind": "Resume",
+      "source_id": "01a18e7a-422b-7360-a3a2-c52e772bf11a",
+      "result_id": "01a18e7a-422b-7360-a3a2-c52e772bf11a",
+      "state": "complete",
+      "target_surface": "2aced0db-dd59-4842-942f-edc168e3601e"
+    }
+  ],
+  "observed": {
+    "context_menu_keyboard_fork": "passed",
+    "right_split_and_source_pid_preserved": "passed",
+    "sidebar_toggle_and_upper_third_panel": "passed",
+    "native_pointer_graph_resume": "passed",
+    "repeat_node_selection_no_new_operation_or_process": "passed",
+    "wheel_zoom_and_fit": "passed",
+    "pointer_menu_activation": "not_passed: popup dismissed without action, also reproduced on legacy Split Right with 200 ms click",
+    "native_drag": "not_passed: no observed camera movement",
+    "accessibility": "not_verified: AX exposes window and menu bar, no GTK content"
+  },
+  "counts": {
+    "before": {
+      "nodes": 19,
+      "edges": 18,
+      "live": 1,
+      "operations": 0
+    },
+    "after": {
+      "nodes": 20,
+      "edges": 19,
+      "live": 3,
+      "operations": 2
+    }
+  },
+  "live_sessions": [
+    {
+      "key": {
+        "provider": "codex",
+        "home": "/private/tmp/fm-flow-v7ye0ldh/codex",
+        "id": "01a18e7a-422b-7360-a3a2-c52e772bf11a"
+      },
+      "owner": "102c5a33-2485-409d-9b3e-636ebee7a239",
+      "pid": 68310,
+      "started": 1793410035102691,
+      "workspace": "cc2e937b-f0aa-45c7-858b-c862e2c8939e",
+      "pane": "f60848f2-d6ba-4eb2-9bfb-063c7baa3737",
+      "surface": "2aced0db-dd59-4842-942f-edc168e3601e",
+      "socket": "/tmp/fmsui-z5s_o9d2/run/flowmux-65831.sock"
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "home": "/private/tmp/fm-flow-v7ye0ldh/codex",
+        "id": "01a18ddc-a51f-7472-ab63-045abb779243"
+      },
+      "owner": "102c5a33-2485-409d-9b3e-636ebee7a239",
+      "pid": 66048,
+      "started": 1793409812586364,
+      "workspace": "cc2e937b-f0aa-45c7-858b-c862e2c8939e",
+      "pane": "f4ceb092-4e44-4b6c-b556-0d9004092df6",
+      "surface": "3d7c5efd-9db3-487e-ae2b-03f4dd7be0f8",
+      "socket": "/tmp/fmsui-z5s_o9d2/run/flowmux-65831.sock"
+    },
+    {
+      "key": {
+        "provider": "codex",
+        "home": "/private/tmp/fm-flow-v7ye0ldh/codex",
+        "id": "01a18f8f-c2c5-7e51-9b8e-85330f228756"
+      },
+      "owner": "102c5a33-2485-409d-9b3e-636ebee7a239",
+      "pid": 66774,
+      "started": 1793409925482970,
+      "workspace": "cc2e937b-f0aa-45c7-858b-c862e2c8939e",
+      "pane": "46eefa5f-972e-4cda-9747-33f74ccef379",
+      "surface": "ae0aa8b4-2aab-4f45-a23d-7db57343622a",
+      "socket": "/tmp/fmsui-z5s_o9d2/run/flowmux-65831.sock"
+    }
+  ],
+  "navigation_invariants": {
+    "operations_unchanged_after_repeat_and_drag": true,
+    "edges_unchanged_after_resume": true,
+    "all_three_live_bindings_unchanged_after_navigation": true
+  },
+  "visual_issue": "20 identical long titles overlap in fitted view; subsequent canvas fix requires fresh runtime verification"
+}

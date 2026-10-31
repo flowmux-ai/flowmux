@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 구현 및 자동 회귀·coverage 검증 완료. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: 구현 및 `9116d3bb`의 자동 회귀·coverage 검증 완료. 후속 제목 충돌 수정 `06425a31`은 로컬 native 검증을 통과했고 전체 CI는 진행 중이다. 수동 실기·접근성 및 도구별 전체 GUI 검증은 아래 경계와 같이 남아 있다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 최신 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -196,16 +196,16 @@ HTML 목업은 초기 상호작용 설계 자료다. 아래 실행 기록은 구
 
 | 요구 | 현재 확인된 증거 | 추가 확인 또는 적용 한계 |
 | --- | --- | --- |
-| R01 | Native terminal 메뉴의 활성/비활성, stale menu 거절; 실제 Codex 메뉴 callback → fork | 물리 secondary click과 다른 provider GUI는 미확인 |
+| R01 | Native terminal 메뉴의 활성/비활성, stale menu 거절; 실제 Codex 메뉴 callback → fork | CUA native secondary click → 키보드 메뉴 선택 → 실제 fork 추가 확인. 메뉴 pointer 선택은 기존 Split Right에서도 실행되지 않아 미통과; 다른 provider GUI는 미확인 |
 | R02 | 실제 Codex 오른쪽 split과 원본 widget/PID 보존; daemon의 source/surface 검증 및 증분 split | 모든 혼합 pane 조합의 실제 provider fork를 실행한 것은 아님 |
 | R03 | 실제 새 child ID·native parent·edge 확인; resume한 child의 재fork로 3세대 부모 연결 검증; state의 원자적 완료·중복 방지 | 실제 GUI provider 증거는 Codex 기준 |
-| R04 | 모든 terminal surface를 anchor로 읽는 구현과 native projection fixture | 비활성 tab만 남긴 workspace 버튼의 물리 UI 조작은 미확인 |
-| R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | 실제 sidebar 버튼의 물리 입력은 미확인 |
+| R04 | 모든 terminal surface를 anchor로 읽는 구현과 native projection fixture | CUA에서 shell 탭을 활성화해도 흐름 버튼·20개 그래프 유지 확인; node pointer로 원래 비활성 surface 복귀 확인 |
+| R05 | Native fixture의 mapped panel 높이 비율 0.20–0.48, 토글·원본 보존; sidebar dispatch 연결 | CUA native sidebar pointer 클릭과 실제 상단 panel 추가 확인; 사람의 하드웨어 조작은 미확인 |
 | R06 | 어느 family anchor에서도 동일한 전체 projection; 실제 두 workspace의 동일 node/edge 집합 | 명시적 native parent 또는 직접 기록한 관계만 복원 가능 |
 | R07 | 독립 family 분리·중복 제거, 1만 노드 모델 시험, 다중 family native fixture | 모든 provider의 외부 fork 계보를 복원하는 기능은 아님 |
-| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처 | 물리 trackpad·VoiceOver/AT-SPI·실제 화면 frame 지연은 미확인 |
-| R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
-| R10 | Native disabled node 입력이 launch를 만들지 않음; 기록 누락 placeholder·불가 사유 | 수동 접근성 검증 미확인 |
+| R08 | 모델 camera/force 수렴·공유 배치, native gesture의 zoom/pan/drag/cancel, cosmic fixture 캡처 | CUA wheel·Fit·확대 버튼, 20개 실제 세션 제목 충돌 수정 확인. Native drag는 카메라 변화가 없어 미통과; 물리 trackpad·VoiceOver/AT-SPI·화면 frame 지연 미확인 |
+| R09 | 실제 graph event → split resume, 반복 선택 중복 없음, 다른 workspace의 정확한 기존 tab으로 이동; CUA native pointer로 실제 같은 ID resume 및 재선택 중복 없음 추가 확인 | 서로 다른 GUI 프로세스 2개의 동시 조작은 state/IPC 수준 증거이며 전체 native E2E 미확인 |
+| R10 | Native disabled node 입력이 launch를 만들지 않음; 실제 비활성 Codex 기록을 임시 이동한 뒤 CUA pointer 클릭도 operation·pane 증가 없음; 기록 복원 완료 | 수동 접근성 검증 미확인 |
 | R11 | Native 토글·gesture 동안 widget/PID 보존; 실제 Codex 30분·159회 workspace/panel 전환 통과; macOS 공통 gate 46개 phase 통과 | 17노드 지속 시험은 대규모 UI 성능이나 더 긴 기간의 누수 부재 증거가 아님 |
 | R12 | 실제 Codex native ID 확인 후 publication, 같은 ID resume, stale source·writer/PID 재사용 검증 | Claude GUI 및 OpenCode 전체 provider 경로 미확인; 외부 writer 원자적 배제 없음 |
 | R13 | 메뉴 생성 후 session 교체 거절, 지연 binding 갱신이 새 writer를 덮지 않음 | 실행 중 임의의 외부 CLI 세션 전환을 모든 provider에서 검증하지는 않음 |
@@ -374,3 +374,20 @@ Window orchestration의 낮은 Linux 계측 범위를 전체 coverage로 숨기�
 최종 소스·문서 점검: 분리된 `feat/session-flow`에서 `4d5929f8`까지 31개 커밋의 author/committer가 모두 지정된 `JunsuChoi <jsuya.choi@samsung.com>`인지 확인했고 co-author trailer와 외부 URL이 없음을 확인했다. 원격과 로컬 HEAD가 일치했고 문서의 로컬 링크 32개 및 검증 JSON도 유효했다. 이 기록 이후의 문서·증거 커밋은 제품 코드 변경이 아니다. 사용자 앱 PID `72789`는 계속 실행 중이며 종료·재시작하지 않았다.
 
 남은 검증 경계: 로컬 `CGSSessionScreenIsLocked=Yes`를 재확인했다. 물리 마우스/trackpad/키보드 및 VoiceOver/AT-SPI 확인은 수행하지 못했다. 실제 Claude GUI, OpenCode의 인증 성공 상태를 포함한 전체 GUI 경로, 두 독립 GUI 프로세스의 실기 전환, provider crash/restart 전체 시나리오를 통과했다고 주장하지 않는다. 위 요구사항별 표의 미확인 항목과 도구별 지원 제한은 유지한다.
+
+
+## 잠금 해제 후 native 입력 재검증과 제목 충돌 수정
+
+2026-10-31, 사용자 앱 PID `72789`를 유지한 상태에서 별도 bundle/state/runtime으로 검증했다. 아래 입력은 CUA가 OS에 전달한 native 입력이며 사람의 실제 마우스·trackpad나 GTK signal emit 시험과 구분한다. 상세 identity와 count는 [native 입력 기록](design-assets/session-flow-native-input-9116d3bb.json)에 남겼다.
+
+- 제품 `9116d3bb`, 격리 앱 PID `65831`: 우클릭으로 메뉴를 열고 Down/Return으로 Fork session을 선택했다. 원본 `01a18ddc-a51f-7472-ab63-045abb779243`의 PID `66048`을 유지하고 child `01a18f8f-c2c5-7e51-9b8e-85330f228756`을 오른쪽 split으로 열었다. Operation은 complete, 노드 19→20, edge 18→19였다.
+- Sidebar 버튼 클릭 후 상단 약 1/3에 그래프가 나타났다. Wheel 확대와 Fit 복원을 확인했다. 그래프 pointer 클릭은 `01a18e7a-422b-7360-a3a2-c52e772bf11a`를 같은 ID로 resume했다. 재선택 후 operation 2개·edge 19개·live binding 3개 및 각각의 process birth identity가 그대로였다.
+- 메뉴의 pointer 선택은 Fork와 기존 Split Right 모두 popup만 닫고 실행되지 않았다. 200ms 누름에서도 같았다. Native drag도 카메라 이동을 관측하지 못했다. 입력 도구와 GTK/AppKit 중 어느 쪽의 문제인지 확정하지 않았으며 이 경로를 통과로 기록하지 않는다. AX snapshot은 window/menu bar만 노출하고 GTK 내용은 노출하지 않아 접근성 성공 증거가 없다.
+- 실제 20개 세션의 Fit 화면에서 제목이 중첩됐다. `06425a31`은 Pango 제목 영역을 위·아래에 배치하고, 이미 배치된 제목이나 노드를 가리는 일반 제목을 생략한다. 선택 제목을 우선하며 노드·edge·hit target·저장된 배치를 바꾸지 않는다.
+- 긴 한글·RTL·emoji 제목 20개에 대해 제목 간 충돌 없음, 선택 우선, graph/position/hit 유지, 분산된 노드의 제목 복원, 화면 밖 생략을 native 공통 canvas 시험에 추가했다. `/tmp/flowmux-session-flow-label-test.log`의 `MACOS_SESSION_FLOW_LAYOUT_OK` 및 `MACOS_NATIVE_SMOKE_OK`, clippy `-D warnings`, GUI build가 통과했다.
+- 새 격리 앱 PID `72353`, `/tmp/fmslabel-rx4d2ri_`에서 같은 실제 계보 20개를 다시 열었다. Fit 화면 제목 중첩 제거, 열린 세션의 pointer 선택과 우선 제목 표시, 확대 버튼을 화면으로 확인했다. 두 앱은 서로 다른 테스트 세션을 열었으며 사용자 앱은 종료·재시작하지 않았다. 이 수정의 전체 CI 결론은 별도로 기록한다.
+
+- `06425a31`에서 비활성 native 기록 하나를 임시 이동해 회색 금지 표식과 연결 유지, native pointer 클릭의 불가 사유 표시, operation 0·live 1·edge 19 유지까지 확인했다. 기록을 원위치로 복원하고 노드가 다시 활성화되는 화면을 확인했다.
+- 같은 pane에 shell 탭을 추가해 Codex 탭을 비활성으로 만들었다. Sidebar 흐름 버튼과 20개 그래프가 유지됐고 native node 클릭으로 정확한 원래 surface `4bb21dc9-aaf2-4915-a2f9-7cb6ef8e420e`가 활성화됐다. Pane 1개·tab 2개·operation 0 및 Codex process birth identity가 유지됐다. [후속 native 검증 기록](design-assets/session-flow-native-input-06425a31.json).
+
+후속 CI: [Test 41155692283](https://github.com/flowmux-ai/flowmux/actions/runs/41155692283), [Sanitizers 41155694852](https://github.com/flowmux-ai/flowmux/actions/runs/41155694852), 모두 제품 `06425a31` 대상. 기록 시점 진행 중이며 이전 커밋의 성공을 이 변경의 성공으로 대신하지 않는다.

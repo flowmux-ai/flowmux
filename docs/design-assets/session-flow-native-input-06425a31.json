@@ -1,0 +1,78 @@
+{
+  "product_commit": "06425a31bacd25dc4bac2f05f07fea0a0538885e",
+  "date": "2026-10-31",
+  "isolation": {
+    "root": "/tmp/fmslabel-rx4d2ri_",
+    "bundle": "/tmp/fmslabel-rx4d2ri_/Flowmux Session Flow Labels.app",
+    "pid": 72353,
+    "socket": "/tmp/fmslabel-rx4d2ri_/run/flowmux-72353.sock",
+    "cli": "/tmp/fmslabel-rx4d2ri_/Flowmux Session Flow Labels.app/Contents/MacOS/flowmuxctl"
+  },
+  "input": "CUA native OS input; not human hardware input",
+  "observed": {
+    "fitted_20_node_title_collision_removed": true,
+    "selected_title_visible": true,
+    "zoom_buttons_preserve_selection": true,
+    "missing_history_node_and_edges_preserved": true,
+    "disabled_native_pointer_click_no_launch": true,
+    "native_history_restored": true,
+    "inactive_agent_tab_preserves_graph_and_sidebar_button": true,
+    "native_pointer_focuses_exact_existing_surface": true
+  },
+  "counts": {
+    "nodes": 20,
+    "edges": 19,
+    "live": 1,
+    "operations": 0,
+    "panes": 1,
+    "tabs": 2
+  },
+  "live_sessions": [
+    {
+      "key": {
+        "provider": "codex",
+        "home": "/private/tmp/fm-flow-v7ye0ldh/codex",
+        "id": "01a18e7a-2962-7462-aa52-5beb822f94e9"
+      },
+      "owner": "2263ba98-a739-417a-83c9-da37dedb9e9d",
+      "pid": 72497,
+      "started": 1793410187085559,
+      "workspace": "c34e3333-3ed3-48a1-a6b7-e5ea6e9bd6c6",
+      "pane": "9983670f-56e3-4bce-b9b8-2f29d61c28a5",
+      "surface": "4bb21dc9-aaf2-4915-a2f9-7cb6ef8e420e",
+      "socket": "/tmp/fmslabel-rx4d2ri_/run/flowmux-72353.sock"
+    }
+  ],
+  "tabs": [
+    {
+      "id": "4bb21dc9-aaf2-4915-a2f9-7cb6ef8e420e",
+      "title": "Prepare session flow response | project",
+      "kind": "terminal",
+      "active": true,
+      "agent": {
+        "name": "codex",
+        "status": "idle",
+        "activity": "idle",
+        "source": "flowmux:proc",
+        "status_evidence": {
+          "source": "program",
+          "since": "2026-10-31T01:30:00.422412Z"
+        },
+        "status_text": "Idle",
+        "custom_status": "Idle"
+      }
+    },
+    {
+      "id": "8f57d6b6-c9d4-4b8d-83a0-92c9aefa04b9",
+      "title": "project",
+      "kind": "terminal",
+      "active": false
+    }
+  ],
+  "temporarily_missing_id": "01a18e5e-4e9e-73a1-bac8-ff16675e74e9",
+  "known_limits": [
+    "Popup pointer activation and drag unresolved in input tool path",
+    "VoiceOver and physical trackpad not run",
+    "Full CI tracked separately"
+  ]
+}
