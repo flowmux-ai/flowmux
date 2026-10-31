@@ -2,7 +2,7 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 Test·Sanitizers와 coverage 기준은 모두 통과했다. 최신 `4cff2a5d`는 macOS 46개 phase·editor/headless·Sanitizers가 성공했으며 Linux test/coverage는 실행 중이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: `4cff2a5d`까지 구현. OpenCode 재개 세션의 TUI ID 관측 수정과 실제 GTK fork/동일 ID resume 검증을 완료했다. Claude native 회귀와 실제 우클릭→키보드 fork→그래프 클릭·휠 입력도 통과했다. 메뉴 항목의 좌표 클릭·드래그 팬·수동 접근성 검증은 미확인이다. 직전 제품 `2b80463a`의 Test·Sanitizers와 coverage 기준은 모두 통과했다. 제품 `4cff2a5d`의 Test·Sanitizers는 전체 성공했고 Linux/macOS phase 및 coverage 산출물까지 확인했다. 이후 렌더링 성능 실험은 이 CI 결과에 포함하지 않는다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
 이전 기준 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
 
@@ -572,3 +572,9 @@ cargo test -p flowmux --release --test macos_native --features native-smoke --lo
 DrawingArea draw callback 이후에도 GL upload 과정에서 Cairo path의 재래스터화 비용이 발생함을 확인했다. 따라서 앞의 draw CPU p95만으로 프레임 비용을 설명할 수 없다. 다음 최적화 후보는 반복 도형의 래스터화 비용이며, node 위치·hit target·상태 구분·label과 실제 frame 결과를 보존하는지 함께 비교해야 한다. 아직 제품 최적화 성공으로 기록하지 않는다.
 
 [샘플링 범위·중첩 count·원본 hash](design-assets/session-flow-release-render-profile.json). 원본은 `/tmp/flowmux-session-flow-release-profile.txt`다. Profiler를 켠 실행의 frame 수치는 성능 수용 기준에 사용하지 않는다.
+
+## 2026-10-31 제품 `4cff2a5d` 최종 CI 산출물
+
+[Test 41159059019](https://github.com/flowmux-ai/flowmux/actions/runs/41159059019)와 [Sanitizers 41159061021](https://github.com/flowmux-ai/flowmux/actions/runs/41159061021)은 모두 전체 success다. 다운로드한 artifact에서 Linux 12개 phase, macOS 46개 phase가 모두 passed/exit 0인 것을 확인했다. macOS `session-flow` phase도 포함한다. Editor/headless, Linux ASan/LSan, ThorVG ASan/UBSan/LSan도 성공했다.
+
+`llvm-cov/summary.json`의 라인 **86.9318%**, 영역 **86.8462%**, 함수 **85.8393%**는 기준 79/78/78%를 충족한다. [워크플로 결론·phase 수·coverage 수치](design-assets/session-flow-ci-4cff2a5d.json). 이는 OpenCode TUI identity 수정까지의 제품 코드 증거다. 이후 추가된 opt-in 측정 시험은 해당 로컬 실행 기록으로 구분하며, 아직 채택하지 않은 렌더링 실험을 이 CI에 포함하지 않는다.
