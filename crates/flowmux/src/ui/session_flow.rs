@@ -681,6 +681,98 @@ impl FlowPanel {
     }
 }
 
+struct CanvasLabel<'a> {
+    key: &'a SessionKey,
+    layout: gtk::pango::Layout,
+    bounds: gtk::gdk::Rectangle,
+}
+
+fn layout_labels<'a>(
+    area: &gtk::DrawingArea,
+    scene: &'a Scene,
+    width: i32,
+    height: i32,
+) -> Vec<CanvasLabel<'a>> {
+    let camera = scene.camera();
+    let selected = scene
+        .workspace
+        .and_then(|id| scene.views.get(&id))
+        .and_then(|v| v.selected.as_ref());
+    let mut keys: Vec<_> = scene.graph.nodes().into_iter().collect();
+    let show_all_labels = keys.len() <= 50;
+    keys.sort_by_key(|key| (selected != Some(*key), !scene.anchors.contains(*key)));
+    let points: Vec<_> = keys
+        .iter()
+        .filter_map(|key| scene.layout.positions.get(*key))
+        .map(|point| camera.screen(*point))
+        .collect();
+    let mut labels: Vec<CanvasLabel<'_>> = Vec::new();
+    for key in keys {
+        let focused = selected == Some(key);
+        if !show_all_labels && camera.zoom < 0.6 && !scene.anchors.contains(key) && !focused {
+            continue;
+        }
+        let Some(point) = scene.layout.positions.get(key) else {
+            continue;
+        };
+        let p = camera.screen(*point);
+        if p.x < 0.0 || p.y < 0.0 || p.x > width as f64 || p.y > height as f64 {
+            continue;
+        }
+        let node = scene.nodes.get(key);
+        let title = node.map(|n| n.title.as_str()).unwrap_or(&key.id);
+        let text = if !node.is_some_and(|n| n.available) {
+            format!("{title} · unavailable")
+        } else if node.is_some_and(|n| n.running) {
+            format!("{title} · open")
+        } else {
+            title.to_string()
+        };
+        let layout = area.create_pango_layout(Some(&text));
+        layout.set_width(170 * gtk::pango::SCALE);
+        layout.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        layout.set_alignment(gtk::pango::Alignment::Center);
+        layout.set_font_description(Some(&gtk::pango::FontDescription::from_string("Sans 9")));
+        let (_, label_height) = layout.pixel_size();
+        let x = (p.x as i32 - 87).clamp(0, (width - 174).max(0));
+        let candidates = [p.y as i32 + 15, p.y as i32 - 19 - label_height];
+        for y in candidates {
+            let bounds = gtk::gdk::Rectangle::new(x, y, 174, label_height + 4);
+            if y < 0 || y + bounds.height() > height {
+                continue;
+            }
+            if labels
+                .iter()
+                .any(|label| label.bounds.intersect(&bounds).is_some())
+            {
+                continue;
+            }
+            // Keep nodes visible; the selected title takes priority in a dense cluster.
+            if !focused
+                && points.iter().any(|point| {
+                    bounds
+                        .intersect(&gtk::gdk::Rectangle::new(
+                            point.x as i32 - 10,
+                            point.y as i32 - 10,
+                            20,
+                            20,
+                        ))
+                        .is_some()
+                })
+            {
+                continue;
+            }
+            labels.push(CanvasLabel {
+                key,
+                layout,
+                bounds,
+            });
+            break;
+        }
+    }
+    labels
+}
+
 fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, scene: &Scene) {
     cr.set_source_rgb(0.025, 0.035, 0.08);
     let _ = cr.paint();
@@ -733,7 +825,6 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
         .and_then(|id| scene.views.get(&id))
         .and_then(|v| v.selected.as_ref());
     let keys = scene.graph.nodes();
-    let show_all_labels = keys.len() <= 50;
     for key in keys {
         let Some(point) = scene.layout.positions.get(key) else {
             continue;
@@ -779,29 +870,16 @@ fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i
             cr.arc(p.x, p.y, 14.0, 0.0, std::f64::consts::TAU);
             let _ = cr.stroke();
         }
-        if !show_all_labels && camera.zoom < 0.6 && !anchor && !focused {
-            continue;
-        }
-        let title = node.map(|n| n.title.as_str()).unwrap_or(&key.id);
-        let label = if !available {
-            format!("{title} · unavailable")
-        } else if node.is_some_and(|n| n.running) {
-            format!("{title} · open")
-        } else {
-            title.to_string()
-        };
-        let layout = area.create_pango_layout(Some(&label));
-        layout.set_width(170 * gtk::pango::SCALE);
-        layout.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        layout.set_alignment(gtk::pango::Alignment::Center);
-        layout.set_font_description(Some(&gtk::pango::FontDescription::from_string("Sans 9")));
+    }
+    for label in layout_labels(area, scene, width, height) {
+        let available = scene.nodes.get(label.key).is_some_and(|n| n.available);
         cr.set_source_rgb(
             if available { 0.83 } else { 0.55 },
             if available { 0.86 } else { 0.57 },
             if available { 0.94 } else { 0.64 },
         );
-        cr.move_to(p.x - 85.0, p.y + 17.0);
-        pangocairo::functions::show_layout(cr, &layout);
+        cr.move_to((label.bounds.x() + 2) as f64, (label.bounds.y() + 2) as f64);
+        pangocairo::functions::show_layout(cr, &label.layout);
     }
 }
 
@@ -875,6 +953,74 @@ pub(crate) fn check_canvas_controls() {
         home: "/fixture".into(),
         id: id.into(),
     };
+    // Reproduce a crowded family with identical, long multilingual titles.
+    let mut crowded = Scene {
+        workspace: Some(WorkspaceId::new()),
+        ..Scene::default()
+    };
+    crowded.view().unwrap().selected = Some(key("19"));
+    for index in 1..20 {
+        crowded
+            .graph
+            .link(key("0"), key(&index.to_string()))
+            .unwrap();
+    }
+    for (index, key) in crowded.graph.nodes().into_iter().enumerate() {
+        crowded.layout.positions.insert(
+            key.clone(),
+            Point {
+                x: 300.0 + (index % 5) as f64 * 20.0,
+                y: 70.0 + (index / 5) as f64 * 25.0,
+            },
+        );
+        crowded.nodes.insert(
+            key.clone(),
+            Node {
+                title: "같은 긴 세션 제목 · تجربة · 🪐 repeated session title".repeat(4),
+                detail: "Full session detail".into(),
+                available: key.id != "0",
+                running: false,
+            },
+        );
+    }
+    let before = crowded.layout.positions.clone();
+    let labels = layout_labels(&panel.area, &crowded, 800, 260);
+    assert!(!labels.is_empty() && labels.len() < 20);
+    assert_eq!(labels[0].key, &key("19"), "selected title has priority");
+    for (index, label) in labels.iter().enumerate() {
+        assert!(
+            labels[index + 1..]
+                .iter()
+                .all(|other| { label.bounds.intersect(&other.bounds).is_none() }),
+            "visible titles must never overlap"
+        );
+    }
+    assert_eq!(crowded.layout.positions, before);
+    assert_eq!(
+        crowded.graph.nodes().len(),
+        20,
+        "decluttering never hides nodes"
+    );
+    assert_eq!(
+        crowded.hit(crowded.camera().screen(before[&key("19")])),
+        Some(key("19"))
+    );
+    for (index, position) in crowded.layout.positions.values_mut().enumerate() {
+        *position = Point {
+            x: 100.0 + index as f64 * 200.0,
+            y: 100.0,
+        };
+    }
+    assert_eq!(
+        layout_labels(&panel.area, &crowded, 4200, 260).len(),
+        20,
+        "separated nodes regain their titles"
+    );
+    crowded.view().unwrap().camera.origin = Point {
+        x: -5000.0,
+        y: -5000.0,
+    };
+    assert!(layout_labels(&panel.area, &crowded, 800, 260).is_empty());
     let mut graph = Lineage::default();
     graph.link(key("parent"), key("child")).unwrap();
     let nodes = [

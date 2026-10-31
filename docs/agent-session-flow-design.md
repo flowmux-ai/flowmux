@@ -174,6 +174,7 @@ Native GTK `DrawingArea`의 Cairo/Pango 벡터 scene과 노드별 hit 영역을 
 - Pointer capture 해제, Escape, focus loss, pointer cancel은 드래그를 종료한다. 종료 후 다음 클릭에 이전 drag 상태가 남지 않는다.
 - `전체 맞춤`은 모든 현재 component의 bounds를 사용한다. 자동 갱신에서는 camera를 유지하고 최초 열기나 명시적 버튼에서만 맞춘다.
 - 축소 시 긴 제목·상세 상태를 줄이는 semantic zoom을 사용한다. 선택 불가 표식은 모든 배율에서 유지한다. 실제 클릭 가능한 영역은 렌더링 위치와 일치해야 한다.
+- 화면 좌표에서 제목 영역의 충돌을 검사해 위·아래 배치를 시도하고, 공간이 없는 일반 제목은 숨긴다. 선택한 제목과 열린 세션을 먼저 배치한다. 선택 제목은 밀집 노드보다 우선할 수 있지만 다른 제목과 겹치지 않는다. 노드·연결·클릭 영역은 그대로 유지하며 전체 상세는 tooltip으로 확인한다.
 - 키보드로 그래프를 탐색하고 Enter로 열 수 있어야 한다. 화면에 보이는 노드의 접근성 widget/overlay와 이름·불가 이유를 제공한다.
 - Node 제목은 plain text로 렌더링하고 길이를 제한한다. Provider 문자열을 markup이나 실행 명령으로 해석하지 않는다.
 
