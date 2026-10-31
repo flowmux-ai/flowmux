@@ -578,3 +578,25 @@ DrawingArea draw callback 이후에도 GL upload 과정에서 Cairo path의 재�
 [Test 41159059019](https://github.com/flowmux-ai/flowmux/actions/runs/41159059019)와 [Sanitizers 41159061021](https://github.com/flowmux-ai/flowmux/actions/runs/41159061021)은 모두 전체 success다. 다운로드한 artifact에서 Linux 12개 phase, macOS 46개 phase가 모두 passed/exit 0인 것을 확인했다. macOS `session-flow` phase도 포함한다. Editor/headless, Linux ASan/LSan, ThorVG ASan/UBSan/LSan도 성공했다.
 
 `llvm-cov/summary.json`의 라인 **86.9318%**, 영역 **86.8462%**, 함수 **85.8393%**는 기준 79/78/78%를 충족한다. [워크플로 결론·phase 수·coverage 수치](design-assets/session-flow-ci-4cff2a5d.json). 이는 OpenCode TUI identity 수정까지의 제품 코드 증거다. 이후 추가된 opt-in 측정 시험은 해당 로컬 실행 기록으로 구분하며, 아직 채택하지 않은 렌더링 실험을 이 CI에 포함하지 않는다.
+
+## 2026-10-31 렌더링 후보 비교와 화면 잠금 확인
+
+동일 release/GL 측정에서 다음 후보를 각각 시험했다. 모든 실행은 기본 native Session Flow regression과 측정 무결성 검사를 통과하고 exit 0으로 종료했지만, 5회 전체에서 frame p95 ≤33ms를 만족한 후보는 없다. **다섯 후보 모두 원복했으며 제품 렌더링 코드는 변경하지 않았다.**
+
+| 후보 | after-paint 간격 p95 범위 | 판단 |
+| --- | --- | --- |
+| 원 도형을 작은 이미지로 그리기 | 33.83–35.32 ms | 전체 프레임 개선 입증 안 됨 |
+| 전체 프레임을 ImageSurface에 먼저 그리기 | 34.16–35.37 ms | 전체 프레임 개선 입증 안 됨 |
+| 연결선 stroke와 화살표 fill 묶기 | 35.01–35.32 ms | callback CPU 감소만으로 채택하지 않음 |
+| 연속된 일반 노드의 원 fill 묶기 | 35.32–35.54 ms | 개선 입증 안 됨 |
+| 도형만 빠른 안티앨리어싱 적용 | 34.08–34.55 ms | 목표 미달, 화면 품질 수용도 미검증 |
+
+마지막 후보 실행 중 `ioreg`에서 `CGSSessionScreenIsLocked=Yes`를 관찰했다. CUA로 보존 중인 Claude 검증 앱을 조회한 결과도 `cgWindowNotFound`였다. 원본 Flowmux PID 72789, Claude 검증 앱 PID 95986, 복구 검증 앱 PID 61360은 계속 실행 중이었다. 기존 앱을 종료하거나 잠금을 우회하지 않았다.
+
+앞선 후보 및 기준 실행은 잠금 상태를 기록하지 않았으므로, 그 실행 전체가 잠겨 있었거나 잠금 해제 상태였다고 추정하지 않는다. 위 수치는 내부 GTK after-paint 관측이며 **잠금 해제된 데스크톱의 성능 수용 증거로 사용할 수 없다**. 원본 수치와 후보 patch hash를 [실험 기록](design-assets/session-flow-render-experiments.json)에 보존했다. 측정값만으로 GTK 자체의 고정 제한이나 제품의 단일 병목을 확정하지 않는다.
+
+Opt-in 측정 harness에 `screen_lock_observation`을 추가했다. 시작·종료 시 `ioreg`의 명시적 Yes/No만 boolean으로 저장하고, 조회 실패·필드 부재·알 수 없는 형식은 `null`로 남긴다. `null`을 잠금 해제로 취급하지 않는다. 원본 출력이나 사용자 식별 정보는 보고서에 저장하지 않는다. 이 필드는 양 끝 시점의 관찰이며 측정 구간 전체의 잠금 상태를 보증하지 않는다.
+
+해당 보완은 all-targets/native-smoke clippy `-D warnings` 및 격리된 debug/GL native 시험을 통과했다. 명시적 Yes/No와 누락 필드 해석 검사, 5회 측정, 기존 Session Flow 회귀 marker와 exit 0을 확인했고 생성된 보고서의 시작·종료 잠금 값은 모두 `true`였다. 이 실행은 잠금 정보 수집의 검증이며 release 성능 통과가 아니다. 보고서와 로그 hash는 위 실험 기록의 `context_probe_validation`에 포함한다.
+
+다음 수용 검증은 잠금 해제 후 **원복된 기준 코드**로 release/GL 5회 측정을 먼저 반복하고, 실제 마우스·trackpad pan/drag와 메뉴 좌표 클릭 및 접근성을 별도로 확인하는 것이다. 사용자의 잠금 해제 응답은 아직 없으며, 자동 입력이나 내부 신호 성공으로 해당 항목을 완료 처리하지 않는다.
