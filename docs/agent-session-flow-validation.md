@@ -659,3 +659,19 @@ Sanitizers `41164400861`은 최종 전체 success다. Linux ASan/LSan의 headles
 Linux artifact `13028289472`, macOS artifact `13028968110`에서 각각 12개·46개 phase의 passed/exit 0을 확인했다. 이번 `llvm-cov/summary.json`의 라인 **86.9090%** (103,460/119,044), 영역 **86.8100%** (171,125/197,126), 함수 **85.8301%** (9,419/10,974)는 기준 79/78/78%를 충족한다. 이전 제품의 커버리지를 이번 수정에 재사용하지 않았다. [워크플로·전체 phase·coverage 수치와 hash](design-assets/session-flow-ci-54a44d89.json).
 
 이 결과는 실제 Codex 관측 ID 영속화 수정의 최종 remote gate를 마감한다. 프레임 p95 목표 미달, 실제 held-button drag·메뉴 포인터·접근성, 두 GUI 프로세스 동시 조작의 전체 E2E 등 위 수용 표의 미완료 항목을 전체 CI 성공으로 대체하지 않는다.
+
+## 2026-10-31 GSK 연결선 후보와 화면 재잠금
+
+직선을 GTK 그래픽 노드로 제출하는 후보를 세 단계로 시험했다. 첫 단계는 기존 DrawingArea의 snapshot에서 선만 GSK 색상 사각형으로 구성하고 Cairo 배경·전경을 분리했다. 두 번째는 크기가 같은 배경 RenderNode를 재사용했다. 세 번째는 동일한 삼각형 화살표 RenderNode도 재사용했다. 입력 위젯의 controller, 세션 실행, 모델·저장 경로와 의존성은 변경하지 않았다. 세 실행은 release/GL, 1,000노드·20개 family, 10초×5회이며 exit 0 및 기존 native Session Flow 회귀 marker를 확인했다.
+
+| 후보 | 내부 frame p95 범위 | 잠금 관측 |
+| --- | --- | --- |
+| GSK 선 | 35.22–35.46ms | 시작 null, 종료 true |
+| GSK 선 + 배경 재사용 | 35.34–35.70ms | 시작·종료 true |
+| GSK 선 + 배경·화살표 재사용 | 첫 4회 35.37–35.53ms, 마지막 252.47ms | 시작·종료 true |
+
+마지막 실행의 큰 지연 원인은 확정하지 않았다. `ioreg`에서 현재 잠금을 다시 확인했고 보존된 복구 앱의 CUA 조회도 `cgWindowNotFound`였다. 사용자가 잠금 해제 상태를 유지할 수 있는지 비동기 질문을 남겼다. 이 수치로 잠금 해제 데스크톱 성능을 판단하거나 후보의 효과를 확정하지 않는다. 세 번째 후보의 callback CPU timer는 노드·라벨만 포함하므로 이전 전체 Cairo callback과 직접 비교할 수 없다.
+
+[원본 보고서·후보 patch·로그 hash](design-assets/session-flow-gsk-experiments.json)에 보존했고, [native fixture 렌더링](design-assets/session-flow-gsk-prototype.png)에서는 선·화살표·활성/비활성 노드·라벨을 확인했다. 이 이미지는 renderer texture 캡처이며 실제 compositor나 물리 입력 증거가 아니다. **후보를 제품에 채택하지 않고 소스를 원복했다.** 최신 CI가 검증한 제품 코드와 동일하며, 원복된 release executable도 다시 빌드한다.
+
+다음 비교는 화면 접근을 먼저 확인한 뒤 동일 baseline과 보존한 후보를 같은 조건에서 실행해야 한다. 실기 pan/drag·메뉴 pointer·접근성과 최종 현재 코드 CI는 별도 검증으로 유지한다. 원본 사용자 앱 PID 72789와 보존된 검증 앱 PID 95986·61360·30374는 모두 실행 중이었다.
