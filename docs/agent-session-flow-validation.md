@@ -2,9 +2,18 @@
 
 # Flowmux Session Flow 테스트와 검증 계획
 
-상태: 최신 제품 `54a44d89`는 Codex의 지연된 시작 hook을 보완한 프로세스 기반 ID를 재시작용 surface 기록에도 저장한다. 저장 직전 값 비교로 더 최신 hook·다른 도구 기록을 보존한다. 관계 publication을 실패시킨 실제 Codex fork 뒤 격리 GUI SIGKILL→재시작→동일 ID 복구, 정상 3세대 fork, 기본 native 회귀, 상태 저장소 시험 및 clippy를 로컬 통과했다. 이 수정의 새 CI는 아직 미완료이며 이전 제품 `4cff2a5d`의 Test·Sanitizers·coverage 성공과 구분한다. 화면 잠금으로 메뉴 좌표 클릭·hardware drag·접근성·잠금 해제 상태의 성능 수용은 미확인이다. 아래 항목은 수용 조건이며 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
+상태: `feat/session-flow`의 최신 제품 변경은 `461a4f9b`(GSK 그래프 렌더러)이며 이후 변경은 검증 문서다. 아래 시험표는 수용 조건이고 전체 통과 목록이 아니다. 작성일: 2026-10-31. 요구사항은 [설계 문서](agent-session-flow-design.md)의 R01–R14를 기준으로 한다.
 
-이전 기준 제품 커밋 `9116d3bb`의 [Test 41119193884](https://github.com/flowmux-ai/flowmux/actions/runs/41119193884)와 [Sanitizers 41119199156](https://github.com/flowmux-ai/flowmux/actions/runs/41119199156)는 모두 전체 성공했다. macOS 46개 phase, Linux coverage 기준, editor/headless 회귀를 통과했다. 이후 `4d5929f8`까지 제품 실행 코드 변경은 없으며 추가된 opt-in 3세대 fork 시험은 실제 Codex로 별도 통과했다. 이전 `7cc0c176`의 Test는 macOS IPC 포화 시험에서 실패했고 Sanitizers는 성공했다. `ecc97ae2`의 Test workflow 전체 성공과 최신 변경의 검증 완료는 구분한다.
+| 현재 gate | 확인한 결과와 근거 |
+| --- | --- |
+| 로컬 회귀 | 최종 release/GL native Session Flow, fmt·clippy, 실제 Codex 두 GUI의 동시 resume·기존 owner focus 통과. [소스 hash와 검사별 범위](design-assets/session-flow-gsk-retained-validation.json) |
+| 그래프 성능 | 1,000노드·20계보 release/GL 내부 frame p95 17.54–17.83ms, 5회 모두 ≤33ms. 측정 전후 데스크톱 접근 확인. Hardware 입력·compositor 지연 측정은 아님. [전체 수치](design-assets/session-flow-gsk-final-frames-461a4f9b.json) |
+| macOS CI | Test `41171842039`의 macOS job 성공, artifact의 46개 phase 모두 passed/exit 0. [전체 phase와 로그 hash](design-assets/session-flow-macos-gate-461a4f9b.json) |
+| Sanitizers·License audit | 같은 제품 commit에 대한 전체 성공. [Sanitizers](design-assets/session-flow-sanitizers-461a4f9b.json), [License audit](design-assets/session-flow-license-461a4f9b.json) |
+| Linux CI·커버리지 | [Test 41171842039](https://github.com/flowmux-ai/flowmux/actions/runs/41171842039)의 Linux job 실행 중. 이전 renderer의 coverage 수치를 현재 결과로 재사용하지 않음 |
+| 남은 화면 확인 | 메뉴의 물리 포인터 선택, held-button drag·트랙패드, 수동 접근성. 새 release 앱에서 사용자 입력이 감지된 이후의 조작 결과는 확인 대기. [실제 화면과 판정 경계](design-assets/session-flow-gsk-live-ui-461a4f9b.json) |
+
+이전 commit의 성공·실패와 수정 과정은 아래 날짜별 실행 기록으로 보존한다. 현재 완료 판단에는 위 제품 commit의 증거를 사용한다.
 
 검증은 모델의 정확성, 실제 provider 계약, native GUI 동작, 기존 기능 회귀, 재시작·실패 복구, 최종 CI를 각각 증명한다. Fixture와 목업 성공으로 실제 fork/resume 성공을 대체하지 않는다.
 
