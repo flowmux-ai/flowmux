@@ -372,7 +372,7 @@ fn message(record: &Value, agent: SessionAgent) -> Option<(&'static str, String)
     Some((role, text))
 }
 
-fn session(path: PathBuf, agent: SessionAgent) -> io::Result<Option<HistorySession>> {
+pub(crate) fn session(path: PathBuf, agent: SessionAgent) -> io::Result<Option<HistorySession>> {
     let (head, partial) = read_window(&path, 256 * 1024, false)?;
     let mut id = None;
     let mut cwd = None;

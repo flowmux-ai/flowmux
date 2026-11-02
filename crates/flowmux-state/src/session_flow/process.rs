@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Exact process-to-rollout evidence for Codex versions that defer startup hooks.
 //! Never infer identity from the newest file, a title, or a shared daemon.
-use crate::session_history::{list_sessions, SessionAgent};
+use crate::session_history::{session, SessionAgent};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Parse only the rollouts the process tree holds open for writing. Walking
+/// every transcript under `home` on each call read hundreds of megabytes per
+/// title change in a window with several Codex tabs.
 pub fn codex_process_session(root: u32, home: &Path) -> io::Result<Option<String>> {
-    let sessions = list_sessions(SessionAgent::Codex, home)?;
+    let sessions = match home.join("sessions").canonicalize() {
+        Ok(sessions) => sessions,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
     let mut ids = BTreeSet::new();
     for pid in flowmux_procmon::descendants(root).map_err(io::Error::other)? {
         if flowmux_procmon::agent_name_for_pid(pid) != Some("codex") {
@@ -20,13 +27,12 @@ pub fn codex_process_session(root: u32, home: &Path) -> io::Result<Option<String
         if flowmux_procmon::process_start_time(pid) != Some(birth) {
             continue;
         }
-        for session in &sessions {
-            if session
-                .path
-                .canonicalize()
-                .is_ok_and(|path| files.contains(&path))
-            {
-                ids.insert(session.id.clone());
+        for path in files {
+            if !path.starts_with(&sessions) || path.extension().is_none_or(|ext| ext != "jsonl") {
+                continue;
+            }
+            if let Ok(Some(session)) = session(path, SessionAgent::Codex) {
+                ids.insert(session.id);
             }
         }
     }
@@ -142,5 +148,53 @@ mod tests {
         assert!(paths.contains(&dir.path().join("writer").canonicalize().unwrap()));
         assert!(!paths.contains(&dir.path().join("reader").canonicalize().unwrap()));
         drop((reader, writer));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    #[test]
+    fn process_session_parses_only_rollouts_the_tree_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("codex");
+        let day = home.join("sessions/2026/11/02");
+        std::fs::create_dir_all(&day).unwrap();
+        let meta = |id: &str| {
+            serde_json::json!({"type":"session_meta","payload":{"id":id,"source":"cli","cwd":dir.path()}})
+                .to_string()
+                + "\n"
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        let rollout = day.join(format!("rollout-2026-11-02T00-00-00-{id}.jsonl"));
+        std::fs::write(&rollout, meta(&id)).unwrap();
+        // A newer valid transcript nobody holds open is not evidence.
+        let other = uuid::Uuid::new_v4().to_string();
+        std::fs::write(
+            day.join(format!("rollout-2026-11-02T00-00-01-{other}.jsonl")),
+            meta(&other),
+        )
+        .unwrap();
+        // The only evidence: a descendant named codex appending to the rollout.
+        let codex = dir.path().join("bin/codex");
+        std::fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        std::fs::copy("/bin/sleep", &codex).unwrap();
+        let mut child = std::process::Command::new(&codex)
+            .arg("30")
+            .stdout(
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&rollout)
+                    .unwrap(),
+            )
+            .spawn()
+            .unwrap();
+        let found = super::codex_process_session(std::process::id(), &home);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(found.unwrap().as_deref(), Some(id.as_str()));
+        assert_eq!(
+            super::codex_process_session(std::process::id(), &home).unwrap(),
+            None
+        );
     }
 }
