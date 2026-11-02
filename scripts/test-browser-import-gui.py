@@ -108,7 +108,8 @@ try:
                              Gio.DBusCallFlags.NO_AUTO_START, 5000, None).unpack()
 
     with (h.root / "keyring.log").open("w") as log:
-        keyring = h.spawn(["gnome-keyring-daemon", "--foreground", "--unlock",
+        # Keep Flowmux's fatal checks; GNOME Keyring logs criticals on late replies to expired prompts.
+        keyring = h.spawn(["env", "-u", "G_DEBUG", "gnome-keyring-daemon", "--foreground", "--unlock",
                            "--components=secrets", "--control-directory", str(h.root / "keyring-control")],
                           stdin=subprocess.PIPE, stdout=log, stderr=log)
     keyring.stdin.write(b"fixture-keyring-password")
@@ -547,6 +548,9 @@ try:
     h.close_window(process)
     print("BROWSER_IMPORT_GUI_OK", flush=True)
 except Exception:
+    keyring_log = h.root / "keyring.log"
+    if keyring_log.exists():
+        print(keyring_log.read_text(), file=sys.stderr)
     if "Atspi" in globals():
         from PIL import ImageGrab
         ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "failure.png")
