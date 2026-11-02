@@ -81,6 +81,7 @@ pub struct GhosttyPane {
     terminal_scrollbar_enabled: Rc<Cell<bool>>,
     terminal_alternate_screen: Rc<Cell<bool>>,
     terminal_minimap: TerminalMinimap,
+    wheel_scroll_multiplier: Rc<Cell<f64>>,
     /// Last non-empty text selection VTE reported. Agent TUIs (Claude Code,
     /// Codex) repaint constantly; VTE clears the drag-selection on the next
     /// output frame (`deselect_all` in `process_incoming`), so by the time the
@@ -455,6 +456,12 @@ impl GhosttyPane {
         );
     }
 
+    pub fn set_wheel_scroll_multiplier(&self, multiplier: f64) {
+        self.wheel_scroll_multiplier.set(
+            flowmux_config::options::Options::clamp_terminal_wheel_scroll_multiplier(multiplier),
+        );
+    }
+
     /// Feed raw bytes to the child PTY (snapping the view to the bottom first).
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         scroll_terminal_to_bottom(&self.widget);
@@ -729,6 +736,7 @@ impl GhosttyPane {
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let scrollback_dirty = Rc::new(Cell::new(false));
         let term = vte::Terminal::new();
+        let wheel_scroll_multiplier = crate::ui::terminal_scroll::install(&term);
         term.set_hexpand(true);
         term.set_vexpand(true);
         term.set_scrollback_lines(i64::from(scrollback_lines));
@@ -1279,6 +1287,7 @@ impl GhosttyPane {
             terminal_scrollbar_enabled,
             terminal_alternate_screen,
             terminal_minimap,
+            wheel_scroll_multiplier,
             last_selection,
             _pty: pty_slot,
         })

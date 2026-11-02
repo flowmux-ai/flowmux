@@ -65,6 +65,14 @@ storage compatibility and do not launch Chrome/Firefox or import their cookies.
 `scrollback_lines` defaults to 5,000 and is
 clamped to `1,000..=1,000,000` for newly created terminal tabs.
 
+**Options → General → Terminal mouse wheel speed (×)** adjusts terminal wheel
+scrolling from 0.5× to 5× in 0.25× steps. `terminal_wheel_scroll_multiplier`
+defaults to 1.0, preserving the existing speed. Changes apply immediately to
+open terminals and are saved for new tabs and future launches. VTE still handles
+scrollback and terminal-app mouse input; fractional wheel input accumulates in
+apps that accept whole wheel events. Precise trackpad scrolling, browser pages,
+and the minimap keep their existing behavior.
+
 `process_isolation` defaults to `auto`: each terminal tab uses its own systemd
 scope on Linux when the user service manager is available. `off` disables it;
 macOS does not use systemd. Restart Flowmux after changing this option.

@@ -36,6 +36,12 @@ pub(crate) struct SshRuntime {
 }
 
 impl SshRuntime {
+    pub(super) fn set_wheel_scroll_multiplier(&self, multiplier: f64) {
+        for terminal in self.master.iter().chain(self.reusable.values()) {
+            terminal.set_wheel_scroll_multiplier(multiplier);
+        }
+    }
+
     pub(super) fn review_repository(
         &self,
         cwd: Option<&str>,
@@ -305,6 +311,7 @@ pub(crate) fn build_ssh_panel(
     })?;
     theme.apply_to_ghostty(&terminal);
     terminal.set_font(&theme.terminal_font(&opts));
+    terminal.set_wheel_scroll_multiplier(opts.terminal_wheel_scroll_multiplier);
     terminal.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
     if opts.restore_terminal_scrollback {
         if let Some(snapshot) = &surface.scrollback {
@@ -1098,6 +1105,7 @@ impl WindowController {
         })?;
         self.current_theme().apply_to_ghostty(&master);
         master.set_font(&self.current_theme().terminal_font(&opts));
+        master.set_wheel_scroll_multiplier(opts.terminal_wheel_scroll_multiplier);
         let window = gtk::Window::builder()
             .transient_for(&self.window)
             .title("SSH authentication")

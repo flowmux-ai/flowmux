@@ -18,6 +18,7 @@ mod restored_roots;
 mod session_paths;
 mod teams_ack;
 mod termination_dialog;
+mod wheel_scroll;
 mod zoom_reorder;
 
 pub(crate) fn run() {
@@ -130,6 +131,10 @@ async fn javascript(browser: &BrowserPane, source: &str) -> String {
 }
 
 async fn check(app: &adw::Application, root: &std::path::Path) {
+    if std::env::var_os("FLOWMUX_WHEEL_SCROLL_SMOKE_ONLY").is_some() {
+        wheel_scroll::check(app).await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_COOKIE_IMPORT_SMOKE_ONLY").is_some() {
         crate::ui::browser_import::macos_smoke::check(app).await;
         return;
@@ -1082,6 +1087,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     cwd_poll::check(app, root).await;
     BrowserPane::check_native_inspector(app.upcast_ref()).await;
     crate::ui::browser_import::macos_smoke::check(app).await;
+    wheel_scroll::check(app).await;
 }
 
 async fn check_sidebar_footer(controller: &WindowController) {

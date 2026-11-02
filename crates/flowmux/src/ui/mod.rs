@@ -32,6 +32,7 @@ pub mod show_in_folder;
 pub mod sidebar;
 pub(crate) mod skills_tab;
 mod terminal_minimap;
+mod terminal_scroll;
 mod terminal_scrollback;
 pub mod theme_tab;
 pub mod thorvg;

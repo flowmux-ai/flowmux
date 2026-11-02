@@ -4240,6 +4240,7 @@ fn build_panel(
                 theme.apply_to_ghostty(&pane);
                 pane.set_font(&font);
                 pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
+                pane.set_wheel_scroll_multiplier(opts.terminal_wheel_scroll_multiplier);
                 pane.set_minimap(
                     opts.terminal_minimap_enabled,
                     opts.terminal_minimap_width,

@@ -2,7 +2,7 @@
 use super::*;
 use flowmux_config::options::{self, AgentSortMode};
 
-fn control(window: &gtk::Window, label: &str) -> gtk::Widget {
+pub(super) fn control(window: &gtk::Window, label: &str) -> gtk::Widget {
     let mut stack = vec![window.clone().upcast::<gtk::Widget>()];
     while let Some(widget) = stack.pop() {
         if widget
@@ -21,7 +21,7 @@ fn control(window: &gtk::Window, label: &str) -> gtk::Widget {
     panic!("options control not found: {label}");
 }
 
-async fn dialog(controller: &WindowController) -> gtk::Window {
+pub(super) async fn dialog(controller: &WindowController) -> gtk::Window {
     controller.dispatch(GtkCommand::ShowOptionsDialog).await;
     let dialog = gtk::Window::list_toplevels()
         .into_iter()

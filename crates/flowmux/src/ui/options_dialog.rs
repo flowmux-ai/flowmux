@@ -115,6 +115,7 @@ fn build_dialog(
     let auto_resume_check = build_persist_check(current.auto_resume_agent_sessions);
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
+    let wheel_scroll_spin = build_wheel_scroll_spin(current.terminal_wheel_scroll_multiplier);
     let terminal_minimap_switch = build_toggle_switch(current.terminal_minimap_enabled);
     let terminal_minimap_width_spin =
         build_terminal_minimap_width_spin(current.terminal_minimap_width);
@@ -145,6 +146,7 @@ fn build_dialog(
     general.append(&row("Resume agent sessions on reopen", &auto_resume_check));
     general.append(&row("Restore terminal scrollback", &scrollback_check));
     general.append(&row("Terminal scrollback lines", &scrollback_lines_spin));
+    general.append(&row("Terminal mouse wheel speed (×)", &wheel_scroll_spin));
     general.append(&row("Terminal minimap", &terminal_minimap_switch));
     general.append(&row(
         "Terminal minimap width (px)",
@@ -190,6 +192,7 @@ fn build_dialog(
         let auto_resume_check = auto_resume_check.clone();
         let scrollback_check = scrollback_check.clone();
         let scrollback_lines_spin = scrollback_lines_spin.clone();
+        let wheel_scroll_spin = wheel_scroll_spin.clone();
         let terminal_minimap_switch = terminal_minimap_switch.clone();
         let terminal_minimap_width_spin = terminal_minimap_width_spin.clone();
         let terminal_minimap_opacity_spin = terminal_minimap_opacity_spin.clone();
@@ -230,6 +233,7 @@ fn build_dialog(
                 &auto_resume_check,
                 &scrollback_check,
                 &scrollback_lines_spin,
+                &wheel_scroll_spin,
                 &terminal_minimap_switch,
                 &terminal_minimap_width_spin,
                 &terminal_minimap_opacity_spin,
@@ -311,6 +315,7 @@ fn build_dialog(
     connect_toggled(&auto_resume_check, apply_current.clone());
     connect_toggled(&scrollback_check, apply_current.clone());
     connect_value_changed(&scrollback_lines_spin, apply_current.clone());
+    connect_value_changed(&wheel_scroll_spin, apply_current.clone());
     connect_active_notify(&terminal_minimap_switch, apply_current.clone());
     connect_value_changed(&terminal_minimap_width_spin, apply_current.clone());
     connect_value_changed(&terminal_minimap_opacity_spin, apply_current.clone());
@@ -1003,6 +1008,7 @@ fn collect_options(
     auto_resume_check: &gtk::CheckButton,
     scrollback_check: &gtk::CheckButton,
     scrollback_lines_spin: &gtk::SpinButton,
+    wheel_scroll_spin: &gtk::SpinButton,
     terminal_minimap_switch: &gtk::Switch,
     terminal_minimap_width_spin: &gtk::SpinButton,
     terminal_minimap_opacity_spin: &gtk::SpinButton,
@@ -1053,6 +1059,9 @@ fn collect_options(
         scrollback_lines: Some(Options::clamp_scrollback_lines(
             scrollback_lines_spin.value_as_int().max(0) as u32,
         )),
+        terminal_wheel_scroll_multiplier: Options::clamp_terminal_wheel_scroll_multiplier(
+            wheel_scroll_spin.value(),
+        ),
         terminal_minimap_enabled: terminal_minimap_switch.is_active(),
         terminal_minimap_width: Options::clamp_terminal_minimap_width(
             terminal_minimap_width_spin.value_as_int().max(0) as u16,
@@ -1316,6 +1325,19 @@ fn build_scrollback_lines_spin(initial: u32) -> gtk::SpinButton {
     spin.set_snap_to_ticks(true);
     spin.set_halign(gtk::Align::End);
     spin.set_tooltip_text(Some("Applies to new terminal tabs only"));
+    spin
+}
+
+fn build_wheel_scroll_spin(initial: f64) -> gtk::SpinButton {
+    use flowmux_config::options::{TERMINAL_WHEEL_SCROLL_MAX, TERMINAL_WHEEL_SCROLL_MIN};
+    let spin =
+        gtk::SpinButton::with_range(TERMINAL_WHEEL_SCROLL_MIN, TERMINAL_WHEEL_SCROLL_MAX, 0.25);
+    spin.set_digits(2);
+    spin.set_numeric(true);
+    spin.set_value(Options::clamp_terminal_wheel_scroll_multiplier(initial));
+    spin.set_halign(gtk::Align::End);
+    spin.set_widget_name("flowmux-terminal-wheel-speed");
+    spin.set_tooltip_text(Some("1× keeps the default speed. Applies immediately to terminal mouse wheels, including terminal apps. Trackpad scrolling is unchanged."));
     spin
 }
 
@@ -1734,6 +1756,7 @@ mod tests {
             &auto_resume_off,
             &scrollback_on,
             &scrollback_lines,
+            &build_wheel_scroll_spin(2.5),
             &terminal_minimap_on,
             &terminal_minimap_width,
             &terminal_minimap_opacity,
@@ -1754,6 +1777,7 @@ mod tests {
             &kb,
             &crate::ui::theme_tab::ThemeSelection::default(),
         );
+        assert_eq!(opts.terminal_wheel_scroll_multiplier, 2.5);
         assert!(opts.agent_bar_mode);
         assert!(opts.usage_bar_enabled);
         assert!(opts.editor_minimap_enabled);
@@ -1815,6 +1839,7 @@ mod tests {
             &auto_resume_on,
             &scrollback_off,
             &scrollback_lines,
+            &build_wheel_scroll_spin(2.5),
             &terminal_minimap_off,
             &terminal_minimap_width,
             &terminal_minimap_opacity,

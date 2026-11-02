@@ -30,6 +30,10 @@ pub const SCROLLBACK_LINES_DEFAULT: u32 = 5_000;
 pub const SCROLLBACK_LINES_MIN: u32 = 1_000;
 pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 
+pub const TERMINAL_WHEEL_SCROLL_MIN: f64 = 0.5;
+pub const TERMINAL_WHEEL_SCROLL_MAX: f64 = 5.0;
+pub const TERMINAL_WHEEL_SCROLL_DEFAULT: f64 = 1.0;
+
 pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
 pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
 pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
@@ -210,6 +214,9 @@ pub struct Options {
     /// [`SCROLLBACK_LINES_DEFAULT`].
     #[serde(default)]
     pub scrollback_lines: Option<u32>,
+    /// Multiplier for mouse-wheel events; precise trackpad scrolling is unchanged.
+    #[serde(default = "default_terminal_wheel_scroll_multiplier")]
+    pub terminal_wheel_scroll_multiplier: f64,
     /// Show a terminal overview on terminal tabs. A single-screen terminal is
     /// still sampled, but only scrollback can be navigated.
     #[serde(default = "default_terminal_minimap_enabled")]
@@ -319,6 +326,10 @@ fn default_terminal_minimap_enabled() -> bool {
     TERMINAL_MINIMAP_ENABLED_DEFAULT
 }
 
+fn default_terminal_wheel_scroll_multiplier() -> f64 {
+    TERMINAL_WHEEL_SCROLL_DEFAULT
+}
+
 fn default_terminal_minimap_width() -> u16 {
     TERMINAL_MINIMAP_WIDTH_DEFAULT
 }
@@ -367,6 +378,7 @@ impl Default for Options {
             auto_resume_agent_sessions: default_auto_resume_agent_sessions(),
             restore_terminal_scrollback: default_restore_terminal_scrollback(),
             scrollback_lines: None,
+            terminal_wheel_scroll_multiplier: default_terminal_wheel_scroll_multiplier(),
             terminal_minimap_enabled: default_terminal_minimap_enabled(),
             terminal_minimap_width: default_terminal_minimap_width(),
             terminal_minimap_opacity: default_terminal_minimap_opacity(),
@@ -540,6 +552,14 @@ impl Options {
         lines.clamp(SCROLLBACK_LINES_MIN, SCROLLBACK_LINES_MAX)
     }
 
+    pub fn clamp_terminal_wheel_scroll_multiplier(value: f64) -> f64 {
+        if value.is_finite() {
+            value.clamp(TERMINAL_WHEEL_SCROLL_MIN, TERMINAL_WHEEL_SCROLL_MAX)
+        } else {
+            TERMINAL_WHEEL_SCROLL_DEFAULT
+        }
+    }
+
     pub fn scrollback_lines_or_default(&self) -> u32 {
         Self::clamp_scrollback_lines(self.scrollback_lines.unwrap_or(SCROLLBACK_LINES_DEFAULT))
     }
@@ -639,6 +659,9 @@ fn normalize_options(opts: Options) -> Options {
         focus_border_color,
         focus_border_opacity: Options::clamp_focus_border_opacity(opts.focus_border_opacity),
         scrollback_lines: opts.scrollback_lines.map(Options::clamp_scrollback_lines),
+        terminal_wheel_scroll_multiplier: Options::clamp_terminal_wheel_scroll_multiplier(
+            opts.terminal_wheel_scroll_multiplier,
+        ),
         terminal_minimap_width: Options::clamp_terminal_minimap_width(opts.terminal_minimap_width),
         terminal_minimap_opacity: Options::clamp_terminal_minimap_opacity(
             opts.terminal_minimap_opacity,
@@ -1501,6 +1524,39 @@ mod tests {
             assert!(!back.terminal_minimap_enabled);
             assert_eq!(back.terminal_minimap_width, 48);
             assert_eq!(back.terminal_minimap_opacity, 65);
+        });
+    }
+
+    #[test]
+    fn terminal_wheel_speed_defaults_clamps_and_round_trips() {
+        let old: Options = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.terminal_wheel_scroll_multiplier, 1.0);
+        for (input, expected) in [
+            (0.0, 0.5),
+            (2.5, 2.5),
+            (99.0, 5.0),
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+        ] {
+            assert_eq!(
+                Options::clamp_terminal_wheel_scroll_multiplier(input),
+                expected
+            );
+        }
+        with_xdg(|_| {
+            let before = Options::default();
+            let after = Options {
+                terminal_wheel_scroll_multiplier: 2.5,
+                ..before.clone()
+            };
+            save_changes(&before, &after).unwrap();
+            assert_eq!(load().terminal_wheel_scroll_multiplier, 2.5);
+            let other = Options {
+                cursor_blink: !before.cursor_blink,
+                ..before.clone()
+            };
+            save_changes(&before, &other).unwrap();
+            assert_eq!(load().terminal_wheel_scroll_multiplier, 2.5);
         });
     }
 

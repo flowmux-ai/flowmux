@@ -1617,9 +1617,15 @@ impl WindowController {
             .borrow_mut()
             .update_deferred_theme(&resolved);
         let registry = self.pane_registry.borrow();
+        for runtime in registry.ssh.values() {
+            runtime
+                .borrow()
+                .set_wheel_scroll_multiplier(opts.terminal_wheel_scroll_multiplier);
+        }
         for terminal in registry.terminals.values() {
             resolved.apply_to_ghostty(terminal);
             terminal.set_font(&font);
+            terminal.set_wheel_scroll_multiplier(opts.terminal_wheel_scroll_multiplier);
             terminal.set_minimap(
                 opts.terminal_minimap_enabled,
                 opts.terminal_minimap_width,
