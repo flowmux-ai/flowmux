@@ -20,6 +20,40 @@ pub struct Import {
     pub skipped: usize,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    #[error("{0}")]
+    Other(String),
+    #[error("macOS denied access to the browser profile. Allow Flowmux to access other apps' data when prompted. If access remains blocked, open System Settings → Privacy & Security → Full Disk Access, enable Flowmux, then retry. macOS may require you to quit and reopen Flowmux.")]
+    ProfileAccess,
+    #[error("{0}")]
+    Keychain(String),
+}
+
+impl From<String> for ImportError {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+
+impl From<&str> for ImportError {
+    fn from(message: &str) -> Self {
+        Self::Other(message.into())
+    }
+}
+
+#[derive(Default)]
+pub struct Discovery {
+    pub profiles: Vec<Profile>,
+    pub access_denied: bool,
+}
+
+impl Discovery {
+    fn record_error(&mut self, error: &std::io::Error) {
+        self.access_denied |= error.kind() == std::io::ErrorKind::PermissionDenied;
+    }
+}
+
 pub fn site_host(url: &str) -> Result<String, String> {
     let url =
         url::Url::parse(url).map_err(|_| "Open an HTTP or HTTPS site before importing cookies")?;
@@ -31,9 +65,9 @@ pub fn site_host(url: &str) -> Result<String, String> {
         .ok_or_else(|| "This page has no site hostname".into())
 }
 
-pub fn discover_profiles() -> Vec<Profile> {
+pub fn discover_profiles() -> Discovery {
     let Some(home) = dirs::home_dir() else {
-        return Vec::new();
+        return Discovery::default();
     };
     #[cfg(target_os = "macos")]
     let roots = {
@@ -74,12 +108,14 @@ pub fn discover_profiles() -> Vec<Profile> {
             ),
         ]
     };
-    let mut profiles = Vec::new();
+    let mut discovery = Discovery::default();
     for (browser, root) in roots {
-        profiles.extend(profiles_in(browser, &root));
+        let found = profiles_in(browser, &root);
+        discovery.profiles.extend(found.profiles);
+        discovery.access_denied |= found.access_denied;
     }
     let mut seen = HashSet::new();
-    profiles.retain(|profile| {
+    discovery.profiles.retain(|profile| {
         seen.insert(
             profile
                 .database
@@ -87,26 +123,43 @@ pub fn discover_profiles() -> Vec<Profile> {
                 .unwrap_or_else(|_| profile.database.clone()),
         )
     });
-    profiles
+    discovery
 }
 
-fn profiles_in(browser: BrowserId, root: &Path) -> Vec<Profile> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
+fn profiles_in(browser: BrowserId, root: &Path) -> Discovery {
+    let mut discovery = Discovery::default();
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            discovery.record_error(&error);
+            return discovery;
+        }
     };
     let metadata: serde_json::Value = std::fs::read(root.join("Local State"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
-    let mut profiles = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                discovery.record_error(&error);
+                continue;
+            }
+        };
         let directory = entry.path();
         let candidates = if browser == BrowserId::Firefox {
             vec![directory.join("cookies.sqlite")]
         } else {
             vec![directory.join("Network/Cookies"), directory.join("Cookies")]
         };
-        let Some(database) = candidates.into_iter().find(|path| path.is_file()) else {
+        let Some(database) = candidates.into_iter().find(|path| match path.metadata() {
+            Ok(metadata) => metadata.is_file(),
+            Err(error) => {
+                discovery.record_error(&error);
+                false
+            }
+        }) else {
             continue;
         };
         let folder = entry.file_name().to_string_lossy().into_owned();
@@ -114,14 +167,14 @@ fn profiles_in(browser: BrowserId, root: &Path) -> Vec<Profile> {
             .as_str()
             .map(|name| format!("{name} ({folder})"))
             .unwrap_or(folder);
-        profiles.push(Profile {
+        discovery.profiles.push(Profile {
             browser,
             name: format!("{} — {name}", browser.slug()),
             database,
         });
     }
-    profiles.sort_by(|a, b| a.name.cmp(&b.name));
-    profiles
+    discovery.profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    discovery
 }
 
 fn matching_domains(host: &str) -> Vec<String> {
@@ -148,16 +201,23 @@ fn columns(connection: &Connection, table: &str) -> rusqlite::Result<HashSet<Str
 
 /// Call only after the user selected a source and approved the site/profile scope.
 /// Keyring implementations can display an OS approval/unlock prompt on this worker.
-pub fn read(profile: &Profile, host: &str) -> Result<Import, String> {
+pub fn read(profile: &Profile, host: &str) -> Result<Import, ImportError> {
     // Use the URL parser again at this public boundary, not a SQL substring filter.
     if site_host(&format!("https://{host}/"))? != host || host.contains(['/', '@', '?', '#']) {
         return Err("Invalid site hostname".into());
     }
-    let result = read_database(profile, host);
-    result.map_err(|error| format!("Could not import from {}: {error}", profile.browser.slug()))
+    read_database(profile, host)
 }
 
-fn read_database(profile: &Profile, host: &str) -> Result<Import, String> {
+fn read_database(profile: &Profile, host: &str) -> Result<Import, ImportError> {
+    // Probe with std::fs so TCC/Unix denial is not flattened into SQLITE_CANTOPEN.
+    std::fs::File::open(&profile.database).map_err(|error| {
+        if cfg!(target_os = "macos") && error.kind() == std::io::ErrorKind::PermissionDenied {
+            ImportError::ProfileAccess
+        } else {
+            ImportError::Other(format!("Cannot read the selected browser profile: {error}"))
+        }
+    })?;
     let mut connection =
         Connection::open_with_flags(&profile.database, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(
             |_| "Cannot read the selected browser profile. Check its file permissions.".to_string(),
@@ -370,11 +430,47 @@ mod tests {
             r#"{"profile":{"info_cache":{"Default":{"name":"Work"}}}}"#,
         )
         .unwrap();
-        let profiles = profiles_in(BrowserId::Chrome, temp.path());
+        let found = profiles_in(BrowserId::Chrome, temp.path());
+        assert!(!found.access_denied);
+        let profiles = found.profiles;
         assert_eq!(profiles.len(), 2);
         assert!(profiles
             .iter()
             .any(|p| p.name.contains("Work") && p.database.ends_with("Network/Cookies")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn denied_profiles_are_distinct_from_missing_profiles_and_can_be_retried() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("Default");
+        std::fs::create_dir(&directory).unwrap();
+        let database = directory.join("Cookies");
+        std::fs::write(&database, []).unwrap();
+        let profile = Profile {
+            browser: BrowserId::Chrome,
+            name: "fixture".into(),
+            database: database.clone(),
+        };
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let denied = profiles_in(BrowserId::Chrome, temp.path());
+        let read_error = read(&profile, "example.test").err().unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(denied.access_denied);
+        assert!(denied.profiles.is_empty());
+        assert!(matches!(read_error, ImportError::ProfileAccess));
+        let allowed = profiles_in(BrowserId::Chrome, temp.path());
+        assert!(!allowed.access_denied);
+        assert_eq!(allowed.profiles.len(), 1);
+        std::fs::remove_file(database).unwrap();
+        let missing = profiles_in(BrowserId::Chrome, temp.path());
+        assert!(!missing.access_denied);
+        assert!(missing.profiles.is_empty());
+        assert!(matches!(
+            read(&profile, "example.test"),
+            Err(ImportError::Other(_))
+        ));
     }
 
     #[cfg(target_os = "linux")]
@@ -419,7 +515,7 @@ mod tests {
             .execute("UPDATE cookies SET host_key='.other.test'", [])
             .unwrap();
         assert!(
-            matches!(read(&profile, "other.test"), Err(error) if error.contains("domain verification failed"))
+            matches!(read(&profile, "other.test"), Err(error) if error.to_string().contains("domain verification failed"))
         );
     }
 

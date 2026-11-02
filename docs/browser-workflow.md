@@ -357,6 +357,22 @@ may ask for OS keyring/Keychain approval or unlocking; enter passwords only in
 the system prompt. No extension is required. The page reloads after cookie
 insertion; the result reports transferred cookies, not verified authentication.
 
+On macOS, allow access to other apps' data if the system asks. If profile access
+is denied, **Open Privacy Settings** opens Full Disk Access; enable the running
+Flowmux app there only if needed. Return to the import dialog and choose **Retry**.
+If macOS requires an app restart, save your work and reopen Flowmux yourself.
+An inaccessible profile is reported separately from an absent profile; you can
+also continue with any profiles that are already accessible.
+
+For encrypted cookies, the native Keychain access/unlock prompt appears after
+you approve the site and source profile. Choose **Allow** for the browser's
+**Safe Storage** key and enter the keychain password only in the system prompt.
+Canceled approval, denied access, a missing key, and an unavailable system prompt
+have separate guidance. **Open Keychain Access** helps resolve these failures;
+then **Retry** repeats the same import, provided the original tab/site is still
+active. Full Disk Access does not grant Keychain access. Flowmux does not modify
+Keychain access controls or create a replacement browser key.
+
 The source database is read-only, including while the browser is running.
 Matching cookies replace equivalent cookies in the selected Flowmux profile
 and are shared with its other tabs. Temporary sessions do not persist imported

@@ -73,6 +73,39 @@ async fn message(parent: &gtk::Window, title: &str, body: &str) {
     let _ = response.await;
 }
 
+#[cfg(target_os = "macos")]
+fn recovery_actions(dialog: &adw::AlertDialog, error: &import::ImportError) {
+    let (label, arguments): (&str, &'static [&str]) = match error {
+        import::ImportError::ProfileAccess => (
+            "Open Privacy Settings",
+            &["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"],
+        ),
+        import::ImportError::Keychain(_) => {
+            ("Open Keychain Access", &["-b", "com.apple.keychainaccess"])
+        }
+        import::ImportError::Other(_) => return,
+    };
+    dialog.add_response("retry", "Retry");
+    let settings = gtk::Button::with_label(label);
+    let weak_dialog = dialog.downgrade();
+    settings.connect_clicked(move |_| {
+        let mut command = vec![std::ffi::OsStr::new("/usr/bin/open")];
+        command.extend(arguments.iter().map(std::ffi::OsStr::new));
+        let process = gio::Subprocess::newv(&command, gio::SubprocessFlags::NONE);
+        let weak_dialog = weak_dialog.clone();
+        glib::MainContext::default().spawn_local(async move {
+            let result = match process {
+                Ok(process) => process.wait_check_future().await,
+                Err(error) => Err(error),
+            };
+            if let (Err(_), Some(dialog)) = (result, weak_dialog.upgrade()) {
+                dialog.set_body(&format!("{}\n\nCould not open {label}. Open it from the Apple menu or Applications, then return here and Retry.", dialog.body()));
+            }
+        });
+    });
+    dialog.set_extra_child(Some(&settings));
+}
+
 fn response(dialog: &adw::AlertDialog) -> tokio::sync::oneshot::Receiver<String> {
     // Also finish when the parent is destroyed without emitting a dialog response.
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -107,19 +140,52 @@ async fn run(
             return;
         }
     };
-    let profiles = match gio::spawn_blocking(import::discover_profiles).await {
-        Ok(profiles) if !profiles.is_empty() => profiles,
-        _ => {
-            message(
-                parent,
-                "No browser profiles found",
-                "Check that your browser has saved cookies and Flowmux can access its profile.",
-            )
-            .await;
-            return;
+    let found = gio::spawn_blocking(import::discover_profiles)
+        .await
+        .unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    let found = {
+        let mut found = found;
+        while found.access_denied {
+            if !source_is_current(button) {
+                return;
+            }
+            let error = import::ImportError::ProfileAccess;
+            let dialog = adw::AlertDialog::new(
+                Some("Browser profile access required"),
+                Some(&error.to_string()),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.set_close_response("cancel");
+            recovery_actions(&dialog, &error);
+            if !found.profiles.is_empty() {
+                dialog.add_response("continue", "Use Available Profiles");
+            }
+            let choice = response(&dialog);
+            dialog.present(Some(parent));
+            match choice.await.as_deref() {
+                Ok("retry") if source_is_current(button) => {
+                    found = gio::spawn_blocking(import::discover_profiles)
+                        .await
+                        .unwrap_or_default();
+                }
+                Ok("continue") if source_is_current(button) => break,
+                _ => return,
+            }
         }
+        found
     };
     if !source_is_current(button) {
+        return;
+    }
+    let profiles = found.profiles;
+    if profiles.is_empty() {
+        message(
+            parent,
+            "No browser profiles found",
+            "Check that your browser has saved cookies and Flowmux can access its profile.",
+        )
+        .await;
         return;
     }
     let choices: Vec<&str> = profiles
@@ -141,6 +207,8 @@ async fn run(
     let dialog = adw::AlertDialog::new(Some("Import cookies?"), Some(&format!(
         "Site: {host}\nFlowmux profile: {profile}\n\nMatching cookies will be replaced across tabs in this profile.{persistence}\nYour system may ask for keyring access."
     )));
+    #[cfg(target_os = "macos")]
+    dialog.set_body(&format!("Site: {host}\nFlowmux profile: {profile}\n\nMatching cookies will be replaced across tabs in this profile.{persistence}\n\nFlowmux needs read access to the selected browser profile. For encrypted cookies, macOS may ask to unlock its Keychain and allow Flowmux to read the browser's Safe Storage key. Choose Allow and enter your keychain password only in the macOS prompt."));
     dialog.set_extra_child(Some(&source));
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("import", "Import");
@@ -164,7 +232,27 @@ async fn run(
         .await;
         return;
     }
-    import_selected(parent, button, host, selected, current_url, apply, reload).await;
+    while import_selected(
+        parent,
+        button,
+        host.clone(),
+        selected.clone(),
+        current_url.clone(),
+        apply.clone(),
+        reload.clone(),
+    )
+    .await
+    {
+        if !source_is_current(button) || import::site_host(&current_url()).as_deref() != Ok(&host) {
+            message(
+                parent,
+                "Page changed",
+                "Nothing more was imported. Reopen Import cookies on the intended site.",
+            )
+            .await;
+            return;
+        }
+    }
 }
 
 async fn import_selected(
@@ -175,7 +263,7 @@ async fn import_selected(
     current_url: Rc<dyn Fn() -> String>,
     apply: Apply,
     reload: Rc<dyn Fn()>,
-) {
+) -> bool {
     let progress = adw::AlertDialog::new(
         Some("Importing cookies…"),
         Some("If prompted, approve or unlock the system keyring."),
@@ -188,15 +276,19 @@ async fn import_selected(
     let worker = gio::spawn_blocking(move || import::read(&selected, &host_for_worker));
     let result = tokio::select! {
         biased;
-        _ = &mut cancel_rx => return,
-        result = worker => result.map_err(|_| "Cookie import worker failed".to_string()).and_then(|result| result),
+        _ = &mut cancel_rx => return false,
+        result = worker => result.map_err(|_| import::ImportError::from("Cookie import worker failed")).and_then(|result| result),
     };
     progress.set_can_close(false);
     progress.set_response_enabled("cancel", false);
+    #[cfg(target_os = "macos")]
+    if let Err(error) = &result {
+        recovery_actions(&progress, error);
+    }
     let (title, body) = async {
         let imported = match result {
             Ok(imported) => imported,
-            Err(error) => return ("Cookie import failed", error),
+            Err(error) => return ("Cookie import failed", error.to_string()),
         };
         if !source_is_current(button) || import::site_host(&current_url()).as_deref() != Ok(&host) {
             return (
@@ -228,7 +320,7 @@ async fn import_selected(
     }
     .await;
     if !parent.is_visible() {
-        return;
+        return false;
     }
     // libadwaita 1.5 can ignore close() before the dialog's first presentation ticks.
     progress.set_heading(Some(title));
@@ -236,11 +328,14 @@ async fn import_selected(
     progress.set_response_label("cancel", "Close");
     progress.set_response_enabled("cancel", true);
     progress.set_can_close(true);
-    let _ = cancel_rx.await;
+    cancel_rx.await.as_deref() == Ok("retry")
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
+pub(crate) mod macos_smoke;
 
 #[cfg(target_os = "linux")]
 pub(super) async fn apply_webkit(

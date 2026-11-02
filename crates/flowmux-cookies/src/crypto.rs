@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+use crate::import::ImportError;
 use crate::source::BrowserId;
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
 use sha2::{Digest, Sha256};
@@ -19,7 +20,7 @@ impl Decryptor {
         bytes: &[u8],
         host: &str,
         version: i64,
-    ) -> Result<String, String> {
+    ) -> Result<String, ImportError> {
         let prefix = bytes.get(..3).ok_or("Invalid encrypted cookie")?;
         if prefix != b"v10" && prefix != b"v11" {
             return Err("This browser uses a cookie encryption format Flowmux does not support. Sign in inside Flowmux instead.".into());
@@ -41,7 +42,7 @@ impl Decryptor {
         } else {
             self.key.as_ref().unwrap()
         };
-        decrypt_value(&bytes[3..], key, host, version)
+        decrypt_value(&bytes[3..], key, host, version).map_err(Into::into)
     }
 }
 
@@ -70,7 +71,7 @@ fn decrypt_value(bytes: &[u8], key: &[u8; 16], host: &str, version: i64) -> Resu
 }
 
 #[cfg(target_os = "linux")]
-fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
+fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, ImportError> {
     use dbus_secret_service::{EncryptionType, SecretService};
     // shortcut: expired OS prompts need manual closure until GNOME Keyring handles Dismiss safely.
     let service =
@@ -102,7 +103,7 @@ fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
+fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, ImportError> {
     let name = match browser {
         BrowserId::Chrome => "Chrome",
         BrowserId::Chromium => "Chromium",
@@ -111,14 +112,28 @@ fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
         BrowserId::Arc => "Arc",
         BrowserId::Firefox => return Err("Firefox does not use a Chromium key".into()),
     };
-    keyring::Entry::new(&format!("{name} Safe Storage"), name)
-        .and_then(|entry| entry.get_secret())
-        .map(Zeroizing::new)
-        .map_err(|_| "Keychain access was denied or the browser key was not found. Allow access in the macOS prompt and retry.".into())
+    let service = format!("{name} Safe Storage");
+    // Search the user's keychain list, not just the default keychain. Security
+    // displays the native access/unlock prompt; never change the item's ACL.
+    security_framework::os::macos::passwords::find_generic_password(None, &service, name)
+        .map(|(password, _)| Zeroizing::new(password.to_vec()))
+        .map_err(|error| keychain_error(&service, error.code()))
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_error(service: &str, code: i32) -> ImportError {
+    let guidance = match code {
+        -128 => "Keychain approval was canceled. Retry when ready and choose Allow in the macOS prompt.",
+        -25293 => "Keychain access was denied. Retry and approve access in the macOS prompt. If no prompt appears, inspect this item's Access Control in Keychain Access.",
+        -25300 => "The browser's encryption key was not found. Open the source browser once and unlock its keychain in Keychain Access before retrying.",
+        -25308 | -25315 => "macOS could not show the Keychain prompt. Unlock your Mac and the browser's keychain, then retry from the Flowmux window.",
+        _ => "Open Keychain Access, unlock the browser's keychain, then retry and approve the macOS prompt.",
+    };
+    ImportError::Keychain(format!("{service}: {guidance}\n\nmacOS status: {code}. Enter your keychain password only in the macOS system prompt. Full Disk Access does not grant Keychain access."))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn storage_password(_: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
+fn storage_password(_: BrowserId) -> Result<Zeroizing<Vec<u8>>, ImportError> {
     Err("Cookie import is not supported on this operating system".into())
 }
 
@@ -126,6 +141,26 @@ fn storage_password(_: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
 mod tests {
     use super::*;
     use aes::cipher::BlockEncryptMut;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_failures_explain_the_required_recovery_without_secrets() {
+        for (status, expected) in [
+            (-128, "canceled"),
+            (-25293, "denied"),
+            (-25300, "not found"),
+            (-25308, "could not show"),
+            (-25315, "could not show"),
+            (-25291, "unlock"),
+        ] {
+            let error = keychain_error("Chrome Safe Storage", status);
+            assert!(matches!(error, ImportError::Keychain(_)));
+            let message = error.to_string();
+            assert!(message.contains(expected));
+            assert!(message.contains(&status.to_string()));
+            assert!(message.contains("Full Disk Access does not grant Keychain access"));
+        }
+    }
 
     #[test]
     fn decrypts_chromium_and_verifies_domain_binding() {
@@ -149,6 +184,7 @@ mod tests {
         assert!(Decryptor::new(BrowserId::Chrome)
             .decrypt(b"v20fixture", "example.test", 24)
             .unwrap_err()
+            .to_string()
             .contains("does not support"));
     }
 }
