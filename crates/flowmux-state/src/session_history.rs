@@ -6,9 +6,77 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 
 mod sqlite;
+
+/// Parsed transcripts by path, keyed on size and mtime, so a repeated listing
+/// re-reads only files that changed instead of every head and tail window.
+/// Gemini's `.project_root` is read alongside its transcript and is not part
+/// of the key; it is written once per project.
+struct Parsed {
+    modified: SystemTime,
+    len: u64,
+    session: Option<HistorySession>,
+}
+
+static PARSED: LazyLock<Mutex<HashMap<PathBuf, Parsed>>> = LazyLock::new(Default::default);
+
+#[cfg(test)]
+static PARSED_PATHS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn parsed_sessions(root: &Path, paths: Vec<PathBuf>, agent: SessionAgent) -> Vec<HistorySession> {
+    let stamped: Vec<_> = paths
+        .into_iter()
+        .filter_map(|path| {
+            let meta = fs::metadata(&path).ok()?;
+            Some((path, meta.modified().ok()?, meta.len()))
+        })
+        .collect();
+    let seen: std::collections::HashSet<&Path> =
+        stamped.iter().map(|(path, _, _)| path.as_path()).collect();
+    let mut sessions = Vec::new();
+    let mut misses = Vec::new();
+    {
+        let mut cache = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+        cache.retain(|path, _| !path.starts_with(root) || seen.contains(path.as_path()));
+        for (path, modified, len) in &stamped {
+            match cache.get(path) {
+                Some(parsed) if parsed.modified == *modified && parsed.len == *len => {
+                    sessions.extend(parsed.session.clone());
+                }
+                _ => misses.push((path.clone(), *modified, *len)),
+            }
+        }
+    }
+    let mut fresh = Vec::new();
+    for (path, modified, len) in misses {
+        #[cfg(test)]
+        PARSED_PATHS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.clone());
+        if let Ok(session) = session(path.clone(), agent) {
+            sessions.extend(session.clone());
+            fresh.push((
+                path,
+                Parsed {
+                    modified,
+                    len,
+                    session,
+                },
+            ));
+        }
+    }
+    if !fresh.is_empty() {
+        PARSED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(fresh);
+    }
+    sessions
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionAgent {
@@ -518,14 +586,12 @@ pub fn list_sessions(agent: SessionAgent, home: &Path) -> io::Result<Vec<History
         });
     }
     let mut sessions = HashMap::new();
-    for path in paths {
-        if let Ok(Some(item)) = session(path, agent) {
-            let existing = sessions
-                .entry(item.id.clone())
-                .or_insert_with(|| item.clone());
-            if item.modified > existing.modified {
-                *existing = item;
-            }
+    for item in parsed_sessions(&root, paths, agent) {
+        let existing = sessions
+            .entry(item.id.clone())
+            .or_insert_with(|| item.clone());
+        if item.modified > existing.modified {
+            *existing = item;
         }
     }
     if agent == SessionAgent::Codex {
@@ -636,6 +702,52 @@ fn collect(directory: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> io::Resu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unchanged_transcripts_are_served_from_the_parse_cache() {
+        use super::*;
+        let home = tempfile::tempdir().unwrap();
+        let day = home.path().join("sessions/2026/11/02");
+        fs::create_dir_all(&day).unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let path = day.join(format!("rollout-{id}.jsonl"));
+        let meta = serde_json::json!({"type":"session_meta","payload":{
+            "id":id,"source":"cli","cwd":home.path()
+        }})
+        .to_string();
+        fs::write(&path, format!("{meta}\n")).unwrap();
+        let parses = || {
+            PARSED_PATHS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .filter(|parsed| **parsed == path)
+                .count()
+        };
+        let first = list_sessions(SessionAgent::Codex, home.path()).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(parses(), 1);
+        assert_eq!(
+            list_sessions(SessionAgent::Codex, home.path())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(parses(), 1, "an unchanged transcript must not be re-read");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&path, format!("{meta}\n{meta}\n")).unwrap();
+        let again = list_sessions(SessionAgent::Codex, home.path()).unwrap();
+        assert_eq!(parses(), 2, "a changed transcript is parsed again");
+        assert!(again[0].modified > first[0].modified);
+        fs::remove_file(&path).unwrap();
+        assert!(list_sessions(SessionAgent::Codex, home.path())
+            .unwrap()
+            .is_empty());
+        assert!(!PARSED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&path));
+    }
+
     #[test]
     fn native_history_directories_follow_override_precedence() {
         let mut env = std::collections::HashMap::from([("HOME", PathBuf::from("/home/test"))]);
