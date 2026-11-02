@@ -362,6 +362,8 @@ Matching cookies replace equivalent cookies in the selected Flowmux profile
 and are shared with its other tabs. Temporary sessions do not persist imported
 logins. Cancel before application to leave the destination unchanged; an
 insertion failure reports how many cookies were already applied.
+If you cancel or approval times out, close any remaining system keyring prompt
+before retrying. A late approval does not resume the canceled import.
 
 Standard Chrome, Chromium, Brave, Edge, Arc (macOS), and Firefox profile
 locations are detected. Chromium v10/v11 AES-CBC cookies are supported on

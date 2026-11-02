@@ -15,6 +15,9 @@ pub(super) fn connect(
     reload: Rc<dyn Fn()>,
 ) {
     button.connect_clicked(move |button| {
+        if !source_is_current(button) {
+            return;
+        }
         let Some(parent) = button.root().and_downcast::<gtk::Window>() else {
             return;
         };
@@ -41,11 +44,51 @@ pub(super) fn connect(
     });
 }
 
+fn source_is_current(button: &gtk::Button) -> bool {
+    if !button.is_mapped() {
+        return false;
+    }
+    let mut child = button.clone().upcast::<gtk::Widget>();
+    while let Some(parent) = child.parent() {
+        // Crossfades keep the previous tab mapped after the active tab changes.
+        if let Some(stack) = parent.downcast_ref::<gtk::Stack>() {
+            if stack.visible_child().as_ref() != Some(&child) {
+                return false;
+            }
+        }
+        child = parent;
+    }
+    true
+}
+
 async fn message(parent: &gtk::Window, title: &str, body: &str) {
+    if !parent.is_visible() {
+        return;
+    }
     let dialog = adw::AlertDialog::new(Some(title), Some(body));
     dialog.add_response("close", "Close");
     dialog.set_close_response("close");
-    dialog.choose_future(parent).await;
+    let response = response(&dialog);
+    dialog.present(Some(parent));
+    let _ = response.await;
+}
+
+fn response(dialog: &adw::AlertDialog) -> tokio::sync::oneshot::Receiver<String> {
+    // Also finish when the parent is destroyed without emitting a dialog response.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Rc::new(std::cell::RefCell::new(Some(tx)));
+    let closed_tx = tx.clone();
+    dialog.connect_unrealize(move |dialog| {
+        if let Some(tx) = closed_tx.borrow_mut().take() {
+            let _ = tx.send(dialog.close_response().to_string());
+        }
+    });
+    dialog.connect_response(None, move |_, response| {
+        if let Some(tx) = tx.borrow_mut().take() {
+            let _ = tx.send(response.to_string());
+        }
+    });
+    rx
 }
 
 async fn run(
@@ -76,7 +119,7 @@ async fn run(
             return;
         }
     };
-    if !button.is_mapped() {
+    if !source_is_current(button) {
         return;
     }
     let choices: Vec<&str> = profiles
@@ -104,7 +147,9 @@ async fn run(
     dialog.set_close_response("cancel");
     dialog.set_default_response(Some("cancel"));
     dialog.set_response_appearance("import", adw::ResponseAppearance::Suggested);
-    if dialog.choose_future(parent).await != "import" || !button.is_mapped() {
+    let choice = response(&dialog);
+    dialog.present(Some(parent));
+    if choice.await.as_deref() != Ok("import") || !source_is_current(button) {
         return;
     }
     let Some(selected) = profiles.get(dropdown.selected() as usize).cloned() else {
@@ -119,20 +164,25 @@ async fn run(
         .await;
         return;
     }
+    import_selected(parent, button, host, selected, current_url, apply, reload).await;
+}
+
+async fn import_selected(
+    parent: &gtk::Window,
+    button: &gtk::Button,
+    host: String,
+    selected: import::Profile,
+    current_url: Rc<dyn Fn() -> String>,
+    apply: Apply,
+    reload: Rc<dyn Fn()>,
+) {
     let progress = adw::AlertDialog::new(
         Some("Importing cookies…"),
         Some("If prompted, approve or unlock the system keyring."),
     );
     progress.add_response("cancel", "Cancel");
     progress.set_close_response("cancel");
-    // Dropping adwaita 0.7's choose_future can pass a null response to its binding.
-    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
-    let cancel_tx = std::cell::RefCell::new(Some(cancel_tx));
-    progress.connect_response(None, move |_, _| {
-        if let Some(tx) = cancel_tx.borrow_mut().take() {
-            let _ = tx.send(());
-        }
-    });
+    let mut cancel_rx = response(&progress);
     progress.present(Some(parent));
     let host_for_worker = host.clone();
     let worker = gio::spawn_blocking(move || import::read(&selected, &host_for_worker));
@@ -148,7 +198,7 @@ async fn run(
             Ok(imported) => imported,
             Err(error) => return ("Cookie import failed", error),
         };
-        if !button.is_mapped() || import::site_host(&current_url()).as_deref() != Ok(&host) {
+        if !source_is_current(button) || import::site_host(&current_url()).as_deref() != Ok(&host) {
             return (
                 "Page changed",
                 "Nothing was imported. Reopen Import cookies on the intended site.".to_string(),
@@ -162,7 +212,7 @@ async fn run(
         }
         match apply(imported.cookies).await {
             Ok(count) => {
-                if import::site_host(&current_url()).as_deref() == Ok(&host) {
+                if source_is_current(button) && import::site_host(&current_url()).as_deref() == Ok(&host) {
                     reload();
                 }
                 (
@@ -177,6 +227,9 @@ async fn run(
         }
     }
     .await;
+    if !parent.is_visible() {
+        return;
+    }
     // libadwaita 1.5 can ignore close() before the dialog's first presentation ticks.
     progress.set_heading(Some(title));
     progress.set_body(&body);
@@ -185,6 +238,9 @@ async fn run(
     progress.set_can_close(true);
     let _ = cancel_rx.await;
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
 
 #[cfg(target_os = "linux")]
 pub(super) async fn apply_webkit(

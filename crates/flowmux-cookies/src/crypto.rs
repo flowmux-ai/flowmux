@@ -72,6 +72,7 @@ fn decrypt_value(bytes: &[u8], key: &[u8; 16], host: &str, version: i64) -> Resu
 #[cfg(target_os = "linux")]
 fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
     use dbus_secret_service::{EncryptionType, SecretService};
+    // shortcut: expired OS prompts need manual closure until GNOME Keyring handles Dismiss safely.
     let service =
         SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 120).map_err(|_| {
             "Could not access the system keyring. Unlock or enable Secret Service and retry."
@@ -94,7 +95,7 @@ fn storage_password(browser: BrowserId) -> Result<Zeroizing<Vec<u8>>, String> {
     }
     let item = &items[0];
     item.unlock()
-        .map_err(|_| "Keyring approval was canceled, denied, or timed out".to_string())?;
+        .map_err(|_| "Keyring approval was canceled, denied, or timed out. Close any remaining system keyring prompt before retrying.".to_string())?;
     item.get_secret()
         .map(Zeroizing::new)
         .map_err(|_| "The system keyring denied access to the browser's encryption key".into())
