@@ -71,6 +71,30 @@ impl FlowState {
 
 /// Help is queried outside any Flowmux pane context, with a bounded child lifetime.
 /// This probes the resolved CLI rather than assuming every installed version supports a flag.
+/// Installed-CLI capabilities per agent home for this process. Probing spawns
+/// a login shell and the agent's `--help`; a forced refresh clears the cache
+/// so an upgrade is noticed on demand rather than on every catalog load.
+static CAPABILITIES: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<(&'static str, std::path::PathBuf), (bool, bool)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn cached_probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
+    let key = (agent.name(), home.path.clone());
+    if let Some(found) = CAPABILITIES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
+        return *found;
+    }
+    let probed = probe_agent(agent, home);
+    CAPABILITIES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, probed);
+    probed
+}
+
 fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
     use std::process::{Command, Stdio};
     let (command, resume, fork) = match agent {
@@ -177,7 +201,7 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         if namespaces.insert((key.provider.clone(), key.home.clone())) {
             let native = import_native(&mut store, anchor.target.agent, &home.path)
                 .map_err(|e| e.to_string())?;
-            let (resumable, forkable) = probe_agent(anchor.target.agent, &home);
+            let (resumable, forkable) = cached_probe_agent(anchor.target.agent, &home);
             catalog.warnings.extend(native.warnings);
             for (native_key, session) in native.sessions {
                 if resumable
@@ -362,6 +386,10 @@ impl WindowController {
     pub(super) async fn refresh_session_flow(&self, force: bool) {
         if force {
             self.flow.probes.borrow_mut().clear();
+            CAPABILITIES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
         }
         let anchors = self.flow_anchors().await;
         self.render_session_flow(&anchors).await;
