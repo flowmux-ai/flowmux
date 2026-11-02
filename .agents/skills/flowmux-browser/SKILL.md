@@ -379,8 +379,13 @@ mocking, full-page tracing and CDP screencast are unavailable; `record` provides
 sampled MP4 capture, and `screenshot --full-page` provides a document PNG. Use
 those supported commands when they meet the task. For a strict CDP requirement,
 explain the missing capability and keep user-visible URLs/results in Flowmux
-alongside the external tool. Cookie import returns `unimplemented` without
-reading host cookies; sign in inside the intended Flowmux profile.
+alongside the external tool. CLI cookie import returns `unimplemented` without
+reading host cookies. The browser toolbar's **Import logins for this site**
+button lets the user select a source browser/profile and approve OS keyring
+access. It imports matching cookies into the current Flowmux profile, then
+reloads the page; cookie insertion does not prove the site accepted the login.
+Passwords, local storage, and device-bound keys are not imported. Leave source
+selection and approval to the user, or sign in inside Flowmux directly.
 
 Linux and macOS offer opt-in WebDriver sessions in separate ephemeral
 Flowmux browser windows. Linux requires a WebKitGTK runtime built with WebDriver
@@ -479,7 +484,8 @@ Folder uploads reject nested links/special files and trees exceeding 10,000
 entries. `value` and `attr value` reject password fields; raw eval and captures
 remain trusted local-client capabilities. Task IDs are not authentication. IPC
 accepts only the same OS user, and file scope is not a same-user sandbox.
-Cookie import reports unsupported without reading or claiming to inject cookies.
+CLI cookie import reports unsupported without reading cookies; interactive
+toolbar import requires the user's site/profile approval.
 
 ## SSH
 

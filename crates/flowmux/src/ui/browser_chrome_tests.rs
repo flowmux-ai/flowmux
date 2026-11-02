@@ -274,7 +274,12 @@ pub(crate) async fn check() {
                 }
             );
             assert!(toolbar.width() <= width && address.width() > 80);
-            for name in ["Back", "Forward", "Reload page"] {
+            for name in [
+                "Back",
+                "Forward",
+                "Reload page",
+                "Import logins for this site",
+            ] {
                 assert!(
                     button(&toolbar, name).is_mapped(),
                     "{name} must remain in the toolbar at width {width}"

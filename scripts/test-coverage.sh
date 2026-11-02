@@ -16,6 +16,9 @@ cargo test --workspace --locked --no-fail-fast --target-dir "$CARGO_LLVM_COV_TAR
 # Keep the same instrumentation environment so its profiles join the unit tests.
 cargo build --workspace --locked --target-dir "$CARGO_LLVM_COV_TARGET_DIR"
 python3 scripts/test-browser-control.py "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux"
+python3 scripts/test-browser-import-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-skills-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"

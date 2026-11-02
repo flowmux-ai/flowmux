@@ -418,8 +418,8 @@ enum Cmd {
         name: String,
     },
 
-    /// Extract and count host-browser cookies. Firefox extraction is supported;
-    /// cookies are not yet inserted into the in-app browser session.
+    /// Reserved CLI cookie import. Use the browser tab's Import logins button
+    /// to select a source profile and approve access for the current site.
     ImportCookies {
         /// Browser slug. Firefox supports extraction; Chromium-family sources
         /// currently support profile detection only.

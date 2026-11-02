@@ -41,6 +41,8 @@ Install `dbus-x11`, `openssh-server`, `tmux`, and `python3-xlib` to run the
 SSH and GUI integration checks used by CI. The SSH autofill check also uses
 `gnome-keyring`, `python3-gi`, `gir1.2-atspi-2.0`, `at-spi2-core`, and
 `python3-pil`; it starts a password-protected keyring on a private D-Bus session.
+The browser login import check uses the same private GUI/keyring harness and
+also needs `python3-cryptography` for synthetic encrypted browser cookies.
 Browser recording and its integration check need `ffmpeg` and `ffprobe` with
 the H.264 encoder: `sudo apt install ffmpeg` on Ubuntu or `brew install ffmpeg`
 on macOS. Other browser controls do not require these tools.
@@ -158,9 +160,10 @@ sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
 
 flowmux checks agent hooks, agent SKILL files, the browser data dir,
 host-browser profile detection, and the daemon socket. Detection of a
-host profile does not mean its session can be imported. Firefox cookie
-extraction exists, but insertion into the embedded browser is not implemented;
-Chromium-family encrypted cookie extraction is also unavailable.
+host profile does not mean its session can be imported. Use the browser tab's
+**Import logins for this site** button to select a profile and approve access;
+see [login import](browser-workflow.md#import-an-existing-login) for supported
+formats and limitations. The CLI import command remains unsupported.
 
 ```bash
 flowmux doctor   # read-only audit; non-zero exit if anything needs fixing

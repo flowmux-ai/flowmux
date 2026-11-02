@@ -118,6 +118,10 @@ fill="#14b014" stroke="none">
 
 const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
     SymbolicIcon {
+        name: "document-import-symbolic",
+        path: "M8 1h6v14H8v-2h4V3H8zM1 7h5V4l5 4-5 4V9H1z",
+    },
+    SymbolicIcon {
         name: "flowmux-session-flow-symbolic",
         path: "M3 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 7.25h1.25v-5H10v1.5H7.75v8.5H10v1.5H6.25v-5H5z",
     },

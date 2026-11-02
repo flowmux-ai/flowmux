@@ -921,6 +921,7 @@ impl BrowserPane {
             back,
             forward,
             reload,
+            import_logins,
             address,
             find,
             zoom_out,
@@ -935,6 +936,35 @@ impl BrowserPane {
             &bookmarks.button.tooltip_text().unwrap_or_default(),
         );
         let zoom_label = zoom_reset.clone();
+        crate::ui::browser_import::connect(
+            &import_logins,
+            profile.display_name(),
+            persist_session,
+            {
+                let view = web_view.clone();
+                Rc::new(move || current_url_native(&view))
+            },
+            {
+                let store = unsafe {
+                    web_view
+                        .configuration()
+                        .websiteDataStore()
+                        .httpCookieStore()
+                };
+                Rc::new(move |cookies| {
+                    Box::pin(crate::ui::browser_import::apply_macos(
+                        store.clone(),
+                        cookies,
+                    ))
+                })
+            },
+            {
+                let view = web_view.clone();
+                Rc::new(move || unsafe {
+                    view.reload();
+                })
+            },
+        );
 
         let viewport = gtk::DrawingArea::new();
         viewport.set_hexpand(true);

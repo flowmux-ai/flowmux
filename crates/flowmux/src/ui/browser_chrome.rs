@@ -41,6 +41,7 @@ pub(super) struct BrowserChrome {
     pub back: gtk::Button,
     pub forward: gtk::Button,
     pub reload: gtk::Button,
+    pub import_logins: gtk::Button,
     pub address: gtk::Entry,
     pub find: gtk::Button,
     pub zoom_out: gtk::Button,
@@ -66,6 +67,8 @@ impl BrowserChrome {
         let back = icon_button("go-previous-symbolic", "Back");
         let forward = icon_button("go-next-symbolic", "Forward");
         let reload = icon_button("view-refresh-symbolic", "Reload page");
+        let import_logins = icon_button("document-import-symbolic", "Import logins for this site");
+        import_logins.set_widget_name("flowmux-import-logins");
         back.set_sensitive(false);
         forward.set_sensitive(false);
         let address = gtk::Entry::builder()
@@ -160,6 +163,7 @@ impl BrowserChrome {
         bar.append(&forward);
         bar.append(&reload);
         bar.append(&address);
+        bar.append(&import_logins);
         bar.append(&zoom_badge);
         bar.append(&bookmark_slot);
         bar.append(&download_slot);
@@ -240,6 +244,7 @@ impl BrowserChrome {
             back,
             forward,
             reload,
+            import_logins,
             address,
             find,
             zoom_out,

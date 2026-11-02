@@ -2634,6 +2634,13 @@ Used by: digest 0.10.7, hmac 0.12.1
 Copyright (c) 2017 Artyom Pavlov
 ~~~~
 
+Used by: pbkdf2 0.12.2
+
+~~~~text
+Copyright (c) 2017 Artyom Pavlov
+Copyright (c) 2018-2023 The RustCrypto Project Developers
+~~~~
+
 Used by: fnv 1.0.7
 
 ~~~~text

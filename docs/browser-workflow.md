@@ -98,8 +98,9 @@ focused editable element.
 - Recording checks the CLI's PATH for ffmpeg with libx264. Captures are silent
   and can omit accelerated layers. Playback of a particular media format must
   still be tested with that media file.
-- Cookie extraction is separate from insertion into a WebView. Host-cookie
-  insertion is not implemented; sign in inside the selected Flowmux profile.
+- The browser toolbar's **Import logins for this site** button imports matching
+  cookies from a selected local browser profile after interactive approval.
+  CLI cookie import remains unsupported; use the toolbar or sign in directly.
 
 `flowmux capabilities` remains an offline command inventory.
 
@@ -345,9 +346,35 @@ storage-preserving operation. Excessively long keys can exceed filesystem limits
 
 On Linux, persistent storage failure opens a separately isolated ephemeral
 session with a visible warning and `diagnose.storage_ephemeral=true`; it never
-uses the global default session. Cookie import returns `unimplemented` before
-reading host cookies, because WebView insertion is not implemented. Sign in
-inside the intended Flowmux profile.
+uses the global default session.
+
+### Import an existing login
+
+Open the intended HTTP/HTTPS site, then click **Import logins for this site**
+beside the address field. Select the source browser/profile, review the site
+and destination Flowmux profile, and choose **Import**. Chrome-family imports
+may ask for OS keyring/Keychain approval or unlocking; enter passwords only in
+the system prompt. No extension is required. The page reloads after cookie
+insertion; the result reports transferred cookies, not verified authentication.
+
+The source database is read-only, including while the browser is running.
+Matching cookies replace equivalent cookies in the selected Flowmux profile
+and are shared with its other tabs. Temporary sessions do not persist imported
+logins. Cancel before application to leave the destination unchanged; an
+insertion failure reports how many cookies were already applied.
+
+Standard Chrome, Chromium, Brave, Edge, Arc (macOS), and Firefox profile
+locations are detected. Chromium v10/v11 AES-CBC cookies are supported on
+Linux/macOS, including database-v24 domain binding. Linux v11 needs a Secret
+Service key; other credential stores and encryption formats report an error.
+Expired cookies, partitioned cookies, and Firefox container cookies are skipped.
+Local storage, IndexedDB, passwords, and device-bound keys are not imported.
+Some sites still require a fresh sign-in. Sandboxed installations may prevent
+access to host profiles or keyrings. The source browser is never closed.
+
+`import-cookies` still returns `unimplemented` without reading secrets; use
+the interactive toolbar flow. `diagnose.cookie_import.interactive_supported`
+advertises this distinction.
 
 ## Task progress and result cards
 

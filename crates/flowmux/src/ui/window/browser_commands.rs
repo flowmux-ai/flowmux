@@ -386,7 +386,8 @@ impl WindowController {
                         });
                         report["cross_origin_frames"] = serde_json::json!(false);
                         report["cookie_import"] = serde_json::json!({"supported":false,
-                            "next_action":"Sign in inside the selected Flowmux profile; host cookie insertion is not implemented"});
+                            "interactive_supported":true,
+                            "next_action":"Use the browser tab's Import logins button to select a source profile and approve access for the current site"});
                         let _ = ack.send(Ok(BrowserActionResult::String(report.to_string())));
                     }
                     BrowserOp::FileChooser { action } => {

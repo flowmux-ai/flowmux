@@ -947,8 +947,8 @@ pub enum Request {
     },
 
     /// `flowmux import-cookies --from firefox [--domain example.com]`
-    /// Extract host cookies and return their count. Chromium extraction and
-    /// WebView insertion are not implemented.
+    /// Reserved CLI operation. Interactive imports use the browser toolbar
+    /// so the user can select a source profile and approve site access.
     ImportCookies {
         source: String,
         domain: Option<String>,

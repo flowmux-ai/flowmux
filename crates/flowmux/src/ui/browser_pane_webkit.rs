@@ -500,6 +500,7 @@ impl BrowserPane {
             back,
             forward,
             reload,
+            import_logins,
             address,
             find,
             zoom_out,
@@ -514,6 +515,40 @@ impl BrowserPane {
             &bookmarks.button.tooltip_text().unwrap_or_default(),
         );
         let zoom_label = zoom_reset.clone();
+        crate::ui::browser_import::connect(
+            &import_logins,
+            profile.display_name(),
+            !network_session.is_ephemeral(),
+            {
+                let view = web_view.downgrade();
+                Rc::new(move || {
+                    view.upgrade()
+                        .and_then(|view| view.uri())
+                        .map(|uri| uri.to_string())
+                        .unwrap_or_default()
+                })
+            },
+            {
+                let session = network_session.downgrade();
+                Rc::new(move |cookies| {
+                    let manager = session
+                        .upgrade()
+                        .and_then(|session| session.cookie_manager());
+                    Box::pin(async move {
+                        let manager = manager.ok_or("The browser tab was closed")?;
+                        crate::ui::browser_import::apply_webkit(manager, cookies).await
+                    })
+                })
+            },
+            {
+                let view = web_view.downgrade();
+                Rc::new(move || {
+                    if let Some(view) = view.upgrade() {
+                        view.reload();
+                    }
+                })
+            },
+        );
 
         let download_signal = {
             let control = control.clone();
