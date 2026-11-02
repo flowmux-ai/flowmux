@@ -203,7 +203,7 @@ impl WindowController {
         &self,
         surface: SurfaceId,
         title: Option<String>,
-    ) {
+    ) -> Option<WorkspaceId> {
         let (screen, title, is_ssh) = {
             let registry = self.pane_registry.borrow();
             let terminal = registry.terminals.get(&surface);
@@ -235,9 +235,9 @@ impl WindowController {
             }
         };
         if screen.is_none() && title.is_none() && !is_ssh {
-            return;
+            return None;
         }
-        if let Some((ws_id, _)) = self
+        let (ws_id, _) = self
             .store
             .report_agent_screen_signals_with_visibility(
                 surface,
@@ -245,10 +245,9 @@ impl WindowController {
                 title.as_deref(),
                 self.is_agent_surface_visible(surface),
             )
-            .await
-        {
-            self.sync_workspace_agent_status(ws_id).await;
-        }
+            .await?;
+        self.sync_workspace_agent_status(ws_id).await;
+        Some(ws_id)
     }
     pub(super) async fn refresh_all_agent_screen_statuses(&self) {
         let surfaces: Vec<SurfaceId> = self
