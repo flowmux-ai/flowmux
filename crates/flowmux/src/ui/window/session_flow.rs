@@ -1430,6 +1430,8 @@ pub(super) async fn check_native(
         controller.store.remove_workspace(shown).await;
         controller.drop_workspace(shown);
     }
+    tests::hidden_panel_skips_history_loads_until_opened().await;
+    controller.window.present();
     println!("MACOS_SESSION_FLOW_LAYOUT_OK");
 }
 
@@ -2475,8 +2477,9 @@ impl WindowController {
 mod tests {
     use super::*;
 
-    #[gtk::test]
-    async fn hidden_panel_skips_history_loads_until_opened() {
+    #[cfg(any(not(target_os = "macos"), feature = "native-smoke"))]
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    pub(super) async fn hidden_panel_skips_history_loads_until_opened() {
         use flowmux_state::State;
         adw::init().expect("libadwaita should initialize in GTK test");
         let store = StateStore::new_lazy(State::default());
@@ -2526,6 +2529,7 @@ mod tests {
             controller.flow.last_load.get().is_some(),
             "opening the panel loads the catalog"
         );
+        controller.window.destroy();
     }
 
     #[test]
