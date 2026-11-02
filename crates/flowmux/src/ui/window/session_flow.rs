@@ -35,6 +35,15 @@ struct Catalog {
     warnings: Vec<String>,
 }
 
+/// Process evidence for one Codex tab, re-read on the agent poll cadence.
+struct CodexProbe {
+    root_pid: u32,
+    at: Instant,
+    id: Option<String>,
+}
+
+const CODEX_PROBE_INTERVAL: Duration = Duration::from_secs(2);
+
 #[derive(Clone)]
 pub(super) struct FlowState {
     pub panel: FlowPanel,
@@ -42,6 +51,7 @@ pub(super) struct FlowState {
     targets: Rc<RefCell<Vec<Anchor>>>,
     loading: Rc<Cell<bool>>,
     last_load: Rc<Cell<Option<Instant>>>,
+    probes: Rc<RefCell<HashMap<SurfaceId, CodexProbe>>>,
     pub owner: uuid::Uuid,
 }
 
@@ -53,6 +63,7 @@ impl FlowState {
             targets: Rc::new(RefCell::new(Vec::new())),
             loading: Rc::new(Cell::new(false)),
             last_load: Rc::new(Cell::new(None)),
+            probes: Rc::new(RefCell::new(HashMap::new())),
             owner: uuid::Uuid::new_v4(),
         }
     }
@@ -265,39 +276,12 @@ impl WindowController {
             })
             .collect();
         let mut anchors = Vec::new();
-        for (workspace, pane, surface, root_pid) in terminals {
+        for (workspace, pane, surface, root_pid) in terminals.iter().copied() {
             if let Some(located) = self.store.located_agent_presence(surface).await {
                 let agent = SessionAgent::from_name(&located.presence.name);
                 let mut session_id = located.presence.session_id;
                 if session_id.is_none() && agent == Some(SessionAgent::Codex) {
-                    let target = SessionTarget {
-                        agent: SessionAgent::Codex,
-                        focused: Some(FocusedSession {
-                            pane,
-                            surface,
-                            root_pid,
-                            session_id: None,
-                        }),
-                    };
-                    session_id = gtk::gio::spawn_blocking(move || {
-                        let home = session_home(&target).ok()?;
-                        let born = flowmux_procmon::process_start_time(root_pid)?;
-                        let saved = flowmux_state::default_agent_session_store();
-                        let expected = saved.as_ref().and_then(|store| store.lookup("codex", surface));
-                        let id = codex_process_session(root_pid, &home.path).ok().flatten()?;
-                        if flowmux_procmon::process_start_time(root_pid) != Some(born) {
-                            return None;
-                        }
-                        if let Some(saved) = saved {
-                            if let Err(error) = saved.record_observed("codex", surface, &id, expected.as_deref()) {
-                                tracing::warn!(%surface, %error, "failed to persist observed Codex session");
-                            }
-                        }
-                        Some(id)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
+                    session_id = self.codex_probe(surface, pane, root_pid).await;
                 }
                 if let (Some(agent), Some(session_id)) = (agent, session_id) {
                     anchors.push(Anchor {
@@ -316,12 +300,76 @@ impl WindowController {
             }
         }
         anchors.sort_by_key(|a| a.target.focused.as_ref().map(|f| f.surface.0));
+        self.flow
+            .probes
+            .borrow_mut()
+            .retain(|surface, _| terminals.iter().any(|(_, _, live, _)| live == surface));
         anchors
     }
 
+    /// Process evidence for a Codex tab without a hook session id. Every title
+    /// change reaches here through the agent displays, so one tab is probed at
+    /// most once per [`CODEX_PROBE_INTERVAL`] unless a forced refresh clears it.
+    async fn codex_probe(&self, surface: SurfaceId, pane: PaneId, root_pid: u32) -> Option<String> {
+        if let Some(probe) = self.flow.probes.borrow().get(&surface) {
+            if probe.root_pid == root_pid && probe.at.elapsed() < CODEX_PROBE_INTERVAL {
+                return probe.id.clone();
+            }
+        }
+        let target = SessionTarget {
+            agent: SessionAgent::Codex,
+            focused: Some(FocusedSession {
+                pane,
+                surface,
+                root_pid,
+                session_id: None,
+            }),
+        };
+        let id = gtk::gio::spawn_blocking(move || {
+            let home = session_home(&target).ok()?;
+            let born = flowmux_procmon::process_start_time(root_pid)?;
+            let saved = flowmux_state::default_agent_session_store();
+            let expected = saved
+                .as_ref()
+                .and_then(|store| store.lookup("codex", surface));
+            let id = codex_process_session(root_pid, &home.path).ok().flatten()?;
+            if flowmux_procmon::process_start_time(root_pid) != Some(born) {
+                return None;
+            }
+            if let Some(saved) = saved {
+                if let Err(error) =
+                    saved.record_observed("codex", surface, &id, expected.as_deref())
+                {
+                    tracing::warn!(%surface, %error, "failed to persist observed Codex session");
+                }
+            }
+            Some(id)
+        })
+        .await
+        .ok()
+        .flatten();
+        self.flow.probes.borrow_mut().insert(
+            surface,
+            CodexProbe {
+                root_pid,
+                at: Instant::now(),
+                id: id.clone(),
+            },
+        );
+        id
+    }
+
     pub(super) async fn refresh_session_flow(&self, force: bool) {
+        if force {
+            self.flow.probes.borrow_mut().clear();
+        }
         let anchors = self.flow_anchors().await;
         self.render_session_flow(&anchors).await;
+        // A hidden panel keeps its last catalog; history scans wait until it
+        // opens. The first load still runs so a panel saved open is restored.
+        if !force && !self.flow.panel.root.is_visible() && self.flow.catalog.borrow().is_some() {
+            return;
+        }
         let recent = self
             .flow
             .last_load
@@ -527,10 +575,11 @@ impl WindowController {
                 if self.store.active_workspace().await != Some(workspace) {
                     self.activate_workspace(workspace).await;
                 }
-                self.refresh_session_flow(false).await;
                 if toggle || !self.flow.panel.root.is_visible() {
                     self.flow.panel.toggle(workspace);
                 }
+                // Open first: the catalog loads only for a visible panel.
+                self.refresh_session_flow(false).await;
                 self.save_flow_view();
                 if !self.flow.panel.root.is_visible() {
                     if let Some(pane) = self.focused_pane.get() {
@@ -2397,6 +2446,60 @@ impl WindowController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    async fn hidden_panel_skips_history_loads_until_opened() {
+        use flowmux_state::State;
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("flow".into()), std::env::temp_dir())
+            .await;
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.SessionFlowGate")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        store.set_active_workspace(Some(ws_id)).await;
+        // The gate reads `is_visible`, which also needs the window to be shown.
+        controller.window.present();
+        let root = tempfile::tempdir().unwrap();
+        let db = FlowStore::open(&root.path().join("flow.sqlite")).unwrap();
+        *controller.flow.catalog.borrow_mut() = Some(Catalog {
+            snapshot: db.snapshot().unwrap(),
+            available: BTreeMap::new(),
+            resumable: BTreeSet::new(),
+            homes: BTreeMap::new(),
+            bindings: HashMap::new(),
+            forkable: BTreeSet::new(),
+            views: BTreeMap::new(),
+            live: BTreeMap::new(),
+            warnings: Vec::new(),
+        });
+        assert!(!controller.flow.panel.root.is_visible());
+        controller.refresh_session_flow(false).await;
+        assert!(
+            controller.flow.last_load.get().is_none(),
+            "a hidden panel with a catalog must not scan session histories"
+        );
+        controller
+            .dispatch_session_flow(FlowAction::ToggleActive)
+            .await;
+        assert!(controller.flow.panel.root.is_visible());
+        assert!(
+            controller.flow.last_load.get().is_some(),
+            "opening the panel loads the catalog"
+        );
+    }
+
     #[test]
     fn claude_live_fork_is_visible_before_history_is_written() {
         use flowmux_state::session_flow::{Operation, OperationKind};
