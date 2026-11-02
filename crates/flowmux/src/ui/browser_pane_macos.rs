@@ -2296,7 +2296,7 @@ fn normalize_uri(raw: &str) -> String {
     if raw.contains('.') && !raw.contains(' ') {
         return format!("https://{raw}");
     }
-    format!("https://duckduckgo.com/?q={}", urlencode(raw))
+    format!("https://www.google.com/search?q={}", urlencode(raw))
 }
 
 fn urlencode(s: &str) -> String {
@@ -2391,7 +2391,7 @@ mod tests {
         assert_eq!(normalize_uri("example.com"), "https://example.com");
         assert_eq!(
             normalize_uri("rust webkit"),
-            "https://duckduckgo.com/?q=rust+webkit"
+            "https://www.google.com/search?q=rust+webkit"
         );
     }
 

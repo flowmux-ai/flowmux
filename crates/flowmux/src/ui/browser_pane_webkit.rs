@@ -1149,7 +1149,7 @@ fn normalize_uri(raw: &str) -> String {
     if raw.contains('.') && !raw.contains(' ') {
         return format!("https://{raw}");
     }
-    format!("https://duckduckgo.com/?q={}", urlencode(raw))
+    format!("https://www.google.com/search?q={}", urlencode(raw))
 }
 
 fn set_webkit_zoom(
@@ -1594,7 +1594,7 @@ mod tests {
     fn normalize_uri_falls_back_to_search() {
         assert_eq!(
             normalize_uri("hello world"),
-            "https://duckduckgo.com/?q=hello+world"
+            "https://www.google.com/search?q=hello+world"
         );
     }
 
