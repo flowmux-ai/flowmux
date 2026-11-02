@@ -126,7 +126,7 @@ async fn run(
     progress.add_response("cancel", "Cancel");
     progress.set_close_response("cancel");
     // Dropping adwaita 0.7's choose_future can pass a null response to its binding.
-    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
     let cancel_tx = std::cell::RefCell::new(Some(cancel_tx));
     progress.connect_response(None, move |_, _| {
         if let Some(tx) = cancel_tx.borrow_mut().take() {
@@ -137,52 +137,53 @@ async fn run(
     let host_for_worker = host.clone();
     let worker = gio::spawn_blocking(move || import::read(&selected, &host_for_worker));
     let result = tokio::select! {
+        biased;
+        _ = &mut cancel_rx => return,
         result = worker => result.map_err(|_| "Cookie import worker failed".to_string()).and_then(|result| result),
-        _ = cancel_rx => return,
     };
-    progress.close();
-    if !button.is_mapped() {
-        return;
-    }
-    let imported = match result {
-        Ok(imported) => imported,
-        Err(error) => {
-            message(parent, "Cookie import failed", &error).await;
-            return;
+    progress.set_can_close(false);
+    progress.set_response_enabled("cancel", false);
+    let (title, body) = async {
+        let imported = match result {
+            Ok(imported) => imported,
+            Err(error) => return ("Cookie import failed", error),
+        };
+        if !button.is_mapped() || import::site_host(&current_url()).as_deref() != Ok(&host) {
+            return (
+                "Page changed",
+                "Nothing was imported. Reopen Import cookies on the intended site.".to_string(),
+            );
         }
-    };
-    if import::site_host(&current_url()).as_deref() != Ok(&host) {
-        message(
-            parent,
-            "Page changed",
-            "Nothing was imported. Reopen Import cookies on the intended site.",
-        )
-        .await;
-        return;
-    }
-    if imported.cookies.is_empty() {
-        message(parent, "No matching cookies", &format!("No cookies available for {host} in this profile.\nSkipped: {} (expired or unsupported).", imported.skipped)).await;
-        return;
-    }
-    match apply(imported.cookies).await {
-        Ok(count) => {
-            if import::site_host(&current_url()).as_deref() == Ok(&host) {
-                reload();
+        if imported.cookies.is_empty() {
+            return (
+                "No matching cookies",
+                format!("No cookies available for {host} in this profile.\nSkipped: {} (expired or unsupported).", imported.skipped),
+            );
+        }
+        match apply(imported.cookies).await {
+            Ok(count) => {
+                if import::site_host(&current_url()).as_deref() == Ok(&host) {
+                    reload();
+                }
+                (
+                    "Cookies imported",
+                    format!(
+                        "Imported: {count} · Skipped: {}\n\nSome sites may still require sign-in.",
+                        imported.skipped
+                    ),
+                )
             }
-            message(
-                parent,
-                "Cookies imported",
-                &format!(
-                    "Imported: {count} · Skipped: {}\n\nSome sites may still require sign-in.",
-                    imported.skipped
-                ),
-            )
-            .await;
-        }
-        Err(error) => {
-            message(parent, "Cookie import incomplete", &error).await;
+            Err(error) => ("Cookie import incomplete", error),
         }
     }
+    .await;
+    // libadwaita 1.5 can ignore close() before the dialog's first presentation ticks.
+    progress.set_heading(Some(title));
+    progress.set_body(&body);
+    progress.set_response_label("cancel", "Close");
+    progress.set_response_enabled("cancel", true);
+    progress.set_can_close(true);
+    let _ = cancel_rx.await;
 }
 
 #[cfg(target_os = "linux")]

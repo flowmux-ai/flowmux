@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -170,22 +171,30 @@ try:
             if child:
                 yield from walk(child)
 
+    def lookup(name, actionable=False, showing=True):
+        desktop = Atspi.get_desktop(0)
+        desktop.clear_cache()
+        for index in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(index)
+            if app.get_process_id() == process.pid:
+                return next((node for node in walk(app) if node.get_name() == name
+                             and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING))
+                             and (not actionable or node.get_state_set().contains(Atspi.StateType.SENSITIVE))), None)
+        return None
+
     def find(name, actionable=False):
-        def lookup():
-            desktop = Atspi.get_desktop(0)
-            desktop.clear_cache()
-            for index in range(desktop.get_child_count()):
-                app = desktop.get_child_at_index(index)
-                if app.get_process_id() == process.pid:
-                    return next((node for node in walk(app) if node.get_name() == name
-                                 and node.get_state_set().contains(Atspi.StateType.SHOWING)
-                                 and (not actionable or node.get_state_set().contains(Atspi.StateType.SENSITIVE))), None)
-            return None
-        return gui.wait_for(lookup, name, timeout=15)
+        return gui.wait_for(lambda: lookup(name, actionable), name, timeout=15)
 
     def click(name):
         action = find(name, actionable=True).get_action_iface()
         assert action and action.get_n_actions() and action.do_action(0), name
+
+    def dismiss_result(title):
+        click("Close")
+        gui.wait_for(lambda: not lookup(title, showing=False)
+                     and not lookup("Importing cookies…", showing=False),
+                     f"{title}: result and progress dialogs dismissed", timeout=5)
+        h.pass_check(f"{title}: no progress dialog remains after Close")
 
     pane = open_page()
     gui.wait_for(lambda: cli("browser", "title", pane) == "Sign in", "initial signed-out page")
@@ -196,18 +205,40 @@ try:
     click("Cancel")
     assert cli("browser", "title", pane) == "Sign in"
     h.pass_check("cancel leaves the destination signed out")
+    # Fail before keyring I/O, while the progress dialog is still opening.
+    writer.execute("UPDATE meta SET value='invalid' WHERE key='version'")
+    writer.commit()
     click("Import cookies")
     click("Import")
     find("Cookie import failed")
-    click("Close")
+    dismiss_result("Cookie import failed")
+    writer.execute("UPDATE meta SET value='24' WHERE key='version'")
+    writer.commit()
+    click("Import cookies")
+    click("Import")
+    find("Cookie import failed")
+    dismiss_result("Cookie import failed")
     assert cli("browser", "title", pane) == "Sign in"
     h.pass_check("missing keyring key reports an error without changing login state")
     install_fixture_key()
+    keyring.send_signal(signal.SIGSTOP)
+    try:
+        click("Import cookies")
+        click("Import")
+        find("Importing cookies…")
+        click("Cancel")
+        gui.wait_for(lambda: not lookup("Importing cookies…", showing=False),
+                     "progress cancelled", timeout=5)
+        find("Import cookies", actionable=True)
+    finally:
+        keyring.send_signal(signal.SIGCONT)
+    assert cli("browser", "title", pane) == "Sign in"
+    h.pass_check("cancelling pending keyring access dismisses progress without importing")
     click("Import cookies")
     click("Import")
     find("Cookies imported")
     ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "import-result.png")
-    click("Close")
+    dismiss_result("Cookies imported")
     gui.wait_for(lambda: cli("browser", "title", pane) == "Signed in", "cookie-backed sign-in")
     assert cli("browser", "eval", pane, "document.cookie") in ("", '""')
     h.pass_check("v11 keyring decryption and HttpOnly cookie insertion sign in on reload")
@@ -216,12 +247,12 @@ try:
     other_pane = open_page()
     gui.wait_for(lambda: cli("browser", "title", other_pane) == "Signed in", "shared profile login")
     h.pass_check("new browser tabs share the imported login")
-    h.stop(process)
+    h.close_window(process)
     process, sock = h.window("import-restarted")
     pane = open_page()
     gui.wait_for(lambda: cli("browser", "title", pane) == "Signed in", "persisted login after restart")
     h.pass_check("imported persistent cookie survives isolated Flowmux restart")
-    h.stop(process)
+    h.close_window(process)
     print("BROWSER_IMPORT_GUI_OK", flush=True)
 finally:
     if server:
