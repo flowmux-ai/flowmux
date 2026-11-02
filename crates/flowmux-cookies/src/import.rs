@@ -22,9 +22,9 @@ pub struct Import {
 
 pub fn site_host(url: &str) -> Result<String, String> {
     let url =
-        url::Url::parse(url).map_err(|_| "Open an HTTP or HTTPS site before importing logins")?;
+        url::Url::parse(url).map_err(|_| "Open an HTTP or HTTPS site before importing cookies")?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err("Open an HTTP or HTTPS site before importing logins".into());
+        return Err("Open an HTTP or HTTPS site before importing cookies".into());
     }
     url.host_str()
         .map(str::to_owned)

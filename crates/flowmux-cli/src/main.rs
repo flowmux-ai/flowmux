@@ -418,7 +418,7 @@ enum Cmd {
         name: String,
     },
 
-    /// Reserved CLI cookie import. Use the browser tab's Import logins button
+    /// Reserved CLI cookie import. Use the browser tab's Import cookies button
     /// to select a source profile and approve access for the current site.
     ImportCookies {
         /// Browser slug. Firefox supports extraction; Chromium-family sources

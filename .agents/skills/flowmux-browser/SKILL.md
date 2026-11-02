@@ -380,7 +380,7 @@ sampled MP4 capture, and `screenshot --full-page` provides a document PNG. Use
 those supported commands when they meet the task. For a strict CDP requirement,
 explain the missing capability and keep user-visible URLs/results in Flowmux
 alongside the external tool. CLI cookie import returns `unimplemented` without
-reading host cookies. The browser toolbar's **Import logins for this site**
+reading host cookies. The browser toolbar's **Import cookies for this site**
 button lets the user select a source browser/profile and approve OS keyring
 access. It imports matching cookies into the current Flowmux profile, then
 reloads the page; cookie insertion does not prove the site accepted the login.

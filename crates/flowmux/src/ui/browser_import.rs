@@ -60,14 +60,19 @@ async fn run(
     let host = match import::site_host(&current_url()) {
         Ok(host) => host,
         Err(error) => {
-            message(parent, "Import logins", &error).await;
+            message(parent, "Import cookies", &error).await;
             return;
         }
     };
     let profiles = match gio::spawn_blocking(import::discover_profiles).await {
         Ok(profiles) if !profiles.is_empty() => profiles,
         _ => {
-            message(parent, "No browser profiles found", "Flowmux could not find readable Chrome, Chromium, Brave, Edge, Arc, or Firefox cookies. Open and sign in to the site in a supported browser first. Sandboxed installations may restrict profile access.").await;
+            message(
+                parent,
+                "No browser profiles found",
+                "Check that your browser has saved cookies and Flowmux can access its profile.",
+            )
+            .await;
             return;
         }
     };
@@ -81,17 +86,17 @@ async fn run(
     let dropdown = gtk::DropDown::from_strings(&choices);
     dropdown.set_widget_name("flowmux-import-source");
     let source = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let label = gtk::Label::new(Some("Browser and profile"));
+    let label = gtk::Label::new(Some("Import from"));
     label.set_xalign(0.0);
     source.append(&label);
     source.append(&dropdown);
     let persistence = if persistent {
-        "Cookies will be saved in this Flowmux profile."
+        ""
     } else {
-        "This is a temporary session. Imported logins will not be saved after it ends."
+        "\nCookies will be lost when this temporary session ends."
     };
-    let dialog = adw::AlertDialog::new(Some("Import logins for this site?"), Some(&format!(
-        "Site: {host}\nFlowmux profile: {profile}\n\nMatching cookies will replace this site's existing cookies in all tabs using this Flowmux profile. {persistence} The source browser will not be changed.\n\nYour operating system may ask you to unlock or approve access to the browser's keyring. Enter any password in that system prompt. Passwords and browsing history are not imported."
+    let dialog = adw::AlertDialog::new(Some("Import cookies?"), Some(&format!(
+        "Site: {host}\nFlowmux profile: {profile}\n\nMatching cookies will be replaced across tabs in this profile.{persistence}\nYour system may ask for keyring access."
     )));
     dialog.set_extra_child(Some(&source));
     dialog.add_response("cancel", "Cancel");
@@ -109,12 +114,15 @@ async fn run(
         message(
             parent,
             "Page changed",
-            "Open Import logins again on the site you want to use.",
+            "Reopen Import cookies on the intended site.",
         )
         .await;
         return;
     }
-    let progress = adw::AlertDialog::new(Some("Importing logins…"), Some("Approve any system keyring prompt to continue. Canceling here prevents cookies from being applied."));
+    let progress = adw::AlertDialog::new(
+        Some("Importing cookies…"),
+        Some("If prompted, approve or unlock the system keyring."),
+    );
     progress.add_response("cancel", "Cancel");
     progress.set_close_response("cancel");
     // Dropping adwaita 0.7's choose_future can pass a null response to its binding.
@@ -139,7 +147,7 @@ async fn run(
     let imported = match result {
         Ok(imported) => imported,
         Err(error) => {
-            message(parent, "Login import failed", &error).await;
+            message(parent, "Cookie import failed", &error).await;
             return;
         }
     };
@@ -147,13 +155,13 @@ async fn run(
         message(
             parent,
             "Page changed",
-            "No cookies were imported. Open Import logins again on the intended site.",
+            "Nothing was imported. Reopen Import cookies on the intended site.",
         )
         .await;
         return;
     }
     if imported.cookies.is_empty() {
-        message(parent, "No matching cookies", &format!("No transferable cookies were found for {host}. Sign in to this site in the selected browser first. {} expired, partitioned, or unsupported cookies were skipped.", imported.skipped)).await;
+        message(parent, "No matching cookies", &format!("No cookies available for {host} in this profile.\nSkipped: {} (expired or unsupported).", imported.skipped)).await;
         return;
     }
     match apply(imported.cookies).await {
@@ -161,10 +169,18 @@ async fn run(
             if import::site_host(&current_url()).as_deref() == Ok(&host) {
                 reload();
             }
-            message(parent, "Cookies imported", &format!("Cookies applied for {host}: {count}.\nCookies skipped (expired, partitioned, or unsupported): {}.\n\nCheck the page to confirm you are signed in. Sites that require other browser data or device verification may still ask you to sign in.", imported.skipped)).await;
+            message(
+                parent,
+                "Cookies imported",
+                &format!(
+                    "Imported: {count} · Skipped: {}\n\nSome sites may still require sign-in.",
+                    imported.skipped
+                ),
+            )
+            .await;
         }
         Err(error) => {
-            message(parent, "Login import incomplete", &error).await;
+            message(parent, "Cookie import incomplete", &error).await;
         }
     }
 }

@@ -965,7 +965,7 @@ impl GuiHandler {
                 }
             }
             Request::ImportCookies { .. } => Response::Error(RpcError::Unimplemented(
-                "CLI cookie import is not implemented. Use the browser tab's Import logins button to select a source and approve access; no cookies were read or imported".into(),
+                "CLI cookie import is not implemented. Use the browser tab's Import cookies button to select a source and approve access; no cookies were read or imported".into(),
             )),
             other => unreachable!("browser router got a non-browser verb: {other:?}"),
         }

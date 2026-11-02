@@ -189,22 +189,23 @@ try:
 
     pane = open_page()
     gui.wait_for(lambda: cli("browser", "title", pane) == "Sign in", "initial signed-out page")
-    click("Import logins for this site")
-    find("Import logins for this site?")
+    click("Import cookies")
+    find("Import cookies?")
+    from PIL import ImageGrab
+    ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "import-confirm.png")
     click("Cancel")
     assert cli("browser", "title", pane) == "Sign in"
     h.pass_check("cancel leaves the destination signed out")
-    click("Import logins for this site")
+    click("Import cookies")
     click("Import")
-    find("Login import failed")
+    find("Cookie import failed")
     click("Close")
     assert cli("browser", "title", pane) == "Sign in"
     h.pass_check("missing keyring key reports an error without changing login state")
     install_fixture_key()
-    click("Import logins for this site")
+    click("Import cookies")
     click("Import")
     find("Cookies imported")
-    from PIL import ImageGrab
     ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "import-result.png")
     click("Close")
     gui.wait_for(lambda: cli("browser", "title", pane) == "Signed in", "cookie-backed sign-in")

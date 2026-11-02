@@ -161,7 +161,7 @@ sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
 flowmux checks agent hooks, agent SKILL files, the browser data dir,
 host-browser profile detection, and the daemon socket. Detection of a
 host profile does not mean its session can be imported. Use the browser tab's
-**Import logins for this site** button to select a profile and approve access;
+**Import cookies for this site** button to select a profile and approve access;
 see [login import](browser-workflow.md#import-an-existing-login) for supported
 formats and limitations. The CLI import command remains unsupported.
 

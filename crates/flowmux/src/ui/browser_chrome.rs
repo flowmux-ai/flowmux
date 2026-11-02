@@ -67,7 +67,8 @@ impl BrowserChrome {
         let back = icon_button("go-previous-symbolic", "Back");
         let forward = icon_button("go-next-symbolic", "Forward");
         let reload = icon_button("view-refresh-symbolic", "Reload page");
-        let import_logins = icon_button("document-import-symbolic", "Import logins for this site");
+        let import_logins = icon_button("document-import-symbolic", "Import cookies for this site");
+        import_logins.update_property(&[gtk::accessible::Property::Label("Import cookies")]);
         import_logins.set_widget_name("flowmux-import-logins");
         back.set_sensitive(false);
         forward.set_sensitive(false);

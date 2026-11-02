@@ -278,7 +278,7 @@ pub(crate) async fn check() {
                 "Back",
                 "Forward",
                 "Reload page",
-                "Import logins for this site",
+                "Import cookies for this site",
             ] {
                 assert!(
                     button(&toolbar, name).is_mapped(),

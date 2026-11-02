@@ -98,7 +98,7 @@ focused editable element.
 - Recording checks the CLI's PATH for ffmpeg with libx264. Captures are silent
   and can omit accelerated layers. Playback of a particular media format must
   still be tested with that media file.
-- The browser toolbar's **Import logins for this site** button imports matching
+- The browser toolbar's **Import cookies for this site** button imports matching
   cookies from a selected local browser profile after interactive approval.
   CLI cookie import remains unsupported; use the toolbar or sign in directly.
 
@@ -350,7 +350,7 @@ uses the global default session.
 
 ### Import an existing login
 
-Open the intended HTTP/HTTPS site, then click **Import logins for this site**
+Open the intended HTTP/HTTPS site, then click **Import cookies for this site**
 beside the address field. Select the source browser/profile, review the site
 and destination Flowmux profile, and choose **Import**. Chrome-family imports
 may ask for OS keyring/Keychain approval or unlocking; enter passwords only in
