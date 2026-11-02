@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Synthetic NSEvents traverse the real macOS GTK/VTE input path in an isolated window.
+//! Native wheel events traverse GTK/VTE in an isolated window; restore the pointer afterward.
 use super::*;
 use gtk::glib::translate::ToGlibPtr;
-use objc2::{define_class, msg_send, rc::Retained, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{msg_send, rc::Retained, ClassType, MainThreadMarker};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventPhase,
-    NSEventType, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
+    NSWindow,
 };
-use objc2_foundation::NSPoint;
+use objc2_foundation::{NSPoint, NSRect};
 use vte::prelude::*;
 
 #[repr(C)]
@@ -19,59 +19,14 @@ unsafe impl objc2::encode::RefEncode for CGEvent {
         objc2::encode::Encoding::Pointer(&objc2::encode::Encoding::Struct("__CGEvent", &[]));
 }
 
-struct WheelState {
-    window: Retained<NSWindow>,
-    point: NSPoint,
-    delta: f64,
-    precise: bool,
-    cg: *const CGEvent,
-}
-impl Drop for WheelState {
-    fn drop(&mut self) {
-        unsafe { CFRelease(self.cg.cast()) }
-    }
-}
-define_class!(
-    #[unsafe(super(NSEvent))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = WheelState]
-    struct FlowmuxTestWheelEvent;
-    impl FlowmuxTestWheelEvent {
-        #[unsafe(method(CGEvent))]
-        fn cg(&self) -> *const CGEvent { self.ivars().cg }
-        #[unsafe(method(type))]
-        fn kind(&self) -> NSEventType { NSEventType::ScrollWheel }
-        #[unsafe(method(window))]
-        fn window(&self) -> *const NSWindow { &*self.ivars().window }
-        #[unsafe(method(windowNumber))]
-        fn number(&self) -> isize { self.ivars().window.windowNumber() }
-        #[unsafe(method(locationInWindow))]
-        fn location(&self) -> NSPoint { self.ivars().point }
-        #[unsafe(method(timestamp))]
-        fn timestamp(&self) -> f64 { glib::monotonic_time() as f64 / 1_000_000.0 }
-        #[unsafe(method(modifierFlags))]
-        fn modifiers(&self) -> NSEventModifierFlags { NSEventModifierFlags::empty() }
-        #[unsafe(method(deltaX))]
-        fn dx(&self) -> f64 { 0.0 }
-        #[unsafe(method(deltaY))]
-        fn dy(&self) -> f64 { self.ivars().delta }
-        #[unsafe(method(scrollingDeltaX))]
-        fn sx(&self) -> f64 { 0.0 }
-        #[unsafe(method(scrollingDeltaY))]
-        fn sy(&self) -> f64 { self.ivars().delta }
-        #[unsafe(method(hasPreciseScrollingDeltas))]
-        fn precise(&self) -> objc2::runtime::Bool { self.ivars().precise.into() }
-        #[unsafe(method(phase))]
-        fn phase(&self) -> NSEventPhase { NSEventPhase::empty() }
-        #[unsafe(method(momentumPhase))]
-        fn momentum(&self) -> NSEventPhase { NSEventPhase::empty() }
-        #[unsafe(method(isDirectionInvertedFromDevice))]
-        fn inverted(&self) -> objc2::runtime::Bool { objc2::runtime::Bool::NO }
-    }
-);
-
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
+    fn CGEventCreate(source: *const std::ffi::c_void) -> *const std::ffi::c_void;
+    fn CGEventGetLocation(event: *const std::ffi::c_void) -> NSPoint;
+    fn CGEventSetLocation(event: *const std::ffi::c_void, point: NSPoint);
+    fn CGWarpMouseCursorPosition(point: NSPoint) -> i32;
+    fn CGMainDisplayID() -> u32;
+    fn CGDisplayBounds(display: u32) -> NSRect;
     fn CGEventCreateScrollWheelEvent(
         source: *const std::ffi::c_void,
         units: u32,
@@ -85,41 +40,80 @@ unsafe extern "C" {
     ) -> *mut std::ffi::c_void;
 }
 
-fn wheel(window: &gtk::Window, term: &vte::Terminal, delta: f64, precise: bool) {
-    let mtm = MainThreadMarker::new().unwrap();
+struct RestorePointer(NSPoint);
+impl RestorePointer {
+    fn save() -> Self {
+        unsafe {
+            let event = CGEventCreate(std::ptr::null());
+            assert!(!event.is_null());
+            let point = CGEventGetLocation(event);
+            CFRelease(event);
+            Self(point)
+        }
+    }
+}
+impl Drop for RestorePointer {
+    fn drop(&mut self) {
+        unsafe {
+            CGWarpMouseCursorPosition(self.0);
+        }
+    }
+}
+
+async fn wheel(window: &gtk::Window, term: &vte::Terminal, delta: f64, precise: bool) {
+    let app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
     let surface = window.surface().unwrap();
     let native = unsafe {
         &*gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>()
     };
+    native.makeKeyAndOrderFront(None);
+    wait_until("wheel window active", || native.isKeyWindow()).await;
     let point = term
         .compute_point(window, &gtk::graphene::Point::new(30.0, 30.0))
         .unwrap();
+    let location = NSPoint::new(
+        f64::from(point.x()),
+        native.contentView().unwrap().frame().size.height - f64::from(point.y()),
+    );
+    let screen = native.convertPointToScreen(location);
+    let controllers = term.observe_controllers();
+    let motion_controller = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerMotion>()
+                .ok()
+        })
+        .unwrap();
     unsafe {
+        let screen = NSPoint::new(
+            screen.x,
+            CGDisplayBounds(CGMainDisplayID()).size.height - screen.y,
+        );
+        // AppKit reconstructs posted wheel events without a window; GTK targets the real pointer.
+        assert_eq!(CGWarpMouseCursorPosition(screen), 0);
+        let motion = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            NSEventType::MouseMoved, location, NSEventModifierFlags::empty(), glib::monotonic_time() as f64 / 1_000_000.0, native.windowNumber(), None, 0, 0, 0.0,
+        ).unwrap();
+        app.postEvent_atStart(&motion, false);
+        wait_until("wheel pointer entered terminal", || {
+            motion_controller.contains_pointer()
+        })
+        .await;
         let cg =
             CGEventCreateScrollWheelEvent(std::ptr::null(), u32::from(!precise), 1, delta as i32);
         assert!(!cg.is_null());
-        let event = FlowmuxTestWheelEvent::alloc(mtm).set_ivars(WheelState {
-            window: Retained::retain(native as *const NSWindow as *mut NSWindow).unwrap(),
-            point: NSPoint::new(
-                f64::from(point.x()),
-                native.contentView().unwrap().frame().size.height - f64::from(point.y()),
-            ),
-            delta,
-            precise,
-            cg: cg.cast(),
-        });
-        let event: Retained<FlowmuxTestWheelEvent> = msg_send![super(event), init];
-        assert_eq!(event.windowNumber(), native.windowNumber());
-        let app = NSApplication::sharedApplication(mtm);
-        let motion = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-            NSEventType::MouseMoved, event.locationInWindow(), NSEventModifierFlags::empty(), glib::monotonic_time() as f64 / 1_000_000.0, native.windowNumber(), None, 0, 0, 0.0,
-        ).unwrap();
-        app.postEvent_atStart(&motion, false);
+        CGEventSetLocation(cg, screen);
+        let event: Retained<NSEvent> =
+            msg_send![NSEvent::class(), eventWithCGEvent: cg.cast::<CGEvent>()];
+        CFRelease(cg);
+        assert_eq!(event.hasPreciseScrollingDeltas(), precise);
         app.postEvent_atStart(&event, false);
     }
 }
 
 pub(super) async fn check(app: &adw::Application) {
+    let _restore_pointer = RestorePointer::save();
     let native_app = NSApplication::sharedApplication(MainThreadMarker::new().unwrap());
     native_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     native_app.finishLaunching();
@@ -183,7 +177,7 @@ pub(super) async fn check(app: &adw::Application) {
         }
         adjustment.set_value(200.0);
         glib::timeout_future(Duration::from_millis(30)).await;
-        wheel(controller.window.upcast_ref(), term, delta, precise);
+        wheel(controller.window.upcast_ref(), term, delta, precise).await;
         wait_until("native wheel moved terminal", || {
             adjustment.value() != 200.0
         })
@@ -231,7 +225,7 @@ pub(super) async fn check(app: &adw::Application) {
     .await;
     new_adjustment.set_value(200.0);
     glib::timeout_future(Duration::from_millis(30)).await;
-    wheel(controller.window.upcast_ref(), new_term, -1.0, false);
+    wheel(controller.window.upcast_ref(), new_term, -1.0, false).await;
     wait_until("new terminal wheel moved", || {
         new_adjustment.value() != 200.0
     })
@@ -259,7 +253,7 @@ async fn check_mouse_protocol(window: &gtk::Window, pane: &crate::ui::pane_termi
     wait_until("mouse mode enabled", || sent.borrow().contains("?1000;1$y")).await;
     sent.borrow_mut().clear();
     pane.set_wheel_scroll_multiplier(2.0);
-    wheel(window, term, -1.0, false);
+    wheel(window, term, -1.0, false).await;
     wait_until("two mouse wheel reports", || {
         sent.borrow().matches('\x1b').count() >= 2
     })
@@ -268,17 +262,17 @@ async fn check_mouse_protocol(window: &gtk::Window, pane: &crate::ui::pane_termi
     assert_eq!(report.matches("\x1b[<65;").count(), 2, "{report:?}");
     sent.borrow_mut().clear();
     pane.set_wheel_scroll_multiplier(0.5);
-    wheel(window, term, 1.0, false);
+    wheel(window, term, 1.0, false).await;
     glib::timeout_future(Duration::from_millis(100)).await;
     assert!(sent.borrow().is_empty(), "fractional wheel must accumulate");
-    wheel(window, term, 1.0, false);
+    wheel(window, term, 1.0, false).await;
     wait_until("fractional wheel report", || !sent.borrow().is_empty()).await;
     assert_eq!(sent.borrow().matches("\x1b[<64;").count(), 1);
     term.feed(b"\x1b[?1000l\x1b[?1006l\x1b[?1049h\x1b[?1007h");
     glib::timeout_future(Duration::from_millis(100)).await;
     sent.borrow_mut().clear();
     pane.set_wheel_scroll_multiplier(2.0);
-    wheel(window, term, -1.0, false);
+    wheel(window, term, -1.0, false).await;
     wait_until("alternate screen wheel keys", || !sent.borrow().is_empty()).await;
     let count = ((term.row_count() as f64 / 10.0).ceil() * 2.0) as usize;
     assert_eq!(*sent.borrow(), "\x1b[B".repeat(count));
