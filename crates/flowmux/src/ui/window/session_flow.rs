@@ -780,22 +780,22 @@ impl WindowController {
                 .borrow_mut()
                 .pending_terminal_commands
                 .insert(surface, line.clone());
-            if let Err(error) = self
+            let split = self
                 .apply_split_incremental_or_rerender(
                     workspace,
                     source.0,
                     pane,
                     SplitDirection::Vertical,
                 )
-                .await
-            {
-                #[cfg(target_os = "macos")]
+                .await;
+            #[cfg(target_os = "macos")]
+            if split.is_err() {
                 self.pane_registry
                     .borrow_mut()
                     .pending_terminal_commands
                     .remove(&surface);
-                return Err(error);
             }
+            split?;
             #[cfg(not(target_os = "macos"))]
             {
                 let terminal = self
