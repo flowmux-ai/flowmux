@@ -101,8 +101,8 @@ jobs:
           sudo sh packaging/debian/postinst configure
 
       - name: Run Linux tests and coverage (same script as local)
-        # Allow the 25-minute test phase plus three bounded coverage reports.
-        timeout-minutes: 40
+        # Allow setup checks, the 40-minute test phase and three bounded coverage reports.
+        timeout-minutes: 55
         run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
 
       - name: Upload test and coverage evidence

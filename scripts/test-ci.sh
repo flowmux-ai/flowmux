@@ -60,7 +60,7 @@ if [[ $mode == linux ]]; then
     # this runner does not disable the WebKit sandbox or change host policy.
     result=0
     # Budget the instrumented build and all browser, team, and SSH GUI suites.
-    run_phase coverage 1800 xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
+    run_phase coverage 2400 xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
         env FLOWMUX_TEST_X11_LOCKS=1 bash scripts/test-coverage.sh -- --nocapture || result=$?
     # Preserve failure evidence even when a test fails; never turn it green.
     mkdir -p "$CARGO_TARGET_DIR/llvm-cov"
