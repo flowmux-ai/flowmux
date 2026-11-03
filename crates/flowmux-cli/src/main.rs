@@ -888,7 +888,7 @@ enum HooksOp {
     /// upgrades. Skips agents whose home directory is missing.
     Setup {
         /// Limit installation to specific agents. Omit to do all.
-        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini", "antigravity"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini", "antigravity", "cline"])]
         agent: Vec<String>,
         /// Executable for the installed hook commands. Defaults to the running
         /// `flowmuxctl` binary, falling back to `flowmux` on PATH.
@@ -897,7 +897,7 @@ enum HooksOp {
     },
     /// Remove flowmux's hook entries from every supported agent.
     Uninstall {
-        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini", "antigravity"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini", "antigravity", "cline"])]
         agent: Vec<String>,
     },
     /// Print which agent config files flowmux currently owns hook

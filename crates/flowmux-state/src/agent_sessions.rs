@@ -28,7 +28,14 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const RESUMABLE_AGENTS: [&str; 4] = ["claude", "codex", "opencode", "antigravity"];
+const RESUMABLE_AGENTS: [&str; 6] = [
+    "claude",
+    "codex",
+    "opencode",
+    "antigravity",
+    "gemini",
+    "cline",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedAgentSession {
@@ -51,6 +58,13 @@ impl SavedAgentSession {
                 "--conversation".into(),
                 self.session_id.clone(),
             ],
+            "gemini" => vec!["gemini".into(), "--resume".into(), self.session_id.clone()],
+            "cline" => vec![
+                "cline".into(),
+                "--id".into(),
+                self.session_id.clone(),
+                "--tui".into(),
+            ],
             _ => Vec::new(),
         }
     }
@@ -70,11 +84,14 @@ impl SavedAgentSession {
             .join(" ");
         let cleanup = match self.agent.as_str() {
             "claude" => "if command -v flowmuxctl >/dev/null 2>&1; then printf '%s' '{\"reason\":\"prompt_input_exit\"}' | flowmuxctl hooks claude session-end >/dev/null 2>&1; fi; ".to_string(),
-            "codex" | "opencode" => format!(
+            "codex" | "opencode" | "cline" => format!(
                 "if command -v flowmuxctl >/dev/null 2>&1; then flowmuxctl hooks {agent} stop '{{\"reason\":\"flowmux_resume_returned\"}}' >/dev/null 2>&1; fi; ",
                 agent = self.agent,
             ),
-            "antigravity" => "if command -v flowmuxctl >/dev/null 2>&1; then printf '%s' '{\"reason\":\"flowmux_resume_returned\"}' | flowmuxctl hooks antigravity stop >/dev/null 2>&1; fi; ".to_string(),
+            "antigravity" | "gemini" => format!(
+                "if command -v flowmuxctl >/dev/null 2>&1; then printf '%s' '{{\"reason\":\"flowmux_resume_returned\"}}' | flowmuxctl hooks {agent} stop >/dev/null 2>&1; fi; ",
+                agent = self.agent,
+            ),
             _ => String::new(),
         };
         Some(format!(
@@ -950,12 +967,58 @@ mod tests {
                 "antigravity",
                 "printf '%s' '{\"reason\":\"flowmux_resume_returned\"}' | flowmuxctl hooks antigravity stop",
             ),
+            (
+                "gemini",
+                "printf '%s' '{\"reason\":\"flowmux_resume_returned\"}' | flowmuxctl hooks gemini stop",
+            ),
+            (
+                "cline",
+                "flowmuxctl hooks cline stop '{\"reason\":\"flowmux_resume_returned\"}'",
+            ),
         ] {
             let saved = SavedAgentSession {
                 agent: agent.into(),
                 session_id: "stale-session".into(),
             };
             assert!(saved.shell_command().unwrap().contains(expected));
+        }
+    }
+
+    #[test]
+    fn resumable_agents_produce_valid_resume_argv() {
+        for (agent, expected) in [
+            (
+                "claude",
+                vec!["claude", "--resume", "sess-1"],
+            ),
+            (
+                "codex",
+                vec!["codex", "resume", "sess-1"],
+            ),
+            (
+                "opencode",
+                vec!["opencode", "--session", "sess-1"],
+            ),
+            (
+                "antigravity",
+                vec!["agy", "--conversation", "sess-1"],
+            ),
+            (
+                "gemini",
+                vec!["gemini", "--resume", "sess-1"],
+            ),
+            (
+                "cline",
+                vec!["cline", "--id", "sess-1", "--tui"],
+            ),
+        ] {
+            let saved = SavedAgentSession {
+                agent: agent.into(),
+                session_id: "sess-1".into(),
+            };
+            assert_eq!(saved.resume_argv(), expected);
+            let command = saved.shell_command().unwrap();
+            assert!(command.starts_with(&format!("if command -v '{}'", expected[0])));
         }
     }
 

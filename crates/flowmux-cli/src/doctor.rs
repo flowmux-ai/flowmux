@@ -506,7 +506,8 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
         agent::Target::OpenCode => Some(hook_install::HookTarget::OpenCode),
         agent::Target::Codex => Some(hook_install::HookTarget::Codex),
         agent::Target::Antigravity => Some(hook_install::HookTarget::Antigravity),
-        agent::Target::Cline | agent::Target::Gemini => None,
+        agent::Target::Cline => Some(hook_install::HookTarget::Cline),
+        agent::Target::Gemini => None,
     }
 }
 
@@ -1108,30 +1109,6 @@ pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> Fix
         }
     }
 
-    match hook_install::uninstall(hook_install::HookTarget::Cline) {
-        Ok(cleanup) if !cleanup.touched_paths.is_empty() => {
-            outcomes.push(FixOutcome {
-                area: "cline legacy hooks".into(),
-                status: Status::Ok,
-                detail: format!(
-                    "removed {}",
-                    cleanup
-                        .touched_paths
-                        .iter()
-                        .map(|path| path.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            });
-        }
-        Ok(_) => {}
-        Err(error) => outcomes.push(FixOutcome {
-            area: "cline legacy hooks".into(),
-            status: Status::Error,
-            detail: error.to_string(),
-        }),
-    }
-
     // Agent wrapper shims — let the daemon's liveness sweep see a
     // hard-killed agent's PID. Only agents found later on PATH get a
     // wrapper; stale wrappers for absent agents are removed.
@@ -1509,26 +1486,19 @@ mod tests {
     }
 
     #[test]
-    fn cline_fix_installs_skill_and_removes_legacy_hooks() {
+    fn cline_fix_installs_skill_and_hooks_then_becomes_idempotent() {
         let _lock = home_env_lock();
         let home = fake_home();
-        let hooks = home.path().join(".cline/hooks");
-        fs::create_dir_all(&hooks).unwrap();
-        fs::write(
-            hooks.join("TaskComplete"),
-            "#!/bin/sh\n# flowmux-hook obsolete\n",
-        )
-        .unwrap();
+        fs::create_dir_all(home.path().join(".cline")).unwrap();
         let _h = HomeOverride::set(home.path());
 
         let first = run_fix(home.path(), None, "flowmux");
-        let cleanup = first
+        let hook = first
             .outcomes
             .iter()
-            .find(|outcome| outcome.area == "cline legacy hooks")
+            .find(|outcome| outcome.area == "cline hooks")
             .unwrap();
-        assert_eq!(cleanup.status, Status::Ok, "{}", cleanup.detail);
-        assert!(!hooks.join("TaskComplete").exists());
+        assert_eq!(hook.status, Status::Ok, "{}", hook.detail);
 
         let report = collect_offline(home.path(), None);
         let agents = report
@@ -1536,22 +1506,23 @@ mod tests {
             .iter()
             .find(|section| section.title == "AI agents")
             .unwrap();
-        let skill = agents
-            .entries
-            .iter()
-            .find(|entry| entry.name == "cline skill")
-            .unwrap();
-        assert_eq!(skill.status, Status::Ok, "{}", skill.detail);
-        assert!(agents
-            .entries
-            .iter()
-            .all(|entry| entry.name != "cline hooks"));
+        for name in ["cline skill", "cline hooks"] {
+            let entry = agents
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap();
+            assert_eq!(entry.status, Status::Ok, "{}", entry.detail);
+        }
 
         let second = run_fix(home.path(), None, "flowmux");
-        assert!(second
+        let hook = second
             .outcomes
             .iter()
-            .all(|outcome| outcome.area != "cline legacy hooks"));
+            .find(|outcome| outcome.area == "cline hooks")
+            .unwrap();
+        assert_eq!(hook.status, Status::Ok);
+        assert_eq!(hook.detail, "no changes");
     }
 
     #[test]

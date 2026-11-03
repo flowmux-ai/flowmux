@@ -1076,7 +1076,7 @@ fn local_only_commands_parse_to_local_variants() {
 }
 
 #[test]
-fn cline_is_supported_as_a_skill_not_a_file_hook() {
+fn cline_is_accepted_by_skill_and_hook_install_commands() {
     let agent = Cli::try_parse_from(["flowmuxctl", "agent", "doctor", "--agent", "cline"]).unwrap();
     assert!(matches!(
         agent.cmd,
@@ -1085,7 +1085,13 @@ fn cline_is_supported_as_a_skill_not_a_file_hook() {
         } if agent == vec!["cline"]
     ));
 
-    assert!(Cli::try_parse_from(["flowmuxctl", "hooks", "setup", "--agent", "cline"]).is_err());
+    let hooks = Cli::try_parse_from(["flowmuxctl", "hooks", "setup", "--agent", "cline"]).unwrap();
+    assert!(matches!(
+        hooks.cmd,
+        Cmd::Hooks {
+            op: HooksOp::Setup { agent, .. }
+        } if agent == vec!["cline"]
+    ));
 }
 
 #[test]
