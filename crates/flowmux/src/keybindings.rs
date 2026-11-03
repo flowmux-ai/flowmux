@@ -330,6 +330,7 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
     );
     let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
     let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
+    let toggle_session_flow = make_toggle_session_flow_action(bridge.clone());
     let review_bridge = bridge.clone();
     let open_diff_review = gtk::gio::ActionEntry::builder("open-diff-review")
         .activate(move |_, _, _| {
@@ -516,6 +517,7 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
         toggle_pane_zoom,
         toggle_workspace_overview,
         toggle_session_panel,
+        toggle_session_flow,
         open_diff_review,
         next_workspace,
         prev_workspace,
@@ -534,6 +536,18 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
         toggle_file_browser,
         toggle_usage_popover,
     ]);
+}
+
+fn make_toggle_session_flow_action(
+    bridge: Bridge,
+) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
+    gtk::gio::ActionEntry::builder("toggle-session-flow")
+        .activate(move |_, _, _| {
+            let _ = bridge.tx.try_send(GtkCommand::SessionFlow(
+                crate::ui::session_flow::FlowAction::ToggleActive,
+            ));
+        })
+        .build()
 }
 
 fn make_toggle_session_panel_action(
@@ -1566,6 +1580,45 @@ mod tests {
         options.keybindings.set(action, vec!["<Alt>j".into()]);
         install_accels(&app, &options);
         assert_eq!(app.accels_for_action(&full_action_name(action)), ["<Alt>j"]);
+        options.keybindings.set(action, vec![]);
+        install_accels(&app, &options);
+        assert!(app.accels_for_action(&full_action_name(action)).is_empty());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn ctrl_alt_b_dispatches_session_flow_and_can_be_rebound() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let action = ActionId::ToggleSessionFlow;
+        assert!(action.is_user_editable());
+        assert_eq!(ActionId::from_wire("toggle-session-flow"), Some(action));
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.SessionFlowAction")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let window = adw::ApplicationWindow::builder().application(&app).build();
+        let (bridge, rx) = Bridge::new();
+        window.add_action_entries([make_toggle_session_flow_action(bridge)]);
+        let mut options = Options::default();
+        install_accels(&app, &options);
+        let registered = app.accels_for_action(&full_action_name(action));
+        assert_eq!(registered.len(), 1);
+        assert_eq!(
+            gtk::accelerator_parse(&registered[0]),
+            Some((
+                gtk::gdk::Key::b,
+                gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK,
+            ))
+        );
+        gtk::prelude::WidgetExt::activate_action(&window, &full_action_name(action), None).unwrap();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::ToggleActive)
+        ));
+        options.keybindings.set(action, vec!["<Alt>b".into()]);
+        install_accels(&app, &options);
+        assert_eq!(app.accels_for_action(&full_action_name(action)), ["<Alt>b"]);
         options.keybindings.set(action, vec![]);
         install_accels(&app, &options);
         assert!(app.accels_for_action(&full_action_name(action)).is_empty());

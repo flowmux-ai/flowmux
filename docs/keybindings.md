@@ -26,6 +26,7 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | toggle-worktree-panel / toggle-file-browser | Ctrl+Alt+W / Ctrl+Alt+F | Cmd+Alt+W / Cmd+Alt+F |
 | toggle-usage-popover | Ctrl+Alt+U | Cmd+Alt+U |
 | toggle-session-panel | Ctrl+Alt+J | Ctrl+Alt+J |
+| toggle-session-flow | Ctrl+Alt+B | Ctrl+Alt+B |
 | open-diff-review | Ctrl+Alt+E | Ctrl+Alt+E |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
 

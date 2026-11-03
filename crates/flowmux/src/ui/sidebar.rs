@@ -376,7 +376,7 @@ impl Sidebar {
         flow_button.set_widget_name("flowmux-session-flow-button");
         flow_button.add_css_class("flat");
         flow_button.add_css_class("flowmux-sidebar-options");
-        flow_button.set_tooltip_text(Some("Session Flow"));
+        flow_button.set_tooltip_text(Some("Session Flow (Ctrl+Alt+B)"));
         flow_button.update_property(&[gtk::accessible::Property::Label("Session Flow")]);
         flow_button.set_focus_on_click(false);
         let flow_bridge = bridge.clone();
@@ -3576,6 +3576,21 @@ mod tests {
             .unwrap();
         assert_eq!(agents + 1, flow);
         assert_eq!(flow + 1, usage);
+        let flow_button =
+            std::iter::successors(footer.first_child(), |widget| widget.next_sibling())
+                .find(|widget| widget.widget_name() == "flowmux-session-flow-button")
+                .unwrap()
+                .downcast::<gtk::Button>()
+                .unwrap();
+        assert_eq!(
+            flow_button.tooltip_text().as_deref(),
+            Some("Session Flow (Ctrl+Alt+B)")
+        );
+        flow_button.emit_clicked();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::ToggleActive)
+        ));
         assert_eq!(
             agents, 0,
             "Agents bar is the first scrollable footer action"

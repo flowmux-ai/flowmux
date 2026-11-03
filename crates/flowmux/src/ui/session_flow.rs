@@ -170,17 +170,20 @@ impl FlowPanel {
         root.connect_destroy(move |root| {
             gtk::style_context_remove_provider_for_display(&root.display(), &css);
         });
-        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let toolbar = gtk::CenterBox::new();
         toolbar.add_css_class("flowmux-session-flow-header");
         let title = gtk::Label::new(Some("Session Flow"));
         title.add_css_class("heading");
-        toolbar.append(&title);
+        toolbar.set_center_widget(Some(&title));
         let status = gtk::Label::new(Some("Fork a session to begin its flow"));
         status.set_hexpand(true);
         status.set_xalign(0.0);
         status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status.add_css_class("caption");
-        toolbar.append(&status);
+        toolbar.set_start_widget(Some(&status));
+        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        controls.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+        toolbar.set_end_widget(Some(&controls));
         root.append(&toolbar);
         let scene = Rc::new(RefCell::new(Scene::default()));
         let area = canvas::Canvas::new(scene.clone()).upcast::<gtk::DrawingArea>();
@@ -246,10 +249,8 @@ impl FlowPanel {
                     }
                 }
             });
-            toolbar.append(&button);
+            controls.append(&button);
         }
-        let separator = gtk::Separator::new(gtk::Orientation::Vertical);
-        toolbar.insert_child_after(&separator, Some(&panel.status));
         panel.connect_canvas();
         panel
     }

@@ -81,6 +81,8 @@ pub enum ActionId {
     ToggleUsagePopover,
     /// Toggle the agent session history panel.
     ToggleSessionPanel,
+    /// Toggle the active workspace's Session Flow.
+    ToggleSessionFlow,
     OpenDiffReview,
     /// Open tig in a new tab in the focused pane.
     OpenTig,
@@ -125,6 +127,7 @@ impl ActionId {
             Self::ToggleFileBrowser => "toggle-file-browser",
             Self::ToggleUsagePopover => "toggle-usage-popover",
             Self::ToggleSessionPanel => "toggle-session-panel",
+            Self::ToggleSessionFlow => "toggle-session-flow",
             Self::OpenDiffReview => "open-diff-review",
             Self::OpenTig => "open-tig",
         }
@@ -169,6 +172,7 @@ impl ActionId {
             Self::ToggleFileBrowser => "Toggle file browser",
             Self::ToggleUsagePopover => "Toggle AI usage",
             Self::ToggleSessionPanel => "Toggle agent sessions",
+            Self::ToggleSessionFlow => "Toggle Session Flow",
             Self::OpenDiffReview => "Toggle Code Review",
             Self::OpenTig => "Open tig",
         }
@@ -216,6 +220,7 @@ impl ActionId {
             Self::ToggleFileBrowser,
             Self::ToggleUsagePopover,
             Self::ToggleSessionPanel,
+            Self::ToggleSessionFlow,
             Self::OpenDiffReview,
             Self::OpenTig,
         ]
@@ -277,6 +282,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleFileBrowser, &["<Ctrl><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Ctrl><Alt>u"]),
     (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
+    (ActionId::ToggleSessionFlow, &["<Ctrl><Alt>b"]),
     (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Ctrl><Alt>g"]),
 ];
@@ -322,6 +328,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleFileBrowser, &["<Meta><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Meta><Alt>u"]),
     (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
+    (ActionId::ToggleSessionFlow, &["<Ctrl><Alt>b"]),
     (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Meta><Alt>g"]),
 ];
