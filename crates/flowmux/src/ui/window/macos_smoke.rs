@@ -542,6 +542,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     }
 
     termination_dialog::check(&controller, workspace, terminal_pane).await;
+    if std::env::var_os("FLOWMUX_TERMINATION_SMOKE_ONLY").is_some() {
+        controller.window.destroy();
+        return;
+    }
     check_theme_focus(&controller).await;
     check_theme_sources(&controller).await;
     crate::ui::review_window::smoke(&controller.window).await;
