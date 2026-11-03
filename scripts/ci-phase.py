@@ -39,6 +39,13 @@ def main():
         status = 'passed' if result == 0 else 'failed'
     except subprocess.TimeoutExpired:
         result, status = 124, 'timeout'
+        if sys.platform == 'darwin':
+            rows = subprocess.check_output(['ps', '-axo', 'pid=,pgid=,comm='], text=True)
+            for row in rows.splitlines():
+                pid, group, command_name = row.split(None, 2)
+                if int(group) == process.pid and Path(command_name).name.startswith('macos_native-'):
+                    subprocess.run(['/usr/bin/sample', pid, '3', '1', '-file',
+                                    str(report.with_suffix('.sample'))], timeout=15, check=False)
     except SystemExit as error:
         result, status = error.code, 'interrupted'
     except OSError as error:

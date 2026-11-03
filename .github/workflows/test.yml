@@ -185,18 +185,7 @@ jobs:
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
       - name: Run macOS tests and native smoke (same script as local)
-        env:
-          CARGO_INCREMENTAL: "0"
-          CARGO_PROFILE_DEV_DEBUG: "1"
-          CARGO_PROFILE_TEST_DEBUG: "1"
-          GSK_RENDERER: cairo
-          G_DEBUG: fatal-criticals
-          FLOWMUX_TERMINATION_SMOKE_ONLY: "1"
-        run: |
-          cargo build --workspace --locked
-          cargo test -p flowmux --test macos_native --features native-smoke --locked --no-run
-          export FLOWMUX_BUNDLED_CLI_PATH="$PWD/target/debug/flowmuxctl"
-          python3 scripts/diagnose-native-hang.py
+        run: bash scripts/test-ci.sh macos
       - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
