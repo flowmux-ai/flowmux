@@ -413,7 +413,7 @@ fn sync_visibility(
     state: &MinimapState,
     adjustment: Option<&gtk::Adjustment>,
 ) {
-    let visible = state.enabled.get() && adjustment.is_some();
+    let visible = state.enabled.get() && !state.alternate_screen.get() && adjustment.is_some();
     area.set_visible(visible);
 }
 
@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     #[gtk::test]
-    async fn alternate_screen_previews_live_content_and_restores_scrollback() {
+    async fn alternate_screen_hides_minimap_and_restores_scrollback() {
         let term = vte::Terminal::new();
         term.set_scrollback_lines(5_000);
         let overlay = gtk::Overlay::new();
@@ -1039,9 +1039,9 @@ mod tests {
         term.feed(b"\x1b[?1049h\x1b[H\x1b[2JCODEX\x1b[10;1HFOOTER\x1b[H");
         minimap.set_alternate_screen(true);
         gtk::glib::timeout_future(Duration::from_millis(200)).await;
-        assert!(minimap.widget().is_mapped());
-        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 5);
-        assert_eq!(minimap.state.pixel_rows.borrow()[9][0].len, 6);
+        assert!(!minimap.widget().is_visible());
+        assert!(minimap.state.pixel_rows.borrow().is_empty());
+        assert!(minimap.state.refresh_source.borrow().is_none());
 
         let adjustment = term.vadjustment().unwrap();
         let before = adjustment.value();
@@ -1056,13 +1056,14 @@ mod tests {
 
         term.feed(b"\x1b[HUPDATED");
         gtk::glib::timeout_future(Duration::from_millis(200)).await;
-        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 7);
+        assert!(minimap.state.pixel_rows.borrow().is_empty());
+        assert!(minimap.state.refresh_source.borrow().is_none());
         minimap.set_enabled(false);
         assert!(!minimap.widget().is_visible());
         minimap.set_enabled(true);
         gtk::glib::timeout_future(Duration::from_millis(200)).await;
-        assert!(minimap.widget().is_mapped());
-        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 7);
+        assert!(!minimap.widget().is_visible());
+        assert!(minimap.state.pixel_rows.borrow().is_empty());
 
         term.feed(b"\x1b[?1049l");
         minimap.set_alternate_screen(false);

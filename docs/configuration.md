@@ -89,8 +89,9 @@ draws terminal cells as pixels without covering terminal text. Scrolling over
 the minimap moves its local history window without moving the terminal;
 clicking or dragging moves the terminal viewport. It includes the current
 screen after commands such as `clear`; setting it to `false` restores the
-standard scrollbar. Alternate-screen TUIs show a live preview of the current
-screen; minimap navigation is inactive because the TUI owns its history.
+standard scrollbar. Alternate-screen TUIs temporarily replace the minimap
+with the standard scrollbar, restoring the minimap on exit. The TUI still owns
+its history; the scrollbar cannot navigate history that VTE does not retain.
 `terminal_minimap_width` defaults to `40` pixels and is
 clamped to `12..=96`. `terminal_minimap_opacity` defaults to `50` percent and
 is clamped to `0..=100`. All three settings apply to open and new tabs.
