@@ -40,6 +40,9 @@ python3 scripts/test-team-usage-gui.py \
 python3 scripts/test-session-save-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
+python3 scripts/test-session-flow-gui.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"

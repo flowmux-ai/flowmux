@@ -194,6 +194,11 @@ impl WindowController {
         install_poll(&self.window, Duration::from_secs(2), async move || {
             controller.poll_agent_processes().await;
         });
+        // Native history can be saved after the final lifecycle event.
+        let controller = self.clone();
+        install_poll(&self.window, Duration::from_secs(30), async move || {
+            controller.refresh_session_flow(false).await;
+        });
     }
     pub(super) async fn poll_agent_processes(&self) {
         let pids = self.pane_registry.borrow().terminal_agent_pids();

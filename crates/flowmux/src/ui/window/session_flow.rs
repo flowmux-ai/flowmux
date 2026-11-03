@@ -393,9 +393,20 @@ impl WindowController {
         }
         let anchors = self.flow_anchors().await;
         self.render_session_flow(&anchors).await;
-        // A hidden panel keeps its last catalog; history scans wait until it
-        // opens. The first load still runs so a panel saved open is restored.
-        if !force && !self.flow.panel.root.is_visible() && self.flow.catalog.borrow().is_some() {
+        // Fork menus also need the catalog while the panel is hidden. Retry
+        // missing native histories on the normal cadence until they are saved.
+        let catalog_current = *self.flow.targets.borrow() == anchors
+            && self.flow.catalog.borrow().as_ref().is_some_and(|catalog| {
+                anchors.iter().all(|anchor| {
+                    anchor.target.focused.as_ref().is_some_and(|focused| {
+                        catalog.bindings.get(&focused.surface).is_some_and(|key| {
+                            Some(&key.id) == focused.session_id.as_ref()
+                                && catalog.available.contains_key(key)
+                        })
+                    })
+                })
+            });
+        if !force && !self.flow.panel.root.is_visible() && catalog_current {
             return;
         }
         let recent = self
@@ -2521,6 +2532,73 @@ mod tests {
             controller.flow.last_load.get().is_none(),
             "a hidden panel with a catalog must not scan session histories"
         );
+        controller.render_workspace(&store.get_workspace(ws_id).await.unwrap());
+        let (surface, terminal) = controller
+            .pane_registry
+            .borrow()
+            .terminals
+            .iter()
+            .next()
+            .map(|(surface, terminal)| (*surface, terminal.clone()))
+            .unwrap();
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while terminal.pid.get().is_none() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("test terminal did not start");
+        let mut presence =
+            flowmux_core::AgentPresence::new("Claude", flowmux_core::AgentActivity::Idle, None);
+        presence.session_id = Some("parent".into());
+        store
+            .set_agent_activity(surface, Some(presence.clone()))
+            .await
+            .unwrap();
+        let key = session_key(SessionAgent::Claude, root.path(), "parent").unwrap();
+        let path = root.path().join("parent.jsonl");
+        std::fs::write(&path, "{}").unwrap();
+        {
+            let mut catalog = controller.flow.catalog.borrow_mut();
+            let catalog = catalog.as_mut().unwrap();
+            catalog.bindings.insert(surface, key.clone());
+            catalog.available.insert(
+                key,
+                HistorySession {
+                    agent: SessionAgent::Claude,
+                    id: "parent".into(),
+                    title: "parent".into(),
+                    summary: String::new(),
+                    cwd: root.path().into(),
+                    modified: std::time::SystemTime::now(),
+                    path,
+                },
+            );
+        }
+        *controller.flow.targets.borrow_mut() = controller.flow_anchors().await;
+        assert_eq!(controller.flow.targets.borrow().len(), 1);
+        controller.refresh_session_flow(false).await;
+        assert!(
+            controller.flow.last_load.get().is_none(),
+            "complete hidden catalog was rescanned"
+        );
+        presence.session_id = Some("replacement".into());
+        store
+            .set_agent_activity(surface, Some(presence))
+            .await
+            .unwrap();
+        controller.refresh_session_flow(false).await;
+        assert!(
+            controller.flow.last_load.get().is_some(),
+            "hidden session replacement did not reload"
+        );
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while controller.flow.loading.get() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("catalog refresh did not finish");
         controller
             .dispatch_session_flow(FlowAction::ToggleActive)
             .await;
