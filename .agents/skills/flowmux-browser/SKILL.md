@@ -123,8 +123,9 @@ printf '%s\n' "$SNAPSHOT"
 ```
 
 Open reuses a right-sibling browser pane as a new tab, or splits beside the
-calling pane. The default start page has an empty address field, the pane theme's
-background and a centered Flowmux icon; its internal URL is still `about:blank`.
+calling pane. The default start page has an empty address field, a background
+that follows the system's light/dark appearance and a centered Flowmux icon;
+its internal URL is still `about:blank`.
 Older builds may show a plain blank page and the literal address. Neither proves
 the requested site loaded. Wait for the requested URL and readiness before taking
 a snapshot. Wait prints `true` or `false`; **check the value**, not just the exit

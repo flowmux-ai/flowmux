@@ -482,10 +482,13 @@ remain unsupported. Existing selector conditions retain their top-level behavior
 
 ## Browser toolbar
 
-The default start page uses the pane theme's background with a centered Flowmux
-icon. The address field is empty; the internal URL returned by `url` and snapshots
-remains `about:blank`. Wait for the intended URL and page result before treating
-navigation as complete. The start page is also retained when reloaded.
+The browser toolbar and default start page follow the system's light/dark
+appearance, independently of the terminal theme. The start page has a centered
+Flowmux icon. Websites receive the system color preference; their own theme
+settings can override it. The address field is empty; the internal URL returned
+by `url` and snapshots remains `about:blank`. Wait for the intended URL and page
+result before treating navigation as complete. The start page is also retained
+when reloaded.
 
 The toolbar keeps navigation, the address, bookmarks and downloads within reach.
 **Browser tools** (the three-dot menu) contains **Find in page**, page zoom,

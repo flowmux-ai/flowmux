@@ -142,14 +142,19 @@ pub(crate) async fn check() {
         "blank tab address: {}",
         address.text()
     );
-    let blank_check = format!(
-        "String((()=>{{const icon=document.querySelector('[aria-label=Flowmux]');if(!icon)return false;const r=icon.getBoundingClientRect();return getComputedStyle(document.body).backgroundColor.replaceAll(\" \",\"\")==={} && Math.abs(r.x+r.width/2-innerWidth/2)<1 && Math.abs(r.y+r.height/2-innerHeight/2)<1 && r.width>0}})())",
-        serde_json::to_string(&crate::theme::ResolvedTheme::load().bg.to_string().replace(' ', "")).unwrap()
-    );
-    wait_js(&pane, &blank_check).await;
+    let blank_check = r#"String((()=>{
+        const icon=document.querySelector('[aria-label=Flowmux]');if(!icon)return false;
+        const r=icon.getBoundingClientRect();
+        const rgb=getComputedStyle(document.body).backgroundColor.match(/\d+/g).slice(0,3).map(Number);
+        const dark=rgb.reduce((sum,v)=>sum+v,0)/3<128;
+        return getComputedStyle(document.documentElement).colorScheme==='light dark'
+            && dark===matchMedia('(prefers-color-scheme: dark)').matches
+            && Math.abs(r.x+r.width/2-innerWidth/2)<1 && Math.abs(r.y+r.height/2-innerHeight/2)<1 && r.width>0;
+    })())"#;
+    wait_js(&pane, blank_check).await;
     button(&toolbar, "Reload page").emit_clicked();
     gtk::glib::timeout_future(Duration::from_millis(300)).await;
-    wait_js(&pane, &blank_check).await;
+    wait_js(&pane, blank_check).await;
     address.set_text(first.to_str().unwrap());
     address.emit_activate();
     wait("page ready", || pane.current_title() == "Browser layout").await;

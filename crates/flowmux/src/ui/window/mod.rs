@@ -1597,19 +1597,12 @@ impl WindowController {
 
     /// Re-resolve the theme from `opts` and repaint everything that
     /// depends on it: every open terminal (colors + font), the global CSS
-    /// provider, and libadwaita's dark/light color scheme. New panes pick
+    /// provider. Native widgets keep the system color scheme. New panes pick
     /// up the swapped theme automatically. Used for every immediate options
     /// update.
     pub(super) fn apply_runtime_theme(&self, opts: &flowmux_config::options::Options) {
         let resolved = Arc::new(ResolvedTheme::resolve(opts));
         *self.theme.borrow_mut() = resolved.clone();
-
-        let style = adw::StyleManager::default();
-        style.set_color_scheme(if resolved.is_dark() {
-            adw::ColorScheme::ForceDark
-        } else {
-            adw::ColorScheme::ForceLight
-        });
 
         let font = resolved.terminal_font(opts);
         self.sidebar.usage.bar.set_font(&font);
@@ -7548,11 +7541,14 @@ mod tests {
 
         let (controller, workspace, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.DeferredEditorTheme").await;
+        let style = adw::StyleManager::default();
+        style.set_color_scheme(adw::ColorScheme::Default);
         let dark = flowmux_config::options::Options {
             theme: Some("one-dark".into()),
             ..Default::default()
         };
         controller.apply_runtime_theme(&dark);
+        assert_eq!(style.color_scheme(), adw::ColorScheme::Default);
         let root = controller
             .store
             .get_workspace(workspace)
@@ -7579,6 +7575,7 @@ mod tests {
         };
         *controller.options.borrow_mut() = light.clone();
         controller.apply_runtime_theme(&light);
+        assert_eq!(style.color_scheme(), adw::ColorScheme::Default);
         controller
             .activate_surface_now(pane, surface)
             .await

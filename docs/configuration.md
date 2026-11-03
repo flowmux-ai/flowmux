@@ -142,6 +142,10 @@ supports `font-family`, `font-size`, `background`, `foreground`,
 preset takes precedence over file colors; font values can still come from
 the file. `theme_overrides` apply on top.
 
+Terminal and editor colors use this theme. Native window chrome, the browser
+toolbar and its start page follow the system's light/dark appearance. Changing
+the terminal theme does not override the system color preference sent to websites.
+
 flowmux does not automatically read `~/.config/ghostty/config`. Import a
 compatible file with `flowmux theme import PATH`, then use **Reload config**
 in the command palette. In **Options > Theme**, select **User theme file**

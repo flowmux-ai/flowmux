@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 .flowmux-browser {
-    background-color: $bg;
-    color: $fg;
+    background-color: @view_bg_color;
+    color: @window_fg_color;
 }
 .browser-toolbar {
     padding: 6px 8px;
-    border-bottom: 1px solid $border;
-    background-color: $surface;
+    border-bottom: 1px solid alpha(@window_fg_color, 0.10);
+    background-color: @window_bg_color;
 }
 button.browser-icon,
 menubutton.browser-icon > button,
@@ -20,7 +20,7 @@ menubutton.browser-icon > button,
     border-radius: 8px;
     background-image: none;
     background-color: transparent;
-    color: $fg;
+    color: @window_fg_color;
     box-shadow: none;
     text-shadow: none;
     font-weight: 500;
@@ -30,19 +30,19 @@ menubutton.browser-icon > button:hover,
 .browser-task-bar button:hover,
 .browser-detail button:hover,
 .browser-popover button:hover {
-    background-color: $hover;
+    background-color: alpha(@window_fg_color, 0.09);
 }
 button.browser-icon:active,
 menubutton.browser-icon > button:checked,
 .browser-task-bar button:checked {
-    background-color: alpha($accent, 0.16);
+    background-color: alpha(@accent_color, 0.16);
 }
 .browser-task-bar button.browser-primary {
-    background-color: alpha($accent, 0.14);
-    border-color: alpha($accent, 0.25);
+    background-color: alpha(@accent_color, 0.14);
+    border-color: alpha(@accent_color, 0.25);
 }
 .browser-task-bar button.browser-primary:hover {
-    background-color: alpha($accent, 0.24);
+    background-color: alpha(@accent_color, 0.24);
 }
 .browser-task-bar button.browser-stop:hover {
     background-color: alpha(@error_color, 0.15);
@@ -50,7 +50,7 @@ menubutton.browser-icon > button:checked,
 }
 .flowmux-browser button:focus-visible,
 .browser-popover button:focus-visible {
-    outline: 2px solid $accent;
+    outline: 2px solid @accent_color;
     outline-offset: -2px;
 }
 .flowmux-browser button:disabled,
@@ -59,14 +59,14 @@ entry.browser-address {
     min-height: 30px;
     padding: 0 10px;
     border-radius: 9px;
-    background-color: $bg;
-    color: $fg;
-    border: 1px solid $border;
+    background-color: @view_bg_color;
+    color: @window_fg_color;
+    border: 1px solid alpha(@window_fg_color, 0.10);
     box-shadow: none;
 }
 entry.browser-address:focus-within {
-    border-color: $accent;
-    box-shadow: inset 0 0 0 1px alpha($accent, 0.25);
+    border-color: @accent_color;
+    box-shadow: inset 0 0 0 1px alpha(@accent_color, 0.25);
 }
 entry.browser-address image { opacity: 0.55; margin-right: 6px; }
 button.browser-zoom-badge {
@@ -76,42 +76,42 @@ button.browser-zoom-badge {
     border-radius: 6px;
     border: 0;
     background-image: none;
-    background-color: $hover;
-    color: $fg;
+    background-color: alpha(@window_fg_color, 0.09);
+    color: @window_fg_color;
     box-shadow: none;
     font-size: 0.9em;
 }
 .browser-task-bar {
     padding: 4px 8px;
-    border-bottom: 1px solid $border;
-    border-left: 3px solid $accent;
-    background-color: $surface;
-    color: $fg;
+    border-bottom: 1px solid alpha(@window_fg_color, 0.10);
+    border-left: 3px solid @accent_color;
+    background-color: @window_bg_color;
+    color: @window_fg_color;
 }
 .browser-task-bar.user-needed { border-left-color: @warning_color; }
 .browser-task-bar.paused,
-.browser-task-bar.ended { border-left-color: $border; }
+.browser-task-bar.ended { border-left-color: alpha(@window_fg_color, 0.10); }
 .browser-task-summary { font-size: 0.95em; }
 .browser-detail {
-    background-color: $surface;
-    color: $fg;
-    border-left: 1px solid $border;
-    border-top: 1px solid $border;
+    background-color: @window_bg_color;
+    color: @window_fg_color;
+    border-left: 1px solid alpha(@window_fg_color, 0.10);
+    border-top: 1px solid alpha(@window_fg_color, 0.10);
 }
-.browser-detail-header { padding: 8px 12px; border-bottom: 1px solid $border; }
+.browser-detail-header { padding: 8px 12px; border-bottom: 1px solid alpha(@window_fg_color, 0.10); }
 .browser-detail-content { padding: 12px; }
 .browser-result {
     padding: 12px;
-    border: 1px solid $border;
+    border: 1px solid alpha(@window_fg_color, 0.10);
     border-radius: 10px;
-    background-color: $bg;
+    background-color: @view_bg_color;
 }
 .browser-result expander { font-size: 0.95em; }
-.browser-find { padding: 6px 8px; border-bottom: 1px solid $border; }
+.browser-find { padding: 6px 8px; border-bottom: 1px solid alpha(@window_fg_color, 0.10); }
 .browser-popover > contents {
-    background-color: $surface;
-    color: $fg;
-    border: 1px solid $border;
+    background-color: @window_bg_color;
+    color: @window_fg_color;
+    border: 1px solid alpha(@window_fg_color, 0.10);
     border-radius: 12px;
     padding: 6px;
 }
