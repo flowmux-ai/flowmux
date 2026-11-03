@@ -88,6 +88,7 @@ fn capture(window: &gtk::Window, name: &str) {
 
 pub(crate) async fn check() {
     crate::builtin_icons::install();
+    crate::ui::browser_bookmarks::check_pending_requests().await;
     #[cfg(target_os = "macos")]
     {
         // The main-thread test harness does not run NSApplication's launch loop.
@@ -424,7 +425,7 @@ pub(crate) async fn check() {
     })
     .await;
     wait("blank address restored", || address.text().is_empty()).await;
-    wait_js(&pane, &blank_check).await;
+    wait_js(&pane, blank_check).await;
     pane.prepare_for_close();
     window.destroy();
     println!("BROWSER_CHROME_LAYOUT_OK");

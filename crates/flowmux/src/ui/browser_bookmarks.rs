@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use flowmux_browser::{Bookmark, BookmarkRepository, BrowserProfile};
+use flowmux_browser::{Bookmark, BookmarkError, BookmarkRepository, BrowserProfile};
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use std::rc::Rc;
@@ -31,20 +31,43 @@ impl BookmarkMenu {
         crate::ui::popover_pos::set_menu_popover(&button, &popover);
 
         let repository = BookmarkRepository::for_profile(profile).ok();
-        request_reload(repository, &list, &popover, current, open);
+        let list = list.downgrade();
+        popover.connect_show(move |popover| {
+            if let Some(list) = list.upgrade() {
+                request_bookmarks(
+                    repository.clone(),
+                    &list,
+                    popover,
+                    current.clone(),
+                    open.clone(),
+                    BookmarkRepository::load,
+                );
+            }
+        });
         Self { button }
     }
 }
 
-fn request_reload(
+fn request_bookmarks(
     repository: Option<BookmarkRepository>,
     list: &gtk::Box,
     popover: &gtk::Popover,
     current: CurrentBookmark,
     open: OpenBookmark,
+    operation: impl FnOnce(&BookmarkRepository) -> Result<Vec<Bookmark>, BookmarkError> + Send + 'static,
 ) {
-    clear_box(list);
-    let loading = gtk::Label::new(Some("Loading bookmarks…"));
+    if !list.is_sensitive() {
+        return;
+    }
+    // Disable synchronously so another click or reopening cannot overlap this request.
+    list.set_sensitive(false);
+    if let Some(error) = list
+        .last_child()
+        .filter(|child| child.has_css_class("error"))
+    {
+        list.remove(&error);
+    }
+    let loading = gtk::Label::new(Some("Updating bookmarks…"));
     loading.add_css_class("dim-label");
     list.append(&loading);
 
@@ -52,7 +75,7 @@ fn request_reload(
     let popover = popover.downgrade();
     glib::MainContext::default().spawn_local(async move {
         let result = match repository.clone() {
-            Some(repository) => gio::spawn_blocking(move || repository.load())
+            Some(repository) => gio::spawn_blocking(move || operation(&repository))
                 .await
                 .map_err(|_| "bookmark worker failed".to_string())
                 .and_then(|result| result.map_err(|error| error.to_string())),
@@ -61,7 +84,16 @@ fn request_reload(
         let (Some(list), Some(popover)) = (list.upgrade(), popover.upgrade()) else {
             return;
         };
-        render(repository, &list, &popover, current, open, result);
+        list.set_sensitive(true);
+        match result {
+            Ok(bookmarks) => render(repository, &list, &popover, current, open, bookmarks),
+            Err(error) => {
+                loading.set_text(&format!("Could not update bookmarks: {error}"));
+                loading.set_wrap(true);
+                loading.remove_css_class("dim-label");
+                loading.add_css_class("error");
+            }
+        }
     });
 }
 
@@ -71,7 +103,7 @@ fn render(
     popover: &gtk::Popover,
     current: CurrentBookmark,
     open: OpenBookmark,
-    result: Result<Vec<Bookmark>, String>,
+    bookmarks: Vec<Bookmark>,
 ) {
     clear_box(list);
     let add = gtk::Button::with_label("Bookmark this page");
@@ -96,29 +128,26 @@ fn render(
             else {
                 return;
             };
-            let repository_for_worker = repository.clone();
-            let list = list.downgrade();
-            let popover = popover.downgrade();
-            let current = current_for_reload.clone();
-            let open = open.clone();
-            glib::MainContext::default().spawn_local(async move {
-                let _ = gio::spawn_blocking(move || repository_for_worker.add(bookmark)).await;
-                if let (Some(list), Some(popover)) = (list.upgrade(), popover.upgrade()) {
-                    request_reload(Some(repository), &list, &popover, current, open);
-                }
-            });
+            request_bookmarks(
+                Some(repository),
+                &list,
+                &popover,
+                current_for_reload.clone(),
+                open.clone(),
+                move |repository| repository.add(bookmark),
+            );
         });
     }
     list.append(&add);
     list.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
-    match result {
-        Ok(bookmarks) if bookmarks.is_empty() => {
+    match bookmarks.as_slice() {
+        [] => {
             let empty = gtk::Label::new(Some("No bookmarks yet"));
             empty.add_css_class("dim-label");
             list.append(&empty);
         }
-        Ok(bookmarks) => {
+        _ => {
             for bookmark in bookmarks {
                 let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
                 let open_button = gtk::Button::new();
@@ -156,27 +185,19 @@ fn render(
                     let current = current.clone();
                     let open = open.clone();
                     remove.connect_clicked(move |_| {
-                        let repository_for_worker = repository.clone();
-                        let repository_for_reload = repository.clone();
+                        let (Some(list), Some(popover)) = (list.upgrade(), popover.upgrade())
+                        else {
+                            return;
+                        };
                         let url = url.clone();
-                        let list = list.clone();
-                        let popover = popover.clone();
-                        let current = current.clone();
-                        let open = open.clone();
-                        glib::MainContext::default().spawn_local(async move {
-                            let _ = gio::spawn_blocking(move || repository_for_worker.remove(&url))
-                                .await;
-                            if let (Some(list), Some(popover)) = (list.upgrade(), popover.upgrade())
-                            {
-                                request_reload(
-                                    Some(repository_for_reload),
-                                    &list,
-                                    &popover,
-                                    current,
-                                    open,
-                                );
-                            }
-                        });
+                        request_bookmarks(
+                            Some(repository.clone()),
+                            &list,
+                            &popover,
+                            current.clone(),
+                            open.clone(),
+                            move |repository| repository.remove(&url),
+                        );
                     });
                 } else {
                     remove.set_sensitive(false);
@@ -186,12 +207,6 @@ fn render(
                 list.append(&row);
             }
         }
-        Err(error) => {
-            let error = gtk::Label::new(Some(&error));
-            error.set_wrap(true);
-            error.add_css_class("error");
-            list.append(&error);
-        }
     }
 }
 
@@ -199,4 +214,82 @@ fn clear_box(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn check_pending_requests() {
+    use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc};
+    use std::time::Duration;
+
+    let repository = BookmarkRepository::for_profile(&BrowserProfile::Default).unwrap();
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let popover = gtk::Popover::new();
+    popover.set_child(Some(&list));
+    let current: CurrentBookmark = Rc::new(|| None);
+    let open: OpenBookmark = Rc::new(|_| {});
+    render(
+        Some(repository.clone()),
+        &list,
+        &popover,
+        current.clone(),
+        open.clone(),
+        Vec::new(),
+    );
+    let add = list.first_child().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    for _ in 0..2 {
+        let calls = calls.clone();
+        request_bookmarks(
+            Some(repository.clone()),
+            &list,
+            &popover,
+            current.clone(),
+            open.clone(),
+            move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied).into())
+            },
+        );
+        assert!(
+            !add.is_sensitive(),
+            "pending mutations must disable their controls"
+        );
+    }
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !list.is_sensitive() {
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "overlapping request was ignored"
+    );
+    assert_eq!(
+        list.first_child(),
+        Some(add.clone()),
+        "failure kept the controls"
+    );
+    assert!(list.last_child().unwrap().has_css_class("error"));
+    request_bookmarks(Some(repository), &list, &popover, current, open, |_| {
+        Ok(Vec::new())
+    });
+    glib::future_with_timeout(Duration::from_secs(5), async {
+        while !list.is_sensitive() {
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !list.last_child().unwrap().has_css_class("error"),
+        "retry cleared the error"
+    );
+    assert_ne!(
+        list.first_child(),
+        Some(add),
+        "successful retry rendered its result"
+    );
 }
