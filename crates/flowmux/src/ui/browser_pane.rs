@@ -14,6 +14,53 @@ mod imp;
 
 pub use imp::*;
 
+fn normalize_uri(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return "about:blank".into();
+    }
+    if raw.split_once(':').is_some_and(|(scheme, _)| {
+        ["http", "https", "about", "file"]
+            .iter()
+            .any(|known| scheme.eq_ignore_ascii_case(known))
+    }) {
+        return raw.to_string();
+    }
+    let path = if let Some(rest) = raw.strip_prefix("~/") {
+        Some(gtk::glib::home_dir().join(rest))
+    } else if std::path::Path::new(raw).is_absolute()
+        || raw.starts_with("./")
+        || raw.starts_with("../")
+    {
+        Some(std::path::PathBuf::from(raw))
+    } else {
+        None
+    };
+    if let Some(path) = path {
+        use gtk::gio::prelude::FileExt;
+        return gtk::gio::File::for_path(path).uri().to_string();
+    }
+    if raw.starts_with("localhost") || raw.starts_with("127.") || raw.starts_with("[::1]") {
+        return format!("http://{raw}");
+    }
+    if raw.contains('.') && !raw.contains(' ') {
+        return format!("https://{raw}");
+    }
+    format!("https://www.google.com/search?q={}", urlencode(raw))
+}
+
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            b' ' => "+".into(),
+            other => format!("%{:02X}", other),
+        })
+        .collect()
+}
+
 /// Keep caller-owned widgets out of WebKit's completion closure: a wedged renderer
 /// may never invoke it, even after the IPC client has gone away.
 fn javascript_completion(
@@ -117,5 +164,84 @@ mod completion_tests {
                 })
             })
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_uri_blank_input_returns_about_blank() {
+        assert_eq!(normalize_uri(""), "about:blank");
+        assert_eq!(normalize_uri("   "), "about:blank");
+    }
+
+    #[test]
+    fn normalize_uri_preserves_explicit_schemes() {
+        for raw in [
+            "http://example.com",
+            "https://example.com/path",
+            "about:blank",
+            "file:///tmp/x.html",
+            "file:///tmp/a%20b.html#section",
+            "FILE:///tmp/x.html",
+            "HTTPS://example.com",
+        ] {
+            assert_eq!(normalize_uri(raw), raw);
+        }
+    }
+
+    #[test]
+    fn normalize_uri_promotes_localhost_to_http() {
+        assert_eq!(normalize_uri("localhost:3000"), "http://localhost:3000");
+        assert_eq!(normalize_uri("127.0.0.1:8080"), "http://127.0.0.1:8080");
+    }
+
+    #[test]
+    fn normalize_uri_promotes_dotted_host_to_https() {
+        assert_eq!(normalize_uri("example.com"), "https://example.com");
+        assert_eq!(
+            normalize_uri("docs.gtk.org/gtk4/"),
+            "https://docs.gtk.org/gtk4/"
+        );
+    }
+
+    #[test]
+    fn normalize_uri_falls_back_to_search() {
+        assert_eq!(
+            normalize_uri("hello world"),
+            "https://www.google.com/search?q=hello+world"
+        );
+    }
+
+    #[test]
+    fn normalize_uri_encodes_local_paths_without_treating_them_as_hosts() {
+        use gtk::gio::prelude::FileExt;
+        assert_eq!(normalize_uri(" /tmp/index.html "), "file:///tmp/index.html");
+        assert_eq!(
+            normalize_uri("/tmp/한 글 #1%.html"),
+            "file:///tmp/%ED%95%9C%20%EA%B8%80%20%231%25.html"
+        );
+        for (raw, path) in [
+            ("~/preview.html", gtk::glib::home_dir().join("preview.html")),
+            (
+                "./preview.html",
+                std::env::current_dir().unwrap().join("preview.html"),
+            ),
+            (
+                "../preview.html",
+                std::env::current_dir()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("preview.html"),
+            ),
+        ] {
+            let uri = normalize_uri(raw);
+            assert!(uri.starts_with("file:///"), "{raw}: {uri}");
+            assert_eq!(gtk::gio::File::for_uri(&uri).path(), Some(path));
+            assert_eq!(normalize_uri(&uri), uri);
+        }
     }
 }

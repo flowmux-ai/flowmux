@@ -101,6 +101,10 @@ right away without a restart.
 
 Ctrl+click an image path to open it, or double-click it in the file browser.
 SVG stays sharp at any size and Lottie animations play right away. In the terminal,
+Ctrl+click a web URL or local HTML path to open a browser tab on the right,
+splitting vertically if needed. Further links add tabs to the same right browser pane.
+Ctrl+Shift+click a local HTML path to edit its source. The browser address bar also
+accepts local paths such as `/tmp/page.html`, `~/page.html`, and `./page.html`.
 Ctrl+click a source or text file path (including Markdown and JSON) to open a new
 editor tab. Ctrl+Shift+click a Markdown path to open its formatted preview.
 Only existing, readable files show a hover underline; relative paths resolve

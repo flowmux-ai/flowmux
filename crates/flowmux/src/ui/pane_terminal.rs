@@ -174,7 +174,7 @@ pub struct PaneCallbacks {
     #[cfg(target_os = "macos")]
     pub tab_drag_preview: Rc<dyn Fn(PaneId, Option<(&gtk::Widget, f64, f64)>)>,
     /// Called when Ctrl+click selects a URL inside the terminal. The caller
-    /// opens that URL in a new browser tab in the same pane
+    /// opens that URL in a new browser tab to the right of the source pane
     /// (GtkCommand::OpenUrlInBrowserTab). The URL arrives with trailing
     /// punctuation already trimmed.
     pub on_open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,

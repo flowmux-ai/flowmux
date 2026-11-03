@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 //! macOS in-app browser pane backed by the system WebKit `WKWebView`.
 
+use super::normalize_uri;
 use crate::ui::browser_bookmarks::BookmarkMenu;
 use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::{DownloadItem, DownloadManager};
@@ -2214,6 +2216,16 @@ fn load_uri_native(web_view: &WKWebView, url: &str) {
         tracing::warn!(url, "WKWebView rejected URL");
         return;
     };
+    if url.isFileURL() {
+        // WKWebView needs explicit read access for sibling CSS, scripts, and images.
+        let directory = url
+            .URLByDeletingLastPathComponent()
+            .unwrap_or_else(|| url.clone());
+        unsafe {
+            web_view.loadFileURL_allowingReadAccessToURL(&url, &directory);
+        }
+        return;
+    }
     let request = NSURLRequest::requestWithURL(&url);
     unsafe {
         web_view.loadRequest(&request);
@@ -2276,39 +2288,6 @@ fn error_description(error: *mut NSError) -> String {
         }
         description
     }
-}
-
-fn normalize_uri(raw: &str) -> String {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return "about:blank".into();
-    }
-    if raw.starts_with("http://")
-        || raw.starts_with("https://")
-        || raw.starts_with("about:")
-        || raw.starts_with("file://")
-    {
-        return raw.to_string();
-    }
-    if raw.starts_with("localhost") || raw.starts_with("127.") || raw.starts_with("[::1]") {
-        return format!("http://{raw}");
-    }
-    if raw.contains('.') && !raw.contains(' ') {
-        return format!("https://{raw}");
-    }
-    format!("https://www.google.com/search?q={}", urlencode(raw))
-}
-
-fn urlencode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            b' ' => "+".into(),
-            other => format!("%{:02X}", other),
-        })
-        .collect()
 }
 
 fn set_native_zoom(native: &NativeBrowserView, label: &gtk::Button, requested: f64) {
@@ -2382,17 +2361,6 @@ mod tests {
         assert!(!native_focus_entered(&focused, true));
         assert!(!native_focus_entered(&focused, false));
         assert!(native_focus_entered(&focused, true));
-    }
-
-    #[test]
-    fn normalize_uri_matches_webkit_backend_rules() {
-        assert_eq!(normalize_uri(""), "about:blank");
-        assert_eq!(normalize_uri("localhost:3000"), "http://localhost:3000");
-        assert_eq!(normalize_uri("example.com"), "https://example.com");
-        assert_eq!(
-            normalize_uri("rust webkit"),
-            "https://www.google.com/search?q=rust+webkit"
-        );
     }
 
     #[test]

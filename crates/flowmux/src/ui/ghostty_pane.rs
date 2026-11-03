@@ -928,8 +928,8 @@ impl GhosttyPane {
 
         // URL recognition for opening terminal URLs in an internal browser tab
         // via Ctrl+click. A PCRE2 regex match changes hover to the pointer
-        // cursor; Ctrl+left-click opens the URL in a new browser tab in the
-        // same pane. Plain clicks continue into VTE text selection.
+        // cursor; Ctrl+left-click opens the URL in a browser tab to the right.
+        // Plain clicks continue into VTE text selection.
         install_url_link_handling(
             &term,
             id,
@@ -1600,6 +1600,7 @@ fn terminal_file_path(raw: &str, cwd: Option<&std::path::Path>) -> Option<PathBu
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalFileKind {
+    Browser,
     Image,
     Markdown,
     Editor,
@@ -1608,6 +1609,12 @@ enum TerminalFileKind {
 fn terminal_file_kind(path: &std::path::Path) -> Option<TerminalFileKind> {
     let viewer = if is_supported_image_path(path) {
         Some(TerminalFileKind::Image)
+    } else if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "html" | "htm" | "xhtml"))
+    {
+        Some(TerminalFileKind::Browser)
     } else if is_supported_markdown_path(path) {
         Some(TerminalFileKind::Markdown)
     } else {
@@ -2130,6 +2137,7 @@ fn install_url_link_handling(
         click_for_release.reset();
         match pending.target {
             TerminalClickTarget::File { candidate, matched, cwd } => {
+                let on_open_url = on_open_url.clone();
                 let on_open_image = on_open_image.clone();
                 let on_open_markdown = on_open_markdown.clone();
                 let on_open_editor = on_open_editor.clone();
@@ -2138,10 +2146,15 @@ fn install_url_link_handling(
                         validated_terminal_file_click(&candidate, &matched, cwd.as_deref())
                     }).await.ok().flatten() else { return };
                     tracing::debug!(?kind, path = %path.display(), "terminal file activation");
+                    if kind == TerminalFileKind::Browser && !pending.shift_pressed {
+                        let url = gtk::gio::File::for_path(&path).uri().to_string();
+                        (on_open_url.borrow_mut())(pane_id, url);
+                        return;
+                    }
                     let callback = match kind {
                         TerminalFileKind::Image => on_open_image,
                         TerminalFileKind::Markdown if pending.shift_pressed => on_open_markdown,
-                        TerminalFileKind::Markdown | TerminalFileKind::Editor => on_open_editor,
+                        TerminalFileKind::Browser | TerminalFileKind::Markdown | TerminalFileKind::Editor => on_open_editor,
                     };
                     (callback.borrow_mut())(pane_id, path);
                 });
@@ -3923,6 +3936,26 @@ mod tests {
     }
 
     #[test]
+    fn terminal_file_html_links_open_in_browser_and_revalidate_on_click() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["index.html", "index.HTM", "preview.xhtml", "한글.html"] {
+            let path = root.path().join(name);
+            std::fs::write(&path, "<!doctype html><title>Preview</title>").unwrap();
+            assert_eq!(
+                validated_terminal_file_click(name, name, Some(root.path())),
+                Some((path.clone(), TerminalFileKind::Browser))
+            );
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(
+                validated_terminal_file_click(name, name, Some(root.path())),
+                None
+            );
+            std::fs::create_dir(&path).unwrap();
+            assert_eq!(terminal_file_kind(&path), None);
+        }
+    }
+
+    #[test]
     fn terminal_file_links_resolve_and_validate_text_without_extension_allowlist() {
         let root = tempfile::tempdir().unwrap();
         for name in [
@@ -3930,7 +3963,6 @@ mod tests {
             "main.c",
             "main.cpp",
             "main.dart",
-            "index.html",
             "app.js",
             "data.json",
             "notes.txt",

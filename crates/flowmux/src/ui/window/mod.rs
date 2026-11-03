@@ -2960,7 +2960,10 @@ impl WindowController {
         if self.workspace_overview.is_active() && command_dismisses_workspace_overview(&cmd) {
             self.dismiss_workspace_overview_immediately();
         }
-        if matches!(&cmd, GtkCommand::BrowserOpenSplit { .. }) {
+        if matches!(
+            &cmd,
+            GtkCommand::BrowserOpenSplit { .. } | GtkCommand::OpenUrlInBrowserTab { .. }
+        ) {
             self.clear_pane_zoom();
         }
         match cmd {
@@ -9547,6 +9550,56 @@ mod tests {
             "browser open split should create a browser pane"
         );
         assert_eq!(outcome.placement_strategy, PlacementStrategy::SplitRight);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn terminal_urls_split_right_then_reuse_browser_without_replacing_terminal() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.TerminalBrowserSplit").await;
+        let original_terminal = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(pane)
+            .unwrap()
+            .render_area()
+            .clone();
+        let mut browser_pane = None;
+        for (index, url) in ["about:blank", "file:///tmp/preview.html"]
+            .into_iter()
+            .enumerate()
+        {
+            controller
+                .dispatch(GtkCommand::OpenUrlInBrowserTab {
+                    pane,
+                    url: url.into(),
+                })
+                .await;
+            let target = controller
+                .store
+                .find_right_sibling_browser_leaf(pane)
+                .await
+                .expect("terminal URL must open in a right browser pane");
+            if let Some(previous) = browser_pane {
+                assert_eq!(
+                    target, previous,
+                    "subsequent links reuse the right browser pane"
+                );
+            }
+            browser_pane = Some(target);
+            assert_eq!(
+                controller.store.workspace_pane_count_for(pane).await,
+                Some((workspace, 2))
+            );
+            let registry = controller.pane_registry.borrow();
+            assert_eq!(
+                registry.active_terminal(pane).unwrap().render_area(),
+                original_terminal
+            );
+            assert_eq!(registry.surface_tabs.get(&pane).unwrap().len(), 1);
+            assert_eq!(registry.surface_tabs.get(&target).unwrap().len(), index + 1);
+            assert!(registry.active_browser(target).is_some());
+        }
     }
 
     #[cfg(not(target_os = "macos"))]

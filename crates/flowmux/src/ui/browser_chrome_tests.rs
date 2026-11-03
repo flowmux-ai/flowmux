@@ -100,7 +100,7 @@ pub(crate) async fn check() {
         app.activateIgnoringOtherApps(true);
     }
     let fixture = tempfile::tempdir().unwrap();
-    let first = fixture.path().join("first.html");
+    let first = fixture.path().join("first 한 글#.html");
     let second = fixture.path().join("second.html");
     std::fs::write(&first, "<!doctype html><meta charset=utf-8><title>Browser layout</title><style>body{font:16px system-ui;padding:32px}input{padding:12px}</style><h1>Browser workspace</h1><p>페이지를 보면서 작업과 결과를 확인합니다.</p><input id=field aria-label=Message>").unwrap();
     std::fs::write(
@@ -150,7 +150,8 @@ pub(crate) async fn check() {
     button(&toolbar, "Reload page").emit_clicked();
     gtk::glib::timeout_future(Duration::from_millis(300)).await;
     wait_js(&pane, &blank_check).await;
-    pane.load_uri(&format!("file://{}", first.display()));
+    address.set_text(first.to_str().unwrap());
+    address.emit_activate();
     wait("page ready", || pane.current_title() == "Browser layout").await;
     wait("page address", || address.text().starts_with("file://")).await;
     #[cfg(target_os = "macos")]

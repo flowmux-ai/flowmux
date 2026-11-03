@@ -446,9 +446,9 @@ pub enum GtkCommand {
         path: PathBuf,
         source_pane: Option<PaneId>,
     },
-    /// Open a Ctrl-clicked terminal URL in a new browser tab in the same
-    /// pane. `pane` is the source terminal pane and `url` has already had
-    /// trailing punctuation trimmed.
+    /// Open a Ctrl-clicked terminal URL in a browser tab to the right,
+    /// reusing an existing browser pane or splitting vertically. `pane` is the
+    /// source terminal pane; `url` has trailing punctuation trimmed or is a file URI.
     OpenUrlInBrowserTab {
         pane: PaneId,
         url: String,

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Linux in-app browser backed by WebKitGTK 6.0. BrowserEngine labels select
 //! isolated [`BrowserProfile`] storage; every profile uses the same renderer.
 
+use super::normalize_uri;
 use crate::ui::browser_bookmarks::BookmarkMenu;
 use crate::ui::browser_dialogs::{PageDialog, PageDialogReply, PageDialogs};
 use crate::ui::browser_downloads::DownloadManager;
@@ -1131,27 +1133,6 @@ fn load_uri(web_view: &webkit6::WebView, url: &str) {
     }
 }
 
-fn normalize_uri(raw: &str) -> String {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return "about:blank".into();
-    }
-    if raw.starts_with("http://")
-        || raw.starts_with("https://")
-        || raw.starts_with("about:")
-        || raw.starts_with("file://")
-    {
-        return raw.to_string();
-    }
-    if raw.starts_with("localhost") || raw.starts_with("127.") || raw.starts_with("[::1]") {
-        return format!("http://{raw}");
-    }
-    if raw.contains('.') && !raw.contains(' ') {
-        return format!("https://{raw}");
-    }
-    format!("https://www.google.com/search?q={}", urlencode(raw))
-}
-
 fn set_webkit_zoom(
     web_view: &webkit6::WebView,
     zoom: &Cell<f64>,
@@ -1229,18 +1210,6 @@ fn available_download_path(directory: &std::path::Path, suggested: &str) -> std:
         }
     }
     unreachable!()
-}
-
-fn urlencode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            b' ' => "+".into(),
-            other => format!("%{:02X}", other),
-        })
-        .collect()
 }
 
 /// Map [`BrowserEngine`] labels saved by the options dialog to
@@ -1555,47 +1524,6 @@ mod tests {
 
         let other = build_network_session(&BrowserProfile::FirefoxImport, false);
         assert_ne!(first, other, "browser profile isolation must remain intact");
-    }
-
-    #[test]
-    fn normalize_uri_blank_input_returns_about_blank() {
-        assert_eq!(normalize_uri(""), "about:blank");
-        assert_eq!(normalize_uri("   "), "about:blank");
-    }
-
-    #[test]
-    fn normalize_uri_preserves_explicit_schemes() {
-        for raw in [
-            "http://example.com",
-            "https://example.com/path",
-            "about:blank",
-            "file:///tmp/x.html",
-        ] {
-            assert_eq!(normalize_uri(raw), raw);
-        }
-    }
-
-    #[test]
-    fn normalize_uri_promotes_localhost_to_http() {
-        assert_eq!(normalize_uri("localhost:3000"), "http://localhost:3000");
-        assert_eq!(normalize_uri("127.0.0.1:8080"), "http://127.0.0.1:8080");
-    }
-
-    #[test]
-    fn normalize_uri_promotes_dotted_host_to_https() {
-        assert_eq!(normalize_uri("example.com"), "https://example.com");
-        assert_eq!(
-            normalize_uri("docs.gtk.org/gtk4/"),
-            "https://docs.gtk.org/gtk4/"
-        );
-    }
-
-    #[test]
-    fn normalize_uri_falls_back_to_search() {
-        assert_eq!(
-            normalize_uri("hello world"),
-            "https://www.google.com/search?q=hello+world"
-        );
     }
 
     #[test]
