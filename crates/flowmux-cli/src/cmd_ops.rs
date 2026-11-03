@@ -243,6 +243,9 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                         println!("backup   {:12}  {}", t.slug(), backup.display());
                     }
                 }
+                if skill == agent::Skill::Team {
+                    println!("Workspace reminders require enabled Flowmux hooks. Check `flowmux hooks doctor`; Codex hook trust and active-session loading remain user-controlled.");
+                }
             }
             Ok(())
         }

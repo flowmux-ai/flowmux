@@ -118,6 +118,14 @@ operations. Without `--agent`, the Team selection covers Claude Code, Codex,
 Gemini CLI and agy. Unsupported agent/skill combinations fail before writing.
 Team removal always preserves wrappers and the other skill, including when
 `--skills-only` is omitted. Team installation does not install or enable hooks.
+Enabled Flowmux session/prompt hooks remind leads to check the workspace through
+the installed Team helper before each task. Team leads delegate separable work
+to visible worker panes; small sequential tasks may stay inline with a reason.
+Ordinary workspaces stay inline, and workers cannot delegate again. Use
+`flowmux hooks doctor` or **Check Team setup** if the reminder is absent. Codex
+hook trust stays user-controlled; file installation does not prove that a running
+agent loaded or enabled its hooks. Report context/setup failures instead of
+silently falling back to inline work.
 
 - `install`: identical content is a no-op. Different content fails without
   `--force`. Forced updates preserve the old bytes in a unique sibling named
@@ -157,7 +165,8 @@ Codex hook trust decisions during skill installation.
 A matching file proves installation, not that a running agent loaded it.
 Check the agent's skill list after an update. Reload at a convenient session
 boundary if needed; never restart an active user session just to validate setup.
-Skills describe workflows, hooks report lifecycle events, and wrapper shims
+Skills describe workflows, hooks report lifecycle events and remind Team leads
+to resolve workspace mode, and wrapper shims
 establish launch identity. These are independent integrations.
 
 Some agents also discover compatible agents' skill directories. Removing one

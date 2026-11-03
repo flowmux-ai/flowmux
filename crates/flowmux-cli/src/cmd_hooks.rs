@@ -7,6 +7,66 @@ use flowmux_ipc::protocol::AgentLifecycleEvent;
 const RESUME_RETURNED_REASON: &str = "flowmux_resume_returned";
 const FLOWMUX_AGENT_NAME_ENV: &str = "FLOWMUX_AGENT_NAME";
 
+fn team_lead_context(
+    agent_name: &str,
+    pane: Option<PaneId>,
+    input: &hooks::ClaudeHookInput,
+) -> Option<String> {
+    if pane.is_none()
+        || std::env::var_os("FLOWMUX_TEAM_WORKER").is_some_and(|value| !value.is_empty())
+        || input.agent_id.is_some()
+        || input.parent_agent_id.is_some()
+    {
+        return None;
+    }
+    let target = match agent_name.to_ascii_lowercase().as_str() {
+        "claude" => agent::Target::ClaudeCode,
+        name => agent::Target::from_slug(name)?,
+    };
+    if !agent::Skill::Team.targets().contains(&target) {
+        return None;
+    }
+    let path = agent::Skill::Team.path(
+        target,
+        &agent::resolved_home().ok()?,
+        agent::resolved_codex_home().as_deref(),
+        &agent::SkillOverrides::from_env(),
+    );
+    team_lead_context_at(&path)
+}
+
+fn team_lead_context_at(skill: &std::path::Path) -> Option<String> {
+    if !skill.is_file() {
+        return None;
+    }
+    let helper = skill.parent()?.join("scripts/team.py");
+    if !helper.is_file() {
+        return Some(format!(
+            "Flowmux Team is incomplete at {}: scripts/team.py is missing. Report this setup failure; do not silently substitute native subagents or create panes. Repair with flowmux agent install --skill flowmux-team for this provider.",
+            skill.display()
+        ));
+    }
+    let helper = helper.to_string_lossy().replace('\'', "'\\''");
+    Some(format!(
+        "Flowmux workspace execution: before each user task, run python3 '{helper}' context and read {}. \
+         Use its exact session binding, never infer the workspace from cwd or focus. \
+         In mode team, delegate independent investigation, implementation or review through this skill's start/followup to visible worker panes, then collect and verify results. \
+         Reuse idle workers. Small, sequential tasks may stay inline with a brief reason. \
+         Do not silently replace Flowmux workers with native Agent/subagents. In mode inline, work in the current agent without workers. \
+         If assigned a FLOWMUX_TEAM_JOB, complete only that assignment and never delegate. \
+         Report context, installation, authentication or quota failures; follow the skill's bounded recovery and never guess another pane or bypass permissions.",
+        skill.display()
+    ))
+}
+
+fn team_hook_response(agent: &str, event: &str, context: &str) -> serde_json::Value {
+    if agent.eq_ignore_ascii_case("antigravity") {
+        serde_json::json!({"injectSteps": [{"ephemeralMessage": context}]})
+    } else {
+        serde_json::json!({"hookSpecificOutput": {"hookEventName": event, "additionalContext": context}})
+    }
+}
+
 pub(crate) fn select_hook_agent_name(
     reported: &str,
     env_name: Option<&str>,
@@ -437,6 +497,16 @@ pub(crate) async fn run_claude_hook_event(
     let input = read_claude_hook_input();
     let pane = cli_pane.or_else(pane_from_env);
     let surface = cli_surface.or_else(surface_from_env);
+    let context_event = match event {
+        ClaudeHookEvent::SessionStart => Some("SessionStart"),
+        ClaudeHookEvent::PromptSubmit => Some("UserPromptSubmit"),
+        _ => None,
+    };
+    if let Some((event, context)) = context_event
+        .and_then(|event| team_lead_context("claude", pane, &input).map(|context| (event, context)))
+    {
+        println!("{}", team_hook_response("claude", event, &context));
+    }
     let pid = if inherited_wrapper_conflicts_with("claude") {
         None
     } else {
@@ -933,10 +1003,7 @@ pub(crate) async fn run_antigravity_hook_event(
     event: &AgentHookEvent,
     socket: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let result = run_generic_agent_hook_event("Antigravity", event, socket).await;
-    let stdout = std::io::stdout();
-    write_antigravity_hook_response(event, &mut stdout.lock())?;
-    result
+    run_generic_agent_hook_event("Antigravity", event, socket).await
 }
 
 pub(crate) fn write_antigravity_hook_response<W: std::io::Write>(
@@ -1090,6 +1157,23 @@ pub(crate) async fn run_generic_agent_hook_event(
     } else {
         read_codex_hook_input(args)
     };
+    let context_event = match (reported_agent.to_ascii_lowercase().as_str(), event) {
+        ("codex" | "gemini" | "antigravity", AgentHookEvent::SessionStart { .. }) => {
+            Some("SessionStart")
+        }
+        ("codex", AgentHookEvent::TurnStart { .. }) => Some("UserPromptSubmit"),
+        ("gemini", AgentHookEvent::Running { .. }) => Some("BeforeAgent"),
+        ("antigravity", AgentHookEvent::TurnStart { .. }) => Some("PreInvocation"),
+        _ => None,
+    };
+    if let Some((event, context)) = context_event.and_then(|event| {
+        team_lead_context(reported_agent, pane, &input).map(|context| (event, context))
+    }) {
+        // Context discovery must still run when lifecycle IPC cannot establish a route.
+        println!("{}", team_hook_response(reported_agent, event, &context));
+    } else if reported_agent.eq_ignore_ascii_case("antigravity") {
+        write_antigravity_hook_response(event, &mut std::io::stdout().lock())?;
+    }
     // Cline children inherit the root tab's routing but own a different session.
     if reported_agent.eq_ignore_ascii_case("cline") && input.is_cline_child() {
         return Ok(());

@@ -58,6 +58,15 @@ control their workspace from a local CLI with explicit workspace IDs.
 
 ## Standard workflow
 
+At the start of each user task inside Flowmux, use the installed `flowmux-team`
+skill's `scripts/team.py context` before choosing whether to delegate. Its exact
+session lookup decides Team versus ordinary workspace; never guess from cwd or
+focus. In Team mode, assign separable investigation, implementation or review to
+visible worker panes through that skill and verify their results. Small sequential
+tasks may stay inline with a brief reason. Ordinary workspaces stay inline.
+Do not substitute native subagents for Team panes. Assigned Team workers complete
+their own task without further delegation. Report unresolved context/setup failures.
+
 The shell examples use `jq` to extract the returned pane ID (`sudo apt
 install jq` on Ubuntu). Web work follows the same shape every time:
 

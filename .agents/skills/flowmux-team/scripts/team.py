@@ -287,6 +287,8 @@ def context(args):
 
 
 def start(args):
+    if os.environ.get("FLOWMUX_TEAM_WORKER"):
+        raise ValueError("Team workers cannot delegate; complete the assigned task and report to the lead")
     origin = context(args)
     if origin["mode"] != "team":
         raise ValueError("Worker creation requires a Team workspace; complete the task in the current agent without delegation")
@@ -697,6 +699,8 @@ def collect_turn(job):
 
 
 def followup(args, *, reuse=None):
+    if os.environ.get("FLOWMUX_TEAM_WORKER"):
+        raise ValueError("Team workers cannot delegate; complete the assigned task and report to the lead")
     root = args.job
     manifest = json.loads((root / "job.json").read_text())
     if "root_job" in manifest and Path(manifest["root_job"]) != root:
@@ -947,7 +951,7 @@ def run_worker(job):
         if (os.environ.get("FLOWMUX_PANE_ID") != manifest["pane"] or not socket
                 or str(Path(socket).resolve(strict=True)) != manifest["socket"]):
             raise RuntimeError("Worker pane/socket does not match the assigned job")
-        env = {**os.environ, **manifest.get("provider_env", {})}
+        env = {**os.environ, **manifest.get("provider_env", {}), "FLOWMUX_TEAM_WORKER": "1"}
         for key in ("CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SESSION_ID"):
             env.pop(key, None)  # This is a new independent session, not its lead.
         attempts = []
@@ -1303,7 +1307,7 @@ def managed_worker(job):
             Path(os.environ.get("FLOWMUX_SOCKET_PATH", "")).resolve() != Path(manifest["socket"])):
         raise ValueError("Worker pane/socket does not match the assigned job")
     assignment = Path(manifest["assignment"])
-    env = {**os.environ, **manifest["provider_env"]}
+    env = {**os.environ, **manifest["provider_env"], "FLOWMUX_TEAM_WORKER": "1"}
     for key in ("CLAUDECODE", "CODEX_THREAD_ID", "CODEX_SESSION_ID"):
         env.pop(key, None)
     process, owned = None, {}

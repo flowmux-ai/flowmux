@@ -30,7 +30,7 @@ pub(super) fn build() -> gtk::ScrolledWindow {
                 let group = adw::PreferencesGroup::new();
                 let (title, description) = match skill {
                     Skill::Browser => ("Flowmux CLI", "flowmux-browser · Workspaces, terminals, browser automation, SSH and notifications."),
-                    Skill::Team => ("Flowmux Team", "flowmux-team · Lead from Claude Code, Codex, Gemini CLI or Antigravity CLI (agy). Workers use Claude Code or Codex. Ordinary workspaces stay inline. Requires Python 3.9+ and signed-in agent CLIs."),
+                    Skill::Team => ("Flowmux Team", "flowmux-team · Leads and workers support Claude Code, Codex, Gemini CLI and Antigravity CLI (agy). Enabled Flowmux hooks remind leads to check workspace mode. Ordinary workspaces stay inline. Requires Python 3.9+ and signed-in agent CLIs."),
                 };
                 group.set_title(title);
                 group.set_description(Some(description));
@@ -383,7 +383,10 @@ fn team_setup(target: Target) -> String {
         format!("Install {command} or add it to PATH")
     });
     details.push(match hook_install::check(hook).status {
-        HookCheckStatus::Installed => "Lifecycle hooks installed".into(),
+        HookCheckStatus::Installed => {
+            "Team reminder hooks installed · Enable/trust and active-session loading not checked"
+                .into()
+        }
         HookCheckStatus::Error(error) => format!("Check lifecycle hooks: {error}"),
         _ => format!(
             "Lifecycle hooks need setup: flowmux hooks setup --agent {}",

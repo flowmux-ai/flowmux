@@ -414,8 +414,21 @@ fn gemini_and_agy_team_bundles_preserve_settings_and_shared_copies() {
     force.push("--force");
     run_with_env(home, &force, true, &env);
     run_with_env(home, &doctor, true, &env);
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        r#"{"hooks":{"custom":true}}"#,
+        "skill installation must not enable hooks"
+    );
     fs::remove_file(&script).unwrap();
     run_with_env(home, &["fix"], true, &env);
+    let settings_after_fix = fs::read_to_string(&settings).unwrap();
+    let configured: Value = serde_json::from_str(&settings_after_fix).unwrap();
+    assert_eq!(configured["hooks"]["custom"], true);
+    assert!(
+        configured["hooks"]["BeforeAgent"].is_array(),
+        "fix must repair hooks in the Gemini profile"
+    );
+    assert!(!home.join(".gemini/settings.json").exists());
     assert!(script.exists());
     let backups: Vec<_> = fs::read_dir(script.parent().unwrap())
         .unwrap()
@@ -450,10 +463,7 @@ fn gemini_and_agy_team_bundles_preserve_settings_and_shared_copies() {
     run_with_env(home, &["fix"], true, &env);
     assert!(!path.exists(), "fix must not enable an absent Team bundle");
     assert_eq!(fs::read_to_string(shared).unwrap(), "user shared skill");
-    assert_eq!(
-        fs::read_to_string(settings).unwrap(),
-        r#"{"hooks":{"custom":true}}"#
-    );
+    assert_eq!(fs::read_to_string(settings).unwrap(), settings_after_fix);
 }
 
 #[test]

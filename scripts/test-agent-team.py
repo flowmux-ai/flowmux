@@ -27,6 +27,12 @@ spec.loader.exec_module(team)
 
 
 class TeamTests(unittest.TestCase):
+    def test_workers_cannot_start_or_follow_up_other_workers(self):
+        with patch.dict(os.environ, FLOWMUX_TEAM_WORKER='1'):
+            for operation in (team.start, team.followup):
+                with self.assertRaisesRegex(ValueError, 'workers cannot delegate'):
+                    operation(None)
+
     def setUp(self):
         clean = patch.dict(os.environ, {k: v for k, v in os.environ.items()
                            if not k.startswith(('FLOWMUX_', 'CODEX_'))}, clear=True)
@@ -89,6 +95,7 @@ class TeamTests(unittest.TestCase):
         return ("import pathlib,time\n" + f"p=pathlib.Path({str(path)!r})\n" +
                 "p.parent.mkdir(parents=True,exist_ok=True)\n" +
                 f"p.write_text({''.join(json.dumps(e) + chr(10) for e in events)!r})\n" +
+                "assert __import__('os').environ['FLOWMUX_TEAM_WORKER'] == '1'\n" +
                 "print('Native interactive agent',flush=True)\ntime.sleep(1)\n")
 
     def test_task_outcomes_and_reentry_for_both_interactive_providers(self):
@@ -1256,7 +1263,7 @@ class ManagedTests(unittest.TestCase):
                     team.write_json(self.job / 'retirement.json', request)
                     return dict(state='completed', task_status='completed', session_id='exact')
                 with patch.dict(os.environ, FLOWMUX_PANE_ID='worker', FLOWMUX_SOCKET_PATH=manifest['socket']), \
-                        patch.object(team.subprocess, 'Popen', return_value=process), \
+                        patch.object(team.subprocess, 'Popen', return_value=process) as launch, \
                         patch.object(team, 'monitor_managed', side_effect=complete), \
                         patch.object(team, 'managed_pane', return_value=dict(active=True, agent=None)), \
                         patch.object(team, 'process_snapshot', return_value={123: (1, 123, 'reused start', 'S'),
@@ -1276,6 +1283,7 @@ class ManagedTests(unittest.TestCase):
                             stop.assert_not_called()
                 self.assertEqual(json.loads((self.job / 'retirement.json').read_text())['state'],
                                  'stopped' if scenario in ('stopped', 'stream-pid-reused') else 'blocked')
+                self.assertEqual(launch.call_args.kwargs['env']['FLOWMUX_TEAM_WORKER'], '1')
 
     def test_worker_exception_preserves_recovery_diagnostics_and_history(self):
         for outcome in ('blocked', 'pending'):

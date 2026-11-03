@@ -2819,7 +2819,19 @@ const GEMINI_EVENTS: &[GeminiEvent] = &[
 ];
 
 fn gemini_settings_path() -> Option<PathBuf> {
-    host_home_dir().map(|home| home.join(".gemini").join("settings.json"))
+    gemini_settings_path_for(
+        host_home_dir(),
+        crate::agent::SkillOverrides::from_env().gemini,
+    )
+}
+
+fn gemini_settings_path_for(
+    home: Option<PathBuf>,
+    override_home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    override_home
+        .or(home)
+        .map(|home| home.join(".gemini/settings.json"))
 }
 
 fn gemini_is_installed(settings_path: &Path, binary_present: bool) -> bool {
@@ -2995,16 +3007,26 @@ fn antigravity_plugin_manifest() -> Value {
     json!({ "name": "flowmux" })
 }
 
+fn antigravity_command_output(subcommand: &str) -> &'static str {
+    match subcommand {
+        "session-start" | "turn-start" => {
+            "2>/dev/null) || flowmux_hook_output='{}'; printf '%s' \"$flowmux_hook_output\""
+        }
+        "stop" => r#">/dev/null 2>&1; printf '%s' '{"decision":""}'"#,
+        _ => ">/dev/null 2>&1; printf '%s' '{}'",
+    }
+}
+
 fn antigravity_command(flowmux_bin: &str, subcommand: &str) -> String {
-    let response = if subcommand == "stop" {
-        r#"{"decision":""}"#
+    let prefix = if matches!(subcommand, "session-start" | "turn-start") {
+        "flowmux_hook_output=$("
     } else {
-        "{}"
+        ""
     };
     format!(
-        "{} hooks antigravity {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}} >/dev/null 2>&1; printf '%s' {}  # {}",
+        "{prefix}{} hooks antigravity {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}} {}  # {}",
         host_invocation_shell_command(flowmux_bin),
-        shell_quote(response),
+        antigravity_command_output(subcommand),
         FLOWMUX_HOOK_MARKER,
     )
 }
@@ -3020,7 +3042,7 @@ fn antigravity_command_entry(flowmux_bin: &str, subcommand: &str) -> Value {
 fn antigravity_hook_group(flowmux_bin: &str) -> Value {
     json!({
         "SessionStart": [antigravity_command_entry(flowmux_bin, "session-start")],
-        "PreInvocation": [antigravity_command_entry(flowmux_bin, "running")],
+        "PreInvocation": [antigravity_command_entry(flowmux_bin, "turn-start")],
         "PostToolUse": [{
             "matcher": "*",
             "hooks": [antigravity_command_entry(flowmux_bin, "running")],
@@ -3030,11 +3052,6 @@ fn antigravity_hook_group(flowmux_bin: &str) -> Value {
 }
 
 fn antigravity_command_matches(value: &Value, subcommand: &str) -> bool {
-    let response = if subcommand == "stop" {
-        r#"{"decision":""}"#
-    } else {
-        "{}"
-    };
     value.get("type").and_then(Value::as_str) == Some("command")
         && value.get("timeout").and_then(Value::as_u64) == Some(ANTIGRAVITY_HOOK_TIMEOUT_SECS)
         && value
@@ -3042,10 +3059,13 @@ fn antigravity_command_matches(value: &Value, subcommand: &str) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|command| {
                 command.contains(FLOWMUX_HOOK_MARKER)
+                    && (!matches!(subcommand, "session-start" | "turn-start")
+                        || command.starts_with("flowmux_hook_output=$("))
                     && command.contains(&format!("hooks antigravity {subcommand}"))
-                    && command.contains(&format!(
-                        ">/dev/null 2>&1; printf '%s' {}",
-                        shell_quote(response)
+                    && command.ends_with(&format!(
+                        " {}  # {}",
+                        antigravity_command_output(subcommand),
+                        FLOWMUX_HOOK_MARKER,
                     ))
                     && command.contains("${FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}")
                     && command.contains("${FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}")
@@ -3078,7 +3098,7 @@ fn antigravity_group_matches(group: &Value) -> bool {
                     .is_some_and(|hooks| antigravity_command_matches(&hooks[0], "running"))
         });
     flat_event_matches("SessionStart", "session-start")
-        && flat_event_matches("PreInvocation", "running")
+        && flat_event_matches("PreInvocation", "turn-start")
         && post_tool_use_matches
         && flat_event_matches("Stop", "stop")
 }
@@ -4811,6 +4831,33 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
     }
 
     #[test]
+    fn gemini_settings_root_matches_skill_overrides() {
+        let home = PathBuf::from("/user");
+        let override_home = PathBuf::from("/custom");
+        assert_eq!(
+            gemini_settings_path_for(Some(home.clone()), None),
+            Some(home.join(".gemini/settings.json"))
+        );
+        for home in [Some(home), None] {
+            let settings = gemini_settings_path_for(home, Some(override_home.clone())).unwrap();
+            let skills = crate::agent::SkillOverrides {
+                gemini: Some(override_home.clone()),
+                ..Default::default()
+            }
+            .path(crate::agent::Target::Gemini, Path::new("/user"), None);
+            assert_eq!(settings, override_home.join(".gemini/settings.json"));
+            assert_eq!(
+                settings
+                    .parent()
+                    .unwrap()
+                    .join("skills/flowmux-browser/SKILL.md"),
+                skills
+            );
+        }
+        assert_eq!(gemini_settings_path_for(None, None), None);
+    }
+
+    #[test]
     fn gemini_hook_entries_follow_the_official_schema_and_event_mapping() {
         let expected = [
             ("SessionStart", "session-start"),
@@ -4904,7 +4951,7 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         assert!(antigravity_group_matches(&group));
         for (event, subcommand) in [
             ("SessionStart", "session-start"),
-            ("PreInvocation", "running"),
+            ("PreInvocation", "turn-start"),
             ("Stop", "stop"),
         ] {
             let hook = &group[event][0];
@@ -4920,7 +4967,9 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         let pre_invocation = group["PreInvocation"][0]["command"].as_str().unwrap();
         let post_tool_use = post_tool_use["hooks"][0]["command"].as_str().unwrap();
         let stop = group["Stop"][0]["command"].as_str().unwrap();
-        assert!(pre_invocation.contains("printf '%s' '{}'"));
+        assert!(pre_invocation.starts_with("flowmux_hook_output=$("));
+        assert!(pre_invocation.contains("|| flowmux_hook_output='{}'"));
+        assert!(!pre_invocation.contains(">/dev/null 2>&1"));
         assert!(post_tool_use.contains("printf '%s' '{}'"));
         assert!(stop.contains(r#"printf '%s' '{"decision":""}'"#));
         let mut missing_start = group;
@@ -4929,6 +4978,70 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
             .unwrap()
             .remove("SessionStart");
         assert!(!antigravity_group_matches(&missing_start));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_wrappers_preserve_start_context_and_keep_other_responses() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tmp();
+        let binary = dir.path().join("fake flowmux");
+        let context = r#"{"injectSteps":[{"ephemeralMessage":"Team context"}]}"#;
+        fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s' '{}'\nprintf 'diagnostic' >&2\n",
+                context
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        for failure in [None, Some(""), Some(context)] {
+            if let Some(partial) = failure {
+                fs::write(
+                    &binary,
+                    format!(
+                        "#!/bin/sh\nprintf '%s' '{partial}'\nprintf 'diagnostic' >&2\nexit 1\n"
+                    ),
+                )
+                .unwrap();
+            }
+            for subcommand in ["session-start", "turn-start", "running", "stop"] {
+                let output = std::process::Command::new("sh")
+                    .args([
+                        "-c",
+                        &antigravity_command(binary.to_str().unwrap(), subcommand),
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert!(output.stderr.is_empty());
+                let expected = match subcommand {
+                    "session-start" | "turn-start" if failure.is_none() => context,
+                    "stop" => r#"{"decision":""}"#,
+                    _ => "{}",
+                };
+                assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn antigravity_doctor_rejects_start_wrappers_that_discard_stdout() {
+        for event in ["SessionStart", "PreInvocation"] {
+            let mut group = antigravity_hook_group("flowmux");
+            let subcommand = if event == "SessionStart" {
+                "session-start"
+            } else {
+                "running"
+            };
+            group[event][0]["command"] = json!(format!(
+                "flowmux hooks antigravity {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}} >/dev/null 2>&1; printf '%s' '{{}}'  # {FLOWMUX_HOOK_MARKER}"
+            ));
+            assert!(antigravity_group_is_owned(&group));
+            assert!(!antigravity_group_matches(&group));
+        }
     }
 
     #[test]
@@ -5131,6 +5244,15 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
             check_antigravity_in(&plugin_dir).status,
             HookCheckStatus::Drift
         );
+        install_antigravity_in(&plugin_dir, "flowmux").unwrap();
+        assert_eq!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Installed
+        );
+        assert!(install_antigravity_in(&plugin_dir, "flowmux")
+            .unwrap()
+            .touched_paths
+            .is_empty());
     }
 
     #[test]

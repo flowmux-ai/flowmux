@@ -17,7 +17,7 @@ result and successful process exit, after hook decisions. Their saved text or
 Stop/AfterAgent notifications alone are not completion. Keep the user's hooks
 and authentication/trust decisions intact.
 
-Resolve the current workspace before choosing how to work. Use `scripts/team.py`
+Resolve the current workspace at the start of each user task, before choosing how to work. Use `scripts/team.py`
 relative to this skill directory. It requires Python 3.9+ and the Flowmux CLI.
 
 ```bash
@@ -29,7 +29,11 @@ python3 /path/to/flowmux-team/scripts/team.py context
   workspaces. Explain briefly that this workspace uses inline execution, then
   do the work; a request mentioning teams is not a reason to stop.
 - `mode: team`: delegate scoped work to real Claude Code, Codex, Gemini or agy
-  sessions in split panes of this workspace, then integrate their results.
+  sessions in split panes of this workspace when investigation, implementation
+  or independent review can be assigned separately, then integrate and verify
+  their results. Small, sequential tasks may stay inline; state the reason briefly.
+  Use this helper instead of silently substituting native Agent/subagents, which
+  do not create Flowmux panes. Reuse idle workers for related work.
 - `No unique live Flowmux pane`: do not create panes yet. Retry `context` once
   in a **separate tool call**, after the failed call completes: the first tool's
   lifecycle hook may establish the exact session binding. Do not sleep/retry
@@ -45,6 +49,17 @@ The user creates a Team workspace through the sidebar menu or command palette
 → **New Team Workspace**, or `flowmux workspace new --team --root /absolute/project`.
 Normal and SSH workspaces cannot create team workers. Do not move an existing
 lead to another workspace to bypass this distinction.
+
+With this skill installed, Flowmux's native session/prompt hooks remind leads
+to run the context check. Hooks must be installed and enabled; Codex hook trust
+remains the user's decision. Check **Options → Skills → Check Team setup** or
+`flowmux hooks doctor` if the reminder is absent. Installing a skill alone does
+not enable disabled/untrusted hooks. An already-running CLI may need its normal
+configuration reload; never restart the user's session to force activation.
+Report setup/context/authentication/quota failures instead of silently switching
+to inline work. Managed workers carry `FLOWMUX_TEAM_WORKER=1`, receive no lead
+reminder, and cannot use `start`/`followup` to delegate again. Existing workers
+must also respect their assigned `FLOWMUX_TEAM_JOB` prompt.
 
 ## Delegate in Team mode
 
