@@ -84,21 +84,27 @@ Run the same complete gate as CI locally:
 bash scripts/test-ci.sh macos
 ```
 
-On Ubuntu 24.04, install `cargo-llvm-cov` 0.6.24 and the dependencies
+On Ubuntu 24.04, install the dependencies
 listed in `.github/workflows/test.yml`, including the ThorVG backend and
 WebKit AppArmor profile, then run:
 
 ```sh
-cargo install cargo-llvm-cov --version 0.6.24 --locked
 aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
 ```
 
 Both gates use the pinned repository Rust toolchain, private state/runtime
 directories, and fatal GTK criticals. Logs and environment versions are in
-`target/ci/{linux,macos}`; Linux coverage is in `target/llvm-cov`.
+`target/ci/{linux,macos}`.
 `CARGO_TARGET_DIR` can relocate both build output and evidence. The Linux
-gate includes instrumented workspace tests, the live SSH fixture, and the
-same coverage floors as CI.
+gate includes workspace tests, doctests, and the existing functional GUI and
+live SSH suites, without coverage instrumentation or percentage requirements.
+
+PRs and main pushes run the regression suite. Weekly and manual Test runs add
+the Linux idle/resource probe, macOS Office stress, and ignored headless stress
+tests. Run `bash scripts/test-ci.sh linux extended` or
+`bash scripts/test-ci.sh macos extended` locally for the platform stress probes.
+Sanitizers run weekly or manually; license and release gates keep their existing
+triggers. New commits cancel superseded Test runs on the same PR or branch.
 
 The smoke executable owns temporary state/configuration and its own window;
 it does not restart an installed Flowmux. A logged-in macOS desktop is

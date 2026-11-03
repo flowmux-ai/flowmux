@@ -19,7 +19,8 @@ import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 if name == 'python3' and args and args[0] == 'scripts/ci-phase.py':
-    os.execv(sys.executable, [sys.executable, *args])
+    # The phase wrapper has its own real timeout/cleanup tests below.
+    os.execvp(args[4], args[4:])
 with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps({'name': name, 'args': args,
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
@@ -35,7 +36,9 @@ with open(os.environ['CALLS'], 'a') as log:
         'renderer': os.environ.get('GSK_RENDERER')}) + '\n')
 if name == 'uname': print(os.environ.get('TEST_OS', 'Linux'))
 if name == 'xvfb-run': sys.exit(int(os.environ.get('TEST_EXIT', '0')))
-if name == 'cargo' and args[:2] == ['llvm-cov', 'show-env']:
+if name == 'cargo' and args[:2] == ['test', '--workspace']:
+    sys.exit(int(os.environ.get('WORKSPACE_TEST_EXIT', '0')))
+if name == 'python3' and args and args[0] == os.environ.get('LINUX_GUI_FAIL'):
     sys.exit(23)
 if name == 'python3' and args == ['scripts/test-agent-unit.py']:
     sys.exit(int(os.environ.get('AGENT_UNIT_EXIT', '0')))
@@ -192,7 +195,7 @@ time.sleep(60)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
             return result, calls
 
-    def test_linux_failure_keeps_reports_and_failure_status(self):
+    def test_linux_failure_preserves_isolation_without_coverage_or_retries(self):
         result, calls = self.run_script('test-ci.sh', 'linux', TEST_EXIT='17')
         self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
         desktop = [call for call in calls if call['name'] == 'xvfb-run']
@@ -200,12 +203,12 @@ time.sleep(60)
         self.assertIsNone(desktop[0]['socket'])
         self.assertTrue(desktop[0]['runtime'].startswith('/tmp/fm-ci.'))
         self.assertFalse(Path(desktop[0]['tmp']).exists(), 'temporary state must be removed')
-        reports = [c for c in calls if c['args'][:2] == ['llvm-cov', 'report']]
-        self.assertEqual(len(reports), 3)
-        self.assertIn('--fail-under-lines', reports[-1]['args'])
+        self.assertIn('scripts/test-linux.sh', desktop[0]['args'])
+        self.assertIn('regression', desktop[0]['args'])
+        self.assertFalse(any('llvm-cov' in c['args'] for c in calls))
 
     def test_macos_pipeline_does_not_hide_native_failure(self):
-        result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin', TEST_EXIT='19')
+        result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin', TEST_EXIT='19')
         self.assertEqual(result.returncode, 19, result.stdout + result.stderr)
         self.assertEqual(sum('macos_native' in c['args'] for c in calls), 1)
 
@@ -213,19 +216,19 @@ time.sleep(60)
         for phase in ('BOOT_RESTORE', 'SSH_PREVIEW', 'IMAGE_VIEWER', 'BROWSER_CHROME', 'PALETTE_RELEASE', 'EDITOR_RECOVERY', 'OFFICE_STABILITY', 'BROWSER_DEADLINE'):
             for exit_code, marker, expected in [(41, '1', 41), (0, '0', 1)]:
                 with self.subTest(phase=phase, marker=marker):
-                    result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    result, _ = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                         **{phase + '_EXIT': str(exit_code), phase + '_MARKER': marker})
                     self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         for phase in ('NATIVE_STATE', 'DMG_UPDATE'):
             with self.subTest(phase=phase):
-                result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, _ = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     **{phase + '_EXIT': '41'})
                 self.assertEqual(result.returncode, 41, result.stdout + result.stderr)
 
     def test_macos_skill_gate_runs_and_propagates_failure(self):
         for exit_code in (0, 21):
             with self.subTest(exit_code=exit_code):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
@@ -237,7 +240,7 @@ time.sleep(60)
         for exit_code, marker, expected in [(0, '1', 0), (29, '1', 29), (0, '0', 1)]:
             with self.subTest(exit_code=exit_code, marker=marker):
                 result, calls = self.run_script(
-                    'test-ci.sh', 'macos', TEST_OS='Darwin',
+                    'test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
@@ -248,7 +251,7 @@ time.sleep(60)
     def test_macos_gate_uses_cairo_despite_inherited_renderer(self):
         for renderer in ('', 'gl'):
             with self.subTest(renderer=renderer):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
@@ -264,7 +267,7 @@ time.sleep(60)
     def test_macos_session_paths_gate_requires_success_and_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (31, '1', 31), (0, '0', 1)]:
             with self.subTest(exit_code=exit_code, marker=marker):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     SESSION_PATHS_EXIT=str(exit_code), SESSION_PATHS_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if c['session_paths'] == '1']
@@ -274,7 +277,7 @@ time.sleep(60)
     def test_macos_session_flow_gate_requires_success_and_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (31, '1', 31), (0, '0', 1)]:
             with self.subTest(exit_code=exit_code, marker=marker):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     SESSION_FLOW_EXIT=str(exit_code), SESSION_FLOW_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if c['session_flow'] == '1']
@@ -284,7 +287,7 @@ time.sleep(60)
     def test_macos_markdown_gate_requires_success_and_native_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (37, '1', 37), (0, '0', 1)]:
             with self.subTest(exit_code=exit_code, marker=marker):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     MARKDOWN_EXIT=str(exit_code), MARKDOWN_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 markdown = [c for c in calls if 'flowmux-md-viewer' in c['args']]
@@ -294,7 +297,7 @@ time.sleep(60)
     def test_macos_webdriver_gate_requires_success_and_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (43, '1', 43), (0, '0', 1)]:
             with self.subTest(exit_code=exit_code, marker=marker):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                     WEBDRIVER_EXIT=str(exit_code), WEBDRIVER_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 driver = [c for c in calls if 'scripts/test-macos-webdriver.py' in c['args']]
@@ -305,14 +308,14 @@ time.sleep(60)
         for phase in ('NOTIFICATIONS', 'CLEANUP'):
             for exit_code, marker, expected in [(0, '1', 0), (39, '1', 39), (0, '0', 1)]:
                 with self.subTest(phase=phase, exit_code=exit_code, marker=marker):
-                    result, _ = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    result, _ = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                         **{phase + '_EXIT': str(exit_code), phase + '_MARKER': marker})
                     self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
     def test_macos_agent_gates_run_and_propagate_failure(self):
         for variable in ('AGENT_UNIT_EXIT', 'AGENT_GUI_EXIT'):
             with self.subTest(variable=variable):
-                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                result, calls = self.run_script('test-ci.sh', 'macos', 'extended', TEST_OS='Darwin',
                                                 **{variable: '27'})
                 self.assertEqual(result.returncode, 27, result.stdout + result.stderr)
                 units = [c for c in calls if c['args'] == ['scripts/test-agent-unit.py']]
@@ -399,10 +402,50 @@ time.sleep(60)
                             process.kill()
                         process.wait(timeout=10)
 
-    def test_coverage_environment_failure_cannot_run_uninstrumented_tests(self):
-        result, calls = self.run_script('test-coverage.sh')
+    def test_linux_workspace_failure_stops_before_build_and_gui(self):
+        result, calls = self.run_script('test-linux.sh', WORKSPACE_TEST_EXIT='23')
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertFalse(any(c['name'] == 'cargo' and c['args'][0] == 'test' for c in calls))
+        self.assertFalse(any(c['name'] == 'cargo' and c['args'][0] == 'build' for c in calls))
+        self.assertFalse(any('scripts/test-browser-control.py' in c['args'] for c in calls))
+
+    def test_linux_suites_keep_functional_tests_and_only_extend_stress(self):
+        expected = {
+            'test-ssh-workspace-fixture.py', 'test-browser-control.py',
+            'test-browser-bookmarks-gui.py', 'test-browser-import-gui.py',
+            'test-skills-gui.py', 'test-notifications-gui.py',
+            'test-team-pingpong-gui.py', 'test-team-recovery-gui.py',
+            'test-team-reuse-gui.py', 'test-team-usage-gui.py',
+            'test-session-save-gui.py', 'test-session-flow-gui.py',
+            'test-pty-spawn-failure-gui.py', 'test-terminal-read-screen-gui.py',
+            'test-terminal-image-links-gui.py', 'test-ipc-recovery-gui.py',
+            'test-polling-delay-gui.py', 'test-editor-io-gui.py',
+            'test-editor-renderer-gui.py', 'test-lazy-restore-gui.py',
+            'ssh-workspace-fixture.py',
+        }
+        for suite in ('regression', 'extended'):
+            with self.subTest(suite=suite):
+                result, calls = self.run_script('test-linux.sh', suite, '--', '--nocapture')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                scripts = {Path(c['args'][0]).name for c in calls if c['name'] == 'python3'}
+                self.assertEqual(scripts, expected | ({'test-idle-stability-gui.py'}
+                                                     if suite == 'extended' else set()))
+                cargo = [c['args'] for c in calls if c['name'] == 'cargo']
+                self.assertEqual(cargo, [['test', '--workspace', '--locked', '--no-fail-fast',
+                                          '--', '--nocapture'], ['build', '--workspace', '--locked']])
+
+    def test_linux_gui_failure_stops_the_suite(self):
+        result, calls = self.run_script('test-linux.sh',
+                                       LINUX_GUI_FAIL='scripts/test-session-flow-gui.py')
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+        self.assertFalse(any('scripts/ssh-workspace-fixture.py' in c['args'] for c in calls))
+
+    def test_macos_default_runs_functional_suites_without_office_stress(self):
+        result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        native = [c for c in calls if 'macos_native' in c['args']]
+        self.assertEqual(len(native), 14)
+        self.assertNotIn('office-stability.log', result.stdout)
+        self.assertIn('MACOS_BROWSER_SCRIPT_DEADLINE_OK', result.stdout)
 
 
 if __name__ == '__main__':

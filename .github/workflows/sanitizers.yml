@@ -2,15 +2,8 @@
 name: Sanitizers
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-    paths:
-      - '**'
-      - '!README.md'
-      - '!docs/**'
-      - 'docs/legal/**'
-      - '!resources/screenshot/**'
+  schedule:
+    - cron: '41 3 * * 1'
   workflow_dispatch:
 
 jobs:

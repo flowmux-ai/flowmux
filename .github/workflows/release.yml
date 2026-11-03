@@ -200,7 +200,7 @@ jobs:
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
 
       - name: Run macOS tests and native smoke
-        run: bash scripts/test-ci.sh macos
+        run: bash scripts/test-ci.sh macos extended
 
       - name: Build release app bundle without installing
         run: bash install.sh --release --bundle-only

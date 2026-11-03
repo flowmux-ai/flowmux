@@ -17,7 +17,7 @@ cargo run -p flowmux                 # debug GUI
 cargo build --release --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-bash scripts/test-ci.sh linux       # on Linux: shared CI gate, coverage + GUI
+bash scripts/test-ci.sh linux       # on Linux: shared CI gate, workspace tests + GUI
 bash scripts/test-ci.sh macos       # on macOS: shared CI gate, native main-thread GUI
 ```
 

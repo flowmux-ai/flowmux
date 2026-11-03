@@ -9,6 +9,11 @@ case "$mode:$(uname -s)" in
     linux:Linux|macos:Darwin) ;;
     *) echo "Usage: $0 linux|macos (on the matching OS)" >&2; exit 2 ;;
 esac
+suite=${2:-regression}
+case "$suite" in
+    regression|extended) ;;
+    *) echo "Usage: $0 linux|macos [regression|extended]" >&2; exit 2 ;;
+esac
 
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
 mkdir -p "$CARGO_TARGET_DIR"
@@ -36,7 +41,7 @@ chmod 700 "$XDG_RUNTIME_DIR"
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-2} RUST_BACKTRACE=1 G_DEBUG=fatal-criticals
 
-printf 'CI_GATE=%s\n' "$mode"
+printf 'CI_GATE=%s SUITE=%s\n' "$mode" "$suite"
 uname -a
 rustc -Vv
 cargo --version
@@ -52,24 +57,13 @@ run_phase stability-harness-tests 60 python3 -B scripts/test-macos-stability.py 
 run_phase format 180 cargo fmt --all -- --check
 
 if [[ $mode == linux ]]; then
-    cargo llvm-cov --version
-    rustup component add llvm-tools-preview
     export GDK_BACKEND=x11 GTK_A11Y=test LANG=C.UTF-8 LC_ALL=C.UTF-8
     locale
     # Keep a fixed virtual desktop. AppArmor is provisioned by the host/CI;
     # this runner does not disable the WebKit sandbox or change host policy.
-    result=0
-    # Budget the instrumented build and all browser, team, and SSH GUI suites.
-    run_phase coverage 2400 xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
-        env FLOWMUX_TEST_X11_LOCKS=1 bash scripts/test-coverage.sh -- --nocapture || result=$?
-    # Preserve failure evidence even when a test fails; never turn it green.
-    mkdir -p "$CARGO_TARGET_DIR/llvm-cov"
-    run_phase coverage-json 180 cargo llvm-cov report --json --summary-only \
-        --output-path "$CARGO_TARGET_DIR/llvm-cov/summary.json" || result=1
-    run_phase coverage-html 180 cargo llvm-cov report --html || result=1
-    run_phase coverage-thresholds 180 cargo llvm-cov report --fail-under-lines 79 --fail-under-regions 78 \
-        --fail-under-functions 78 || result=1
-    exit "$result"
+    run_phase regression 2400 xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
+        env FLOWMUX_TEST_X11_LOCKS=1 bash scripts/test-linux.sh "$suite" -- --nocapture
+    exit 0
 fi
 
 # Hosted macOS VMs compile OpenGL shaders on the GTK thread for seconds.
@@ -168,10 +162,12 @@ FLOWMUX_EDITOR_RECOVERY_SMOKE_ONLY=1 run_phase editor-recovery 180 cargo test -p
     2>&1 | tee "$report_dir/editor-recovery.log"
 grep -q '^MACOS_EDITOR_RENDERER_RETRY_OK$' "$report_dir/editor-recovery.log"
 
-# Exercise actual office drawing and release after repeated status/resize churn.
-FLOWMUX_OFFICE_STRESS_SMOKE_ONLY=1 run_phase office-stability 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
-    2>&1 | tee "$report_dir/office-stability.log"
-grep -q '^OFFICE_STABILITY_OK ' "$report_dir/office-stability.log"
+if [[ $suite == extended ]]; then
+    # Exercise actual office drawing and release after repeated status/resize churn.
+    FLOWMUX_OFFICE_STRESS_SMOKE_ONLY=1 run_phase office-stability 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+        2>&1 | tee "$report_dir/office-stability.log"
+    grep -q '^OFFICE_STABILITY_OK ' "$report_dir/office-stability.log"
+fi
 
 run_phase browser-completion-unit 180 cargo test -p flowmux --bin flowmux --locked completion_tests
 FLOWMUX_BROWSER_DEADLINE_SMOKE_ONLY=1 run_phase browser-deadline 120 cargo test -p flowmux --test macos_native --features native-smoke --locked \

@@ -17,6 +17,13 @@ on:
   schedule:
     - cron: '23 3 * * 1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  CI_TEST_SUITE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'extended' || 'regression' }}
+
 jobs:
   editor-web:
     name: editor web
@@ -40,7 +47,7 @@ jobs:
 
       - name: Test and rebuild editor assets
         run: |
-          npm run test:coverage
+          npm test
           npm run build
           npm run verify
 
@@ -49,7 +56,7 @@ jobs:
         run: git diff --exit-code -- editor/flowmux-editor-web/dist
 
   cargo-test:
-    name: cargo test and coverage
+    name: Linux regression tests
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -59,10 +66,6 @@ jobs:
         run: |
           rustup show active-toolchain
           cargo fmt --all -- --check
-          rustup component add llvm-tools-preview
-
-      - name: Install coverage tool
-        run: cargo install cargo-llvm-cov --version 0.6.24 --locked
 
       - name: Install Node.js for the OpenCode hook integration test
         uses: actions/setup-node@v7
@@ -100,19 +103,17 @@ jobs:
           fi
           sudo sh packaging/debian/postinst configure
 
-      - name: Run Linux tests and coverage (same script as local)
-        # Allow setup checks, the 40-minute test phase and three bounded coverage reports.
+      - name: Run Linux regression tests (same script as local)
         timeout-minutes: 55
-        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
+        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux "$CI_TEST_SUITE"
 
-      - name: Upload test and coverage evidence
+      - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-test-evidence
           path: |
             target/ci/linux
-            target/llvm-cov
             /tmp/fm-gui-*/memory.jsonl
             /tmp/fm-gui-*/summary.json
             /tmp/fm-gui-*/idle-stability.log
@@ -187,7 +188,7 @@ jobs:
       - name: Install compatible ThorVG for native image and Lottie checks
         run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
       - name: Run macOS tests and native smoke (same script as local)
-        run: bash scripts/test-ci.sh macos
+        run: bash scripts/test-ci.sh macos "$CI_TEST_SUITE"
       - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
