@@ -1,36 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use super::{cline_arguments, SessionAgent};
-use std::collections::BTreeMap;
-
-pub(super) fn read(
-    pid: u32,
-    agent: SessionAgent,
-) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
-    let keys = agent
-        .home_variables()
-        .iter()
-        .copied()
-        .chain(["PATH"])
-        .collect::<Vec<_>>();
-    let mut environment =
-        flowmux_procmon::process_environment(pid, &keys).map_err(|error| error.to_string())?;
-    let arguments = if agent == SessionAgent::Cline {
-        let argv = flowmux_procmon::cmdline_of(pid);
-        cline_arguments(
-            &mut environment,
-            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
-            || {
-                flowmux_procmon::process_cwd(pid)
-                    .ok_or_else(|| "Agent working directory is unavailable".into())
-            },
-        )?
-    } else {
-        Vec::new()
-    };
-    Ok((environment, arguments))
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::*;

@@ -12,16 +12,18 @@
 //! ```
 //!
 //! A single file per agent makes it easy to inspect, back up, or
-//! delete one agent's history without touching the others. The JSON
-//! payload is `{"<surface_uuid>": "<session_id>", ...}` — flat, so
-//! human-readable and trivially mergeable.
+//! delete one agent's history without touching the others. JSON values are
+//! session IDs, or objects with the ID and native storage overrides.
+//! Existing string entries remain readable and keep their original format.
 //!
 //! Writes are atomic (tmp file + rename), matching the policy in
 //! `state_store.rs`, so a crash mid-write never leaves a partially
 //! serialized file behind.
 
+use crate::session_history::{SessionAgent, SessionLaunchContext};
 use flowmux_core::SurfaceId;
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io;
@@ -41,6 +43,40 @@ const RESUMABLE_AGENTS: [&str; 6] = [
 pub struct SavedAgentSession {
     pub agent: String,
     pub session_id: String,
+    pub context: Option<SessionLaunchContext>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum StoredSession {
+    Id(String),
+    Scoped {
+        session_id: String,
+        context: SessionLaunchContext,
+    },
+}
+
+impl StoredSession {
+    fn session_id(&self) -> &str {
+        match self {
+            Self::Id(id) | Self::Scoped { session_id: id, .. } => id,
+        }
+    }
+
+    fn into_saved(self, agent: &str) -> SavedAgentSession {
+        let (session_id, context) = match self {
+            Self::Id(id) => (id, None),
+            Self::Scoped {
+                session_id,
+                context,
+            } => (session_id, Some(context)),
+        };
+        SavedAgentSession {
+            agent: agent.into(),
+            session_id,
+            context,
+        }
+    }
 }
 
 impl SavedAgentSession {
@@ -79,9 +115,34 @@ impl SavedAgentSession {
         let argv = self.resume_argv();
         let executable = argv.first()?;
         let command = std::iter::once(executable.clone())
-            .chain(argv[1..].iter().map(|arg| shell_quote(arg)))
+            .chain(
+                argv[1..]
+                    .iter()
+                    .chain(self.context.iter().flat_map(|context| &context.arguments))
+                    .map(|arg| shell_quote(arg)),
+            )
             .collect::<Vec<_>>()
             .join(" ");
+        let command = if let Some(context) = &self.context {
+            let agent = SessionAgent::from_name(&self.agent)?;
+            context.validate_for_resume(agent).ok()?;
+            let unset = agent
+                .home_variables()
+                .iter()
+                .filter(|key| **key != "HOME")
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let exports = context
+                .environment
+                .iter()
+                .map(|(key, value)| format!("export {}; ", shell_quote(&format!("{key}={value}"))))
+                .collect::<String>();
+            // A subshell retains aliases without changing the replacement shell's home.
+            format!("(unset {unset}; {exports}{command})")
+        } else {
+            command
+        };
         let cleanup = match self.agent.as_str() {
             "claude" => "if command -v flowmuxctl >/dev/null 2>&1; then printf '%s' '{\"reason\":\"prompt_input_exit\"}' | flowmuxctl hooks claude session-end >/dev/null 2>&1; fi; ".to_string(),
             "codex" | "opencode" | "cline" => format!(
@@ -146,7 +207,7 @@ impl AgentSessionStore {
             .find(|candidate| candidate.eq_ignore_ascii_case(agent.trim()))
     }
 
-    fn load(&self, agent: &str) -> io::Result<BTreeMap<String, String>> {
+    fn load(&self, agent: &str) -> io::Result<BTreeMap<String, StoredSession>> {
         let path = self.agent_path(agent);
         if !path.exists() {
             return Ok(BTreeMap::new());
@@ -179,6 +240,45 @@ impl AgentSessionStore {
     /// Prepare all files first and roll back published files on a rename error.
     /// shortcut: not crash-atomic across files; use one storage unit if that is required.
     pub fn record(&self, agent: &str, surface: SurfaceId, session_id: &str) -> io::Result<()> {
+        self.record_with_context(agent, surface, session_id, None)
+    }
+
+    /// Capture native storage only after the window accepts a session report.
+    pub fn record_from_process(
+        &self,
+        agent: &str,
+        surface: SurfaceId,
+        session_id: &str,
+        pid: Option<u32>,
+    ) -> io::Result<()> {
+        let context = match SessionAgent::from_name(agent) {
+            Some(provider @ (SessionAgent::Gemini | SessionAgent::Cline)) => {
+                let pid = pid.ok_or_else(|| {
+                    io::Error::other(
+                        "Agent PID unavailable; preserving the previous resume binding",
+                    )
+                })?;
+                let mut context =
+                    SessionLaunchContext::read(provider, pid).map_err(io::Error::other)?;
+                // Let the restored interactive shell select executables and wrapper shims.
+                context.environment.remove("PATH");
+                context
+                    .validate_for_resume(provider)
+                    .map_err(io::Error::other)?;
+                Some(context)
+            }
+            _ => None,
+        };
+        self.record_with_context(agent, surface, session_id, context)
+    }
+
+    fn record_with_context(
+        &self,
+        agent: &str,
+        surface: SurfaceId,
+        session_id: &str,
+        context: Option<SessionLaunchContext>,
+    ) -> io::Result<()> {
         let agent = Self::normalize_agent(agent).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "unsupported resumable agent")
         })?;
@@ -195,7 +295,18 @@ impl AgentSessionStore {
             {
                 let mut map = self.load(candidate)?;
                 if candidate == agent {
-                    map.insert(surface.to_string(), session_id.to_string());
+                    let binding = match &context {
+                        Some(context) => StoredSession::Scoped {
+                            session_id: session_id.into(),
+                            context: context.clone(),
+                        },
+                        None => map
+                            .get(&surface.to_string())
+                            .filter(|binding| binding.session_id() == session_id)
+                            .cloned()
+                            .unwrap_or_else(|| StoredSession::Id(session_id.into())),
+                    };
+                    map.insert(surface.to_string(), binding);
                 } else if map.remove(&surface.to_string()).is_none() {
                     continue;
                 }
@@ -283,11 +394,11 @@ impl AgentSessionStore {
                 }
             }
             let mut map = self.load(agent)?;
-            if map.get(&surface).map(String::as_str) != expected {
+            if map.get(&surface).map(StoredSession::session_id) != expected {
                 return Ok(false);
             }
             if expected != Some(session_id) {
-                map.insert(surface, session_id.to_string());
+                map.insert(surface, StoredSession::Id(session_id.to_string()));
                 let bytes = serde_json::to_vec_pretty(&map).map_err(io::Error::other)?;
                 Self::write_atomic(&self.agent_path(agent), &bytes)?;
             }
@@ -300,16 +411,18 @@ impl AgentSessionStore {
     /// that surface (or the file is missing).
     pub fn lookup(&self, agent: &str, surface: SurfaceId) -> Option<String> {
         let agent = Self::normalize_agent(agent)?;
-        self.load(agent).ok()?.get(&surface.to_string()).cloned()
+        self.load(agent)
+            .ok()?
+            .get(&surface.to_string())
+            .map(|binding| binding.session_id().to_string())
     }
 
     pub fn lookup_surface(&self, surface: SurfaceId) -> Option<SavedAgentSession> {
         RESUMABLE_AGENTS.into_iter().find_map(|agent| {
-            self.lookup(agent, surface)
-                .map(|session_id| SavedAgentSession {
-                    agent: agent.to_string(),
-                    session_id,
-                })
+            self.load(agent)
+                .ok()?
+                .remove(&surface.to_string())
+                .map(|binding| binding.into_saved(agent))
         })
     }
 
@@ -320,16 +433,13 @@ impl AgentSessionStore {
         self.with_exclusive_lock(|| {
             for agent in RESUMABLE_AGENTS {
                 let mut map = self.load(agent)?;
-                let Some(session_id) = map.remove(&surface.to_string()) else {
+                let Some(binding) = map.remove(&surface.to_string()) else {
                     continue;
                 };
                 let bytes = serde_json::to_vec_pretty(&map)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 Self::write_atomic(&self.agent_path(agent), &bytes)?;
-                return Ok(Some(SavedAgentSession {
-                    agent: agent.to_string(),
-                    session_id,
-                }));
+                return Ok(Some(binding.into_saved(agent)));
             }
             Ok(None)
         })
@@ -435,6 +545,169 @@ mod tests {
         s.record("claude", surface, "sess-new").unwrap();
         assert_eq!(s.lookup("claude", surface), Some("sess-new".into()));
         assert_eq!(s.len("claude"), 1);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn scoped_sessions_restore_native_storage_after_the_agent_exits() {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+        for agent in ["gemini", "cline"] {
+            let (store, dir) = store();
+            let surface = SurfaceId::new();
+            let native_root = dir.path().canonicalize().unwrap();
+            let native_home = native_root.join("home ' $(exit 7)");
+            let native_data = native_root.join("data ' $(exit 7)");
+            let native_config = native_root.join("config ' $(exit 7)");
+            let mut native = Command::new("/bin/sh");
+            native
+                .args(["-c", "printf 'ready\\n'; read -r done", "fixture"])
+                .env_clear()
+                .env("HOME", &native_home)
+                .env("GEMINI_CLI_HOME", &native_config)
+                .env("CLINE_DATA_DIR", "/ignored/by/cli")
+                .env("PRIVATE_API_KEY", "must-not-be-persisted")
+                .current_dir(dir.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped());
+            if agent == "cline" {
+                native.args([
+                    "--config",
+                    "config ' $(exit 7)",
+                    "--data-dir=data ' $(exit 7)",
+                ]);
+            }
+            let mut native = native.spawn().unwrap();
+            let mut ready = String::new();
+            BufReader::new(native.stdout.take().unwrap())
+                .read_line(&mut ready)
+                .unwrap();
+            let recorded =
+                store.record_from_process(agent, surface, "session-1", Some(native.id()));
+            native.stdin.take().unwrap().write_all(b"done\n").unwrap();
+            assert!(native.wait().unwrap().success());
+            recorded.unwrap();
+
+            // A later report without process metadata must retain this session's scope.
+            store.record(agent, surface, "session-1").unwrap();
+            assert!(store
+                .record_from_process(agent, surface, "session-1", None)
+                .is_err());
+            assert!(!std::fs::read_to_string(store.agent_path(agent))
+                .unwrap()
+                .contains("must-not-be-persisted"));
+            let saved = AgentSessionStore::new(dir.path().into())
+                .take_surface(surface)
+                .unwrap()
+                .unwrap();
+            let context = saved.context.as_ref().unwrap();
+            assert!(!context.environment.contains_key("PRIVATE_API_KEY"));
+            assert!(!context.environment.contains_key("PATH"));
+            assert!(store.lookup_surface(surface).is_none());
+
+            let executable = dir.path().join(agent);
+            std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$HOME\" \"${GEMINI_CLI_HOME-unset}\" \"${CLINE_DIR-unset}\" \"${CLINE_DATA_DIR-unset}\" \"${CLINE_DB_DATA_DIR-unset}\" \"${CLINE_SESSION_DATA_DIR-unset}\" \"$@\" > \"$TEST_CAPTURE\"\n").unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let captured = dir.path().join("captured");
+            let parent = dir.path().join("parent");
+            let output = Command::new("/bin/bash")
+                .args([
+                    "-c",
+                    &format!(
+                        "shopt -s expand_aliases\nalias {agent}='{agent} --from-alias'\n{}; printf '%s' \"$HOME\" > \"$TEST_PARENT\"",
+                        saved.shell_command().unwrap()
+                    ),
+                ])
+                .env_clear()
+                .env("PATH", dir.path())
+                .env("HOME", "/replacement-shell-home")
+                .env("CLINE_SESSION_DATA_DIR", "/stale/inherited/storage")
+                .env("TEST_CAPTURE", &captured)
+                .env("TEST_PARENT", &parent)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let values = std::fs::read_to_string(captured).unwrap();
+            let values = values.lines().collect::<Vec<_>>();
+            assert_eq!(values[0], native_home.to_str().unwrap());
+            assert_eq!(values[6], "--from-alias");
+            if agent == "gemini" {
+                assert_eq!(values[1], native_config.to_str().unwrap());
+                assert_eq!(&values[7..], ["--resume", "session-1"]);
+            } else {
+                assert_eq!(values[2], native_config.to_str().unwrap());
+                assert_eq!(values[3], native_data.to_str().unwrap());
+                assert_eq!(values[4], native_data.join("db").to_str().unwrap());
+                assert_eq!(values[5], "unset");
+                assert_eq!(
+                    &values[7..],
+                    [
+                        "--id",
+                        "session-1",
+                        "--tui",
+                        "--config",
+                        native_config.to_str().unwrap(),
+                        "--data-dir",
+                        native_data.to_str().unwrap()
+                    ]
+                );
+            }
+            assert_eq!(
+                std::fs::read_to_string(parent).unwrap(),
+                "/replacement-shell-home"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_bindings_and_scoped_replacement_keep_their_storage_format() {
+        let (store, dir) = store();
+        let surface = SurfaceId::new();
+        let legacy = serde_json::json!({surface.to_string(): "legacy"});
+        std::fs::write(store.agent_path("gemini"), legacy.to_string()).unwrap();
+        assert_eq!(store.lookup_surface(surface).unwrap().context, None);
+        let context = SessionLaunchContext {
+            environment: [("GEMINI_CLI_HOME".into(), "/custom".into())].into(),
+            arguments: Vec::new(),
+        };
+        store
+            .record_with_context("gemini", surface, "scoped", Some(context))
+            .unwrap();
+        store.record("gemini", surface, "new-session").unwrap();
+        let disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("gemini.json")).unwrap())
+                .unwrap();
+        assert_eq!(disk[surface.to_string()], "new-session");
+        assert_eq!(store.lookup_surface(surface).unwrap().context, None);
+    }
+
+    #[test]
+    fn resume_rejects_non_storage_environment_and_arguments() {
+        for context in [
+            SessionLaunchContext {
+                environment: [("BASH_ENV".into(), "/untrusted".into())].into(),
+                arguments: vec![],
+            },
+            SessionLaunchContext {
+                environment: BTreeMap::new(),
+                arguments: vec!["--yolo".into()],
+            },
+            SessionLaunchContext {
+                environment: [("CLINE_DIR".into(), "path\ncommand".into())].into(),
+                arguments: vec![],
+            },
+        ] {
+            let saved = SavedAgentSession {
+                agent: "cline".into(),
+                session_id: "session".into(),
+                context: Some(context),
+            };
+            assert!(saved.shell_command().is_none());
+        }
     }
 
     #[test]
@@ -547,6 +820,7 @@ mod tests {
             Some(SavedAgentSession {
                 agent: "codex".into(),
                 session_id: "codex-session".into(),
+                context: None,
             })
         );
     }
@@ -754,6 +1028,7 @@ mod tests {
             Some(SavedAgentSession {
                 agent: "claude".into(),
                 session_id: "resume-once".into(),
+                context: None,
             })
         );
         assert_eq!(s.lookup_surface(resumed), None);
@@ -827,11 +1102,14 @@ mod tests {
             ("codex", vec!["codex", "resume", "session-1"]),
             ("opencode", vec!["opencode", "--session", "session-1"]),
             ("antigravity", vec!["agy", "--conversation", "session-1"]),
+            ("gemini", vec!["gemini", "--resume", "session-1"]),
+            ("cline", vec!["cline", "--id", "session-1", "--tui"]),
         ];
         for (agent, expected) in cases {
             let saved = SavedAgentSession {
                 agent: agent.into(),
                 session_id: "session-1".into(),
+                context: None,
             };
             assert_eq!(saved.resume_argv(), expected);
         }
@@ -859,6 +1137,7 @@ mod tests {
         let saved = SavedAgentSession {
             agent: "claude".into(),
             session_id: session_id.clone(),
+            context: None,
         };
         let output = Command::new("/bin/sh")
             .arg("-c")
@@ -889,6 +1168,7 @@ mod tests {
         let saved = SavedAgentSession {
             agent: "codex".into(),
             session_id: "session-1".into(),
+            context: None,
         };
 
         let output = Command::new("/bin/sh")
@@ -931,6 +1211,7 @@ mod tests {
         let saved = SavedAgentSession {
             agent: "claude".into(),
             session_id: "stale-session".into(),
+            context: None,
         };
 
         let output = Command::new("/bin/sh")
@@ -979,46 +1260,9 @@ mod tests {
             let saved = SavedAgentSession {
                 agent: agent.into(),
                 session_id: "stale-session".into(),
+                context: None,
             };
             assert!(saved.shell_command().unwrap().contains(expected));
-        }
-    }
-
-    #[test]
-    fn resumable_agents_produce_valid_resume_argv() {
-        for (agent, expected) in [
-            (
-                "claude",
-                vec!["claude", "--resume", "sess-1"],
-            ),
-            (
-                "codex",
-                vec!["codex", "resume", "sess-1"],
-            ),
-            (
-                "opencode",
-                vec!["opencode", "--session", "sess-1"],
-            ),
-            (
-                "antigravity",
-                vec!["agy", "--conversation", "sess-1"],
-            ),
-            (
-                "gemini",
-                vec!["gemini", "--resume", "sess-1"],
-            ),
-            (
-                "cline",
-                vec!["cline", "--id", "sess-1", "--tui"],
-            ),
-        ] {
-            let saved = SavedAgentSession {
-                agent: agent.into(),
-                session_id: "sess-1".into(),
-            };
-            assert_eq!(saved.resume_argv(), expected);
-            let command = saved.shell_command().unwrap();
-            assert!(command.starts_with(&format!("if command -v '{}'", expected[0])));
         }
     }
 
@@ -1028,6 +1272,7 @@ mod tests {
         let saved = SavedAgentSession {
             agent: "opencode".into(),
             session_id: "session-1".into(),
+            context: None,
         };
         let output = Command::new("/bin/sh")
             .arg("-c")

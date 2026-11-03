@@ -46,6 +46,8 @@ exiting the agent returns to that shell in the selected project directory.
 On Linux, OpenCode retains its XDG/config overrides,
 Antigravity retains its home, Gemini CLI retains `GEMINI_CLI_HOME`, and Cline retains its directory overrides and
 `--config` / `--data-dir` arguments, including isolated sandbox storage.
+Automatic window restoration also retains Gemini and Cline storage overrides
+captured from their running process.
 
 Another session can be opened while the focused agent is working or waiting for
 input; the original tab remains untouched. The currently active session cannot

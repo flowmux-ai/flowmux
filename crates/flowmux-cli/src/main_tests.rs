@@ -2317,6 +2317,45 @@ fn hook_agent_identity_prefers_native_route_over_inherited_wrapper_env() {
 }
 
 #[tokio::test]
+async fn cline_child_hooks_never_reach_the_root_tab() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("flowmux.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    for payload in [
+        r#"{"taskId":"child","parent_agent_id":"lead"}"#,
+        r#"{"taskId":"child","sessionContext":{"rootSessionId":"root"}}"#,
+    ] {
+        for event in [
+            AgentHookEvent::SessionStart {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
+            AgentHookEvent::Running {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
+            AgentHookEvent::Stop {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
+        ] {
+            run_generic_agent_hook_event("Cline", &event, Some(socket.clone()))
+                .await
+                .unwrap();
+        }
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn codex_child_prompt_reactivates_the_observed_child_turn() {
     use crate::cmd_hooks::run_generic_agent_hook_event;
     use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};

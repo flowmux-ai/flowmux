@@ -1090,6 +1090,10 @@ pub(crate) async fn run_generic_agent_hook_event(
     } else {
         read_codex_hook_input(args)
     };
+    // Cline children inherit the root tab's routing but own a different session.
+    if reported_agent.eq_ignore_ascii_case("cline") && input.is_cline_child() {
+        return Ok(());
+    }
     // Legacy notify also fires for ephemeral title jobs in dedicated TUIs.
     if reported_agent.eq_ignore_ascii_case("codex")
         && input.event_type.as_deref() == Some("agent-turn-complete")

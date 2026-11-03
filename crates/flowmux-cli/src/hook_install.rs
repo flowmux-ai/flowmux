@@ -2124,6 +2124,8 @@ fn prune_nested_flowmux_notify_json(value: &mut Value) -> bool {
 
 // ---- Cline ----------------------------------------------------------
 
+const CLINE_HOOK_MARKER: &str = "flowmux-hook cline v2";
+
 #[derive(Debug, Clone, Copy)]
 struct ClineEvent {
     /// Extensionless executable filename used by Cline.
@@ -2213,7 +2215,7 @@ fn check_cline_in_dirs(dirs: &[PathBuf]) -> HookCheckEntry {
                 }
             };
             let command = format!("hooks cline {}", event.subcommand);
-            if bytes_contain(&body, FLOWMUX_HOOK_MARKER.as_bytes())
+            if bytes_contain(&body, CLINE_HOOK_MARKER.as_bytes())
                 && bytes_contain(&body, command.as_bytes())
                 && is_executable(&path)
             {
@@ -2325,11 +2327,10 @@ fn cline_hook_script(flowmux_bin: &str, event: ClineEvent) -> String {
         r#"#!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # {marker} managed Cline {event_name} hook
-payload=$(cat)
-{prefix} hooks cline {subcommand} -- "$payload" >/dev/null 2>&1 </dev/null
+{prefix} hooks cline {subcommand} >/dev/null 2>&1
 printf '%s\n' '{{"cancel":false}}'
 "#,
-        marker = FLOWMUX_HOOK_MARKER,
+        marker = CLINE_HOOK_MARKER,
         event_name = event.name,
         subcommand = event.subcommand,
     )
@@ -3323,6 +3324,49 @@ mod tests {
 
         let second = install_cline_in_dirs(&dirs, "/usr/local/bin/flowmux").unwrap();
         assert!(second.touched_paths.is_empty());
+
+        let path = hooks_dir.join("TaskStart");
+        let old = fs::read_to_string(&path)
+            .unwrap()
+            .replace(CLINE_HOOK_MARKER, FLOWMUX_HOOK_MARKER);
+        fs::write(&path, old).unwrap();
+        assert_eq!(check_cline_in_dirs(&dirs).status, HookCheckStatus::Drift);
+        let upgraded = install_cline_in_dirs(&dirs, "/usr/local/bin/flowmux").unwrap();
+        assert_eq!(upgraded.touched_paths, [path]);
+        assert_eq!(
+            check_cline_in_dirs(&dirs).status,
+            HookCheckStatus::Installed
+        );
+    }
+
+    #[test]
+    fn cline_hook_streams_large_prompts_without_command_line_limits() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+        let dir = tmp();
+        let receiver = dir.path().join("receive");
+        let captured = dir.path().join("payload");
+        fs::write(&receiver, "#!/bin/sh\ncat > \"$TEST_PAYLOAD\"\n").unwrap();
+        fs::set_permissions(&receiver, fs::Permissions::from_mode(0o755)).unwrap();
+        let hooks = dir.path().join("hooks");
+        install_cline_in_dirs(std::slice::from_ref(&hooks), receiver.to_str().unwrap()).unwrap();
+        let payload = json!({"taskId":"root", "userPromptSubmit":{"prompt":"x".repeat(200_000), "attachments":[]}}).to_string();
+        let mut child = Command::new(hooks.join("UserPromptSubmit"))
+            .env("TEST_PAYLOAD", &captured)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"{\"cancel\":false}\n");
+        assert_eq!(fs::read_to_string(captured).unwrap(), payload);
     }
 
     #[test]

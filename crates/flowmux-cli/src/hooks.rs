@@ -94,6 +94,10 @@ pub struct ClaudeHookInput {
     /// Codex child-thread identity carried by SubagentStart/SubagentStop.
     #[serde(default)]
     pub agent_id: Option<String>,
+    #[serde(default)]
+    pub parent_agent_id: Option<String>,
+    #[serde(default, rename = "sessionContext")]
+    pub cline_session_context: Option<ClineSessionContext>,
     /// Claude/Codex permission mode. Only the bypass mode needs a PreToolUse
     /// fallback toast because it skips the normal PermissionRequest event.
     #[serde(default)]
@@ -102,6 +106,27 @@ pub struct ClaudeHookInput {
     /// blocked completion and forced the same turn to continue.
     #[serde(default)]
     pub stop_hook_active: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClineSessionContext {
+    #[serde(default, rename = "rootSessionId")]
+    pub root_session_id: Option<String>,
+}
+
+impl ClaudeHookInput {
+    pub fn is_cline_child(&self) -> bool {
+        self.parent_agent_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+            || self
+                .cline_session_context
+                .as_ref()
+                .and_then(|context| context.root_session_id.as_deref())
+                .filter(|id| !id.trim().is_empty())
+                .zip(self.session_id.as_deref())
+                .is_some_and(|(root, session)| root != session)
+    }
 }
 
 /// Stream JSON from stdin and retain only the small fields Flowmux uses.
@@ -1541,6 +1566,19 @@ mod tests {
         ] {
             let parsed: ClaudeHookInput = serde_json::from_str(raw).unwrap();
             assert!(parsed.session_id.is_some(), "payload was {raw}");
+        }
+    }
+
+    #[test]
+    fn cline_root_and_legacy_payloads_remain_accepted() {
+        for payload in [
+            r#"{"taskId":"root"}"#,
+            r#"{"taskId":"root","parent_agent_id":null,"sessionContext":{"rootSessionId":"root"}}"#,
+            r#"{"taskId":"root","parent_agent_id":"","sessionContext":null}"#,
+        ] {
+            let input = parse_agent_hook_payload(payload).unwrap();
+            assert!(!input.is_cline_child(), "{payload}");
+            assert_eq!(input.session_id.as_deref(), Some("root"));
         }
     }
 

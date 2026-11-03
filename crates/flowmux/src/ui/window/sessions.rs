@@ -159,59 +159,10 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
         })
         .min()
         .ok_or("The agent is no longer running in this tab")?;
-    let mut environment = std::collections::BTreeMap::new();
-    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(unused_mut))]
-    let mut arguments = Vec::new();
-    #[cfg(target_os = "linux")]
-    {
-        let bytes = std::fs::read(format!("/proc/{pid}/environ")).map_err(|e| e.to_string())?;
-        for key in target
-            .agent
-            .home_variables()
-            .iter()
-            .copied()
-            .chain(["PATH"])
-        {
-            let prefix = format!("{key}=");
-            if let Some(value) = bytes
-                .split(|b| *b == 0)
-                .find_map(|entry| entry.strip_prefix(prefix.as_bytes()))
-                .filter(|v| !v.is_empty())
-            {
-                environment.insert(
-                    key.to_string(),
-                    String::from_utf8(value.to_vec()).map_err(|e| e.to_string())?,
-                );
-            }
-        }
-        if target.agent == SessionAgent::Cline {
-            let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).map_err(|e| e.to_string())?;
-            let argv: Vec<_> = bytes
-                .split(|b| *b == 0)
-                .filter_map(|v| std::str::from_utf8(v).ok())
-                .collect();
-            arguments = cline_arguments(&mut environment, &argv, || {
-                std::fs::read_link(format!("/proc/{pid}/cwd")).map_err(|e| e.to_string())
-            })?;
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let (native_environment, native_arguments) = macos::read(pid, target.agent)?;
-        environment.extend(native_environment);
-        arguments.extend(native_arguments);
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        let _ = pid;
-        for key in target.agent.home_variables() {
-            if let Ok(value) = std::env::var(key) {
-                if !value.is_empty() {
-                    environment.insert((*key).into(), value);
-                }
-            }
-        }
-    }
+    let flowmux_state::session_history::SessionLaunchContext {
+        environment,
+        arguments,
+    } = flowmux_state::session_history::SessionLaunchContext::read(target.agent, pid)?;
     let path = target
         .agent
         .history_home(|key| environment.get(key).map(PathBuf::from))
@@ -221,40 +172,6 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
         environment,
         arguments,
     })
-}
-
-fn cline_arguments(
-    environment: &mut std::collections::BTreeMap<String, String>,
-    argv: &[&str],
-    cwd: impl Fn() -> Result<PathBuf, String>,
-) -> Result<Vec<String>, String> {
-    let mut arguments = Vec::new();
-    for (flag, variable) in [("--config", "CLINE_DIR"), ("--data-dir", "CLINE_DATA_DIR")] {
-        if let Some(value) = argv.iter().enumerate().find_map(|(i, arg)| {
-            arg.strip_prefix(&format!("{flag}="))
-                .or_else(|| (*arg == flag).then(|| argv.get(i + 1).copied()).flatten())
-        }) {
-            let path = PathBuf::from(value);
-            let path = if path.is_absolute() {
-                path
-            } else {
-                cwd()?.join(path)
-            };
-            let value = path
-                .to_str()
-                .ok_or("Agent directory is not UTF-8")?
-                .to_string();
-            environment.insert(variable.into(), value.clone());
-            if flag == "--data-dir" {
-                environment.insert(
-                    "CLINE_DB_DATA_DIR".into(),
-                    path.join("db").to_string_lossy().into_owned(),
-                );
-            }
-            arguments.extend([flag.to_string(), value]);
-        }
-    }
-    Ok(arguments)
 }
 
 impl WindowController {
@@ -563,38 +480,6 @@ mod tests {
         assert!(
             !home.environment.contains_key("PATH"),
             "the GUI process PATH must not replace the initialized shell PATH"
-        );
-    }
-
-    #[test]
-    fn cline_options_preserve_absolute_paths_and_override_environment() {
-        let mut environment = [("CLINE_DATA_DIR".into(), "/old".into())].into();
-        let arguments = cline_arguments(
-            &mut environment,
-            &["cline", "--data-dir=/custom data", "--config", "/config"],
-            || panic!("absolute options do not require a running process"),
-        )
-        .unwrap();
-        assert_eq!(
-            arguments,
-            ["--config", "/config", "--data-dir", "/custom data"]
-        );
-        assert_eq!(environment["CLINE_DATA_DIR"], "/custom data");
-        assert_eq!(environment["CLINE_DB_DATA_DIR"], "/custom data/db");
-        let previous = environment.clone();
-        assert!(
-            cline_arguments(&mut environment, &["cline", "--config"], || Err(
-                "unavailable".into()
-            ))
-            .unwrap()
-            .is_empty()
-        );
-        assert_eq!(environment, previous);
-        assert!(
-            cline_arguments(&mut environment, &["cline", "--config=relative"], || Err(
-                "unavailable".into()
-            ))
-            .is_err()
         );
     }
 

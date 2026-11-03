@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 
+mod launch;
 mod sqlite;
+pub use launch::SessionLaunchContext;
 
 /// Parsed transcripts by path, keyed on size and mtime, so a repeated listing
 /// re-reads only files that changed instead of every head and tail window.

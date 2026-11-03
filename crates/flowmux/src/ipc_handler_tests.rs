@@ -1103,6 +1103,66 @@ async fn stale_and_screen_reports_do_not_emit_recent_activity() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn accepted_native_sessions_persist_storage_and_reject_stale_replacements() {
+    use std::process::{Command, Stdio};
+    for agent in ["gemini", "cline"] {
+        let data = tempfile::tempdir().unwrap();
+        let native_home = data.path().join("native");
+        let mut native = Command::new("/bin/sh")
+            .args(["-c", "read -r done || :"])
+            .env("GEMINI_CLI_HOME", &native_home)
+            .env("CLINE_DATA_DIR", &native_home)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let store = flowmux_state::AgentSessionStore::new(data.path().join("bindings"));
+        let (handler, rx, pane, surface) =
+            single_pane_handler_with_store(Some(store.clone())).await;
+        for (seq, session) in [(11, "current"), (10, "stale")] {
+            let response = handler.handle(Request::AgentActivityUpdate {
+                pane: Some(pane),
+                surface: Some(surface),
+                agent: agent.into(),
+                status: Some(AgentStatus::Idle),
+                activity: Some(AgentActivity::Idle),
+                pid: Some(native.id()),
+                source: Some("flowmux:hook".into()),
+                seq: Some(seq),
+                message: None,
+                custom_status: None,
+                session_id: Some(session.into()),
+                session_name: None,
+                messaging_socket: None,
+            });
+            tokio::pin!(response);
+            let command = tokio::select! {
+                response = &mut response => panic!("update completed before visibility query: {response:?}"),
+                command = rx.recv() => command.unwrap(),
+            };
+            let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+                panic!("expected visibility query");
+            };
+            ack.send(false).unwrap();
+            assert!(matches!(response.await, Response::Ok));
+            let saved = store.lookup_surface(surface).unwrap();
+            assert_eq!(saved.session_id, "current");
+            let key = if agent == "gemini" {
+                "GEMINI_CLI_HOME"
+            } else {
+                "CLINE_DATA_DIR"
+            };
+            assert_eq!(
+                saved.context.unwrap().environment[key],
+                native_home.to_str().unwrap()
+            );
+            while rx.try_recv().is_ok() {}
+        }
+        drop(native.stdin.take());
+        assert!(native.wait().unwrap().success());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it() {
     let data = tempfile::tempdir().unwrap();
     let store = flowmux_state::AgentSessionStore::new(data.path().to_path_buf());

@@ -1194,7 +1194,9 @@ impl GuiHandler {
                 let mut accepted_pane = None;
                 if let Some(ws_id) = outcome.workspace {
                     if let Some(store) = self.session_store.as_ref() {
-                        if let Err(error) = store.record(&agent, surface, &session_id) {
+                        if let Err(error) =
+                            store.record_from_process(&agent, surface, &session_id, pid)
+                        {
                             warn!(%surface, %agent, %error, "failed to persist agent session");
                         }
                     }
@@ -1352,9 +1354,12 @@ impl GuiHandler {
                         {
                             if let Some(session_id) = session_binding.as_deref() {
                                 if let Some(store) = self.session_store.as_ref() {
-                                    if let Err(error) =
-                                        store.record(&session_agent, surface, session_id)
-                                    {
+                                    if let Err(error) = store.record_from_process(
+                                        &session_agent,
+                                        surface,
+                                        session_id,
+                                        pid,
+                                    ) {
                                         warn!(%surface, agent = %session_agent, %error, "failed to persist agent session");
                                     }
                                 }
