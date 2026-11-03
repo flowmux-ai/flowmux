@@ -177,7 +177,8 @@ mod linux_tests {
         // The only evidence: a descendant named codex appending to the rollout.
         let codex = dir.path().join("bin/codex");
         std::fs::create_dir_all(codex.parent().unwrap()).unwrap();
-        std::fs::copy("/bin/sleep", &codex).unwrap();
+        // Avoid executing a freshly written inode while another test forks.
+        std::os::unix::fs::symlink("/bin/sleep", &codex).unwrap();
         let mut child = std::process::Command::new(&codex)
             .arg("30")
             .stdout(

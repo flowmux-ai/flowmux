@@ -71,6 +71,7 @@ int main(int argc, char **argv) {
         subprocess.run(["cc", str(source), "-o", str(executable)], check=True, timeout=30)
         h.env["PATH"] = str(h.root) + os.pathsep + h.env["PATH"]
         h.start_display()
+        os.environ["DISPLAY"] = h.env["DISPLAY"]
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
         os.environ.pop("AT_SPI_BUS_ADDRESS", None)
         import gi
@@ -79,6 +80,15 @@ int main(int argc, char **argv) {
         Atspi.set_timeout(3000, 3000)
         connection = display.Display(h.env["DISPLAY"])
         process, socket = h.window("session-flow")
+
+        def mapped_window():
+            return next((window for window in connection.screen().root.query_tree().children
+                         if (owner := window.get_full_property(connection.intern_atom("_NET_WM_PID"),
+                                                              X.AnyPropertyType)) is not None
+                         and int(owner.value[0]) == process.pid
+                         and window.get_attributes().map_state == X.IsViewable), None)
+
+        window = gui.wait_for(mapped_window, "mapped fixture window")
         workspace = h.rpc(socket, "workspace_create", name="Fork fixture", root=str(h.root))["workspace_created"]["id"]
         h.rpc(socket, "workspace_focus", workspace=workspace)
         pane = h.workspace(socket, workspace)["panes"][0]
@@ -92,22 +102,26 @@ int main(int argc, char **argv) {
 
         def find(role, name=None):
             desktop = Atspi.get_desktop(0)
+            desktop.clear_cache()
             pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
-            pending = [node for node in pending if node.get_process_id() == process.pid]
+            pending = [node for node in pending if node and node.get_process_id() == process.pid]
             while pending:
                 node = pending.pop()
                 if node is None:
                     continue
+                node.clear_cache()
                 if (node.get_role() == role and (name is None or node.get_name() == name)
                         and node.get_state_set().contains(Atspi.StateType.SHOWING)):
                     return node
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
 
         def menu_enabled():
-            frame = gui.wait_for(lambda: find(Atspi.Role.FRAME), "visible window")
-            bounds = frame.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
-            xtest.fake_input(connection, X.MotionNotify, x=bounds.x + bounds.width * 3 // 4,
-                             y=bounds.y + bounds.height // 2)
+            # Native input needs a mapped X window, not a particular accessibility role.
+            bounds = window.get_geometry()
+            point = connection.screen().root.translate_coords(
+                window, bounds.width * 3 // 4, bounds.height // 2)
+            window.set_input_focus(X.RevertToParent, X.CurrentTime)
+            xtest.fake_input(connection, X.MotionNotify, x=point.x, y=point.y)
             xtest.fake_input(connection, X.ButtonPress, 3)
             xtest.fake_input(connection, X.ButtonRelease, 3)
             connection.sync()

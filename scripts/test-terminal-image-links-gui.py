@@ -177,7 +177,7 @@ def main():
             assert (changed > difference.width * .7) == expected, (path_text, changed, difference.width)
 
         for name, absolute in [("main.cc", False), ("main.c", False), ("main.cpp", True),
-                               ("main.dart", False), ("index.html", False), ("app.js", False),
+                               ("main.dart", False), ("app.js", False),
                                ("settings.json", False), ("notes.txt", False), ("Dockerfile", False),
                                ("readme.md", False), ("guide.MARKDOWN", True)]:
             file_path = h.root / name
@@ -359,6 +359,32 @@ def main():
                 time.sleep(.3)
                 assert len(windows(include_markdown=True)) == 1, "missing Markdown opened a viewer"
             h.pass_check(f"{name}: no underline or editor tab")
+        for name, absolute in [("index.html", False), ("preview.HTM", True), ("한글.xhtml", False)]:
+            file_path = h.root / name
+            file_path.write_text('<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml">'
+                                 f'<head><meta charset="utf-8" /><title>{name}</title></head>'
+                                 '<body><p>Local HTML fixture</p></body></html>')
+            path_text = str(file_path) if absolute else name
+            geometry = show_path(path_text)
+            previous = len(editor_tabs())
+            click(path_text[:len(path_text) // 2], geometry)
+
+            def browser_pane():
+                return next((p for p in h.workspace(socket, workspace_id)["panes"]
+                             if any(tab["kind"] == "browser" for tab in p["tabs"])), None)
+
+            browser = gui.wait_for(browser_pane, "HTML link opens browser pane")
+            assert browser["id"] != pane, "HTML preview replaced the source terminal"
+            gui.wait_for(lambda: h.rpc(socket, "browser_url", pane=browser["id"])
+                         ["browser_result"]["value"] == file_path.as_uri(), "HTML file URL")
+            gui.wait_for(lambda: h.rpc(socket, "browser_title", pane=browser["id"])
+                         ["browser_result"]["value"] == name, "HTML document loaded")
+            assert len(editor_tabs()) == previous, "HTML preview added an editor tab"
+            geometry = show_path(path_text)
+            click(path_text[:len(path_text) // 2], geometry, shift=True)
+            gui.wait_for(lambda: len(editor_tabs()) == previous + 1, "Ctrl+Shift-click edits HTML")
+            gui.wait_for(lambda: editor_tabs()[-1]["title"] == name, "HTML editor title")
+            h.pass_check(f"{path_text}: Ctrl-click previews HTML; Ctrl+Shift-click edits it")
         h.close_window(process)
     finally:
         if connection:

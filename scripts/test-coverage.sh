@@ -43,7 +43,8 @@ python3 scripts/test-team-usage-gui.py \
 python3 scripts/test-session-save-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
-python3 scripts/test-session-flow-gui.py \
+# Keep failure logs outside the CI temporary tree, which is deleted on exit.
+TMPDIR=/tmp python3 scripts/test-session-flow-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-pty-spawn-failure-gui.py \
@@ -52,7 +53,7 @@ python3 scripts/test-pty-spawn-failure-gui.py \
 python3 scripts/test-terminal-read-screen-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
-python3 scripts/test-terminal-image-links-gui.py \
+TMPDIR=/tmp python3 scripts/test-terminal-image-links-gui.py \
   --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
 python3 scripts/test-ipc-recovery-gui.py \
