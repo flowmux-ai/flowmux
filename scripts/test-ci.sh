@@ -40,7 +40,7 @@ printf 'CI_GATE=%s\n' "$mode"
 uname -a
 rustc -Vv
 cargo --version
-pkg-config --modversion gtk4 libadwaita-1
+pkg-config --modversion glib-2.0 gtk4 libadwaita-1
 # The full failure/marker matrix starts many mock processes on hosted macOS.
 run_phase ci-runner-tests 300 python3 scripts/test-ci-runner.py
 run_phase installer-routing 60 python3 scripts/test-install.py

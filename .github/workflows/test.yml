@@ -155,8 +155,9 @@ jobs:
       - name: Install native dependencies
         run: brew install pkg-config gtk4 libadwaita appstream vte3 meson ninja ffmpeg
       # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
-      # Keep fatal-critical checks enabled with a compatible GTK/libadwaita pair.
-      - name: Install compatible GTK and libadwaita for native popup checks
+      # GLib 2.90.1 also deadlocks in source_destroy_lock during native worker wakeups.
+      # Keep fatal-critical checks enabled with a compatible runtime stack.
+      - name: Install compatible GLib, GTK and libadwaita for native checks
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
@@ -173,10 +174,13 @@ jobs:
                 root_url "https://ghcr.io/v2/homebrew/core"
             ' "$formula"
           done
-          brew uninstall --ignore-dependencies libadwaita gtk4
-          brew install --force-bottle flowmux/ci/gtk4
+          cp .github/homebrew/glib.rb "$(brew --repository flowmux/ci)/Formula/glib.rb"
+          brew uninstall --ignore-dependencies libadwaita gtk4 glib
+          brew install --build-from-source flowmux/ci/glib
+          brew install --force-bottle --ignore-dependencies flowmux/ci/gtk4
           # Dependencies were installed above; do not upgrade the pinned GTK.
           brew install --force-bottle --ignore-dependencies flowmux/ci/libadwaita
+          test "$(pkg-config --modversion glib-2.0)" = 2.88.4
           test "$(pkg-config --modversion gtk4)" = 4.22.3
           test "$(pkg-config --modversion libadwaita-1)" = 1.9.3
           pkg-config --print-errors --exists gtk4 libadwaita-1 vte-2.91-gtk4
