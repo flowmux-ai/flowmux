@@ -14,6 +14,11 @@ class Glib < Formula
   depends_on "pcre2"
   uses_from_macos "libffi"
 
+  patch do
+    url "https://raw.githubusercontent.com/Homebrew/homebrew-core/a6afb6c533be34a6148cf138984506944bc5170b/Patches/glib/hardcoded-paths.diff"
+    sha256 "d846efd0bf62918350da94f850db33b0f8727fece9bfaf8164566e3094e80c97"
+  end
+
   def install
     system "meson", "setup", "build", *std_meson_args,
            "-Dintrospection=disabled", "-Dtests=false", "-Ddtrace=disabled",
