@@ -39,6 +39,19 @@ def main():
         status = 'passed' if result == 0 else 'failed'
     except subprocess.TimeoutExpired:
         result, status = 124, 'timeout'
+        if sys.platform == 'darwin':
+            # GLib deadlines cannot fire when the native main thread is blocked.
+            try:
+                rows = subprocess.check_output(
+                    ['ps', '-axo', 'pid=,pgid=,comm='], text=True, timeout=5)
+                for row in rows.splitlines():
+                    pid, group, executable = row.split(None, 2)
+                    if int(group) == process.pid and Path(executable).name.startswith('macos_native-'):
+                        subprocess.run(
+                            ['/usr/bin/sample', pid, '3', '1', '-file',
+                             str(report.with_suffix(f'.{pid}.sample'))], timeout=10, check=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                record['diagnostic_error'] = str(error)
     except SystemExit as error:
         result, status = error.code, 'interrupted'
     except OSError as error:

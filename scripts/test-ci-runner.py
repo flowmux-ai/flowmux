@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Check gate failure propagation and isolation without launching a desktop."""
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 STUB = r'''
@@ -91,6 +93,32 @@ if name == 'cargo' and 'macos_native' in args:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_native_timeout_samples_only_owned_tests_and_preserves_failure(self):
+        spec = importlib.util.spec_from_file_location('phase', ROOT / 'scripts/ci-phase.py')
+        phase = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(phase)
+        for error in (None, OSError('sample unavailable'), subprocess.TimeoutExpired('sample', 10)):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
+                process = Mock(pid=123)
+                process.wait.side_effect = [subprocess.TimeoutExpired('cargo', 1), 0]
+                with patch.object(sys, 'argv', ['ci-phase.py', directory, 'native', '1', 'cargo']), \
+                     patch.object(sys, 'platform', 'darwin'), \
+                     patch.object(phase.signal, 'signal'), \
+                     patch.object(phase.os, 'killpg') as kill, \
+                     patch.object(phase.subprocess, 'Popen', return_value=process), \
+                     patch.object(phase.subprocess, 'check_output', return_value=(
+                         '123 123 /bin/cargo\n124 123 /build/macos_native-abc\n'
+                         '125 123 /bin/sh\n126 999 /other/macos_native-def\n')), \
+                     patch.object(phase.subprocess, 'run', side_effect=error) as sample:
+                    self.assertEqual(phase.main(), 124)
+                sample.assert_called_once_with(
+                    ['/usr/bin/sample', '124', '3', '1', '-file',
+                     str(Path(directory) / 'native.124.sample')], timeout=10, check=True)
+                kill.assert_called_once_with(123, signal.SIGKILL)
+                receipt = json.loads((Path(directory) / 'native.json').read_text())
+                self.assertEqual((receipt['status'], receipt['exit_code']), ('timeout', 124))
+                self.assertEqual('diagnostic_error' in receipt, error is not None)
+
     def test_phase_deadlines_exit_codes_and_descendant_cleanup(self):
         job = """
 import os, pathlib, signal, subprocess, sys, time

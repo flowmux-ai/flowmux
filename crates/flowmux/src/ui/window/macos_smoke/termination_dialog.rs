@@ -3,6 +3,7 @@ use super::*;
 use vte::prelude::*;
 
 pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId, pane: PaneId) {
+    println!("MACOS_TERMINATION_DIALOG_START");
     let original = controller
         .pane_registry
         .borrow()
@@ -28,6 +29,7 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     })
     .await;
     let dialog = controller.current_termination_dialog().unwrap();
+    println!("MACOS_TERMINATION_DEAD_TAB_DIALOG");
     let heading = dialog.heading().unwrap();
     assert!(
         heading.contains("SIGKILL") || heading.contains("low on memory"),
@@ -40,6 +42,7 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
         .dispatch(GtkCommand::CloseSurface { pane, surface, ack })
         .await;
     rx.await.unwrap().unwrap();
+    println!("MACOS_TERMINATION_DEAD_TAB_CLOSED");
     wait_until("closed tab's termination explanation dismissed", || {
         controller.current_termination_dialog().is_none() && !dialog.is_mapped()
     })
@@ -80,6 +83,7 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     rx.await.unwrap().unwrap();
     glib::timeout_future(Duration::from_millis(500)).await;
     assert!(controller.current_termination_dialog().is_none());
+    println!("MACOS_TERMINATION_LIVE_TAB_CLOSED");
 
     let (_, surface) = controller
         .store
@@ -92,6 +96,7 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
         .unwrap();
     let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
     controller.tear_off_surface(pane, surface).await;
+    println!("MACOS_TERMINATION_TORN_OFF");
     let torn = controller.torn_off_terminals.borrow()[&surface]
         .window
         .upgrade()
@@ -102,6 +107,7 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     })
     .await;
     let dialog = controller.current_termination_dialog().unwrap();
+    println!("MACOS_TERMINATION_TORN_OFF_DIALOG");
     assert_eq!(
         dialog.root().and_downcast::<adw::ApplicationWindow>(),
         Some(torn.clone())

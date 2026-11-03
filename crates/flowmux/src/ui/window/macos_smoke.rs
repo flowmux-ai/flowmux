@@ -118,6 +118,19 @@ async fn wait_until(description: &str, mut ready: impl FnMut() -> bool) {
     .unwrap_or_else(|_| panic!("native UI timed out: {description}"));
 }
 
+async fn wait_for_paint(widget: &impl IsA<gtk::Widget>) {
+    wait_until("mapped widget", || widget.is_mapped()).await;
+    let clock = widget.frame_clock().expect("mapped widget frame clock");
+    let painted = Rc::new(Cell::new(false));
+    let signal = clock.connect_after_paint({
+        let painted = painted.clone();
+        move |_| painted.set(true)
+    });
+    widget.queue_draw();
+    wait_until("widget painted", || painted.get()).await;
+    clock.disconnect(signal);
+}
+
 async fn javascript(browser: &BrowserPane, source: &str) -> String {
     let (tx, rx) = oneshot::channel();
     browser.evaluate_js(source, move |result| {
@@ -528,8 +541,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             })
             .collect::<Vec<_>>();
         assert_eq!(options.len(), 1);
+        // Exercise mapped native windows instead of opening and closing in one poll.
+        wait_for_paint(&options[0]).await;
         controller.dispatch(GtkCommand::ShowOptionsDialog).await;
         assert!(!options[0].is_visible());
+        wait_for_paint(&controller.window).await;
     }
     println!("OPTIONS_BUTTON_TOGGLE_OK");
 
