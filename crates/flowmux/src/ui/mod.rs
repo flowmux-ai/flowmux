@@ -4,6 +4,8 @@ pub(crate) mod agent_office;
 mod browser_bookmarks;
 mod browser_capture;
 mod browser_chrome;
+#[cfg(not(target_os = "macos"))]
+pub(crate) mod browser_color_scheme;
 mod browser_control;
 mod browser_dialogs;
 mod browser_downloads;

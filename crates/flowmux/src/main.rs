@@ -410,8 +410,18 @@ fn main() -> anyhow::Result<()> {
         // picks up after the user re-launches.
         let theme = std::sync::Arc::new(theme::ResolvedTheme::load());
 
-        // Native widgets and WebKit's color preference follow the system.
-        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::Default);
+        // Force libadwaita's color scheme to match our background. Web pages
+        // in browser tabs keep the system preference.
+        #[cfg(not(target_os = "macos"))]
+        if let Some(display) = gtk::gdk::Display::default() {
+            ui::browser_color_scheme::install(&display);
+        }
+        let style = adw::StyleManager::default();
+        if theme.is_dark() {
+            style.set_color_scheme(adw::ColorScheme::ForceDark);
+        } else {
+            style.set_color_scheme(adw::ColorScheme::ForceLight);
+        }
 
         // Install the global CSS for pane frames + sidebar tint. Seed it with
         // the current focus border options; the options dialog later reloads

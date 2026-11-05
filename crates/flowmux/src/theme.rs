@@ -8,9 +8,10 @@
 //!
 //! * flowmux terminal widgets — font, bg/fg/cursor, ANSI palette, selection.
 //! * embedded editor surfaces — font, bg/fg/cursor, and selection.
-//! * Global CSS — pane frame and sidebar tint.
+//! * libadwaita color scheme — forced dark when the background is dark.
+//! * Global CSS — pane frame, sidebar tint, and browser toolbar.
 //!
-//! Native chrome and browser surfaces follow the system color scheme.
+//! Web pages in browser tabs follow the system color scheme instead.
 //!
 //! Users who want a specific look should drop a theme file into
 //! `~/.config/flowmux/theme` (see `resources/themes/example.theme` for
@@ -288,7 +289,13 @@ impl ResolvedTheme {
             0.94,
         ));
         let toast_border_css = rgba_css(&blend_with_alpha(&self.fg, 0.18));
-        let browser_css = include_str!("ui/browser.css");
+        let browser_css = include_str!("ui/browser.css")
+            .replace("$bg", &bg_css)
+            .replace("$fg", &rgba_css(&self.fg))
+            .replace("$surface", &tabbar_bg_css)
+            .replace("$border", &pane_border_css)
+            .replace("$hover", &control_hover_css)
+            .replace("$accent", &focus_full_css);
         let sidebar_zoom =
             flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
         format!(
