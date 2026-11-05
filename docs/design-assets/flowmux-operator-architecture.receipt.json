@@ -1,0 +1,62 @@
+{
+  "diagram_type": "architecture",
+  "design_status": "proposal; not implemented",
+  "specification": {
+    "path": "/home/junsu/dev/os/flowmux/docs/design-assets/flowmux-operator-architecture.json",
+    "sha256": "43861207eece323a59ee4f00e6d18151339fce41a3b3f16b3d28e48b3a29d0b7",
+    "bytes": 11941
+  },
+  "artifact": {
+    "path": "/home/junsu/dev/os/flowmux/docs/design-assets/flowmux-operator-architecture.html",
+    "sha256": "d181b420ef73bc8f6e82af09def27a139c7293ada22ec9894b4a124ec606e005",
+    "bytes": 659582
+  },
+  "validation": "9/9 showcase, 0 errors, 0 warnings; frozen diagram specification and final assembled Korean HTML checked",
+  "visual_review": "passed",
+  "visual_review_scope": "Inspected final rendered diagram in light and dark themes in Flowmux at 935 x 1205 CSS pixels. Inspected the ASCII preview and voice cards in both themes, the query-budget table in dark theme, and terminal contracts in light theme. No page-wide horizontal overflow. DOM-driven interaction checks exercised all five guided views, all six ASCII states, Korean search for the new GitHub node, search closure and review/source disclosures. Theme changes were reloaded before captures. Native pointer input, other viewport widths and file/clipboard exports were not tested.",
+  "correction_rounds": 1,
+  "design_note": "Revision 03 proposal, not implemented: GitHub onboarding and relevant issue/PR/release/CI monitoring, user-selected Claude/agy/Codex adapter, separate HTTP/inference/notification budgets, direct terminal actions and ASCII identity in MVP, later voice commands. Flowmux owns memory/cache/job state; provider sessions remain separate and profiles are pinned per task. Product budget proposals are not service quotas. Atomic terminal target/ownership validation and command completion evidence are new contracts, not capabilities claimed for existing PaneSendKeys. Local polling is the default; webhook receivers and independent resident deployment remain optional follow-up work.",
+  "research_date": "2026-11-03",
+  "locale": "ko",
+  "localization_note": "Archify deliver rendered the frozen JSON to a temporary artifact. Its header, guided-view data, SVG and cards replaced corresponding sections of the preserved Korean standalone viewer. The Korean appendix, scoped styles and local-only ASCII preview were authored separately. Final Archify check, JavaScript syntax/state self-check, duplicate-ID and relative-link checks cover the exact assembled HTML identified by the artifact hash.",
+  "revision": "03",
+  "revision_date": "2026-11-05",
+  "research_updated_date": "2026-11-05",
+  "review_history": [
+    {
+      "revision": "02",
+      "primary_model": "claude-fable-5-1",
+      "primary_report": "/home/junsu/.local/state/flowmux/team-jobs/job-30essivo/result.md",
+      "revision_job": "/home/junsu/.local/state/flowmux/team-jobs/job-je2uev_z",
+      "revision_collection_status": "failed: invalid_report; extra prose before JSON report",
+      "revision_manual_review": "Inspected retained assistant report and applied all three wording recommendations: conditional goal reuse, neither permission nor prohibition inferred from API-key guidance, separate operator identity from terminal PID/PTY liveness. Managed collection is not reported as successful.",
+      "revision_report_source": "/home/junsu/.local/state/flowmux/team-jobs/job-je2uev_z/attempt-1/answer.txt"
+    }
+  ],
+  "review": {
+    "kind": "implementation evidence and GitHub official documentation investigation",
+    "agent": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "medium",
+    "job": "/home/junsu/.local/state/flowmux/team-jobs/job-d6p51ay4",
+    "report": "/home/junsu/.local/state/flowmux/team-jobs/job-d6p51ay4/result.md",
+    "collection_status": "completed",
+    "fallback_used": false,
+    "lead_verification": "Inspected terminal IPC and actual active-terminal input handling, reviewed the worker findings, and kept proposed product budgets separate from GitHub official limits. Prior Fable meta-review is retained as revision 02 history; no new Fable review is claimed."
+  },
+  "additional_checks": {
+    "inline_javascript": "syntax passed",
+    "ascii_preview": "all six states; six lines; printable ASCII; exactly one right-arm backslash; exactly one pressed state; nonempty text labels",
+    "html_ids": "141 unique, zero duplicates",
+    "local_links": "7 checked, zero missing",
+    "guided_views": "5 checked including wake-and-reason and github-and-terminal"
+  },
+  "not_tested": [
+    "Live GitHub account authentication or API traffic",
+    "Live Claude/agy/Codex operator execution",
+    "Direct terminal execution or cancellation",
+    "Microphone, STT or TTS",
+    "File/clipboard exports",
+    "Native pointer input and other viewport widths"
+  ]
+}
