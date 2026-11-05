@@ -14,7 +14,6 @@ import re
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 from Xlib import X, XK, display, protocol
@@ -170,7 +169,10 @@ def main():
 
         document.unlink()
         os.mkfifo(document)
-        time.sleep(1.5)
+        # A nonblocking writer opens only once the real reader arrives; hold EOF
+        # until the close/error checks finish instead of guessing the poll timing.
+        fifo_writer = gui.wait_for(lambda: os.open(document, os.O_WRONLY | os.O_NONBLOCK),
+                                  "background FIFO reader")
         try:
             latency = responsive(terminal)
             # Closing must fail safely while the ordered document flush cannot
@@ -185,13 +187,10 @@ def main():
             gui.wait_for(lambda: not sync_error_visible(), "synchronization error dismissed")
             responsive(terminal)
         finally:
-            def release():
-                with document.open("w") as writer:
-                    writer.write("FIFO read completed\n")
-            writer = threading.Thread(target=release, daemon=True)
-            writer.start()
-            writer.join(5)
-        assert not writer.is_alive(), "background reader never consumed the FIFO"
+            try:
+                os.write(fifo_writer, b"FIFO read completed\n")
+            finally:
+                os.close(fifo_writer)
         document.unlink()
         document.write_text("Restored regular file\n")
         responsive(terminal)

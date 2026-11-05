@@ -10,6 +10,26 @@ import sys
 import time
 
 
+def reap_detached_children():
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            while os.waitpid(-1, os.WNOHANG)[0]:
+                pass
+        except ChildProcessError:
+            return
+        # Subreaper adoption retains ownership even after setsid or double-fork.
+        children = Path(f'/proc/self/task/{os.getpid()}/children').read_text().split()
+        for child in children:
+            try:
+                os.kill(int(child), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if time.monotonic() >= deadline:
+            raise TimeoutError('detached test descendants did not exit')
+        time.sleep(.01)
+
+
 def interrupted(signum, _frame):
     raise SystemExit(128 + signum)
 
@@ -30,9 +50,27 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, interrupted)
     try:
+        if sys.platform == 'linux':
+            import ctypes
+            libc = ctypes.CDLL(None, use_errno=True)
+            if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error))
         process = subprocess.Popen(command, start_new_session=True)
         record['pid'] = process.pid
         report.write_text(json.dumps(record, indent=2) + '\n')
+        if sys.platform == 'linux':
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                # Reap exited orphans during the suite so PID liveness checks stay valid.
+                children = Path(f'/proc/self/task/{os.getpid()}/children').read_text().split()
+                for child in map(int, children):
+                    if child != process.pid:
+                        os.waitpid(child, os.WNOHANG)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                time.sleep(min(.05, remaining))
         result = process.wait(timeout=timeout)
         if result < 0:
             result = 128 - result
@@ -67,6 +105,8 @@ def main():
                 except ProcessLookupError:
                     pass
                 process.wait(timeout=5)
+                if sys.platform == 'linux':
+                    reap_detached_children()
             except (OSError, subprocess.TimeoutExpired) as error:
                 record['error'] = 'cleanup failed: ' + str(error)
                 result, status = result or 1, 'cleanup-failed'

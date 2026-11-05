@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Check gate failure propagation and isolation without launching a desktop."""
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import subprocess
 import sys
@@ -16,16 +19,15 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 STUB = r'''
 import json, os, pathlib, sys
-name = pathlib.Path(sys.argv[0]).name
+name = pathlib.Path(sys.argv[0]).stem
 args = sys.argv[1:]
-if name == 'python3' and args and args[0] == 'scripts/ci-phase.py':
-    # The phase wrapper has its own real timeout/cleanup tests below.
-    os.execvp(args[4], args[4:])
 with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps({'name': name, 'args': args,
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
         'tmp': os.environ.get('TMPDIR'),
         'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
+        'desktop': os.environ.get('XDG_CURRENT_DESKTOP'),
+        'session_desktop': os.environ.get('XDG_SESSION_DESKTOP'),
         'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
         'boot_restore': os.environ.get('FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY'),
         'ssh_preview': os.environ.get('FLOWMUX_SSH_PREVIEW_SMOKE_ONLY'),
@@ -96,6 +98,104 @@ if name == 'cargo' and 'macos_native' in args:
 
 
 class RunnerTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux subreaper ownership')
+    def test_phase_reaps_exited_orphans_while_command_is_running(self):
+        job = """
+import os, pathlib, sys, time
+root = pathlib.Path(sys.argv[1])
+parent = os.fork()
+if parent == 0:
+    child = os.fork()
+    if child == 0:
+        time.sleep(.1)
+        (root / 'completed').touch()
+        os._exit(0)
+    (root / 'child.pid').write_text(str(child))
+    os._exit(0)
+os.waitpid(parent, 0)
+child = int((root / 'child.pid').read_text())
+deadline = time.monotonic() + 2
+while True:
+    try:
+        os.kill(child, 0)
+    except ProcessLookupError:
+        break
+    assert time.monotonic() < deadline, 'orphan zombie retained until phase exit'
+    time.sleep(.01)
+assert (root / 'completed').exists(), 'live orphan was killed before completing'
+sys.exit(27)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([
+                sys.executable, str(ROOT / 'scripts/ci-phase.py'), directory, 'live-reaping', '10',
+                sys.executable, '-c', job, directory,
+            ], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 27, result.stdout + result.stderr)
+
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux detached GUI fixtures')
+    def test_phase_reaps_detached_descendants_without_touching_other_processes(self):
+        job = """
+import pathlib, subprocess, sys, time
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+if sys.argv[2] == 'timeout':
+    time.sleep(60)
+sys.exit(27 if sys.argv[2] == 'failed' else 0)
+"""
+        protected = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+        try:
+            for mode, expected in [('passed', 0), ('failed', 27), ('timeout', 124)]:
+                with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                    info = Path(directory) / 'child.pid'
+                    try:
+                        result = subprocess.run([
+                            sys.executable, str(ROOT / 'scripts/ci-phase.py'), directory, mode,
+                            '.5' if mode == 'timeout' else '10',
+                            sys.executable, '-c', job, str(info), mode,
+                        ], capture_output=True, text=True, timeout=10)
+                        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                        self.assertIsNone(protected.poll(), 'cleanup reached an unrelated process')
+                        with self.assertRaises(ProcessLookupError, msg='detached fixture survived'):
+                            os.kill(int(info.read_text()), 0)
+                    finally:
+                        if info.exists():
+                            try:
+                                os.kill(int(info.read_text()), signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+        finally:
+            protected.kill()
+            protected.wait(timeout=5)
+
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux nested phase ownership')
+    def test_outer_timeout_reaps_children_of_an_interrupted_inner_phase(self):
+        job = """
+import pathlib, subprocess, sys, time
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                         start_new_session=True)
+pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+time.sleep(60)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            info = Path(directory) / 'child.pid'
+            phase = [sys.executable, str(ROOT / 'scripts/ci-phase.py')]
+            try:
+                result = subprocess.run(
+                    phase + [directory, 'outer', '.5'] + phase + [directory, 'inner', '30',
+                        sys.executable, '-c', job, str(info)],
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
+                self.assertEqual(json.loads((Path(directory) / 'outer.json').read_text())['status'], 'timeout')
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(info.read_text()), 0)
+            finally:
+                if info.exists():
+                    try:
+                        os.kill(int(info.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
     def test_native_timeout_samples_only_owned_tests_and_preserves_failure(self):
         spec = importlib.util.spec_from_file_location('phase', ROOT / 'scripts/ci-phase.py')
         phase = importlib.util.module_from_spec(spec)
@@ -104,7 +204,8 @@ class RunnerTests(unittest.TestCase):
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
                 process = Mock(pid=123)
                 process.wait.side_effect = [subprocess.TimeoutExpired('cargo', 1), 0]
-                with patch.object(sys, 'argv', ['ci-phase.py', directory, 'native', '1', 'cargo']), \
+                with contextlib.redirect_stdout(io.StringIO()), \
+                     patch.object(sys, 'argv', ['ci-phase.py', directory, 'native', '1', 'cargo']), \
                      patch.object(sys, 'platform', 'darwin'), \
                      patch.object(phase.signal, 'signal'), \
                      patch.object(phase.os, 'killpg') as kill, \
@@ -185,22 +286,36 @@ time.sleep(60)
             root = Path(directory)
             for name in ['uname', 'rustc', 'rustup', 'cargo', 'pkg-config', 'xvfb-run', 'python3']:
                 stub = root / name
-                stub.write_text(f'#!{sys.executable}\n' + STUB)
+                stub.write_text(f'#!{sys.executable} -S\n' + STUB)
                 stub.chmod(0o755)
+            # Skip a second interpreter per phase; real timeout/cleanup tests stay above.
+            (root / 'python3.py').write_text(STUB)
+            (root / 'python3').write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = scripts/ci-phase.py ]; then shift 4; exec "$@"; fi\n'
+                f'exec {shlex.quote(sys.executable)} -S {shlex.quote(str(root / "python3.py"))} "$@"\n')
             env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}',
                        CALLS=str(root / 'calls'), CARGO_TARGET_DIR=str(root / 'target'),
                        FLOWMUX_SOCKET_PATH='/do/not/use/live.sock', **extra)
             result = subprocess.run(['bash', str(ROOT / 'scripts' / script), *args],
                                     env=env, capture_output=True, text=True)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+            if script == 'test-linux.sh':
+                saved = (root / 'target/ci/linux/tests.jsonl').read_text().splitlines()
+                logged = [line.split('=', 1)[1] for line in result.stdout.splitlines()
+                          if line.startswith('CI_TEST_RESULT=')]
+                self.assertEqual(saved, logged, 'uploaded timings must match the job log')
             return result, calls
 
     def test_linux_failure_preserves_isolation_without_coverage_or_retries(self):
-        result, calls = self.run_script('test-ci.sh', 'linux', TEST_EXIT='17')
+        result, calls = self.run_script('test-ci.sh', 'linux', TEST_EXIT='17',
+                                       XDG_CURRENT_DESKTOP='ubuntu:GNOME', XDG_SESSION_DESKTOP='ubuntu')
         self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
         desktop = [call for call in calls if call['name'] == 'xvfb-run']
         self.assertEqual(len(desktop), 1, 'a failed test must not be retried')
         self.assertIsNone(desktop[0]['socket'])
+        self.assertEqual(desktop[0]['desktop'], '')
+        self.assertEqual(desktop[0]['session_desktop'], '')
         self.assertTrue(desktop[0]['runtime'].startswith('/tmp/fm-ci.'))
         self.assertFalse(Path(desktop[0]['tmp']).exists(), 'temporary state must be removed')
         self.assertIn('scripts/test-linux.sh', desktop[0]['args'])
@@ -407,10 +522,12 @@ time.sleep(60)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertFalse(any(c['name'] == 'cargo' and c['args'][0] == 'build' for c in calls))
         self.assertFalse(any('scripts/test-browser-control.py' in c['args'] for c in calls))
+        self.assertIn('"test":"workspace"', result.stdout)
+        self.assertIn('"exit_code":23}', result.stdout)
 
     def test_linux_suites_keep_functional_tests_and_only_extend_stress(self):
         expected = {
-            'test-ssh-workspace-fixture.py', 'test-browser-control.py',
+            'test-gui-harness.py', 'test-ssh-workspace-fixture.py', 'test-browser-control.py',
             'test-browser-bookmarks-gui.py', 'test-browser-import-gui.py',
             'test-skills-gui.py', 'test-notifications-gui.py',
             'test-team-pingpong-gui.py', 'test-team-recovery-gui.py',
@@ -432,12 +549,22 @@ time.sleep(60)
                 cargo = [c['args'] for c in calls if c['name'] == 'cargo']
                 self.assertEqual(cargo, [['test', '--workspace', '--locked', '--no-fail-fast',
                                           '--', '--nocapture'], ['build', '--workspace', '--locked']])
+                timings = [json.loads(line.split('=', 1)[1]) for line in result.stdout.splitlines()
+                           if line.startswith('CI_TEST_RESULT=')]
+                self.assertEqual(len(timings), 26 if suite == 'extended' else 24)
+                self.assertEqual(len({row['test'] for row in timings}), len(timings))
+                self.assertTrue(all(row['exit_code'] == 0 and row['elapsed_seconds'] >= 0
+                                    for row in timings))
+                session_flow = next(c for c in calls if c['args'][0] == 'scripts/test-session-flow-gui.py')
+                self.assertEqual(session_flow['tmp'], '/tmp', 'GUI evidence must survive gate cleanup')
 
     def test_linux_gui_failure_stops_the_suite(self):
         result, calls = self.run_script('test-linux.sh',
                                        LINUX_GUI_FAIL='scripts/test-session-flow-gui.py')
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertFalse(any('scripts/ssh-workspace-fixture.py' in c['args'] for c in calls))
+        self.assertIn('"test":"session-flow"', result.stdout)
+        self.assertIn('"exit_code":23}', result.stdout)
 
     def test_macos_default_runs_functional_suites_without_office_stress(self):
         result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin')

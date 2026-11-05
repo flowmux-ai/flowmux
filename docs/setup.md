@@ -95,6 +95,11 @@ aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
 Both gates use the pinned repository Rust toolchain, private state/runtime
 directories, and fatal GTK criticals. Logs and environment versions are in
 `target/ci/{linux,macos}`.
+Linux also writes per-suite durations and exit codes to `tests.jsonl` in that
+directory, with `CI_TEST_START` / `CI_TEST_RESULT` markers in the job log.
+Each Linux suite runs under a child subreaper, so detached GUI, PTY and service
+processes are killed and reaped before the next suite, including after failure
+or timeout. Per-suite phase receipts are under `target/ci/linux/tests/`.
 `CARGO_TARGET_DIR` can relocate both build output and evidence. The Linux
 gate includes workspace tests, doctests, and the existing functional GUI and
 live SSH suites, without coverage instrumentation or percentage requirements.

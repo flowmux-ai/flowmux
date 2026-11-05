@@ -10,6 +10,7 @@ Artifacts remain in the printed temporary directory, including on failure.
 
 import argparse
 from contextlib import closing
+from contextvars import ContextVar
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -29,18 +30,27 @@ import uuid
 
 from Xlib import X, display, protocol
 
+WAIT_DEADLINE = ContextVar('gui_wait_deadline', default=None)
+
 
 def wait_for(check, description, timeout=30):
     deadline = time.monotonic() + timeout
+    parent = WAIT_DEADLINE.get()
+    if parent is not None:
+        deadline = min(deadline, parent)
+    token = WAIT_DEADLINE.set(deadline)
     last = None
-    while time.monotonic() < deadline:
-        try:
-            value = check()
-            if value:
-                return value
-        except (OSError, RuntimeError, ValueError) as error:
-            last = error
-        time.sleep(0.1)
+    try:
+        while time.monotonic() < deadline:
+            try:
+                value = check()
+                if value and time.monotonic() < deadline:
+                    return value
+            except (OSError, RuntimeError, ValueError) as error:
+                last = error
+            time.sleep(min(.1, max(0, deadline - time.monotonic())))
+    finally:
+        WAIT_DEADLINE.reset(token)
     raise AssertionError(f"Timed out: {description}; last error: {last}")
 
 
@@ -152,21 +162,36 @@ class Harness:
         with (self.root / f"{name}.log").open("w") as log:
             process = self.spawn([self.args.gui], stdout=log, stderr=log, cwd=self.root)
         path = self.root / f"run/flowmux-{process.pid}.sock"
-        wait_for(lambda: path.exists() and self.rpc(path, "ping"), f"{name} GUI socket")
+        def ready():
+            result = process.poll()
+            assert result is None, f"{name} GUI exited with {result}; see {self.root / (name + '.log')}"
+            return path.exists() and self.rpc(path, "ping")
+        wait_for(ready, f"{name} GUI socket")
         return process, path
 
     def rpc(self, path, verb, **fields):
         assert path.parent == self.root / "run"
         request = {"id": 1, "kind": "request", "verb": verb, **fields}
         self.log("request", socket=str(path), request=request)
+        deadline = min(time.monotonic() + 20, WAIT_DEADLINE.get() or float('inf'))
+        def remaining():
+            seconds = deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError(f"GUI IPC deadline during {verb}")
+            return seconds
         with socket.socket(socket.AF_UNIX) as stream:
-            stream.settimeout(20)
+            stream.settimeout(remaining())
             stream.connect(str(path))
+            stream.settimeout(remaining())
             stream.sendall((json.dumps(request) + "\n").encode())
-            line = stream.makefile("rb").readline()
-            if not line:
-                raise RuntimeError(f"GUI closed IPC during {verb}; see {self.root}/*.log")
-            response = json.loads(line)
+            line = bytearray()
+            while b'\n' not in line:
+                stream.settimeout(remaining())
+                chunk = stream.recv(65536)
+                if not chunk:
+                    raise RuntimeError(f"GUI closed IPC during {verb}; see {self.root}/*.log")
+                line.extend(chunk)
+            response = json.loads(line.split(b'\n', 1)[0])
         self.log("rpc", socket=str(path), request=request, response=response)
         if "error" in response:
             raise RuntimeError(str(response["error"]))

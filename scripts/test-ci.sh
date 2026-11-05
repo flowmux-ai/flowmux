@@ -58,6 +58,8 @@ run_phase format 180 cargo fmt --all -- --check
 
 if [[ $mode == linux ]]; then
     export GDK_BACKEND=x11 GTK_A11Y=test LANG=C.UTF-8 LC_ALL=C.UTF-8
+    # Xvfb must not select a host GNOME portal that requires the desktop session.
+    export XDG_CURRENT_DESKTOP= XDG_SESSION_DESKTOP=
     locale
     # Keep a fixed virtual desktop. AppArmor is provisioned by the host/CI;
     # this runner does not disable the WebKit sandbox or change host policy.
