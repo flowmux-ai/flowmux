@@ -661,11 +661,11 @@ pub enum GtkCommand {
         id: WorkspaceId,
         target_index: usize,
     },
-    /// Open the 'Change tab name' dialog for `id`. Bridge-driven so
-    /// the dialog runs in the window dispatch loop where the parent
-    /// window reference is in scope.
+    /// Open the workspace name dialog for `id`, or for the active
+    /// workspace when `None`. Bridge-driven so the dialog runs in the
+    /// window dispatch loop where the parent window reference is in scope.
     ShowRenameDialog {
-        id: WorkspaceId,
+        id: Option<WorkspaceId>,
     },
     /// Open the color picker dialog for `id`.
     ShowColorDialog {

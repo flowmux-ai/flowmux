@@ -1929,7 +1929,10 @@ fn row_widget(
             activate: Box::new(move || {
                 let bridge = bridge_for_rename.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
-                    let _ = bridge.tx.send(GtkCommand::ShowRenameDialog { id }).await;
+                    let _ = bridge
+                        .tx
+                        .send(GtkCommand::ShowRenameDialog { id: Some(id) })
+                        .await;
                 });
             }),
         };

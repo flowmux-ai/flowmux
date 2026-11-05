@@ -184,7 +184,7 @@ actions keep their defaults; an empty array unbinds an editable action.
 Copy and paste are fixed and ignore overrides. For example:
 
 ```json
-{"keybindings": {"split-right": ["<Ctrl><Alt>r"], "next-workspace": []}}
+{"keybindings": {"split-right": ["<Ctrl><Alt>o"], "next-workspace": []}}
 ```
 
 See [keyboard shortcuts](keybindings.md) for action names and context behavior.

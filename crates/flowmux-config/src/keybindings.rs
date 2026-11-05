@@ -21,7 +21,7 @@
 //! ```json
 //! {
 //!   "keybindings": {
-//!     "split-right": ["<Ctrl><Alt>r"],
+//!     "split-right": ["<Ctrl><Alt>o"],
 //!     "next-workspace": []
 //!   }
 //! }
@@ -86,6 +86,8 @@ pub enum ActionId {
     OpenDiffReview,
     /// Open tig in a new tab in the focused pane.
     OpenTig,
+    /// Open the rename dialog for the active workspace.
+    RenameActiveWorkspace,
 }
 
 impl ActionId {
@@ -130,6 +132,7 @@ impl ActionId {
             Self::ToggleSessionFlow => "toggle-session-flow",
             Self::OpenDiffReview => "open-diff-review",
             Self::OpenTig => "open-tig",
+            Self::RenameActiveWorkspace => "rename-active-workspace",
         }
     }
 
@@ -175,6 +178,7 @@ impl ActionId {
             Self::ToggleSessionFlow => "Toggle Session Flow",
             Self::OpenDiffReview => "Toggle Code Review",
             Self::OpenTig => "Open tig",
+            Self::RenameActiveWorkspace => "Rename workspace",
         }
     }
 
@@ -223,6 +227,9 @@ impl ActionId {
             Self::ToggleSessionFlow,
             Self::OpenDiffReview,
             Self::OpenTig,
+            // New defaults go last. GTK fires the first registered action
+            // for a duplicated accel, so existing overrides keep their chord.
+            Self::RenameActiveWorkspace,
         ]
     }
 
@@ -285,6 +292,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleSessionFlow, &["<Ctrl><Alt>b"]),
     (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Ctrl><Alt>g"]),
+    (ActionId::RenameActiveWorkspace, &["<Ctrl><Alt>r"]),
 ];
 
 /// macOS uses Command for most app actions. Workspace cycling keeps Control
@@ -331,6 +339,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleSessionFlow, &["<Ctrl><Alt>b"]),
     (ActionId::OpenDiffReview, &["<Ctrl><Alt>e"]),
     (ActionId::OpenTig, &["<Meta><Alt>g"]),
+    (ActionId::RenameActiveWorkspace, &["<Ctrl><Alt>r"]),
 ];
 
 /// Built-in default accelerators. The first install path reads this and

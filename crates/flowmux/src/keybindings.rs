@@ -85,7 +85,7 @@ fn full_action_name(action: ActionId) -> String {
 /// Each accel string is validated through `gtk::accelerator_parse`.
 /// Invalid entries are logged and skipped — the rest of the action's
 /// accels still install. Duplicate accels across actions are logged
-/// (GTK keeps the last writer); the function does not refuse to install
+/// (GTK fires the action registered first); the function does not refuse to install
 /// either side so the user can recover by editing `options.json` again.
 pub fn install_accels(app: &adw::Application, options: &Options) {
     let overrides = &options.keybindings;
@@ -128,7 +128,7 @@ pub fn install_accels(app: &adw::Application, options: &Options) {
                         accel = %accel,
                         first = %prev,
                         second = action.as_str(),
-                        "accel bound to multiple actions — GTK will keep the last writer"
+                        "accel bound to multiple actions — GTK fires the first one"
                     );
                 } else {
                     owner.insert(canonical, action.as_str());
@@ -490,6 +490,22 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
             })
             .build()
     };
+    // Not `rename-workspace`: that name is the side panel's id-taking action,
+    // and registering a second action under it would replace the first.
+    let rename_active_workspace = {
+        let bridge = bridge.clone();
+        gtk::gio::ActionEntry::builder("rename-active-workspace")
+            .activate(move |_, _, _| {
+                let bridge = bridge.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    let _ = bridge
+                        .tx
+                        .send(GtkCommand::ShowRenameDialog { id: None })
+                        .await;
+                });
+            })
+            .build()
+    };
     let usage_popover_focus = Rc::new(UsagePopoverFocus::default());
     install_usage_popover_accel_capture(window, &usage_button, usage_popover_focus.clone());
     let toggle_usage_popover = make_toggle_usage_popover_action(usage_button, usage_popover_focus);
@@ -510,6 +526,7 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
         next_surface,
         prev_surface,
         new_workspace,
+        rename_active_workspace,
         new_window,
         command_palette,
         terminal_search,
@@ -1503,6 +1520,16 @@ mod tests {
     fn ctrl_alt_m_toggles_focused_pane_zoom() {
         assert_eq!(default_for(ActionId::TogglePaneZoom), vec!["<Ctrl><Alt>m"]);
         assert!(ActionId::TogglePaneZoom.is_user_editable());
+    }
+
+    #[test]
+    fn ctrl_alt_r_renames_active_workspace_without_replacing_side_panel_action() {
+        assert_eq!(
+            default_for(ActionId::RenameActiveWorkspace),
+            vec!["<Ctrl><Alt>r"]
+        );
+        assert!(ActionId::RenameActiveWorkspace.is_user_editable());
+        assert_ne!(ActionId::RenameActiveWorkspace.as_str(), "rename-workspace");
     }
 
     #[test]

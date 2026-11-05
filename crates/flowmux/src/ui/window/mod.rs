@@ -3625,6 +3625,8 @@ fn show_rename_dialog(
     entry.set_activates_default(true);
     entry.set_hexpand(true);
     dialog.set_extra_child(Some(&entry));
+    // Ctrl+Alt+R opens this from the keyboard; start typing in the entry.
+    dialog.set_focus(Some(&entry));
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("ok", "OK");
     dialog.set_default_response(Some("ok"));

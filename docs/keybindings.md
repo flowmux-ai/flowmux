@@ -17,6 +17,7 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | copy / paste | Ctrl+Shift+C / Ctrl+Shift+V | Cmd+C / Cmd+V |
 | new-surface / new-browser-surface | Ctrl+Shift+T / B | Cmd+Shift+T / B |
 | new-workspace / new-window | Ctrl+N / Ctrl+Shift+N | Cmd+N / Cmd+Shift+N |
+| rename-active-workspace | Ctrl+Alt+R | Ctrl+Alt+R |
 | command-palette | Ctrl+Shift+P | Cmd+Shift+P |
 | terminal-search | Ctrl+Shift+F | Ctrl+Shift+F |
 | search-all-terminals | Ctrl+Alt+Shift+F | Ctrl+Alt+Shift+F |
@@ -29,6 +30,10 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | toggle-session-flow | Ctrl+Alt+B | Ctrl+Alt+B |
 | open-diff-review | Ctrl+Alt+E | Ctrl+Alt+E |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
+
+**Ctrl+Alt+R** renames the active workspace even while a terminal has focus,
+so terminal programs do not receive that chord. In terminal Emacs, press
+Escape and then Ctrl+R for `C-M-r`, or unbind the action in Options → Keybindings.
 
 The side-panel footer toggles **Code Review** from the icon immediately right of AI usage.
 **Ctrl+Alt+E** and the pane's **Code Review** menu item also toggle between the

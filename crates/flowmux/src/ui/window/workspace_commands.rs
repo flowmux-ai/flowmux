@@ -109,6 +109,13 @@ impl WindowController {
                 }
             }
             GtkCommand::ShowRenameDialog { id } => {
+                let id = match id {
+                    Some(id) => Some(id),
+                    None => self.store.active_workspace().await,
+                };
+                let Some(id) = id else {
+                    return;
+                };
                 if let Some(ws) = self.store.get_workspace(id).await {
                     // Match cmux prefill behavior: start from custom_title when
                     // present so the user can edit it, otherwise show the current
