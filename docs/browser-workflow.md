@@ -483,9 +483,9 @@ remain unsupported. Existing selector conditions retain their top-level behavior
 ## Browser toolbar
 
 The browser toolbar uses the terminal theme like the rest of the window. The
-default start page follows the system's light/dark appearance, independently of
-the terminal theme, and has a centered Flowmux icon. Websites receive the system color preference; their own theme
-settings can override it. The address field is empty; the internal URL returned
+default start page fills the viewport with the Flowmux icon's dark SVG gradient
+and keeps the icon centered. Websites receive the system color preference; their
+own theme settings can override it. The address field is empty; the internal URL returned
 by `url` and snapshots remains `about:blank`. Wait for the intended URL and page
 result before treating navigation as complete. The start page is also retained
 when reloaded.

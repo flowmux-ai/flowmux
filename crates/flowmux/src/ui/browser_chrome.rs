@@ -17,9 +17,13 @@ pub(super) fn blank_page_html() -> String {
         r#"<!doctype html><html><head><meta charset="utf-8"><title></title>
 <style>html,body{{margin:0;width:100%;height:100%;overflow:hidden}}
 html{{color-scheme:light dark}}
-body{{display:grid;place-items:center;background:Canvas;color:CanvasText}}
-svg{{display:block;width:96px;height:96px;max-width:50vw;max-height:50vh}}</style>
-</head><body><div role="img" aria-label="Flowmux">{icon}</div></body></html>"#
+body{{display:grid;place-items:center;background:#161c24}}
+.background{{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}}
+.logo{{position:relative}}
+.logo svg{{display:block;width:96px;height:96px;max-width:50vw;max-height:50vh}}</style>
+</head><body>
+<svg class="background" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="100%" height="100%" fill="url(#bg)"/></svg>
+<div class="logo" role="img" aria-label="Flowmux">{icon}</div></body></html>"#
     )
 }
 

@@ -143,9 +143,10 @@ preset takes precedence over file colors; font values can still come from
 the file. `theme_overrides` apply on top.
 
 Terminal and editor colors use this theme, and the window chrome, including the
-browser toolbar, uses its light or dark appearance. Web pages in browser tabs,
-including the start page, follow the system's light/dark preference instead.
-Changing the terminal theme does not change the color preference sent to websites.
+browser toolbar, uses its light or dark appearance. Web pages in browser tabs
+follow the system's light/dark preference instead; the start page keeps the
+Flowmux icon's dark background. Changing the terminal theme does not change the
+color preference sent to websites.
 
 flowmux does not automatically read `~/.config/ghostty/config`. Import a
 compatible file with `flowmux theme import PATH`, then use **Reload config**

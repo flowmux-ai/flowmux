@@ -146,13 +146,17 @@ pub(crate) async fn check() {
     let blank_check = r#"String((()=>{
         const icon=document.querySelector('[aria-label=Flowmux]');if(!icon)return false;
         const r=icon.getBoundingClientRect();
-        const rgb=getComputedStyle(document.body).backgroundColor.match(/\d+/g).slice(0,3).map(Number);
-        const dark=rgb.reduce((sum,v)=>sum+v,0)/3<128;
+        const background=document.querySelector('svg.background');if(!background)return false;
+        const b=background.getBoundingClientRect();
         return getComputedStyle(document.documentElement).colorScheme==='light dark'
-            && dark===matchMedia('(prefers-color-scheme: dark)').matches
+            && background.getAttribute('aria-hidden')==='true' && document.querySelector('#bg stop')!==null
+            && background.querySelector('rect')?.getAttribute('fill')==='url(#bg)'
+            && b.x===0 && b.y===0 && b.width===innerWidth && b.height===innerHeight
+            && document.documentElement.scrollWidth===innerWidth && document.documentElement.scrollHeight===innerHeight
             && Math.abs(r.x+r.width/2-innerWidth/2)<1 && Math.abs(r.y+r.height/2-innerHeight/2)<1 && r.width>0;
     })())"#;
     wait_js(&pane, blank_check).await;
+    capture(&window, "start-page-wide");
     button(&toolbar, "Reload page").emit_clicked();
     gtk::glib::timeout_future(Duration::from_millis(300)).await;
     wait_js(&pane, blank_check).await;
@@ -426,6 +430,7 @@ pub(crate) async fn check() {
     .await;
     wait("blank address restored", || address.text().is_empty()).await;
     wait_js(&pane, blank_check).await;
+    capture(&window, "start-page-narrow");
     pane.prepare_for_close();
     window.destroy();
     println!("BROWSER_CHROME_LAYOUT_OK");
