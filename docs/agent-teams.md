@@ -211,6 +211,48 @@ owned process shutdown, failed-pane cleanup and native foreground input in the
 same isolated GUI harness. The GTK regression additionally checks the visible
 workspace, actual focused widget and zoom during background splits and closes.
 
+## Delegation policy checks
+
+`python3 scripts/test-team-activation-gui.py` uses a real signed-in Claude lead
+and workers in isolated GUI PTYs. `--cases ordinary direct sequential review
+parallel` selects cases: ordinary execution, a Team edit with no workers,
+dependent calculations, a lead artifact reviewed by one fresh worker followed
+by same-session correction, and overlapping independent investigations. The
+review includes constraints present only in the user request. It checks actual
+reports and session identity as well as pane counts. Native input/trust waits
+are blockers, never automatically approved.
+
+For a limited before/after comparison, retain the previous GUI/CLI binaries and
+run the same cases with `--gui OLD_GUI --cli OLD_CLI --baseline`; use current
+binaries without `--baseline` for the policy assertions. `measurements.json`
+retains elapsed time, worker counts, native lead usage and worker transcript
+usage. Worker usage is cumulative within a case; do not add it again for each
+follow-up row. Missing usage is unknown, not zero. Reports, raw logs and transcript
+paths remain available for assessing acceptance and correction turns. These
+small runs are behavioral checks, not statistical proof of savings; account load,
+caches and native model versions affect time and cost.
+
+The account-free helper tests and `test-team-recovery-gui.py` separately verify
+that task failures do not substitute a model, valid failed reports can receive
+explicit corrections, malformed reports cannot authorize input, and required
+providers are not silently replaced with `--no-fallback`. Fixture results do not
+prove model judgment or information preservation.
+
+Validation on 2026-11-06: 110 helper tests, six GUI harness tests,
+134 CLI library tests (one ignored),
+the native hook integration test, and 43 recovery plus 13 reuse checks in isolated
+real GUI PTYs passed. Actual Claude leads passed ordinary, direct Team and
+sequential Team cases. The two Team cases also used zero workers with the old
+bundle, so those observations do not establish fewer launches. Native review
+stopped at Claude's external CLAUDE.md import consent for `~/.claude/RTK.md`;
+no approval was supplied. Native review/follow-up and parallel judgment remain
+unverified. The entrypoint shrank from 24,275 to 9,472 bytes; this is a payload
+reduction, not a measured billing or completion-time improvement.
+The shared GUI harness now suppresses automatic skill updates outside its isolated
+state directory. A separate live startup/shutdown check verified that installed
+user Team skills stay unchanged; test-triggered updates were restored from their
+pre-task content/backups before that check.
+
 ## Task routing and prompt size
 
 Choose whether to delegate before selecting a provider. Weigh handoff, repeated
