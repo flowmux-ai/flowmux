@@ -1104,17 +1104,25 @@ async fn stale_and_screen_reports_do_not_emit_recent_activity() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn accepted_native_sessions_persist_storage_and_reject_stale_replacements() {
+    use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
     for agent in ["gemini", "cline"] {
         let data = tempfile::tempdir().unwrap();
         let native_home = data.path().join("native");
         let mut native = Command::new("/bin/sh")
-            .args(["-c", "read -r done || :"])
+            .args(["-c", "printf 'ready\\n'; read -r done || :"])
             .env("GEMINI_CLI_HOME", &native_home)
             .env("CLINE_DATA_DIR", &native_home)
             .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .unwrap();
+        // Process metadata can still be empty immediately after spawn returns.
+        let mut ready = String::new();
+        BufReader::new(native.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
         let store = flowmux_state::AgentSessionStore::new(data.path().join("bindings"));
         let (handler, rx, pane, surface) =
             single_pane_handler_with_store(Some(store.clone())).await;
