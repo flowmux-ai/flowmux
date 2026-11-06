@@ -12,7 +12,6 @@ import sqlite3
 import subprocess
 import sys
 import time
-import tomllib
 import uuid
 
 from Xlib import X, XK, display
@@ -48,10 +47,6 @@ def main():
         config = h.root / "config/flowmux"
         config.mkdir()
         (config / "options.json").write_text(json.dumps({"default_shell": str(shell)}))
-        state = h.root / "state/flowmux"
-        state.mkdir()
-        manifest = tomllib.loads(Path(__file__).resolve().parents[1].joinpath("Cargo.toml").read_text())
-        (state / "installed-skill-version").write_text(manifest["workspace"]["package"]["version"])
         source = h.root / "agent.c"
         source.write_text(r'''#include <stdio.h>
 #include <string.h>

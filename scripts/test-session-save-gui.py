@@ -64,7 +64,6 @@ def main():
             connection.sync()
             time.sleep(0.5)
 
-        h.state_path.parent.mkdir(parents=True)
         for index, source in enumerate([b'{"schema_version":', b'{"schema_version":4294967295}']):
             h.state_path.write_bytes(source)
             process, socket = h.window(f"degraded-{index}")

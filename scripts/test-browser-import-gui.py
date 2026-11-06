@@ -18,7 +18,6 @@ import subprocess
 import sys
 import threading
 import time
-import tomllib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from cryptography.hazmat.primitives import padding
@@ -57,10 +56,6 @@ try:
         "persist_browser_session": True,
     }
     (config / "options.json").write_text(json.dumps(options))
-    state = h.root / "state/flowmux"
-    state.mkdir()
-    manifest = tomllib.loads(Path(__file__).resolve().parents[1].joinpath("Cargo.toml").read_text())
-    (state / "installed-skill-version").write_text(manifest["workspace"]["package"]["version"])
     browser = h.root / "config/google-chrome/Default/Network"
     browser.mkdir(parents=True)
     writer = sqlite3.connect(browser / "Cookies")
