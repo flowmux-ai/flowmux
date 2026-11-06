@@ -81,11 +81,15 @@ while True:
     failure = behavior.get(agent)
     unavailable = {'model_unavailable': 'model_not_found', 'client_unavailable': 'unsupported_client'}.get(failure)
     evidence = {'argv': sys.argv, 'pid': os.getpid(), 'session': session, 'token': token, 'started': time.monotonic()}
-    if failure in ('quota', 'stalled', 'crash', 'invalid_report', 'provider_error'):
+    if failure in ('quota', 'stalled', 'crash', 'provider_error'):
         child = subprocess.Popen([sys.executable, '-c', 'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(120)'])
         evidence['child'] = child.pid
     (root / (token + '-process.json')).write_text(json.dumps(evidence))
     answer = json.dumps({'task_status': 'completed', 'report': agent + ' verified'})
+    if failure in ('task_failed', 'invalid_report'):
+        (root / 'partial-edit.txt').write_text('retained partial work')
+        answer = (json.dumps({'task_status': 'failed', 'report': 'acceptance check failed'})
+                  if failure == 'task_failed' else 'malformed answer')
     if agent in ('codex', 'claude'):
         if agent == 'codex':
             save({'type': 'session_meta', 'payload': {'id': session}})
@@ -103,8 +107,6 @@ while True:
             for step in range(40 if failure == 'long_progress' else 8):
                 save({'type': 'progress', 'step': step})
                 time.sleep(.5)
-        if failure == 'invalid_report':
-            answer = 'malformed answer'
         if agent == 'codex':
             final = {'type': 'task_complete', 'last_agent_message': answer}
             if failure in ('quota', 'provider_error'):
@@ -305,7 +307,7 @@ sys.exit(result.returncode)
             h.pass_check(f'{agent}: native auth code prevents quota holds, substitution and automatic pane closure')
             h.rpc(socket, 'pane_close', pane=receipt['pane'])
 
-        for failure in ('quota', 'provider_error', 'stalled', 'crash', 'invalid_report'):
+        for failure in ('quota', 'provider_error', 'stalled', 'crash'):
             (h.root / 'behavior.json').write_text(json.dumps({'codex': failure}))
             receipt = start()
             state = finished(receipt)
@@ -322,6 +324,41 @@ sys.exit(result.returncode)
             fixture.wait_for(lambda: typed in h.screen(socket, foreground_pane), 'native foreground input after recovery')
             h.pass_check(f'{failure}: old process tree and pane removed before replacement; foreground preserved')
             h.rpc(socket, 'pane_close', pane=state['pane'])
+
+        for agent in ('codex', 'claude', 'gemini', 'agy'):
+            for failure in ('task_failed', 'invalid_report'):
+                (h.root / 'behavior.json').write_text(json.dumps({agent: failure}))
+                receipt = start(agent)
+                state = finished(receipt)
+                root = Path(receipt['job'])
+                original = (root / 'answer.txt').read_text()
+                assert state['state'] == 'failed' and not state['fallback_used'], state
+                assert len(state['attempts']) == 1 and not state['closed_panes'], state
+                assert state['pane'] == receipt['pane'] and source != state['pane']
+                assert (h.root / 'partial-edit.txt').read_text() == 'retained partial work'
+                expected = 'acceptance check failed' if failure == 'task_failed' else 'malformed answer'
+                fixture.wait_for(lambda: expected in h.screen(socket, state['pane']), 'failure remains visible')
+                if agent in ('codex', 'claude'):
+                    h.rpc(socket, 'agent_activity_update', pane=state['pane'], surface=state['surface'], agent=agent,
+                          activity='idle', session_id=state['session_id'], source='flowmux:hook')
+                if failure == 'task_failed':
+                    assert state['task_status'] == 'failed' and not state.get('blocker_kind'), state
+                    (h.root / 'behavior.json').write_text('{}')
+                    turn = command('followup', receipt['job'], '--task-file', str(task), '--cli', args.cli)
+                    corrected = finished(turn)
+                    assert corrected['state'] == 'completed' and corrected['session_id'] == state['session_id'], corrected
+                    assert corrected['pane'] == state['pane'] and not corrected['fallback_used'], corrected
+                else:
+                    rejected = subprocess.run([sys.executable, str(HELPER), 'followup', receipt['job'],
+                                              '--task-file', str(task), '--cli', args.cli], env=env,
+                                             capture_output=True, text=True, timeout=25)
+                    assert rejected.returncode == 1 and 'Previous assignment' in rejected.stderr, rejected
+                    assert not (root / 'turns').exists()
+                assert (root / 'answer.txt').read_text() == original
+                assert json.loads((root / 'status.json').read_text()) == state
+                assert h.rpc(socket, 'workspace_current')['workspace_current']['id'] == foreground
+                h.pass_check(f'{agent}/{failure}: failure stays visible without replay; only a valid report permits correction')
+                h.rpc(socket, 'pane_close', pane=state['pane'])
 
         for agent in ('codex', 'claude', 'gemini', 'agy'):
             (h.root / 'behavior.json').write_text(json.dumps({agent: 'quiet_tool'}))
@@ -379,12 +416,12 @@ sys.exit(result.returncode)
         (native / 'codex').write_text('#!' + sys.executable + '\n' + PROVIDER)
         h.pass_check('An unlaunchable provider closes its failed pane and selects another installed provider')
 
-        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'invalid_report', 'claude': 'invalid_report'}))
+        (h.root / 'behavior.json').write_text(json.dumps({'codex': 'quota', 'claude': 'model_unavailable'}))
         receipt = start('codex', '--max-attempts', '2')
         state = finished(receipt)
-        assert state['state'] == 'failed' and state['recovery_exhausted'], state
+        assert state['state'] == 'blocked' and state['recovery_exhausted'], state
         assert len(state['attempts']) == 2 and len(state['closed_panes']) == 2, state
-        h.pass_check('Attempt budget stops repeated malformed reports and closes both failed panes')
+        h.pass_check('Attempt budget stops native infrastructure failures and closes both failed panes')
 
         (h.root / 'behavior.json').write_text(json.dumps({'codex': 'quota'}))
         receipt = start('codex', '--no-fallback')

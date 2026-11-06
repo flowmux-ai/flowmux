@@ -807,6 +807,21 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(set(json.loads(out.getvalue())),
                          {'job', 'root_job', 'pane', 'surface', 'workspace', 'socket', 'session_id'})
 
+    def test_managed_failed_report_requires_idle_session_before_correction(self):
+        self.managed()
+        state = dict(state='failed', task_status='failed', session_id='session',
+                     transcript=str(self.transcript))
+        team.write_json(self.root / 'status.json', state)
+        self.tab['agent']['activity'] = 'running'
+        with self.assertRaises(ValueError):
+            self.dispatch()
+        self.assertFalse((self.root / 'turns').exists())
+        self.tab['agent']['activity'] = 'idle'
+        turn = self.dispatch()
+        self.assertEqual(json.loads((turn / 'job.json').read_text())['session_id'], 'session')
+        self.assertEqual(json.loads((self.root / 'status.json').read_text()), state)
+        self.assertEqual((self.root / 'result.md').read_text(), 'original result')
+
     def test_other_lead_workspace_or_window_cannot_followup(self):
         for key in ('pane', 'workspace', 'socket', 'mode'):
             with self.subTest(key=key), patch.dict(self.origin, {key: 'other'}):
@@ -1421,7 +1436,8 @@ class ManagedTests(unittest.TestCase):
         self.assertEqual(recovery['generation'], 1)
         self.assertEqual(recovery['assignment'], str(self.job))
 
-    def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400, tool=False):
+    def monitor_clock(self, *, timeout=0, progress=True, waiting=None, complete_at=400, tool=False,
+                      outcome='completed'):
         attempt = self.job / 'attempt-1'
         attempt.mkdir()
         path = self.job / 'native.jsonl'
@@ -1436,7 +1452,7 @@ class ManagedTests(unittest.TestCase):
             if progress:
                 with path.open('a') as stream:
                     stream.write('native progress\n')
-            return True, 'exact', json.dumps(dict(task_status='completed', report='verified')) if clock[0] >= complete_at else None, None
+            return True, 'exact', json.dumps(dict(task_status=outcome, report='verified')) if clock[0] >= complete_at else None, None
         def advance(seconds):
             clock[0] += 100
         def pane(manifest):
@@ -1451,6 +1467,13 @@ class ManagedTests(unittest.TestCase):
 
     def test_progressing_work_completes_beyond_old_300_second_limit(self):
         self.assertEqual(self.monitor_clock()['state'], 'completed')
+
+    def test_valid_task_failure_returns_evidence_without_provider_recovery(self):
+        state = self.monitor_clock(outcome='failed')
+        self.assertEqual((state['state'], state['task_status']), ('failed', 'failed'))
+        self.assertNotIn('blocker_kind', state)
+        self.assertEqual((self.job / 'attempt-1/result.md').read_text(), 'verified')
+        self.assertEqual(state['session_id'], 'exact')
 
     def test_explicit_budget_is_not_stall_or_retry(self):
         state = self.monitor_clock(timeout=300)
@@ -1670,7 +1693,7 @@ class ManagedTests(unittest.TestCase):
             self.assertIn('yolo' if agent == 'gemini' else '--dangerously-skip-permissions', argv)
             self.assertNotIn('--skip-trust', argv)
 
-    def test_nontext_native_report_retains_evidence_and_allows_recovery(self):
+    def test_nontext_native_report_retains_evidence_without_recovery(self):
         attempt = self.job / 'attempt-1'
         attempt.mkdir()
         team.write_json(self.job / 'status.json', dict(state='pending'))
@@ -1685,7 +1708,7 @@ class ManagedTests(unittest.TestCase):
             state = team.monitor_managed(self.job, attempt, manifest, process, {}, True)
         self.assertEqual(state['state'], 'failed')
         self.assertEqual(state['blocker_kind'], 'invalid_report')
-        self.assertIn(state['blocker_kind'], team.RECOVERABLE)
+        self.assertNotIn(state['blocker_kind'], team.RECOVERABLE)
         self.assertEqual(json.loads((attempt / 'answer.txt').read_text()), response)
 
     def test_gemini_final_report_excludes_commentary_tools_and_rejected_answers(self):

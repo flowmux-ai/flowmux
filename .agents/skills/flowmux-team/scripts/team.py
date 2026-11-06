@@ -1234,8 +1234,6 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
                 state.update(state=outcome, task_status=outcome)
                 if blocker:
                     state["blocker_kind"] = blocker
-                elif outcome == "failed":
-                    state["blocker_kind"] = "task_failed"
                 break
             if progress != signature:
                 signature, last_progress = progress, time.monotonic()
@@ -1280,7 +1278,7 @@ def monitor_managed(assignment, attempt, manifest, process, owned, streamed):
 
 
 RECOVERABLE = {"quota", "provider_error", "unavailable", "model_unavailable", "client_unavailable",
-               "stalled", "exited", "launch_error", "invalid_report", "task_failed"}
+               "stalled", "exited", "launch_error"}
 
 
 def next_route(manifest, attempts):
@@ -1573,7 +1571,7 @@ def main():
     launch.add_argument("--max-attempts", type=positive, default=4)
     launch.add_argument("--allow-edits", action="store_true",
                         help="Authorize edits in the task prompt; workers always run in YOLO mode")
-    launch.add_argument("--no-fallback", action="store_true", help="Disable substitution; failed managed panes are still closed")
+    launch.add_argument("--no-fallback", action="store_true", help="Disable substitution; infrastructure failures still clean up owned panes")
     continuation = commands.add_parser("followup", help="Send another tracked assignment to the same idle worker")
     continuation.add_argument("job", type=lambda value: Path(value).resolve())
     continuation.add_argument("--task-file", type=Path, required=True)
