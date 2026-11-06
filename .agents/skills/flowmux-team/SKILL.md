@@ -1,376 +1,165 @@
 ---
 name: flowmux-team
-description: Lead Flowmux teams from Claude Code, Codex, Gemini CLI or Antigravity CLI (agy). In Team workspaces, delegate to Claude Code, Codex, Gemini or agy workers in split panes with bounded model recovery; in ordinary workspaces, complete the work in the current agent.
+description: Use visible Flowmux workers when parallel work or independent review justifies delegation. Team workspaces allow workers; default to the current agent. Ordinary workspaces stay inline. Supports Claude Code, Codex, Gemini CLI and Antigravity CLI (agy).
 ---
 
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
 # Flowmux team
 
-Claude Code, Codex, Gemini CLI and Antigravity CLI (`agy`) can use this skill as
-the lead. Install it with `flowmux agent install --agent gemini --skill flowmux-team`
-or `--agent agy`, or use **Options → Skills → Flowmux Team**. Use the same commands
-below from any lead. All four providers can also work in worker panes.
-Claude/Codex use their interactive TUIs. Gemini/agy use their official
-`stream-json` per-turn mode in the pane: completion requires the native final
-result and successful process exit, after hook decisions. Their saved text or
-Stop/AfterAgent notifications alone are not completion. Keep the user's hooks
-and authentication/trust decisions intact.
-
-Resolve the current workspace at the start of each user task, before choosing how to work. Use `scripts/team.py`
-relative to this skill directory. It requires Python 3.9+ and the Flowmux CLI.
+Use this skill from Claude Code, Codex, Gemini CLI or Antigravity CLI (`agy`).
+Read it once per session; reread after an update or loss of these instructions.
+Run the context check at the start of each user task, even when the skill is
+already loaded. Python 3.9+ and the Flowmux CLI are required.
 
 ```bash
 python3 /path/to/flowmux-team/scripts/team.py context
 ```
 
-- `mode: inline`: complete all requested investigation, implementation and review
-  in the **current agent**. Do not create worker processes, subagents, panes or
-  workspaces. Explain briefly that this workspace uses inline execution, then
-  do the work; a request mentioning teams is not a reason to stop.
-- `mode: team`: delegate scoped work to real Claude Code, Codex, Gemini or agy
-  sessions in split panes of this workspace when investigation, implementation
-  or independent review can be assigned separately, then integrate and verify
-  their results. Small, sequential tasks may stay inline; state the reason briefly.
-  Use this helper instead of silently substituting native Agent/subagents, which
-  do not create Flowmux panes. Reuse idle workers for related work.
-- `No unique live Flowmux pane`: do not create panes yet. Retry `context` once
-  in a **separate tool call**, after the failed call completes: the first tool's
-  lifecycle hook may establish the exact session binding. Do not sleep/retry
-  inside the same shell call, where that hook cannot run. If still unresolved,
-  stop and report both diagnostics. Do not retry permission/authentication errors.
-  A retry cannot create a missing shared-daemon binding. For future local Codex
-  leads, use the updated Flowmux shim or `codex --no-daemon` in the intended pane.
-  Keep active sessions open; do not restart or relocate them to recover context.
-- Other unresolved/ambiguous context: stop pane creation and report the diagnostic.
-  Never choose a window by working directory, title, focus or visit order.
+## Decide whether to delegate
 
-The user creates a Team workspace through the sidebar menu or command palette
-→ **New Team Workspace**, or `flowmux workspace new --team --root /absolute/project`.
-Normal and SSH workspaces cannot create team workers. Do not move an existing
-lead to another workspace to bypass this distinction.
+- `mode: inline`: complete work in the current agent. Do not create worker
+  processes, subagents, panes or workspaces. If an explicitly required external
+  review cannot be obtained here, report that gap; self-review does not satisfy it.
+- `mode: team`: workers are available; **default to working in the current agent**.
+  Delegate when independent work can make useful progress in parallel, or when
+  independent review is explicitly requested or justified by the consequences
+  of a mistake and remaining uncertainty. Honor explicit user delegation requests.
+  Task size, role names and the existence of a Team workspace alone do not justify
+  delegation. Large, tightly dependent work can stay in the lead.
+- Before delegating, weigh handoff, repeated reading, integration and verification
+  against the expected time or quality benefit. Use the fewest workers needed.
+  Do not create a researcher/implementer/reviewer chain by default. Two workers
+  can make useful parallel progress while the lead waits to integrate them.
+- State the purpose, scope and provider/model briefly when delegating. No lengthy
+  cost scorecard or routine permission question is needed. Keep the lead's work
+  distinct from the worker's; verify relevant evidence without repeating the whole
+  investigation. Worker completion does not complete the user's goal.
 
-With this skill installed, Flowmux's native session/prompt hooks remind leads
-to run the context check. Hooks must be installed and enabled; Codex hook trust
-remains the user's decision. Check **Options → Skills → Check Team setup** or
-`flowmux hooks doctor` if the reminder is absent. Installing a skill alone does
-not enable disabled/untrusted hooks. An already-running CLI may need its normal
-configuration reload; never restart the user's session to force activation.
-Report setup/context/authentication/quota failures instead of silently switching
-to inline work. Managed workers carry `FLOWMUX_TEAM_WORKER=1`, receive no lead
-reminder, and cannot use `start`/`followup` to delegate again. Existing workers
-must also respect their assigned `FLOWMUX_TEAM_JOB` prompt.
+Use this helper for delegated work in visible panes, never silently substitute
+native Agent/subagents. Workers cannot delegate again. An assigned
+`FLOWMUX_TEAM_JOB` takes precedence over lead workflows.
 
-## Delegate in Team mode
+## Resolve context safely
 
-Choose `--agent codex|claude|gemini|agy` per worker, regardless
-of the lead's provider. Honor an explicit provider request. For cross-provider
-review, give one agent's actual result to the other provider. Preserve each
-provider's authentication and hook trust decisions. Team workers run in YOLO mode
-as described below; do not change the lead's permissions. Model overrides apply
-only to the new worker session; never rewrite provider defaults.
+Use the exact session binding; never infer a pane from cwd, focus or title.
+For `No unique live Flowmux pane`, retry `context` once in a separate tool call
+so its lifecycle hook can run. If unresolved, retain both diagnostics and report
+it. Do not retry permission/authentication errors or guess another pane.
+Never restart, move or close the user's active lead/session to recover context.
+Normal and SSH workspaces cannot create workers. The user can create a Team
+workspace with **New Team Workspace** or `flowmux workspace new --team --root PATH`.
+Do not create one to bypass inline mode.
 
-## Choose provider, model and scope
+Install with `flowmux agent install --agent codex --skill flowmux-team` (also
+`claude-code`, `gemini`, `agy`) or **Options → Skills → Flowmux Team**. Hooks must
+be installed and enabled; installing this skill does not change authentication
+or hook trust. **Check Team setup** or `flowmux hooks doctor` diagnoses setup.
+Report context/setup/authentication/quota failures, not silent substitution.
+See [runtime context diagnostics](references/runtime.md#worker-lifecycle-and-context-diagnostics)
+for shared Codex daemons, socket permissions, shims and restoration.
 
-Honor explicit provider choices. Otherwise use Codex for code and debugging,
-Claude for independent review or prose. Use only the workers the task needs.
+## Preserve the information needed to finish
 
-Classify each assignment by scope, uncertainty and consequence, not prompt
-length or role name. Start with the smallest tier that can meet its checks:
+Workers do not inherit this conversation. Use a short `task.txt` with:
 
-| Complexity | Assignment | Codex | Claude | Gemini | agy |
-|---|---|---|---|---|---|
-| `simple` | Fact extraction, focused search, mechanical small edits with clear checks | GPT-6 Luna / high | Haiku / low | Flash Lite | Gemini Flash / low |
-| `standard` | Bounded implementation, debugging with reproduction, ordinary review | GPT-6.1 Sol / medium | Sonnet / medium | Flash | Gemini Argon / medium |
-| `complex` | Unclear root cause, cross-module design, concurrency, security or data-loss-sensitive review | GPT-6 Astra / high | Opus / high | Pro | Claude Opus / high |
-
-Pass `--complexity` on every start; use scope, expected work and uncertainty to
-choose it. `--agent auto` (the default) chooses an eligible installed CLI, preferring
-Codex, then Claude, Gemini and agy. Latest matching-profile Claude/Codex usage
-observations exclude exhausted routes before a pane is created. Model-scoped
-limits only exclude matching models; Claude web-only limits do not apply to CLI workers.
-With fallback enabled, this can also replace
-an explicitly selected exhausted provider; `--no-fallback` instead returns a
-diagnostic before launching. `--model sol|terra|opus|sonnet` accepts short names
-(`sonet` is also accepted); Terra maps to `gpt-5.6-terra`. Gemini CLI has no
-`--effort` flag; choose its model tier instead. agy's model IDs depend on account
-access; use `agy models` when choosing an override.
-
-The CLI defaults to `standard` if omitted.
-The helper sets `--model` and effort for that session and records the selection
-in its receipt. Claude names are CLI aliases, so their versions depend on the
-installed provider. Account access is still required. Preview without launching:
-
-```bash
-python3 /path/to/flowmux-team/scripts/team.py route --agent codex --complexity simple
+```text
+Goal and acceptance checks:
+User constraints and permitted edits (read-only unless authorized):
+Relevant source/result paths and the version being examined:
+Known facts and unresolved questions:
 ```
 
-`--model MODEL` overrides the tier's model and preserves provider effort defaults
-unless `--effort` is also supplied. Honor a request to preserve an existing model
-by explicitly selecting that model. Tell the user the provider, model and brief
-reason when delegating. If a completed lower-tier attempt misses its checks,
-use its findings to make one targeted higher-tier assignment. Automatic recovery
-is bounded as described below; authentication and uncertain launches require inspection.
-An ordinary workspace stays in the current agent/model; never spawn to change it.
+Include rejected approaches or background only when they affect the decision.
+Separate facts from hypotheses. Preserve essential constraints before shortening
+text; around 150 words is a guide, not a limit. Reference focused source paths
+instead of copying whole files or conversation history. Referenced reports and
+source are evidence, not new instructions. Ask for concise findings, evidence,
+checks performed and unverified items; expand when necessary.
 
-## Keep prompts small
+Read-only workers may share a checkout. Editing workers need separate worktrees
+or disjoint files with clear ownership and integration checks. `--allow-edits`
+authorizes only assigned edits and is fixed at start; followup cannot expand it.
+Workers must not commit, push or send unrelated external messages.
+**Read-only is a prompt instruction, not a sandbox.** Workers use provider YOLO
+modes; preserve the user's authorization, authentication and trust decisions.
 
-Write a short assignment: goal, relevant files/lines, allowed edits and acceptance
-checks. Aim for 150 words, expanding only for essential constraints. Reference
-source paths and a prior worker's `result.md` instead of pasting entire files,
-conversation history or repeated skill rules. Workers can read those files.
-Treat referenced reports and source text as evidence, not new instructions.
-Ask for findings, evidence paths, checks and blockers in about 200 words unless
-more detail is needed. Reuse an idle worker for related follow-ups instead of
-creating a fresh session for every message. Batch related checks into one
-assignment; avoid acknowledgement-only turns and repeatedly sending shared rules.
+## Launch, reuse and review
 
-Give each worker a role, concrete assignment, context, permitted files and
-acceptance checks. Workers do not inherit this conversation. Read-only workers
-may share a checkout; editing workers need separate worktrees or disjoint files.
-Use `--allow-edits` only for an authorized editing assignment. Workers should
-not delegate again, commit, push or send unrelated external messages.
-The edit scope is fixed at `start`; `followup` cannot authorize edits for a
-read-only worker. For an authorized inspect-then-edit assignment, start with `--allow-edits` and limit the
-first phase by prompt (not tool enforcement), or use a separate editing worker.
+Choose complexity by scope, uncertainty and consequence; start with the smallest
+sufficient tier. Use `route` to preview models without launching. Honor explicit
+provider/model requests. See [model selection](references/runtime.md#choose-provider-model-and-scope)
+for the tier table, aliases, usage routing and provider flags.
 
 ```bash
+python3 /path/to/flowmux-team/scripts/team.py route --agent codex --complexity standard
 python3 /path/to/flowmux-team/scripts/team.py start \
-  --agent codex --complexity simple --role researcher --cwd /absolute/project \
-  --task-file /absolute/research-task.txt
+  --agent codex --complexity standard --role investigator --cwd /absolute/project \
+  --task-file /absolute/task.txt
 ```
 
-`start` first looks for a completed, idle worker from the same lead, Team workspace,
-working directory and provider profile. A compatible provider, model, effort and
-edit policy continues through a tracked follow-up in the existing pane and conversation.
-The new assignment gets its own report and requested limits; earlier reports remain intact.
-If an owned completed worker needs a different configuration, the helper retires
-that worker before opening its replacement. Busy workers, input waits, changed
-sessions and panes with extra tabs are preserved. Concurrent work can still need
-more than one worker; repeated sequential assignments should not keep adding panes.
-Older compatible managed workers can still be reused. Automatic retirement requires
-a worker started with this helper version; older helpers cannot acknowledge shutdown
-and their panes are preserved.
+Ordinary `start` can reuse an idle worker with matching launch settings, including
+across role names. It does not assess task relevance or review independence.
+Use explicit `followup` for related work in a known conversation; use
+`--fresh-session` when unrelated history would be misleading.
 
-Use `--fresh-session` only when the task needs an independent conversation, such
-as a separate reviewer. It explicitly keeps existing workers and opens another pane.
-The sample and multi-role examples use this option to keep their reviewers independent.
-For a related follow-up to a known worker, continue to use `followup` directly.
+For independent review, first finish a concrete code change or report and its
+available checks. **Always use `--fresh-session` for the first independent review**;
+changing `--role` does not create independence. Provide the original requirements,
+actual artifact and primary sources, including uncommitted changes when relevant.
+Identify the reviewed version (commit plus relevant diff, or a report copy).
+Ask for missing requirements, counterexamples and evidence before relying on the
+writer's explanation. A new conversation or different provider does not prove
+correctness. Review is not mandatory for every result.
 
-When a new worker is needed, the helper uses the Flowmux CLI's `team-spawn` to split
-the **lead's** pane. The split's first and only tab launches the provider with the task prompt.
-Claude/Codex stay interactive after their answer. Gemini/agy display their native
-stream and resume the exact conversation on `followup`. Creating or replacing a
-worker preserves the user's active workspace and keyboard focus. Codex workers use a dedicated local
-TUI (`--no-daemon`) with `--dangerously-bypass-approvals-and-sandbox`.
-Claude workers use `--allow-dangerously-skip-permissions --permission-mode bypassPermissions`;
-the allow flag alone does not activate bypass mode. Gemini uses `--approval-mode yolo`; agy uses
-`--dangerously-skip-permissions`. YOLO also applies after replacement and restoration. Claude retains its normal
-tools and MCP configuration, so it can run shell checks. `--allow-edits` changes
-the task prompt only: read-only assignments are instructions, not a sandbox or
-tool restriction. Keep assignments within the user's authorized scope.
+When a specific or different provider is required, select it explicitly with
+`--no-fallback`; report unavailability instead of weakening that requirement.
+For subsequent corrections, use the same reviewer to check the changed parts and
+impact. Do not add reviewers or repeat full reviews without a concrete reason.
+Incorporate new user constraints in the next assignment. If the artifact or
+requirements change, identify which earlier review conclusions still apply.
 
-Jobs retain provider paths and profiles for collection and restoration;
-credentials are not copied. Restoration resumes the conversation, not the task.
+Retain the receipt's `job`, `root_job` when present, pane/surface/workspace/socket
+and actual provider. Use `root_job` for explicit followup and the returned turn
+job for status/wait. Always launch from the original lead, not a worker.
 
-Retain the JSON receipt: `job`, `pane`, `surface`, `workspace`, `socket` and
-`root_job` when present. An automatically reused assignment returns a turn's
-`job`; use `root_job` for later explicit `followup` calls. Launch subsequent workers from the lead's origin, never a prior
-worker. Explicit pane IDs keep routing independent of focus. Working directory
-changes do not change the workspace that receives the split.
-
-The managed Flowmux Codex shim uses `--no-daemon` when supported, preserving
-explicit remote connections and provider permission/profile settings. Run
-`flowmux hooks refresh-shims` after a binary-only update to refresh existing
-wrappers without changing provider settings. The Linux/macOS installers do this
-automatically. This affects new invocations, not new chats inside an already-running
-shared TUI; keep those sessions open.
-
-Codex source discovery uses `identify --session ID`. A direct Codex process can
-prove its source through its agent and Flowmux process ancestry, including on
-the first turn before a lifecycle hook. Shared daemons require an exact live
-session binding. Do not clear a lead's session ID, replace its pane/socket or
-fall back to inherited shared-daemon variables when resolution fails. Outside
-Flowmux, use only the user's intended `--socket PATH --pane UUID`.
-
-The lead must have permission to connect to the originating window's Unix socket
-and its `.ctl` companion. A socket permission error is not a missing session or
-an old CLI. Use the provider's normal permission approval flow for authorized
-Flowmux commands when available. If approval is denied, stop and report it;
-do not disable the lead's sandbox, silently change network policy, or use another
-process to evade the denial. Any socket allowlist change requires the user's
-authorization.
-
-## Limits and recovery
-
-New jobs automatically substitute an installed provider/model after a native quota
-or capacity error, unavailable model/client, unexpected exit, malformed/failed
-report, or stalled reasoning. `--max-attempts` defaults to 4, with no repeated
-provider/model pair. A quota-exhausted provider is skipped for the rest of that
-assignment. Available alternatives and their effort are recorded in the receipt;
-`route` previews them. A catalog or installed CLI does not prove remaining credit:
-the native provider enforces its current account limits. No account/credential
-rotation or provider-default changes are made.
-
-The existing Flowmux usage collector publishes credential-free observations under
-the state directory's `team-usage/`. `route` and launch receipts show `available`,
-`exhausted`, `unavailable`, `stale` or `unknown` for each candidate. Only observations at most five
-minutes old, from the exact configuration root, affect initial selection; missing,
-failed, expired or unsupported observations retain native error-based fallback.
-No new account request is made by the helper. Refresh **AI Usage** to renew data.
-The existing collector also refreshes while a Team workspace exists, even with
-the usage bar hidden; hiding the bar controls display, not Team routing freshness.
-Gemini/agy currently have no preflight usage collector.
-
-Native quota errors are shared across jobs under `team-quota/`, scoped to the
-provider's configuration root. The hold lasts until a known reset, or five minutes
-when no reset is known. A newer available observation releases it early; the old
-hold stays released if that observation later expires or refresh fails. A new
-native quota error can establish a new hold. Concurrent
-jobs update the record under a lock; profiles never borrow each other's limits.
-This reduces repeated failed launches, but cannot reserve quota against concurrent
-provider usage. Successful work and the native provider remain authoritative.
-
-Native `model_not_found` and `unsupported_client` failures are shared under
-`team-unavailable/` for five minutes, scoped to the provider configuration root.
-A missing model excludes only that model; an unsupported client excludes all
-models of that provider. Other profiles remain eligible. Expiry allows a retry,
-including after a client update. Authentication/permission errors are never cached
-as unavailability. `route` reports these holds before a pane is created.
-
-`--stall-timeout` bounds absence of native transcript/stream progress (default
-180 seconds). Matching native tool start/result IDs grant up to five times this
-quiet interval while a tool is pending (15 minutes by default), without resetting
-the clock on polling. Codex/Claude tool calls, Gemini tool events and agy tool
-steps supply this evidence; a working label or live process alone does not.
-Hung tools still reach the extended stall deadline. Increase `--stall-timeout`
-for longer expected quiet tools or reasoning. There is
-no total time limit by default (`--timeout 0`), so continued progress can outlive
-five minutes. An explicit positive `--timeout` bounds an attempt; expiry is
-`time_budget`, closes the owned worker and stops without a replacement. It is
-distinct from `stalled` recovery and takes priority when both deadlines expire.
-Verified native input waits pause the total budget without resetting time already spent.
-Native authentication/permission error codes take priority over quota or model
-wording in their messages. Authentication, trust/permission prompts, changed session identity,
-extra/user-owned tabs and uncertain IPC delivery require inspection, not a retry.
-
-Before replacement, the helper saves evidence, stops its owned process tree,
-verifies it stopped, then closes that failed worker's single-terminal pane. A
-separate recovery process opens the next pane from the recorded original lead;
-it does not depend on focus. Generation guards prevent old launchers replaying a
-task. The replacement reads the assignment and prior artifacts, and must inspect
-partial edits before continuing. Never close the lead or another user's pane.
-If ownership, shutdown or close cannot be verified, recovery stops with a reason.
-
-`--no-fallback` disables substitution; failed managed panes are still closed.
-When alternatives or the attempt budget are exhausted, the failed pane is closed
-and the final failure is retained. Successful and task-level `blocked` reports
-remain available for inspection and follow-up. Initial assignments and helper
-`followup` assignments are monitored; manual TUI input is not a managed assignment.
-Jobs launched by an older copied helper keep their original behavior.
-
-Every `attempt-N/` retains its prompt, provider/model, answer and evidence.
-`status`/`wait` report current `pane`, `surface`, `attempts`, `closed_panes` and
-`fallback_used`; the original receipt's pane may have been replaced. Report
-substitutions to the user. If researcher and reviewer use the same provider,
-call it independent-session review, not cross-provider review.
-
-## Receive and review results
+## Collect, correct and stop
 
 ```bash
-python3 /path/to/flowmux-team/scripts/team.py status /path/from/receipt/job
-python3 /path/to/flowmux-team/scripts/team.py wait /path/from/receipt/job --timeout 60
-```
-
-The helper observes the provider's saved conversation. It binds only to the
-unique job marker in a **user prompt**, then accepts a completed turn with a
-JSON final answer containing `task_status: completed|blocked|failed` and a
-nonempty `report`. A single surrounding JSON code block is accepted; extra prose
-is not. Tool output, screen text, intermediate commentary and an
-agent merely starting are not completion. `result.md`, `answer.txt`, and
-`status.json` retain the report, exact session and transcript path.
-
-Inspect the report and relevant files before accepting success. Give the
-researcher's actual result as explicit context to a reviewer; a second
-`start --agent claude` can review a Codex worker, and vice versa. For a runnable
-handoff, read [the sample](references/sample.md).
-
-`waiting_input` (exit 2) means the recorded worker pane needs user input or approval.
-Inspect `input_required` for its pane and message; `input-required.json` preserves
-the handoff. Ask the user to act in that provider's UI, then call `wait` again.
-This is a live observation, not a task-level `blocked` report. Never approve
-on the user's behalf. An `observation_error` means live state could not be verified.
-Before a session is bound, it reports that input waits cannot yet be observed;
-inspect the recorded pane for setup or input UI. This does not mark the job blocked.
-Without native session hooks, `session_verified: false` permits UI inspection
-only; follow-up input still requires an exact live session binding.
-
-`pending`/`running`/`recovering`/`closing_failed_pane` are incomplete.
-`wait --timeout` bounds only the caller's wait and exits 124; it does not cancel
-work. `waiting_input` exits 2. Final completed reports exit 0; other final results
-exit 1. A lost supervisor is reported as `interrupted`, without replaying an
-uncertain assignment. Retain artifacts and inspect the recorded pane.
-
-Use `flowmux --socket SOCKET read-screen pane:PANE` to inspect the real UI.
-Authentication, trust dialogs and denied permissions are blockers, never
-permission to bypass controls. Native failure follows the bounded recovery
-rule above; a screen message alone does not authorize substitution. A terminal screen is diagnostic evidence, not
-proof of task completion. If the provider does not save a supported conversation
-record, report that limitation rather than claiming success.
-
-## Continue orchestration
-
-Own the user's acceptance checks through the whole task: assign, collect, inspect
-evidence, request corrections, and verify again. A worker's completed turn does not
-complete the team's goal. Reuse idle workers for related assignments and send the
-actual review or failing-check path. Incorporate user changes in the next assignment
-and its acceptance checks. Choose a finite review/time budget; when exhausted,
-report the remaining gap instead of declaring success or repeating indefinitely.
-
-```bash
-python3 /path/to/flowmux-team/scripts/team.py followup /original/worker/job \
+python3 /path/to/flowmux-team/scripts/team.py wait /returned/job --timeout 60
+python3 /path/to/flowmux-team/scripts/team.py followup /original/job \
   --task-file /absolute/correction.txt
-# Use the returned job (a turns/0001 directory), not the original job:
 python3 /path/to/flowmux-team/scripts/team.py wait /returned/turn/job --timeout 60
 ```
 
-`followup` requires the original lead pane and Team workspace, then checks
-the exact worker session, active surface and idle state before input. It records the assignment, paste evidence and a unique marker, and collects
-only the matching turn from the pinned transcript. Every follow-up returns its own
-job receipt. The original report and earlier turns stay unchanged. Always pass the
-original worker job to `followup`; pass a turn's receipt to `status`/`wait`.
-Existing jobs can continue if their session is still uniquely identified and idle.
-Managed jobs also require a live supervisor before creating a turn and immediately
-before sending input. A live agent alone is insufficient; after supervisor loss,
-inspect the retained pane and reports rather than sending an unmonitored task.
-`followup --timeout SECONDS --stall-timeout SECONDS` overrides the recorded limits
-for the next assignment and are then inherited by later follow-ups; zero disables
-the total limit. These overrides require
-a job created by this updated helper. Old copied helpers retain their time policy.
+Completion requires a native completed turn bound to the exact job marker in a
+user prompt, with JSON `task_status: completed|blocked|failed` and a nonempty
+`report`. A single JSON fence is allowed; extra prose is not. Stream providers
+also require their native final result and successful process exit. Screen text,
+tool output and Stop notifications alone are not completion. Inspect `result.md`,
+relevant files and checks before accepting the report.
 
-Only one unresolved assignment per worker is allowed. `dispatch_unknown` means
-receipt is not yet proven by the saved user prompt; `running` with `received: true`
-means it was received, not completed. A wait timeout does not cancel or resend.
-Inspect `dispatch-error.json` and the pane on uncertainty; never automatically
-resend or send Enter. Busy/blocked UI, inactive tabs and changed/missing session
-bindings reject input. Missing hooks/session identity must be diagnosed, not
-replaced with an invented idle event. Task-level `blocked` can be followed up with
-the missing information once the real agent is idle; a permission dialog cannot.
-Managed follow-ups use the same bounded recovery policy after confirmed receipt.
-Gemini/agy follow-ups resume through native CLI arguments instead of terminal input.
+A valid `failed` or `blocked` task report needs lead judgment. Inspect evidence,
+then send a corrected assignment to the same idle session when useful. A malformed
+report stays failed with its raw answer; do not loosen parsing or automatically
+repeat the task. It cannot authorize followup. Only infrastructure failures use
+bounded automatic recovery; read [limits and recovery](references/runtime.md#limits-and-recovery)
+when one occurs. Old jobs retain their copied helper behavior.
 
-Keep a bounded wait/inspect loop active while work is outstanding. Retain pending
-user changes until an idle worker can receive them. This helper does not interrupt
-a busy agent or wake an orchestrator after its final response. If manual input or
-session replacement interferes, inspect the retained evidence before proceeding.
-Never approve dialogs or send slash commands to force progress.
+`waiting_input` (exit 2) requires the user to act in the recorded provider UI.
+Never approve dialogs on their behalf. `observation_error`, changed sessions and
+uncertain delivery require inspection. `dispatch_unknown` is not permission to
+resend or press Enter. Followup requires exact identity, an idle active surface
+and a live supervisor. See [delivery details](references/runtime.md#follow-up-delivery-and-restoration).
 
-For runnable multi-turn examples, expected evidence and troubleshooting, read the
-[communication cookbook](references/cookbook.md). The examples cover review and
-revision, missing input, and a real failing-check → correction → passing-check loop.
+`pending`, `running` and recovery states are incomplete. `wait --timeout` exits
+124 without cancelling work. `start --timeout` limits an attempt; it is not a
+whole-task token or time budget. Choose finite review/correction limits and
+appropriate attempt limits for the assignment. Maintain a bounded wait/inspect
+loop while work is outstanding; this helper does not wake a lead after its final
+answer or interrupt a busy worker. Report remaining gaps honestly when limits
+are reached. Never close the lead or another user's pane. No automatic merge/push.
 
-Keep reports and artifacts for review. Completed worker panes are available for
-reuse or retirement on a later `start`; do not request a fresh pane for every task.
-Failed managed workers and panes are cleaned up automatically under the recovery policy above; never close
-the lead or another user's session. Restoring a launcher does not rerun its
-assignment. No automatic merge or push.
+See [workflow examples](references/sample.md) for when to work alone, parallelize
+or request review. The [communication cookbook](references/cookbook.md) contains
+small transport tests; their worker counts are not defaults for ordinary work.

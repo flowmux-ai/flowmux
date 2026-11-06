@@ -48,10 +48,12 @@ fn team_lead_context_at(skill: &std::path::Path) -> Option<String> {
     }
     let helper = helper.to_string_lossy().replace('\'', "'\\''");
     Some(format!(
-        "Flowmux workspace execution: before each user task, run python3 '{helper}' context and read {}. \
+        "Flowmux workspace execution: before each user task, run python3 '{helper}' context. \
+         Read {} once per session, and again after an update or loss of its instructions. \
          Use its exact session binding, never infer the workspace from cwd or focus. \
-         In mode team, delegate independent investigation, implementation or review through this skill's start/followup to visible worker panes, then collect and verify results. \
-         Reuse idle workers. Small, sequential tasks may stay inline with a brief reason. \
+         In mode team, default to the current agent; delegate only for useful independent parallel work, justified independent review, or explicit user requests. \
+         Task size or workspace type alone does not justify workers. Use this skill's start/followup in visible panes and verify results. \
+         Preserve user constraints in assignments. Use --fresh-session for independent review, followup for related corrections, and --no-fallback when a specific or different provider is required. \
          Do not silently replace Flowmux workers with native Agent/subagents. In mode inline, work in the current agent without workers. \
          If assigned a FLOWMUX_TEAM_JOB, complete only that assignment and never delegate. \
          Report context, installation, authentication or quota failures; follow the skill's bounded recovery and never guess another pane or bypass permissions.",

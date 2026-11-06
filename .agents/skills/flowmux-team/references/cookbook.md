@@ -1,6 +1,18 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Team workspace 프롬프트 사례집
+# Team workspace 통신 검증 사례집
+
+아래 작은 사례는 전달·세션 재사용·결과 수집을 검증하는 테스트입니다.
+일반 작업의 권장 분업량이나 비용 절감의 근거가 아닙니다. 실제 작업은
+[스킬](../SKILL.md)의 기본 직접 수행·선택적 위임 정책과
+[워크플로 예제](sample.md)를 따릅니다. 독립 리뷰는 첫 요청에 새 세션을 쓰고,
+관련 수정은 같은 reviewer에게 전달합니다. 원래 사용자 제약과 검토 대상 버전을
+인계하며, 특정/다른 provider가 필수이면 `--no-fallback`으로 보존합니다.
+
+아래 검증 기록은 각 실행 시점의 결과입니다. 현재 helper는 유효한 작업 실패와
+잘못된 보고 형식에서 자동으로 다른 모델을 실행하지 않습니다. 원문과 pane을
+보존하고 리드가 판단하며, 유효한 failed 보고만 idle 확인 후 followup할 수 있습니다.
+최신 복구 규칙은 [runtime reference](runtime.md#limits-and-recovery)를 참고하세요.
 
 각 사례의 **사용자 프롬프트**를 Team workspace의 오케스트레이터(리드 에이전트)에
 입력하세요. 리드가 작업을 나누고, 서브 에이전트의 결과를 확인한 뒤 같은 에이전트에

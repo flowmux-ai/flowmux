@@ -90,7 +90,10 @@ fn native_prompt_hooks_activate_only_installed_lead_skills() {
             };
             assert!(context.contains(&skill.join("scripts/team.py").display().to_string()));
             assert!(context.contains("mode inline"));
-            assert!(context.contains("Small, sequential tasks"));
+            assert!(context.contains("default to the current agent"));
+            assert!(context.contains("once per session"));
+            assert!(context.contains("--fresh-session"));
+            assert!(context.contains("--no-fallback"));
             assert_eq!(hook(home, agent, event, true, json!({})), empty);
             assert_eq!(
                 hook(home, agent, event, false, json!({"agent_id":"child"})),

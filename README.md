@@ -126,11 +126,11 @@ See the [CLI guide](AGENTS.md) for automation and JSON output.
 
 ### Team workspace
 
-Give one lead agent a task and let it coordinate the team. In a **Team workspace**,
-Claude Code and Codex workers run in visible split panes, each with its own
-assignment. The lead collects their results, asks for corrections, and checks the
-finished work. You can follow every conversation and continue with the same
-workers for the next round.
+Give one lead agent a task. In a **Team workspace**, it works directly by default
+and can use Claude Code, Codex, Gemini or agy workers in visible split panes when
+parallel work or independent review is useful. A request can finish without any
+workers. The lead preserves your constraints, verifies results and reuses related
+conversations for corrections. Independent review starts a fresh conversation.
 
 Install **Flowmux Team** for your agent from **Options → Skills**, then choose
 **New Team Workspace** from the sidebar menu or command palette. Start your lead

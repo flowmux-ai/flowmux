@@ -6,8 +6,12 @@ Claude Code, Codex, Gemini CLI and Antigravity CLI (`agy`) can lead a Team
 workspace with this skill. All four providers can also run workers, regardless
 of which agent is leading.
 
-`flowmux-team` delegates bounded assignments to workers in visible panes. The lead collects evidence, requests corrections from
-the same workers, and verifies the user's acceptance checks. A role describes a
+`flowmux-team` defaults to the current agent, including in Team workspaces.
+Workers in visible panes are used for useful independent parallel work, justified
+independent review, or explicit user requests. Task size and workspace type alone
+do not justify delegation. A large sequential task can stay with the lead.
+The lead preserves user constraints, collects evidence, requests related
+corrections from the same workers, and verifies the user's acceptance checks. A role describes a
 worker's responsibility; each assignment supplies context, file ownership and
 acceptance checks. The [communication cookbook](../.agents/skills/flowmux-team/references/cookbook.md)
 contains copyable user prompts, expected lead/worker conversations, acceptance
@@ -20,8 +24,10 @@ and SSH workspaces return `inline`: the current agent completes the work itself.
 In a Team workspace, `team.py start` first looks for a completed, idle worker
 from the same lead pane and directory, with matching provider, model, effort,
 edit permission and provider configuration. It can reuse that session for a new
-assignment. Pass `--fresh-session` when an independent conversation is required,
-such as a separate review. Otherwise, the helper can retire a completed managed
+assignment. Matching settings do not prove task relevance or independence.
+Always pass `--fresh-session` for the first independent review; use explicit
+`followup` for related corrections. Use a fresh session for unrelated work when
+old context would mislead the worker. Otherwise, the helper can retire a completed managed
 worker with incompatible settings before creating a replacement.
 
 New workers use a split with a single tab running the Claude/Codex interactive
@@ -87,7 +93,7 @@ not replay partial work or kill a surviving child.
 ## Use and installation
 
 Read [the skill](../.agents/skills/flowmux-team/SKILL.md), then run
-[the researcher → reviewer sample](../.agents/skills/flowmux-team/references/sample.md)
+[the workflow examples and transport sample](../.agents/skills/flowmux-team/references/sample.md)
 from a trusted local repository in a **Team workspace**. Create one with the
 side-panel menu or command palette → **New Team Workspace**, or
 `flowmux workspace new --team --root /absolute/project`, then start the lead
@@ -119,9 +125,11 @@ resume the recorded conversation through native CLI arguments. Existing hooks
 remain enabled. Account access and trusted-directory requirements still apply.
 
 Each row checks the complete bundle: `SKILL.md`, `scripts/team.py`,
-`scripts/examples.py`, `references/sample.md` and `references/cookbook.md`.
+`scripts/examples.py`, `references/sample.md`, `references/cookbook.md` and
+`references/runtime.md`. The skill entrypoint covers decisions and handoffs;
+read the runtime reference only for the model/lifecycle/recovery details needed.
 Missing or changed resources offer **Update**, which
-backs up changed files before replacement. **Remove** deletes the five
+backs up changed files before replacement. **Remove** deletes the six
 managed files, preserves modified content in backups, and leaves unrelated files
 alone. Linked resource directories are user-managed and cannot be changed here.
 The instructions preview is read-only; Python and agent CLIs must already be
@@ -205,11 +213,23 @@ workspace, actual focused widget and zoom during background splits and closes.
 
 ## Task routing and prompt size
 
-The lead chooses a provider per assignment: Codex for code investigation and
-implementation, Claude for independent review or synthesis; review Claude's
-implementation with Codex when useful. Explicit user choices take priority.
-This is a workflow default, not a provider capability restriction. Simple work
-needs no automatic second reviewer.
+Choose whether to delegate before selecting a provider. Weigh handoff, repeated
+reading, integration and verification against the time or quality benefit. Use
+the fewest workers needed; do not create a fixed chain of roles. Independent
+branches may run in parallel while the lead waits to integrate them.
+
+For a review, first finish a concrete artifact and the available checks. Give a
+fresh reviewer the original requirements, actual artifact and primary sources.
+Identify the version: commit plus relevant uncommitted changes, or a report copy.
+Ask for missing requirements and counterexamples as well as factual errors.
+A fresh conversation or different provider does not prove correctness. Routine
+work needs no automatic second reviewer. Keep related rechecks in that reviewer's
+session and identify when changed requirements or artifacts invalidate prior review.
+
+Assignments include goal/checks, user constraints, permitted changes, relevant
+paths/version, and known facts versus unresolved questions. Workers do not inherit
+the lead's conversation. Keep the prompt short without dropping essential facts;
+only include rejected approaches or background that affect the decision.
 
 `team.py start --complexity simple|standard|complex` chooses a model and effort
 for the new worker only. The lead assesses scope, expected work, uncertainty and
@@ -232,7 +252,9 @@ Refresh **AI Usage** to renew observations. Gemini/agy have no preflight usage
 collector yet. `route` and job receipts retain candidate usage decisions.
 
 When fallback is enabled, known exhaustion can replace an explicit provider before
-launch. With `--no-fallback`, it returns a diagnostic without creating a pane.
+launch. With `--no-fallback`, it returns a diagnostic without creating a pane. Use that
+flag whenever a specific or different provider is required; report the gap if
+unavailable instead of claiming that a substituted review satisfied the request.
 Native quota errors also create a locked, atomic hold in `team-quota/` shared by
 jobs using the same provider configuration root. A known reset ends the hold;
 unknown resets use five minutes. A newer available observation releases it early
@@ -242,8 +264,12 @@ error can establish a new hold.
 These are observations, not quota reservations; simultaneous provider work can
 still exhaust an account after selection.
 
-Native quota/capacity errors, unavailable models/clients, unexpected exits,
-malformed/failed reports and stalled attempts trigger bounded substitution.
+Native quota/capacity errors, unavailable models/clients, unexpected exits and
+stalled attempts trigger bounded substitution. Valid task-level `failed` reports
+and malformed reports do not trigger model substitution or pane cleanup. Inspect
+the retained answer and partial edits. A valid `failed` report can receive an
+explicit corrected assignment through `followup` once the exact session is idle;
+a malformed report cannot authorize followup and is never accepted as success.
 The default is at most four attempts, without repeating provider/model pairs;
 quota-exhausted providers are skipped for the rest of the assignment. Current
 account limits are enforced by the provider, not inferred from CLI installation.
@@ -256,7 +282,8 @@ deadlines expire together. Verified input waits pause the total budget while
 preserving time already spent; they do not count as stalled work. Increase the stall interval for expected quiet tools or
 reasoning. `followup` accepts both limits as overrides for updated-helper jobs;
 older jobs retain their copied policy. `--no-fallback` disables substitution,
-while retaining failed-worker cleanup.
+while retaining infrastructure-failure cleanup. Neither an attempt timeout nor
+a wait timeout is a whole-task cost limit; a wait timeout does not cancel work.
 
 The supervisor saves evidence, stops its owned process tree and verifies death.
 A detached handoff then validates and closes the failed single-terminal pane,
@@ -267,8 +294,8 @@ cannot replay assignments. Partial edits remain for the replacement to inspect.
 
 The same policy covers helper follow-ups after confirmed receipt. Manual TUI
 turns are not managed. Earlier results remain intact; `status`/`wait` return the
-current pane/surface, `attempts`, `closed_panes` and `fallback_used`. Successful
-and task-level blocked panes remain open. When no alternative remains, the failed
+current pane/surface, `attempts`, `closed_panes` and `fallback_used`. Successful,
+task-level blocked/failed and malformed-report panes remain open for inspection. When no alternative remains, the failed
 pane is closed and its artifacts/failure are retained. A substituted review using
 the researcher's provider is independent-session review, not cross-provider review.
 Jobs created by older helpers retain their copied implementation.

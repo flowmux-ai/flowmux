@@ -108,6 +108,10 @@ impl Skill {
                     include_str!("../../../../.agents/skills/flowmux-team/references/cookbook.md"),
                 ),
                 (
+                    "references/runtime.md",
+                    include_str!("../../../../.agents/skills/flowmux-team/references/runtime.md"),
+                ),
+                (
                     "SKILL.md",
                     include_str!("../../../../.agents/skills/flowmux-team/SKILL.md"),
                 ),
@@ -283,6 +287,7 @@ mod tests {
         Skill::Team.install(&path, false).unwrap();
         assert_eq!(Skill::Team.doctor(&path), DoctorStatus::Ok);
         fs::remove_file(root.join("references/sample.md")).unwrap();
+        fs::remove_file(root.join("references/runtime.md")).unwrap();
         fs::write(root.join("scripts/team.py"), "user edits").unwrap();
         assert_eq!(Skill::Team.doctor(&path), DoctorStatus::Drift);
         assert!(Skill::Team.install(&path, false).is_err());
@@ -311,6 +316,7 @@ mod tests {
             UninstallOutcome::Preserved { .. }
         ));
         assert_eq!(Skill::Team.doctor(&path), DoctorStatus::Missing);
+        assert!(!root.join("references/runtime.md").exists());
         assert!(root.join("notes.txt").exists());
         assert!(backups[0].path().exists());
         assert_eq!(

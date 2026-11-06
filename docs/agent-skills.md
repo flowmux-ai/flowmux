@@ -119,8 +119,11 @@ Gemini CLI and agy. Unsupported agent/skill combinations fail before writing.
 Team removal always preserves wrappers and the other skill, including when
 `--skills-only` is omitted. Team installation does not install or enable hooks.
 Enabled Flowmux session/prompt hooks remind leads to check the workspace through
-the installed Team helper before each task. Team leads delegate separable work
-to visible worker panes; small sequential tasks may stay inline with a reason.
+the installed Team helper before each task. The skill is read once per session,
+again after an update or loss of its instructions. Team leads default to working
+directly and delegate only for useful independent parallel work, justified
+independent review, or explicit user requests. Independent review uses a fresh
+session; a required provider is selected without automatic fallback.
 Ordinary workspaces stay inline, and workers cannot delegate again. Use
 `flowmux hooks doctor` or **Check Team setup** if the reminder is absent. Codex
 hook trust stays user-controlled; file installation does not prove that a running

@@ -59,11 +59,15 @@ control their workspace from a local CLI with explicit workspace IDs.
 ## Standard workflow
 
 At the start of each user task inside Flowmux, use the installed `flowmux-team`
-skill's `scripts/team.py context` before choosing whether to delegate. Its exact
+skill's `scripts/team.py context` before choosing whether to delegate. Read the
+skill once per session, again after an update or loss of its instructions. Its exact
 session lookup decides Team versus ordinary workspace; never guess from cwd or
-focus. In Team mode, assign separable investigation, implementation or review to
-visible worker panes through that skill and verify their results. Small sequential
-tasks may stay inline with a brief reason. Ordinary workspaces stay inline.
+focus. In Team mode, default to the current agent. Delegate through the skill only
+for useful independent parallel work, justified independent review, or explicit
+user requests. Size and workspace type alone do not justify workers. Preserve user
+constraints in each assignment; verify the result. Independent review requires
+`--fresh-session`; related corrections use `followup`. Use `--no-fallback` when a
+specific or different provider is required. Ordinary workspaces stay inline.
 Do not substitute native subagents for Team panes. Assigned Team workers complete
 their own task without further delegation. Report unresolved context/setup failures.
 
