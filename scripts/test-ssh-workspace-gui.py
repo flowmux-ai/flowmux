@@ -85,6 +85,10 @@ class Harness:
                         PATH=str(Path(args.cli).parent) + os.pathsep + self.env.get("PATH", ""))
         assert self.env.get("HOME") == os.environ.get("HOME")
         self.state_path = self.root / "state/flowmux/state.json"
+        # HOME stays user-owned; an isolated GUI must not refresh installed skills.
+        marker = self.state_path.parent / "installed-skill-version"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("9999.0.0")
         print(f"ARTIFACTS: {self.root}", flush=True)
 
     def log(self, event, **fields):

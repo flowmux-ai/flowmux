@@ -73,10 +73,6 @@ def main():
     h = fixture.Harness(args)
     for key in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDECODE'):
         h.env.pop(key, None)
-    # Do not let this isolated GUI refresh the user's installed skill files.
-    marker = h.root / 'state/flowmux/installed-skill-version'
-    marker.parent.mkdir(parents=True)
-    marker.write_text('9999.0.0')
     profile = h.root / 'claude'
     profile.mkdir()
     original = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')

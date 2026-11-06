@@ -19,6 +19,16 @@ spec.loader.exec_module(gui)
 
 
 class HarnessTests(unittest.TestCase):
+    def test_isolated_gui_disables_user_skill_refresh(self):
+        h = gui.Harness(SimpleNamespace(cli='/bin/true', gui='/bin/false', protected_pid=[]))
+        try:
+            marker = Path(h.env['XDG_STATE_HOME']) / 'flowmux/installed-skill-version'
+            self.assertEqual(marker.read_text(), '9999.0.0')
+            self.assertEqual(h.env['HOME'], gui.os.environ['HOME'])
+            self.assertTrue(marker.is_relative_to(h.root))
+        finally:
+            h.cleanup()
+
     @contextmanager
     def clock(self):
         now = [0.0]
