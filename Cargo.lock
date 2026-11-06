@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1002,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-browser"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "dirs",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-cli"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-config"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-cookies"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "aes",
  "cbc",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-core"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "chrono",
  "serde",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-daemon"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1113,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-editor"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "globset",
  "ignore",
@@ -1128,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-ipc"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-md-viewer"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "block2",
  "comrak",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-notify"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "base64",
  "block2",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-procmon"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "libc",
  "thiserror 1.0.69",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-state"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "chrono",
  "flowmux-config",
@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-terminal"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "flowmux-core",
  "libc",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "flowmux-vcs"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "flowmux-core",
  "gix",
