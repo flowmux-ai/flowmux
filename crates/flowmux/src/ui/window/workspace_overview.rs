@@ -9,7 +9,7 @@ const THUMBNAIL_MAX_HEIGHT: i32 = 200;
 #[derive(Clone, Default)]
 pub(super) struct WorkspaceOverviewState {
     active: Rc<RefCell<Option<ActiveWorkspaceOverview>>>,
-    transitioning: Rc<Cell<bool>>,
+    pub(super) transitioning: Rc<Cell<bool>>,
     generation: Rc<Cell<u64>>,
     tick: Rc<RefCell<Option<gtk::TickCallbackId>>>,
     dismiss_pending: Rc<Cell<bool>>,

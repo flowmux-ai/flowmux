@@ -9,22 +9,28 @@ impl WindowController {
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
+            // Pane-targeted commands only unzoom when they change the zoomed
+            // pane's own workspace; a background workspace keeps the zoom.
             GtkCommand::TeamSpawn { pane, .. }
+            | GtkCommand::SplitPane { pane, .. }
+            | GtkCommand::ResizePane { pane, .. }
             | GtkCommand::CloseFocused { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. } => zoomed.is_some_and(|zoom| {
                 let registry = self.pane_registry.borrow();
                 registry.workspace_of_pane(*pane) == registry.workspace_of_pane(zoom)
             }),
-            GtkCommand::SplitPane { .. }
-            | GtkCommand::SplitFocused { .. }
+            GtkCommand::SplitFocused { .. }
             | GtkCommand::FocusDirection { .. }
             | GtkCommand::TearOffSurface { .. }
             | GtkCommand::MoveSurfaceToPane { .. }
             | GtkCommand::MoveSurfaceToWorkspace { .. }
-            | GtkCommand::SplitSurfaceIntoPane { .. }
-            | GtkCommand::ResizePane { .. } => zoomed.is_some(),
-            GtkCommand::FocusPane { pane, .. } => zoomed.is_some_and(|zoom| zoom != *pane),
+            | GtkCommand::SplitSurfaceIntoPane { .. } => zoomed.is_some(),
+            GtkCommand::FocusPane { pane, .. } => zoomed.is_some_and(|zoom| {
+                let registry = self.pane_registry.borrow();
+                zoom != *pane
+                    && registry.workspace_of_pane(*pane) == registry.workspace_of_pane(zoom)
+            }),
             _ => false,
         };
         if clears_zoom {

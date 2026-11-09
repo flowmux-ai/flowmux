@@ -2950,6 +2950,34 @@ impl WindowController {
         }
     }
 
+    /// True when `cmd` acts on a pane outside the visible workspace. Such
+    /// commands come from agents (`browser open`, `split`, `focus-tab`) or
+    /// background events (a shell exiting) and must not dismiss the overview,
+    /// close the agent office or unzoom the pane the user is looking at.
+    fn command_targets_background_pane(&self, cmd: &GtkCommand) -> bool {
+        let pane = match cmd {
+            GtkCommand::BrowserOpenSplit {
+                target_pane: Some(pane),
+                ..
+            }
+            | GtkCommand::OpenUrlInBrowserTab { pane, .. }
+            | GtkCommand::OpenBrowserPopup { pane, .. }
+            | GtkCommand::SplitPane { pane, .. }
+            | GtkCommand::TeamSpawn { pane, .. }
+            | GtkCommand::NewSurface { pane }
+            | GtkCommand::NewBrowserSurface { pane }
+            | GtkCommand::OpenTig { pane }
+            | GtkCommand::ActivateSurface { pane, .. }
+            | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::CloseTerminatedSurface { pane, .. }
+            | GtkCommand::RenameSurface { pane, .. }
+            | GtkCommand::ResizePane { pane, .. }
+            | GtkCommand::FocusPane { pane, .. } => *pane,
+            _ => return false,
+        };
+        !self.pane_in_visible_workspace(pane)
+    }
+
     pub async fn dispatch(&self, cmd: GtkCommand) {
         let office_data_change = matches!(
             &cmd,
@@ -2971,8 +2999,12 @@ impl WindowController {
                 | GtkCommand::TerminalTitleChanged { .. }
                 | GtkCommand::SshCwd { .. }
         );
+        // Agent work and background events aimed at a pane in another
+        // workspace must not disturb what the user is looking at.
+        let background_target = self.command_targets_background_pane(&cmd);
         if !matches!(&cmd, GtkCommand::ToggleAgentOffice)
             && !office_data_change
+            && !background_target
             && (command_dismisses_workspace_overview(&cmd)
                 || matches!(
                     &cmd,
@@ -2981,13 +3013,18 @@ impl WindowController {
         {
             self.close_agent_office();
         }
-        if self.workspace_overview.is_active() && command_dismisses_workspace_overview(&cmd) {
+        if self.workspace_overview.is_active()
+            && !background_target
+            && command_dismisses_workspace_overview(&cmd)
+        {
             self.dismiss_workspace_overview_immediately();
         }
-        if matches!(
-            &cmd,
-            GtkCommand::BrowserOpenSplit { .. } | GtkCommand::OpenUrlInBrowserTab { .. }
-        ) {
+        if !background_target
+            && matches!(
+                &cmd,
+                GtkCommand::BrowserOpenSplit { .. } | GtkCommand::OpenUrlInBrowserTab { .. }
+            )
+        {
             self.clear_pane_zoom();
         }
         match cmd {
@@ -9873,6 +9910,159 @@ mod tests {
         controller.activate_workspace(background_id).await;
         gtk::glib::timeout_future(Duration::from_millis(100)).await;
         assert_eq!(controller.focused_pane.get(), Some(background_second));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn background_pane_commands_preserve_foreground_zoom_and_overview() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let root = std::env::temp_dir();
+        let background_id = store
+            .create_workspace(Some("background".into()), root.clone())
+            .await;
+        let foreground_id = store
+            .create_workspace(Some("foreground".into()), root)
+            .await;
+        let background = store.get_workspace(background_id).await.unwrap();
+        let foreground = store.get_workspace(foreground_id).await.unwrap();
+        let background_pane = background.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let foreground_pane = foreground.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.BackgroundZoomOverview")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&background);
+        controller.render_workspace(&foreground);
+        controller
+            .split_pane(foreground_pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        controller.activate_workspace(foreground_id).await;
+        controller.window.present();
+        controller.focus_pane(foreground_pane);
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        controller
+            .dispatch(GtkCommand::TogglePaneZoom {
+                pane: foreground_pane,
+            })
+            .await;
+        for _ in 0..100 {
+            if controller.stack.visible_child_name().as_deref() == Some(PANE_ZOOM_PAGE)
+                && controller.pane_zoom.transition.borrow().is_none()
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert_eq!(controller.zoomed_pane(), Some(foreground_pane));
+        let assert_zoom_kept = || {
+            assert_eq!(controller.zoomed_pane(), Some(foreground_pane));
+            assert_eq!(
+                controller.stack.visible_child_name().as_deref(),
+                Some(PANE_ZOOM_PAGE)
+            );
+            assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+        };
+
+        // An agent's browser open in the background keeps the user's zoom.
+        let (ack, outcome) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserOpenSplit {
+                target_pane: Some(background_pane),
+                url: "about:blank".into(),
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        let opened = outcome.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(store.active_workspace().await, Some(foreground_id));
+        assert_zoom_kept();
+
+        // So does splitting the background pane.
+        let (ack, split) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::SplitPane {
+                pane: opened.pane,
+                direction: SplitDirection::Horizontal,
+                ack,
+            })
+            .await;
+        split.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_zoom_kept();
+
+        // Native input on the hidden tab fails fast with a usable reason.
+        let (ack, result) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserAction {
+                pane: opened.pane,
+                surface: None,
+                op: BrowserOp::Click {
+                    target: "e1".into(),
+                },
+                ack,
+            })
+            .await;
+        let error = result.await.unwrap().unwrap_err();
+        assert!(error.contains("not on screen"), "{error}");
+        assert_zoom_kept();
+
+        // The workspace overview survives background browser work and still
+        // closes for a command in the visible workspace.
+        controller
+            .dispatch(GtkCommand::TogglePaneZoom {
+                pane: foreground_pane,
+            })
+            .await;
+        for _ in 0..100 {
+            if controller.zoomed_pane().is_none()
+                && controller.pane_zoom.transition.borrow().is_none()
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert_eq!(controller.zoomed_pane(), None);
+        controller
+            .dispatch(GtkCommand::ToggleWorkspaceOverview)
+            .await;
+        for _ in 0..100 {
+            if !controller.workspace_overview.transitioning.get() {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert!(controller.workspace_overview.is_active());
+        let (ack, outcome) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserOpenSplit {
+                target_pane: Some(background_pane),
+                url: "about:blank#overview".into(),
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        outcome.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(controller.workspace_overview.is_active());
+        assert_eq!(store.active_workspace().await, Some(foreground_id));
+        controller
+            .dispatch(GtkCommand::NewSurface {
+                pane: foreground_pane,
+            })
+            .await;
+        assert!(!controller.workspace_overview.is_active());
     }
 
     #[cfg(not(target_os = "macos"))]

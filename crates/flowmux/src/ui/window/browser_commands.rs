@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// Native pointer and key input need a mapped WebView. A tab whose workspace
+/// is not on screen fails immediately instead of waiting for render frames,
+/// and the message steers agents to commands that work in the background.
+pub(super) const BACKGROUND_TAB_NATIVE_INPUT: &str = "native input requires a visible browser tab: its workspace is not on screen. Use fill, select, check, eval or wait, or ask the user to view that workspace";
+
 impl WindowController {
     async fn open_browser_split(
         &self,
@@ -112,6 +117,10 @@ impl WindowController {
         ack: tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>,
     ) {
         use flowmux_browser::{input::PointerTarget, scripts};
+        if !self.pane_in_visible_workspace(pane) {
+            let _ = ack.send(Err(BACKGROUND_TAB_NATIVE_INPUT.into()));
+            return;
+        }
         let revision = browser.control.revision();
         let registry = self.pane_registry.clone();
         let expected = surface.or_else(|| registry.borrow().active_surface(pane));
@@ -719,6 +728,10 @@ impl WindowController {
                         );
                     }
                     BrowserOp::Press { key } => {
+                        if !self.pane_in_visible_workspace(pane) {
+                            let _ = ack.send(Err(BACKGROUND_TAB_NATIVE_INPUT.into()));
+                            return;
+                        }
                         let registry = self.pane_registry.clone();
                         let expected_surface =
                             surface.or_else(|| registry.borrow().active_surface(pane));
