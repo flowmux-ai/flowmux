@@ -217,8 +217,10 @@ panes in a background workspace without changing what the user sees, so
 keep working there. Only `workspace focus` and the user's own clicks switch
 the visible workspace. Native `click`/`dblclick`/`hover`/`press` need the tab
 on screen and fail immediately in a background workspace; use `fill`,
-`select`, `check`, `eval` or `wait` instead, and report what still needs the
-visible tab rather than switching workspaces.
+`select`, `eval` or `wait` instead, and report what still needs the visible
+tab rather than switching workspaces. A tab opened while its workspace was
+hidden has no viewport until shown once, so `check` and `--viewport`
+snapshots do not work there yet.
 
 The `send-keys` + `read-screen` pair is the core terminal loop: launch
 or feed a command in another pane, then read its output to decide what

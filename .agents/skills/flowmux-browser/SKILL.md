@@ -229,9 +229,12 @@ default actions. If an input opens a page dialog, the command returns once the
 dialog is available; answer it with `dialog` before checking the page result.
 A tab whose workspace is not on screen rejects `click`, `dblclick`, `hover` and
 `press` immediately with `native input requires a visible browser tab`. Do not
-run `workspace focus` to work around it: continue with `fill`, `select`, `check`,
-`eval`, `wait`, `text` and `snapshot`, and report which step still needs the tab
-on screen so the user can view that workspace when they choose.
+run `workspace focus` to work around it: continue with `fill`, `select`, `eval`,
+`wait`, `text` and `snapshot`, and report which step still needs the tab on
+screen so the user can view that workspace when they choose. A tab opened while
+its workspace was hidden has a 0x0 viewport until it has been shown once, so
+`check`, `--viewport` snapshots and other viewport-dependent commands fail or
+return nothing there until the user views that workspace.
 Use `wait` for later network responses or other asynchronous page changes.
 Set `$BUTTON_REF`, `$FIELD_REF` and `$SELECT_REF` from the current snapshot's
 complete tokens, such as `e3-<snapshot-id>`. These are independent examples;
