@@ -1145,8 +1145,12 @@ async fn accepted_native_sessions_persist_storage_and_reject_stale_replacements(
     for agent in ["gemini", "cline"] {
         let data = tempfile::tempdir().unwrap();
         let native_home = data.path().join("native");
-        let mut native = Command::new("/bin/sh")
-            .args(["-c", "printf 'ready\\n'; read -r done || :"])
+        // macOS can redact launch environments for system shells.
+        let mut native = Command::new("python3")
+            .args([
+                "-c",
+                "import sys; print('ready', flush=True); sys.stdin.readline()",
+            ])
             .env("GEMINI_CLI_HOME", &native_home)
             .env("CLINE_DATA_DIR", &native_home)
             .stdin(Stdio::piped())
