@@ -202,13 +202,23 @@ flowmux read-screen pane:$OTHER                 # dump that pane's buffer text*
 
 # Workspace / pane / tab control
 flowmux workspace current               # focused workspace id
-flowmux workspace focus <workspace>     # switch to a workspace
+flowmux workspace new --background --root /p  # create a workspace without switching the user's view
+flowmux workspace focus <workspace>     # switch the user's view (never do this just to see your own panes)
 flowmux new-tab --workspace <workspace> --cwd /tmp # open a terminal tab
-flowmux focus-pane pane:$P              # grab keyboard focus
+flowmux focus-pane pane:$P              # grab keyboard focus (in a background workspace: remembered, not applied)
 flowmux close-pane  pane:$P             # close a pane (refuses the last pane)
-flowmux focus-tab  <surface> --pane $P  # activate a tab
+flowmux focus-tab  <surface> --pane $P  # activate a tab (no keyboard focus steal from a background workspace)
 flowmux close-tab  <surface> --pane $P  # close a tab (refuses the last tab of the last pane)
 ```
+
+The user may be working in another workspace while you run. Every pane
+command above, `browser open` and the JS-based browser actions operate on
+panes in a background workspace without changing what the user sees, so
+keep working there. Only `workspace focus` and the user's own clicks switch
+the visible workspace. Native `click`/`dblclick`/`hover`/`press` need the tab
+on screen and fail immediately in a background workspace; use `fill`,
+`select`, `check`, `eval` or `wait` instead, and report what still needs the
+visible tab rather than switching workspaces.
 
 The `send-keys` + `read-screen` pair is the core terminal loop: launch
 or feed a command in another pane, then read its output to decide what

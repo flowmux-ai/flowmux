@@ -63,8 +63,8 @@ source pane for that invocation, or unset it to use that window's focused pane.
 ```bash
 "$FLOWMUX_CLI" workspace ls
 "$FLOWMUX_CLI" workspace current
-"$FLOWMUX_CLI" workspace new --name Research --root /path/to/project
-"$FLOWMUX_CLI" workspace focus "$WORKSPACE"
+"$FLOWMUX_CLI" workspace new --name Research --root /path/to/project --background
+"$FLOWMUX_CLI" workspace focus "$WORKSPACE"   # switches the user's view; see below
 "$FLOWMUX_CLI" split "pane:$PANE" --right
 "$FLOWMUX_CLI" split "pane:$PANE" --down
 "$FLOWMUX_CLI" resize-pane "pane:$PANE" --ratio 0.5
@@ -75,6 +75,15 @@ source pane for that invocation, or unset it to use that window's focused pane.
 
 `resize-pane` sets the parent split's first-child ratio. `new-tab` creates a
 terminal tab; inspect the returned/tree IDs before operating on it.
+
+The user may be working in another workspace while you run. `workspace new
+--background`, `split`, `new-tab`, `focus-pane`, `focus-tab`, `browser open` and
+the JavaScript-based browser actions all work on panes in a background
+workspace without changing what the user sees, so keep working there. In a
+background workspace `focus-pane` only records the pane for that workspace's
+next activation and `focus-tab` switches the tab without taking keyboard
+focus. Only `workspace focus` switches the visible workspace; use it when the
+user asks to see something, never just to make your own panes visible.
 
 To run a user-requested command in another terminal: inspect its screen, confirm
 it is the intended shell, send text, send Enter, then read the result.
@@ -218,6 +227,11 @@ two clicks. A blocked or moving target returns an error without retrying.
 Key and pointer completion waits for synchronous event handlers and native
 default actions. If an input opens a page dialog, the command returns once the
 dialog is available; answer it with `dialog` before checking the page result.
+A tab whose workspace is not on screen rejects `click`, `dblclick`, `hover` and
+`press` immediately with `native input requires a visible browser tab`. Do not
+run `workspace focus` to work around it: continue with `fill`, `select`, `check`,
+`eval`, `wait`, `text` and `snapshot`, and report which step still needs the tab
+on screen so the user can view that workspace when they choose.
 Use `wait` for later network responses or other asynchronous page changes.
 Set `$BUTTON_REF`, `$FIELD_REF` and `$SELECT_REF` from the current snapshot's
 complete tokens, such as `e3-<snapshot-id>`. These are independent examples;
