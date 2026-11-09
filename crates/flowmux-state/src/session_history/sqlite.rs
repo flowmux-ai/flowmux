@@ -216,6 +216,28 @@ mod tests {
     const ID: &str = "12345678-1234-4234-8234-123456789abc";
 
     #[test]
+    fn session_history_reads_live_wal_without_changing_database_or_wal() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("conversation_summaries.db");
+        let wal = home.path().join("conversation_summaries.db-wal");
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch("PRAGMA journal_mode=WAL;
+            CREATE TABLE conversation_summaries(conversation_id TEXT, title TEXT, workspace_uris TEXT, last_modified_time TEXT, preview TEXT, parent_conversation_id TEXT, nesting_depth INTEGER);").unwrap();
+        writer.execute("INSERT INTO conversation_summaries VALUES (?1, 'WAL title', '[\"file:///tmp/project\"]', '2026-09-03T02:05:48Z', 'WAL summary', '', 0)", [ID]).unwrap();
+        let before = fs::read(&path).unwrap();
+        let wal_before = fs::read(&wal).unwrap();
+        assert!(!wal_before.is_empty());
+
+        let items = list_sessions(SessionAgent::Antigravity, home.path()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, ID);
+        assert_eq!(items[0].title, "WAL title");
+        assert!(items[0].preview().unwrap().contains("WAL summary"));
+        assert_eq!(before, fs::read(&path).unwrap());
+        assert_eq!(wal_before, fs::read(&wal).unwrap());
+    }
+
+    #[test]
     fn opencode_database_filters_children_archives_and_private_parts() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("opencode.db");

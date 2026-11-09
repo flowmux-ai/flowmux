@@ -18,7 +18,8 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 fs2 = { workspace = true }
-rusqlite = { version = "0.32", features = ["bundled"] }
+# Keep checked u64 revisions and usize query limits supported.
+rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
 url = "2"
 
 [dev-dependencies]

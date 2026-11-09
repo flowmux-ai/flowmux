@@ -2428,16 +2428,16 @@ Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
 ~~~~
 
+Used by: libsqlite3-sys 0.39.1, rusqlite 0.41.1
+
+~~~~text
+Copyright (c) 2014 The rusqlite developers
+~~~~
+
 Used by: dbus 0.9.12, libdbus-sys 0.2.7
 
 ~~~~text
 Copyright (c) 2014-2018 David Henningsson <diwic@ubuntu.com> and other contributors
-~~~~
-
-Used by: libsqlite3-sys 0.30.1, rusqlite 0.32.1
-
-~~~~text
-Copyright (c) 2014-2021 The rusqlite developers
 ~~~~
 
 Used by: headers-core 0.3.0
@@ -2532,7 +2532,7 @@ Copyright (c) 2016 Alex Crichton
 Copyright (c) 2017 The Tokio Authors
 ~~~~
 
-Used by: hashbrown 0.14.5, hashbrown 0.16.1, hashbrown 0.17.1
+Used by: hashbrown 0.16.1, hashbrown 0.17.1
 
 ~~~~text
 Copyright (c) 2016 Amanieu d'Antras
@@ -2758,12 +2758,6 @@ Used by: smallvec 1.15.1
 
 ~~~~text
 Copyright (c) 2018 The Servo Project Developers
-~~~~
-
-Used by: ahash 0.8.12
-
-~~~~text
-Copyright (c) 2018 Tom Kaitchuck
 ~~~~
 
 Used by: want 0.3.1
@@ -3012,12 +3006,6 @@ Used by: ipnet 2.12.0
 Copyright 2017 Juniper Networks, Inc.
 ~~~~
 
-Used by: zerocopy 0.8.48
-
-~~~~text
-Copyright 2023 The Fuchsia Authors
-~~~~
-
 Used by: utf8_iter 1.0.4
 
 ~~~~text
@@ -3097,7 +3085,15 @@ MIT License
 Copyright (c) 2024 Robert Bastian
 ~~~~
 
-Used by: block2 0.6.2, chrono 0.4.44, dispatch2 0.3.1, javascriptcore6 0.4.0, javascriptcore6-sys 0.4.0, libm 0.2.16, objc2 0.6.4, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, r-efi 6.0.0, siphasher 1.0.3, wasip3 0.4.0+wasi-0.3.0-rc-2026-01-06, webkit6 0.4.0, webkit6-sys 0.4.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-core 0.62.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.48.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.61.2, windows-targets 0.48.5, windows-targets 0.52.6, windows_aarch64_gnullvm 0.48.5, windows_aarch64_gnullvm 0.52.6, windows_aarch64_msvc 0.48.5, windows_aarch64_msvc 0.52.6, windows_i686_gnu 0.48.5, windows_i686_gnu 0.52.6, windows_i686_gnullvm 0.52.6, windows_i686_msvc 0.48.5, windows_i686_msvc 0.52.6, windows_x86_64_gnu 0.48.5, windows_x86_64_gnu 0.52.6, windows_x86_64_gnullvm 0.48.5, windows_x86_64_gnullvm 0.52.6, windows_x86_64_msvc 0.48.5, windows_x86_64_msvc 0.52.6
+Used by: sqlite-wasm-rs 0.5.5
+
+~~~~text
+MIT License
+
+Copyright (c) 2024 Spxg
+~~~~
+
+Used by: block2 0.6.2, chrono 0.4.44, dispatch2 0.3.1, javascriptcore6 0.4.0, javascriptcore6-sys 0.4.0, libm 0.2.16, objc2 0.6.4, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-foundation 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, r-efi 6.0.0, rsqlite-vfs 0.1.1, siphasher 1.0.3, wasip3 0.4.0+wasi-0.3.0-rc-2026-01-06, webkit6 0.4.0, webkit6-sys 0.4.0, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows-core 0.62.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.48.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.61.2, windows-targets 0.48.5, windows-targets 0.52.6, windows_aarch64_gnullvm 0.48.5, windows_aarch64_gnullvm 0.52.6, windows_aarch64_msvc 0.48.5, windows_aarch64_msvc 0.52.6, windows_i686_gnu 0.48.5, windows_i686_gnu 0.52.6, windows_i686_gnullvm 0.52.6, windows_i686_msvc 0.48.5, windows_i686_msvc 0.52.6, windows_x86_64_gnu 0.48.5, windows_x86_64_gnu 0.52.6, windows_x86_64_gnullvm 0.48.5, windows_x86_64_gnullvm 0.52.6, windows_x86_64_msvc 0.48.5, windows_x86_64_msvc 0.52.6
 
 ~~~~text
 MIT License
@@ -3310,7 +3306,7 @@ The MIT License (MIT)
 Copyright (c) 2016 Johann Tuffe
 ~~~~
 
-Used by: hashlink 0.9.1
+Used by: hashlink 0.12.2
 
 ~~~~text
 This work is derived in part from the `linked-hash-map` crate, Copyright (c)
