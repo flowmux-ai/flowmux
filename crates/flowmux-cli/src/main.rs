@@ -240,6 +240,9 @@ enum Cmd {
     },
 
     /// Grab keyboard focus for a pane (falls back to `$FLOWMUX_PANE_ID`).
+    ///
+    /// A pane in a background workspace is remembered for that workspace's
+    /// next activation; the visible workspace keeps keyboard focus.
     FocusPane { pane: Option<PaneId> },
 
     /// Close a pane (falls back to `$FLOWMUX_PANE_ID`). Refuses to close
@@ -248,6 +251,9 @@ enum Cmd {
 
     /// Make a tab the active one in its pane. `--pane` falls back to
     /// `$FLOWMUX_PANE_ID`.
+    ///
+    /// A pane in a background workspace switches tabs without taking
+    /// keyboard focus from the visible workspace.
     FocusTab {
         surface: SurfaceId,
         #[arg(long)]

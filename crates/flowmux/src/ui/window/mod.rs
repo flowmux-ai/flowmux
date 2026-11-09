@@ -1324,6 +1324,26 @@ impl WindowController {
             .map(|zoom| zoom.pane)
     }
 
+    /// The workspace the user is looking at: the zoomed pane's workspace while
+    /// a pane is zoomed, otherwise the stack's visible workspace page.
+    pub(super) fn visible_workspace(&self) -> Option<WorkspaceId> {
+        if let Some(zoom) = self.pane_zoom.active.borrow().as_ref() {
+            return Some(zoom.workspace);
+        }
+        self.stack
+            .visible_child_name()
+            .and_then(|name| name.as_str().parse::<WorkspaceId>().ok())
+    }
+
+    /// True when `pane` is rendered inside the visible workspace. Commands
+    /// aimed at a pane in another workspace must leave the user's view and
+    /// keyboard focus alone: GTK moves focus into an unmapped widget without
+    /// switching the stack page, which silently takes typing away.
+    pub(super) fn pane_in_visible_workspace(&self, pane: PaneId) -> bool {
+        let workspace = self.pane_registry.borrow().workspace_of_pane(pane);
+        workspace.is_some() && workspace == self.visible_workspace()
+    }
+
     fn cancel_pane_zoom_transition(&self) {
         self.pane_zoom
             .transition_generation
@@ -2541,6 +2561,18 @@ impl WindowController {
     /// Handle a pane focus event, update MRU, and sync label/subtitles. Focusing
     /// the same pane again moves it to the MRU head, though the label itself may
     /// not change because set_workspace_name is idempotent.
+    /// Record `pane` as its workspace's most recently focused pane so the next
+    /// activation of that workspace lands on it.
+    fn remember_pane_focus(&self, ws_id: WorkspaceId, pane: PaneId) {
+        let mut mru = self.focus_mru.borrow_mut();
+        let queue = mru.entry(ws_id).or_default();
+        queue.retain(|p| *p != pane);
+        queue.push_front(pane);
+        while queue.len() > 3 {
+            queue.pop_back();
+        }
+    }
+
     async fn on_pane_focused(&self, pane: PaneId) {
         let Some(ws_id) = self.store.workspace_for_pane(pane).await else {
             return;
@@ -2552,15 +2584,7 @@ impl WindowController {
         }
         self.focused_pane.set(Some(pane));
         self.pane_registry.borrow().mark_focused_pane(pane);
-        {
-            let mut mru = self.focus_mru.borrow_mut();
-            let queue = mru.entry(ws_id).or_default();
-            queue.retain(|p| *p != pane);
-            queue.push_front(pane);
-            while queue.len() > 3 {
-                queue.pop_back();
-            }
-        }
+        self.remember_pane_focus(ws_id, pane);
         self.sync_workspace_label(ws_id).await;
         let active_surface = self.pane_registry.borrow().active_surface(pane);
         self.acknowledge_source_notifications(Some(ws_id), Some(pane), active_surface);
@@ -9703,6 +9727,152 @@ mod tests {
         );
         assert_eq!(store.active_workspace().await, Some(foreground_workspace));
         assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn focus_commands_on_background_workspace_keep_foreground_focus() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let root = std::env::temp_dir();
+        let background_id = store
+            .create_workspace(Some("background".into()), root.clone())
+            .await;
+        let foreground_id = store
+            .create_workspace(Some("foreground".into()), root)
+            .await;
+        let background = store.get_workspace(background_id).await.unwrap();
+        let foreground = store.get_workspace(foreground_id).await.unwrap();
+        let background_pane = background.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let foreground_pane = foreground.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.BackgroundFocusCommands")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&background);
+        controller.render_workspace(&foreground);
+        // A second pane in the background workspace so the remembered focus
+        // target differs from the first leaf.
+        let background_second = controller
+            .split_pane(background_pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        controller.activate_workspace(foreground_id).await;
+        controller.window.present();
+        controller.focus_pane(foreground_pane);
+        // The deferred grab lands on the terminal after the sidebar row; wait
+        // for it so the baseline is the pane the user is typing in.
+        let foreground_terminal: gtk::Widget = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(foreground_pane)
+            .expect("foreground terminal")
+            .widget
+            .clone()
+            .upcast();
+        for _ in 0..100 {
+            if gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref()
+                == Some(&foreground_terminal)
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        let focus = gtk::prelude::GtkWindowExt::focus(&controller.window);
+        assert_eq!(focus.as_ref(), Some(&foreground_terminal));
+        let foreground_name = foreground_id.to_string();
+        let assert_foreground_untouched = || {
+            assert_eq!(
+                controller.stack.visible_child_name().as_deref(),
+                Some(foreground_name.as_str())
+            );
+            assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+            assert_eq!(gtk::prelude::GtkWindowExt::focus(&controller.window), focus);
+        };
+
+        // focus-tab: a second tab attaches without focus, then switching back
+        // to the first tab must not pull keyboard focus into the hidden pane.
+        controller
+            .dispatch(GtkCommand::NewSurface {
+                pane: background_pane,
+            })
+            .await;
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let tabs: Vec<SurfaceId> = {
+            let workspaces = store.ordered_workspaces().await;
+            flowmux_ipc::protocol::describe_workspaces(&workspaces)
+                .iter()
+                .flat_map(|w| &w.panes)
+                .find(|p| p.id == background_pane)
+                .expect("background pane in tree")
+                .tabs
+                .iter()
+                .map(|tab| tab.id)
+                .collect()
+        };
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .active_surface(background_pane),
+            Some(tabs[1])
+        );
+        assert_foreground_untouched();
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::ActivateSurface {
+                pane: background_pane,
+                surface: tabs[0],
+                ack: Some(ack),
+            })
+            .await;
+        done.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .active_surface(background_pane),
+            Some(tabs[0])
+        );
+        assert_eq!(store.active_workspace().await, Some(foreground_id));
+        assert_foreground_untouched();
+
+        // focus-pane: remembered for the background workspace, not applied now.
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::FocusPane {
+                pane: background_second,
+                ack,
+            })
+            .await;
+        done.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(store.active_workspace().await, Some(foreground_id));
+        assert_foreground_untouched();
+        assert_eq!(
+            controller
+                .focus_mru
+                .borrow()
+                .get(&background_id)
+                .and_then(|queue| queue.front().copied()),
+            Some(background_second)
+        );
+
+        // The remembered pane is honored once the user switches over.
+        controller.activate_workspace(background_id).await;
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(controller.focused_pane.get(), Some(background_second));
     }
 
     #[cfg(not(target_os = "macos"))]

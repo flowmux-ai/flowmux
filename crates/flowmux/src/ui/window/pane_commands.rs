@@ -282,6 +282,14 @@ impl WindowController {
                     }
                     return;
                 }
+                if !self.pane_in_visible_workspace(pane) {
+                    // The tab switched inside its pane; keyboard focus stays
+                    // with the visible workspace.
+                    if let Some(ack) = ack {
+                        let _ = ack.send(Ok(()));
+                    }
+                    return;
+                }
                 // Focus the newly active surface after GTK has mounted it.
                 let registry = self.pane_registry.clone();
                 glib::idle_add_local_once(move || {
@@ -591,16 +599,30 @@ impl WindowController {
                 // Existence check up front so a bad id is reported rather
                 // than silently no-op'd by focus_pane. Reuses the same
                 // grab-focus primitive the notification-click path uses.
-                let known = self.pane_registry.borrow().pane_frame(pane).is_some();
-                if known {
+                let (known, workspace) = {
+                    let registry = self.pane_registry.borrow();
+                    (
+                        registry.pane_frame(pane).is_some(),
+                        registry.workspace_of_pane(pane),
+                    )
+                };
+                if !known {
+                    let _ = ack.send(Err(format!("pane not found: {pane}")));
+                } else if !self.pane_in_visible_workspace(pane) {
+                    // Background workspace: remember the pane for that
+                    // workspace's next activation instead of pulling keyboard
+                    // focus away from the pane the user is typing in.
+                    if let Some(ws_id) = workspace {
+                        self.remember_pane_focus(ws_id, pane);
+                    }
+                    let _ = ack.send(Ok(()));
+                } else {
                     self.focus_pane(pane);
                     self.on_pane_focused(pane).await;
                     let _ = ack.send(Ok(()));
                     self.refresh_file_browser_from_focus().await;
                     self.refresh_worktrees_from_focus().await;
                     self.refresh_session_panel(false).await;
-                } else {
-                    let _ = ack.send(Err(format!("pane not found: {pane}")));
                 }
             }
             GtkCommand::TogglePaneZoom { pane } => {

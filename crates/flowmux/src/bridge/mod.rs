@@ -327,6 +327,8 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<Option<String>, String>>,
     },
     /// Grab keyboard focus for a pane by id (`flowmux focus-pane`).
+    /// A pane in a background workspace is only remembered as that
+    /// workspace's focus target; the visible workspace keeps keyboard focus.
     /// `Err` when the id is not a live pane. Non-destructive.
     FocusPane {
         pane: PaneId,
@@ -470,6 +472,8 @@ pub enum GtkCommand {
     },
     /// Switch the active pane-local surface tab. An ack reports completion
     /// after GTK applies focus; it does not wait for background persistence.
+    /// A pane in a background workspace switches tabs without taking
+    /// keyboard focus from the visible workspace.
     ActivateSurface {
         pane: PaneId,
         surface: SurfaceId,
