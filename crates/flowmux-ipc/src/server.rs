@@ -1022,6 +1022,7 @@ mod tests {
                     Duration::from_secs(2),
                     client.call(Request::WorkspaceCreate {
                         team: false,
+                        background: false,
                         name: None,
                         root: dir.path().to_owned(),
                     }),

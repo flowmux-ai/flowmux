@@ -1404,7 +1404,11 @@ pub(super) async fn check_native(
             let id = controller.store.create_workspace(None, root.into()).await;
             let (ack, reply) = tokio::sync::oneshot::channel();
             controller
-                .dispatch(GtkCommand::WorkspaceCreated { id, ack })
+                .dispatch(GtkCommand::WorkspaceCreated {
+                    id,
+                    activate: true,
+                    ack,
+                })
                 .await;
             reply.await.unwrap().unwrap();
         } else {

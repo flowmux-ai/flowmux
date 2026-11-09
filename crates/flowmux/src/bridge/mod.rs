@@ -297,6 +297,9 @@ pub enum GtkCommand {
     /// Render a freshly-created workspace in the sidebar + open its first pane.
     WorkspaceCreated {
         id: WorkspaceId,
+        /// Switch to the new workspace. `false` renders it behind the visible
+        /// one so agent-created workspaces do not pull the user away.
+        activate: bool,
         ack: oneshot::Sender<Result<(), String>>,
     },
     /// Split model + widgets in the ordered GTK lane. Success means applied,

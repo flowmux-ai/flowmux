@@ -6,15 +6,22 @@ use super::*;
 impl WindowController {
     pub(super) async fn dispatch_workspace_command(&self, cmd: GtkCommand) {
         match cmd {
-            GtkCommand::WorkspaceCreated { id, ack } => {
+            GtkCommand::WorkspaceCreated { id, activate, ack } => {
                 // Pull the authoritative workspace (with the store's
                 // pane ids) instead of fabricating new ones — otherwise
                 // `focused_pane` gets a UUID that doesn't exist in the
                 // store and split / close shortcuts no-op.
                 let result = match self.store.get_workspace(id).await {
-                    Some(ws) => {
+                    Some(ws) if activate => {
                         self.render_workspace(&ws);
                         self.activate_workspace(id).await;
+                        Ok(())
+                    }
+                    Some(ws) => {
+                        // `--background`: render behind the visible workspace
+                        // like a restored one, so the user keeps their view.
+                        self.render_workspace_with_activation(&ws, false);
+                        self.sync_workspace_label(id).await;
                         Ok(())
                     }
                     None => Err("Workspace no longer exists".into()),

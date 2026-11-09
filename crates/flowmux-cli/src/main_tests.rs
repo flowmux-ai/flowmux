@@ -185,11 +185,33 @@ fn split_down_maps_to_horizontal_direction() {
 }
 
 #[test]
+fn workspace_create_background_flag_is_forwarded() {
+    let req = build_request(Cmd::Workspace {
+        op: WorkspaceOp::New {
+            team: false,
+            background: true,
+            name: None,
+            root: Some(PathBuf::from("/tmp/flowmux-cli-background")),
+        },
+    })
+    .unwrap();
+
+    assert!(matches!(
+        req,
+        Request::WorkspaceCreate {
+            background: true,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn workspace_create_uses_explicit_root_and_name() {
     let root = PathBuf::from("/tmp/flowmux-cli-test");
     let req = build_request(Cmd::Workspace {
         op: WorkspaceOp::New {
             team: false,
+            background: false,
             name: Some("demo".into()),
             root: Some(root.clone()),
         },
@@ -198,7 +220,7 @@ fn workspace_create_uses_explicit_root_and_name() {
 
     assert!(matches!(
         req,
-        Request::WorkspaceCreate { name, root: got_root, team: false }
+        Request::WorkspaceCreate { name, root: got_root, team: false, background: false }
             if name.as_deref() == Some("demo") && got_root == root
     ));
 }

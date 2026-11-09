@@ -10067,6 +10067,64 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
+    async fn workspace_created_in_background_keeps_the_visible_workspace() {
+        let (controller, ws_id, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.WorkspaceCreatedBackground")
+                .await;
+        controller.activate_workspace(ws_id).await;
+        controller.window.present();
+        controller.focus_pane(pane);
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+
+        let created = controller
+            .store
+            .create_workspace(Some("agent".into()), std::env::temp_dir())
+            .await;
+        let (ack, reply) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::WorkspaceCreated {
+                id: created,
+                activate: false,
+                ack,
+            })
+            .await;
+        reply.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(
+            controller.surfaces.borrow().contains_key(&created),
+            "a background workspace is still rendered"
+        );
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(ws_id.to_string().as_str())
+        );
+        assert_eq!(controller.store.active_workspace().await, Some(ws_id));
+        assert_eq!(controller.sidebar.selected_workspace(), Some(ws_id));
+        assert_eq!(controller.focused_pane.get(), Some(pane));
+
+        // The default path still switches to the new workspace.
+        let foreground = controller
+            .store
+            .create_workspace(Some("user".into()), std::env::temp_dir())
+            .await;
+        let (ack, reply) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::WorkspaceCreated {
+                id: foreground,
+                activate: true,
+                ack,
+            })
+            .await;
+        reply.await.unwrap().unwrap();
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(foreground.to_string().as_str())
+        );
+        assert_eq!(controller.store.active_workspace().await, Some(foreground));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     async fn team_spawn_preserves_background_workspace_focus_and_zoom() {
         adw::init().unwrap();
         let store = StateStore::new_lazy(State::default());

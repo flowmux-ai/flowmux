@@ -101,6 +101,7 @@ async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
     let root = std::path::PathBuf::from("/tmp/flowmux-ipc-create-workspace");
     let response = handler.handle(Request::WorkspaceCreate {
         team: false,
+        background: false,
         name: Some("created".into()),
         root: root.clone(),
     });
@@ -110,9 +111,43 @@ async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
         response = &mut response => panic!("workspace create completed before bridge ack: {response:?}"),
         command = rx.recv() => command.expect("workspace create should dispatch to GTK"),
     };
-    let GtkCommand::WorkspaceCreated { id, ack } = command else {
+    let GtkCommand::WorkspaceCreated { id, activate, ack } = command else {
         panic!("expected WorkspaceCreated command");
     };
+    assert!(
+        activate,
+        "a plain `workspace new` switches to the workspace"
+    );
+    ack.send(Ok(())).unwrap();
+
+    assert!(matches!(
+        response.await,
+        Response::WorkspaceCreated { id: response_id } if response_id == id
+    ));
+}
+
+#[tokio::test]
+async fn workspace_create_in_background_requests_no_activation() {
+    let (handler, rx, _pane, _tab) = single_pane_handler().await;
+    let response = handler.handle(Request::WorkspaceCreate {
+        team: false,
+        background: true,
+        name: Some("agent".into()),
+        root: std::path::PathBuf::from("/tmp/flowmux-ipc-create-background"),
+    });
+    tokio::pin!(response);
+
+    let command = tokio::select! {
+        response = &mut response => panic!("workspace create completed before bridge ack: {response:?}"),
+        command = rx.recv() => command.expect("workspace create should dispatch to GTK"),
+    };
+    let GtkCommand::WorkspaceCreated { id, activate, ack } = command else {
+        panic!("expected WorkspaceCreated command");
+    };
+    assert!(
+        !activate,
+        "`--background` must leave the visible workspace alone"
+    );
     ack.send(Ok(())).unwrap();
 
     assert!(matches!(
@@ -128,6 +163,7 @@ async fn workspace_creation_failure_rolls_back_the_model() {
         let before = handler.inner.store().list_workspaces().await;
         let response = handler.handle(Request::WorkspaceCreate {
             team: false,
+            background: false,
             name: Some("must not survive".into()),
             root: std::env::temp_dir(),
         });
@@ -1432,7 +1468,7 @@ async fn claude_teams_uses_incremental_splits_after_initial_workspace_render() {
         response = &mut response => panic!("claude-teams completed before initial render ack: {response:?}"),
         command = rx.recv() => command.expect("claude-teams should dispatch initial render"),
     };
-    let GtkCommand::WorkspaceCreated { id: ws_id, ack } = command else {
+    let GtkCommand::WorkspaceCreated { id: ws_id, ack, .. } = command else {
         panic!("expected WorkspaceCreated command");
     };
     ack.send(Ok(())).unwrap();
@@ -1503,7 +1539,7 @@ async fn claude_teams_rejects_failed_or_lost_workspace_ack() {
             root: "/tmp".into(),
         });
         let gui = async {
-            let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+            let GtkCommand::WorkspaceCreated { id, ack, .. } = rx.recv().await.unwrap() else {
                 panic!("workspace creation expected")
             };
             if lost {
@@ -1540,7 +1576,7 @@ async fn claude_teams_reports_partial_workspace_on_input_failure() {
             root: "/tmp".into(),
         });
         let gui = async {
-            let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+            let GtkCommand::WorkspaceCreated { id, ack, .. } = rx.recv().await.unwrap() else {
                 panic!("workspace creation expected")
             };
             ack.send(Ok(())).unwrap();
@@ -1576,7 +1612,7 @@ async fn claude_teams_reports_partial_workspace_on_split_failure() {
         root: "/tmp".into(),
     });
     let gui = async {
-        let GtkCommand::WorkspaceCreated { id, ack } = rx.recv().await.unwrap() else {
+        let GtkCommand::WorkspaceCreated { id, ack, .. } = rx.recv().await.unwrap() else {
             panic!("workspace creation expected")
         };
         ack.send(Ok(())).unwrap();

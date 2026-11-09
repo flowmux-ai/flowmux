@@ -167,7 +167,11 @@ mod tests {
             .await;
         let (ack, reply) = tokio::sync::oneshot::channel();
         controller
-            .dispatch(GtkCommand::WorkspaceCreated { id: added, ack })
+            .dispatch(GtkCommand::WorkspaceCreated {
+                id: added,
+                activate: true,
+                ack,
+            })
             .await;
         reply.await.unwrap().unwrap();
         assert_eq!(

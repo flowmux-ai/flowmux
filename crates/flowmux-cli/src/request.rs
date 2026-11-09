@@ -293,9 +293,16 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         } => Request::AgentExplain { surface },
         Cmd::Tree | Cmd::Agents { .. } | Cmd::SessionName => Request::WorkspaceTree,
         Cmd::Workspace {
-            op: WorkspaceOp::New { name, root, team },
+            op:
+                WorkspaceOp::New {
+                    name,
+                    root,
+                    team,
+                    background,
+                },
         } => Request::WorkspaceCreate {
             team,
+            background,
             name,
             root: std::path::absolute(root.unwrap_or_else(|| PathBuf::from(".")))?,
         },

@@ -1170,6 +1170,11 @@ enum WorkspaceOp {
         /// Enable Flowmux team workers in this workspace.
         #[arg(long)]
         team: bool,
+        /// Create the workspace without switching to it; the visible
+        /// workspace keeps focus. Use this from agents so the user is not
+        /// pulled away from their work.
+        #[arg(long)]
+        background: bool,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]

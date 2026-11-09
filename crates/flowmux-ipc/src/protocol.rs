@@ -480,6 +480,10 @@ pub enum Request {
     WorkspaceCreate {
         #[serde(default)]
         team: bool,
+        /// Render the workspace without switching to it (`--background`), so
+        /// an agent can prepare panes while the user keeps working elsewhere.
+        #[serde(default)]
+        background: bool,
         name: Option<String>,
         root: PathBuf,
     },

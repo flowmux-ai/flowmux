@@ -97,6 +97,7 @@ async fn daemon_and_gui_preserve_each_others_workspaces() {
         let Response::WorkspaceCreated { id: daemon_id } = client
             .call(Request::WorkspaceCreate {
                 team: false,
+                background: false,
                 name: Some("daemon bytes 별도".into()),
                 root: dir.path().into(),
             })
@@ -188,6 +189,7 @@ async fn daemon_and_gui_preserve_each_others_workspaces() {
     let Response::WorkspaceCreated { id } = client
         .call(Request::WorkspaceCreate {
             team: false,
+            background: false,
             name: Some("ephemeral".into()),
             root: dir.path().into(),
         })

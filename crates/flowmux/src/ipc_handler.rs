@@ -58,11 +58,12 @@ fn browser_error_response(error: String) -> Response {
 async fn materialize_workspace(
     bridge: &Bridge,
     id: flowmux_core::WorkspaceId,
+    activate: bool,
 ) -> Result<(), String> {
     let (ack, reply) = oneshot::channel();
     bridge
         .tx
-        .send(GtkCommand::WorkspaceCreated { id, ack })
+        .send(GtkCommand::WorkspaceCreated { id, activate, ack })
         .await
         .map_err(|_| "bridge closed".to_string())?;
     reply.await.map_err(|_| "bridge closed".to_string())?
@@ -558,14 +559,14 @@ impl GuiHandler {
     /// Dispatch for the workspace verb group (split out of the `handle` match).
     async fn handle_workspace_verb(&self, req: Request) -> Response {
         match req {
-            Request::WorkspaceCreate { .. } => {
+            Request::WorkspaceCreate { background, .. } => {
                 // Create the model, then require the GUI to materialize it.
                 let resp = self.inner.handle(req.clone()).await;
                 let id = match &resp {
                     Response::WorkspaceCreated { id } => *id,
                     _ => return resp,
                 };
-                match materialize_workspace(&self.bridge, id).await {
+                match materialize_workspace(&self.bridge, id, !background).await {
                     Ok(()) => Response::WorkspaceCreated { id },
                     Err(error) => {
                         self.inner.store().remove_workspace(id).await;
@@ -1005,7 +1006,7 @@ impl GuiHandler {
                     .create_workspace(Some("claude-teams".into()), root)
                     .await;
 
-                if let Err(error) = materialize_workspace(&self.bridge, ws_id).await {
+                if let Err(error) = materialize_workspace(&self.bridge, ws_id, true).await {
                     store.remove_workspace(ws_id).await;
                     return Response::Error(RpcError::Internal(error));
                 }
@@ -1603,7 +1604,7 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         _name: &str,
         _root: &std::path::Path,
     ) -> Result<(), String> {
-        materialize_workspace(self.bridge, id).await
+        materialize_workspace(self.bridge, id, true).await
     }
 
     async fn split_pane(
