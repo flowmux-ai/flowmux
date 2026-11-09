@@ -559,9 +559,14 @@ mod tests {
             let native_home = native_root.join("home ' $(exit 7)");
             let native_data = native_root.join("data ' $(exit 7)");
             let native_config = native_root.join("config ' $(exit 7)");
-            let mut native = Command::new("/bin/sh");
+            // macOS can redact launch environments for system shells.
+            let mut native = Command::new("python3");
             native
-                .args(["-c", "printf 'ready\\n'; read -r done", "fixture"])
+                .args([
+                    "-c",
+                    "import sys; print('ready', flush=True); sys.stdin.readline()",
+                    "fixture",
+                ])
                 .env_clear()
                 .env("HOME", &native_home)
                 .env("GEMINI_CLI_HOME", &native_config)
