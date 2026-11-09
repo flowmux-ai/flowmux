@@ -114,8 +114,12 @@ pub(super) async fn check(controller: &WindowController, workspace: WorkspaceId,
     );
     assert!(terminal.pid.get().is_none());
     glib::timeout_future(Duration::from_millis(300)).await;
+    let settings = dialog.settings();
+    let animations = settings.is_gtk_enable_animations();
+    settings.set_gtk_enable_animations(false);
     dialog.close();
     wait_until("terminated torn-off window closed", || !torn.is_visible()).await;
+    settings.set_gtk_enable_animations(animations);
     assert!(!controller
         .torn_off_terminals
         .borrow()

@@ -270,9 +270,8 @@ impl TerminationPresenter {
                             window.upcast_ref(),
                         );
                     dialog.present(Some(&window));
-                    let choice = rx.await;
-                    dialog.close();
-                    choice
+                    // AlertDialog closes itself before emitting its response.
+                    rx.await
                 };
                 presenter.termination_dialog.borrow_mut().take();
                 if matches!(choice, Ok(TerminationChoice::Close)) {
