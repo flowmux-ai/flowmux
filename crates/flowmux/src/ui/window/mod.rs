@@ -10142,6 +10142,192 @@ mod tests {
         assert_eq!(controller.store.active_workspace().await, Some(foreground));
     }
 
+    /// The background guards must not change what happens in the workspace
+    /// the user is looking at: focus commands still move keyboard focus and
+    /// layout commands aimed at the zoomed workspace still unzoom it.
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn foreground_pane_commands_keep_focus_and_zoom_semantics() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("visible".into()), std::env::temp_dir())
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let first = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.ForegroundSemantics")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&ws);
+        let second = controller
+            .split_pane(first, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        controller.activate_workspace(ws_id).await;
+        controller.window.present();
+        fn terminal_of(controller: &WindowController, pane: PaneId) -> gtk::Widget {
+            controller
+                .pane_registry
+                .borrow()
+                .active_terminal(pane)
+                .expect("terminal")
+                .widget
+                .clone()
+                .upcast()
+        }
+        async fn wait_focus(controller: &WindowController, widget: &gtk::Widget) -> bool {
+            for _ in 0..100 {
+                if gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref() == Some(widget) {
+                    return true;
+                }
+                gtk::glib::timeout_future(Duration::from_millis(20)).await;
+            }
+            false
+        }
+        async fn zoom(controller: &WindowController, pane: PaneId) {
+            controller
+                .dispatch(GtkCommand::TogglePaneZoom { pane })
+                .await;
+            for _ in 0..100 {
+                if controller.stack.visible_child_name().as_deref() == Some(PANE_ZOOM_PAGE)
+                    && controller.pane_zoom.transition.borrow().is_none()
+                {
+                    break;
+                }
+                gtk::glib::timeout_future(Duration::from_millis(20)).await;
+            }
+            assert_eq!(controller.zoomed_pane(), Some(pane));
+        }
+        controller.focus_pane(first);
+        assert!(wait_focus(&controller, &terminal_of(&controller, first)).await);
+
+        // focus-pane in the visible workspace still moves keyboard focus.
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::FocusPane { pane: second, ack })
+            .await;
+        done.await.unwrap().unwrap();
+        assert!(
+            wait_focus(&controller, &terminal_of(&controller, second)).await,
+            "focus-pane must focus a visible pane"
+        );
+        assert_eq!(controller.focused_pane.get(), Some(second));
+
+        // focus-tab in the visible workspace focuses the newly active tab.
+        controller
+            .dispatch(GtkCommand::NewSurface { pane: second })
+            .await;
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let tabs: Vec<SurfaceId> = {
+            let workspaces = store.ordered_workspaces().await;
+            flowmux_ipc::protocol::describe_workspaces(&workspaces)
+                .iter()
+                .flat_map(|w| &w.panes)
+                .find(|p| p.id == second)
+                .expect("second pane in tree")
+                .tabs
+                .iter()
+                .map(|tab| tab.id)
+                .collect()
+        };
+        assert_eq!(tabs.len(), 2);
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::ActivateSurface {
+                pane: second,
+                surface: tabs[0],
+                ack: Some(ack),
+            })
+            .await;
+        done.await.unwrap().unwrap();
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(second),
+            Some(tabs[0])
+        );
+        let first_tab_widget: gtk::Widget = controller
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&tabs[0])
+            .expect("first tab terminal")
+            .widget
+            .clone()
+            .upcast();
+        assert!(
+            wait_focus(&controller, &first_tab_widget).await,
+            "focus-tab must focus the visible tab"
+        );
+
+        // Layout commands aimed at the zoomed workspace still clear the zoom.
+        let ws_name = ws_id.to_string();
+        zoom(&controller, second).await;
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::SplitPane {
+                pane: first,
+                direction: SplitDirection::Horizontal,
+                ack,
+            })
+            .await;
+        done.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(
+            controller.zoomed_pane(),
+            None,
+            "split in the zoomed workspace unzooms"
+        );
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(ws_name.as_str())
+        );
+
+        zoom(&controller, second).await;
+        let (ack, outcome) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserOpenSplit {
+                target_pane: Some(first),
+                url: "about:blank".into(),
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        outcome.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(
+            controller.zoomed_pane(),
+            None,
+            "browser open in the zoomed workspace unzooms"
+        );
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(ws_name.as_str())
+        );
+
+        zoom(&controller, second).await;
+        let (ack, done) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::FocusPane { pane: first, ack })
+            .await;
+        done.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(
+            controller.zoomed_pane(),
+            None,
+            "focusing another pane in the zoomed workspace unzooms"
+        );
+        assert!(wait_focus(&controller, &terminal_of(&controller, first)).await);
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn team_spawn_preserves_background_workspace_focus_and_zoom() {
