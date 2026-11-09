@@ -2561,6 +2561,17 @@ impl WindowController {
     /// Handle a pane focus event, update MRU, and sync label/subtitles. Focusing
     /// the same pane again moves it to the MRU head, though the label itself may
     /// not change because set_workspace_name is idempotent.
+    /// The most recently focused pane of `id` that is still rendered there.
+    fn remembered_pane(&self, id: WorkspaceId) -> Option<PaneId> {
+        let registry = self.pane_registry.borrow();
+        self.focus_mru.borrow().get(&id).and_then(|panes| {
+            panes
+                .iter()
+                .copied()
+                .find(|pane| registry.workspace_of_pane(*pane) == Some(id))
+        })
+    }
+
     /// Record `pane` as its workspace's most recently focused pane so the next
     /// activation of that workspace lands on it.
     fn remember_pane_focus(&self, ws_id: WorkspaceId, pane: PaneId) {
@@ -3272,15 +3283,7 @@ impl WindowController {
             }
         }
         // Capture MRU before mapping: GTK focus-enter signals can update it.
-        let remembered_pane = {
-            let registry = self.pane_registry.borrow();
-            self.focus_mru.borrow().get(&id).and_then(|panes| {
-                panes
-                    .iter()
-                    .copied()
-                    .find(|pane| registry.workspace_of_pane(*pane) == Some(id))
-            })
-        };
+        let remembered_pane = self.remembered_pane(id);
         self.clear_pane_zoom();
         if self.surfaces.borrow().contains_key(&id) {
             self.stack.set_visible_child_name(&id.to_string());
@@ -9905,6 +9908,22 @@ mod tests {
                 .and_then(|queue| queue.front().copied()),
             Some(background_second)
         );
+
+        // `new-tab --workspace` lands in the remembered pane, still in the background.
+        let (ack, created) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::CreateSurface {
+                workspace: background_id,
+                cwd: None,
+                shell: Some("/bin/sh".into()),
+                ack,
+            })
+            .await;
+        let (tab_pane, _surface) = created.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        assert_eq!(tab_pane, background_second);
+        assert_eq!(store.active_workspace().await, Some(foreground_id));
+        assert_foreground_untouched();
 
         // The remembered pane is honored once the user switches over.
         controller.activate_workspace(background_id).await;

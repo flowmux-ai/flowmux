@@ -226,13 +226,18 @@ impl WindowController {
                     Some(pane) if self.store.workspace_for_pane(pane).await == Some(workspace) => {
                         Some(pane)
                     }
-                    _ => self
-                        .store
-                        .get_workspace(workspace)
-                        .await
-                        .and_then(|workspace| {
-                            workspace.surfaces.first()?.root_pane.first_leaf_id()
-                        }),
+                    // `focus-pane` on a background workspace only records its
+                    // target; `new-tab --workspace` must still land there.
+                    _ => match self.remembered_pane(workspace) {
+                        Some(pane) => Some(pane),
+                        None => self
+                            .store
+                            .get_workspace(workspace)
+                            .await
+                            .and_then(|workspace| {
+                                workspace.surfaces.first()?.root_pane.first_leaf_id()
+                            }),
+                    },
                 };
                 let previous = match pane {
                     Some(pane) => self
