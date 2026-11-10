@@ -179,6 +179,8 @@ Choose the smallest observation that answers the next question:
   (`fill` does not move focus, so focus the field before `press`) and
   stops at the first error, unmet wait, dialog, popup, control change or document
   change; later steps report `not_run`. Inspect `stopped` before continuing.
+  A step with status `unknown` (`stopped.reason` `no_response`) got no answer
+  and may have run: check the page instead of repeating it.
 
 Check `truncated` before deciding something is absent. A viewport/filter also
 excludes content even when `truncated` is false. Expand the scope or budget only
@@ -199,7 +201,8 @@ Prefer `--dense` for model-facing observation: compact output with shorter refs,
 `states` listing only non-default flags (no `states` means visible, enabled,
 unchecked, collapsed, unfocused, valid), `control` with input type/value/
 placeholder/min/max or a select's option count, first options and selection
-(never password or file values), and `page.scroll` with `pages_above`/
+(never password or file values; declared card or passcode fields show
+`redacted`), and `page.scroll` with `pages_above`/
 `pages_below` or `hidden_viewport`. Its `--max-chars` counts printed data, so
 the same budget holds more refs. It cannot be combined with `--compact`.
 
