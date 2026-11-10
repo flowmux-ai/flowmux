@@ -554,6 +554,14 @@ def exercise_covered_clicks(cli, url, root):
     value("eval", "banner.remove(); 'ok'")
     cli("browser", "click", pane, refs()["Behind"])
     assert value("eval", "String(window.behindClicks)") == "1"
+    # Covers that can go away on their own keep the full wait: a modal that only shows
+    # progress, and a dialog that is not modal.
+    for transient in ('<div id=transient role=dialog aria-modal=true aria-label=Saving style="position:fixed;inset:0;z-index:99;background:white">Saving</div>',
+                      '<div id=transient role=dialog aria-label=Panel style="position:fixed;inset:0;z-index:99;background:white"><button>Close</button></div>'):
+        behind = refs()["Behind"]
+        value("eval", f"document.body.insertAdjacentHTML('beforeend', {json.dumps(transient)}); setTimeout(() => transient.remove(), 1200); 'ok'")
+        cli("browser", "click", pane, behind)
+    assert value("eval", "String(window.behindClicks)") == "3", "a transient cover failed the click instead of delaying it"
     # A short-lived cover inside the target's own dialog is waited for, not failed fast.
     value("eval", "document.body.insertAdjacentHTML('beforeend', '<div role=dialog aria-label=Settings style=\"position:fixed;left:300px;top:20px;width:200px;height:120px;z-index:50;background:white\">"
           "<button style=\"position:absolute;left:10px;top:10px\" onclick=\"window.saved = true\">Save</button>"

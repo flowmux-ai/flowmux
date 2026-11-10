@@ -510,9 +510,16 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                     while (hit && hit !== target && hit.control !== target)
                         hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
                     if (!hit) {{
-                        // Name the cover so the agent can dismiss it; a modal over the target fails fast.
-                        const dialog = cover?.closest('dialog[open],[aria-modal="true"],[role=dialog],[role=alertdialog]');
-                        const modal = dialog && !dialog.contains(target) ? dialog : null;
+                        // Name the cover so the agent can dismiss it. Only a modal dialog that offers
+                        // a control fails fast: it waits for an answer, while a progress modal or a
+                        // non-modal panel can go away on its own and keeps the full wait.
+                        const dialog = cover?.closest('dialog,[aria-modal="true"]');
+                        const isModal = node => {{
+                            if (node.getAttribute('aria-modal') === 'true') return true;
+                            try {{ return node.matches(':modal'); }} catch (_) {{ return false; }}
+                        }};
+                        const modal = dialog && !dialog.contains(target) && isModal(dialog) && dialog.querySelector(
+                            'button:not([disabled]),a[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[role=button],[role=link]') ? dialog : null;
                         const shown = modal || cover;
                         const label = shown && (shown.getAttribute('aria-label') || shown.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
                         return "error: element is covered or cannot receive pointer input" + (shown ?
@@ -675,7 +682,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
                     }}
                     break;
                 }} catch (error) {{
-                    // A modal dialog rarely closes on its own; allow only a closing animation.
+                    // A modal dialog asking for an answer does not close on its own; allow only a closing animation.
                     if (performance.now() >= deadline || String(error).includes('stale') ||
                         (String(error).includes('covered by modal') && performance.now() >= started + 750)) throw error;
                     await new Promise(resolve => setTimeout(resolve, 50));
