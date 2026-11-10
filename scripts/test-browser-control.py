@@ -518,6 +518,14 @@ def exercise_scroll_pages(cli, url, root):
     value("eval", "document.body.insertAdjacentHTML('afterbegin', '<h2>Top</h2>'); 'ok'")
     top = next(ref for ref, meta in json.loads(value("snapshot", "--dense"))["refs"].items() if meta["name"] == "Top")
     assert "no scrollable container" in str(value("scroll", "--pages", "1", "--within", top, error=True))
+    # An application shell scrolls an inner area; the page scroll says where instead of only not moving.
+    value("eval", "document.documentElement.style.overflow = 'hidden'; document.body.style.cssText = 'margin:0;height:100vh;overflow:hidden';"
+          "document.body.innerHTML = '<div id=shell style=\"height:100vh;overflow:auto\"><h2>Inbox</h2><div style=height:5000px>rows</div></div>'; 'ok'")
+    shell = json.loads(value("scroll", "--pages", "1"))
+    assert not shell["moved"] and "--within" in shell["hint"] and "<div#shell>" in shell["hint"], shell
+    inbox = next(ref for ref, meta in json.loads(value("snapshot", "--dense"))["refs"].items() if meta["name"] == "Inbox")
+    moved = json.loads(value("scroll", "--pages", "1", "--within", inbox))
+    assert moved["moved"] and moved["container"] == "div" and "hint" not in moved, moved
     print("BROWSER_SCROLL_PAGES_OK", flush=True)
 
 

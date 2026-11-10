@@ -33,7 +33,9 @@ and selection. Password and file values are never included. `page.scroll` gives
 the offset, viewport, document size and `pages_above`/`pages_below`, or
 `hidden_viewport: true` for a background tab; `scroll PANE --pages N` moves by
 those pages (negative is up), and `--within REF` scrolls that ref's nearest
-scroll container instead. `--max-chars` counts only the
+scroll container instead. When the document itself does not scroll, as in an
+application shell, the result's `hint` names the inner scrolling area; pass a
+ref inside it with `--within`. `--max-chars` counts only the
 printed data, so the same budget holds more refs than `--compact`. Dense refs
 behave like other refs and expire with the next snapshot. It cannot be combined
 with `--compact` or `--receipt`.

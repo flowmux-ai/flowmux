@@ -843,9 +843,20 @@ pub fn scroll_pages(pages: f64, within: bool) -> String {
             const before = target.scrollTop;
             target.scrollBy({{top: pages * height, behavior: 'instant'}});
             const y = target.scrollTop, total = target.scrollHeight;
-            return JSON.stringify({{moved: y !== before, container: page ? 'document' : target.localName,
+            const result = {{moved: y !== before, container: page ? 'document' : target.localName,
                 y: Math.round(y), pages_above: +(y / height).toFixed(1),
-                pages_below: +(Math.max(0, total - y - height) / height).toFixed(1)}});
+                pages_below: +(Math.max(0, total - y - height) / height).toFixed(1)}};
+            // An application shell keeps the document fixed and scrolls an inner area.
+            if (page && total <= height + 1) {{
+                let inner = null, area = 0;
+                for (const node of document.querySelectorAll('*')) {{
+                    const size = node.clientWidth * node.clientHeight;
+                    if (size > area && scrollable(node)) {{ inner = node; area = size; }}
+                }}
+                if (inner) result.hint = 'the document does not scroll; pass --within with a ref inside <' +
+                    inner.localName + (inner.id ? '#' + inner.id : '') + '>';
+            }}
+            return JSON.stringify(result);
         }})({root}, {pages})"#,
         root = if within { "el" } else { "null" },
     )
