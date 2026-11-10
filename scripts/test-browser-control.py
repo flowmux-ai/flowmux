@@ -1782,6 +1782,10 @@ def exercise_navigation(cli, url, state, server):
                 failed = load("navigate", target)
             assert not failed["loaded"] and failed["reason"] == "load_failed", failed
             assert failed["url"] == target and failed["error"], failed
+            # A port the engine refuses to contact ends on a blank document, not on the page asked for.
+            blocked = load("navigate", "http://127.0.0.1:1/")
+            assert not blocked["loaded"] and blocked["reason"] == "load_failed", blocked
+            assert load("navigate", "about:blank")["loaded"], "a requested blank page is a loaded page"
         print("BROWSER_LOAD_WAIT_OK", flush=True)
     finally:
         server.navigation_release.set()

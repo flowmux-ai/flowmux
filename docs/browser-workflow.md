@@ -120,11 +120,12 @@ says why:
 | `dialog` | A page dialog appeared |
 | `no_history` | `back` or `forward` had no entry (`moved: false`) |
 | `download` | The response became a download; the document was not replaced |
-| `load_failed` | The engine showed its error page; `error` holds its text (Linux) |
+| `load_failed` | The address could not be loaded: the engine showed its error page (`error` holds its text) or a blank document |
 
 No outcome retries the navigation: inspect the state or keep waiting without
-issuing the action again. On macOS a failed load leaves the old document and
-ends as `timeout`. Verify the expected URL and application result, then take a
+issuing the action again. `load_failed` is detected from WebKitGTK's error
+page; where the engine shows none, a failed load ends as `timeout`. An HTTP
+error page such as 404 is a loaded document. Verify the expected URL and application result, then take a
 fresh snapshot before using refs.
 
 A fragment or history move inside the same document, such as `navigate URL#part`

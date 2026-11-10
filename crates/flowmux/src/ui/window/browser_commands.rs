@@ -1200,8 +1200,10 @@ async fn run_browser_load(
     })?;
     browser.control.check_revision(revision)?;
     let before = browser.control.observation();
+    let mut wants_page = false;
     let moved = match action {
         Action::Navigate(url) => {
+            wants_page = !url.starts_with("about:");
             browser.load_uri(&url);
             true
         }
@@ -1261,9 +1263,11 @@ async fn run_browser_load(
             glib::timeout_future(Duration::from_millis(50)).await;
         }
     };
-    // An engine error page is a blank-URL document shown for the failed address.
+    // An engine error page is a blank-URL document shown for the failed address;
+    // a refused address can also end on a plain blank document.
     let shown = browser.current_url();
-    let failed = reason.is_none() && state["url"] == "about:blank" && shown != "about:blank";
+    let failed =
+        reason.is_none() && state["url"] == "about:blank" && (shown != "about:blank" || wants_page);
     let mut result = serde_json::json!({
         "moved": moved,
         "loaded": reason.is_none() && !failed,
