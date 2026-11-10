@@ -441,7 +441,9 @@ def exercise_page_reads(cli, url, root):
       <input aria-label=Fruit list=fruits><datalist id=fruits><option value=Kiwi><option value=Lime></datalist>
       <input type=password value=topsecret aria-label=Pin><div id=host></div>
       <p>${Array.from({length: 400}, (_, i) => 'filler ' + i).join('<br>')}</p>`;
-      host.attachShadow({mode: 'open'}).innerHTML = '<p>Shadow text</p>'; 'ok'""")
+      host.attachShadow({mode: 'open'}).innerHTML = '<p class=deep>Shadow text</p>';
+      const framed = document.body.appendChild(document.createElement('iframe')).contentDocument;
+      framed.open(); framed.write('<a href="/beta">Beta link</a><p class=deep>Framed text</p>'); framed.close(); 'ok'""")
     before = value("eval", "document.documentElement.outerHTML")
     snap = json.loads(value("snapshot", "--dense"))
     refs = {meta["name"]: ref for ref, meta in snap["refs"].items()}
@@ -472,6 +474,10 @@ def exercise_page_reads(cli, url, root):
     rows = data("query", "tr", "--attrs", "id")
     assert rows["count"] == 2 and rows["items"][1]["text"].split() == ["Ann", "9"], rows
     assert data("query", "input[type=password]", "--attrs", "value,type")["items"][0]["attrs"] == {"type": "password"}
+    # Links and queries reach open shadow roots and same-origin frames, like read does.
+    assert "Framed text" in text and {"text": "Beta link", "href": url + "beta"} in links, links
+    deep = data("query", ".deep")
+    assert deep["count"] == 2 and [item["text"] for item in deep["items"]] == ["Shadow text", "Framed text"], deep
     scoped = data("read", "--within", refs["Scores"])["text"]
     assert "Ann | 9" in scoped and "Report" not in scoped, scoped
     assert data("options", refs["Pick"])["options"] == [

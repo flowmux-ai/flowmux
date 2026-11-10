@@ -53,7 +53,8 @@ null at the end. `grep PANE TEXT` searches the same text by line (`-i`,
 `--regex`, `--context N`) and returns each match's `offset` for `read`.
 `links PANE` lists visible links with absolute URLs, `query PANE CSS --attrs
 id,href` lists matching elements with their text, and `options PANE REF` lists
-a select, datalist input or listbox's options. All accept `--within REF` except
+a select, datalist input or listbox's options. `links` and `query` also search
+open shadow roots and same-origin frames. All accept `--within REF` except
 `options`; none replaces snapshot refs or returns password values.
 
 `run PANE STEPS` sends up to 20 ordinary commands in one CLI call. `STEPS` is a

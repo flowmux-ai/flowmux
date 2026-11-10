@@ -1241,9 +1241,15 @@ function pageText(start, withLinks) {
   flush();
   return lines.join('\n');
 }
+// Matches under `start`, then those in its open shadow roots and same-origin frames,
+// the same reach as the text walk above.
 function deepAll(start, selector) {
   const found = Array.from(start.querySelectorAll(selector));
-  for (const host of start.querySelectorAll('*')) if (host.shadowRoot) found.push(...deepAll(host.shadowRoot, selector));
+  for (const host of start.querySelectorAll('*')) {
+    let inner = host.shadowRoot;
+    if (!inner && (host.localName === 'iframe' || host.localName === 'frame')) try { inner = host.contentDocument; } catch (_) {}
+    if (inner) for (const match of deepAll(inner, selector)) found.push(match);
+  }
   return found;
 }
 const textRoot = root || doc.body || doc.documentElement;
@@ -1285,7 +1291,7 @@ if (opts.op === 'links') {
   return JSON.stringify({...page, links, total, truncated: total > links.length});
 }
 if (opts.op === 'query') {
-  const all = Array.from((root || doc).querySelectorAll(opts.selector));
+  const all = deepAll(root || doc, opts.selector);
   const items = all.slice(0, opts.max).map(el => {
     const item = {tag: el.localName, text: flat(el.innerText || el.textContent).slice(0, 200), visible: el.getClientRects().length > 0};
     const attrs = {};
