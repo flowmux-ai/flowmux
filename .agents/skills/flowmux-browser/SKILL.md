@@ -147,11 +147,14 @@ later application requests; wait for the result that the task actually needs.
 Add `--wait` to `navigate`, `reload`, `back` or `forward` to return after the
 replacing document is `complete`; without it, URL and ready-state waits can
 match the old document after a reload or same-URL navigation. The JSON result
-reports `loaded`, `url`, `title` and `ready_state`; `loaded: false` means the
-deadline (`--timeout-ms`, default 15000), a page dialog, or no history entry.
-Check `loaded`, verify the destination/result, then refresh refs. SPA and
-fragment changes do not replace the document and need a typed wait for the
-changed state instead. Receipt document generations indicate navigation start,
+reports `loaded`, `reason`, `url`, `title` and `ready_state`. With
+`loaded: false`, `reason` is `timeout` (`--timeout-ms`, default 15000), `dialog`,
+`no_history`, `download` or `load_failed` (with the error page text in `error`).
+Check `loaded`, verify the destination/result, then refresh refs. A fragment or
+history move inside one document returns `loaded: true` with
+`same_document: true` once the URL changes; the application may still be
+rendering, so add a typed wait for the changed state. Receipt document
+generations indicate navigation start,
 not completed loading; receipt expectations reject JavaScript. A timeout never
 means the action should be repeated.
 

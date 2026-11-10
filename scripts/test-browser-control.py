@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -1721,10 +1722,43 @@ def exercise_navigation(cli, url, state, server):
         requests = server.navigation_requests
         timed_out = json.loads(browser("reload", "--wait", "--timeout-ms", "300")["browser_result"]["value"])
         assert server.navigation_requested.wait(5)
-        assert not timed_out["loaded"] and timed_out["moved"], timed_out
+        assert not timed_out["loaded"] and timed_out["moved"] and timed_out["reason"] == "timeout", timed_out
         server.navigation_release.set()
         assert wait("--ready-state", "complete")
         assert server.navigation_requests == requests + 1, "timed-out load wait repeated the navigation"
+
+        def load(*args):
+            return json.loads(browser(*args, "--wait")["browser_result"]["value"])
+
+        # Fragment and history moves inside one document complete without a new document.
+        assert load("navigate", destination)["loaded"]
+        requests = server.navigation_requests
+        fragment = load("navigate", destination + "#section")
+        assert fragment["loaded"] and fragment["same_document"] and fragment["reason"] is None, fragment
+        assert fragment["url"] == destination + "#section", fragment
+        evaluate("history.pushState({}, '', '/navigation?step=2'); 'ok'")
+        back = load("back")
+        assert back["loaded"] and back["same_document"] and back["url"] == destination + "#section", back
+        assert load("forward")["url"] == destination + "?step=2"
+        assert server.navigation_requests == requests, "same-document moves requested the page again"
+        end = load("forward")
+        assert not end["moved"] and not end["loaded"] and end["reason"] == "no_history", end
+        # A replacing load is still reported as a new document.
+        replaced = load("navigate", destination)
+        assert replaced["loaded"] and "same_document" not in replaced, replaced
+        # A response that becomes a download ends the wait without replacing the document.
+        download = load("navigate", url + "download")
+        assert not download["loaded"] and download["reason"] == "download", download
+        assert evaluate("location.href") == destination, "download replaced the document"
+        if sys.platform.startswith("linux"):
+            # WebKitGTK shows an error page for a refused connection; it is not a loaded page.
+            # A bound socket that never listens refuses connections for as long as it is held.
+            with socket.socket() as refused:
+                refused.bind(("127.0.0.1", 0))
+                target = f"http://127.0.0.1:{refused.getsockname()[1]}/"
+                failed = load("navigate", target)
+            assert not failed["loaded"] and failed["reason"] == "load_failed", failed
+            assert failed["url"] == target and failed["error"], failed
         print("BROWSER_LOAD_WAIT_OK", flush=True)
     finally:
         server.navigation_release.set()

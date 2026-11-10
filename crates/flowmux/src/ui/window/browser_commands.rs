@@ -1176,8 +1176,10 @@ async fn evaluate_automation(
 
 /// Start a document load, then poll until a new document is complete. The
 /// automation-world mark cannot survive document replacement, so a reload or
-/// same-URL navigation cannot be satisfied by the old document. A timeout
-/// reports `loaded: false` and never repeats the navigation.
+/// same-URL navigation cannot be satisfied by the old document. A history or
+/// fragment move inside the marked document completes without a new document.
+/// Every other outcome reports `loaded: false` with a reason and never
+/// repeats the navigation.
 async fn run_browser_load(
     browser: &crate::ui::browser_pane::BrowserPane,
     action: flowmux_ipc::protocol::BrowserLoadAction,
@@ -1187,7 +1189,7 @@ async fn run_browser_load(
     use flowmux_ipc::protocol::BrowserLoadAction as Action;
     let started = Instant::now();
     let marker = uuid::Uuid::new_v4().to_string();
-    evaluate_automation(
+    let origin = evaluate_automation(
         browser,
         &flowmux_browser::scripts::load_mark(&marker),
         Duration::from_secs(2),
@@ -1197,6 +1199,7 @@ async fn run_browser_load(
         format!("current page did not respond ({error}); no navigation was started. Use the command without --wait, then wait for the result")
     })?;
     browser.control.check_revision(revision)?;
+    let before = browser.control.observation();
     let moved = match action {
         Action::Navigate(url) => {
             browser.load_uri(&url);
@@ -1215,11 +1218,24 @@ async fn run_browser_load(
     let deadline = started + Duration::from_millis(timeout_ms);
     let probe = flowmux_browser::scripts::load_probe(&marker);
     let mut state = serde_json::Value::Null;
-    let loaded = moved
-        && loop {
+    let mut same_document = false;
+    let reason = if !moved {
+        Some("no_history")
+    } else {
+        loop {
             browser.control.check_revision(revision)?;
             if browser.has_pending_dialog() {
-                break false;
+                break Some("dialog");
+            }
+            let now = browser.control.observation();
+            // A response handed to the download manager never replaces the document.
+            if now["events"].as_array().is_some_and(|events| {
+                events.iter().any(|event| {
+                    event["kind"] == "download"
+                        && event["sequence"].as_u64() > before["event_sequence"].as_u64()
+                })
+            }) {
+                break Some("download");
             }
             // Navigation can detach the old document mid-call; retry until the deadline.
             if let Ok(value) =
@@ -1227,27 +1243,46 @@ async fn run_browser_load(
             {
                 state = serde_json::from_str(&value).unwrap_or_default();
                 if state["replaced"] == true && state["ready_state"] == "complete" {
-                    break true;
+                    break None;
+                }
+                // The marked document moved without any load starting: a history
+                // entry or fragment of the same document.
+                if state["replaced"] == false
+                    && state["url"] != origin.as_str()
+                    && now["document_generation"] == before["document_generation"]
+                {
+                    same_document = true;
+                    break None;
                 }
             }
             if Instant::now() >= deadline {
-                break false;
+                break Some("timeout");
             }
             glib::timeout_future(Duration::from_millis(50)).await;
-        };
-    Ok(BrowserActionResult::String(
-        serde_json::json!({
-            "moved": moved,
-            "loaded": loaded,
-            "url": state.get("url").cloned().unwrap_or_else(|| browser.current_url().into()),
-            "title": state.get("title").cloned().unwrap_or_else(|| browser.current_title().into()),
-            "ready_state": state["ready_state"],
-            "document_generation": browser.control.observation()["document_generation"],
-            "dialog_pending": browser.has_pending_dialog(),
-            "elapsed_ms": started.elapsed().as_millis(),
-        })
-        .to_string(),
-    ))
+        }
+    };
+    // An engine error page is a blank-URL document shown for the failed address.
+    let shown = browser.current_url();
+    let failed = reason.is_none() && state["url"] == "about:blank" && shown != "about:blank";
+    let mut result = serde_json::json!({
+        "moved": moved,
+        "loaded": reason.is_none() && !failed,
+        "reason": if failed { Some("load_failed") } else { reason },
+        "url": if failed { shown.into() } else {
+            state.get("url").cloned().unwrap_or_else(|| browser.current_url().into()) },
+        "title": state.get("title").cloned().unwrap_or_else(|| browser.current_title().into()),
+        "ready_state": state["ready_state"],
+        "document_generation": browser.control.observation()["document_generation"],
+        "dialog_pending": browser.has_pending_dialog(),
+        "elapsed_ms": started.elapsed().as_millis(),
+    });
+    if same_document {
+        result["same_document"] = true.into();
+    }
+    if failed {
+        result["error"] = state["text"].clone();
+    }
+    Ok(BrowserActionResult::String(result.to_string()))
 }
 
 async fn capture_change_baseline(

@@ -1309,22 +1309,24 @@ pub fn page_read(options: &serde_json::Value, within: bool) -> String {
     )
 }
 
-/// Mark the current document in the automation world. A replacing document
-/// starts with a fresh world, so the mark distinguishes old from new without
-/// touching page-visible state.
+/// Mark the current document in the automation world and return its URL. A
+/// replacing document starts with a fresh world, so the mark distinguishes old
+/// from new without touching page-visible state.
 pub fn load_mark(marker: &str) -> String {
     format!(
-        r#"(function() {{ globalThis.__flowmuxLoadMark = "{m}"; return "ok"; }})()"#,
+        r#"(function() {{ globalThis.__flowmuxLoadMark = "{m}"; return location.href; }})()"#,
         m = js_string(marker)
     )
 }
 
 /// Report whether the marked document is still current and its readiness.
+/// A blank-URL document also reports its text: engine error pages are blank-URL.
 pub fn load_probe(marker: &str) -> String {
     format!(
         r#"(function() {{
             return JSON.stringify({{replaced: globalThis.__flowmuxLoadMark !== "{m}",
-                ready_state: document.readyState, url: location.href, title: document.title}});
+                ready_state: document.readyState, url: location.href, title: document.title,
+                text: location.href === 'about:blank' ? (document.body?.innerText || '').trim().slice(0, 200) : undefined}});
         }})()"#,
         m = js_string(marker)
     )

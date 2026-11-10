@@ -101,20 +101,31 @@ LOAD=$(flowmux browser --surface "$SURFACE" reload "$PANE" --wait) || exit 1
 [ "$(printf '%s' "$LOAD" | jq -r .loaded)" = true ] || exit 1
 ```
 
-The result is JSON with `moved`, `loaded`, `url`, `title`, `ready_state`,
-`document_generation`, `dialog_pending` and `elapsed_ms`. Flowmux marks the old
-document in its private script world, so the old document cannot satisfy the
-wait and the page is not modified. `loaded: false` means the deadline passed
-(`--timeout-ms`, default 15000), a page dialog appeared, or history had no entry
-(`moved: false`). A timeout does not retry the navigation: inspect the state or
-keep waiting without issuing the action again. A failed load can still complete
-an error page, so verify the expected URL and application result, then take a
+The result is JSON with `moved`, `loaded`, `reason`, `url`, `title`,
+`ready_state`, `document_generation`, `dialog_pending` and `elapsed_ms`. Flowmux
+marks the old document in its private script world, so the old document cannot
+satisfy the wait and the page is not modified. When `loaded` is false, `reason`
+says why:
+
+| `reason` | Meaning |
+|---|---|
+| `timeout` | The deadline passed (`--timeout-ms`, default 15000); the load may still finish |
+| `dialog` | A page dialog appeared |
+| `no_history` | `back` or `forward` had no entry (`moved: false`) |
+| `download` | The response became a download; the document was not replaced |
+| `load_failed` | The engine showed its error page; `error` holds its text (Linux) |
+
+No outcome retries the navigation: inspect the state or keep waiting without
+issuing the action again. On macOS a failed load leaves the old document and
+ends as `timeout`. Verify the expected URL and application result, then take a
 fresh snapshot before using refs.
 
-Same-document SPA or fragment navigation does not replace the document, so
-`--wait` reaches its deadline; use the application's changed state, such as a
-`TextChanged` receipt expectation, for those actions instead. JavaScript
-predicates belong to `wait --js`; receipt expectations do not accept JavaScript.
+A fragment or history move inside the same document, such as `navigate URL#part`
+or `back` over an application route, returns `loaded: true` with
+`same_document: true` as soon as the URL changes. The application may still be
+rendering, so wait for its changed state, such as a `TextChanged` receipt
+expectation. JavaScript predicates belong to `wait --js`; receipt expectations
+do not accept JavaScript.
 
 ## Check the environment
 
