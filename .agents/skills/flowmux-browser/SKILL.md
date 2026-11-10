@@ -317,7 +317,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Scrolling | `scroll PANE REF X Y`: bring the element into view, then offset the viewport; `scroll PANE --pages N [--within REF]`: move the page, or the ref's scroll container, by N viewport heights (negative is up) and print `y`, `pages_above`, `pages_below` |
 | Wait | `wait PANE --condition JSON`, `--selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms`; no network-idle wait |
 | Video capture | `record PANE output.mp4 --seconds 5 --fps 5` |
-| Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |
+| Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task; `eval PANE -` and `eval-async PANE -` read the script from stdin, avoiding shell quoting |
 | Async completion | `eval-async PANE BODY --timeout-ms 10000`; BODY is a function body, e.g. `return await fetch('/status').then(r => r.text())` |
 
 `eval-async` waits for the returned Promise and reports rejection or timeout.

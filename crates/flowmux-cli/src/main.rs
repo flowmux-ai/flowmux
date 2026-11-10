@@ -689,9 +689,9 @@ enum BrowserOp {
     },
     /// Diagnose this live tab's native input, capture, media and recording support.
     Diagnose { pane: PaneId },
-    /// Run JS in a browser pane and print the result.
+    /// Run JS in a browser pane and print the result; `-` reads the script from stdin.
     Eval { pane: PaneId, source: String },
-    /// Run an async JS function body (use return for its result).
+    /// Run an async JS function body (use return for its result); `-` reads it from stdin.
     EvalAsync {
         pane: PaneId,
         body: String,
@@ -1461,6 +1461,18 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         );
     }
     let compact_snapshot = compact_snapshot(&cmd);
+    let mut cmd = cmd;
+    // `-` reads the script from stdin, avoiding shell quoting of JavaScript.
+    if let Cmd::Browser {
+        op: BrowserOp::Eval { source: script, .. } | BrowserOp::EvalAsync { body: script, .. },
+        ..
+    } = &mut cmd
+    {
+        if script == "-" {
+            script.clear();
+            std::io::stdin().read_to_string(script)?;
+        }
+    }
     let mut req = build_request(cmd)?;
     if let Request::SurfaceCreate {
         workspace,

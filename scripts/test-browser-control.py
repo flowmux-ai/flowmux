@@ -466,6 +466,11 @@ def exercise_page_reads(cli, url, root):
     # Reads are queries: the page is unchanged and the snapshot's refs stay valid.
     assert value("eval", "document.documentElement.outerHTML") == before
     assert value("value", refs["Pick"]) == "b"
+    # `eval PANE -` takes the script from stdin, so quotes need no shell escaping.
+    script = "JSON.stringify({quoted: \"it's \" + 'a \"test\"' + `!`})"
+    piped = cli("browser", "eval", pane, "-", stdin=script)["browser_result"]["value"]
+    assert json.loads(piped) == {"quoted": "it's a \"test\"!"}, piped
+    assert cli("browser", "eval-async", pane, "-", stdin="return 6 * 7")["browser_result"]["value"] == "42"
     print("BROWSER_PAGE_READS_OK", flush=True)
 
 
@@ -1717,10 +1722,10 @@ def main():
             process = subprocess.Popen([str(binary)], cwd=root, env=env, stdout=log, stderr=log)
             socket_path = root / "run" / f"flowmux-{process.pid}.sock"
 
-            def cli(*args, error=False, pane_context=None, env_overrides=None):
+            def cli(*args, error=False, pane_context=None, env_overrides=None, stdin=None):
                 result = subprocess.run([str(cli_binary), "--socket", str(socket_path), "--json", *args],
                                         env={**env, **({"FLOWMUX_PANE_ID": pane_context} if pane_context else {}), **(env_overrides or {})},
-                                        capture_output=True, text=True, timeout=30)
+                                        input=stdin, capture_output=True, text=True, timeout=30)
                 assert bool(result.returncode) == error, (args, result.stdout, result.stderr)
                 response = json.loads(result.stdout) if result.stdout else {"error": result.stderr}
                 if error:
