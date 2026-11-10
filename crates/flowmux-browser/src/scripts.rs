@@ -498,8 +498,9 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                     while (hit && hit !== target && hit.control !== target)
                         hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
                     if (!hit) {{
-                        // Name the cover so the agent can dismiss it; a modal fails fast.
-                        const modal = cover?.closest('dialog[open],[aria-modal="true"],[role=dialog],[role=alertdialog]');
+                        // Name the cover so the agent can dismiss it; a modal over the target fails fast.
+                        const dialog = cover?.closest('dialog[open],[aria-modal="true"],[role=dialog],[role=alertdialog]');
+                        const modal = dialog && !dialog.contains(target) ? dialog : null;
                         const shown = modal || cover;
                         const label = shown && (shown.getAttribute('aria-label') || shown.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
                         return "error: element is covered or cannot receive pointer input" + (shown ?

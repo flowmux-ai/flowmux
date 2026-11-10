@@ -536,6 +536,12 @@ def exercise_covered_clicks(cli, url, root):
     value("eval", "banner.remove(); 'ok'")
     cli("browser", "click", pane, refs()["Behind"])
     assert value("eval", "String(window.behindClicks)") == "1"
+    # A short-lived cover inside the target's own dialog is waited for, not failed fast.
+    value("eval", "document.body.insertAdjacentHTML('beforeend', '<div role=dialog aria-label=Settings style=\"position:fixed;left:300px;top:20px;width:200px;height:120px;z-index:50;background:white\">"
+          "<button style=\"position:absolute;left:10px;top:10px\" onclick=\"window.saved = true\">Save</button>"
+          "<div id=tip style=\"position:absolute;inset:0;z-index:2\">Tip</div></div>'); setTimeout(() => tip.remove(), 1200); 'ok'")
+    cli("browser", "click", pane, refs()["Save"])
+    assert value("eval", "String(window.saved)") == "true", "click inside the dialog did not wait for its tooltip"
     print(f"BROWSER_COVERED_CLICKS_OK modal_failure_s={elapsed:.2f}", flush=True)
 
 
