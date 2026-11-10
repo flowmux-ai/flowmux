@@ -550,6 +550,52 @@ def exercise_pointer_navigation(cli, url, root):
     print(f"BROWSER_POINTER_NAVIGATION_OK elapsed_s={elapsed:.2f}", flush=True)
 
 
+def exercise_run_batch(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Batched steps", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args, error=False):
+        result = cli("browser", op, pane, *args, error=error)
+        return result if error else result["browser_result"]["value"]
+
+    def run(*steps):
+        return json.loads(value("run", json.dumps(steps)))
+
+    def refs():
+        return {meta["name"]: ref for ref, meta in json.loads(value("snapshot", "--dense"))["refs"].items()}
+
+    value("eval", "document.body.innerHTML = '<form action=/popup><input name=q aria-label=Query><button>Search</button></form>"
+          "<button onclick=\"out.textContent = ++window.count\">Increment</button><p id=out>0</p>'; window.count = 0; 'ok'")
+    names = refs()
+    done = run(["fill", names["Query"], "flowmux"], ["click", names["Increment"]], ["wait", "--text", "1"],
+               ["read", "--max-chars", "2000"], ["value", names["Query"]])
+    assert done["stopped"] is None and done["completed"] == 5, done
+    assert [row["status"] for row in done["steps"]] == ["ok"] * 5, done
+    assert done["steps"][1]["receipt"] == "input_delivered" and "1" in done["steps"][3]["result"]["text"], done
+    assert done["steps"][4]["result"] == "flowmux" and done["steps"][0]["step"][0] == "fill", done
+    # A typo in any step rejects the whole batch before anything runs.
+    value("run", json.dumps([["fill", names["Query"], "never"], ["clik", names["Increment"]]]), error=True)
+    assert value("value", names["Query"]) == "flowmux"
+    # A step error and an unmet wait stop the batch; later steps are not run.
+    stale = run(["click", "e999-stale"], ["read"])
+    assert stale["stopped"] == {"index": 0, "reason": "error"} and stale["steps"][1]["status"] == "not_run", stale
+    unmet = run(["wait", "--text", "never shown", "--timeout-ms", "100"], ["click", names["Increment"]])
+    assert unmet["stopped"]["reason"] == "condition_not_met" and value("eval", "String(count)") == "1", unmet
+    # Submitting the form replaces the document, so the following read is not run on it.
+    submitted = run(["fill", names["Query"], "abc"], ["focus", names["Query"]], ["press", "Enter"], ["read"])
+    assert submitted["stopped"] == {"index": 2, "reason": "document_changed"}, submitted
+    assert submitted["steps"][3]["status"] == "not_run", submitted
+    assert cli("browser", "wait", pane, "--url", "popup?q=abc")["browser_bool_result"]["value"]
+    # A load with --wait that completes lets the batch continue on the new document.
+    loaded = run(["navigate", url + "inner", "--wait"], ["read"])
+    assert loaded["stopped"] is None and "Nested frame button" in loaded["steps"][1]["result"]["text"], loaded
+    started = run(["reload"], ["read"])
+    assert started["stopped"] == {"index": 0, "reason": "navigation_started"}, started
+    print("BROWSER_RUN_BATCH_OK", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1689,6 +1735,7 @@ def main():
                 exercise_scroll_pages(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_covered_clicks(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_pointer_navigation(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_run_batch(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)

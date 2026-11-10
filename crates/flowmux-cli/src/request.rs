@@ -366,6 +366,7 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 max,
             },
         },
+        BrowserOp::Run { .. } => anyhow::bail!("run sends its steps from the CLI"),
         BrowserOp::Options { pane, target } => Request::BrowserRead {
             pane,
             query: BrowserReadQuery::Options { target },

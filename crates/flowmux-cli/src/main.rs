@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use flowmux_cli::{agent, doctor, hook_install};
+mod batch;
 mod cmd_hooks;
 mod cmd_ops;
 mod hooks;
@@ -917,6 +918,12 @@ enum BrowserOp {
     },
     /// List the options of a select, a datalist input or a listbox ref.
     Options { pane: PaneId, target: String },
+    /// Run 1-20 browser commands in order. STEPS is a JSON array of argument
+    /// arrays without the pane, or `-` to read it from stdin, e.g.
+    /// '[["fill","REF","text"],["press","Enter"],["wait","--text","Done"]]'.
+    /// Stops at the first error, unmet wait, dialog, popup, control change or
+    /// document change; later steps report not_run. Nothing is retried.
+    Run { pane: PaneId, steps: String },
 }
 
 #[derive(Subcommand)]
@@ -1427,9 +1434,33 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             ..
         }
     );
-    let compact_snapshot = matches!(&cmd, Cmd::Browser {
-        op: BrowserOp::Snapshot { options, .. }, ..
-    } if options.compact || options.dense);
+    if let Cmd::Browser {
+        surface,
+        task,
+        receipt,
+        op: BrowserOp::Run { pane, steps },
+    } = cmd
+    {
+        anyhow::ensure!(
+            !receipt.enabled,
+            "run adds receipts to its input steps; --receipt is not accepted"
+        );
+        let steps = if steps == "-" {
+            let mut text = String::new();
+            std::io::stdin().read_to_string(&mut text)?;
+            text
+        } else {
+            steps
+        };
+        let result = batch::run(&client, surface, task, pane, &steps).await?;
+        return print_response(
+            &Response::BrowserResult {
+                value: result.to_string(),
+            },
+            json_mode,
+        );
+    }
+    let compact_snapshot = compact_snapshot(&cmd);
     let mut req = build_request(cmd)?;
     if let Request::SurfaceCreate {
         workspace,
@@ -1464,6 +1495,13 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     }
     print_response(&resp, json_mode)?;
     Ok(())
+}
+
+/// Snapshot output that the CLI compacts before printing.
+fn compact_snapshot(cmd: &Cmd) -> bool {
+    matches!(cmd, Cmd::Browser {
+        op: BrowserOp::Snapshot { options, .. }, ..
+    } if options.compact || options.dense)
 }
 
 /// Forward one shim-intercepted tmux invocation to the daemon and

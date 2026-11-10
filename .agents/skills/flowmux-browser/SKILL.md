@@ -171,6 +171,11 @@ Choose the smallest observation that answers the next question:
 - Completion: use a typed `wait` or action `--receipt --expect` instead of
   repeatedly dumping snapshots. Wait polling stays inside Flowmux.
 - Multiple form fields: use `form` and inspect its per-field results.
+- Several known steps: `run PANE '[["fill","REF","text"],["focus","REF"],["press","Enter"],["wait","--text","Done"],["read"]]'`
+  sends ordinary commands (argument arrays without the pane) in one call
+  (`fill` does not move focus, so focus the field before `press`) and
+  stops at the first error, unmet wait, dialog, popup, control change or document
+  change; later steps report `not_run`. Inspect `stopped` before continuing.
 
 Check `truncated` before deciding something is absent. A viewport/filter also
 excludes content even when `truncated` is false. Expand the scope or budget only
@@ -303,6 +308,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Task control | `control PANE start`, `status`, `handoff`, `pause`, `stop`, or `finish`; Continue is a user UI action |
 | Task details | `task PANE --name NAME --step STEP --waiting REASON --user-action ACTION` with owning `--task` |
 | Form fields | `form PANE JSON` with 1–20 unique current refs and fill/select/check actions; no submit command |
+| Batches | `run PANE STEPS_JSON` or `run PANE -` (stdin): 1–20 commands as argument arrays without the pane; inherits `--surface`/`--task`; no retries |
 | Media | `media PANE REF status`, `play`, `pause`, `seek SECONDS`, `mute`, or `unmute` |
 | Downloads | `download PANE list`, `cancel ID`, or `directory EXISTING_PATH` |
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |

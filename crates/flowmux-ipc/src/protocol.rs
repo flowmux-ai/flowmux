@@ -17,6 +17,7 @@ pub const BROWSER_VERBS: &[&str] = &[
     "control",
     "task",
     "form",
+    "run",
     "navigate",
     "back",
     "forward",

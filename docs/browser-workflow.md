@@ -54,6 +54,30 @@ id,href` lists matching elements with their text, and `options PANE REF` lists
 a select, datalist input or listbox's options. All accept `--within REF` except
 `options`; none replaces snapshot refs or returns password values.
 
+`run PANE STEPS` sends up to 20 ordinary commands in one CLI call. `STEPS` is a
+JSON array of argument arrays without the pane, or `-` to read it from stdin:
+
+```sh
+flowmux browser --surface "$SURFACE" run "$PANE" \
+  '[["fill","'"$QUERY_REF"'","flowmux"],["focus","'"$QUERY_REF"'"],["press","Enter"],["wait","--text","Results"],["read","--max-chars","4000"]]'
+```
+
+`fill` sets the value without moving focus, so the example focuses the field
+before `press Enter`; clicking the form's submit button works as well.
+
+Every step is parsed before the first one runs, so a typo runs nothing. Steps
+inherit `--surface` and `--task` and cannot set their own. Input steps carry a
+receipt, and after each non-query step Flowmux waits 100 ms and checks the tab
+again. The batch stops at the first failed step (`error`), a `wait` that
+returned false (`condition_not_met`), a page dialog, a popup, a control change,
+a replaced document (`document_changed`), a load without `--wait`
+(`navigation_started`) or a `--wait` load that did not finish (`not_loaded`).
+The JSON result lists each step's `status` (`ok`, `failed`, `not_met` or
+`not_run`) with its result, plus `completed` and `stopped` (`index` and
+`reason`, or null). A batch is not a transaction: completed steps keep their
+effects, and nothing is retried. `open`, `record`, `control`, `task` and nested
+`run` are not accepted as steps.
+
 Prefer typed waits or an action's expected outcome to repeated full snapshots.
 Wait polling runs inside Flowmux and returns one result. Use `form` for a known
 set of fields. Keep large JSON in local files and expose only task-relevant data

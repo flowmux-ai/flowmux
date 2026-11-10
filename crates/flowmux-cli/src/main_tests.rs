@@ -3046,6 +3046,59 @@ fn browser_task_form_and_ref_expectations_parse() {
 }
 
 #[test]
+fn browser_run_steps_parse_as_normal_commands() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let task = uuid::Uuid::new_v4();
+    let step = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        batch::parse_step(&args, Some(surface), Some(task), pane)
+    };
+    // Inputs carry a receipt inside the inherited task and surface wrappers.
+    let Request::BrowserOnSurface {
+        surface: got,
+        request,
+    } = step(&["click", "e1-x"]).unwrap().request()
+    else {
+        panic!("expected the surface wrapper")
+    };
+    assert_eq!(got, surface);
+    let Request::BrowserWithTask {
+        task: owner,
+        request,
+    } = *request
+    else {
+        panic!("expected the task wrapper")
+    };
+    assert_eq!(owner, task);
+    assert!(matches!(
+        *request,
+        Request::BrowserReceipt {
+            condition: None,
+            ..
+        }
+    ));
+    // Queries are sent as they are.
+    let Request::BrowserOnSurface { request, .. } =
+        step(&["read", "--max-chars", "4000"]).unwrap().request()
+    else {
+        panic!("expected the surface wrapper")
+    };
+    assert!(matches!(*request, Request::BrowserWithTask { request, .. }
+        if matches!(*request, Request::BrowserRead { .. })));
+    for invalid in [
+        &["run", "[]"][..],
+        &["open", "https://example.com/"],
+        &["click", "e1-x", "--receipt"],
+        &["fill", "e1-x", "text", "--surface", "x"],
+        &["clik", "e1-x"],
+        &[],
+    ] {
+        assert!(step(invalid).is_err(), "{invalid:?}");
+    }
+}
+
+#[test]
 fn browser_page_reads_map_to_read_queries() {
     use flowmux_ipc::protocol::BrowserReadQuery as Query;
     let pane = PaneId::new();
