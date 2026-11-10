@@ -464,9 +464,18 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                         if (!next || next === hit) break;
                         hit = next;
                     }}
-                    while (hit && hit !== target)
+                    const cover = hit;
+                    // Activating a label reaches its own control, so the label does not cover it.
+                    while (hit && hit !== target && hit.control !== target)
                         hit = hit.assignedSlot || hit.parentElement || hit.getRootNode().host;
-                    if (!hit) return "error: element is covered or cannot receive pointer input";
+                    if (!hit) {{
+                        // Name the cover so the agent can dismiss it; a modal fails fast.
+                        const modal = cover?.closest('dialog[open],[aria-modal="true"],[role=dialog],[role=alertdialog]');
+                        const shown = modal || cover;
+                        const label = shown && (shown.getAttribute('aria-label') || shown.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+                        return "error: element is covered or cannot receive pointer input" + (shown ?
+                            ` (covered by ${{modal ? 'modal ' : ''}}<${{shown.localName}}${{shown.id ? '#' + shown.id : ''}}${{shown.getAttribute('role') ? ' role=' + shown.getAttribute('role') : ''}}> "${{label}}")` : '');
+                    }}
                     const frame = view.frameElement;
                     if (!frame) break;
                     const transform = frameTransform(frame);
@@ -602,7 +611,7 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
         const state = {{ received: false, event: '{event}' }};
         globalThis.__flowmuxInput = state;
         try {{
-            const deadline = performance.now() + 5000;
+            const started = performance.now(), deadline = started + 5000;
             let before, targetElement, targetDragSource;
             while (true) {{
                 try {{
@@ -624,7 +633,9 @@ pub fn prepare_pointer_input(geometry: &str, action: crate::input::PointerAction
                     }}
                     break;
                 }} catch (error) {{
-                    if (performance.now() >= deadline || String(error).includes('stale')) throw error;
+                    // A modal dialog rarely closes on its own; allow only a closing animation.
+                    if (performance.now() >= deadline || String(error).includes('stale') ||
+                        (String(error).includes('covered by modal') && performance.now() >= started + 750)) throw error;
                     await new Promise(resolve => setTimeout(resolve, 50));
                 }}
             }}

@@ -492,6 +492,42 @@ def exercise_scroll_pages(cli, url, root):
     print("BROWSER_SCROLL_PAGES_OK", flush=True)
 
 
+def exercise_covered_clicks(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Covered clicks", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args, error=False):
+        result = cli("browser", op, pane, *args, error=error)
+        return result if error else result["browser_result"]["value"]
+
+    def refs():
+        return {meta["name"]: ref for ref, meta in json.loads(value("snapshot", "--dense"))["refs"].items()}
+
+    # A styled label drawn over its own checkbox does not count as a cover.
+    value("eval", "document.body.innerHTML = '<input type=checkbox id=agree aria-label=Agree style=\"position:absolute;left:20px;top:20px;width:24px;height:24px;margin:0\">"
+          "<label for=agree style=\"position:absolute;left:0;top:0;width:240px;height:64px;z-index:5;background:rgba(0,0,0,.1)\">I agree</label>"
+          "<button id=behind style=\"position:absolute;left:20px;top:120px\" onclick=\"window.behindClicks=(window.behindClicks||0)+1\">Behind</button>'; 'ok'")
+    cli("browser", "click", pane, refs()["Agree"])
+    assert value("eval", "String(agree.checked)") == "true", "label-covered checkbox was not toggled"
+    # A modal cover fails fast and names the dialog; other covers are named too.
+    value("eval", "document.body.insertAdjacentHTML('beforeend', '<div role=dialog aria-modal=true aria-label=\"Cookie consent\" style=\"position:fixed;inset:0;z-index:99;background:white\"><button>Accept</button></div>'); 'ok'")
+    started = time.monotonic()
+    covered = str(value("click", refs()["Behind"], error=True))
+    elapsed = time.monotonic() - started
+    assert "covered by modal <div role=dialog>" in covered and "Cookie consent" in covered, covered
+    assert elapsed < 3, f"modal-covered click took {elapsed:.1f}s"
+    value("eval", "document.querySelector('[role=dialog]').remove(); document.body.insertAdjacentHTML('beforeend', '<div id=banner style=\"position:fixed;inset:0;z-index:99\">Banner</div>'); 'ok'")
+    covered = str(value("click", refs()["Behind"], error=True))
+    assert "covered by <div#banner>" in covered and "modal" not in covered, covered
+    assert value("eval", "String(window.behindClicks || 0)") == "0", "covered button was clicked"
+    value("eval", "banner.remove(); 'ok'")
+    cli("browser", "click", pane, refs()["Behind"])
+    assert value("eval", "String(window.behindClicks)") == "1"
+    print(f"BROWSER_COVERED_CLICKS_OK modal_failure_s={elapsed:.2f}", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1629,6 +1665,7 @@ def main():
                 exercise_dense_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_page_reads(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_scroll_pages(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_covered_clicks(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)

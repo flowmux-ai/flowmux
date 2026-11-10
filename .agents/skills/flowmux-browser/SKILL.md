@@ -219,7 +219,10 @@ any browser command except `open` to keep targeting that tab after another tab
 becomes active. A closed tab or a surface outside the given pane returns an error.
 Without this option, commands use the pane's active tab.
 Actions reject hidden or inert elements. Clicks also reject disabled or covered
-targets, and fill rejects disabled or readonly fields. Wait for the page to reach
+targets, and fill rejects disabled or readonly fields. A covered-target error
+names the cover, e.g. `(covered by modal <div role=dialog> "Cookie consent")`;
+dismiss it with a ref inside it rather than retrying. A modal cover fails within
+about a second, other covers after five; a label over its own control is not a cover. Wait for the page to reach
 the required state before retrying; commands do not retry side effects.
 `type` uses native editing at the current selection, including contenteditable,
 and reports canceled input. It emits native input events without artificial
