@@ -3938,7 +3938,7 @@ fn run_browser_js(
     ok_string_required: bool,
 ) {
     let reply: Box<dyn FnOnce(Result<BrowserActionResult, String>)> = if ok_string_required {
-        Box::new(browser_commands::native_input_reply(browser, ack))
+        Box::new(browser_commands::native_input_reply(browser, ack, false))
     } else {
         Box::new(move |result| {
             let _ = ack.send(result);

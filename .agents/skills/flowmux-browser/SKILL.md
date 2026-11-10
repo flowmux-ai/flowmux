@@ -248,6 +248,8 @@ two clicks. A blocked or moving target returns an error without retrying.
 Key and pointer completion waits for synchronous event handlers and native
 default actions. If an input opens a page dialog, the command returns once the
 dialog is available; answer it with `dialog` before checking the page result.
+If the page starts replacing its document after the input was sent, the command
+returns `ok` then; use `navigate`-style checks (URL, `wait`) for the new page.
 A tab whose workspace is not on screen rejects `click`, `dblclick`, `hover` and
 `press` immediately with `native input requires a visible browser tab`. Do not
 run `workspace focus` to work around it: continue with `fill`, `select`, `eval`,

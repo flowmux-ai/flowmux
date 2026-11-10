@@ -528,6 +528,28 @@ def exercise_covered_clicks(cli, url, root):
     print(f"BROWSER_COVERED_CLICKS_OK modal_failure_s={elapsed:.2f}", flush=True)
 
 
+def exercise_pointer_navigation(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Pointer navigation", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+    # The click lands in a frame inside a closed shadow root, so the top document never
+    # observes it; the frame then replaces the top document. Completion must not hang.
+    cli("browser", "eval", pane, """const host = document.createElement('div');
+      host.style = 'position:absolute;left:0;top:0;width:300px;height:150px'; document.body.replaceChildren(host);
+      const frame = document.createElement('iframe'); frame.style = 'border:0;width:300px;height:150px';
+      frame.srcdoc = '<body style=margin:0><button style=width:300px;height:150px onclick="setTimeout(() => top.location.href = \\'/popup\\', 300)">Verify</button>';
+      host.attachShadow({mode: 'closed'}).append(frame); 'ok'""")
+    assert cli("browser", "wait", pane, "--js", "document.querySelector('div').offsetHeight === 150")["browser_bool_result"]["value"]
+    time.sleep(.5)
+    started = time.monotonic()
+    cli("browser", "pointer", pane, "click", "150", "75")
+    elapsed = time.monotonic() - started
+    assert elapsed < 5, f"pointer completion waited {elapsed:.1f}s after the document was replaced"
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "popup"}))["browser_bool_result"]["value"]
+    print(f"BROWSER_POINTER_NAVIGATION_OK elapsed_s={elapsed:.2f}", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1666,6 +1688,7 @@ def main():
                 exercise_page_reads(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_scroll_pages(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_covered_clicks(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_pointer_navigation(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
