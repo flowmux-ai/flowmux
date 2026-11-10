@@ -124,6 +124,7 @@ OPEN=$("$FLOWMUX_CLI" --json browser open https://example.com) || exit 1
 PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
+# Later page changes in this tab: navigate "pane:$PANE" URL --wait, then check .loaded.
 SNAPSHOT=$("$FLOWMUX_CLI" browser snapshot "pane:$PANE" --compact --viewport --max-nodes 40 --max-chars 12000) || exit 1
 SURFACE=$(printf '%s' "$SNAPSHOT" | jq -er '.page.surface_id') || exit 1
 printf '%s\n' "$SNAPSHOT"
@@ -143,14 +144,16 @@ code. Stop dependent actions on timeout and inspect the current URL/diagnostics.
 when the exact URL matters. `complete` is document readiness, not completion of
 later application requests; wait for the result that the task actually needs.
 
-For `reload` or same-URL `navigate`, URL and ready-state waits can match the old
-document. Use a site-specific changed result, or mark the current document with
-an unused temporary window property before the action and use `wait --js` to
-require both its disappearance and `document.readyState === 'complete'`.
-Then verify the destination/result and refresh refs. This marker technique is
-for full-document navigation, not SPA or fragment changes. Receipt document
-generations indicate navigation start, not completed loading; receipt
-expectations reject JavaScript. A timeout never means the action should be repeated.
+Add `--wait` to `navigate`, `reload`, `back` or `forward` to return after the
+replacing document is `complete`; without it, URL and ready-state waits can
+match the old document after a reload or same-URL navigation. The JSON result
+reports `loaded`, `url`, `title` and `ready_state`; `loaded: false` means the
+deadline (`--timeout-ms`, default 15000), a page dialog, or no history entry.
+Check `loaded`, verify the destination/result, then refresh refs. SPA and
+fragment changes do not replace the document and need a typed wait for the
+changed state instead. Receipt document generations indicate navigation start,
+not completed loading; receipt expectations reject JavaScript. A timeout never
+means the action should be repeated.
 
 Choose the smallest observation that answers the next question:
 
@@ -271,7 +274,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 
 | Command family | Usage after `browser` |
 |---|---|
-| Navigation | `navigate PANE URL`, `back PANE`, `forward PANE`, `reload PANE` |
+| Navigation | `navigate PANE URL`, `back PANE`, `forward PANE`, `reload PANE`; add `--wait [--timeout-ms N]` to return after the new document loads |
 | Page metadata | `url PANE`, `title PANE` |
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |

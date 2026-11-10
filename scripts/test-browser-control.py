@@ -1411,6 +1411,31 @@ def exercise_navigation(cli, url, state, server):
             browser("fill", field, "new document")
             assert browser("value", field)["browser_result"]["value"] == "new document"
             print(f"BROWSER_NAVIGATION_COMPLETION {action}: ready_state_only={ready_only}, fresh_document_verified={generation}", flush=True)
+        # --wait returns only after the replacing document completes, for reloads too.
+        for action in ("reload", "navigate"):
+            requests = server.navigation_requests
+            server.navigation_requested.clear()
+            server.navigation_release.clear()
+            with ThreadPoolExecutor(1) as pool:
+                pending = pool.submit(browser, action, *([destination] if action == "navigate" else []), "--wait")
+                assert server.navigation_requested.wait(5), "load wait did not start navigation"
+                time.sleep(.4)
+                assert not pending.done(), "load wait returned while the old document was current"
+                server.navigation_release.set()
+                loaded = json.loads(pending.result(timeout=30)["browser_result"]["value"])
+            assert loaded["loaded"] and loaded["moved"] and loaded["ready_state"] == "complete", loaded
+            assert loaded["url"] == destination, loaded
+            assert evaluate("document.querySelector('#generation').textContent") == str(requests + 1)
+        server.navigation_requested.clear()
+        server.navigation_release.clear()
+        requests = server.navigation_requests
+        timed_out = json.loads(browser("reload", "--wait", "--timeout-ms", "300")["browser_result"]["value"])
+        assert server.navigation_requested.wait(5)
+        assert not timed_out["loaded"] and timed_out["moved"], timed_out
+        server.navigation_release.set()
+        assert wait("--ready-state", "complete")
+        assert server.navigation_requests == requests + 1, "timed-out load wait repeated the navigation"
+        print("BROWSER_LOAD_WAIT_OK", flush=True)
     finally:
         server.navigation_release.set()
     print("BROWSER_NAVIGATION_COMPLETION_OK", flush=True)

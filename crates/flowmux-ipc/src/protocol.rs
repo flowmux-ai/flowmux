@@ -658,6 +658,13 @@ pub enum Request {
     BrowserReload {
         pane: PaneId,
     },
+    /// Navigate or move through history, then report when the replacing
+    /// document has finished loading or the deadline passed.
+    BrowserLoad {
+        pane: PaneId,
+        action: BrowserLoadAction,
+        timeout_ms: u64,
+    },
     BrowserUrl {
         pane: PaneId,
     },
@@ -1012,6 +1019,14 @@ pub struct BrowserInspectOptions {
     pub viewport: bool,
     pub max_nodes: Option<u32>,
     pub max_chars: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BrowserLoadAction {
+    Navigate(String),
+    Back,
+    Forward,
+    Reload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2044,6 +2059,14 @@ mod tests {
             (Request::BrowserBack { pane }, "browser_back"),
             (Request::BrowserForward { pane }, "browser_forward"),
             (Request::BrowserReload { pane }, "browser_reload"),
+            (
+                Request::BrowserLoad {
+                    pane,
+                    action: BrowserLoadAction::Navigate("about:blank".into()),
+                    timeout_ms: 1000,
+                },
+                "browser_load",
+            ),
             (Request::BrowserUrl { pane }, "browser_url"),
             (Request::BrowserTitle { pane }, "browser_title"),
             (

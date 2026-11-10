@@ -32,31 +32,34 @@ percentage; model context caching and tool-output limits differ by agent.
 
 ## Wait for a new document
 
-`navigate` and `reload` return after requesting navigation. A URL or
-`ready-state=complete` wait can still match the previous document, especially
-when reloading or navigating to the same URL. A receipt's document generation
-advances when navigation starts, not when the new document finishes loading.
+Without `--wait`, `navigate`, `reload`, `back` and `forward` return after
+requesting navigation. A URL or `ready-state=complete` wait can then still match
+the previous document, especially when reloading or navigating to the same URL.
+A receipt's document generation advances when navigation starts, not when the
+new document finishes loading.
 
-Prefer a site-specific changed result when available, such as a `TextChanged`
-receipt expectation. For a full-document reload with no distinct result, mark
-the current document with an unused temporary window property, then wait for
-its disappearance and readiness together:
+Add `--wait` to return only after the replacing document reaches
+`readyState === 'complete'`:
 
 ```sh
-flowmux browser --surface "$SURFACE" eval "$PANE" \
-  'window.__flowmuxNavigationPending = true; "marked"'
-flowmux browser --surface "$SURFACE" reload "$PANE"
-[ "$(flowmux browser --surface "$SURFACE" wait "$PANE" --js \
-  "typeof window.__flowmuxNavigationPending === 'undefined' && document.readyState === 'complete'")" = true ] || exit 1
+LOAD=$(flowmux browser --surface "$SURFACE" reload "$PANE" --wait) || exit 1
+[ "$(printf '%s' "$LOAD" | jq -r .loaded)" = true ] || exit 1
 ```
 
-The same sequence works with `navigate "$PANE" "$URL"` in place of `reload`.
-Then verify the expected URL and application result, and take a fresh snapshot
-before using refs. Same-document SPA or fragment navigation does not replace the
-window property; use the application's changed state for those actions instead.
-JavaScript predicates belong to `wait --js`; receipt expectations do not accept
-JavaScript. A timeout does not retry the navigation: inspect the state or keep
-waiting without issuing the action again.
+The result is JSON with `moved`, `loaded`, `url`, `title`, `ready_state`,
+`document_generation`, `dialog_pending` and `elapsed_ms`. Flowmux marks the old
+document in its private script world, so the old document cannot satisfy the
+wait and the page is not modified. `loaded: false` means the deadline passed
+(`--timeout-ms`, default 15000), a page dialog appeared, or history had no entry
+(`moved: false`). A timeout does not retry the navigation: inspect the state or
+keep waiting without issuing the action again. A failed load can still complete
+an error page, so verify the expected URL and application result, then take a
+fresh snapshot before using refs.
+
+Same-document SPA or fragment navigation does not replace the document, so
+`--wait` reaches its deadline; use the application's changed state, such as a
+`TextChanged` receipt expectation, for those actions instead. JavaScript
+predicates belong to `wait --js`; receipt expectations do not accept JavaScript.
 
 ## Check the environment
 

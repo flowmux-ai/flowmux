@@ -84,6 +84,10 @@ pub enum BrowserOp {
     Navigate {
         url: String,
     },
+    Load {
+        action: flowmux_ipc::protocol::BrowserLoadAction,
+        timeout_ms: u64,
+    },
     Back,
     Forward,
     Reload,
@@ -185,6 +189,12 @@ impl BrowserOp {
             Self::Snapshot | Self::Inspect(_) => "snapshot",
             Self::Diagnose => "diagnose",
             Self::Navigate { .. } => "navigate",
+            Self::Load { action, .. } => match action {
+                flowmux_ipc::protocol::BrowserLoadAction::Navigate(_) => "navigate",
+                flowmux_ipc::protocol::BrowserLoadAction::Back => "back",
+                flowmux_ipc::protocol::BrowserLoadAction::Forward => "forward",
+                flowmux_ipc::protocol::BrowserLoadAction::Reload => "reload",
+            },
             Self::Back => "back",
             Self::Forward => "forward",
             Self::Reload => "reload",

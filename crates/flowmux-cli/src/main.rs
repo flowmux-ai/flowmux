@@ -567,6 +567,16 @@ struct ReceiptArgs {
     outcome_timeout_ms: u64,
 }
 
+#[derive(clap::Args, Clone, Copy, Default)]
+struct LoadArgs {
+    /// Return after the replacing document finishes loading, with its URL and title.
+    #[arg(long)]
+    wait: bool,
+    /// Load deadline for --wait; a timeout reports `loaded: false` and does not retry.
+    #[arg(long, requires = "wait", default_value_t = 15_000, value_parser = clap::value_parser!(u64).range(1..=120_000))]
+    timeout_ms: u64,
+}
+
 #[derive(clap::Args, Default)]
 struct InspectArgs {
     /// Omit duplicate Markdown and per-element selectors from the returned JSON.
@@ -684,13 +694,30 @@ enum BrowserOp {
         timeout_ms: u32,
     },
     /// Navigate a browser pane to a new URL.
-    Navigate { pane: PaneId, url: String },
+    Navigate {
+        pane: PaneId,
+        url: String,
+        #[command(flatten)]
+        load: LoadArgs,
+    },
     /// Move a browser pane backward in session history.
-    Back { pane: PaneId },
+    Back {
+        pane: PaneId,
+        #[command(flatten)]
+        load: LoadArgs,
+    },
     /// Move a browser pane forward in session history.
-    Forward { pane: PaneId },
+    Forward {
+        pane: PaneId,
+        #[command(flatten)]
+        load: LoadArgs,
+    },
     /// Reload the current page in a browser pane.
-    Reload { pane: PaneId },
+    Reload {
+        pane: PaneId,
+        #[command(flatten)]
+        load: LoadArgs,
+    },
     /// Print the current URL of a browser pane.
     Url { pane: PaneId },
     /// Print the current page title of a browser pane.

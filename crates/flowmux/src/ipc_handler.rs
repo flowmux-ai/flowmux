@@ -235,6 +235,11 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserBack { pane } => (pane, BrowserOp::Back),
             Request::BrowserForward { pane } => (pane, BrowserOp::Forward),
             Request::BrowserReload { pane } => (pane, BrowserOp::Reload),
+            Request::BrowserLoad {
+                pane,
+                action,
+                timeout_ms,
+            } => (pane, BrowserOp::Load { action, timeout_ms }),
             Request::BrowserUrl { pane } => (pane, BrowserOp::Url),
             Request::BrowserTitle { pane } => (pane, BrowserOp::Title),
             Request::BrowserClick { pane, target } => (pane, BrowserOp::Click { target }),
@@ -482,6 +487,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserBack { .. }
                 | Request::BrowserForward { .. }
                 | Request::BrowserReload { .. }
+                | Request::BrowserLoad { .. }
                 | Request::BrowserUrl { .. }
                 | Request::BrowserTitle { .. }
                 | Request::BrowserClick { .. }

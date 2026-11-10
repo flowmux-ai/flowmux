@@ -3,10 +3,23 @@
 
 use super::*;
 
+fn load_request(
+    pane: PaneId,
+    action: flowmux_ipc::protocol::BrowserLoadAction,
+    load: LoadArgs,
+) -> Request {
+    Request::BrowserLoad {
+        pane,
+        action,
+        timeout_ms: load.timeout_ms,
+    }
+}
+
 /// Map a `flowmux browser <op>` invocation to its IPC request. Every
 /// arm maps 1:1 to an existing `Request::Browser*` variant, so the new
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
+    use flowmux_ipc::protocol::BrowserLoadAction;
     let request = match op {
         BrowserOp::Record { .. } => anyhow::bail!("recording requires the CLI capture loop"),
         BrowserOp::Drag {
@@ -175,10 +188,22 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             body,
             timeout_ms,
         },
-        BrowserOp::Navigate { pane, url } => Request::BrowserNavigate { pane, url },
-        BrowserOp::Back { pane } => Request::BrowserBack { pane },
-        BrowserOp::Forward { pane } => Request::BrowserForward { pane },
-        BrowserOp::Reload { pane } => Request::BrowserReload { pane },
+        BrowserOp::Navigate { pane, url, load } if load.wait => {
+            load_request(pane, BrowserLoadAction::Navigate(url), load)
+        }
+        BrowserOp::Back { pane, load } if load.wait => {
+            load_request(pane, BrowserLoadAction::Back, load)
+        }
+        BrowserOp::Forward { pane, load } if load.wait => {
+            load_request(pane, BrowserLoadAction::Forward, load)
+        }
+        BrowserOp::Reload { pane, load } if load.wait => {
+            load_request(pane, BrowserLoadAction::Reload, load)
+        }
+        BrowserOp::Navigate { pane, url, .. } => Request::BrowserNavigate { pane, url },
+        BrowserOp::Back { pane, .. } => Request::BrowserBack { pane },
+        BrowserOp::Forward { pane, .. } => Request::BrowserForward { pane },
+        BrowserOp::Reload { pane, .. } => Request::BrowserReload { pane },
         BrowserOp::Url { pane } => Request::BrowserUrl { pane },
         BrowserOp::Title { pane } => Request::BrowserTitle { pane },
         BrowserOp::Click { pane, target } => Request::BrowserClick { pane, target },

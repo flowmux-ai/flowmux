@@ -1029,6 +1029,27 @@ pub fn count_selector(selector: &str) -> String {
     )
 }
 
+/// Mark the current document in the automation world. A replacing document
+/// starts with a fresh world, so the mark distinguishes old from new without
+/// touching page-visible state.
+pub fn load_mark(marker: &str) -> String {
+    format!(
+        r#"(function() {{ globalThis.__flowmuxLoadMark = "{m}"; return "ok"; }})()"#,
+        m = js_string(marker)
+    )
+}
+
+/// Report whether the marked document is still current and its readiness.
+pub fn load_probe(marker: &str) -> String {
+    format!(
+        r#"(function() {{
+            return JSON.stringify({{replaced: globalThis.__flowmuxLoadMark !== "{m}",
+                ready_state: document.readyState, url: location.href, title: document.title}});
+        }})()"#,
+        m = js_string(marker)
+    )
+}
+
 /// Escape text embedded inside a double-quoted JavaScript string literal.
 fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);

@@ -258,9 +258,13 @@ impl WindowController {
                 let (operation, revision) = if read_only {
                     (None, browser.control.revision())
                 } else {
+                    // A load wait holds this tab, not native input in other tabs.
                     match browser.control.admit(
                         task,
-                        !matches!(op, BrowserOp::Snapshot | BrowserOp::Inspect(_)),
+                        !matches!(
+                            op,
+                            BrowserOp::Snapshot | BrowserOp::Inspect(_) | BrowserOp::Load { .. }
+                        ),
                     ) {
                         Ok((operation, revision)) => (Some(operation), revision),
                         Err(error) => {
@@ -588,6 +592,13 @@ impl WindowController {
                         browser.refs.borrow_mut().clear(browser.ref_scope);
                         browser.load_uri(&url);
                         let _ = ack.send(Ok(BrowserActionResult::Ok));
+                    }
+                    BrowserOp::Load { action, timeout_ms } => {
+                        glib::spawn_future_local(async move {
+                            let result =
+                                run_browser_load(&browser, action, timeout_ms, revision).await;
+                            let _ = ack.send(result);
+                        });
                     }
                     BrowserOp::Back => {
                         let moved = browser.go_back();
@@ -1093,6 +1104,98 @@ fn run_prepared_element_action(
         // The action still validates the original ref and executes exactly once.
         run_browser_js(&browser, &action, ack, true);
     });
+}
+
+async fn evaluate_automation(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    script: &str,
+    limit: Duration,
+) -> Result<String, String> {
+    let (tx, rx) = oneshot::channel();
+    browser.evaluate_automation_js(script, move |result| {
+        let _ = tx.send(result);
+    });
+    match glib::future_with_timeout(limit, rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("browser script callback closed".into()),
+        Err(_) => Err("browser script timed out".into()),
+    }
+}
+
+/// Start a document load, then poll until a new document is complete. The
+/// automation-world mark cannot survive document replacement, so a reload or
+/// same-URL navigation cannot be satisfied by the old document. A timeout
+/// reports `loaded: false` and never repeats the navigation.
+async fn run_browser_load(
+    browser: &crate::ui::browser_pane::BrowserPane,
+    action: flowmux_ipc::protocol::BrowserLoadAction,
+    timeout_ms: u64,
+    revision: u64,
+) -> Result<BrowserActionResult, String> {
+    use flowmux_ipc::protocol::BrowserLoadAction as Action;
+    let started = Instant::now();
+    let marker = uuid::Uuid::new_v4().to_string();
+    evaluate_automation(
+        browser,
+        &flowmux_browser::scripts::load_mark(&marker),
+        Duration::from_secs(2),
+    )
+    .await
+    .map_err(|error| {
+        format!("current page did not respond ({error}); no navigation was started. Use the command without --wait, then wait for the result")
+    })?;
+    browser.control.check_revision(revision)?;
+    let moved = match action {
+        Action::Navigate(url) => {
+            browser.load_uri(&url);
+            true
+        }
+        Action::Back => browser.go_back(),
+        Action::Forward => browser.go_forward(),
+        Action::Reload => {
+            browser.reload();
+            true
+        }
+    };
+    if moved {
+        browser.refs.borrow_mut().clear(browser.ref_scope);
+    }
+    let deadline = started + Duration::from_millis(timeout_ms);
+    let probe = flowmux_browser::scripts::load_probe(&marker);
+    let mut state = serde_json::Value::Null;
+    let loaded = moved
+        && loop {
+            browser.control.check_revision(revision)?;
+            if browser.has_pending_dialog() {
+                break false;
+            }
+            // Navigation can detach the old document mid-call; retry until the deadline.
+            if let Ok(value) =
+                evaluate_automation(browser, &probe, Duration::from_millis(1000)).await
+            {
+                state = serde_json::from_str(&value).unwrap_or_default();
+                if state["replaced"] == true && state["ready_state"] == "complete" {
+                    break true;
+                }
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            glib::timeout_future(Duration::from_millis(50)).await;
+        };
+    Ok(BrowserActionResult::String(
+        serde_json::json!({
+            "moved": moved,
+            "loaded": loaded,
+            "url": state.get("url").cloned().unwrap_or_else(|| browser.current_url().into()),
+            "title": state.get("title").cloned().unwrap_or_else(|| browser.current_title().into()),
+            "ready_state": state["ready_state"],
+            "document_generation": browser.control.observation()["document_generation"],
+            "dialog_pending": browser.has_pending_dialog(),
+            "elapsed_ms": started.elapsed().as_millis(),
+        })
+        .to_string(),
+    ))
 }
 
 async fn capture_change_baseline(

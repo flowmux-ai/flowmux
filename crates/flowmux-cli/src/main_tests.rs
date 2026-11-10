@@ -1363,6 +1363,57 @@ fn browser_navigate_maps_pane_and_url() {
 }
 
 #[test]
+fn browser_navigation_wait_maps_to_load_request() {
+    use flowmux_ipc::protocol::BrowserLoadAction;
+    let pane = PaneId::new();
+    let id = pane.to_string();
+    let parse = |args: &[&str]| {
+        let mut argv = vec!["flowmuxctl", "browser"];
+        argv.extend_from_slice(args);
+        build_request(Cli::try_parse_from(argv).unwrap().cmd).unwrap()
+    };
+    assert!(matches!(
+        parse(&["navigate", &id, "https://example.com/", "--wait"]),
+        Request::BrowserLoad { pane: got, action: BrowserLoadAction::Navigate(url), timeout_ms: 15_000 }
+            if got == pane && url == "https://example.com/"
+    ));
+    assert!(matches!(
+        parse(&["reload", &id, "--wait", "--timeout-ms", "2500"]),
+        Request::BrowserLoad {
+            action: BrowserLoadAction::Reload,
+            timeout_ms: 2500,
+            ..
+        }
+    ));
+    assert!(matches!(
+        parse(&["back", &id, "--wait"]),
+        Request::BrowserLoad {
+            action: BrowserLoadAction::Back,
+            ..
+        }
+    ));
+    assert!(matches!(
+        parse(&["forward", &id, "--wait"]),
+        Request::BrowserLoad {
+            action: BrowserLoadAction::Forward,
+            ..
+        }
+    ));
+    // Without --wait the existing requests and plain `ok` output are unchanged.
+    assert!(matches!(
+        parse(&["navigate", &id, "https://example.com/"]),
+        Request::BrowserNavigate { .. }
+    ));
+    assert!(matches!(
+        parse(&["reload", &id]),
+        Request::BrowserReload { .. }
+    ));
+    assert!(
+        Cli::try_parse_from(["flowmuxctl", "browser", "back", &id, "--timeout-ms", "10"]).is_err()
+    );
+}
+
+#[test]
 fn browser_history_verbs_map_pane_only() {
     let pane = PaneId::new();
     assert!(matches!(

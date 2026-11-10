@@ -296,7 +296,8 @@ Notes:
   ref tokens are resolved server-side.
 - Do not assume ref tokens survive across snapshots or page
   navigation. After a navigate / reload action
-  call, take a fresh snapshot before the next ref-based action.
+  call (use `--wait` to return after the new document loads), take a
+  fresh snapshot before the next ref-based action.
 
 ## Reference
 
