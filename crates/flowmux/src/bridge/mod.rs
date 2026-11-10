@@ -109,6 +109,10 @@ pub enum BrowserOp {
         x: i32,
         y: i32,
     },
+    ScrollPages {
+        within: Option<String>,
+        pages: f64,
+    },
     Type {
         text: String,
     },
@@ -204,7 +208,7 @@ impl BrowserOp {
             Self::Click { .. } => "click",
             Self::Fill { .. } => "fill",
             Self::Select { .. } => "select",
-            Self::Scroll { .. } => "scroll",
+            Self::Scroll { .. } | Self::ScrollPages { .. } => "scroll",
             Self::Type { .. } => "type",
             Self::Press { .. } => "press",
             Self::Text { .. } => "text",

@@ -766,6 +766,31 @@ pub fn scroll_by_selector(selector: &str, x: i32, y: i32) -> String {
     )
 }
 
+/// Scroll by viewport heights: the document, or the nearest scroll container of
+/// `el` (the element itself or an ancestor). Reports the resulting position.
+pub fn scroll_pages(pages: f64, within: bool) -> String {
+    format!(
+        r#"(function(el, pages) {{
+            const scrollable = node => node.scrollHeight > node.clientHeight + 1 &&
+                /(auto|scroll|overlay)/.test(node.ownerDocument.defaultView.getComputedStyle(node).overflowY);
+            let box = el;
+            while (box && !scrollable(box)) box = box.parentElement;
+            if (el && !box) throw new Error('ref has no scrollable container; scroll the page without --within');
+            const page = !box;
+            const target = box || document.scrollingElement || document.documentElement;
+            const height = page ? innerHeight : target.clientHeight;
+            if (!height) throw new Error('viewport is hidden: show the browser tab, or use read for content');
+            const before = target.scrollTop;
+            target.scrollBy({{top: pages * height, behavior: 'instant'}});
+            const y = target.scrollTop, total = target.scrollHeight;
+            return JSON.stringify({{moved: y !== before, container: page ? 'document' : target.localName,
+                y: Math.round(y), pages_above: +(y / height).toFixed(1),
+                pages_below: +(Math.max(0, total - y - height) / height).toFixed(1)}});
+        }})({root}, {pages})"#,
+        root = if within { "el" } else { "null" },
+    )
+}
+
 /// Read element's `innerText`.
 pub fn text_of_selector(selector: &str) -> String {
     format!(

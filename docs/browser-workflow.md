@@ -31,7 +31,9 @@ Inputs, text areas and selects add `control` with the input type, current value,
 placeholder, `min`/`max`/`step`, or a select's option count, first four options
 and selection. Password and file values are never included. `page.scroll` gives
 the offset, viewport, document size and `pages_above`/`pages_below`, or
-`hidden_viewport: true` for a background tab. `--max-chars` counts only the
+`hidden_viewport: true` for a background tab; `scroll PANE --pages N` moves by
+those pages (negative is up), and `--within REF` scrolls that ref's nearest
+scroll container instead. `--max-chars` counts only the
 printed data, so the same budget holds more refs than `--compact`. Dense refs
 behave like other refs and expire with the next snapshot. It cannot be combined
 with `--compact` or `--receipt`.

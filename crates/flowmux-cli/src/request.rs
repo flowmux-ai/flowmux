@@ -226,7 +226,30 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             target,
             value,
         },
-        BrowserOp::Scroll { pane, target, x, y } => Request::BrowserScroll { pane, target, x, y },
+        BrowserOp::Scroll {
+            pane,
+            pages: Some(pages),
+            within,
+            ..
+        } => {
+            anyhow::ensure!(
+                pages.is_finite() && pages != 0.0 && pages.abs() <= 100.0,
+                "--pages must be a nonzero number of at most 100 viewport heights"
+            );
+            Request::BrowserScrollPages {
+                pane,
+                within,
+                pages,
+            }
+        }
+        BrowserOp::Scroll {
+            pane,
+            target: Some(target),
+            x: Some(x),
+            y: Some(y),
+            ..
+        } => Request::BrowserScroll { pane, target, x, y },
+        BrowserOp::Scroll { .. } => anyhow::bail!("scroll requires REF X Y or --pages N"),
         BrowserOp::Type { pane, text } => Request::BrowserType { pane, text },
         BrowserOp::Press { pane, key } => Request::BrowserPress { pane, key },
         BrowserOp::Text { pane, target } => Request::BrowserText { pane, target },

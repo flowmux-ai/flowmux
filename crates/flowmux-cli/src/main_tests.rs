@@ -1507,6 +1507,33 @@ fn browser_scroll_preserves_negative_offsets() {
 }
 
 #[test]
+fn browser_scroll_pages_is_an_alternative_to_ref_offsets() {
+    let pane = PaneId::new();
+    let id = pane.to_string();
+    let parse = |args: &[&str]| {
+        let mut argv = vec!["flowmuxctl", "browser", "scroll", id.as_str()];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(argv).map(|cli| build_request(cli.cmd))
+    };
+    assert!(matches!(
+        parse(&["e1-x", "0", "250"]).unwrap().unwrap(),
+        Request::BrowserScroll { target, x: 0, y: 250, .. } if target == "e1-x"
+    ));
+    assert!(matches!(
+        parse(&["--pages", "-1.5"]).unwrap().unwrap(),
+        Request::BrowserScrollPages { within: None, pages, .. } if pages == -1.5
+    ));
+    assert!(matches!(
+        parse(&["--pages", "2", "--within", "e3-x"]).unwrap().unwrap(),
+        Request::BrowserScrollPages { within: Some(within), .. } if within == "e3-x"
+    ));
+    assert!(parse(&[]).is_err());
+    assert!(parse(&["e1-x", "0", "1", "--pages", "1"]).is_err());
+    assert!(parse(&["--within", "e3-x"]).is_err());
+    assert!(parse(&["--pages", "0"]).unwrap().is_err());
+}
+
+#[test]
 fn browser_type_preserves_unicode_text() {
     let pane = PaneId::new();
     let req = build_request(Cmd::BrowserType {

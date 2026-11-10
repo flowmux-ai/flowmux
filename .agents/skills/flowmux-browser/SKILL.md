@@ -303,7 +303,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 | Page dialogs | `dialog PANE status`, `accept ID [--text TEXT]`, or `dismiss ID` |
 | File selection | `file-chooser PANE status`, `select ID PATH... --root DIR`, or `cancel ID` |
 | Coordinates | `pointer PANE click\|dblclick\|hover X Y`, `drag PANE FROM_X FROM_Y TO_X TO_Y` |
-| Scrolling | `scroll PANE REF X Y`: bring the element into view, then offset the viewport |
+| Scrolling | `scroll PANE REF X Y`: bring the element into view, then offset the viewport; `scroll PANE --pages N [--within REF]`: move the page, or the ref's scroll container, by N viewport heights (negative is up) and print `y`, `pages_above`, `pages_below` |
 | Wait | `wait PANE --condition JSON`, `--selector CSS`, `--text TEXT`, `--url TEXT`, `--ready-state complete`, or `--js PREDICATE`; optional `--timeout-ms` / `--poll-ms`; no network-idle wait |
 | Video capture | `record PANE output.mp4 --seconds 5 --fps 5` |
 | Escape hatch | `eval PANE JAVASCRIPT` when normal verbs cannot express the task |

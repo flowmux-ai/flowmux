@@ -256,6 +256,11 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserScroll { pane, target, x, y } => {
                 (pane, BrowserOp::Scroll { target, x, y })
             }
+            Request::BrowserScrollPages {
+                pane,
+                within,
+                pages,
+            } => (pane, BrowserOp::ScrollPages { within, pages }),
             Request::BrowserType { pane, text } => (pane, BrowserOp::Type { text }),
             Request::BrowserPress { pane, key } => (pane, BrowserOp::Press { key }),
             Request::BrowserText { pane, target } => (pane, BrowserOp::Text { target }),
@@ -495,6 +500,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserFill { .. }
                 | Request::BrowserSelect { .. }
                 | Request::BrowserScroll { .. }
+                | Request::BrowserScrollPages { .. }
                 | Request::BrowserType { .. }
                 | Request::BrowserPress { .. }
                 | Request::BrowserText { .. }

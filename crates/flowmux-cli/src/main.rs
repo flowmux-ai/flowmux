@@ -762,12 +762,22 @@ enum BrowserOp {
         target: String,
         value: String,
     },
-    /// Scroll an element into view, then offset the viewport by (x, y).
+    /// Scroll an element into view, then offset the viewport by (x, y), or
+    /// scroll by viewport heights with --pages.
     Scroll {
         pane: PaneId,
-        target: String,
-        x: i32,
-        y: i32,
+        #[arg(required_unless_present = "pages")]
+        target: Option<String>,
+        #[arg(required_unless_present = "pages")]
+        x: Option<i32>,
+        #[arg(required_unless_present = "pages")]
+        y: Option<i32>,
+        /// Viewport heights to scroll; negative scrolls up. Replaces REF X Y.
+        #[arg(long, allow_hyphen_values = true, conflicts_with_all = ["target", "x", "y"])]
+        pages: Option<f64>,
+        /// With --pages, scroll this ref's nearest scroll container instead of the page.
+        #[arg(long, requires = "pages")]
+        within: Option<String>,
     },
     /// Type literal text into the active element of a browser pane.
     Type { pane: PaneId, text: String },

@@ -715,6 +715,20 @@ impl WindowController {
                             }
                         }
                     }
+                    BrowserOp::ScrollPages { within, pages } => {
+                        let script = match within {
+                            Some(target) => ref_script(&browser, &target, |_| {
+                                flowmux_browser::scripts::scroll_pages(pages, true)
+                            }),
+                            None => Ok(flowmux_browser::scripts::scroll_pages(pages, false)),
+                        };
+                        match script {
+                            Ok(js) => run_browser_js(&browser, &js, ack, false),
+                            Err(e) => {
+                                let _ = ack.send(Err(e));
+                            }
+                        }
+                    }
                     BrowserOp::Type { text } => {
                         if text.is_empty() {
                             let _ = ack.send(Ok(BrowserActionResult::Ok));

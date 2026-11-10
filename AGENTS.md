@@ -143,6 +143,7 @@ This option applies to every browser command except `open`.
 | diagnose / control | yes | Runtime support checks and per-tab task handoff; see [browser tasks](docs/browser-workflow.md) |
 | --receipt / --expect-text / --expect-url | yes | Observed action results; timeout never repeats the action |
 | click / dblclick / hover / focus / blur | yes | by ref token |
+| scroll | yes | `REF X Y`, or `--pages N [--within REF]` by viewport heights |
 | pointer / drag | yes | CSS viewport coordinates; verify the resulting page state |
 | fill / select / type / press | yes | type & press act on the active element |
 | form | yes | bounded ref-based field list; per-field verification, no submit command |

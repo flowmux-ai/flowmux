@@ -463,6 +463,35 @@ def exercise_page_reads(cli, url, root):
     print("BROWSER_PAGE_READS_OK", flush=True)
 
 
+def exercise_scroll_pages(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Page scrolling", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args, error=False):
+        result = cli("browser", op, pane, *args, error=error)
+        return result if error else result["browser_result"]["value"]
+
+    value("eval", "document.body.innerHTML = '<div style=height:5000px>tall</div><section role=region aria-label=Feed style=\"height:200px;overflow:auto\"><div style=height:1000px>feed</div></section>'; scrollTo(0, 0); 'ok'")
+    height = int(value("eval", "String(innerHeight)"))
+    down = json.loads(value("scroll", "--pages", "1"))
+    assert down["moved"] and down["container"] == "document" and abs(down["y"] - height) <= 1, (down, height)
+    assert down["pages_above"] == 1.0 and down["pages_below"] > 0, down
+    assert int(value("eval", "String(Math.round(scrollY))")) == down["y"]
+    assert json.loads(value("scroll", "--pages", "-5"))["y"] == 0
+    snap = json.loads(value("snapshot", "--dense"))
+    assert snap["page"]["scroll"]["y"] == 0 and snap["page"]["scroll"]["pages_below"] > 0, snap["page"]
+    feed = next(ref for ref, meta in snap["refs"].items() if meta["name"] == "Feed")
+    inner = json.loads(value("scroll", "--pages", "2", "--within", feed))
+    assert inner["container"] == "section" and inner["y"] == 400 and inner["pages_above"] == inner["pages_below"] == 2, inner
+    assert int(value("eval", "String(scrollY)")) == 0, "container scroll moved the page"
+    value("eval", "document.body.insertAdjacentHTML('afterbegin', '<h2>Top</h2>'); 'ok'")
+    top = next(ref for ref, meta in json.loads(value("snapshot", "--dense"))["refs"].items() if meta["name"] == "Top")
+    assert "no scrollable container" in str(value("scroll", "--pages", "1", "--within", top, error=True))
+    print("BROWSER_SCROLL_PAGES_OK", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1599,6 +1628,7 @@ def main():
                 exercise_compact_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_dense_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_page_reads(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_scroll_pages(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)

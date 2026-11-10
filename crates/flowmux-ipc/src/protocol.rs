@@ -696,6 +696,12 @@ pub enum Request {
         x: i32,
         y: i32,
     },
+    /// Scroll the document, or the scroll container of `within`, by viewport heights.
+    BrowserScrollPages {
+        pane: PaneId,
+        within: Option<String>,
+        pages: f64,
+    },
     BrowserType {
         pane: PaneId,
         text: String,
@@ -2130,6 +2136,14 @@ mod tests {
             (Request::BrowserBack { pane }, "browser_back"),
             (Request::BrowserForward { pane }, "browser_forward"),
             (Request::BrowserReload { pane }, "browser_reload"),
+            (
+                Request::BrowserScrollPages {
+                    pane,
+                    within: None,
+                    pages: -1.5,
+                },
+                "browser_scroll_pages",
+            ),
             (
                 Request::BrowserRead {
                     pane,
