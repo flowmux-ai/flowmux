@@ -203,7 +203,7 @@ def local_cases(client, url, root, terminal, samples, warmup):
 
     for size in (20, 500):
         client.js(f"document.body.innerHTML=Array.from({{length:{size}}},(_,i)=>'<button>Target '+i+'</button><p>Row '+i+' benchmark text</p>').join('');'ready'")
-        for name, options in [('full', []), ('compact', ['--compact']), ('find', 'find')]:
+        for name, options in [('full', []), ('compact', ['--compact']), ('dense', ['--dense']), ('find', 'find')]:
             case(f'observe_{size}_{name}', lambda i: None,
                  lambda _, i, options=options, size=size: observe(options, 1 if options == 'find' else size))
 

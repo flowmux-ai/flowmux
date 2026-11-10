@@ -125,7 +125,7 @@ PANE=$(printf '%s' "$OPEN" | jq -er '.browser_pane_opened.pane') || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --url example.com)" = true ] || exit 1
 [ "$("$FLOWMUX_CLI" browser wait "pane:$PANE" --ready-state complete)" = true ] || exit 1
 # Later page changes in this tab: navigate "pane:$PANE" URL --wait, then check .loaded.
-SNAPSHOT=$("$FLOWMUX_CLI" browser snapshot "pane:$PANE" --compact --viewport --max-nodes 40 --max-chars 12000) || exit 1
+SNAPSHOT=$("$FLOWMUX_CLI" browser snapshot "pane:$PANE" --dense --viewport --max-nodes 40 --max-chars 12000) || exit 1
 SURFACE=$(printf '%s' "$SNAPSHOT" | jq -er '.page.surface_id') || exit 1
 printf '%s\n' "$SNAPSHOT"
 # Pin subsequent operations to this browser tab.
@@ -157,8 +157,8 @@ means the action should be repeated.
 
 Choose the smallest observation that answers the next question:
 
-- Known target: `find PANE --role button --name Save --exact --compact --max-chars 6000`.
-- Visible controls: `snapshot PANE --compact --viewport --interactive --max-nodes 40 --max-chars 12000`.
+- Known target: `find PANE --role button --name Save --exact --dense --max-chars 6000`.
+- Visible controls: `snapshot PANE --dense --viewport --interactive --max-nodes 40 --max-chars 12000`.
 - Reading content: omit `--interactive`; it excludes document prose. Scope with
   `--within REF`, then read the required element with `text PANE REF`.
 - Completion: use a typed `wait` or action `--receipt --expect` instead of
@@ -179,6 +179,14 @@ Use `--compact` on `snapshot`/`find` to omit the duplicate Markdown and element
 selectors from model-facing JSON. Complete refs, page text, states, descriptions
 and frame/shadow paths remain. Actions still use the full server-side registry.
 Omit it when a script needs the full format; `--receipt` cannot be combined with it.
+
+Prefer `--dense` for model-facing observation: compact output with shorter refs,
+`states` listing only non-default flags (no `states` means visible, enabled,
+unchecked, collapsed, unfocused, valid), `control` with input type/value/
+placeholder/min/max or a select's option count, first options and selection
+(never password or file values), and `page.scroll` with `pages_above`/
+`pages_below` or `hidden_viewport`. Its `--max-chars` counts printed data, so
+the same budget holds more refs. It cannot be combined with `--compact`.
 
 A full snapshot returns a Markdown tree and opaque refs such as `e1-<snapshot-id>`.
 Copy the entire returned ref; short names such as `e1` are not aliases.

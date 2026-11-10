@@ -1019,6 +1019,9 @@ pub struct BrowserInspectOptions {
     pub viewport: bool,
     pub max_nodes: Option<u32>,
     pub max_chars: Option<u32>,
+    /// Model-facing form; omitted when false so older GUIs accept other options.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dense: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

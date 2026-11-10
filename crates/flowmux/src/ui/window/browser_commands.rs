@@ -3,6 +3,12 @@
 
 use super::*;
 
+thread_local! {
+    // Dense snapshot tokens combine this process-unique serial with random bits,
+    // so a token from an earlier snapshot in this process never names a new ref.
+    static SNAPSHOT_SERIAL: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Native pointer and key input need a mapped WebView. A tab whose workspace
 /// is not on screen fails immediately instead of waiting for render frames,
 /// and the message steers agents to commands that work in the background.
@@ -539,10 +545,18 @@ impl WindowController {
                         });
                     }
                     BrowserOp::Snapshot | BrowserOp::Inspect(_) => {
-                        let options = match op {
+                        let mut options = match op {
                             BrowserOp::Inspect(options) => serde_json::to_value(options).unwrap(),
                             _ => serde_json::json!({}),
                         };
+                        if options["dense"] == true {
+                            options["serial"] = SNAPSHOT_SERIAL
+                                .with(|serial| {
+                                    serial.set(serial.get() + 1);
+                                    serial.get()
+                                })
+                                .into();
+                        }
                         let script = flowmux_browser::scripts::snapshot_with_options(&options);
                         // Run the non-mutating snapshot script, then mirror
                         // its `refs` map into the pane's server-side

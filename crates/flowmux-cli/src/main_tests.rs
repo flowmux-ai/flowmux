@@ -3019,6 +3019,43 @@ fn browser_task_form_and_ref_expectations_parse() {
 }
 
 #[test]
+fn dense_snapshot_is_opt_in_and_compatible_with_older_guis() {
+    let pane = PaneId::new();
+    let id = pane.to_string();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "browser",
+        "find",
+        &id,
+        "--dense",
+        "--role",
+        "button",
+    ])
+    .unwrap();
+    let Request::BrowserInspect { options, .. } = build_request(cli.cmd).unwrap() else {
+        panic!("expected inspection")
+    };
+    assert!(options.dense && options.role.as_deref() == Some("button"));
+    for conflict in ["--compact", "--receipt"] {
+        assert!(Cli::try_parse_from([
+            "flowmuxctl",
+            "browser",
+            "snapshot",
+            &id,
+            "--dense",
+            conflict
+        ])
+        .is_err());
+    }
+    // Requests without --dense keep their previous wire form.
+    let plain = flowmux_ipc::protocol::BrowserInspectOptions {
+        role: Some("button".into()),
+        ..Default::default()
+    };
+    assert!(!serde_json::to_string(&plain).unwrap().contains("dense"));
+}
+
+#[test]
 fn compact_snapshot_preserves_request_scope_and_rejects_receipts() {
     let pane = PaneId::new();
     for verb in ["snapshot", "find"] {

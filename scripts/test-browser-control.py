@@ -350,6 +350,52 @@ def exercise_task_workflow(cli, url, root):
     print("BROWSER_TASK_WORKFLOW_OK", flush=True)
 
 
+def exercise_dense_snapshot(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Dense observations", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url, pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--url", url)["browser_bool_result"]["value"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args):
+        return cli("browser", op, pane, *args)["browser_result"]["value"]
+
+    value("eval", "document.body.insertAdjacentHTML('beforeend', '<select aria-label=Size><option>Small<option selected>Medium<option>Large</select>"
+          "<input type=range aria-label=Volume min=0 max=10 value=3>'); check.checked = true; 'ok'")
+    before = value("eval", "document.documentElement.outerHTML")
+    full = json.loads(value("snapshot"))
+    dense_text = value("snapshot", "--dense")
+    dense = json.loads(dense_text)
+    assert value("eval", "document.documentElement.outerHTML") == before, "dense snapshot changed the DOM"
+    assert "markdown" not in dense and len(dense["refs"]) == len(full["refs"])
+    assert dense["page"]["scroll"]["viewport"][1] > 0 and "pages_below" in dense["page"]["scroll"], dense["page"]
+    assert all("selector" not in meta for meta in dense["refs"].values())
+    allowed = {"disabled", "readonly", "checked", "selected", "expanded", "focused", "invalid"}
+    assert all(set(meta.get("states", [])) <= allowed for meta in dense["refs"].values())
+    assert max(map(len, dense["refs"])) < min(map(len, full["refs"])), "dense refs are not shorter"
+    by_name = {meta["name"]: meta for meta in dense["refs"].values()}
+    assert by_name["Size"]["control"] == {"type": "select", "option_count": 3,
+        "options": ["Small", "Medium", "Large"], "selected": "Medium"}, by_name["Size"]
+    assert by_name["Volume"]["control"] == {"type": "range", "value": "3", "min": "0", "max": "10"}, by_name["Volume"]
+    assert by_name["Password"]["control"] == {"type": "password"} and "secret" not in dense_text
+    assert any("checked" in meta.get("states", []) for meta in dense["refs"].values())
+    assert len(dense_text) < len(value("snapshot", "--compact")) * .7, "dense output is not smaller"
+    # --max-chars counts printed data, so the same budget fits more refs than --compact.
+    small = json.loads(value("snapshot", "--dense", "--max-chars", "2500"))
+    compact_small = json.loads(value("snapshot", "--compact", "--max-chars", "2500"))
+    assert small["truncated"] and len(json.dumps(small)) < 2700, len(json.dumps(small))
+    assert len(small["refs"]) > len(compact_small["refs"]), (len(small["refs"]), len(compact_small["refs"]))
+    # Dense refs act like other refs and expire with the next snapshot.
+    latest = json.loads(value("snapshot", "--dense"))
+    field = next(k for k, v in latest["refs"].items() if v["name"] == "Contact email")
+    assert field not in dense["refs"]
+    stale = next(k for k, v in dense["refs"].items() if v["name"] == "Contact email")
+    cli("browser", "fill", pane, stale, "stale", error=True)
+    cli("browser", "fill", pane, field, "dense@example.test")
+    assert value("value", field) == "dense@example.test"
+    print("BROWSER_DENSE_SNAPSHOT_OK", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1484,6 +1530,7 @@ def main():
                 assert cli("ping") == "pong"
                 exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_compact_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_dense_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)

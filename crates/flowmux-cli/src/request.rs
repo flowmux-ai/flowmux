@@ -150,6 +150,7 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
                 viewport: options.viewport,
                 max_nodes: options.max_nodes,
                 max_chars: options.max_chars,
+                dense: options.dense,
             };
             if options == Default::default() {
                 Request::BrowserSnapshot { pane }

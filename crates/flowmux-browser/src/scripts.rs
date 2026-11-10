@@ -22,6 +22,8 @@
 pub const SNAPSHOT_JS: &str = r#"
 (function() {
   const options = /*FLOWMUX_OPTIONS*/ {};
+  // Dense output omits Markdown and selectors, so the budget counts only printed data.
+  const dense = !!options.dense;
   const maxNodes = Math.max(1, Math.min(options.max_nodes || 2000, 2000));
   const maxChars = Math.max(1024, Math.min(options.max_chars || 262144, 262144));
   let truncated = false, usedChars = 512;
@@ -166,9 +168,31 @@ pub const SNAPSHOT_JS: &str = r#"
     return parts.join(' > ');
   }
 
+  // Values an agent would otherwise read with separate calls. Passwords are never read.
+  function controlDetails(el, shownName) {
+    if (!el.matches('input,textarea,select')) return null;
+    const control = {};
+    const type = el.matches('input') ? el.type : el.tagName.toLowerCase();
+    if (type !== 'text') control.type = type;
+    if (type === 'password' || type === 'file') return control;
+    if (el.matches('select')) {
+      control.option_count = el.options.length;
+      control.options = Array.from(el.options).slice(0, 4).map(option => flat(option.label).slice(0, 40));
+      const chosen = Array.from(el.selectedOptions, option => flat(option.label).slice(0, 40));
+      if (chosen.length) control.selected = el.multiple ? chosen : chosen[0];
+    } else if (!['checkbox','radio','submit','button','reset','image','color','hidden'].includes(type) && el.value)
+      control.value = el.value.slice(0, 80);
+    const placeholder = flat(el.getAttribute('placeholder'));
+    if (placeholder && placeholder !== shownName) control.placeholder = placeholder.slice(0, 80);
+    for (const key of ['min', 'max', 'step']) if (el.getAttribute(key)) control[key] = el.getAttribute(key);
+    return Object.keys(control).length ? control : null;
+  }
+
   const refs = {};
   const nodes = new Map();
-  const nonce = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16).padStart(8, '0')).join('');
+  // Dense tokens are shorter: a process-unique snapshot serial plus 32 random bits.
+  const nonce = (dense ? Number(options.serial || 0).toString(36) : '') +
+    Array.from(crypto.getRandomValues(new Uint32Array(dense ? 1 : 4)), n => n.toString(16).padStart(8, '0')).join('');
   const lines = [];
   let counter = 0;
 
@@ -195,7 +219,7 @@ pub const SNAPSHOT_JS: &str = r#"
       const token = 'e' + counter + '-' + nonce;
       const sel = cssPath(el);
       const nm = fullName.slice(0, 120);
-      refs[token] = { role: role, name: nm, selector: sel };
+      refs[token] = dense ? { role: role, name: nm } : { role: role, name: nm, selector: sel };
       if (shadowPath.length) refs[token].shadow_path = shadowPath;
       if (framePath.length) refs[token].frame_path = framePath;
       if (el.matches('iframe,frame')) refs[token].frame_accessible = !!el.contentDocument;
@@ -206,7 +230,7 @@ pub const SNAPSHOT_JS: &str = r#"
       const description = flat(el.getAttribute('aria-description')) || flat(
         flat(el.getAttribute('aria-describedby')).split(' ').map(id => el.getRootNode().getElementById(id)?.textContent || '').join(' '));
       if (description) refs[token].description = description.slice(0, 240);
-      refs[token].states = {
+      const states = {
         visible: true, disabled: !enabled, readonly: !!el.readOnly, enabled,
         checked: !!el.checked || el.getAttribute('aria-checked') === 'true',
         selected: !!el.selected || el.getAttribute('aria-selected') === 'true',
@@ -215,10 +239,20 @@ pub const SNAPSHOT_JS: &str = r#"
         focused: el.getRootNode().activeElement === el,
         invalid: el.getAttribute('aria-invalid') === 'true' || el.matches(':invalid'),
       };
-      const cost = JSON.stringify(refs[token]).length + nm.length + token.length * 2 + 64;
+      if (!dense) refs[token].states = states;
+      else {
+        // Defaults (visible, enabled, unchecked, collapsed, unfocused, valid) are omitted.
+        const set = ['disabled', 'readonly', 'checked', 'selected', 'expanded', 'focused', 'invalid'].filter(key => states[key]);
+        if (set.length) refs[token].states = set;
+        const control = controlDetails(el, nm);
+        if (control) refs[token].control = control;
+      }
+      const cost = dense ? JSON.stringify(refs[token]).length + token.length + 8
+        : JSON.stringify(refs[token]).length + nm.length + token.length * 2 + 64;
       if (usedChars + cost > maxChars) { delete refs[token]; truncated = true; return; }
       usedChars += cost;
-      nodes.set(token, { el, root: el.getRootNode(), frames, shadowPath, framePath });
+      nodes.set(token, { el, root: el.getRootNode(), frames, shadowPath, framePath, selector: sel });
+      if (dense) return;
       const safe = nm.split(String.fromCharCode(34)).join('\\"');
       lines.push('- ' + role + ' "' + safe + '" [ref=' + token + ']');
     });
@@ -237,6 +271,16 @@ pub const SNAPSHOT_JS: &str = r#"
     ready_state: document.readyState,
     text: text
   };
+  if (dense) {
+    // A hidden tab has a 0x0 viewport; page counts would be meaningless there.
+    const view = document.scrollingElement || document.documentElement;
+    page.scroll = innerHeight > 0 ? {
+      x: Math.round(scrollX), y: Math.round(scrollY), viewport: [innerWidth, innerHeight],
+      document: [view.scrollWidth, view.scrollHeight],
+      pages_above: +(scrollY / innerHeight).toFixed(1),
+      pages_below: +(Math.max(0, view.scrollHeight - scrollY - innerHeight) / innerHeight).toFixed(1)
+    } : { hidden_viewport: true };
+  }
 
   const result = {truncated, markdown: lines.join('\n') + (lines.length ? '\n' : ''), refs, page};
   let json = JSON.stringify(result);
@@ -251,6 +295,11 @@ pub const SNAPSHOT_JS: &str = r#"
   if (json.length > maxChars) {
     page.text = ''; page.url = page.url.slice(0, 96); page.title = page.title.slice(0, 32);
     result.truncated = true;
+    json = JSON.stringify(result);
+  }
+  if (dense) {
+    // The server needs selectors for its ref registry; the CLI removes them before printing.
+    for (const [token, record] of nodes) refs[token].selector = record.selector;
     json = JSON.stringify(result);
   }
   // Kept in the application script world, never in page attributes.

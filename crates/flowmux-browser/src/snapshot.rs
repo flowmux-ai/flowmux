@@ -109,6 +109,9 @@ pub struct RefMeta {
     pub states: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Dense snapshots only: input type, value, select options and range bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,6 +136,9 @@ pub struct PageMeta {
     /// Optional HTML payload; the current snapshot script leaves this unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub html: Option<String>,
+    /// Dense snapshots only: scroll offset, viewport and pages above/below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scroll: Option<serde_json::Value>,
 }
 
 impl DomSnapshot {
@@ -148,6 +154,7 @@ impl DomSnapshot {
                 ready_state: "loading".into(),
                 text: String::new(),
                 html: None,
+                scroll: None,
             },
         }
     }
@@ -199,6 +206,7 @@ mod tests {
                 frame_accessible: None,
                 states: None,
                 description: None,
+                control: None,
             },
         );
         refs.insert(
@@ -212,6 +220,7 @@ mod tests {
                 frame_accessible: None,
                 states: None,
                 description: None,
+                control: None,
             },
         );
         DomSnapshot {
@@ -225,6 +234,7 @@ mod tests {
                 ready_state: "complete".into(),
                 text: "Email Password Sign in".into(),
                 html: None,
+                scroll: None,
             },
         }
     }

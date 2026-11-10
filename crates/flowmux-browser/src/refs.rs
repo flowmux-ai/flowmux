@@ -230,6 +230,7 @@ mod tests {
             frame_accessible: None,
             states: None,
             description: None,
+            control: None,
         }
     }
 

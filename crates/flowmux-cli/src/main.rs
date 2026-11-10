@@ -583,6 +583,10 @@ struct InspectArgs {
     /// Complete refs, page text, states and frame/shadow paths are retained.
     #[arg(long, conflicts_with = "enabled")]
     compact: bool,
+    /// Compact output plus shorter refs, only non-default states as a list, control
+    /// values/options and scroll position; --max-chars counts only printed data.
+    #[arg(long, conflicts_with_all = ["compact", "enabled"])]
+    dense: bool,
     #[arg(long)]
     role: Option<String>,
     #[arg(long)]
@@ -1356,7 +1360,7 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     );
     let compact_snapshot = matches!(&cmd, Cmd::Browser {
         op: BrowserOp::Snapshot { options, .. }, ..
-    } if options.compact);
+    } if options.compact || options.dense);
     let mut req = build_request(cmd)?;
     if let Request::SurfaceCreate {
         workspace,
