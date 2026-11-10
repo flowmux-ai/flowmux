@@ -72,11 +72,14 @@ again. The batch stops at the first failed step (`error`), a `wait` that
 returned false (`condition_not_met`), a page dialog, a popup, a control change,
 a replaced document (`document_changed`), a load without `--wait`
 (`navigation_started`) or a `--wait` load that did not finish (`not_loaded`).
-The JSON result lists each step's `status` (`ok`, `failed`, `not_met` or
-`not_run`) with its result, plus `completed` and `stopped` (`index` and
+It also stops when the tab can no longer be checked after a step
+(`tab_unavailable`) or a step's response never arrives (`no_response`).
+The JSON result lists each step's `status` (`ok`, `failed`, `not_met`,
+`not_run`, or `unknown` for a step without a response, which may or may not
+have run) with its result, plus `completed` and `stopped` (`index` and
 `reason`, or null). A batch is not a transaction: completed steps keep their
 effects, and nothing is retried. `open`, `record`, `control`, `task` and nested
-`run` are not accepted as steps.
+`run` are not accepted as steps, and `eval -` cannot read stdin inside a step.
 
 Prefer typed waits or an action's expected outcome to repeated full snapshots.
 Wait polling runs inside Flowmux and returns one result. Use `form` for a known

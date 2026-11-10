@@ -3086,16 +3086,121 @@ fn browser_run_steps_parse_as_normal_commands() {
     };
     assert!(matches!(*request, Request::BrowserWithTask { request, .. }
         if matches!(*request, Request::BrowserRead { .. })));
+    let other_surface = SurfaceId::new().to_string();
+    let other_task = format!("--task={}", uuid::Uuid::new_v4());
     for invalid in [
         &["run", "[]"][..],
         &["open", "https://example.com/"],
         &["click", "e1-x", "--receipt"],
         &["fill", "e1-x", "text", "--surface", "x"],
+        &["fill", "e1-x", "text", "--surface", &other_surface],
+        &["fill", "e1-x", "text", &other_task],
+        &["eval", "-"],
+        &["eval-async", "-"],
         &["clik", "e1-x"],
         &[],
     ] {
         assert!(step(invalid).is_err(), "{invalid:?}");
     }
+    // Text after `--` is data, and the added receipt stays an option.
+    let Request::BrowserOnSurface { request, .. } =
+        step(&["fill", "e1-x", "--", "--task"]).unwrap().request()
+    else {
+        panic!("expected the surface wrapper")
+    };
+    let Request::BrowserWithTask { request, .. } = *request else {
+        panic!("expected the task wrapper")
+    };
+    let Request::BrowserReceipt { request, .. } = *request else {
+        panic!("expected a receipt")
+    };
+    assert!(matches!(*request, Request::BrowserFill { value, .. } if value == "--task"));
+}
+
+/// Serve `replies` to one client in order, then close the connection.
+async fn serve_replies(listener: tokio::net::UnixListener, replies: Vec<&'static str>) {
+    use flowmux_ipc::protocol::{Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let (stream, _) = listener.accept().await.unwrap();
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = tokio::io::BufReader::new(reader).lines();
+    for reply in replies {
+        let line = lines.next_line().await.unwrap().unwrap();
+        let request: Envelope = serde_json::from_str(&line).unwrap();
+        let envelope = Envelope {
+            id: request.id,
+            payload: Payload::Response(Response::BrowserResult {
+                value: reply.into(),
+            }),
+        };
+        let mut out = serde_json::to_vec(&envelope).unwrap();
+        out.push(b'\n');
+        writer.write_all(&out).await.unwrap();
+    }
+}
+
+#[test]
+fn browser_run_keeps_completed_rows_when_the_connection_is_lost() {
+    const TAB: &str = r#"{"observation":{"document_generation":1},"pending_dialog":false}"#;
+    let pane = PaneId::new();
+    // (replies before the connection closes, expected statuses, expected stop)
+    let cases = [
+        // The step's own response never arrives: it may or may not have run.
+        (
+            vec![TAB, "Title"],
+            ["ok", "unknown", "not_run"],
+            serde_json::json!({"index": 1, "reason": "no_response"}),
+        ),
+        // The step answered, but the tab check after it could not be made.
+        (
+            vec![TAB, "Title", "2"],
+            ["ok", "ok", "not_run"],
+            serde_json::json!({"index": 1, "reason": "tab_unavailable"}),
+        ),
+    ];
+    // Unoptimized command parsing needs the main thread's stack, as in the real CLI.
+    let batch = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    for (replies, statuses, stop) in cases {
+                        let dir = tempfile::tempdir().unwrap();
+                        let socket = dir.path().join("flowmux.sock");
+                        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+                        let server = tokio::spawn(serve_replies(listener, replies));
+                        let client = Client::connect(&socket).await.unwrap();
+                        let result = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            batch::run(
+                                &client,
+                                None,
+                                None,
+                                pane,
+                                r#"[["title"],["eval","1+1"],["title"]]"#,
+                            ),
+                        )
+                        .await
+                        .expect("a lost connection must end the batch")
+                        .unwrap();
+                        server.await.unwrap();
+                        let got: Vec<_> = result["steps"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|row| row["status"].as_str().unwrap().to_string())
+                            .collect();
+                        assert_eq!(got, statuses, "{result}");
+                        assert_eq!(result["stopped"], stop, "{result}");
+                        assert_eq!(result["steps"][0]["result"], "Title", "{result}");
+                    }
+                });
+        })
+        .unwrap();
+    batch.join().unwrap();
 }
 
 #[test]

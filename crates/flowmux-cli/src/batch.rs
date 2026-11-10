@@ -63,32 +63,50 @@ pub(crate) fn parse_step(
         !REJECTED.contains(&verb.as_str()),
         "`{verb}` cannot run inside a batch"
     );
+    let parse = |inherited: &[String]| {
+        let mut argv = vec!["flowmux".to_string(), "browser".to_string()];
+        argv.extend_from_slice(inherited);
+        argv.extend([verb.clone(), pane.to_string()]);
+        argv.extend(step[1..].iter().cloned());
+        Cli::try_parse_from(&argv).map_err(|error| {
+            let message = error.to_string();
+            anyhow::anyhow!(
+                "run step {step:?}: {}",
+                message.lines().next().unwrap_or_default()
+            )
+        })
+    };
+    // Parsed on its own first: whatever the step sets itself is then visible,
+    // in any spelling, and text after `--` is not mistaken for an option.
+    let Cmd::Browser {
+        surface: own_surface,
+        task: own_task,
+        receipt,
+        op,
+    } = parse(&[])?.cmd
+    else {
+        anyhow::bail!("run step {step:?} is not a browser command");
+    };
     anyhow::ensure!(
-        !step.iter().any(|arg| matches!(
-            arg.as_str(),
-            "--surface" | "--task" | "--receipt" | "--expect" | "--expect-text" | "--expect-url"
-        )),
+        own_surface.is_none() && own_task.is_none() && !receipt.enabled,
         "run steps inherit --surface and --task from run and cannot set receipts"
     );
-    let mut argv = vec!["flowmux".to_string(), "browser".to_string()];
+    anyhow::ensure!(
+        !matches!(&op, BrowserOp::Eval { source: script, .. } | BrowserOp::EvalAsync { body: script, .. } if script == "-"),
+        "a run step cannot read its script from stdin; pass the script as the argument"
+    );
+    // Options go before the verb so they stay options when the step uses `--`.
+    let mut inherited = Vec::new();
     if let Some(surface) = surface {
-        argv.extend(["--surface".into(), surface.to_string()]);
+        inherited.extend(["--surface".to_string(), surface.to_string()]);
     }
     if let Some(task) = task {
-        argv.extend(["--task".into(), task.to_string()]);
+        inherited.extend(["--task".to_string(), task.to_string()]);
     }
-    argv.extend([verb.clone(), pane.to_string()]);
-    argv.extend(step[1..].iter().cloned());
     if RECEIPT_ACTIONS.contains(&verb.as_str()) {
-        argv.push("--receipt".into());
+        inherited.push("--receipt".into());
     }
-    let cli = Cli::try_parse_from(&argv).map_err(|error| {
-        let message = error.to_string();
-        anyhow::anyhow!(
-            "run step {step:?}: {}",
-            message.lines().next().unwrap_or_default()
-        )
-    })?;
+    let cli = parse(&inherited)?;
     let compact = compact_snapshot(&cli.cmd);
     Ok(Step {
         argv: step.to_vec(),
@@ -175,11 +193,21 @@ pub(crate) async fn run(
             rows.push(serde_json::json!({"step": step.argv, "status": "not_run"}));
             continue;
         }
-        let mut response = client.call(step.request).await?;
+        let verb = step.verb.as_str();
+        // Earlier steps already ran, so a lost connection is reported as a row
+        // instead of discarding their results. This step may or may not have run.
+        let mut response = match client.call(step.request).await {
+            Ok(response) => response,
+            Err(error) => {
+                rows.push(serde_json::json!({"step": step.argv, "status": "unknown",
+                    "error": format!("no response: {error:#}")}));
+                stopped = serde_json::json!({"index": index, "reason": "no_response"});
+                continue;
+            }
+        };
         if step.compact {
             output::compact_browser_snapshot(&mut response)?;
         }
-        let verb = step.verb.as_str();
         let (row, reason) = match result_value(&response) {
             Err(error) => (
                 serde_json::json!({"status": "failed", "error": error}),
@@ -234,13 +262,17 @@ pub(crate) async fn run(
         // Page effects such as navigation can follow an input slightly later.
         if reason.is_none() && !QUERIES.contains(&verb) && index + 1 < total {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let (now, dialog) = observe(client, pane, surface, task).await?;
-            if dialog {
-                reason = Some("dialog_pending".into());
-            } else if now != generation {
-                reason = Some("document_changed".into());
+            match observe(client, pane, surface, task).await {
+                Ok((_, true)) => reason = Some("dialog_pending".into()),
+                Ok((now, false)) => {
+                    if now != generation {
+                        reason = Some("document_changed".into());
+                    }
+                    generation = now;
+                }
+                // The step itself succeeded; the tab is gone or unreachable now.
+                Err(_) => reason = Some("tab_unavailable".into()),
             }
-            generation = now;
         }
         let mut row = row;
         row["step"] = serde_json::json!(step.argv);
