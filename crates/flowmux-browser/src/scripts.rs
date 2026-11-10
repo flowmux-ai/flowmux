@@ -524,7 +524,8 @@ fn element_action(selector: &str, pointer: bool, enabled: bool, action: &str) ->
                         }};
                         const modal = dialog && !dialog.contains(target) && isModal(dialog) && dialog.querySelector(
                             'button:not([disabled]),a[href],input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),[role=button],[role=link]') ? dialog : null;
-                        const shown = modal || cover;
+                        const panel = cover?.closest('dialog,[aria-modal="true"],[role=dialog],[role=alertdialog]');
+                        const shown = modal || (panel && !panel.contains(target) ? panel : cover);
                         const label = shown && (shown.getAttribute('aria-label') || shown.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
                         return "error: element is covered or cannot receive pointer input" + (shown ?
                             ` (covered by ${{modal ? 'modal ' : ''}}<${{shown.localName}}${{shown.id ? '#' + shown.id : ''}}${{shown.getAttribute('role') ? ' role=' + shown.getAttribute('role') : ''}}> "${{label}}")` : '');

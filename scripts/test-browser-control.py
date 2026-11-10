@@ -577,6 +577,11 @@ def exercise_covered_clicks(cli, url, root):
         value("eval", f"document.body.insertAdjacentHTML('beforeend', {json.dumps(transient)}); setTimeout(() => transient.remove(), 1200); 'ok'")
         cli("browser", "click", pane, behind)
     assert value("eval", "String(window.behindClicks)") == "3", "a transient cover failed the click instead of delaying it"
+    # A lasting non-modal dialog is named as the cover, without the modal fast path.
+    value("eval", "document.body.insertAdjacentHTML('beforeend', '<div id=panel role=dialog aria-label=Filters style=\"position:fixed;inset:0;z-index:99;background:white\"><p>Narrow results</p></div>'); 'ok'")
+    covered = str(value("click", refs()["Behind"], error=True))
+    assert 'covered by <div#panel role=dialog> "Filters"' in covered, covered
+    value("eval", "panel.remove(); 'ok'")
     # A short-lived cover inside the target's own dialog is waited for, not failed fast.
     value("eval", "document.body.insertAdjacentHTML('beforeend', '<div role=dialog aria-label=Settings style=\"position:fixed;left:300px;top:20px;width:200px;height:120px;z-index:50;background:white\">"
           "<button style=\"position:absolute;left:10px;top:10px\" onclick=\"window.saved = true\">Save</button>"
