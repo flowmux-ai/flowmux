@@ -393,6 +393,23 @@ def exercise_dense_snapshot(cli, url, root):
     cli("browser", "fill", pane, stale, "stale", error=True)
     cli("browser", "fill", pane, field, "dense@example.test")
     assert value("value", field) == "dense@example.test"
+    # A control named `id` or `parentNode` shadows that property on its form.
+    # Refs inside repeated forms like these must still resolve, also in a quirks-mode frame.
+    assert value("eval", """document.body.innerHTML = Array.from({length: 3}, (_, i) =>
+        '<form><input type=hidden name=id><input type=hidden name=parentNode>' +
+        '<button type=button onclick="window.deleted = ' + i + '">Delete</button></form>').join('') + '<iframe id=quirks></iframe>';
+      quirks.contentDocument.open();
+      quirks.contentDocument.write('<form><input type=hidden name=id><button type=button onclick="top.inner = true">Inner</button></form>');
+      quirks.contentDocument.close(); quirks.contentDocument.compatMode""") == "BackCompat"
+    for args in ([], ["--dense"]):
+        value("eval", "window.deleted = window.inner = null; 'ok'")
+        shadowed = json.loads(value("snapshot", *args))["refs"]
+        buttons = {name: [ref for ref, meta in shadowed.items() if meta["role"] == "button" and meta["name"] == name]
+                   for name in ("Delete", "Inner")}
+        assert len(buttons["Delete"]) == 3 and len(buttons["Inner"]) == 1, shadowed
+        cli("browser", "click", pane, buttons["Delete"][1])
+        cli("browser", "click", pane, buttons["Inner"][0])
+        assert value("eval", "String(window.deleted) + String(window.inner)") == "1true", args
     # Selector generation must stay near-linear: 2,000 targets once took over 30 s.
     value("eval", "document.body.innerHTML = Array.from({length: 2000}, (_, i) => '<button>Target ' + i + '</button><p>Row ' + i + '</p>').join(''); 'ok'")
     started = time.monotonic()

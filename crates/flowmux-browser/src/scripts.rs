@@ -141,6 +141,17 @@ pub const SNAPSHOT_JS: &str = r#"
   // One pass per document or shadow root: id counts, each element's
   // nth-of-type index and the elements under each `tag:nth-of-type(n)` step.
   // Querying the whole root for every step made large pages quadratic or worse.
+  // A form control named `id`, `tagName` or `parentNode` shadows that property on
+  // its form, so read them through the prototype accessors.
+  const accessor = (proto, name) => {
+    const get = Object.getOwnPropertyDescriptor(proto, name).get;
+    return node => get.call(node);
+  };
+  const idOf = el => Element.prototype.getAttribute.call(el, 'id');
+  const tagOf = accessor(Element.prototype, 'tagName'), localNameOf = accessor(Element.prototype, 'localName');
+  const namespaceOf = accessor(Element.prototype, 'namespaceURI');
+  const parentOf = accessor(Node.prototype, 'parentNode'), parentElementOf = accessor(Node.prototype, 'parentElement');
+
   function pathIndex(root) {
     let index = pathIndexes.get(root);
     if (index) return index;
@@ -149,15 +160,16 @@ pub const SNAPSHOT_JS: &str = r#"
     index = { ids: new Map(), nth: new Map(), steps: new Map(), idKey: id => quirks ? id.toLowerCase() : id };
     const counters = new Map();
     for (const el of root.querySelectorAll('*')) {
-      if (el.id) index.ids.set(index.idKey(el.id), (index.ids.get(index.idKey(el.id)) || 0) + 1);
-      let siblings = counters.get(el.parentNode);
-      if (!siblings) counters.set(el.parentNode, siblings = new Map());
-      const nth = (siblings.get(el.tagName) || 0) + 1;
-      siblings.set(el.tagName, nth);
+      const id = idOf(el), tag = tagOf(el), parent = parentOf(el);
+      if (id) index.ids.set(index.idKey(id), (index.ids.get(index.idKey(id)) || 0) + 1);
+      let siblings = counters.get(parent);
+      if (!siblings) counters.set(parent, siblings = new Map());
+      const nth = (siblings.get(tag) || 0) + 1;
+      siblings.set(tag, nth);
       index.nth.set(el, nth);
       // A lowercased type selector does not match mixed-case foreign elements such as SVG linearGradient.
-      if (el.namespaceURI !== 'http://www.w3.org/1999/xhtml' && el.localName !== el.localName.toLowerCase()) continue;
-      const step = el.tagName.toLowerCase() + ':nth-of-type(' + nth + ')';
+      if (namespaceOf(el) !== 'http://www.w3.org/1999/xhtml' && localNameOf(el) !== localNameOf(el).toLowerCase()) continue;
+      const step = tag.toLowerCase() + ':nth-of-type(' + nth + ')';
       const list = index.steps.get(step);
       if (list) list.push(el); else index.steps.set(step, [el]);
     }
@@ -172,27 +184,27 @@ pub const SNAPSHOT_JS: &str = r#"
   // counted from the index; `with_ref` still verifies the selector on use.
   function cssPath(el) {
     const index = pathIndex(el.getRootNode());
-    const unique = node => node.id && index.ids.get(index.idKey(node.id)) === 1;
-    if (unique(el)) return '#' + CSS.escape(el.id);
+    const unique = node => idOf(node) && index.ids.get(index.idKey(idOf(node))) === 1;
+    if (unique(el)) return '#' + CSS.escape(idOf(el));
     const parts = [];
     // Elements the selector built so far would match, and their ancestor at the current step.
     let matches = null;
     let node = el;
-    while (node && node.nodeType === 1) {
+    while (node) {
       if (unique(node)) {
-        parts.unshift('#' + CSS.escape(node.id));
+        parts.unshift('#' + CSS.escape(idOf(node)));
         return parts.join(' > ');
       }
-      const step = node.tagName.toLowerCase() + ':nth-of-type(' + index.nth.get(node) + ')';
+      const step = tagOf(node).toLowerCase() + ':nth-of-type(' + index.nth.get(node) + ')';
       parts.unshift(step);
       const stepElements = index.steps.get(step) || [];
       if (!matches) matches = stepElements.map(match => ({ match, at: match }));
       else {
         const allowed = new Set(stepElements);
-        matches = matches.filter(entry => (entry.at = entry.at.parentElement) && allowed.has(entry.at));
+        matches = matches.filter(entry => (entry.at = parentElementOf(entry.at)) && allowed.has(entry.at));
       }
       if (matches.length === 1) return parts.join(' > ');
-      node = node.parentElement;
+      node = parentElementOf(node);
     }
     return parts.join(' > ');
   }
