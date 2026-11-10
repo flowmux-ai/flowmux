@@ -209,7 +209,7 @@ pub const SNAPSHOT_JS: &str = r#"
     return parts.join(' > ');
   }
 
-  // Values an agent would otherwise read with separate calls. Passwords are never read.
+  // Values an agent would otherwise read with separate calls. Passwords, card details and passcodes are never read.
   function controlDetails(el, shownName) {
     if (!el.matches('input,textarea,select')) return null;
     const control = {};
@@ -221,8 +221,12 @@ pub const SNAPSHOT_JS: &str = r#"
       control.options = Array.from(el.options).slice(0, 4).map(option => flat(option.label).slice(0, 40));
       const chosen = Array.from(el.selectedOptions, option => flat(option.label).slice(0, 40));
       if (chosen.length) control.selected = el.multiple ? chosen : chosen[0];
-    } else if (!['checkbox','radio','submit','button','reset','image','color','hidden'].includes(type) && el.value)
-      control.value = el.value.slice(0, 80);
+    } else if (!['checkbox','radio','submit','button','reset','image','color','hidden'].includes(type) && el.value) {
+      // Card details and passcodes are often plain text fields; their purpose is declared here.
+      if (/(^|\s)(cc-(number|csc|exp|exp-month|exp-year)|one-time-code|current-password|new-password)(\s|$)/i
+          .test(el.getAttribute('autocomplete') || '')) control.redacted = true;
+      else control.value = el.value.slice(0, 80);
+    }
     const placeholder = flat(el.getAttribute('placeholder'));
     if (placeholder && placeholder !== shownName) control.placeholder = placeholder.slice(0, 80);
     for (const key of ['min', 'max', 'step']) if (el.getAttribute(key)) control[key] = el.getAttribute(key);

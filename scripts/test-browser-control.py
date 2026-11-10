@@ -362,7 +362,7 @@ def exercise_dense_snapshot(cli, url, root):
         return cli("browser", op, pane, *args)["browser_result"]["value"]
 
     value("eval", "document.body.insertAdjacentHTML('beforeend', '<select aria-label=Size><option>Small<option selected>Medium<option>Large</select>"
-          "<input type=range aria-label=Volume min=0 max=10 value=3>'); check.checked = true; 'ok'")
+          "<input type=range aria-label=Volume min=0 max=10 value=3><input aria-label=Card autocomplete=\"section-pay cc-number\" value=4111111111111111>'); check.checked = true; 'ok'")
     before = value("eval", "document.documentElement.outerHTML")
     full = json.loads(value("snapshot"))
     dense_text = value("snapshot", "--dense")
@@ -379,6 +379,7 @@ def exercise_dense_snapshot(cli, url, root):
         "options": ["Small", "Medium", "Large"], "selected": "Medium"}, by_name["Size"]
     assert by_name["Volume"]["control"] == {"type": "range", "value": "3", "min": "0", "max": "10"}, by_name["Volume"]
     assert by_name["Password"]["control"] == {"type": "password"} and "secret" not in dense_text
+    assert by_name["Card"]["control"] == {"redacted": True} and "4111" not in dense_text, by_name["Card"]
     assert any("checked" in meta.get("states", []) for meta in dense["refs"].values())
     assert len(dense_text) < len(value("snapshot", "--compact")) * .7, "dense output is not smaller"
     # --max-chars counts printed data, so the same budget fits more refs than --compact.

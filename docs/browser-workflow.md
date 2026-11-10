@@ -29,7 +29,8 @@ ref tokens and `states` as a list of only the non-default flags (`disabled`,
 without `states` is visible, enabled, unchecked, collapsed, unfocused and valid.
 Inputs, text areas and selects add `control` with the input type, current value,
 placeholder, `min`/`max`/`step`, or a select's option count, first four options
-and selection. Password and file values are never included. `page.scroll` gives
+and selection. Password and file values are never included, and a field whose
+`autocomplete` declares card details or a passcode shows `redacted: true`. `page.scroll` gives
 the offset, viewport, document size and `pages_above`/`pages_below`, or
 `hidden_viewport: true` for a background tab; `scroll PANE --pages N` moves by
 those pages (negative is up), and `--within REF` scrolls that ref's nearest
