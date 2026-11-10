@@ -604,6 +604,16 @@ def exercise_run_batch(cli, url, root):
     assert loaded["stopped"] is None and "Nested frame button" in loaded["steps"][1]["result"]["text"], loaded
     started = run(["reload"], ["read"])
     assert started["stopped"] == {"index": 0, "reason": "navigation_started"}, started
+    # Under a task, only the batch's own actions add task results; its tab checks do not.
+    assert json.loads(value("navigate", url + "inner", "--wait"))["loaded"]
+    owner = json.loads(value("control", "start"))["task_id"]
+    names = {meta["name"]: ref for ref, meta in json.loads(cli("browser", "--task", owner, "snapshot", pane, "--dense")["browser_result"]["value"])["refs"].items()}
+    owned = json.loads(cli("browser", "--task", owner, "run", pane, json.dumps(
+        [["focus", names["Nested frame field"]], ["fill", names["Nested frame field"], "owned"], ["read"]]))["browser_result"]["value"])
+    assert owned["stopped"] is None and owned["completed"] == 3, owned
+    titles = [row["title"] for row in json.loads(value("control", "status"))["results"]]
+    assert titles == ["focus: Input delivered", "fill: Input delivered"], titles
+    cli("browser", "--task", owner, "control", pane, "finish")
     print("BROWSER_RUN_BATCH_OK", flush=True)
 
 

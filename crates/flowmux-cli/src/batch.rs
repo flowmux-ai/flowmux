@@ -127,24 +127,23 @@ fn result_value(response: &Response) -> Result<serde_json::Value, serde_json::Va
     }
 }
 
-/// Current document generation and whether a page dialog is pending, from a
-/// receipt around a read-only URL query.
+/// Current document generation and whether a page dialog is pending. The
+/// diagnose query reports both without adding a task result for each check.
 async fn observe(
     client: &Client,
     pane: PaneId,
     surface: Option<SurfaceId>,
     task: Option<uuid::Uuid>,
 ) -> anyhow::Result<(serde_json::Value, bool)> {
-    let probe = Request::BrowserReceipt {
-        request: Box::new(Request::BrowserUrl { pane }),
-        condition: None,
-        timeout_ms: 1000,
-    };
-    let receipt = result_value(&client.call(wrap(probe, surface, task)).await?)
-        .map_err(|error| anyhow::anyhow!("browser tab is not available: {error}"))?;
+    let report = result_value(
+        &client
+            .call(wrap(Request::BrowserDiagnose { pane }, surface, task))
+            .await?,
+    )
+    .map_err(|error| anyhow::anyhow!("browser tab is not available: {error}"))?;
     Ok((
-        receipt["document_after"].clone(),
-        receipt["status"] == "dialog_pending",
+        report["observation"]["document_generation"].clone(),
+        report["pending_dialog"] == true,
     ))
 }
 
