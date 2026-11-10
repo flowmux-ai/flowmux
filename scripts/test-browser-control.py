@@ -393,7 +393,13 @@ def exercise_dense_snapshot(cli, url, root):
     cli("browser", "fill", pane, stale, "stale", error=True)
     cli("browser", "fill", pane, field, "dense@example.test")
     assert value("value", field) == "dense@example.test"
-    print("BROWSER_DENSE_SNAPSHOT_OK", flush=True)
+    # Selector generation must stay near-linear: 2,000 targets once took over 30 s.
+    value("eval", "document.body.innerHTML = Array.from({length: 2000}, (_, i) => '<button>Target ' + i + '</button><p>Row ' + i + '</p>').join(''); 'ok'")
+    started = time.monotonic()
+    large = json.loads(value("snapshot", "--dense", "--max-nodes", "2000"))
+    elapsed = time.monotonic() - started
+    assert len(large["refs"]) == 2000 and elapsed < 5, (len(large["refs"]), elapsed)
+    print(f"BROWSER_DENSE_SNAPSHOT_OK large_snapshot_s={elapsed:.2f}", flush=True)
 
 
 def exercise_page_reads(cli, url, root):

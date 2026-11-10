@@ -22,6 +22,8 @@
 pub const SNAPSHOT_JS: &str = r#"
 (function() {
   const options = /*FLOWMUX_OPTIONS*/ {};
+  // Declared before the scope lookup below, which can already need cssPath.
+  const pathIndexes = new Map();
   // Dense output omits Markdown and selectors, so the budget counts only printed data.
   const dense = !!options.dense;
   const maxNodes = Math.max(1, Math.min(options.max_nodes || 2000, 2000));
@@ -136,33 +138,60 @@ pub const SNAPSHOT_JS: &str = r#"
     return content || flat(el.getAttribute('title')) || flat(el.getAttribute('placeholder'));
   }
 
+  // One pass per document or shadow root: id counts, each element's
+  // nth-of-type index and the elements under each `tag:nth-of-type(n)` step.
+  // Querying the whole root for every step made large pages quadratic or worse.
+  function pathIndex(root) {
+    let index = pathIndexes.get(root);
+    if (index) return index;
+    // Quirks-mode id selectors match ASCII case-insensitively.
+    const quirks = (root.ownerDocument || root).compatMode === 'BackCompat';
+    index = { ids: new Map(), nth: new Map(), steps: new Map(), idKey: id => quirks ? id.toLowerCase() : id };
+    const counters = new Map();
+    for (const el of root.querySelectorAll('*')) {
+      if (el.id) index.ids.set(index.idKey(el.id), (index.ids.get(index.idKey(el.id)) || 0) + 1);
+      let siblings = counters.get(el.parentNode);
+      if (!siblings) counters.set(el.parentNode, siblings = new Map());
+      const nth = (siblings.get(el.tagName) || 0) + 1;
+      siblings.set(el.tagName, nth);
+      index.nth.set(el, nth);
+      // A lowercased type selector does not match mixed-case foreign elements such as SVG linearGradient.
+      if (el.namespaceURI !== 'http://www.w3.org/1999/xhtml' && el.localName !== el.localName.toLowerCase()) continue;
+      const step = el.tagName.toLowerCase() + ':nth-of-type(' + nth + ')';
+      const list = index.steps.get(step);
+      if (list) list.push(el); else index.steps.set(step, [el]);
+    }
+    pathIndexes.set(root, index);
+    return index;
+  }
+
   // Build a CSS selector that matches only `el`. Prefer `#id` when the id is
   // unique; otherwise prepend `tag:nth-of-type(n)` steps until the path
   // matches one element. Stopping early keeps the selector short; repeated
-  // markup without ids may need a path anchored at <html>.
+  // markup without ids may need a path anchored at <html>. Matches are
+  // counted from the index; `with_ref` still verifies the selector on use.
   function cssPath(el) {
-    const document = el.getRootNode();
-    if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) {
-      return '#' + CSS.escape(el.id);
-    }
+    const index = pathIndex(el.getRootNode());
+    const unique = node => node.id && index.ids.get(index.idKey(node.id)) === 1;
+    if (unique(el)) return '#' + CSS.escape(el.id);
     const parts = [];
+    // Elements the selector built so far would match, and their ancestor at the current step.
+    let matches = null;
     let node = el;
     while (node && node.nodeType === 1) {
-      let tag = node.tagName.toLowerCase();
-      if (node.id && document.querySelectorAll('#' + CSS.escape(node.id)).length === 1) {
+      if (unique(node)) {
         parts.unshift('#' + CSS.escape(node.id));
         return parts.join(' > ');
       }
-      let nth = 1;
-      let sib = node.previousElementSibling;
-      while (sib) {
-        if (sib.tagName === node.tagName) nth += 1;
-        sib = sib.previousElementSibling;
+      const step = node.tagName.toLowerCase() + ':nth-of-type(' + index.nth.get(node) + ')';
+      parts.unshift(step);
+      const stepElements = index.steps.get(step) || [];
+      if (!matches) matches = stepElements.map(match => ({ match, at: match }));
+      else {
+        const allowed = new Set(stepElements);
+        matches = matches.filter(entry => (entry.at = entry.at.parentElement) && allowed.has(entry.at));
       }
-      parts.unshift(tag + ':nth-of-type(' + nth + ')');
-      if (document.querySelectorAll(parts.join(' > ')).length === 1) {
-        return parts.join(' > ');
-      }
+      if (matches.length === 1) return parts.join(' > ');
       node = node.parentElement;
     }
     return parts.join(' > ');
