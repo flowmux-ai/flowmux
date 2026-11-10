@@ -150,6 +150,7 @@ This option applies to every browser command except `open`.
 | check / uncheck | yes | radios cannot be unchecked individually |
 | is-visible / is-enabled / is-checked / count | yes | return strings or ints |
 | text / value / attr | yes | read by ref |
+| read / links / grep / query / options | yes | read-only page text chunks, links, text search, CSS queries and option lists; refs are kept |
 | eval (low-level JS) | yes | escape hatch only |
 | eval-async | yes | async function body; waits for the returned Promise with `--timeout-ms` |
 | screenshot | yes | viewport PNG, or `--full-page` for a document PNG; see the CLI skill for platform limits |

@@ -42,6 +42,11 @@ pub const BROWSER_VERBS: &[&str] = &[
     "is-enabled",
     "is-checked",
     "count",
+    "read",
+    "links",
+    "grep",
+    "query",
+    "options",
     "eval",
     "eval-async",
     "wait",
@@ -770,6 +775,11 @@ pub enum Request {
         pane: PaneId,
         selector: String,
     },
+    /// Read-only page text, link, search, selector and option queries.
+    BrowserRead {
+        pane: PaneId,
+        query: BrowserReadQuery,
+    },
 
     /// Record (or overwrite) the session id an agent (claude/codex/…)
     /// is currently using inside `surface`. Persisted at
@@ -1022,6 +1032,64 @@ pub struct BrowserInspectOptions {
     /// Model-facing form; omitted when false so older GUIs accept other options.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dense: bool,
+}
+
+/// Page reads never replace snapshot refs. `within` and `target` are refs from
+/// the latest snapshot; the page script receives this value as its options.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum BrowserReadQuery {
+    Read {
+        within: Option<String>,
+        offset: u32,
+        max_chars: u32,
+        links: bool,
+    },
+    Links {
+        within: Option<String>,
+        matching: Option<String>,
+        max: u32,
+    },
+    Grep {
+        within: Option<String>,
+        pattern: String,
+        regex: bool,
+        ignore_case: bool,
+        context: u32,
+        max: u32,
+    },
+    Query {
+        within: Option<String>,
+        selector: String,
+        attrs: Vec<String>,
+        max: u32,
+    },
+    Options {
+        target: String,
+    },
+}
+
+impl BrowserReadQuery {
+    /// Ref the page script runs against, if any.
+    pub fn scope(&self) -> Option<&str> {
+        match self {
+            Self::Read { within, .. }
+            | Self::Links { within, .. }
+            | Self::Grep { within, .. }
+            | Self::Query { within, .. } => within.as_deref(),
+            Self::Options { target } => Some(target),
+        }
+    }
+
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Self::Read { .. } => "read",
+            Self::Links { .. } => "links",
+            Self::Grep { .. } => "grep",
+            Self::Query { .. } => "query",
+            Self::Options { .. } => "options",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2062,6 +2130,15 @@ mod tests {
             (Request::BrowserBack { pane }, "browser_back"),
             (Request::BrowserForward { pane }, "browser_forward"),
             (Request::BrowserReload { pane }, "browser_reload"),
+            (
+                Request::BrowserRead {
+                    pane,
+                    query: BrowserReadQuery::Options {
+                        target: "e1".into(),
+                    },
+                },
+                "browser_read",
+            ),
             (
                 Request::BrowserLoad {
                     pane,

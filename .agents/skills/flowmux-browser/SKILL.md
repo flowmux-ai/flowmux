@@ -159,8 +159,15 @@ Choose the smallest observation that answers the next question:
 
 - Known target: `find PANE --role button --name Save --exact --dense --max-chars 6000`.
 - Visible controls: `snapshot PANE --dense --viewport --interactive --max-nodes 40 --max-chars 12000`.
-- Reading content: omit `--interactive`; it excludes document prose. Scope with
-  `--within REF`, then read the required element with `text PANE REF`.
+- Reading content: `read PANE [--within REF] [--links]` returns rendered text
+  as Markdown-like lines (headings `#`, list items `-`, table cells `|`) in
+  `--max-chars` chunks (default 16000); continue with `--offset NEXT_OFFSET`.
+  `grep PANE TEXT [-i] [--regex] [--context N]` returns matching lines with
+  offsets for `read --offset`. Prefer these to `eval` or large snapshots for prose.
+- Links and lists: `links PANE [--match TEXT]` lists visible link text and
+  absolute URLs; `query PANE CSS [--attrs a,b]` lists matching elements' text and
+  attributes; `options PANE REF` lists a select, datalist input or listbox's
+  options. Reads never replace snapshot refs and never return password values.
 - Completion: use a typed `wait` or action `--receipt --expect` instead of
   repeatedly dumping snapshots. Wait polling stays inside Flowmux.
 - Multiple form fields: use `form` and inspect its per-field results.
@@ -284,6 +291,7 @@ does not change scrolling. `--element` and `--full-page` cannot be combined.
 |---|---|
 | Navigation | `navigate PANE URL`, `back PANE`, `forward PANE`, `reload PANE`; add `--wait [--timeout-ms N]` to return after the new document loads |
 | Page metadata | `url PANE`, `title PANE` |
+| Page reads | `read PANE [--within REF] [--offset N] [--max-chars N] [--links]`, `links PANE [--match TEXT]`, `grep PANE TEXT [-i] [--regex] [--context N]`, `query PANE CSS [--attrs a,b]`, `options PANE REF`; JSON, read-only, refs kept |
 | Element interaction | `dblclick`, `hover`, `focus`, `blur`, `check`, `uncheck`: each takes `PANE REF` |
 | State | `is-enabled PANE REF`, `is-checked PANE REF` |
 | Live diagnostics | `diagnose PANE` |

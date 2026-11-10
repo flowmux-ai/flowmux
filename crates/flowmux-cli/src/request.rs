@@ -19,7 +19,7 @@ fn load_request(
 /// arm maps 1:1 to an existing `Request::Browser*` variant, so the new
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
-    use flowmux_ipc::protocol::BrowserLoadAction;
+    use flowmux_ipc::protocol::{BrowserLoadAction, BrowserReadQuery};
     let request = match op {
         BrowserOp::Record { .. } => anyhow::bail!("recording requires the CLI capture loop"),
         BrowserOp::Drag {
@@ -281,6 +281,72 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             element,
         },
         BrowserOp::Count { pane, selector } => Request::BrowserCount { pane, selector },
+        BrowserOp::Read {
+            pane,
+            within,
+            offset,
+            max_chars,
+            links,
+        } => Request::BrowserRead {
+            pane,
+            query: BrowserReadQuery::Read {
+                within,
+                offset,
+                max_chars,
+                links,
+            },
+        },
+        BrowserOp::Links {
+            pane,
+            within,
+            matching,
+            max,
+        } => Request::BrowserRead {
+            pane,
+            query: BrowserReadQuery::Links {
+                within,
+                matching,
+                max,
+            },
+        },
+        BrowserOp::Grep {
+            pane,
+            pattern,
+            regex,
+            ignore_case,
+            context,
+            max,
+            within,
+        } => Request::BrowserRead {
+            pane,
+            query: BrowserReadQuery::Grep {
+                within,
+                pattern,
+                regex,
+                ignore_case,
+                context,
+                max,
+            },
+        },
+        BrowserOp::Query {
+            pane,
+            selector,
+            attrs,
+            max,
+            within,
+        } => Request::BrowserRead {
+            pane,
+            query: BrowserReadQuery::Query {
+                within,
+                selector,
+                attrs,
+                max,
+            },
+        },
+        BrowserOp::Options { pane, target } => Request::BrowserRead {
+            pane,
+            query: BrowserReadQuery::Options { target },
+        },
     };
     Ok(request)
 }

@@ -1078,6 +1078,159 @@ pub fn count_selector(selector: &str) -> String {
     )
 }
 
+/// Body of the read-only page queries. `root` is a validated ref element or
+/// null; `opts` is a serialized `BrowserReadQuery`. It never replaces
+/// `__flowmuxRefs`, so the latest snapshot's refs stay valid.
+const PAGE_READ_JS: &str = r#"
+const flat = text => (text || '').replace(/\s+/g, ' ').trim();
+const style = el => el.ownerDocument.defaultView.getComputedStyle(el);
+const doc = root ? (root.ownerDocument || root) : document;
+const SKIP = new Set(['script', 'style', 'noscript', 'template', 'head', 'svg', 'canvas', 'object', 'embed', 'textarea']);
+// Rendered text in layout order: open shadow roots, slots and same-origin frames
+// included; display:none subtrees and visibility-hidden text excluded.
+function pageText(start, withLinks) {
+  const lines = [];
+  let line = '', marker = '', flushes = 0, lists = 0;
+  const flush = () => {
+    const text = line.replace(/[ \t ]+/g, ' ').trim();
+    if (text) { lines.push(marker + text); marker = ''; }
+    line = ''; flushes++;
+  };
+  const children = node => node.shadowRoot ? node.shadowRoot.childNodes :
+    node.localName === 'slot' && node.assignedNodes().length ? node.assignedNodes() : node.childNodes;
+  function walk(node, shown, pre) {
+    if (node.nodeType === 3) {
+      if (!shown) return;
+      if (!pre) { line += node.data.replace(/\s+/g, ' '); return; }
+      node.data.split('\n').forEach((part, index) => { if (index) flush(); line += part; });
+      return;
+    }
+    if (node.nodeType === 9 || node.nodeType === 11) { for (const child of node.childNodes) walk(child, shown, pre); return; }
+    if (node.nodeType !== 1 || SKIP.has(node.localName)) return;
+    const el = node, cs = style(el), tag = el.localName;
+    if (cs.display === 'none') return;
+    const visible = cs.visibility === 'visible';
+    if (tag === 'br') { flush(); return; }
+    if (tag === 'iframe' || tag === 'frame') {
+      let inner = null;
+      try { inner = el.contentDocument; } catch (_) {}
+      flush();
+      if (inner?.body) walk(inner.body, true, false);
+      else if (visible) lines.push('[frame not accessible: ' + flat(el.title || el.name || el.src).slice(0, 80) + ']');
+      flush();
+      return;
+    }
+    if (tag === 'img') { const alt = flat(el.getAttribute('alt')); if (visible && alt) line += ' [image: ' + alt + '] '; return; }
+    if (tag === 'input') { if (visible && ['submit', 'button', 'reset'].includes(el.type) && el.value) line += ' ' + el.value + ' '; return; }
+    if (tag === 'select') { if (visible) line += ' ' + Array.from(el.selectedOptions, option => option.label).join(', ') + ' '; return; }
+    const display = cs.display;
+    const block = display !== 'contents' && !display.startsWith('inline') && display !== 'table-cell';
+    if (block) flush();
+    if (display === 'table-cell' && line.trim()) line += ' | ';
+    const list = tag === 'ul' || tag === 'ol';
+    if (list) lists++;
+    if (/^h[1-6]$/.test(tag)) marker = '#'.repeat(Number(tag[1])) + ' ';
+    else if (display === 'list-item') marker = '  '.repeat(Math.max(0, lists - 1)) + '- ';
+    const start = line.length, startFlushes = flushes;
+    for (const child of children(el)) walk(child, visible, pre || cs.whiteSpace.startsWith('pre'));
+    if (withLinks && tag === 'a' && el.href && !el.href.startsWith('javascript:')) {
+      const label = line.slice(start).trim();
+      if (flushes === startFlushes && label) line = line.slice(0, start) + ' [' + label + '](' + el.href + ') ';
+      else line += ' (' + el.href + ')';
+    }
+    if (list) lists--;
+    if (block) flush();
+  }
+  walk(start, true, false);
+  flush();
+  return lines.join('\n');
+}
+function deepAll(start, selector) {
+  const found = Array.from(start.querySelectorAll(selector));
+  for (const host of start.querySelectorAll('*')) if (host.shadowRoot) found.push(...deepAll(host.shadowRoot, selector));
+  return found;
+}
+const textRoot = root || doc.body || doc.documentElement;
+const page = {url: doc.URL, title: doc.title};
+if (opts.op === 'read') {
+  const full = pageText(textRoot, opts.links);
+  const offset = Math.min(opts.offset, full.length);
+  let end = Math.min(full.length, offset + opts.max_chars);
+  // End on a line boundary unless that would drop more than half of the chunk.
+  if (end < full.length) { const cut = full.lastIndexOf('\n', end); if (cut > offset + opts.max_chars / 2) end = cut + 1; }
+  return JSON.stringify({...page, offset, text: full.slice(offset, end),
+    next_offset: end < full.length ? end : null, total_chars: full.length});
+}
+if (opts.op === 'grep') {
+  const lines = pageText(textRoot, false).split('\n');
+  let test;
+  if (opts.regex) { const re = new RegExp(opts.pattern, opts.ignore_case ? 'i' : ''); test = text => re.test(text); }
+  else { const needle = opts.ignore_case ? opts.pattern.toLowerCase() : opts.pattern; test = text => (opts.ignore_case ? text.toLowerCase() : text).includes(needle); }
+  const matches = [];
+  let offset = 0, total = 0;
+  lines.forEach((text, index) => {
+    if (test(text) && ++total <= opts.max)
+      matches.push({offset, line: index + 1, text: lines.slice(Math.max(0, index - opts.context), index + opts.context + 1).join('\n')});
+    offset += text.length + 1;
+  });
+  return JSON.stringify({...page, matches, total, truncated: total > matches.length});
+}
+if (opts.op === 'links') {
+  const needle = (opts.matching || '').toLowerCase(), seen = new Set(), links = [];
+  let total = 0;
+  for (const a of deepAll(textRoot, 'a[href]')) {
+    if (!a.getClientRects().length || style(a).visibility !== 'visible' || a.href.startsWith('javascript:')) continue;
+    const text = flat(a.innerText || a.getAttribute('aria-label') || a.title || a.querySelector('img[alt]')?.alt).slice(0, 160);
+    const key = text + '\n' + a.href;
+    if (seen.has(key) || (needle && !(text + ' ' + a.href).toLowerCase().includes(needle))) continue;
+    seen.add(key);
+    if (++total <= opts.max) links.push({text, href: a.href});
+  }
+  return JSON.stringify({...page, links, total, truncated: total > links.length});
+}
+if (opts.op === 'query') {
+  const all = Array.from((root || doc).querySelectorAll(opts.selector));
+  const items = all.slice(0, opts.max).map(el => {
+    const item = {tag: el.localName, text: flat(el.innerText || el.textContent).slice(0, 200), visible: el.getClientRects().length > 0};
+    const attrs = {};
+    for (const name of opts.attrs) {
+      if (name === 'value' && el.matches('input[type=password]')) continue;
+      const value = name === 'value' && 'value' in el ? el.value : name === 'href' && el.href ? el.href : el.getAttribute(name);
+      if (value != null) attrs[name] = String(value).slice(0, 500);
+    }
+    if (opts.attrs.length) item.attrs = attrs;
+    return item;
+  });
+  return JSON.stringify({...page, count: all.length, items, truncated: all.length > items.length});
+}
+if (opts.op === 'options') {
+  let options;
+  if (root.matches('select')) {
+    options = Array.from(root.options, o => ({value: o.value, label: flat(o.label), selected: o.selected, disabled: o.disabled}));
+  } else if (root.list) {
+    options = Array.from(root.list.options, o => ({value: o.value, label: flat(o.label || o.value), disabled: o.disabled}));
+  } else {
+    const owned = flat(root.getAttribute('aria-controls') || root.getAttribute('aria-owns')).split(' ')
+      .map(id => id && root.getRootNode().getElementById(id)).find(Boolean);
+    const box = root.matches('[role=listbox]') ? root : owned;
+    if (!box) throw new Error('target is not a select, a datalist input or a listbox');
+    options = Array.from(box.querySelectorAll('[role=option]'), o => ({label: flat(o.innerText || o.textContent),
+      selected: o.getAttribute('aria-selected') === 'true', disabled: o.getAttribute('aria-disabled') === 'true'}));
+  }
+  return JSON.stringify({...page, options: options.slice(0, 500), total: options.length, truncated: options.length > 500});
+}
+throw new Error('unknown page read');
+"#;
+
+/// Read-only page query. With `within`, the caller wraps this in [`with_ref`],
+/// which binds `el` to the validated ref element.
+pub fn page_read(options: &serde_json::Value, within: bool) -> String {
+    format!(
+        "(function(root, opts) {{ {PAGE_READ_JS} }})({}, {options})",
+        if within { "el" } else { "null" }
+    )
+}
+
 /// Mark the current document in the automation world. A replacing document
 /// starts with a fresh world, so the mark distinguishes old from new without
 /// touching page-visible state.

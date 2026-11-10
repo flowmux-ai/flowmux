@@ -36,6 +36,22 @@ printed data, so the same budget holds more refs than `--compact`. Dense refs
 behave like other refs and expire with the next snapshot. It cannot be combined
 with `--compact` or `--receipt`.
 
+Read page content with the read-only verbs instead of `eval` or large
+snapshots. `read PANE` returns rendered text as Markdown-like lines: headings
+start with `#`, list items with `-` (indented when nested), table cells are
+joined with `|`, and `--links` writes links as `[text](absolute URL)`. Text in
+`display:none` or `visibility:hidden` elements, scripts, and text field values
+is omitted (a select shows its selected option); open shadow roots and
+same-origin frames are included. The result holds
+at most `--max-chars` characters (default 16000), ends on a line boundary when
+possible, and reports `next_offset` for the following `read --offset` call, or
+null at the end. `grep PANE TEXT` searches the same text by line (`-i`,
+`--regex`, `--context N`) and returns each match's `offset` for `read`.
+`links PANE` lists visible links with absolute URLs, `query PANE CSS --attrs
+id,href` lists matching elements with their text, and `options PANE REF` lists
+a select, datalist input or listbox's options. All accept `--within REF` except
+`options`; none replaces snapshot refs or returns password values.
+
 Prefer typed waits or an action's expected outcome to repeated full snapshots.
 Wait polling runs inside Flowmux and returns one result. Use `form` for a known
 set of fields. Keep large JSON in local files and expose only task-relevant data

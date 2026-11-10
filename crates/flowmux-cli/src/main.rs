@@ -848,6 +848,65 @@ enum BrowserOp {
     },
     /// Count elements matching a CSS selector.
     Count { pane: PaneId, selector: String },
+    /// Read rendered page text as Markdown-like lines, in chunks. Read-only:
+    /// it does not replace snapshot refs.
+    Read {
+        pane: PaneId,
+        /// Read only inside this ref from the latest snapshot.
+        #[arg(long)]
+        within: Option<String>,
+        /// Start offset; use a previous result's `next_offset`.
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+        #[arg(long, default_value_t = 16_000, value_parser = clap::value_parser!(u32).range(256..=262_144))]
+        max_chars: u32,
+        /// Write links as [text](absolute URL).
+        #[arg(long)]
+        links: bool,
+    },
+    /// List visible links with their text and absolute URLs.
+    Links {
+        pane: PaneId,
+        #[arg(long)]
+        within: Option<String>,
+        /// Keep links whose text or URL contains this text (case-insensitive).
+        #[arg(long = "match")]
+        matching: Option<String>,
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=2000))]
+        max: u32,
+    },
+    /// Search rendered page text by line; match offsets work with `read --offset`.
+    Grep {
+        pane: PaneId,
+        #[arg(allow_hyphen_values = true)]
+        pattern: String,
+        /// Treat the pattern as a JavaScript regular expression.
+        #[arg(long)]
+        regex: bool,
+        #[arg(long, short = 'i')]
+        ignore_case: bool,
+        /// Lines of context before and after each match.
+        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=10))]
+        context: u32,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=500))]
+        max: u32,
+        #[arg(long)]
+        within: Option<String>,
+    },
+    /// List elements matching a CSS selector with their text and chosen attributes.
+    Query {
+        pane: PaneId,
+        selector: String,
+        /// Comma-separated attributes; `value` and `href` read the live properties.
+        #[arg(long, value_delimiter = ',')]
+        attrs: Vec<String>,
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..=1000))]
+        max: u32,
+        #[arg(long)]
+        within: Option<String>,
+    },
+    /// List the options of a select, a datalist input or a listbox ref.
+    Options { pane: PaneId, target: String },
 }
 
 #[derive(Subcommand)]

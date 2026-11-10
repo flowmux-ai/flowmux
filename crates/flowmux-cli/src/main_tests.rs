@@ -3019,6 +3019,89 @@ fn browser_task_form_and_ref_expectations_parse() {
 }
 
 #[test]
+fn browser_page_reads_map_to_read_queries() {
+    use flowmux_ipc::protocol::BrowserReadQuery as Query;
+    let pane = PaneId::new();
+    let id = pane.to_string();
+    let parse = |args: &[&str]| {
+        let mut argv = vec!["flowmuxctl", "browser"];
+        argv.extend_from_slice(args);
+        let Request::BrowserRead { pane: got, query } =
+            build_request(Cli::try_parse_from(argv).unwrap().cmd).unwrap()
+        else {
+            panic!("expected a page read")
+        };
+        assert_eq!(got, pane);
+        query
+    };
+    assert_eq!(
+        parse(&["read", &id]),
+        Query::Read {
+            within: None,
+            offset: 0,
+            max_chars: 16_000,
+            links: false
+        }
+    );
+    assert_eq!(
+        parse(&[
+            "read",
+            &id,
+            "--within",
+            "e1-x",
+            "--offset",
+            "40",
+            "--max-chars",
+            "500",
+            "--links"
+        ]),
+        Query::Read {
+            within: Some("e1-x".into()),
+            offset: 40,
+            max_chars: 500,
+            links: true
+        }
+    );
+    assert_eq!(
+        parse(&["links", &id, "--match", "docs", "--max", "5"]),
+        Query::Links {
+            within: None,
+            matching: Some("docs".into()),
+            max: 5
+        }
+    );
+    assert_eq!(
+        parse(&["grep", &id, "-total", "-i", "--regex", "--context", "2"]),
+        Query::Grep {
+            within: None,
+            pattern: "-total".into(),
+            regex: true,
+            ignore_case: true,
+            context: 2,
+            max: 20
+        }
+    );
+    assert_eq!(
+        parse(&["query", &id, "tr", "--attrs", "id,href"]),
+        Query::Query {
+            within: None,
+            selector: "tr".into(),
+            attrs: vec!["id".into(), "href".into()],
+            max: 50
+        }
+    );
+    assert_eq!(
+        parse(&["options", &id, "e2-x"]),
+        Query::Options {
+            target: "e2-x".into()
+        }
+    );
+    assert!(
+        Cli::try_parse_from(["flowmuxctl", "browser", "read", &id, "--max-chars", "10"]).is_err()
+    );
+}
+
+#[test]
 fn dense_snapshot_is_opt_in_and_compatible_with_older_guis() {
     let pane = PaneId::new();
     let id = pane.to_string();

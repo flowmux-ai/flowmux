@@ -297,6 +297,7 @@ impl TryFrom<Request> for BrowserActionRequest {
             Request::BrowserIsEnabled { pane, target } => (pane, BrowserOp::IsEnabled { target }),
             Request::BrowserIsChecked { pane, target } => (pane, BrowserOp::IsChecked { target }),
             Request::BrowserCount { pane, selector } => (pane, BrowserOp::Count { selector }),
+            Request::BrowserRead { pane, query } => (pane, BrowserOp::Read(query)),
             Request::BrowserSnapshot { pane } => (pane, BrowserOp::Snapshot),
             Request::BrowserInspect { pane, options } => (pane, BrowserOp::Inspect(options)),
             Request::BrowserTask { pane, details } => (pane, BrowserOp::Task(details)),
@@ -511,6 +512,7 @@ impl Handler for GuiHandler {
                 | Request::BrowserIsEnabled { .. }
                 | Request::BrowserIsChecked { .. }
                 | Request::BrowserCount { .. }
+                | Request::BrowserRead { .. }
                 | Request::BrowserSnapshot { .. }
                 | Request::BrowserInspect { .. }
                 | Request::BrowserDiagnose { .. }

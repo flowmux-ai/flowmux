@@ -166,6 +166,7 @@ pub enum BrowserOp {
     Count {
         selector: String,
     },
+    Read(flowmux_ipc::protocol::BrowserReadQuery),
 }
 
 impl BrowserOp {
@@ -221,6 +222,7 @@ impl BrowserOp {
             Self::IsEnabled { .. } => "is-enabled",
             Self::IsChecked { .. } => "is-checked",
             Self::Count { .. } => "count",
+            Self::Read(query) => query.verb(),
         }
     }
 
@@ -261,6 +263,7 @@ impl BrowserOp {
                 | Self::IsEnabled { .. }
                 | Self::IsChecked { .. }
                 | Self::Count { .. }
+                | Self::Read(_)
         )
     }
 }

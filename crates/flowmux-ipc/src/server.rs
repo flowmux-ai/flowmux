@@ -80,7 +80,8 @@ fn query_timeout(request: &Request) -> Option<Duration> {
         | Request::BrowserIsVisible { .. }
         | Request::BrowserIsEnabled { .. }
         | Request::BrowserIsChecked { .. }
-        | Request::BrowserCount { .. } => Some(QUERY_TIMEOUT),
+        | Request::BrowserCount { .. }
+        | Request::BrowserRead { .. } => Some(QUERY_TIMEOUT),
         // Mutations (including raw JS and screenshot file writes) may already
         // have effects or be waiting for user confirmation. Do not cancel them.
         _ => None,

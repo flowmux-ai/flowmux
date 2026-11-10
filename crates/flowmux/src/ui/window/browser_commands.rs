@@ -947,6 +947,21 @@ impl WindowController {
                             let _ = ack.send(Err(e));
                         }
                     },
+                    BrowserOp::Read(query) => {
+                        let options = serde_json::to_value(&query).expect("serializable read");
+                        let script = match query.scope() {
+                            Some(target) => ref_script(&browser, target, |_| {
+                                flowmux_browser::scripts::page_read(&options, true)
+                            }),
+                            None => Ok(flowmux_browser::scripts::page_read(&options, false)),
+                        };
+                        match script {
+                            Ok(js) => run_browser_js(&browser, &js, ack, false),
+                            Err(e) => {
+                                let _ = ack.send(Err(e));
+                            }
+                        }
+                    }
                     BrowserOp::Count { selector } => {
                         // Count takes a raw selector (not a ref) — the
                         // agent might want to know how many `.row`

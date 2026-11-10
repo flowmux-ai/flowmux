@@ -396,6 +396,73 @@ def exercise_dense_snapshot(cli, url, root):
     print("BROWSER_DENSE_SNAPSHOT_OK", flush=True)
 
 
+def exercise_page_reads(cli, url, root):
+    workspace = cli("workspace", "new", "--name", "Page reads", "--root", str(root))["workspace_created"]["id"]
+    terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
+    pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
+
+    def value(op, *args, error=False):
+        result = cli("browser", op, pane, *args, error=error)
+        return result if error else result["browser_result"]["value"]
+
+    def data(op, *args):
+        return json.loads(value(op, *args))
+
+    value("eval", """document.body.innerHTML = `<h1>Report</h1><p>Intro <a href="/alpha">Alpha link</a> text</p>
+      <ul><li>One</li><li>Two<ul><li>Nested</li></ul></li></ul>
+      <table role=table aria-label=Scores><tr><th>Name</th><th>Score</th></tr><tr><td>Ann</td><td>9</td></tr></table>
+      <div style="display:none">Hidden secret</div><span style="visibility:hidden">Invisible words</span>
+      <select aria-label=Pick><option value=a>Apple<option value=b selected>Banana<option disabled>Cherry</select>
+      <input aria-label=Fruit list=fruits><datalist id=fruits><option value=Kiwi><option value=Lime></datalist>
+      <input type=password value=topsecret aria-label=Pin><div id=host></div>
+      <p>${Array.from({length: 400}, (_, i) => 'filler ' + i).join('<br>')}</p>`;
+      host.attachShadow({mode: 'open'}).innerHTML = '<p>Shadow text</p>'; 'ok'""")
+    before = value("eval", "document.documentElement.outerHTML")
+    snap = json.loads(value("snapshot", "--dense"))
+    refs = {meta["name"]: ref for ref, meta in snap["refs"].items()}
+    page = data("read", "--max-chars", "262144")
+    text = page["text"]
+    for expected in ["# Report", "- One", "  - Nested", "Name | Score", "Ann | 9", "Shadow text", "Banana", "filler 399"]:
+        assert expected in text, (expected, text[:800])
+    for hidden in ["Hidden secret", "Invisible words", "topsecret", "Kiwi"]:
+        assert hidden not in text, hidden
+    assert page["next_offset"] is None and page["total_chars"] == len(text)
+    assert f"[Alpha link]({url}alpha)" in data("read", "--links")["text"]
+    # Chunks end on line boundaries and concatenate to the full text.
+    chunks, offset = [], 0
+    while offset is not None:
+        chunk = data("read", "--max-chars", "1000", "--offset", str(offset))
+        chunks.append(chunk["text"])
+        offset = chunk["next_offset"]
+    assert len(chunks) > 2 and "".join(chunks) == text and all(c.endswith("\n") for c in chunks[:-1])
+    found = data("grep", "ann", "-i")
+    assert found["total"] == 1 and found["matches"][0]["text"] == "Ann | 9", found
+    assert data("read", "--offset", str(found["matches"][0]["offset"]))["text"].startswith("Ann | 9")
+    assert data("grep", "filler [0-9]+$", "--regex", "--max", "3")["truncated"]
+    assert data("grep", "Two", "--context", "1")["matches"][0]["text"] == "- One\n- Two\n  - Nested"
+    invalid = value("grep", "(", "--regex", error=True)["error"]
+    assert "regular expression" in str(invalid).lower(), invalid
+    links = data("links")["links"]
+    assert {"text": "Alpha link", "href": url + "alpha"} in links and data("links", "--match", "ALPHA")["total"] == 1
+    rows = data("query", "tr", "--attrs", "id")
+    assert rows["count"] == 2 and rows["items"][1]["text"].split() == ["Ann", "9"], rows
+    assert data("query", "input[type=password]", "--attrs", "value,type")["items"][0]["attrs"] == {"type": "password"}
+    scoped = data("read", "--within", refs["Scores"])["text"]
+    assert "Ann | 9" in scoped and "Report" not in scoped, scoped
+    assert data("options", refs["Pick"])["options"] == [
+        {"value": "a", "label": "Apple", "selected": False, "disabled": False},
+        {"value": "b", "label": "Banana", "selected": True, "disabled": False},
+        {"value": "Cherry", "label": "Cherry", "selected": False, "disabled": True}]
+    assert [o["value"] for o in data("options", refs["Fruit"])["options"]] == ["Kiwi", "Lime"]
+    not_options = value("options", refs["Report"], error=True)["error"]
+    assert "not a select" in str(not_options), not_options
+    # Reads are queries: the page is unchanged and the snapshot's refs stay valid.
+    assert value("eval", "document.documentElement.outerHTML") == before
+    assert value("value", refs["Pick"]) == "b"
+    print("BROWSER_PAGE_READS_OK", flush=True)
+
+
 def exercise_compact_snapshot(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Compact observations", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
@@ -1531,6 +1598,7 @@ def main():
                 exercise_task_workflow(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_compact_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 exercise_dense_snapshot(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                exercise_page_reads(cli, f"http://127.0.0.1:{server.server_port}/", root)
                 if not os.environ.get("FLOWMUX_BROWSER_TASKS_ONLY"):
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
