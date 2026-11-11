@@ -24,6 +24,16 @@ pub const SNAPSHOT_JS: &str = r#"
   const options = /*FLOWMUX_OPTIONS*/ {};
   // Declared before the scope lookup below, which can already need cssPath.
   const pathIndexes = new Map();
+  // A form control named `id`, `tagName` or `parentNode` shadows that property on
+  // its form, so read them through the prototype accessors.
+  const accessor = (proto, name) => {
+    const get = Object.getOwnPropertyDescriptor(proto, name).get;
+    return node => get.call(node);
+  };
+  const idOf = el => Element.prototype.getAttribute.call(el, 'id');
+  const tagOf = accessor(Element.prototype, 'tagName'), localNameOf = accessor(Element.prototype, 'localName');
+  const namespaceOf = accessor(Element.prototype, 'namespaceURI');
+  const parentOf = accessor(Node.prototype, 'parentNode'), parentElementOf = accessor(Node.prototype, 'parentElement');
   // Dense output omits Markdown and selectors, so the budget counts only printed data.
   const dense = !!options.dense;
   const maxNodes = Math.max(1, Math.min(options.max_nodes || 2000, 2000));
@@ -141,17 +151,6 @@ pub const SNAPSHOT_JS: &str = r#"
   // One pass per document or shadow root: id counts, each element's
   // nth-of-type index and the elements under each `tag:nth-of-type(n)` step.
   // Querying the whole root for every step made large pages quadratic or worse.
-  // A form control named `id`, `tagName` or `parentNode` shadows that property on
-  // its form, so read them through the prototype accessors.
-  const accessor = (proto, name) => {
-    const get = Object.getOwnPropertyDescriptor(proto, name).get;
-    return node => get.call(node);
-  };
-  const idOf = el => Element.prototype.getAttribute.call(el, 'id');
-  const tagOf = accessor(Element.prototype, 'tagName'), localNameOf = accessor(Element.prototype, 'localName');
-  const namespaceOf = accessor(Element.prototype, 'namespaceURI');
-  const parentOf = accessor(Node.prototype, 'parentNode'), parentElementOf = accessor(Node.prototype, 'parentElement');
-
   function pathIndex(root) {
     let index = pathIndexes.get(root);
     if (index) return index;
