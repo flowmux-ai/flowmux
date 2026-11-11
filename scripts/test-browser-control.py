@@ -425,6 +425,8 @@ def exercise_page_reads(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Page reads", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
     pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    # The tab's initial blank document is already complete; wait for the requested page first.
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "inner"}))["browser_bool_result"]["value"]
     assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
 
     def value(op, *args, error=False):
@@ -503,6 +505,8 @@ def exercise_scroll_pages(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Page scrolling", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
     pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    # The tab's initial blank document is already complete; wait for the requested page first.
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "inner"}))["browser_bool_result"]["value"]
     assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
 
     def value(op, *args, error=False):
@@ -540,6 +544,8 @@ def exercise_covered_clicks(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Covered clicks", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
     pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    # The tab's initial blank document is already complete; wait for the requested page first.
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "inner"}))["browser_bool_result"]["value"]
     assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
 
     def value(op, *args, error=False):
@@ -595,6 +601,8 @@ def exercise_pointer_navigation(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Pointer navigation", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
     pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    # The tab's initial blank document is already complete; wait for the requested page first.
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "inner"}))["browser_bool_result"]["value"]
     assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
     # The click lands in a frame inside a closed shadow root, so the top document never
     # observes it; the frame then replaces the top document. Completion must not hang.
@@ -617,6 +625,8 @@ def exercise_run_batch(cli, url, root):
     workspace = cli("workspace", "new", "--name", "Batched steps", "--root", str(root))["workspace_created"]["id"]
     terminal = next(w for w in cli("tree")["tree"]["workspaces"] if w["id"] == workspace)["panes"][0]["id"]
     pane = cli("browser", "open", url + "inner", pane_context=terminal)["browser_pane_opened"]["pane"]
+    # The tab's initial blank document is already complete; wait for the requested page first.
+    assert cli("browser", "wait", pane, "--condition", json.dumps({"UrlExact": url + "inner"}))["browser_bool_result"]["value"]
     assert cli("browser", "wait", pane, "--ready-state", "complete")["browser_bool_result"]["value"]
 
     def value(op, *args, error=False):
