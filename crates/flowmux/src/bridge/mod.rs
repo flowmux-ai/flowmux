@@ -511,6 +511,12 @@ pub enum GtkCommand {
         surface: SurfaceId,
         ack: oneshot::Sender<Result<(), String>>,
     },
+    /// Ask before closing a tab from the close-surface keyboard action.
+    ConfirmCloseSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
     /// Rename a pane-local surface tab and refresh its workspace.
     RenameSurface {
         pane: PaneId,

@@ -64,6 +64,10 @@ copy/paste also routes to the focused editor. flowmux surface shortcuts
 such as Alt+W remain global. On Linux, Ctrl+Shift+Left/Right stays local to
 the editor for word selection instead of switching tabs.
 
+Alt+W asks before closing the active tab. Cancel or Escape keeps it open.
+Closing the last tab also removes its pane; closing the last pane asks before
+removing the workspace. Unsaved editor changes still require confirmation.
+
 ## Context behavior
 
 | Input | Terminal, browser, or Files focused | Embedded editor focused |

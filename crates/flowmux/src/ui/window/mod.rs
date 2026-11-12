@@ -90,6 +90,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::ConfirmCloseSurface { .. }
             | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
             | GtkCommand::ShowRenameSurfaceDialog { .. }
@@ -2980,6 +2981,7 @@ impl WindowController {
             | GtkCommand::OpenTig { pane }
             | GtkCommand::ActivateSurface { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::ConfirmCloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. }
             | GtkCommand::RenameSurface { pane, .. }
             | GtkCommand::ResizePane { pane, .. }
@@ -3004,6 +3006,7 @@ impl WindowController {
                 | GtkCommand::CreateSurface { .. }
                 | GtkCommand::NewSurface { .. }
                 | GtkCommand::CloseSurface { .. }
+                | GtkCommand::ConfirmCloseSurface { .. }
                 | GtkCommand::CloseTerminatedSurface { .. }
                 | GtkCommand::RenameSurface { .. }
                 | GtkCommand::TerminalCwdChanged { .. }
@@ -3113,6 +3116,7 @@ impl WindowController {
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::ConfirmCloseSurface { .. }
             | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
             | GtkCommand::ShowRenameSurfaceDialog { .. }
@@ -10798,8 +10802,8 @@ mod tests {
         );
     }
 
-    /// Regression: Alt+W triggers `win.close-surface` (CloseSurface),
-    /// not the X-button's CloseFocused. When the focused pane has only
+    /// Regression: after Alt+W confirmation, the shared close path must
+    /// restore focus just like CloseFocused. When the focused pane has only
     /// one tab CloseSurface falls through to the daemon's `PaneRemoved`
     /// outcome, but the GTK side originally only ran the incremental
     /// collapse and forgot to hand focus to a sibling — leaving
@@ -10863,22 +10867,74 @@ mod tests {
         }
         assert_eq!(controller.focused_pane.get(), Some(pane_c));
 
-        // Alt+W path: keybindings.rs sends CloseSurface with the active
-        // surface of the focused pane, not CloseFocused.
+        // Alt+W must wait for consent before closing the captured active surface.
         let surface_c = controller
             .pane_registry
             .borrow()
             .active_surface(pane_c)
             .expect("focused pane must have an active surface");
-        let (ack_tx, ack_rx) = oneshot::channel();
-        controller
-            .dispatch(GtkCommand::CloseSurface {
-                pane: pane_c,
-                surface: surface_c,
-                ack: ack_tx,
+        controller.window.present();
+        for response in ["cancel", "close"] {
+            let (ack, result) = oneshot::channel();
+            let closing = controller.clone();
+            glib::spawn_future_local(async move {
+                closing
+                    .dispatch(GtkCommand::ConfirmCloseSurface {
+                        pane: pane_c,
+                        surface: surface_c,
+                        ack,
+                    })
+                    .await;
+            });
+            let dialog = glib::future_with_timeout(Duration::from_secs(2), async {
+                loop {
+                    if let Some(dialog) = controller.window.visible_dialog() {
+                        break dialog.downcast::<adw::AlertDialog>().unwrap();
+                    }
+                    glib::timeout_future(Duration::from_millis(10)).await;
+                }
             })
-            .await;
-        ack_rx.await.unwrap().unwrap();
+            .await
+            .unwrap();
+            assert_eq!(dialog.default_response().as_deref(), Some("cancel"));
+            assert_eq!(dialog.close_response(), "cancel");
+            assert!(store.surface_title(pane_c, surface_c).await.is_some());
+            glib::timeout_future(Duration::from_millis(300)).await;
+            let label = dialog.response_label(response);
+            let mut pending = vec![dialog.clone().upcast::<gtk::Widget>()];
+            let mut clicked = false;
+            while let Some(widget) = pending.pop() {
+                if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+                    if button.label().as_deref() == Some(label.as_str()) {
+                        button.emit_clicked();
+                        clicked = true;
+                        break;
+                    }
+                }
+                let mut child = widget.first_child();
+                while let Some(widget) = child {
+                    child = widget.next_sibling();
+                    pending.push(widget);
+                }
+            }
+            assert!(clicked, "confirmation response button missing");
+            let result = glib::future_with_timeout(Duration::from_secs(2), result)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.is_ok(), response == "close");
+            assert_eq!(
+                store.surface_title(pane_c, surface_c).await.is_some(),
+                response == "cancel"
+            );
+            glib::future_with_timeout(Duration::from_secs(2), async {
+                while controller.window.visible_dialog().is_some() {
+                    glib::timeout_future(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
 
         // grab_focus runs from an idle handler; pump one idle cycle so the
         // EventControllerFocus on_focus callback updates focused_pane.

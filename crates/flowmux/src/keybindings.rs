@@ -1075,7 +1075,7 @@ fn make_close_surface_action(
                 let (tx, rx) = oneshot::channel();
                 let _ = bridge
                     .tx
-                    .send(GtkCommand::CloseSurface {
+                    .send(GtkCommand::ConfirmCloseSurface {
                         pane,
                         surface,
                         ack: tx,

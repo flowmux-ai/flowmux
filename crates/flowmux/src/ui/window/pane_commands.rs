@@ -16,6 +16,7 @@ impl WindowController {
             | GtkCommand::ResizePane { pane, .. }
             | GtkCommand::CloseFocused { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::ConfirmCloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. } => zoomed.is_some_and(|zoom| {
                 let registry = self.pane_registry.borrow();
                 registry.workspace_of_pane(*pane) == registry.workspace_of_pane(zoom)
@@ -319,6 +320,13 @@ impl WindowController {
             }
             GtkCommand::CloseSurface { pane, surface, ack } => {
                 self.close_surface_command(pane, surface, true, ack).await;
+            }
+            GtkCommand::ConfirmCloseSurface { pane, surface, ack } => {
+                if self.confirm_close_tab(pane, surface).await {
+                    self.close_surface_command(pane, surface, true, ack).await;
+                } else {
+                    let _ = ack.send(Err("Tab close cancelled".into()));
+                }
             }
             GtkCommand::RenameSurface {
                 pane,
@@ -649,6 +657,46 @@ impl WindowController {
 }
 
 impl WindowController {
+    async fn confirm_close_tab(&self, pane: PaneId, surface: SurfaceId) -> bool {
+        let Some(title) = self.store.surface_title(pane, surface).await else {
+            return false;
+        };
+        let last_tab = self.store.tab_count_in_pane(pane).await == Some(1);
+        if last_tab
+            && matches!(
+                self.store.workspace_pane_count_for(pane).await,
+                Some((_, 1))
+            )
+        {
+            // The shared close path already asks before removing the workspace.
+            return true;
+        }
+        let body = if last_tab {
+            format!("This will close “{title}”, stop its running process, and remove this pane.")
+        } else {
+            format!("This will close “{title}” and stop its running process.")
+        };
+        let dialog = adw::AlertDialog::new(Some("Close tab?"), Some(&body));
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("close", "Close");
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+        let (tx, rx) = oneshot::channel();
+        let tx = Cell::new(Some(tx));
+        dialog.connect_response(None, move |_, response| {
+            if let Some(tx) = tx.take() {
+                let _ = tx.send(response == "close");
+            }
+        });
+        let _native_browser_suspend =
+            crate::ui::browser_pane::suspend_native_browser_views_for_window(
+                self.window.upcast_ref(),
+            );
+        dialog.present(Some(&self.window));
+        rx.await.unwrap_or(false)
+    }
+
     pub(super) async fn close_surface_command(
         &self,
         pane: PaneId,
