@@ -35,6 +35,9 @@ run_test ssh-fixture-unit python3 scripts/test-ssh-workspace-fixture.py
 run_test workspace cargo test --workspace --locked --no-fail-fast "$@"
 run_test build cargo build --workspace --locked
 run_test browser-control python3 scripts/test-browser-control.py "$CARGO_TARGET_DIR/debug/flowmux"
+run_test browser-source python3 scripts/test-browser-source-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_test browser-bookmarks python3 scripts/test-browser-bookmarks-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"

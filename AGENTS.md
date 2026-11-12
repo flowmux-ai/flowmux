@@ -81,6 +81,8 @@ install jq` on Ubuntu). Web work follows the same shape every time:
 #    pane already exists to the right, the URL opens as a new tab in
 #    that pane (placement_strategy = "reuse_right_sibling"); otherwise
 #    flowmux splits the source pane vertically.
+#    Codex resolves its live session instead of inherited pane variables;
+#    use browser open URL --pane UUID for an explicit source pane.
 OPEN=$(flowmux --json browser open https://example.com)
 PANE=$(printf '%s' "$OPEN" | jq -r '.browser_pane_opened.pane')
 # → {"browser_pane_opened":{"pane":"<uuid>","placement_strategy":"split_right"|"reuse_right_sibling"}}

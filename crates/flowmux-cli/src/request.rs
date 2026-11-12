@@ -117,6 +117,7 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
         }
         BrowserOp::Open {
             url,
+            pane,
             right: _,
             down,
         } => {
@@ -128,12 +129,9 @@ pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
             } else {
                 SplitDirection::Vertical
             };
-            // When invoked from a terminal that flowmux spawned, the PTY's
-            // `FLOWMUX_PANE_ID` lets the daemon resolve "next to me" without
-            // the caller passing a pane id explicitly.
             Request::BrowserOpen {
                 url,
-                target_pane: pane_from_env(),
+                target_pane: pane.or_else(pane_from_env),
                 direction,
             }
         }

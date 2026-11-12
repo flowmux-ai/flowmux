@@ -55,8 +55,12 @@ the user's session.
 
 When targeting another authorized window with `--socket`, inherited pane IDs
 still refer to the original window. Read the target window's `tree` and use its
-IDs. `browser open` has no pane argument: set `FLOWMUX_PANE_ID` to the chosen
-source pane for that invocation, or unset it to use that window's focused pane.
+IDs. Use `browser open URL --pane UUID` to choose an explicit source pane.
+Without `--pane`, Codex calls resolve the live session using `CODEX_THREAD_ID`
+(or `CODEX_SESSION_ID`); an unresolved session fails without opening a tab.
+Other callers use `FLOWMUX_PANE_ID`, or the focused pane when it is unset.
+Codex session resolution can recover the originating window from a stale socket
+environment; use both `--socket` and `--pane` to target another window explicitly.
 
 ## Workspaces and terminals
 

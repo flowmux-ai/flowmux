@@ -1212,6 +1212,7 @@ fn browser_open_no_flags_defaults_to_right_split() {
         task: None,
         surface: None,
         op: BrowserOp::Open {
+            pane: None,
             url: "https://example.com".into(),
             right: false,
             down: false,
@@ -1242,6 +1243,7 @@ fn browser_open_picks_target_pane_from_flowmux_pane_id_env() {
         task: None,
         surface: None,
         op: BrowserOp::Open {
+            pane: None,
             url: "https://example.com".into(),
             right: false,
             down: false,
@@ -1260,6 +1262,29 @@ fn browser_open_picks_target_pane_from_flowmux_pane_id_env() {
 }
 
 #[test]
+fn browser_open_explicit_pane_overrides_environment() {
+    let _g = flowmux_pane_env_lock();
+    let pane = PaneId::new();
+    unsafe {
+        std::env::set_var("FLOWMUX_PANE_ID", PaneId::new().to_string());
+    }
+    let cli = Cli::try_parse_from([
+        "flowmux",
+        "browser",
+        "open",
+        "about:blank",
+        "--pane",
+        &format!("pane:{pane}"),
+    ])
+    .unwrap();
+    let req = build_request(cli.cmd).unwrap();
+    unsafe {
+        std::env::remove_var("FLOWMUX_PANE_ID");
+    }
+    assert!(matches!(req, Request::BrowserOpen { target_pane: Some(got), .. } if got == pane));
+}
+
+#[test]
 fn browser_open_ignores_invalid_flowmux_pane_id_env() {
     let _g = flowmux_pane_env_lock();
     unsafe {
@@ -1271,6 +1296,7 @@ fn browser_open_ignores_invalid_flowmux_pane_id_env() {
         task: None,
         surface: None,
         op: BrowserOp::Open {
+            pane: None,
             url: "https://example.com".into(),
             right: false,
             down: false,
@@ -1303,6 +1329,7 @@ fn browser_open_with_right_is_vertical_split() {
         task: None,
         surface: None,
         op: BrowserOp::Open {
+            pane: None,
             url: "https://a.test".into(),
             right: true,
             down: false,
@@ -1331,6 +1358,7 @@ fn browser_open_with_down_is_horizontal_split() {
         task: None,
         surface: None,
         op: BrowserOp::Open {
+            pane: None,
             url: "https://a.test".into(),
             right: false,
             down: true,

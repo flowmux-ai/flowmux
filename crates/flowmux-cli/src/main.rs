@@ -674,6 +674,10 @@ enum BrowserOp {
     /// focused pane outside flowmux); the default split direction is right.
     Open {
         url: String,
+        /// Source pane. Defaults to the live Codex session, then FLOWMUX_PANE_ID
+        /// outside Codex. An unresolved Codex session returns an error.
+        #[arg(long)]
+        pane: Option<PaneId>,
         #[arg(long, conflicts_with = "down")]
         right: bool,
         #[arg(long)]
@@ -1334,7 +1338,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run_cli(cli: Cli) -> anyhow::Result<()> {
-    let cmd = cli.cmd;
+    let mut cmd = cli.cmd;
 
     // Local-only commands — handled before the daemon connect so they
     // work without a running flowmux GUI.
@@ -1378,9 +1382,35 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         .socket
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
         .unwrap_or_else(paths::runtime_socket);
-    let client = Client::connect(&socket)
-        .await
-        .with_context(|| "is the flowmux daemon running? try: flowmux")?;
+    let session = match &cmd {
+        Cmd::Browser {
+            op: BrowserOp::Open { pane: None, .. },
+            ..
+        } => std::env::var("CODEX_THREAD_ID")
+            .or_else(|_| std::env::var("CODEX_SESSION_ID"))
+            .ok(),
+        _ => None,
+    };
+    let client = if let Some(session) = session {
+        // Shared Codex daemons can retain a different pane's environment.
+        let (client, source, _, _) = hooks::resolve_codex_source(&session, Some(socket))
+            .await?
+            .with_context(|| {
+                format!("No unique live Flowmux pane for Codex session {session}; browser was not opened. Check `flowmux identify --session {session}` or pass an explicit --pane.")
+            })?;
+        if let Cmd::Browser {
+            op: BrowserOp::Open { pane, .. },
+            ..
+        } = &mut cmd
+        {
+            *pane = Some(source);
+        }
+        client
+    } else {
+        Client::connect(&socket)
+            .await
+            .with_context(|| "is the flowmux daemon running? try: flowmux")?
+    };
 
     if let Cmd::NotifyStream { pane } = cmd {
         return notify_stream(&client, pane).await;
