@@ -1,0 +1,48 @@
+SPDX-License-Identifier: LGPL-2.0-or-later
+
+GTK 4.14.5: acquire cached icon references atomically with finalization.
+
+A preload GTask can drop the last icon reference on a worker while the
+main thread looks up its raw cache pointer. The icon_cache lock protects
+removal, but not the preceding transition to a zero GObject refcount.
+Use GWeakRef to acquire only live icons. Remove a dead entry under the
+cache lock so its delayed finalizer cannot evict a replacement icon.
+
+Applies to gtk/gtkicontheme.c in GTK 4.14.5, including Ubuntu
+4.14.5+ds-0ubuntu0.10. Does not change public ABI or disable preloading.
+Regression: scripts/test-gtk-icon-cache.c in the Flowmux repository.
+
+--- a/gtk/gtkicontheme.c
++++ b/gtk/gtkicontheme.c
+@@ -426,4 +426,5 @@
+
+   GdkTexture *texture;
++  GWeakRef cache_ref;
+ };
+
+@@ -705,8 +706,11 @@
+                     g_hash_table_size (theme->icon_cache)));
+
+-      icon = g_object_ref (icon);
++      /* Finalization can start before the finalizer takes icon_cache. */
++      icon = g_weak_ref_get (&icon->cache_ref);
++      if (icon == NULL)
++        g_hash_table_remove (theme->icon_cache, key);
+
+       /* Move item to front in LRU cache */
+-      if (_icon_cache_should_lru_cache (icon))
++      if (icon != NULL && _icon_cache_should_lru_cache (icon))
+         old_icon = _icon_cache_add_to_lru_cache (theme, icon);
+     }
+@@ -3463,4 +3467,5 @@
+ {
+   g_mutex_init (&icon->texture_lock);
++  g_weak_ref_init (&icon->cache_ref, icon);
+ }
+
+@@ -3488,4 +3493,5 @@
+
+   icon_cache_remove (icon);
++  g_weak_ref_clear (&icon->cache_ref);
+
+   g_strfreev (icon->key.icon_names);

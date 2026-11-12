@@ -125,6 +125,55 @@ the macOS gate passes and publishes the release
 only after both Linux and macOS builds succeed.
 There is no native Windows build or installer in this tree.
 
+## GTK 4.14.5 icon-cache crash
+
+GTK 4.14.5 can race an icon preload worker's final release against a cache
+lookup. The result is `object_ref: assertion '!object_already_finalized'
+failed` followed by a segmentation fault in `libgtk-4`. This is independent
+of the Wayland surface workaround and does not require memory exhaustion.
+
+[`gtk4-4.14.5-icon-cache-lifetime.patch`](../scripts/patches/gtk4-4.14.5-icon-cache-lifetime.patch)
+fixes the GTK dependency: cache lookups acquire a strong reference through
+`GWeakRef`, and remove expired entries before creating replacements. This
+preserves asynchronous loading and the bounded recent-icon cache. It applies
+to GTK 4.14.5, including Ubuntu's `4.14.5+ds-0ubuntu0.10` source package;
+other versions need their own applicability and regression checks.
+
+**Rebuilding Flowmux or running `install.sh` does not apply this dependency
+patch.** Deploy it through a rebuilt GTK distribution package, retaining the
+distribution's existing patches and build options. An already running
+Flowmux keeps using its loaded GTK; save work and reopen it after installing
+the fixed runtime. Do not replace a live process's library in place.
+
+To verify the fix without installing a library, obtain the GTK source and
+its build dependencies (Ubuntu: enable source repositories, then use
+`apt source gtk4` and `sudo apt build-dep gtk4`). From the Flowmux repository:
+
+```bash
+flowmux_repo="$PWD"
+gtk_source=/absolute/path/to/gtk4-4.14.5+ds
+git -C "$gtk_source" apply --check "$flowmux_repo/scripts/patches/gtk4-4.14.5-icon-cache-lifetime.patch"
+git -C "$gtk_source" apply "$flowmux_repo/scripts/patches/gtk4-4.14.5-icon-cache-lifetime.patch"
+meson setup "$gtk_source/build-icon-fix" "$gtk_source" --buildtype=debugoptimized \
+  -Dintrospection=disabled -Dbuild-demos=false -Dbuild-examples=false \
+  -Dbuild-tests=false -Dbuild-testsuite=true -Dmedia-gstreamer=disabled \
+  -Dprint-cups=disabled -Dvulkan=disabled
+ninja -C "$gtk_source/build-icon-fix" -j2 gtk/libgtk-4.so.1.1400.5 testsuite/gtk/icontheme
+cc -g -Wall -Wextra -Werror "$flowmux_repo/scripts/test-gtk-icon-cache.c" \
+  $(pkg-config --cflags --libs gtk4) -o "$gtk_source/build-icon-fix/icon-cache-regression"
+GIO_USE_VFS=local LD_LIBRARY_PATH="$gtk_source/build-icon-fix/gtk" \
+  timeout 60 xvfb-run -a dbus-run-session -- "$gtk_source/build-icon-fix/icon-cache-regression"
+xvfb-run -a dbus-run-session -- meson test -C "$gtk_source/build-icon-fix" \
+  --no-rebuild --print-errorlogs icontheme
+```
+
+This reduced-feature build is for diagnosis, not a replacement for the
+distribution package. The regression pauses an icon at finalization, checks
+that the next lookup returns a live replacement which survives the old
+finalizer, verifies small-icon cache cleanup, and exercises 100,000 async
+preloads. It intentionally fails against affected unpatched GTK, so it is
+not part of the regular CI gate that uses distribution libraries.
+
 ## Optional runtime dependencies
 
 ### ThorVG (image viewer)
