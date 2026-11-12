@@ -528,6 +528,7 @@ time.sleep(60)
     def test_linux_suites_keep_functional_tests_and_only_extend_stress(self):
         expected = {
             'test-gui-harness.py', 'test-ssh-workspace-fixture.py', 'test-browser-control.py',
+            'test-browser-source-gui.py',
             'test-browser-bookmarks-gui.py', 'test-browser-import-gui.py',
             'test-skills-gui.py', 'test-notifications-gui.py',
             'test-team-pingpong-gui.py', 'test-team-recovery-gui.py',
@@ -551,7 +552,7 @@ time.sleep(60)
                                           '--', '--nocapture'], ['build', '--workspace', '--locked']])
                 timings = [json.loads(line.split('=', 1)[1]) for line in result.stdout.splitlines()
                            if line.startswith('CI_TEST_RESULT=')]
-                self.assertEqual(len(timings), 26 if suite == 'extended' else 24)
+                self.assertEqual(len(timings), 27 if suite == 'extended' else 25)
                 self.assertEqual(len({row['test'] for row in timings}), len(timings))
                 self.assertTrue(all(row['exit_code'] == 0 and row['elapsed_seconds'] >= 0
                                     for row in timings))
