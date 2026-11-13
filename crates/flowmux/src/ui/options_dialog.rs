@@ -102,6 +102,7 @@ fn build_dialog(
     header.set_show_end_title_buttons(false);
 
     let close_btn = gtk::Button::with_label("Close");
+    close_btn.add_css_class("flat");
     header.pack_end(&close_btn);
 
     let font_widgets = build_font_widgets(parent, current, &default_font_family, default_font_size);
@@ -131,39 +132,67 @@ fn build_dialog(
     let cursor_blink_switch = build_toggle_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
 
-    let general = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    general.set_margin_top(16);
-    general.set_margin_bottom(16);
-    general.set_margin_start(20);
-    general.set_margin_end(20);
-    general.append(&row("Global zoom (%)", &zoom_picker.drop));
-    general.append(&row("Terminal font", &font_widgets.family_drop));
-    general.append(&row("Font size (pt)", &font_widgets.size_spin));
-    general.append(&row("Browser web view", &gtk::Label::new(Some("WebKit"))));
-    general.append(&row("Automatic focus colors", &focus_auto));
-    general.append(&row("Focus border color", &focus_color_btn));
-    general.append(&row("Focus border opacity (%)", &opacity_widgets.row));
-    general.append(&row("Keep browser session data", &persist_check));
-    general.append(&row("Resume agent sessions on reopen", &auto_resume_check));
-    general.append(&row("Restore terminal scrollback", &scrollback_check));
-    general.append(&row("Terminal scrollback lines", &scrollback_lines_spin));
-    general.append(&row("Terminal mouse wheel speed (×)", &wheel_scroll_spin));
-    general.append(&row("Terminal minimap", &terminal_minimap_switch));
-    general.append(&row(
-        "Terminal minimap width (px)",
-        &terminal_minimap_width_spin,
+    let general = gtk::Box::new(gtk::Orientation::Vertical, 24);
+    general.set_widget_name("flowmux-general-preferences");
+    general.set_margin_top(24);
+    general.set_margin_bottom(24);
+    general.set_margin_start(32);
+    general.set_margin_end(32);
+    general.append(&preference_group(
+        "Display",
+        &[
+            row("Global zoom (%)", &zoom_picker.drop),
+            row("Terminal font", &font_widgets.family_drop),
+            row("Font size (pt)", &font_widgets.size_spin),
+            row("Browser web view", &gtk::Label::new(Some("WebKit"))),
+        ],
     ));
-    general.append(&row(
-        "Terminal minimap opacity (%)",
-        &terminal_minimap_opacity_spin,
+    general.append(&preference_group(
+        "Focus",
+        &[
+            row("Automatic focus colors", &focus_auto),
+            row("Focus border color", &focus_color_btn),
+            row("Focus border opacity (%)", &opacity_widgets.row),
+        ],
     ));
-    general.append(&row("Default shell", &default_shell_entry));
-    general.append(&row("System notifications", &system_notify_switch));
-    general.append(&row("Agents bar mode", &agent_bar_switch));
-    general.append(&row("AI Usage bar", &usage_bar_switch));
-    general.append(&row("Editor minimap", &editor_minimap_switch));
-    general.append(&row("Cursor blink", &cursor_blink_switch));
-    general.append(&row("Cursor blink interval (ms)", &blink_interval_spin));
+    general.append(&preference_group(
+        "Session restoration",
+        &[
+            row("Keep browser session data", &persist_check),
+            row("Resume agent sessions on reopen", &auto_resume_check),
+            row("Restore terminal scrollback", &scrollback_check),
+        ],
+    ));
+    general.append(&preference_group(
+        "Terminal",
+        &[
+            row("Terminal scrollback lines", &scrollback_lines_spin),
+            row("Terminal mouse wheel speed (×)", &wheel_scroll_spin),
+            row("Terminal minimap", &terminal_minimap_switch),
+            row("Terminal minimap width (px)", &terminal_minimap_width_spin),
+            row(
+                "Terminal minimap opacity (%)",
+                &terminal_minimap_opacity_spin,
+            ),
+            row("Default shell", &default_shell_entry),
+        ],
+    ));
+    general.append(&preference_group(
+        "Notifications and activity",
+        &[
+            row("System notifications", &system_notify_switch),
+            row("Agents bar mode", &agent_bar_switch),
+            row("AI Usage bar", &usage_bar_switch),
+        ],
+    ));
+    general.append(&preference_group(
+        "Editor and cursor",
+        &[
+            row("Editor minimap", &editor_minimap_switch),
+            row("Cursor blink", &cursor_blink_switch),
+            row("Cursor blink interval (ms)", &blink_interval_spin),
+        ],
+    ));
 
     // Keep the footer actions reachable when the compositor gives the window
     // less vertical space than requested. The General page is the only page
@@ -171,6 +200,7 @@ fn build_dialog(
     // scroll that page instead of letting it push the About button below the
     // window edge.
     let general_scroll = gtk::ScrolledWindow::builder()
+        .name("flowmux-general-scroll")
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .child(&general)
@@ -901,6 +931,18 @@ fn about_body_with_version(version: &str) -> String {
          Version: v{}",
         version
     )
+}
+
+fn preference_group(title: &str, rows: &[gtk::Box]) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::new();
+    group.set_title(title);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.add_css_class("flowmux-preference-group");
+    for row in rows {
+        content.append(row);
+    }
+    group.add(&content);
+    group
 }
 
 pub(crate) fn row(label_text: &str, value_widget: &impl IsA<gtk::Widget>) -> gtk::Box {

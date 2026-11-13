@@ -17,7 +17,9 @@ purposeful motion principles to the existing native application.
 - Signature: the session connection line, with consistent focus and status cues.
 
 Keep existing terminal palettes, configured focus colors, provider identities,
-native font choices and the Office's pixel-art identity. Use 4px spacing steps
+native font choices, Session Flow's cosmic identity and the Office's pixel-art identity.
+Session Flow's star field, twinkles and node glow are intentional product identity.
+Use 4px spacing steps
 with 2px optical adjustments, quiet surfaces, legible text and consistent controls.
 Do not change command routing, action order, persistence, permission handling,
 terminal content, split geometry or drag/drop semantics to achieve a visual change.
@@ -184,3 +186,46 @@ handling. The centered header, readable labels and non-intercepting empty state
 remain. `cosmic-restored/native.log` passes layout, entry-point, presentation and
 `MACOS_SESSION_FLOW_STARS_CACHE_MOTION_OK` checks. The restored populated and empty
 views are captured under `cosmic-restored/` in the evidence directory.
+
+
+### Aesthetic revision — 2026-11-14
+
+Audit of the rendered screen: General preferences repeated one heavy card for every
+setting, selected tabs blended into their bar, and footer tools sat against the
+window edge without a visual group. The revision addresses those specific issues.
+
+- Product: a desktop workspace for operating and following coding agents.
+- Character: precise, calm, alive.
+- World: an observatory around active work.
+- Moments: Session Flow's cosmic graph and the Office's pixel scenes.
+- Signature: a restrained accent identifying the active workspace and session.
+
+General preferences now use six named groups with a shared surface and internal
+hairlines. All 22 controls retain their original order, labels, values and apply
+callbacks. Tabs have a rounded inset silhouette and a clearer selected surface;
+pane tools form a quieter group beside them. The active workspace has a neutral
+surface behind its existing accent. Sidebar footer tools sit in a padded frame
+and retain their original sequence and horizontal scrolling. Existing themes,
+terminal palettes, browser content, provider colors and Office artwork remain.
+
+The native presentation check now verifies the complete setting order, label/control
+associations and the last setting's reachability in both light and dark themes.
+Validation under `target/unslop-evidence/aesthetic-pass/`:
+
+- `native-full.log`: complete default macOS native harness passed.
+- `chrome-captures.log`: light/dark shell, selection geometry, all five options
+  pages and top/bottom preference captures passed.
+- `REVIEW.log`: footer scrolling/resize reachability and review interactions passed.
+- `BROWSER_CHROME.log`, `ZOOM_REORDER.log`, `OPTIONS_MERGE.log`: narrow browser
+  chrome, zoomed tab reordering and concurrent settings persistence passed.
+- `theme-tests.log`: 20 theme tests passed; `clippy.log`: UI all-target Clippy with
+  native-smoke and warnings denied passed. Formatting and diff checks passed.
+- `linux-focused.log`: 18 preferences tests, rebuilt GUI and all three XTest divider
+  cases passed. Each divider case reports zero resize outside the resize cursor
+  while adjacent terminal text selection succeeds.
+
+Compare `final/options-general-one-dark.png` with
+`aesthetic-pass/options-general-one-dark.png`, and the corresponding
+`shell-one-dark.png` images. The light-theme and bottom-of-settings captures are
+also retained. This revision uses focused regression checks; it does not claim a
+new full macOS/Linux CI gate run, hosted CI, release build or app installation.

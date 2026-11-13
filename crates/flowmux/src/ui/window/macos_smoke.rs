@@ -1306,6 +1306,74 @@ async fn check_preferences_presentation(controller: &WindowController) {
             stack.set_visible_child_name(page);
             wait_for_paint(&dialog).await;
             assert!(stack.visible_child().unwrap().is_mapped());
+            if page == "general" {
+                fn rows(widget: &gtk::Widget, result: &mut Vec<gtk::Widget>) {
+                    if widget.has_css_class("flowmux-preference-row") {
+                        result.push(widget.clone());
+                    }
+                    let mut child = widget.first_child();
+                    while let Some(widget) = child {
+                        child = widget.next_sibling();
+                        rows(&widget, result);
+                    }
+                }
+                let general: gtk::Box =
+                    theme_widget(dialog.upcast_ref(), "flowmux-general-preferences");
+                let mut settings = Vec::new();
+                rows(general.upcast_ref(), &mut settings);
+                let labels: Vec<_> = settings
+                    .iter()
+                    .map(|row| {
+                        let label = row.first_child().unwrap().downcast::<gtk::Label>().unwrap();
+                        assert_eq!(label.mnemonic_widget(), row.last_child());
+                        label.text().to_string()
+                    })
+                    .collect();
+                assert_eq!(
+                    labels,
+                    [
+                        "Global zoom (%)",
+                        "Terminal font",
+                        "Font size (pt)",
+                        "Browser web view",
+                        "Automatic focus colors",
+                        "Focus border color",
+                        "Focus border opacity (%)",
+                        "Keep browser session data",
+                        "Resume agent sessions on reopen",
+                        "Restore terminal scrollback",
+                        "Terminal scrollback lines",
+                        "Terminal mouse wheel speed (×)",
+                        "Terminal minimap",
+                        "Terminal minimap width (px)",
+                        "Terminal minimap opacity (%)",
+                        "Default shell",
+                        "System notifications",
+                        "Agents bar mode",
+                        "AI Usage bar",
+                        "Editor minimap",
+                        "Cursor blink",
+                        "Cursor blink interval (ms)",
+                    ],
+                    "grouping must preserve every setting and its navigation order"
+                );
+                let scroll: gtk::ScrolledWindow =
+                    theme_widget(dialog.upcast_ref(), "flowmux-general-scroll");
+                let adjustment = scroll.vadjustment();
+                adjustment.set_value(adjustment.upper() - adjustment.page_size());
+                wait_for_paint(&dialog).await;
+                let last = settings.last().unwrap();
+                let bounds = last.compute_bounds(&scroll).unwrap();
+                assert!(
+                    bounds.y() >= 0.0
+                        && bounds.y() + bounds.height() <= scroll.height() as f32 + 1.0,
+                    "last preference is clipped: {bounds:?}"
+                );
+                assert!(last.last_child().unwrap().grab_focus());
+                capture_native_window(&dialog, &format!("options-general-bottom-{theme}")).await;
+                adjustment.set_value(0.0);
+                wait_for_paint(&dialog).await;
+            }
             capture_native_window(&dialog, &format!("options-{page}-{theme}")).await;
         }
         dialog.close();

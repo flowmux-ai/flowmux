@@ -320,10 +320,11 @@ impl Sidebar {
 
         // Route options through the bridge so the controller can present the window.
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        footer.set_margin_top(2);
-        footer.set_margin_bottom(4);
-        footer.set_margin_start(4);
-        footer.set_margin_end(4);
+        footer.add_css_class("flowmux-sidebar-toolbar");
+        footer.set_margin_top(8);
+        footer.set_margin_bottom(8);
+        footer.set_margin_start(8);
+        footer.set_margin_end(8);
         let options_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
         options_btn.add_css_class("flat");
         options_btn.set_tooltip_text(Some("Options"));
