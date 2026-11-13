@@ -1148,11 +1148,20 @@ async fn check_sidebar_footer(controller: &WindowController) {
     let previous = controller.sidebar_split.position();
     let adjustment = scroll.hadjustment();
     controller.sidebar_split.set_position(210);
-    wait_until("footer overflows at right edge", || {
-        adjustment.upper() > adjustment.page_size()
-            && (adjustment.value() - (adjustment.upper() - adjustment.page_size())).abs() < 1.0
+    wait_until("footer exposes its scrollbar", || {
+        adjustment.upper() > adjustment.page_size() && scroll.hscrollbar().is_mapped()
     })
     .await;
+    let controllers = scroll.observe_controllers();
+    let wheel = (0..controllers.n_items())
+        .find_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerScroll>()
+                .ok()
+        })
+        .unwrap();
+    wheel.emit_by_name::<bool>("scroll", &[&100.0, &0.0]);
     // Adjustment values can update before GTK allocates the scrolled children.
     wait_until(
         "footer clips left icons and keeps the last icon visible",
@@ -1165,15 +1174,25 @@ async fn check_sidebar_footer(controller: &WindowController) {
         },
     )
     .await;
-    adjustment.set_value(0.0);
+    wheel.emit_by_name::<bool>("scroll", &[&-100.0, &0.0]);
+    wait_until("footer first action is reachable", || {
+        let first = buttons[0].compute_bounds(&scroll).unwrap();
+        first.x() >= 0.0 && first.x() + first.width() <= scroll.width() as f32
+    })
+    .await;
     glib::timeout_future(Duration::from_millis(100)).await;
     assert_eq!(adjustment.value(), 0.0, "manual scroll must not snap back");
     controller.sidebar_split.set_position(600);
     wait_until("footer expands", || scroll.width() > 500).await;
     controller.sidebar_split.set_position(210);
-    wait_until("footer resize restores right edge", || {
-        scroll.width() < 300
-            && (adjustment.value() - (adjustment.upper() - adjustment.page_size())).abs() < 1.0
+    wait_until("footer resize restores scrolling", || {
+        scroll.width() < 300 && adjustment.upper() > adjustment.page_size()
+    })
+    .await;
+    wheel.emit_by_name::<bool>("scroll", &[&100.0, &0.0]);
+    wait_until("footer last action remains reachable after resize", || {
+        let last = buttons.last().unwrap().compute_bounds(&scroll).unwrap();
+        last.x() >= 0.0 && last.x() + last.width() <= scroll.width() as f32 + 1.0
     })
     .await;
     controller.sidebar_split.set_position(previous);

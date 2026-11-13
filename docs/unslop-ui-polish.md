@@ -83,3 +83,13 @@ workspace ordering are retained, with quieter captions and explicit focus cues.
 Validation: full macOS native suite (`panels-native.log`) passed, including review
 comment persistence, browser input, file operations, split/tab drag and terminal
 wheel handling. Linux theme tests passed (20 tests, `linux-theme.log`).
+
+### Footer reachability check
+
+The additional review-only native check exposed a stale expectation that resizing
+always scrolls the footer to its right edge. It failed with the original External
+scrollbar policy too (`footer-original-policy.log`). The check now drives the real
+wheel controller to both ends, verifies first/last button bounds and preserved
+ordering, and repeats reachability after resize. Non-overlay automatic scrolling
+makes overflow discoverable. The complete review-only native run passed
+(`footer-reachable.log`), including comment storage and handoff.
