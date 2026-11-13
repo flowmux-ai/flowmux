@@ -33,7 +33,7 @@ retain it), and appropriate verification before the work is complete.
 | Window, workspace sidebar, tabs and pane tools | Consistent spacing, stable selected-row geometry, neutral chrome, distinct focus | Theme tests; native light/dark; tab drag, reorder, zoom and split checks |
 | Agents, notifications, AI Usage | Reserve broad emphasis for attention; align meta and controls; preserve status meanings | Agent/status tests; notification and usage native checks |
 | Files, worktrees, session history, terminal search | Consistent panel headers, row and keyboard selection states | Native panel actions, file operations, search and session checks |
-| Session Flow | Quiet canvas, useful empty state, clear labels; retain graph navigation and fork controls | Native graph layout, hit testing, pan/zoom/drag and session routing |
+| Session Flow | Cosmic canvas, useful empty state, clear labels; retain graph navigation and fork controls | Native graph layout, hit testing, pan/zoom/drag and session routing |
 | Agent Office and workspace overview | Keep meaningful content; quiet and align controls, captions and overlays | Native Office interaction/cache and overview selection/close checks |
 | Browser, task controls, dialogs and media | Normalize control spacing, radii and focus; retain responsive toolbar | Browser chrome minimum-width tests; native input, dialogs and media checks |
 | Editor and Code Review | Consistent surrounding chrome, readable review comments and file rows | Editor tests/assets; native edit/save/focus, review/comment/handoff checks |
@@ -97,9 +97,8 @@ make overflow discoverable without reducing button height. The complete review-o
 ### Content and preferences pass
 
 Session Flow retains its dark navy canvas and cyan/violet node meanings, centered
-header, hit radii and all graph operations. Flat cached nodes replace glow and the
-background star animation; a non-interactive empty-state overlay explains how
-relationships appear. Labels inherit the interface font. Presentation captures use
+header, hit radii and all graph operations. The original cached glowing nodes and independent star animation are preserved;
+a non-interactive empty-state overlay explains how relationships appear. Labels inherit the interface font. Presentation captures use
 a separate mapped fixture so live shell presence polling cannot erase test data.
 
 The editor keeps Monaco and its action order. Its surrounding dialogs, search rows
@@ -173,3 +172,15 @@ No push, hosted CI, installation or release is part of this branch.
 Physical mouse/trackpad testing across every hardware configuration has not been
 performed; automated native input and the
 rendered checks above define the verified boundary.
+
+
+### Cosmic identity correction — 2026-11-14
+
+The initial pass removed the star field and node glow too aggressively. The user
+confirmed that the cosmic appearance is an intentional part of Session Flow.
+Restored the original cached star field, eight sparse twinkles and glowing node
+sprites, including drag/zoom priority, inactive/hidden pause and reduced-motion
+handling. The centered header, readable labels and non-intercepting empty state
+remain. `cosmic-restored/native.log` passes layout, entry-point, presentation and
+`MACOS_SESSION_FLOW_STARS_CACHE_MOTION_OK` checks. The restored populated and empty
+views are captured under `cosmic-restored/` in the evidence directory.

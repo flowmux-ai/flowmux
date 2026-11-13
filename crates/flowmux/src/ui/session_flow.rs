@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Session Flow's lineage canvas. The scene is shared; only view/camera state belongs to a workspace.
+//! Session Flow's cosmic canvas. The scene is shared; only view/camera state belongs to a workspace.
 
 use crate::bridge::{Bridge, GtkCommand};
 use flowmux_core::session_flow::{Camera, Layout, Lineage, Point, SessionKey};
@@ -36,6 +36,7 @@ pub(crate) struct Node {
 use flowmux_state::session_flow::SavedView as View;
 
 mod canvas;
+mod stars;
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 mod performance;
@@ -57,6 +58,7 @@ struct Scene {
     held: Option<SessionKey>,
     moved: bool,
     drag_active: bool,
+    last_zoom: Option<std::time::Instant>,
     space_pan: bool,
     fit_during_settle: bool,
 }
@@ -184,7 +186,9 @@ impl FlowPanel {
         area.set_content_height(140);
         area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · Space or middle-drag to pan over nodes · arrows to select · Enter to open"));
         let canvas = gtk::Overlay::new();
-        canvas.set_child(Some(&area));
+        canvas.set_child(Some(&stars::Stars::new(&scene)));
+        canvas.add_overlay(&area);
+        canvas.set_measure_overlay(&area, true);
         let empty = gtk::Box::new(gtk::Orientation::Vertical, 8);
         empty.set_halign(gtk::Align::Center);
         empty.set_valign(gtk::Align::Center);
@@ -481,6 +485,7 @@ impl FlowPanel {
             }
             let mut scene = scene.borrow_mut();
             scene.fit_during_settle = false;
+            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(v) = scene.view() {
                 v.camera.zoom_at(cursor, (-dy * 0.15).exp());
@@ -506,6 +511,7 @@ impl FlowPanel {
             let factor = scale / last_scale.replace(scale);
             let mut scene = panel.scene.borrow_mut();
             scene.fit_during_settle = false;
+            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(view) = scene.view() {
                 view.camera.zoom_at(cursor, factor);
@@ -764,6 +770,32 @@ fn layout_labels<'a>(
     labels
 }
 
+fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {
+    cr.set_source_rgb(0.025, 0.035, 0.08);
+    let _ = cr.paint();
+    for i in 0..150u32 {
+        let (x, y) = stars::star_position(i, width, height);
+        let (x, y) = (x as f64, y as f64);
+        if i % 7 == 0 {
+            let glow = gtk::cairo::RadialGradient::new(x, y, 0.0, x, y, 3.5);
+            glow.add_color_stop_rgba(0.0, 0.70, 0.82, 1.0, 0.28);
+            glow.add_color_stop_rgba(1.0, 0.45, 0.65, 1.0, 0.0);
+            let _ = cr.set_source(&glow);
+            cr.arc(x, y, 3.5, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        cr.set_source_rgba(0.74, 0.84, 1.0, 0.28 + (i % 4) as f64 * 0.10);
+        cr.arc(
+            x,
+            y,
+            if i % 7 == 0 { 1.2 } else { 0.65 },
+            0.0,
+            std::f64::consts::TAU,
+        );
+        let _ = cr.fill();
+    }
+}
+
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 impl FlowPanel {
     pub(crate) async fn check_native_presentation(&self, empty: bool) {
@@ -843,6 +875,9 @@ impl FlowPanel {
                 .unwrap();
         }
         window.destroy();
+        if !empty {
+            stars::check_native(&panel).await;
+        }
         println!("MACOS_SESSION_FLOW_PRESENTATION_OK empty={empty}");
     }
 
