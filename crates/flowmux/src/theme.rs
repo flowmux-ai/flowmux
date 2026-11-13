@@ -318,11 +318,11 @@ impl ResolvedTheme {
     box-shadow: inset 0 0 0 2px {focus_full};
 }}
 .flowmux-pane .flowmux-terminal {{
-    padding: 7px;
+    padding: 8px;
     border-radius: 0;
 }}
 .flowmux-theme-preview {{
-    padding: 8px 10px;
+    padding: 8px 12px;
 }}
 .flowmux-terminal-search-entry {{
     /* Keep the search field readable over terminal output while retaining a
@@ -330,7 +330,7 @@ impl ResolvedTheme {
     background-color: alpha(@theme_base_color, 0.95);
 }}
 .flowmux-pane-tabbar {{
-    min-height: 26px;
+    min-height: 28px;
     background-color: {tabbar};
     border-top: 2px solid transparent;
     border-bottom: 1px solid {border};
@@ -343,13 +343,14 @@ impl ResolvedTheme {
     color: {focus_full};
     border: 1px solid {focus};
     border-radius: 4px;
-    margin: 3px 4px 3px 5px;
-    padding: 0 5px;
+    margin: 4px;
+    padding: 0 4px;
 }}
 .flowmux-pane-tab {{
-    margin: 2px 1px 0 0;
+    margin: 2px 2px 0 0;
     border: 0;
-    border-radius: 4px 4px 0 0;
+    border-top: 2px solid transparent;
+    border-radius: 6px 6px 0 0;
 }}
 .flowmux-pane-tab.active {{
     background-color: {tab_active};
@@ -358,19 +359,19 @@ impl ResolvedTheme {
     border-top: 2px solid {focus};
 }}
 .flowmux-pane-tab-main {{
-    min-height: 22px;
-    padding: 0 7px;
-    border-radius: 3px 0 0 0;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 4px 0 0 0;
     color: {subdued_fg};
 }}
 .flowmux-pane-tab.active .flowmux-pane-tab-main {{
     color: {fg};
 }}
 .flowmux-pane-tab-close {{
-    min-height: 22px;
-    min-width: 20px;
+    min-height: 24px;
+    min-width: 24px;
     padding: 0 4px;
-    border-radius: 0 3px 0 0;
+    border-radius: 0 4px 0 0;
     opacity: 0.66;
 }}
 .flowmux-pane-tab-close,
@@ -387,12 +388,20 @@ menubutton.flowmux-pane-tool > button {{
     margin: 0 2px 0 4px;
 }}
 .flowmux-pane-tool {{
-    min-height: 22px;
-    min-width: 22px;
+    min-height: 24px;
+    min-width: 24px;
     margin-top: 2px;
     padding: 0;
-    border-radius: 4px;
+    border-radius: 6px;
     opacity: 0.72;
+}}
+.flowmux-pane-tab-main:focus-visible,
+.flowmux-pane-tab-close:focus-visible,
+button.flowmux-pane-tool:focus-visible,
+menubutton.flowmux-pane-tool > button:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
+    opacity: 1;
 }}
 paned > separator {{
     background-color: {border};
@@ -434,7 +443,7 @@ paned > separator {{
     border-radius: 8px;
 }}
 .flowmux-session-row {{
-    padding: 7px 8px;
+    padding: 8px 12px;
     border-bottom: 1px solid alpha(@sidebar_fg_color, 0.08);
 }}
 .flowmux-session-row:last-child {{
@@ -468,7 +477,7 @@ headerbar.flowmux-window-header {{
     min-height: 40px;
 }}
 headerbar.flowmux-window-header > windowhandle > box {{
-    padding: 3px 6px;
+    padding: 4px 8px;
 }}
 headerbar.flowmux-window-header windowcontrols {{
     border-spacing: 4px;
@@ -513,8 +522,8 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .navigation-sidebar row {{
     color: @sidebar_fg_color;
     border-radius: 6px;
-    margin: 2px 6px;
-    padding: 8px 10px;
+    margin: 2px 8px;
+    padding: 8px 12px;
 }}
 /* Keep the window chrome on libadwaita's semantic sidebar palette;
    terminal themes remain scoped to panes. The .dim-label variants keep
@@ -547,14 +556,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     background-color: transparent;
     border-left: 0 solid transparent;
 }}
-/* Visible "active workspace" indicator. A left-edge accent
-   stripe in the focus color lets the user see which workspace is
-   currently active. Always full opacity (focus_full), independent of
-   the focus-border opacity slider, and is the only row-level left-edge
-   accent. The :hover/:focus/:active/
-   .has-open-popup variants must mirror the suppression block above: those
-   selectors clear borders at the same specificity, so without matching
-   variants here the stripe vanishes whenever the row is hovered. */
+/* Paint selection inside the row so labels and drag targets never move. */
 .navigation-sidebar row.activatable:selected,
 .navigation-sidebar row.activatable:selected:hover,
 .navigation-sidebar row.activatable:selected:focus,
@@ -564,10 +566,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .navigation-sidebar > row.activatable:selected:hover,
 .navigation-sidebar > row.activatable:selected:active,
 .navigation-sidebar > row.activatable:selected.has-open-popup {{
-    border-left: 5px solid {focus_full};
-    /* Nudge the selected row's content 5px right (base left padding is
-       10px) so the active workspace reads as indented. */
-    padding-left: 15px;
+    box-shadow: inset 3px 0 0 {focus_full};
 }}
 /* Hover and press share one faint tint across every workspace row, so
    hovering only whispers and clicking introduces no separate color step.
@@ -588,6 +587,12 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .navigation-sidebar row.activatable:selected label.heading,
 .navigation-sidebar row.activatable:selected label.caption {{
     color: @sidebar_fg_color;
+}}
+.navigation-sidebar row:focus-visible,
+.flowmux-agent-bar-item:focus-visible,
+.flowmux-sidebar-options:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
 }}
 .navigation-sidebar row.flowmux-attention {{
     background-color: rgba(245, 158, 11, 0.18);
@@ -657,7 +662,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-agent-bar {{
     background-color: {sidebar};
     border-top: 1px solid {border};
-    padding: 3px 6px;
+    padding: 4px 8px;
 }}
 .flowmux-agent-bar > label {{
     color: {fg};
@@ -665,13 +670,13 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 }}
 .flowmux-agent-bar-item {{
     min-width: {agent_item_min}px;
-    min-height: 39px;
-    padding: 3px 6px;
+    min-height: 40px;
+    padding: 4px 8px;
     border: 1px solid transparent;
     border-radius: 6px;
 }}
 .flowmux-agent-bar-item.flowmux-agent-bar-working {{
-    background-color: rgba(245, 158, 11, 0.12);
+    background-color: rgba(245, 158, 11, 0.04);
 }}
 .flowmux-agent-bar-item:hover {{
     background-color: {control_hover};
@@ -680,7 +685,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     border-color: {focus};
 }}
 .flowmux-agent-bar-item.flowmux-agent-bar-working.focused {{
-    border-color: transparent;
+    border-color: {focus};
 }}
 .flowmux-agent-bar-item.flowmux-attention {{
     background-color: rgba(245, 158, 11, 0.18);
@@ -1275,7 +1280,7 @@ mod tests {
             .expect("selected-row rule must exist");
         let tail = &css[selected_block_start..];
         assert!(
-            tail.contains("border-left: 5px solid"),
+            tail.contains("box-shadow: inset 3px 0 0"),
             "selected workspace row is missing its left-edge accent stripe"
         );
         // The very last `:selected` rule wins because every block in
@@ -1286,11 +1291,17 @@ mod tests {
             .find("background-color: transparent")
             .expect("suppression rule must still be present");
         let accent_block = tail
-            .find("border-left: 5px solid")
+            .find("box-shadow: inset 3px 0 0")
             .expect("accent rule must be present");
         assert!(
             accent_block > suppression_block,
             "accent rule must follow the suppression rule so it overrides"
+        );
+        let accent_rule =
+            &tail[accent_block..tail[accent_block..].find('}').unwrap() + accent_block];
+        assert!(
+            !accent_rule.contains("padding") && !accent_rule.contains("border-left"),
+            "workspace selection must not move labels or change drag target geometry"
         );
     }
 
@@ -1333,7 +1344,7 @@ mod tests {
         assert!(
             css.contains(
                 ".flowmux-pane.focused .flowmux-pane-tabbar,\n.flowmux-pane.flowmux-notification .flowmux-pane-tabbar {\n    border-top: 2px solid rgba("
-            ) && css.contains(".flowmux-pane-tabbar {\n    min-height: 26px;\n    background-color:")
+            ) && css.contains(".flowmux-pane-tabbar {\n    min-height: 28px;\n    background-color:")
                 && css.contains("border-top: 2px solid transparent")
                 && css.contains(
                     ".flowmux-pane.focused.flowmux-solo .flowmux-pane-tabbar {\n    border-top-color: transparent;"
@@ -1496,15 +1507,15 @@ mod tests {
 
         assert!(
             css.contains(
-                ".flowmux-agent-bar-item.flowmux-agent-bar-working {\n    background-color: rgba(245, 158, 11, 0.12);\n}"
+                ".flowmux-agent-bar-item.flowmux-agent-bar-working {\n    background-color: rgba(245, 158, 11, 0.04);\n}"
             ),
-            "working Agent items must use an orange background without a border"
+            "working Agent items must be quieter than attention items"
         );
         assert!(
             css.contains(
-                ".flowmux-agent-bar-item.flowmux-agent-bar-working.focused {\n    border-color: transparent;\n}"
+                ".flowmux-agent-bar-item.flowmux-agent-bar-working.focused {\n    border-color: rgba("
             ),
-            "focused working Agent items must keep their border invisible"
+            "focused working Agent items must retain the focus cue"
         );
     }
 

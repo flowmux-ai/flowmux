@@ -80,6 +80,7 @@ pub(crate) fn run() {
     let _entered = runtime.enter();
     crate::ui::macos_layer::install_tile_refresh();
     adw::init().expect("native macOS display must be available");
+    crate::builtin_icons::install();
     let app = adw::Application::builder()
         .application_id("com.flowmux.NativeSmoke")
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
@@ -246,6 +247,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     spawn_dispatch_loop(rx, controller.clone());
     controller.window.present();
     wait_until("window mapped", || controller.window.is_mapped()).await;
+    if std::env::var_os("FLOWMUX_CHROME_STYLE_SMOKE_ONLY").is_some() {
+        check_theme_focus(&controller).await;
+        check_shell_geometry(&controller).await;
+        controller.window.destroy();
+        return;
+    }
     if std::env::var_os("FLOWMUX_USAGE_PINS_SMOKE_ONLY").is_some() {
         crate::ui::usage_popover::native_tests::check(&controller.sidebar.usage).await;
         controller.window.destroy();
@@ -559,6 +566,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
 
     termination_dialog::check(&controller, workspace, terminal_pane).await;
     check_theme_focus(&controller).await;
+    check_shell_geometry(&controller).await;
     check_theme_sources(&controller).await;
     crate::ui::review_window::smoke(&controller.window).await;
     super::review::handoff_smoke(&controller).await;
@@ -1170,6 +1178,77 @@ async fn check_sidebar_footer(controller: &WindowController) {
     .await;
     controller.sidebar_split.set_position(previous);
     println!("DIFF_REVIEW_SIDEBAR_FOOTER_OK");
+}
+
+async fn check_shell_geometry(controller: &WindowController) {
+    let list = &controller.sidebar.list;
+    let row = list.selected_row().expect("selected workspace");
+    let child = row.child().unwrap();
+    let tab = controller
+        .pane_registry
+        .borrow()
+        .surface_tabs
+        .values()
+        .next()
+        .unwrap()[0]
+        .1
+        .clone();
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let handler = controller.css_provider.connect_parsing_error({
+        let errors = errors.clone();
+        move |_, _, error| errors.borrow_mut().push(error.to_string())
+    });
+    for theme in ["one-dark", "github-light"] {
+        controller.apply_runtime_theme(&flowmux_config::options::Options {
+            theme: Some(theme.into()),
+            ..Default::default()
+        });
+        list.unselect_all();
+        tab.remove_css_class("active");
+        wait_for_paint(&controller.window).await;
+        let bounds = child.compute_bounds(&row).unwrap();
+        let size = (tab.width(), tab.height());
+        list.select_row(Some(&row));
+        tab.add_css_class("active");
+        wait_for_paint(&controller.window).await;
+        assert_eq!(
+            child.compute_bounds(&row).unwrap(),
+            bounds,
+            "workspace selection shifted its content in {theme}"
+        );
+        assert_eq!(
+            (tab.width(), tab.height()),
+            size,
+            "tab selection changed its drag geometry in {theme}"
+        );
+        assert!(row.grab_focus());
+        assert_eq!(list.selected_row(), Some(row.clone()));
+        if let Some(directory) = std::env::var_os("FLOWMUX_BROWSER_UI_SNAPSHOTS") {
+            wait_for_paint(&controller.window).await;
+            std::fs::create_dir_all(&directory).unwrap();
+            let snapshot = gtk::Snapshot::new();
+            gtk::WidgetPaintable::new(Some(&controller.window)).snapshot(
+                &snapshot,
+                controller.window.width() as f64,
+                controller.window.height() as f64,
+            );
+            controller
+                .window
+                .renderer()
+                .unwrap()
+                .render_texture(snapshot.to_node().unwrap(), None)
+                .save_to_png(std::path::Path::new(&directory).join(format!("shell-{theme}.png")))
+                .unwrap();
+        }
+    }
+    controller.css_provider.disconnect(handler);
+    assert!(
+        errors.borrow().is_empty(),
+        "application CSS errors: {:?}",
+        errors.borrow()
+    );
+    controller.apply_runtime_theme(&Default::default());
+    println!("MACOS_SHELL_SELECTION_GEOMETRY_OK");
 }
 
 async fn check_theme_focus(controller: &WindowController) {
