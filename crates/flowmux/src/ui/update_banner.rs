@@ -117,7 +117,7 @@ impl UpdateBanner {
         banner.dispatch(Event::Progress(update::Stage::Installing, 75));
         assert_eq!(banner.inner.progress.text().as_deref(), Some("75%"));
         banner.dispatch(Event::Done(version));
-        assert!(banner.inner.banner.title().contains("Restart flowmux"));
+        assert!(banner.inner.banner.title().contains("Restart Flowmux"));
         gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
         assert!(window.is_mapped());
         window.destroy();
