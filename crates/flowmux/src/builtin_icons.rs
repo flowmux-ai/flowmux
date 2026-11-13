@@ -218,6 +218,14 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M4 2a2 2 0 1 0 1.5 3.3v4.4A2 2 0 1 0 7 11.6V9.8c0-.8.6-1.4 1.4-1.4h1.1A2 2 0 1 0 9.5 7H8.4A2.9 2.9 0 0 0 7 7.4V5.3A2 2 0 0 0 4 2zm0 1.3a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4zm7 0a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4zm-5 8a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4z",
     },
     SymbolicIcon {
+        name: "applications-graphics-symbolic",
+        path: "M2 2h5v5H2zm7 0h5v5H9zM2 9h5v5H2zm9 0a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
+    },
+    SymbolicIcon {
+        name: "software-update-available-symbolic",
+        path: "M7 1h2v7l2.5-2.5L13 7l-5 5-5-5 1.5-1.5L7 8zM2 12h2v2h8v-2h2v4H2z",
+    },
+    SymbolicIcon {
         name: "view-refresh-symbolic",
         path: "M12.7 5.2A5.2 5.2 0 1 0 13 8h-1.5a3.7 3.7 0 1 1-.9-2.4L8.5 5.6V7h5V2h-1.4z",
     },

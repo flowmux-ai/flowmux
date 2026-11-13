@@ -346,12 +346,12 @@ impl Sidebar {
         footer_actions.set_widget_name("flowmux-footer-actions");
         let footer_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Automatic)
-            .overlay_scrolling(false)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .hexpand(true)
             .child(&footer_actions)
             .build();
         footer_scroll.set_widget_name("flowmux-footer-actions-scroll");
+        footer_scroll.set_tooltip_text(Some("Scroll to see more workspace actions"));
         let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
         let adjustment = footer_scroll.hadjustment();
         wheel.connect_scroll(move |_, dx, dy| {

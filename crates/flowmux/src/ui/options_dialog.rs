@@ -112,6 +112,7 @@ fn build_dialog(
     focus_color_btn.set_sensitive(!focus_auto.is_active());
     opacity_widgets.row.set_sensitive(!focus_auto.is_active());
     let persist_check = build_persist_check(current.persist_browser_session);
+    persist_check.set_tooltip_text(Some("Persist cookies, sign-ins, and site data"));
     let auto_resume_check = build_persist_check(current.auto_resume_agent_sessions);
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
@@ -467,13 +468,13 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             check_sensitive: true,
         },
         BannerState::Current => UpdateTabProps {
-            status: "You are using the latest version of flowmux.".into(),
+            status: "You are using the latest version of Flowmux.".into(),
             update_version: None,
             update_label: None,
             check_sensitive: true,
         },
         BannerState::Available(version) | BannerState::Ignored(version) => UpdateTabProps {
-            status: format!("flowmux v{version} is available."),
+            status: format!("Flowmux v{version} is available."),
             update_version: Some(*version),
             update_label: Some(match crate::update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => format!("Update to v{version}"),
@@ -484,19 +485,19 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             check_sensitive: true,
         },
         BannerState::Running(Stage::Fetching, percent, version) => UpdateTabProps {
-            status: format!("Downloading flowmux v{version}: {percent}%"),
+            status: format!("Downloading Flowmux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
         },
         BannerState::Running(Stage::Installing, percent, version) => UpdateTabProps {
-            status: format!("Installing flowmux v{version}: {percent}%"),
+            status: format!("Installing Flowmux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
         },
         BannerState::Done(version) => UpdateTabProps {
-            status: format!("flowmux v{version} is installed. Restart flowmux to use it."),
+            status: format!("Flowmux v{version} is installed. Restart Flowmux to use it."),
             update_version: None,
             update_label: None,
             check_sensitive: true,
@@ -588,7 +589,7 @@ fn show_newer_update_prompt(
     on_choice: impl FnOnce(Option<Version>) + 'static,
 ) {
     let body = format!(
-        "You were about to update to flowmux v{selected}, but v{latest} is now available. Which version would you like to install?"
+        "You were about to update to Flowmux v{selected}, but v{latest} is now available. Which version would you like to install?"
     );
     let dialog = adw::AlertDialog::new(Some("A newer version is available"), Some(&body));
     dialog.add_response("cancel", "Cancel");
@@ -628,7 +629,7 @@ fn build_update_tab(
 
     let group = adw::PreferencesGroup::builder()
         .title("Software Update")
-        .description("Check for a new flowmux release and use the update action for this install.")
+        .description("Check for a new Flowmux release and use the update action for this install.")
         .build();
 
     let version_row = adw::ActionRow::builder()
@@ -761,7 +762,7 @@ fn build_update_tab(
             if crate::update::origin::update_gate(install_origin) == UpdateGate::ReleasePage {
                 match crate::ui::update_banner::open_release_page(install_origin, selected) {
                     Ok(()) => status_row
-                        .set_subtitle(&format!("Opened the release page for flowmux v{selected}.")),
+                        .set_subtitle(&format!("Opened the release page for Flowmux v{selected}.")),
                     Err(error) => {
                         tracing::warn!(%error, %selected, "could not open release page");
                         status_row.set_subtitle(&format!("Could not open the release page: {error}"));
@@ -894,7 +895,7 @@ fn show_about_popup(parent: &impl IsA<gtk::Widget>) {
 
 fn about_body_with_version(version: &str) -> String {
     format!(
-        "flowmux - Agent Workflow Multiplexer Terminal\n\n\
+        "Flowmux - Agent Workflow Multiplexer Terminal\n\n\
          Maintained by JSUYA (Junsu Choi).\n\
          <a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>\n\n\
          Version: v{}",
@@ -1302,12 +1303,8 @@ fn build_focus_opacity_row(initial: u8) -> FocusOpacityRow {
     FocusOpacityRow { row, spin }
 }
 
-/// CheckButton seeded with the current persistence flag. New browser tabs
-/// pick up the saved value through [`Options::persist_browser_session`];
-/// already-open browser tabs keep their existing NetworkSession (matching
-/// the dropdown engine option above).
 fn build_persist_check(initial: bool) -> gtk::CheckButton {
-    let check = gtk::CheckButton::with_label("Persist cookies, sign-ins, and site data");
+    let check = gtk::CheckButton::new();
     check.set_active(initial);
     check
 }
@@ -1592,7 +1589,7 @@ mod tests {
     #[test]
     fn about_body_contains_requested_copy() {
         let body = about_body_with_version("9.8.7-6");
-        assert!(body.contains("flowmux - Agent Workflow Multiplexer Terminal"));
+        assert!(body.contains("Flowmux - Agent Workflow Multiplexer Terminal"));
         assert!(!body.contains("cmux"));
         assert!(body.contains("Maintained by JSUYA (Junsu Choi)."));
         assert!(body.contains(
@@ -1613,7 +1610,7 @@ mod tests {
             &BannerState::Done(Version(9, 8, 7)),
             InstallOrigin::MacosBundle,
         );
-        assert!(done.status.contains("Restart flowmux"));
+        assert!(done.status.contains("Restart Flowmux"));
         assert_eq!(done.update_version, None);
     }
 

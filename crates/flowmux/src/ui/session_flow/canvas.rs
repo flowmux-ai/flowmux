@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Render the cosmic graph with retained GSK resources instead of a full-frame Cairo upload.
+//! Render the lineage graph with retained GSK resources instead of a full-frame Cairo upload.
 
 use super::*;
 use gtk::subclass::prelude::*;
@@ -114,9 +114,9 @@ mod imp {
                     *sprites = Some((
                         scale,
                         [
-                            star_texture(scale, (0.43, 0.86, 0.94), 8.0, true),
-                            star_texture(scale, (0.65, 0.57, 0.95), 6.0, true),
-                            star_texture(scale, (0.40, 0.43, 0.53), 6.0, false),
+                            node_texture(scale, (0.43, 0.86, 0.94), 8.0),
+                            node_texture(scale, (0.65, 0.57, 0.95), 6.0),
+                            node_texture(scale, (0.40, 0.43, 0.53), 6.0),
                         ],
                     ));
                 }
@@ -141,14 +141,9 @@ mod imp {
 }
 
 // Three tiny HiDPI sprites are uploaded once per scale factor. Node movement
-// only places existing textures; gradients and glow never run per-node per-frame.
-fn star_texture(
-    scale: i32,
-    rgb: (f64, f64, f64),
-    radius: f64,
-    luminous: bool,
-) -> gtk::gdk::Texture {
-    let size = (radius * 2.6).ceil() as i32 * 2;
+// only places existing textures; no per-node Cairo work runs during a frame.
+fn node_texture(scale: i32, rgb: (f64, f64, f64), radius: f64) -> gtk::gdk::Texture {
+    let size = (radius as i32 + 1) * 2;
     let mut surface =
         gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, size * scale, size * scale)
             .unwrap();
@@ -156,46 +151,7 @@ fn star_texture(
         let cr = gtk::cairo::Context::new(&surface).unwrap();
         cr.scale(scale as f64, scale as f64);
         cr.translate(size as f64 / 2.0, size as f64 / 2.0);
-        let glow = gtk::cairo::RadialGradient::new(0.0, 0.0, radius * 0.4, 0.0, 0.0, radius * 2.6);
-        glow.add_color_stop_rgba(0.0, rgb.0, rgb.1, rgb.2, if luminous { 0.48 } else { 0.15 });
-        glow.add_color_stop_rgba(
-            0.45,
-            rgb.0,
-            rgb.1,
-            rgb.2,
-            if luminous { 0.15 } else { 0.05 },
-        );
-        glow.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
-        let _ = cr.set_source(&glow);
-        cr.arc(0.0, 0.0, radius * 2.6, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-        if luminous {
-            let _ = cr.save();
-            let ray = gtk::cairo::LinearGradient::new(-radius * 1.8, 0.0, radius * 1.8, 0.0);
-            ray.add_color_stop_rgba(0.0, rgb.0, rgb.1, rgb.2, 0.0);
-            ray.add_color_stop_rgba(0.5, rgb.0, rgb.1, rgb.2, 0.6);
-            ray.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
-            for _ in 0..2 {
-                let _ = cr.set_source(&ray);
-                cr.rectangle(-radius * 1.8, -0.5, radius * 3.6, 1.0);
-                let _ = cr.fill();
-                cr.rotate(std::f64::consts::FRAC_PI_2);
-            }
-            let _ = cr.restore();
-        }
-        let core =
-            gtk::cairo::RadialGradient::new(-radius * 0.2, -radius * 0.25, 0.0, 0.0, 0.0, radius);
-        let white = if luminous { 0.82 } else { 0.25 };
-        core.add_color_stop_rgb(
-            0.0,
-            rgb.0 + (1.0 - rgb.0) * white,
-            rgb.1 + (1.0 - rgb.1) * white,
-            rgb.2 + (1.0 - rgb.2) * white,
-        );
-        core.add_color_stop_rgb(0.42, rgb.0, rgb.1, rgb.2);
-        core.add_color_stop_rgba(0.85, rgb.0 * 0.65, rgb.1 * 0.65, rgb.2 * 0.65, 0.9);
-        core.add_color_stop_rgba(1.0, rgb.0, rgb.1, rgb.2, 0.0);
-        let _ = cr.set_source(&core);
+        cr.set_source_rgb(rgb.0, rgb.1, rgb.2);
         cr.arc(0.0, 0.0, radius, 0.0, std::f64::consts::TAU);
         let _ = cr.fill();
     }

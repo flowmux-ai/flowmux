@@ -119,7 +119,7 @@ async fn wait_until(description: &str, mut ready: impl FnMut() -> bool) {
     .unwrap_or_else(|_| panic!("native UI timed out: {description}"));
 }
 
-async fn wait_for_paint(widget: &impl IsA<gtk::Widget>) {
+pub(crate) async fn wait_for_paint(widget: &impl IsA<gtk::Widget>) {
     wait_until("mapped widget", || widget.is_mapped()).await;
     let clock = widget.frame_clock().expect("mapped widget frame clock");
     let painted = Rc::new(Cell::new(false));
@@ -250,6 +250,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     if std::env::var_os("FLOWMUX_CHROME_STYLE_SMOKE_ONLY").is_some() {
         check_theme_focus(&controller).await;
         check_shell_geometry(&controller).await;
+        check_preferences_presentation(&controller).await;
         controller.window.destroy();
         return;
     }
@@ -1152,6 +1153,19 @@ async fn check_sidebar_footer(controller: &WindowController) {
         adjustment.upper() > adjustment.page_size() && scroll.hscrollbar().is_mapped()
     })
     .await;
+    let viewport = scroll.child().unwrap();
+    for button in &buttons {
+        let bounds = button.compute_bounds(&viewport).unwrap();
+        assert!(
+            bounds.y() >= 0.0 && bounds.y() + bounds.height() <= viewport.height() as f32,
+            "footer scrollbar clipped a button vertically: {bounds:?}, viewport {}",
+            viewport.height()
+        );
+        assert!(
+            button.height() >= 24,
+            "footer button lost its usable height"
+        );
+    }
     let controllers = scroll.observe_controllers();
     let wheel = (0..controllers.n_items())
         .find_map(|i| {
@@ -1242,23 +1256,8 @@ async fn check_shell_geometry(controller: &WindowController) {
         );
         assert!(row.grab_focus());
         assert_eq!(list.selected_row(), Some(row.clone()));
-        if let Some(directory) = std::env::var_os("FLOWMUX_BROWSER_UI_SNAPSHOTS") {
-            wait_for_paint(&controller.window).await;
-            std::fs::create_dir_all(&directory).unwrap();
-            let snapshot = gtk::Snapshot::new();
-            gtk::WidgetPaintable::new(Some(&controller.window)).snapshot(
-                &snapshot,
-                controller.window.width() as f64,
-                controller.window.height() as f64,
-            );
-            controller
-                .window
-                .renderer()
-                .unwrap()
-                .render_texture(snapshot.to_node().unwrap(), None)
-                .save_to_png(std::path::Path::new(&directory).join(format!("shell-{theme}.png")))
-                .unwrap();
-        }
+        wait_for_paint(&controller.window).await;
+        capture_native_window(controller.window.upcast_ref(), &format!("shell-{theme}")).await;
     }
     controller.css_provider.disconnect(handler);
     assert!(
@@ -1268,6 +1267,51 @@ async fn check_shell_geometry(controller: &WindowController) {
     );
     controller.apply_runtime_theme(&Default::default());
     println!("MACOS_SHELL_SELECTION_GEOMETRY_OK");
+}
+
+async fn capture_native_window(window: &gtk::Window, name: &str) {
+    let Some(directory) = std::env::var_os("FLOWMUX_BROWSER_UI_SNAPSHOTS") else {
+        return;
+    };
+    std::fs::create_dir_all(&directory).unwrap();
+    let paintable = gtk::WidgetPaintable::new(Some(window));
+    wait_for_paint(window).await;
+    let snapshot = gtk::Snapshot::new();
+    paintable.snapshot(&snapshot, window.width() as f64, window.height() as f64);
+    window
+        .renderer()
+        .unwrap()
+        .render_texture(snapshot.to_node().unwrap(), None)
+        .save_to_png(std::path::Path::new(&directory).join(format!("{name}.png")))
+        .unwrap();
+}
+
+async fn check_preferences_presentation(controller: &WindowController) {
+    for theme in ["one-dark", "github-light"] {
+        controller.apply_runtime_theme(&flowmux_config::options::Options {
+            theme: Some(theme.into()),
+            ..Default::default()
+        });
+        controller.dispatch(GtkCommand::ShowOptionsDialog).await;
+        let dialog = gtk::Window::list_toplevels()
+            .into_iter()
+            .filter_map(|w| w.downcast::<gtk::Window>().ok())
+            .find(|w| {
+                w.widget_name() == "flowmux-options-dialog"
+                    && w.transient_for().as_ref() == Some(controller.window.upcast_ref())
+            })
+            .unwrap();
+        let stack: adw::ViewStack = theme_widget(dialog.upcast_ref(), "flowmux-options-stack");
+        for page in ["general", "theme", "keybindings", "update", "skills"] {
+            stack.set_visible_child_name(page);
+            wait_for_paint(&dialog).await;
+            assert!(stack.visible_child().unwrap().is_mapped());
+            capture_native_window(&dialog, &format!("options-{page}-{theme}")).await;
+        }
+        dialog.close();
+    }
+    controller.apply_runtime_theme(&Default::default());
+    println!("MACOS_PREFERENCES_PRESENTATION_OK");
 }
 
 async fn check_theme_focus(controller: &WindowController) {

@@ -222,8 +222,8 @@ pub fn build(state: Rc<RefCell<ThemeSelection>>, on_change: Rc<dyn Fn()>) -> gtk
         let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         row_box.set_margin_top(8);
         row_box.set_margin_bottom(8);
-        row_box.set_margin_start(10);
-        row_box.set_margin_end(10);
+        row_box.set_margin_start(12);
+        row_box.set_margin_end(12);
         let name = gtk::Label::new(Some(name));
         name.set_xalign(0.0);
         name.set_hexpand(true);

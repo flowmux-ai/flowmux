@@ -717,6 +717,13 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-pane-tab.flowmux-pane-tab-drop-after {{
     border-right: 2px solid rgba(96, 165, 250, 0.95);
 }}
+#flowmux-session-flow {{
+    background-color: #070a16;
+    color: #d4dbe9;
+}}
+#flowmux-session-flow-canvas {{
+    font-size: 12px;
+}}
 .flowmux-session-flow-header {{
     background-color: {sidebar};
     color: {fg};
@@ -819,6 +826,10 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 8px;
     background-color: @card_bg_color;
+}}
+label.dim-label,
+label.subtitle {{
+    opacity: 0.72;
 }}
 #flowmux-options-dialog .heading,
 .flowmux-panel-header .heading {{

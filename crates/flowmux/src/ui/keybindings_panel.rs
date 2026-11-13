@@ -32,10 +32,10 @@ pub type SharedOverrides = Rc<RefCell<KeybindingOverrides>>;
 ///
 pub fn build(state: SharedOverrides, on_change: Rc<dyn Fn()>) -> gtk::Box {
     let outer = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    outer.set_margin_top(12);
-    outer.set_margin_bottom(12);
-    outer.set_margin_start(16);
-    outer.set_margin_end(16);
+    outer.set_margin_top(16);
+    outer.set_margin_bottom(16);
+    outer.set_margin_start(20);
+    outer.set_margin_end(20);
 
     let hint = gtk::Label::new(Some(
         "Changes take effect immediately. Use GTK accelerator syntax \

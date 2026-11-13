@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Session Flow's cosmic canvas. The scene is shared; only view/camera state belongs to a workspace.
+//! Session Flow's lineage canvas. The scene is shared; only view/camera state belongs to a workspace.
 
 use crate::bridge::{Bridge, GtkCommand};
 use flowmux_core::session_flow::{Camera, Layout, Lineage, Point, SessionKey};
@@ -36,14 +36,11 @@ pub(crate) struct Node {
 use flowmux_state::session_flow::SavedView as View;
 
 mod canvas;
-mod stars;
 
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 mod performance;
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 pub(crate) use performance::check_native_performance;
-#[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
-pub(crate) use stars::check_native as check_native_stars;
 
 #[derive(Default)]
 struct Scene {
@@ -60,7 +57,6 @@ struct Scene {
     held: Option<SessionKey>,
     moved: bool,
     drag_active: bool,
-    last_zoom: Option<std::time::Instant>,
     space_pan: bool,
     fit_during_settle: bool,
 }
@@ -112,6 +108,7 @@ pub(crate) struct FlowPanel {
     pub root: gtk::Box,
     pub area: gtk::DrawingArea,
     pub status: gtk::Label,
+    empty: gtk::Box,
     scene: Rc<RefCell<Scene>>,
     animating: Rc<Cell<bool>>,
     bridge: Bridge,
@@ -123,6 +120,7 @@ struct WeakPanel {
     root: glib::WeakRef<gtk::Box>,
     area: glib::WeakRef<gtk::DrawingArea>,
     status: glib::WeakRef<gtk::Label>,
+    empty: glib::WeakRef<gtk::Box>,
     scene: Rc<RefCell<Scene>>,
     animating: Rc<Cell<bool>>,
     bridge: Bridge,
@@ -135,6 +133,7 @@ impl WeakPanel {
             root: self.root.upgrade()?,
             area: self.area.upgrade()?,
             status: self.status.upgrade()?,
+            empty: self.empty.upgrade()?,
             scene: self.scene.clone(),
             animating: self.animating.clone(),
             bridge: self.bridge.clone(),
@@ -150,6 +149,7 @@ impl FlowPanel {
             root: self.root.downgrade(),
             area: self.area.downgrade(),
             status: self.status.downgrade(),
+            empty: self.empty.downgrade(),
             scene: self.scene.clone(),
             animating: self.animating.clone(),
             bridge: self.bridge.clone(),
@@ -160,22 +160,12 @@ impl FlowPanel {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_widget_name("flowmux-session-flow");
         root.set_visible(false);
-        let css = gtk::CssProvider::new();
-        css.load_from_string("#flowmux-session-flow { background: #070a16; }");
-        gtk::style_context_add_provider_for_display(
-            &root.display(),
-            &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-        root.connect_destroy(move |root| {
-            gtk::style_context_remove_provider_for_display(&root.display(), &css);
-        });
         let toolbar = gtk::CenterBox::new();
         toolbar.add_css_class("flowmux-session-flow-header");
         let title = gtk::Label::new(Some("Session Flow"));
         title.add_css_class("heading");
         toolbar.set_center_widget(Some(&title));
-        let status = gtk::Label::new(Some("Fork a session to begin its flow"));
+        let status = gtk::Label::new(Some("0 sessions"));
         status.set_hexpand(true);
         status.set_xalign(0.0);
         status.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -193,11 +183,26 @@ impl FlowPanel {
         area.set_focusable(true);
         area.set_content_height(140);
         area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · Space or middle-drag to pan over nodes · arrows to select · Enter to open"));
-        let sky = gtk::Overlay::new();
-        sky.set_child(Some(&stars::Stars::new(&scene)));
-        sky.add_overlay(&area);
-        sky.set_measure_overlay(&area, true);
-        root.append(&sky);
+        let canvas = gtk::Overlay::new();
+        canvas.set_child(Some(&area));
+        let empty = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        empty.set_halign(gtk::Align::Center);
+        empty.set_valign(gtk::Align::Center);
+        empty.set_margin_start(24);
+        empty.set_margin_end(24);
+        empty.set_can_target(false);
+        let heading = gtk::Label::new(Some("No session relationships yet"));
+        heading.add_css_class("heading");
+        let hint = gtk::Label::new(Some(
+            "Fork a supported session or resume one with recorded relationships",
+        ));
+        hint.set_wrap(true);
+        hint.set_justify(gtk::Justification::Center);
+        hint.add_css_class("dim-label");
+        empty.append(&heading);
+        empty.append(&hint);
+        canvas.add_overlay(&empty);
+        root.append(&canvas);
         let host = gtk::Paned::new(gtk::Orientation::Vertical);
         host.set_hexpand(true);
         host.set_vexpand(true);
@@ -212,6 +217,7 @@ impl FlowPanel {
             root,
             area,
             status,
+            empty,
             scene,
             animating: Rc::new(Cell::new(false)),
             bridge,
@@ -286,6 +292,7 @@ impl FlowPanel {
             scene.space_pan = false;
         }
         scene.workspace = workspace;
+        self.empty.set_visible(graph.is_empty());
         scene.graph = graph;
         scene.anchors = anchors;
         let view = scene.view().cloned().unwrap_or_default();
@@ -474,7 +481,6 @@ impl FlowPanel {
             }
             let mut scene = scene.borrow_mut();
             scene.fit_during_settle = false;
-            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(v) = scene.view() {
                 v.camera.zoom_at(cursor, (-dy * 0.15).exp());
@@ -500,7 +506,6 @@ impl FlowPanel {
             let factor = scale / last_scale.replace(scale);
             let mut scene = panel.scene.borrow_mut();
             scene.fit_during_settle = false;
-            scene.last_zoom = Some(std::time::Instant::now());
             let cursor = scene.cursor;
             if let Some(view) = scene.view() {
                 view.camera.zoom_at(cursor, factor);
@@ -719,7 +724,6 @@ fn layout_labels<'a>(
         layout.set_width(170 * gtk::pango::SCALE);
         layout.set_ellipsize(gtk::pango::EllipsizeMode::End);
         layout.set_alignment(gtk::pango::Alignment::Center);
-        layout.set_font_description(Some(&gtk::pango::FontDescription::from_string("Sans 9")));
         let (_, label_height) = layout.pixel_size();
         let x = (p.x as i32 - 87).clamp(0, (width - 174).max(0));
         let candidates = [p.y as i32 + 15, p.y as i32 - 19 - label_height];
@@ -760,34 +764,88 @@ fn layout_labels<'a>(
     labels
 }
 
-fn draw_background(cr: &gtk::cairo::Context, width: i32, height: i32) {
-    cr.set_source_rgb(0.025, 0.035, 0.08);
-    let _ = cr.paint();
-    for i in 0..150u32 {
-        let (x, y) = stars::star_position(i, width, height);
-        let (x, y) = (x as f64, y as f64);
-        if i % 7 == 0 {
-            let glow = gtk::cairo::RadialGradient::new(x, y, 0.0, x, y, 3.5);
-            glow.add_color_stop_rgba(0.0, 0.70, 0.82, 1.0, 0.28);
-            glow.add_color_stop_rgba(1.0, 0.45, 0.65, 1.0, 0.0);
-            let _ = cr.set_source(&glow);
-            cr.arc(x, y, 3.5, 0.0, std::f64::consts::TAU);
-            let _ = cr.fill();
-        }
-        cr.set_source_rgba(0.74, 0.84, 1.0, 0.28 + (i % 4) as f64 * 0.10);
-        cr.arc(
-            x,
-            y,
-            if i % 7 == 0 { 1.2 } else { 0.65 },
-            0.0,
-            std::f64::consts::TAU,
-        );
-        let _ = cr.fill();
-    }
-}
-
 #[cfg(all(test, target_os = "macos", feature = "native-smoke"))]
 impl FlowPanel {
+    pub(crate) async fn check_native_presentation(&self, empty: bool) {
+        // Keep the presentation fixture independent of the real shell's presence polling.
+        let (bridge, _receiver) = Bridge::new();
+        let panel = Self::new(&gtk::Stack::new(), bridge);
+        let workspace = WorkspaceId::new();
+        {
+            let scene = self.scene.borrow();
+            assert_eq!(scene.graph.is_empty(), empty);
+            panel.set_nodes(
+                scene.all.clone(),
+                scene.nodes.clone(),
+                &scene.layout.positions,
+            );
+            panel.show_workspace(Some(workspace), scene.graph.clone(), scene.anchors.clone());
+            panel
+                .status
+                .set_text(&format!("{} sessions", scene.graph.nodes().len()));
+        }
+        panel.toggle(workspace);
+        let window = gtk::Window::builder()
+            .title("Session Flow presentation")
+            .default_width(1000)
+            .default_height(360)
+            .child(&panel.host)
+            .build();
+        window.present();
+        crate::ui::window::macos_smoke::wait_for_paint(&window).await;
+        let center = panel
+            .area
+            .compute_point(
+                &panel.root,
+                &gtk::graphene::Point::new(
+                    panel.area.width() as f32 / 2.0,
+                    panel.area.height() as f32 / 2.0,
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            panel.root.pick(
+                center.x() as f64,
+                center.y() as f64,
+                gtk::PickFlags::DEFAULT
+            ),
+            Some(panel.area.clone().upcast()),
+            "empty guidance must not intercept canvas gestures"
+        );
+        glib::future_with_timeout(std::time::Duration::from_secs(5), async {
+            while panel.animating.get() {
+                glib::timeout_future(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("graph animation must settle");
+        assert_eq!(panel.empty.get_visible(), empty);
+        if let Ok(path) = std::env::var("FLOWMUX_SESSION_FLOW_CAPTURE") {
+            let paintable = gtk::WidgetPaintable::new(Some(&panel.root));
+            crate::ui::window::macos_smoke::wait_for_paint(&window).await;
+            let snapshot = gtk::Snapshot::new();
+            paintable.snapshot(
+                &snapshot,
+                panel.root.width() as f64,
+                panel.root.height() as f64,
+            );
+            let path = std::path::PathBuf::from(path);
+            let path = if empty {
+                path.with_file_name("session-flow-empty.png")
+            } else {
+                path
+            };
+            window
+                .renderer()
+                .unwrap()
+                .render_texture(snapshot.to_node().unwrap(), None)
+                .save_to_png(path)
+                .unwrap();
+        }
+        window.destroy();
+        println!("MACOS_SESSION_FLOW_PRESENTATION_OK empty={empty}");
+    }
+
     pub(crate) fn assert_native_graph(&self, workspace: WorkspaceId, expected: &Lineage) {
         let scene = self.scene.borrow();
         assert_eq!(scene.workspace, Some(workspace));
@@ -851,6 +909,8 @@ pub(crate) fn check_canvas_controls() {
     let existing = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&existing, Some("existing"));
     let panel = FlowPanel::new(&stack, bridge);
+    assert!(panel.empty.get_visible());
+    assert!(!panel.empty.can_target());
     let key = |id: &str| SessionKey {
         provider: "codex".into(),
         home: "/fixture".into(),
@@ -970,6 +1030,7 @@ pub(crate) fn check_canvas_controls() {
     panel.set_nodes(graph.clone(), nodes, &BTreeMap::new());
     let workspace = WorkspaceId::new();
     panel.show_workspace(Some(workspace), graph, [key("child")].into());
+    assert!(!panel.empty.get_visible());
     panel.toggle(workspace);
     panel.scene.borrow_mut().fit(800.0, 260.0);
     let point = panel
@@ -1138,6 +1199,7 @@ pub(crate) fn check_canvas_controls() {
     );
     assert!(receiver.try_recv().is_err());
     panel.show_workspace(Some(workspace), graph, [key("child")].into());
+    assert!(!panel.empty.get_visible());
     canvas::check_snapshot(&panel.area);
     for _ in 0..50 {
         panel.toggle(workspace);

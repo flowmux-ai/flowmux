@@ -1035,6 +1035,7 @@ pub(super) async fn check_native(
     })
     .await
     .expect("footer did not open an empty Session Flow panel");
+    controller.flow.panel.check_native_presentation(true).await;
     controller
         .dispatch_session_flow(FlowAction::Show(pane))
         .await;
@@ -1359,45 +1360,18 @@ pub(super) async fn check_native(
     assert_eq!(terminal.pid.get(), pid);
     controller.flow.panel.toggle(workspace);
     glib::timeout_future(Duration::from_millis(300)).await;
-    crate::ui::session_flow::check_native_stars(&controller.flow.panel).await;
-    if let Ok(path) = std::env::var("FLOWMUX_SESSION_FLOW_CAPTURE") {
-        let paintable = gtk::WidgetPaintable::new(Some(&controller.flow.panel.root));
-        let snapshot = gtk::Snapshot::new();
-        paintable.snapshot(
-            &snapshot,
-            controller.flow.panel.root.width() as f64,
-            controller.flow.panel.root.height() as f64,
-        );
-        if let Some(node) = snapshot.to_node() {
-            let renderer = controller.window.renderer().unwrap();
-            renderer
-                .render_texture(&node, None)
-                .save_to_png(&path)
-                .unwrap();
-        }
-        let sidebar = &controller.sidebar.root;
-        let snapshot = gtk::Snapshot::new();
-        // The sidebar is transparent; include its window's light background in the capture.
-        snapshot.append_color(
-            &gtk::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0),
-            &gtk::graphene::Rect::new(0.0, 0.0, sidebar.width() as f32, sidebar.height() as f32),
-        );
-        gtk::WidgetPaintable::new(Some(sidebar)).snapshot(
-            &snapshot,
-            sidebar.width() as f64,
-            sidebar.height() as f64,
-        );
-        let node = snapshot
-            .to_node()
-            .expect("sidebar renders Session Flow icon");
-        controller
-            .window
-            .renderer()
-            .unwrap()
-            .render_texture(&node, None)
-            .save_to_png(std::path::Path::new(&path).with_extension("sidebar.png"))
-            .unwrap();
-    }
+    // The real shell's status polling can clear the synthetic anchor after the split.
+    controller.flow.panel.show_workspace(
+        Some(workspace),
+        graph.project([&key(&child), &key(&other_child)]),
+        [key(&child), key(&other_child)].into(),
+    );
+    controller
+        .flow
+        .panel
+        .status
+        .set_text(&format!("{} sessions", graph.nodes().len()));
+    controller.flow.panel.check_native_presentation(false).await;
     // Creating a workspace must switch the model and the graph together with its panes.
     for via_cli in [true, false] {
         if via_cli {
