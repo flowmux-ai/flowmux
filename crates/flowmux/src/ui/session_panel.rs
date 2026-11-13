@@ -62,7 +62,8 @@ impl SessionPanel {
         root.set_margin_bottom(8);
         root.set_margin_start(8);
         root.set_margin_end(8);
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.add_css_class("flowmux-panel-header");
         header.set_margin_start(8);
         header.set_margin_end(8);
         let title = gtk::Label::new(Some("Agent sessions"));
@@ -322,7 +323,7 @@ impl SessionPanel {
             icon.set_tooltip_text(Some(session.agent.name()));
             icon.update_property(&[gtk::accessible::Property::Label(session.agent.name())]);
             content.append(&icon);
-            let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
+            let text = gtk::Box::new(gtk::Orientation::Vertical, 4);
             text.set_hexpand(true);
             let title = gtk::Label::new(Some(&session.title));
             title.add_css_class("flowmux-session-title");

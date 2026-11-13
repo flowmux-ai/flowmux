@@ -66,6 +66,7 @@ impl ReviewWindow {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_widget_name("flowmux-diff-review");
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.add_css_class("flowmux-panel-header");
         margins(&header, 8);
         let back = gtk::Button::from_icon_name("go-previous-symbolic");
         back.set_tooltip_text(Some("Back to previous tab"));
@@ -110,7 +111,7 @@ impl ReviewWindow {
             .build();
         content.append(&commit_details);
 
-        let left = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let left = gtk::Box::new(gtk::Orientation::Vertical, 8);
         margins(&left, 8);
         let search = gtk::SearchEntry::builder()
             .placeholder_text("Filter files")
@@ -127,7 +128,7 @@ impl ReviewWindow {
                 .xalign(0.0)
                 .ellipsize(pango::EllipsizeMode::Middle)
                 .build();
-            margins(&label, 7);
+            margins(&label, 8);
             item.set_child(Some(&label));
         });
         factory.connect_bind(|_, object| {
@@ -160,10 +161,11 @@ impl ReviewWindow {
             .build();
         margins(&heading, 8);
         heading.add_css_class("heading");
-        let file_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let file_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        file_header.add_css_class("flowmux-panel-header");
         heading.set_hexpand(true);
         file_header.append(&heading);
-        let comment = gtk::Button::with_label("+ Comment");
+        let comment = gtk::Button::with_label("Add comment");
         comment.set_tooltip_text(Some("Comment on selected lines (C)"));
         let whole_file = gtk::Button::with_label("File comment");
         whole_file.set_tooltip_text(Some("Comment on whole file"));
@@ -175,8 +177,8 @@ impl ReviewWindow {
             .cursor_visible(true)
             .monospace(true)
             .wrap_mode(gtk::WrapMode::None)
-            .left_margin(10)
-            .right_margin(10)
+            .left_margin(12)
+            .right_margin(12)
             .top_margin(8)
             .bottom_margin(8)
             .build();

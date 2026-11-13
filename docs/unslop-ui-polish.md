@@ -55,7 +55,7 @@ retain it), and appropriate verification before the work is complete.
 - [x] Inventory and dedicated branch
 - [x] Baseline native checks (`baseline-native.log`, `MACOS_NATIVE_SMOKE_OK`)
 - [x] Common shell and status styling (20 theme tests; native light/dark selection geometry)
-- [ ] Panels, dialogs and supporting surfaces
+- [x] Panels, dialogs and supporting surfaces
 - [ ] Session Flow and content-specific polish
 - [ ] Final regression and visual verification
 - [ ] Work-unit commits and final scope audit
@@ -70,3 +70,16 @@ The native harness now installs the same bundled fallback icons as the app;
 previous test captures showed missing-icon placeholders. The baseline also emits
 system `gtk.css` parser warnings; the new check separately asserts that Flowmux's
 own stylesheet produces no parsing errors.
+
+### Panel pass
+
+Files, worktrees, history, notifications, usage, SSH and review headers now share
+compact control spacing. Keyboard focus remains distinct from selection; focused
+panels use inset accents without shrinking their contents. Preferences keep their
+existing control order and immediate-apply behavior. Browser controls retain their
+32px height. Sidebar footer overflow exposes a scrollbar. Office pixel art and
+workspace ordering are retained, with quieter captions and explicit focus cues.
+
+Validation: full macOS native suite (`panels-native.log`) passed, including review
+comment persistence, browser input, file operations, split/tab drag and terminal
+wheel handling. Linux theme tests passed (20 tests, `linux-theme.log`).

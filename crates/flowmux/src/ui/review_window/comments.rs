@@ -58,7 +58,7 @@ fn style_card(card: &gtk::Box) {
     card.add_css_class("review-comment");
     let style = gtk::CssProvider::new();
     style.load_from_string(
-        ".review-comment { padding: 10px; font-family: sans-serif; font-size: 12px; }",
+        ".review-comment { padding: 12px; border-radius: 8px; box-shadow: none; font-family: sans-serif; font-size: 13px; }",
     );
     #[allow(deprecated)]
     card.style_context()
@@ -90,7 +90,7 @@ impl Comments {
                 .propagate_natural_height(true)
                 .build(),
         );
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let save = gtk::Button::with_label("Add comment");
         save.add_css_class("suggested-action");
         let cancel = gtk::Button::with_label("Cancel");

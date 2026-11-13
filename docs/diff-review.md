@@ -47,7 +47,7 @@ changes remain visible. With the diff focused, **n / p** moves between hunks.
 
 ## Comment where you read
 
-Click **+** beside a code line, select a range and click **+ Comment**, or press
+Click **+** beside a code line, select a range and click **Add comment**, or press
 **c** in the diff. The comment editor opens directly below the selected code.
 Use **File comment** for feedback on the entire file. **Ctrl/Cmd+Enter** saves;
 **Cancel** or **Escape** cancels from anywhere in the composer. An open menu

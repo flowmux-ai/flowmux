@@ -63,6 +63,7 @@ impl WorktreePanel {
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("flowmux-worktree-panel-header");
+        header.add_css_class("flowmux-panel-header");
 
         let title_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         title_box.set_hexpand(true);
@@ -71,6 +72,7 @@ impl WorktreePanel {
         title.set_xalign(0.0);
         let repository_label = gtk::Label::new(None);
         repository_label.add_css_class("dim-label");
+        repository_label.add_css_class("caption");
         repository_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         repository_label.set_xalign(0.0);
         title_box.append(&title);

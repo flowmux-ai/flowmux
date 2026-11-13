@@ -345,7 +345,7 @@ impl Sidebar {
         footer_actions.set_halign(gtk::Align::Start);
         footer_actions.set_widget_name("flowmux-footer-actions");
         let footer_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::External)
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .hexpand(true)
             .child(&footer_actions)

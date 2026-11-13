@@ -446,8 +446,8 @@ impl WindowController {
                 let labels = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 labels.set_margin_top(8);
                 labels.set_margin_bottom(8);
-                labels.set_margin_start(10);
-                labels.set_margin_end(10);
+                labels.set_margin_start(12);
+                labels.set_margin_end(12);
                 let location = gtk::Label::builder()
                     .label(&title)
                     .xalign(0.0)

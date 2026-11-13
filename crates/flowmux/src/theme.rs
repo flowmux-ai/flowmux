@@ -725,10 +725,11 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 }}
 .flowmux-session-flow-header button {{
     color: {fg};
-    min-height: 22px;
+    min-height: 24px;
     min-width: 24px;
-    padding: 0 6px;
-    margin: 3px 0;
+    padding: 0 8px;
+    margin: 4px 0;
+    border-radius: 6px;
 }}
 .flowmux-session-flow-header button:hover,
 .flowmux-session-flow-header button:checked {{
@@ -737,7 +738,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-session-flow-header separator {{
     background-color: {border};
     min-width: 1px;
-    margin: 7px 4px;
+    margin: 8px 4px;
 }}
 .flowmux-file-browser {{
     background-color: {sidebar};
@@ -745,10 +746,10 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     border-left: 1px solid {border};
 }}
 .flowmux-file-browser.focused {{
-    border-left: 2px solid {focus};
+    box-shadow: inset 2px 0 0 {focus};
 }}
 .flowmux-file-browser-header {{
-    padding: 8px 8px 6px 10px;
+    padding: 8px 12px;
     border-bottom: 1px solid {border};
 }}
 .flowmux-file-browser.focused .flowmux-file-browser-header {{
@@ -758,7 +759,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     background: transparent;
 }}
 .flowmux-file-browser-row {{
-    min-height: 24px;
+    min-height: 28px;
 }}
 .flowmux-file-browser-row:hover {{
     background-color: {sidebar_hover};
@@ -770,7 +771,8 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     background-color: {control_hover};
 }}
 .flowmux-file-browser-row.focused {{
-    background-color: {control_hover};
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
 }}
 .flowmux-file-browser-row.cut {{
     opacity: 0.45;
@@ -781,25 +783,63 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     border-left: 1px solid {border};
 }}
 .flowmux-worktree-panel.focused {{
-    border-left: 2px solid {focus};
+    box-shadow: inset 2px 0 0 {focus};
 }}
 .flowmux-worktree-panel-header {{
-    padding: 8px 8px 6px 10px;
+    padding: 8px 12px;
     border-bottom: 1px solid {border};
 }}
 .flowmux-worktree-list {{
     background: transparent;
 }}
-.flowmux-worktree-row:hover,
-.flowmux-worktree-row:selected {{
+.flowmux-worktree-row:hover {{
     background-color: {sidebar_hover};
+}}
+.flowmux-worktree-row:selected {{
+    background-color: {control_hover};
+}}
+.flowmux-worktree-row:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
+}}
+.flowmux-panel-header button {{
+    min-height: 24px;
+    min-width: 24px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    box-shadow: none;
+}}
+.flowmux-panel-header button:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
+}}
+.flowmux-preference-row {{
+    min-height: 32px;
+    padding: 8px 12px;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 8px;
+    background-color: @card_bg_color;
+}}
+#flowmux-options-dialog .heading,
+.flowmux-panel-header .heading {{
+    font-weight: 600;
+}}
+.flowmux-notification-popover > contents {{
+    border-radius: 12px;
+}}
+#flowmux-review-files row {{
+    border-radius: 6px;
+}}
+#flowmux-review-files row:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
 }}
 .flowmux-clipboard-toast {{
     background-color: {toast_bg};
     color: {fg};
     border: 1px solid {toast_border};
     border-radius: 8px;
-    padding: 8px 14px;
+    padding: 8px 12px;
 }}
 .flowmux-overlay-menu {{
     background-color: {toast_bg};
@@ -811,15 +851,15 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-workspace-overview {{
     background-color: {bg};
     color: {fg};
-    padding: 14px 28px 28px 28px;
+    padding: 16px 24px 24px;
 }}
 .flowmux-agent-office {{
     background-color: {bg};
     color: {fg};
 }}
 .flowmux-office-summary {{
-    padding: 10px 16px;
-    color: #aebbc7;
+    padding: 12px 16px;
+    color: {subdued_fg};
 }}
 .flowmux-office-title {{
     background: #2a2233;
@@ -836,12 +876,12 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     background: #fffaf0;
     color: #241d33;
     border: 2px solid #2a2233;
-    border-bottom-width: 3px;
+    border-bottom-width: 2px;
     border-radius: 8px 8px 8px 2px;
     font-size: 13px;
     font-weight: 600;
-    padding: 3px 8px;
-    box-shadow: 2px 2px 0 alpha(#1d1530, 0.28);
+    padding: 4px 8px;
+    box-shadow: none;
 }}
 .flowmux-office-bubble.waiting {{
     background: #fff1c8;
@@ -868,6 +908,10 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     box-shadow: none;
     outline: none;
 }}
+.flowmux-office-resident:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -2px;
+}}
 .flowmux-office-nameplate {{
     background: alpha(#1d1530, 0.86);
     color: #fff4dc;
@@ -887,11 +931,15 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     background-color: transparent;
     border: 2px solid transparent;
     border-radius: 12px;
-    padding: 6px;
+    padding: 8px;
 }}
 .flowmux-workspace-overview-card:hover,
 .flowmux-workspace-overview-card:focus-visible {{
     background-color: {control_hover};
+}}
+.flowmux-workspace-overview-card:focus-visible {{
+    outline: 2px solid {focus_full};
+    outline-offset: -4px;
 }}
 .flowmux-workspace-overview-card.active {{
     border-color: {focus_full};
@@ -909,7 +957,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .flowmux-workspace-overview-picture {{
     background-color: {tabbar};
     border: 1px solid {border};
-    border-radius: 9px;
+    border-radius: 4px;
 }}
 .flowmux-workspace-overview-name {{
     color: {subdued_fg};
@@ -1545,7 +1593,7 @@ mod tests {
             ".flowmux-worktree-panel.focused {",
             ".flowmux-worktree-panel-header {",
             ".flowmux-worktree-list {",
-            ".flowmux-worktree-row:hover,",
+            ".flowmux-worktree-row:hover {",
             ".flowmux-worktree-row:selected {",
         ] {
             assert!(

@@ -130,7 +130,7 @@ fn build_dialog(
     let cursor_blink_switch = build_toggle_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
 
-    let general = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let general = gtk::Box::new(gtk::Orientation::Vertical, 8);
     general.set_margin_top(16);
     general.set_margin_bottom(16);
     general.set_margin_start(20);
@@ -904,10 +904,13 @@ fn about_body_with_version(version: &str) -> String {
 
 pub(crate) fn row(label_text: &str, value_widget: &impl IsA<gtk::Widget>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.add_css_class("flowmux-preference-row");
     let label = gtk::Label::new(Some(label_text));
     label.set_xalign(0.0);
     label.set_hexpand(true);
     label.set_halign(gtk::Align::Start);
+    label.set_mnemonic_widget(Some(value_widget));
+    value_widget.set_valign(gtk::Align::Center);
     row.append(&label);
     row.append(value_widget);
     row

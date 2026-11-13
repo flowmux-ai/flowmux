@@ -272,6 +272,7 @@ impl FileBrowserPanel {
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("flowmux-file-browser-header");
+        header.add_css_class("flowmux-panel-header");
 
         let title_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         title_box.set_hexpand(true);
@@ -280,6 +281,7 @@ impl FileBrowserPanel {
         title.set_xalign(0.0);
         let path_label = gtk::Label::new(None);
         path_label.add_css_class("dim-label");
+        path_label.add_css_class("caption");
         path_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         path_label.set_xalign(0.0);
         title_box.append(&title);
@@ -314,8 +316,8 @@ impl FileBrowserPanel {
 
         let load_more_button = gtk::Button::with_label("Show 500 more");
         load_more_button.add_css_class("flat");
-        load_more_button.set_margin_top(6);
-        load_more_button.set_margin_bottom(6);
+        load_more_button.set_margin_top(8);
+        load_more_button.set_margin_bottom(8);
         load_more_button.set_margin_start(16);
         load_more_button.set_margin_end(16);
         load_more_button.set_visible(false);

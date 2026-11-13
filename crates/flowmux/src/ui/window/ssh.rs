@@ -399,7 +399,7 @@ impl WindowController {
             .title("New SSH Workspace")
             .default_width(460)
             .build();
-        let form = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let form = gtk::Box::new(gtk::Orientation::Vertical, 12);
         for set in [
             gtk::Widget::set_margin_top,
             gtk::Widget::set_margin_bottom,
@@ -794,6 +794,11 @@ impl WindowController {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
         root.add_css_class("flowmux-ssh-workspace");
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        bar.add_css_class("flowmux-panel-header");
+        bar.set_margin_start(12);
+        bar.set_margin_end(12);
+        bar.set_margin_top(4);
+        bar.set_margin_bottom(4);
         let label = gtk::Label::new(Some(&format!(
             "SSH {} · {}{}",
             ws.location.display(),

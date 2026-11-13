@@ -104,12 +104,13 @@ impl UsagePopover {
         let manual_refresh = Rc::new(Cell::new(false));
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        root.set_margin_top(10);
-        root.set_margin_bottom(10);
-        root.set_margin_start(10);
-        root.set_margin_end(10);
+        root.set_margin_top(12);
+        root.set_margin_bottom(12);
+        root.set_margin_start(12);
+        root.set_margin_end(12);
 
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.add_css_class("flowmux-panel-header");
         let title = gtk::Label::new(Some("AI Usage"));
         title.add_css_class("heading");
         title.set_halign(gtk::Align::Start);
@@ -526,9 +527,9 @@ fn provider_card(
     let row = gtk::ListBoxRow::new();
     row.set_activatable(false);
     row.set_selectable(false);
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    content.set_margin_top(10);
-    content.set_margin_bottom(10);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
     content.set_margin_start(12);
     content.set_margin_end(12);
 
@@ -597,7 +598,7 @@ fn provider_card(
 }
 
 fn limit_row(window: &UsageWindow, animate: bool, pin: &gtk::ToggleButton) -> gtk::Widget {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
     root.set_margin_top(2);
 
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);

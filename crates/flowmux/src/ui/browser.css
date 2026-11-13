@@ -4,7 +4,7 @@
     color: $fg;
 }
 .browser-toolbar {
-    padding: 6px 8px;
+    padding: 8px 12px;
     border-bottom: 1px solid $border;
     background-color: $surface;
 }
@@ -57,8 +57,8 @@ menubutton.browser-icon > button:checked,
 .browser-popover button:disabled { opacity: 0.4; }
 entry.browser-address {
     min-height: 30px;
-    padding: 0 10px;
-    border-radius: 9px;
+    padding: 0 12px;
+    border-radius: 8px;
     background-color: $bg;
     color: $fg;
     border: 1px solid $border;
@@ -82,7 +82,7 @@ button.browser-zoom-badge {
     font-size: 0.9em;
 }
 .browser-task-bar {
-    padding: 4px 8px;
+    padding: 4px 12px;
     border-bottom: 1px solid $border;
     border-left: 3px solid $accent;
     background-color: $surface;
@@ -103,17 +103,17 @@ button.browser-zoom-badge {
 .browser-result {
     padding: 12px;
     border: 1px solid $border;
-    border-radius: 10px;
+    border-radius: 8px;
     background-color: $bg;
 }
 .browser-result expander { font-size: 0.95em; }
-.browser-find { padding: 6px 8px; border-bottom: 1px solid $border; }
+.browser-find { padding: 8px 12px; border-bottom: 1px solid $border; }
 .browser-popover > contents {
     background-color: $surface;
     color: $fg;
     border: 1px solid $border;
     border-radius: 12px;
-    padding: 6px;
+    padding: 8px;
 }
-.browser-menu { padding: 6px; }
-.browser-menu-action { padding: 4px 10px; }
+.browser-menu { padding: 4px; }
+.browser-menu-action { padding: 4px 12px; }

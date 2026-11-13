@@ -119,6 +119,7 @@ impl NotificationPopover {
         root.set_margin_end(12);
         root.set_size_request(580, -1);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.add_css_class("flowmux-panel-header");
         let heading = gtk::Label::new(Some("Notifications"));
         heading.add_css_class("title-3");
         heading.set_hexpand(true);
