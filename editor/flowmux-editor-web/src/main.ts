@@ -1541,6 +1541,8 @@ function applyAppearance(appearance: EditorAppearance): void {
   root.style.setProperty("--text", appearance.foreground);
   root.style.setProperty("--accent", appearance.cursor);
   root.style.setProperty("--selection", appearance.selectionBackground);
+  root.style.setProperty("--warning", appearance.dark ? "#e1ad72" : "#8a5200");
+  root.style.setProperty("--danger", appearance.dark ? "#ec8a8a" : "#b42318");
 }
 
 function setMinimapEnabled(enabled: boolean): void {

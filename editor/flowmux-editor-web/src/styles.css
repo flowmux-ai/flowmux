@@ -9,7 +9,7 @@
   --accent: #72b7a8;
   --selection: #365c59a0;
   --warning: #e1ad72;
-  --danger: #e07a7a;
+  --danger: #ec8a8a;
   --ui-font: Inter, "SF Pro Text", "Noto Sans", "Apple SD Gothic Neo", sans-serif;
 }
 
@@ -43,7 +43,7 @@ body {
   z-index: 2;
   top: 8px;
   right: 112px;
-  padding: 3px 7px;
+  padding: 4px 8px;
   border-radius: 4px;
   color: var(--warning);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
@@ -60,12 +60,12 @@ body {
   z-index: 4;
   left: 50%;
   bottom: 24px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 96%, transparent);
-  box-shadow: 0 5px 20px rgb(0 0 0 / 30%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
   font-weight: 600;
   pointer-events: none;
   transform: translateX(-50%);
@@ -79,16 +79,16 @@ body {
   position: absolute;
   z-index: 3;
   top: 38px;
-  left: 10px;
-  right: 10px;
+  left: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
-  box-shadow: 0 5px 20px rgb(0 0 0 / 30%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
 }
 
 .conflict-banner[hidden] {
@@ -98,7 +98,7 @@ body {
 .conflict-banner span {
   flex: 1;
   min-width: 100px;
-  color: #ffd8d8;
+  color: var(--danger);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -106,9 +106,9 @@ body {
 
 .conflict-banner button {
   flex: 0 0 auto;
-  padding: 4px 7px;
+  padding: 4px 8px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 75%, var(--text) 8%);
   font: inherit;
@@ -160,10 +160,10 @@ body {
   width: min(420px, calc(100% - 32px));
   padding: 20px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--text);
   background: var(--panel);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
 }
 
 .close-dialog::backdrop {
@@ -190,7 +190,7 @@ body {
 
 .close-dialog button {
   min-width: 72px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
   border-radius: 6px;
   color: var(--text);
@@ -209,7 +209,7 @@ body {
 }
 
 .close-dialog button.destructive {
-  color: #ffd8d8;
+  color: var(--danger);
 }
 
 .close-dialog button:disabled {
@@ -219,9 +219,9 @@ body {
 .dialog-path {
   width: 100%;
   margin: 0 0 8px;
-  padding: 8px 9px;
+  padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 75%, var(--text) 8%);
   font: inherit;
@@ -241,12 +241,12 @@ body {
 .search-dialog {
   width: min(680px, calc(100% - 32px));
   max-height: min(620px, calc(100% - 32px));
-  padding: 10px;
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--text);
   background: var(--panel);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
 }
 
 .search-dialog::backdrop {
@@ -270,7 +270,7 @@ body {
 .search-dialog input,
 .search-dialog button {
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--text);
   background: color-mix(in srgb, var(--panel) 75%, var(--text) 8%);
   font: inherit;
@@ -284,7 +284,7 @@ body {
 
 #search-query {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   font-size: 13px;
 }
 
@@ -298,7 +298,7 @@ body {
 .search-options {
   display: grid;
   grid-template-columns: auto auto auto minmax(120px, 1fr) minmax(120px, 1fr);
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 
@@ -308,7 +308,7 @@ body {
 
 .search-options button {
   min-width: 32px;
-  padding: 5px 7px;
+  padding: 4px 8px;
 }
 
 .search-options button[aria-pressed="true"] {
@@ -318,12 +318,12 @@ body {
 
 .search-options input {
   min-width: 0;
-  padding: 5px 7px;
+  padding: 4px 8px;
 }
 
 .search-status {
   min-height: 18px;
-  margin: 7px 2px 3px;
+  margin: 8px 4px 4px;
   color: var(--muted);
 }
 
@@ -335,15 +335,22 @@ body {
 .search-result {
   display: block;
   width: 100%;
-  padding: 7px 9px;
+  padding: 8px 12px;
   border: 0 !important;
   text-align: left;
   background: transparent !important;
 }
 
-.search-result:hover,
+.search-result:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent) !important;
+}
+
 .search-result.is-selected {
   background: var(--selection) !important;
+}
+
+.search-result:focus-visible {
+  outline-offset: -2px;
 }
 
 .search-result-path,

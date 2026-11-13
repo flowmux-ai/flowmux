@@ -56,7 +56,7 @@ retain it), and appropriate verification before the work is complete.
 - [x] Baseline native checks (`baseline-native.log`, `MACOS_NATIVE_SMOKE_OK`)
 - [x] Common shell and status styling (20 theme tests; native light/dark selection geometry)
 - [x] Panels, dialogs and supporting surfaces
-- [ ] Session Flow and content-specific polish
+- [x] Session Flow and content-specific polish
 - [ ] Final regression and visual verification
 - [ ] Work-unit commits and final scope audit
 
@@ -90,6 +90,37 @@ The additional review-only native check exposed a stale expectation that resizin
 always scrolls the footer to its right edge. It failed with the original External
 scrollbar policy too (`footer-original-policy.log`). The check now drives the real
 wheel controller to both ends, verifies first/last button bounds and preserved
-ordering, and repeats reachability after resize. Non-overlay automatic scrolling
-makes overflow discoverable. The complete review-only native run passed
+ordering, and repeats reachability after resize. The native overlay scrollbar and a scroll hint
+make overflow discoverable without reducing button height. The complete review-only native run passed
 (`footer-reachable.log`), including comment storage and handoff.
+
+### Content and preferences pass
+
+Session Flow retains its dark navy canvas and cyan/violet node meanings, centered
+header, hit radii and all graph operations. Flat cached nodes replace glow and the
+background star animation; a non-interactive empty-state overlay explains how
+relationships appear. Labels inherit the interface font. Presentation captures use
+a separate mapped fixture so live shell presence polling cannot erase test data.
+
+The editor keeps Monaco and its action order. Its surrounding dialogs, search rows
+and status overlays now share spacing and smaller neutral shadows. Warning and
+error text use separate light/dark values; the macOS WebKit test measures actual
+computed foreground/background contrast against 4.5:1. Markdown spacing, heading
+weight and link focus were aligned without changing the renderer or link routing.
+
+Preferences retain the native grouped lists, immediate apply, reset behavior and
+page order. Their repeated cookie-only checkbox descriptions were removed from
+unrelated restoration settings; row labels identify each control. Theme/Update
+fallback icons are bundled for hosts without the corresponding system icons.
+
+Retained after review: Welcome's existing 24px margins and native navigation,
+SSH/confirmation dialogs' safe action defaults, native image/Lottie controls,
+provider artwork, terminal palettes, Office pixel scenes, and native keybinding,
+skill and update controls. These already follow the chosen direction; their
+behavior is covered by the platform gates rather than being rewritten.
+
+Focused native checks passed: Session Flow entry points/layout/empty-state input,
+all five preference pages in light and dark themes, browser chrome at narrow
+widths, usage pins, zoomed-tab reorder, Office screen cache, and footer/review
+interaction. The shipped editor bundle rebuilt and verified with 41 web tests.
+The final platform gates and native editor contrast check remain pending here.

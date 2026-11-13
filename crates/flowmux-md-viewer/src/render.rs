@@ -194,7 +194,7 @@ body {{
 h1, h2, h3, h4, h5, h6 {{
   line-height: 1.25;
   margin: 1.4em 0 0.65em;
-  font-weight: 650;
+  font-weight: 600;
 }}
 h1 {{ font-size: 2em; }}
 h2 {{ font-size: 1.5em; }}
@@ -223,6 +223,10 @@ a {{
 a:hover {{
   text-decoration: underline;
 }}
+a:focus-visible {{
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}}
 blockquote {{
   color: var(--muted);
   border-left: 0.25em solid var(--border);
@@ -241,7 +245,7 @@ pre {{
   overflow: auto;
   padding: 16px;
   background: var(--code-bg);
-  border-radius: 6px;
+  border-radius: 8px;
 }}
 pre code {{
   display: block;
@@ -280,7 +284,7 @@ table {{
 }}
 th, td {{
   border: 1px solid var(--border);
-  padding: 6px 13px;
+  padding: 8px 12px;
 }}
 tr:nth-child(2n) {{
   background: color-mix(in srgb, var(--code-bg) 60%, transparent);
