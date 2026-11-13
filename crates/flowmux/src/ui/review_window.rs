@@ -165,7 +165,7 @@ impl ReviewWindow {
         file_header.add_css_class("flowmux-panel-header");
         heading.set_hexpand(true);
         file_header.append(&heading);
-        let comment = gtk::Button::with_label("Add comment");
+        let comment = gtk::Button::with_label("Line comment");
         comment.set_tooltip_text(Some("Comment on selected lines (C)"));
         let whole_file = gtk::Button::with_label("File comment");
         whole_file.set_tooltip_text(Some("Comment on whole file"));
