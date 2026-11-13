@@ -57,8 +57,8 @@ retain it), and appropriate verification before the work is complete.
 - [x] Common shell and status styling (20 theme tests; native light/dark selection geometry)
 - [x] Panels, dialogs and supporting surfaces
 - [x] Session Flow and content-specific polish
-- [ ] Final regression and visual verification
-- [ ] Work-unit commits and final scope audit
+- [x] Final regression and visual verification
+- [x] Work-unit commits and final scope audit
 
 ### Shell pass
 
@@ -123,4 +123,53 @@ Focused native checks passed: Session Flow entry points/layout/empty-state input
 all five preference pages in light and dark themes, browser chrome at narrow
 widths, usage pins, zoomed-tab reorder, Office screen cache, and footer/review
 interaction. The shipped editor bundle rebuilt and verified with 41 web tests.
-The final platform gates and native editor contrast check remain pending here.
+
+### Final verification
+
+- macOS regression: all 45 required phases passed, with records combined in
+  `macos-phase-summary.json`. This was not one uninterrupted successful run:
+  inherited Codex session identifiers were removed from the test environment,
+  the update-banner expectation was corrected to `Restart Flowmux`, and the gate
+  resumed at the failed phase. One WebDriver hover check lost native document
+  focus; its standalone recheck and the resumed phase both passed unchanged.
+  Earlier results remain in `macos-before-resume.log` and
+  `macos-before-webdriver-resume.log`; the final segment is `macos-regression.log`.
+- Linux regression: all 25 test groups are covered by passing results in an
+  isolated Ubuntu 24.04 ARM64 VM checkout. The full run passed 24 groups,
+  including all workspace tests (929 passed in the application binary), then
+  exposed duplicate `Add comment` accessibility names in the SSH review.
+  The line-comment entry is now `Line comment`, distinct from the save action.
+  After rebuilding, the entire SSH fixture passed, including remote review,
+  comments, history and feedback delivery (`linux-ssh-review-final.log`).
+  The original gate's exit remains 1 in `linux-regression.log`; earlier groups
+  were not redundantly rerun for this button-label correction. The final native
+  macOS review check also passed (`review-final-native.log`).
+  WebKit ran under the repository's scoped AppArmor profile, with its sandbox
+  enabled. Production sources were copied to the VM rather than modifying its
+  existing working checkout.
+- Linux XTest pointer checks passed sequentially for the sidebar divider,
+  split dividers and restored split dividers (`linux-pointer-drags.log`). All
+  three report zero resize movement outside the resize cursor and successful
+  adjacent terminal text selection. An earlier overlapping test invocation
+  tripped the harness's unrelated-process lifecycle guard; the final run used
+  no concurrent Linux GUI tests. Source hashes match the isolated checkout
+  (`source-manifest.json`, `linux-source-parity.json`).
+- The default editor-recovery phase includes `MACOS_EDITOR_STATUS_CONTRAST_OK`
+  and retains renderer retry and deleted-file recovery checks. Actual WebKit
+  computed warning/error contrast meets 4.5:1 in light and dark themes.
+- Additional mapped Office testing passed 12 cycles with 32 residents and
+  `OFFICE_STABILITY_OK` (`office-stress.log`). This checks short-run interaction
+  and resource behavior, not indefinite leak freedom.
+- Rendered review covers light/dark shell and all five preferences pages,
+  browser chrome at 480/720/1200px and larger fonts, and populated/empty Session
+  Flow. Captures are in `final/`, `session-flow.png` and `session-flow-empty.png`
+  beneath the evidence directory.
+- UI and Markdown crates pass Clippy for all targets with `native-smoke` and
+  warnings denied (`clippy-ui.log`). Full-workspace Clippy stops at the unchanged
+  redundant `let mut cmd = cmd` in `crates/flowmux-cli/src/main.rs:1494`
+  (`clippy.log`); that unrelated code is outside this change.
+
+No push, hosted CI, installation or release is part of this branch.
+Physical mouse/trackpad testing across every hardware configuration has not been
+performed; automated native input and the
+rendered checks above define the verified boundary.
