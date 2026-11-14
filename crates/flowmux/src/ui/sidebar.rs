@@ -321,10 +321,10 @@ impl Sidebar {
         // Route options through the bridge so the controller can present the window.
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         footer.add_css_class("flowmux-sidebar-toolbar");
-        footer.set_margin_top(8);
-        footer.set_margin_bottom(8);
-        footer.set_margin_start(8);
-        footer.set_margin_end(8);
+        footer.set_margin_top(2);
+        footer.set_margin_bottom(4);
+        footer.set_margin_start(4);
+        footer.set_margin_end(4);
         let options_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
         options_btn.add_css_class("flat");
         options_btn.set_tooltip_text(Some("Options"));
@@ -346,7 +346,7 @@ impl Sidebar {
         footer_actions.set_halign(gtk::Align::Start);
         footer_actions.set_widget_name("flowmux-footer-actions");
         let footer_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .hscrollbar_policy(gtk::PolicyType::External)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .hexpand(true)
             .child(&footer_actions)

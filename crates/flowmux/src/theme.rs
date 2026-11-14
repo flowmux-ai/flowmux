@@ -276,7 +276,7 @@ impl ResolvedTheme {
         ));
         let tab_active_bg_css = rgba_css(&shift_lightness(
             &self.bg,
-            if self.is_dark() { 0.085 } else { -0.075 },
+            if self.is_dark() { 0.055 } else { -0.055 },
         ));
         let control_hover_css = rgba_css(&blend_with_alpha(&self.fg, 0.09));
         // Fainter than control_hover so the active workspace row only
@@ -347,14 +347,13 @@ impl ResolvedTheme {
     padding: 0 4px;
 }}
 .flowmux-pane-tab {{
-    margin: 4px 2px;
+    margin: 2px 2px 0 0;
     border: 0;
     border-top: 2px solid transparent;
-    border-radius: 8px;
+    border-radius: 6px 6px 0 0;
 }}
 .flowmux-pane-tab.active {{
     background-color: {tab_active};
-    box-shadow: inset 0 -1px 0 {border};
 }}
 .flowmux-pane-tabs.has-multi-tabs > .flowmux-pane-tab.active {{
     border-top: 2px solid {focus};
@@ -362,7 +361,7 @@ impl ResolvedTheme {
 .flowmux-pane-tab-main {{
     min-height: 24px;
     padding: 0 8px;
-    border-radius: 6px 0 0 6px;
+    border-radius: 4px 0 0 0;
     color: {subdued_fg};
 }}
 .flowmux-pane-tab.active .flowmux-pane-tab-main {{
@@ -372,7 +371,7 @@ impl ResolvedTheme {
     min-height: 24px;
     min-width: 24px;
     padding: 0 4px;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 4px 0 0;
     opacity: 0.66;
 }}
 .flowmux-pane-tab-close,
@@ -386,14 +385,12 @@ menubutton.flowmux-pane-tool > button {{
     opacity: 1.0;
 }}
 .flowmux-pane-tools {{
-    margin: 4px;
-    border-radius: 8px;
-    background-color: {sidebar_hover};
+    margin: 0 2px 0 4px;
 }}
 .flowmux-pane-tool {{
     min-height: 24px;
     min-width: 24px;
-    margin-top: 0;
+    margin-top: 2px;
     padding: 0;
     border-radius: 6px;
     opacity: 0.72;
@@ -420,15 +417,11 @@ paned > separator {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
 }}
-.flowmux-sidebar-toolbar {{
-    padding: 4px;
-    border: 1px solid alpha(@sidebar_fg_color, 0.08);
-    border-radius: 10px;
-    background-color: alpha(@sidebar_fg_color, 0.035);
-}}
-.flowmux-sidebar-toolbar button,
-.flowmux-sidebar-toolbar menubutton > button {{
-    border-radius: 6px;
+.flowmux-sidebar-toolbar button:checked,
+.flowmux-sidebar-toolbar button:active {{
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
 }}
 .flowmux-notification-popover {{
     font-size: 0.92em;
@@ -534,7 +527,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 }}
 .navigation-sidebar row {{
     color: @sidebar_fg_color;
-    border-radius: 10px;
+    border-radius: 6px;
     margin: 2px 8px;
     padding: 8px 12px;
 }}
@@ -580,9 +573,12 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .navigation-sidebar > row.activatable:selected:active,
 .navigation-sidebar > row.activatable:selected.has-open-popup {{
     box-shadow: inset 3px 0 0 {focus_full};
-    background-color: alpha(@sidebar_fg_color, 0.06);
 }}
-/* Hover remains neutral; the inset accent keeps selection identifiable. */
+/* Hover and press share one faint tint across every workspace row, so
+   hovering only whispers and clicking introduces no separate color step.
+   The :selected variants are spelled out to outrank libadwaita's own
+   selected-hover/active rules; the idle :selected state stays untinted
+   (handled by the suppression block above). */
 .navigation-sidebar row.activatable:hover,
 .navigation-sidebar row.activatable:active,
 .navigation-sidebar row.activatable:selected:hover,
@@ -591,7 +587,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 .navigation-sidebar > row.activatable:active,
 .navigation-sidebar > row.activatable:selected:hover,
 .navigation-sidebar > row.activatable:selected:active {{
-    background-color: alpha(@sidebar_fg_color, 0.09);
+    background-color: alpha(@sidebar_fg_color, 0.055);
 }}
 .navigation-sidebar row.activatable:selected label,
 .navigation-sidebar row.activatable:selected label.heading,

@@ -243,6 +243,12 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         gtk::CssProvider::new(),
         None,
     );
+    gtk::style_context_add_provider_for_display(
+        &gtk::prelude::WidgetExt::display(&controller.window),
+        &controller.css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    controller.apply_runtime_theme(&controller.options.borrow().clone());
     controller.render_workspace(&ws);
     spawn_dispatch_loop(rx, controller.clone());
     controller.window.present();
@@ -533,9 +539,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     }
 
     let review_only = std::env::var_os("FLOWMUX_REVIEW_SMOKE_ONLY").is_some();
-    if review_only {
-        check_sidebar_footer(&controller).await;
-    }
+    check_sidebar_footer(&controller).await;
     println!("MACOS_MENU_TOGGLE_START");
     crate::ui::popover_pos::menu_toggle_smoke().await;
     for _ in 0..2 {
@@ -1148,11 +1152,13 @@ async fn check_sidebar_footer(controller: &WindowController) {
     );
     let previous = controller.sidebar_split.position();
     let adjustment = scroll.hadjustment();
+    let previous_scroll = adjustment.value();
     controller.sidebar_split.set_position(210);
-    wait_until("footer exposes its scrollbar", || {
-        adjustment.upper() > adjustment.page_size() && scroll.hscrollbar().is_mapped()
+    wait_until("footer scrolls without an overlay scrollbar", || {
+        adjustment.upper() > adjustment.page_size() && !scroll.hscrollbar().is_mapped()
     })
     .await;
+    assert_eq!(scroll.hscrollbar_policy(), gtk::PolicyType::External);
     let viewport = scroll.child().unwrap();
     for button in &buttons {
         let bounds = button.compute_bounds(&viewport).unwrap();
@@ -1209,7 +1215,30 @@ async fn check_sidebar_footer(controller: &WindowController) {
         last.x() >= 0.0 && last.x() + last.width() <= scroll.width() as f32 + 1.0
     })
     .await;
+    assert!(
+        !scroll.hscrollbar().is_mapped(),
+        "scrolling must not expose a scrollbar over buttons"
+    );
     controller.sidebar_split.set_position(previous);
+    wait_for_paint(&controller.window).await;
+    adjustment.set_value(previous_scroll);
+    let button = buttons[0].clone().downcast::<gtk::ToggleButton>().unwrap();
+    let settings = button.settings();
+    let animations = settings.is_gtk_enable_animations();
+    settings.set_gtk_enable_animations(false);
+    let active = button.is_active();
+    for checked in [false, true] {
+        button.set_active(checked);
+        wait_for_paint(&controller.window).await;
+        capture_native_window(
+            controller.window.upcast_ref(),
+            &format!("footer-checked-{checked}"),
+        )
+        .await;
+    }
+    button.set_active(active);
+    wait_for_paint(&controller.window).await;
+    settings.set_gtk_enable_animations(animations);
     println!("DIFF_REVIEW_SIDEBAR_FOOTER_OK");
 }
 
@@ -1384,12 +1413,6 @@ async fn check_preferences_presentation(controller: &WindowController) {
 
 async fn check_theme_focus(controller: &WindowController) {
     use flowmux_config::options::Options;
-    let display = gtk::gdk::Display::default().unwrap();
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &controller.css_provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
     let badge = gtk::Label::new(Some("Focused pane"));
     badge.add_css_class("flowmux-pane-zoom-badge");
     let window = gtk::Window::builder()
