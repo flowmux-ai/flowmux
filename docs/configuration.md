@@ -98,7 +98,9 @@ is clamped to `0..=100`. All three settings apply to open and new tabs.
 
 `zoom_percent` applies to terminal and browser surfaces. Terminal zoom is
 rounded to a whole-point font size instead of using VTE's fractional font
-scale, avoiding GTK text-damage artifacts during cursor blink. Editors keep
+scale, avoiding GTK text-damage artifacts during cursor blink. The options picker
+keeps the exact saved percentage, even between its whole-point suggestions;
+changing the base font size does not change that percentage. Editors keep
 their own zoom per tab and use the last changed editor zoom as the default for
 new tabs. The resolved theme plus `font_family` and `font_size` overrides are
 applied live to both terminal and editor text; editor selection and cursor

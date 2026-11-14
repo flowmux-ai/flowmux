@@ -227,6 +227,14 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         BrowserPane::check_native_lifetime(app.upcast_ref()).await;
         return;
     }
+    if std::env::var_os("FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY").is_some() {
+        flowmux_config::options::save(
+            &flowmux_config::options::Options::default()
+                .with_zoom_percent(75)
+                .with_font_size(Some(16.0)),
+        )
+        .unwrap();
+    }
     let owner = WindowOwner::current();
     let store = StateStore::new_lazy_window(State::default(), owner);
     let workspace = store
@@ -253,6 +261,11 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     spawn_dispatch_loop(rx, controller.clone());
     controller.window.present();
     wait_until("window mapped", || controller.window.is_mapped()).await;
+    if std::env::var_os("FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY").is_some() {
+        options_merge::check_zoom(&controller, workspace, terminal_pane).await;
+        controller.window.destroy();
+        return;
+    }
     if std::env::var_os("FLOWMUX_CHROME_STYLE_SMOKE_ONLY").is_some() {
         check_theme_focus(&controller).await;
         check_shell_geometry(&controller).await;

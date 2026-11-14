@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::*;
 use flowmux_config::options::{self, AgentSortMode};
+use vte::prelude::*;
 
 pub(super) fn control(window: &gtk::Window, label: &str) -> gtk::Widget {
     let mut stack = vec![window.clone().upcast::<gtk::Widget>()];
@@ -120,4 +121,120 @@ pub(super) async fn check(app: &adw::Application) {
     first.window.destroy();
     second.window.destroy();
     println!("MACOS_OPTIONS_FIELD_MERGE_OK");
+}
+
+pub(super) async fn check_zoom(
+    controller: &WindowController,
+    workspace: WorkspaceId,
+    pane: PaneId,
+) {
+    let original = controller
+        .pane_registry
+        .borrow()
+        .active_terminal(pane)
+        .unwrap()
+        .clone();
+    let assert_font = |terminal: &crate::ui::pane_terminal::PaneTerminal, points: f64| {
+        assert_eq!(terminal.widget.font_scale(), 1.0);
+        assert_eq!(
+            terminal.widget.font().unwrap().size() as f64 / gtk::pango::SCALE as f64,
+            points
+        );
+    };
+    assert_font(&original, 12.0);
+    let window = dialog(controller).await;
+    let zoom = control(&window, "Global zoom (%)")
+        .downcast::<gtk::DropDown>()
+        .unwrap();
+    let displayed = |zoom: &gtk::DropDown| {
+        zoom.selected_item()
+            .unwrap()
+            .downcast::<gtk::StringObject>()
+            .unwrap()
+            .string()
+            .to_string()
+    };
+    assert_eq!(displayed(&zoom), "75%");
+    assert_eq!(
+        control(&window, "Font size (pt)")
+            .downcast::<gtk::SpinButton>()
+            .unwrap()
+            .value(),
+        16.0
+    );
+    for (percent, points) in [(100, 16.0), (50, 8.0), (75, 12.0)] {
+        let model = zoom.model().unwrap();
+        let index = (0..model.n_items())
+            .find(|index| {
+                model
+                    .item(*index)
+                    .unwrap()
+                    .downcast::<gtk::StringObject>()
+                    .unwrap()
+                    .string()
+                    == format!("{percent}%")
+            })
+            .unwrap();
+        zoom.set_selected(index);
+        wait_until("zoom option saved", || {
+            options::load().zoom_percent == percent
+        })
+        .await;
+        assert_font(&original, points);
+        wait_for_paint(&controller.window).await;
+    }
+    super::capture_native_window(&window, "zoom-75-font-16-options").await;
+    window.close();
+    let (_, surface) = controller
+        .store
+        .add_terminal_surface_to_pane(pane, None)
+        .await
+        .unwrap();
+    controller
+        .attach_or_rerender_surface(workspace, pane, surface, None)
+        .await
+        .unwrap();
+    let new = controller
+        .pane_registry
+        .borrow()
+        .active_terminal(pane)
+        .unwrap()
+        .clone();
+    assert_font(&new, 12.0);
+    assert_eq!(original.widget.char_height(), new.widget.char_height());
+    super::capture_native_window(controller.window.upcast_ref(), "zoom-75-font-16-terminal").await;
+    println!("MACOS_OPTIONS_ZOOM_FONT_OK saved=75 base_pt=16 terminal_pt=12 scale=1");
+
+    let mut saved = options::load();
+    saved.zoom_percent = 85;
+    options::save(&saved).unwrap();
+    *controller.options.borrow_mut() = saved.clone();
+    controller.apply_runtime_theme(&saved);
+    let window = dialog(controller).await;
+    let zoom = control(&window, "Global zoom (%)")
+        .downcast::<gtk::DropDown>()
+        .unwrap();
+    assert_eq!(
+        displayed(&zoom),
+        "85%",
+        "opening options must show the applied zoom exactly"
+    );
+    control(&window, "Font size (pt)")
+        .downcast::<gtk::SpinButton>()
+        .unwrap()
+        .set_value(18.0);
+    wait_until("font option saved", || {
+        options::load().font_size == Some(18.0)
+    })
+    .await;
+    assert_eq!(
+        options::load().zoom_percent,
+        85,
+        "editing font size must not change zoom"
+    );
+    assert_eq!(displayed(&zoom), "85%");
+    assert_font(&original, 15.0);
+    assert_font(&new, 15.0);
+    window.close();
+    println!("MACOS_OPTIONS_ZOOM_DISPLAY_OK");
 }

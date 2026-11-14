@@ -94,6 +94,10 @@ run_phase native 600 cargo test -p flowmux --test macos_native --features native
     2>&1 | tee "$report_dir/native-smoke.log"
 grep -q '^MACOS_NATIVE_SMOKE_OK$' "$report_dir/native-smoke.log"
 
+FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY=1 run_phase options-zoom 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
+    2>&1 | tee "$report_dir/options-zoom.log"
+grep -q '^MACOS_OPTIONS_ZOOM_DISPLAY_OK$' "$report_dir/options-zoom.log"
+
 FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY=1 run_phase boot-restore 180 cargo test -p flowmux --test macos_native --features native-smoke --locked \
     2>&1 | tee "$report_dir/boot-restore.log"
 grep -q '^MACOS_BOOT_RESTORE_POLICY_OK$' "$report_dir/boot-restore.log"

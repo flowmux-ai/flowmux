@@ -983,15 +983,16 @@ impl ZoomPicker {
     }
 
     fn rebuild_with_current(&self, font_size: f64, current: u16) {
-        let values = valid_zoom_percentages(font_size);
+        let current = Options::clamp_zoom(current);
+        let mut values = valid_zoom_percentages(font_size);
+        // Font rounding must not silently change the saved global zoom.
+        if !values.contains(&current) {
+            values.push(current);
+            values.sort_unstable();
+        }
         let labels: Vec<String> = values.iter().map(|value| format!("{value}%")).collect();
         let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let selected = values
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, value)| value.abs_diff(current))
-            .map(|(index, _)| index)
-            .unwrap_or(0);
+        let selected = values.iter().position(|value| *value == current).unwrap();
         self.syncing.set(true);
         self.drop
             .set_model(Some(&gtk::StringList::new(&label_refs)));
@@ -1990,14 +1991,15 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn zoom_picker_only_exposes_whole_point_values() {
+    fn zoom_picker_preserves_applied_percentage_when_rounding_fonts() {
         let picker = ZoomPicker::new(85, 12.0);
-        assert_eq!(picker.selected(), 83);
+        assert_eq!(picker.selected(), 85);
         assert_eq!(picker.values.borrow().first(), Some(&50));
         assert_eq!(picker.values.borrow().last(), Some(&200));
-        assert_eq!(picker.drop.model().map(|model| model.n_items()), Some(19));
+        assert_eq!(picker.drop.model().map(|model| model.n_items()), Some(20));
 
         picker.rebuild(14.0);
+        assert_eq!(picker.selected(), 85);
         assert!(picker.values.borrow().contains(&100));
         assert!(picker
             .values

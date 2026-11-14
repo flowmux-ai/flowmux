@@ -188,7 +188,7 @@ remain. `cosmic-restored/native.log` passes layout, entry-point, presentation an
 views are captured under `cosmic-restored/` in the evidence directory.
 
 
-### Aesthetic revision — 2026-11-14
+### Aesthetic revision — 2026-11-14 (chrome revised below)
 
 Audit of the rendered screen: General preferences repeated one heavy card for every
 setting, selected tabs blended into their bar, and footer tools sat against the
@@ -229,3 +229,41 @@ Compare `final/options-general-one-dark.png` with
 `shell-one-dark.png` images. The light-theme and bottom-of-settings captures are
 also retained. This revision uses focused regression checks; it does not claim a
 new full macOS/Linux CI gate run, hosted CI, release build or app installation.
+
+
+### Chrome and zoom correction — 2026-11-14
+
+User feedback rejected the detached chrome and persistent selection fills. The
+footer frame, inset tab styling, pane-tool background and added workspace fill
+are reverted. Footer buttons share the sidebar background in both toggle states;
+keyboard focus and hover feedback remain. Horizontal wheel scrolling and button
+order are retained, with the scrollbar policy set to `External` so no scrollbar
+covers the controls. Grouped preferences and cosmic Session Flow remain.
+
+The zoom picker previously rounded a saved percentage to its nearest whole-point
+suggestion: a saved 85% with a 16pt base font displayed 87%. It now includes and
+selects the exact saved percentage. Changing the base font preserves that zoom.
+Rendering still uses the documented whole-point terminal font size.
+
+Evidence is under `target/unslop-evidence/chrome-correction/`:
+
+- `zoom-before.log` reproduces the 85% versus 87% mismatch before the fix.
+- `OPTIONS_ZOOM.log` verifies startup at 75% with a 16pt base gives 12pt, live
+  changes to 100%/50%/75%, matching new-tab font metrics, exact 85% display, and
+  unchanged zoom when editing the base font. The native CI script includes this
+  regression check.
+- `REVIEW.log` checks footer overflow, first/last button reachability, resizing,
+  hidden scrollbar, and review interactions. `footer-checked-false.png` and
+  `footer-checked-true.png` have identical pixels in the bottom-left footer.
+  The harness now installs the actual app stylesheet before rendering and runs
+  the footer check in its default path as well.
+- `linux-focused.log`: all 18 preferences tests and three XTest divider cases
+  passed; terminal selection succeeds with zero unintended divider movement.
+- `native-full.log`: default macOS native harness passed, including the footer check.
+- `theme-tests.log`: all 20 theme tests passed. `clippy.log`: UI all-target Clippy
+  with native-smoke and warnings denied passed. Formatting and diff checks passed.
+
+The user's oversized-terminal report is not reproduced by those startup/live/
+new-tab paths. User settings and active sessions were not changed. This corrects
+the proven percentage mismatch; it does not establish the cause of that separate
+size report. No app installation, release or hosted CI is claimed.
