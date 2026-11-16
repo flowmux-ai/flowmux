@@ -844,7 +844,8 @@ impl FlowPanel {
             Some(panel.area.clone().upcast()),
             "empty guidance must not intercept canvas gestures"
         );
-        glib::future_with_timeout(std::time::Duration::from_secs(5), async {
+        // Layout can take 300 frame-clock steps; allow slower CI displays than 60 Hz.
+        glib::future_with_timeout(std::time::Duration::from_secs(30), async {
             while panel.animating.get() {
                 glib::timeout_future(std::time::Duration::from_millis(20)).await;
             }
