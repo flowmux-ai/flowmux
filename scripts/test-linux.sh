@@ -72,10 +72,65 @@ run_test session-save python3 scripts/test-session-save-gui.py \
 TMPDIR=/tmp run_test session-flow python3 scripts/test-session-flow-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp run_test managed-session-flow python3 scripts/test-agent-session-resume-gui.py --session-flow \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
 run_test pty-spawn-failure python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 TMPDIR=/tmp run_test agent-host python3 scripts/test-agent-host-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-ready python3 scripts/test-agent-ready-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-relay-replacement python3 scripts/test-agent-ready-gui.py --replacement \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-gui-replacement python3 scripts/test-agent-ready-gui.py --gui-replacement \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-binding-restore python3 scripts/test-agent-binding-restore-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-background-binding-restore python3 scripts/test-agent-binding-restore-gui.py --background \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-drag python3 scripts/test-agent-drag-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp run_test managed-agent-drag python3 scripts/test-agent-drag-gui.py --managed \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test managed-agent-tearoff python3 scripts/test-agent-drag-gui.py --managed --tearoff \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-native-hooks python3 scripts/test-agent-native-hooks-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-session-resume python3 scripts/test-agent-session-resume-gui.py --context \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test new-agent python3 scripts/test-agent-session-resume-gui.py --new-agent \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-termination python3 scripts/test-agent-session-resume-gui.py --termination \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-cli-controls python3 scripts/test-agent-session-resume-gui.py --cli-controls \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
   --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"

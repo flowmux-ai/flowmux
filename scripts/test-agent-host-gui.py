@@ -29,6 +29,12 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
+def launch_request_id():
+    # UUIDv7 timestamp stays fixed when replaying an evicted launch request.
+    value = ((time.time_ns() // 1_000_000) << 80) | (uuid.uuid4().int & ((1 << 80) - 1))
+    return str(uuid.UUID(int=(value & ~(0xf << 76) & ~(3 << 62)) | (7 << 76) | (2 << 62)))
+
+
 class HostClient:
     def __init__(self, path, role):
         self.stream = socket.socket(socket.AF_UNIX)
@@ -36,7 +42,7 @@ class HostClient:
         self.stream.connect(str(path))
         self.reader = self.stream.makefile("rb")
         self.identifier = 0
-        self.call("hello", version=2, role=role)
+        self.call("hello", version=13, role=role)
 
     def call(self, op, **fields):
         self.identifier += 1
@@ -65,6 +71,7 @@ def main():
     for name in ("gui", "cli", "host"):
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     harness = fixture.Harness(SimpleNamespace(gui=args.gui, cli=args.cli, protected_pid=args.protected_pid))
+    harness.env["GTK_A11Y"] = "atspi"
     options = harness.root / "config/flowmux/options.json"
     options.parent.mkdir(parents=True, exist_ok=True)
     options.write_text(json.dumps({"default_shell": "/bin/sh", "auto_resume_agent_sessions": True}))
@@ -78,6 +85,26 @@ def main():
     host_socket = harness.root / "run/flowmux-agent-host.sock"
     try:
         harness.start_display()
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = harness.env["DBUS_SESSION_BUS_ADDRESS"]
+        os.environ.pop("AT_SPI_BUS_ADDRESS", None)
+        import gi
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+        Atspi.set_timeout(3000, 3000)
+
+        def connection_failure_visible(process):
+            def walk(node):
+                if (node.get_role() == Atspi.Role.LABEL
+                        and node.get_name() == "Agent connection failed. Reopen from Agents to retry."
+                        and node.get_state_set().contains(Atspi.StateType.SHOWING)):
+                    return True
+                return any(walk(child) for index in range(node.get_child_count())
+                           if (child := node.get_child_at_index(index)))
+            desktop = Atspi.get_desktop(0)
+            return any(application.get_process_id() == process.pid and walk(application)
+                       for index in range(desktop.get_child_count())
+                       if (application := desktop.get_child_at_index(index)))
+
         app, gui_socket = harness.window("agent-host-first")
         if not args.service_start:
             with (harness.root / "host.log").open("w") as log:
@@ -93,12 +120,14 @@ with (root / 'starts').open('a') as file: file.write(str(os.getpid()) + '\\n')
 counter = 0
 received = 0
 pending = b''
+pause_output = False
 print('\\x1b[?1049h\\x1b[2J\\x1b[HSESSION:' + str(os.getpid()) + '\\r\\n한글 화면 e\\u0301', end='', flush=True)
 while True:
     counter += 1
     (root / 'progress.tmp').write_text(str(counter))
     (root / 'progress.tmp').replace(root / 'progress')
-    print('\\x1b[3;1HCOUNTER:' + str(counter) + '\\x1b[K', end='', flush=True)
+    if not pause_output:
+        print('\\x1b[3;1HCOUNTER:' + str(counter) + '\\x1b[K', end='', flush=True)
     if (root / 'hold-input').exists():
         time.sleep(0.1)
         continue
@@ -113,6 +142,22 @@ while True:
             (root / 'last-line-size').write_text(str(len(line)))
             text = line.decode('utf-8')
             if text == 'quit': sys.exit(0)
+            if text == 'sync-open':
+                pause_output = True
+                print('\\x1b[?2026h\\x1b[5;1HSYNC-TIMEOUT:한글 e\\u0301', end='', flush=True)
+                (root / 'sync-open').write_text('no more output until sync-end')
+                continue
+            if text == 'sync-end':
+                pause_output = False
+                print('\\x1b[?2026l', end='', flush=True)
+            if text == 'osc-open':
+                pause_output = True
+                print('\\x1b]8;;https://oversized.example/' + 'x' * (256 * 1024), end='', flush=True)
+                (root / 'osc-open').write_text('unterminated oversized hyperlink')
+                continue
+            if text == 'osc-end':
+                pause_output = False
+                print('\\x07\\x1b[6;1HOSC-RECOVERED:한글', end='', flush=True)
             if len(text) > 1024: text = 'bulk'
             print('\\x1b[4;1HACK:<' + text + '>\\x1b[K', end='', flush=True)
 ''')
@@ -157,7 +202,7 @@ while True:
             assert Path(args.cli).with_name("flowmux-daemon").samefile(args.host)
         control_connection = HostClient(host_socket, "relay")
         if not args.service_start:
-            launch = {"request_id": str(uuid.uuid4()), "provider": "fixture", "label": "isolated Agent Host fixture",
+            launch = {"request_id": launch_request_id(), "provider": "fixture", "label": "isolated Agent Host fixture",
                       "argv": ["/usr/bin/python3", "-u", str(provider), str(harness.root)],
                       "cwd": str(harness.root), "env": list(harness.env.items()) + [["TERM", "xterm-256color"]],
                       "size": {"rows": 24, "cols": 80}}
@@ -212,6 +257,81 @@ while True:
 
         verify_view(gui_socket)
         harness.pass_check("real Flowmux/VTE shows Host-owned alternate screen and round-trips Hangul input")
+
+        harness.send(gui_socket, target, 'sync-open')
+        fixture.wait_for(lambda: (harness.root / 'sync-open').exists(), 'unterminated synchronized output')
+        fixture.wait_for(lambda: 'SYNC-TIMEOUT:한글 e' in harness.screen(gui_socket, target),
+                         'Host expires synchronized output without further provider bytes')
+        harness.send(gui_socket, target, 'sync-end')
+        fixture.wait_for(lambda: 'ACK:<sync-end>' in harness.screen(gui_socket, target),
+                         'input after synchronized output expiry')
+        assert Path(f'/proc/{agent_pid}/stat').read_text().rsplit(') ', 1)[1].split()[19] == birth
+        harness.pass_check('unterminated synchronized output reaches live VTE without further output or process replacement')
+
+        harness.send(gui_socket, target, 'osc-open')
+        fixture.wait_for(lambda: (harness.root / 'osc-open').exists(), 'oversized unterminated OSC')
+        harness.send(gui_socket, target, 'osc-end')
+        fixture.wait_for(lambda: 'OSC-RECOVERED:한글' in harness.screen(gui_socket, target),
+                         'live VTE recovers after oversized OSC')
+        fixture.wait_for(lambda: 'ACK:<osc-end>' in harness.screen(gui_socket, target),
+                         'input after oversized OSC')
+        assert 'oversized.example' not in harness.screen(gui_socket, target)
+        harness.pass_check('oversized unterminated OSC is discarded and live VTE resumes output and input')
+
+        def current_agent():
+            return next(item for item in control_connection.call("list")["agents"]
+                        if item["instance"] == agent["instance"])
+
+        fixture.wait_for(lambda: current_agent()["view"], "owning GUI publishes its live location")
+        source_key = current_agent()["attachment"]["key"]
+        for outcome in ("abort", "disconnect", "timeout"):
+            candidate = HostClient(host_socket, "relay")
+            try:
+                request_id = str(uuid.uuid4())
+                candidate_surface = str(uuid.uuid4())
+                def prepare_candidate():
+                    try:
+                        return candidate.call("prepare_attach", instance=agent["instance"],
+                            epoch=agent["epoch"], request_id=request_id, view=None,
+                            require_gui=True, surface=candidate_surface, replace=source_key)
+                    except AssertionError as error:
+                        # Busy means this request was not started; wait for the prior EOF cleanup.
+                        assert "another attachment is being prepared" in str(error), error
+                        return None
+                prepared = fixture.wait_for(prepare_candidate, "replacement reservation after prior cleanup")
+                key = prepared["key"]
+                source_size = prepared["frame"]["size"]
+                attached = candidate.call("commit_attach", key=key, size={"rows": 12, "cols": 40})
+                candidate.call("resize", key=key, size={"rows": 16, "cols": 60})
+                assert attached["frame"]["size"] == source_size, (source_size, attached["frame"]["size"])
+                frame_size = candidate.call("frame", key=key, after=0, offset=0)["frame"]["size"]
+                assert frame_size == source_size, (source_size, frame_size)
+                assert current_agent()["attachment"]["key"] == source_key
+                location = current_agent()["view"]
+                assert location and (location["pane"], location["surface"]) == (target, agent_surface)
+                verify_view(gui_socket)
+                if outcome == "abort":
+                    candidate.call("abort_attach", key=key)
+                elif outcome == "disconnect":
+                    candidate.close()
+                else:
+                    deadline = time.monotonic() + 11
+                    while time.monotonic() < deadline:
+                        verify_view(gui_socket)
+                        candidate.call("keep_alive")
+                        time.sleep(0.2)
+                    try:
+                        candidate.call("view_ready", key=key, sequence=attached["frame"]["sequence"])
+                        raise RuntimeError("expired replacement took over the source")
+                    except AssertionError as error:
+                        assert "stale" in str(error), error
+                verify_view(gui_socket)
+                assert current_agent()["attachment"]["key"] == source_key
+                assert Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19] == birth
+                assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
+                harness.pass_check(f"replacement {outcome} before ready preserves the original GUI location, input and exact execution")
+            finally:
+                candidate.close()
         harness.rpc(gui_socket, "surface_close", pane=target, surface=agent_surface)
         reopened = harness.rpc(gui_socket, "agent_view_open", pane=target, instance=agent["instance"])
         agent_surface = reopened["surface_created"]["id"]
@@ -289,7 +409,8 @@ while True:
         blocked = subprocess.run(
             [args.cli, "--socket", str(host_socket), "agent-relay", "--require-gui",
              "--instance", agent["instance"], "--epoch", agent["epoch"]],
-            env=harness.env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+            env={**harness.env, "FLOWMUX_SURFACE_ID": agent_surface},
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
         assert blocked.returncode != 0 and "GUI management" in blocked.stderr, blocked
         assert f"SESSION:{agent_pid}" not in blocked.stdout
         assert host_alive()
@@ -337,7 +458,8 @@ while True:
         tab["kind"]["shell"] = "/bin/sh -c 'touch " + str(sentinel) + "; exec /bin/sh'"
         harness.state_path.write_text(json.dumps(state))
         app, gui_socket = harness.window("agent-host-wrong-epoch")
-        fixture.wait_for(lambda: "Agent Host" in harness.screen(gui_socket, target), "epoch mismatch visible")
+        # RUST_BACKTRACE can scroll relay stderr out of view; inspect the visible failure UI.
+        fixture.wait_for(lambda: connection_failure_visible(app), "epoch mismatch visible")
         assert f"SESSION:{agent_pid}" not in harness.screen(gui_socket, target)
         assert not sentinel.exists()
         assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
@@ -362,7 +484,7 @@ while True:
         control_connection = None
         harness.close_window(app)
         app, gui_socket = harness.window("agent-host-absent")
-        fixture.wait_for(lambda: "Agent" in harness.screen(gui_socket, target), "absent Host failure visible")
+        fixture.wait_for(lambda: connection_failure_visible(app), "absent Host failure visible")
         assert not host_socket.exists() and not sentinel.exists()
         assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
         assert any(tab["id"] == shell_surface for item in harness.tree(gui_socket)[0]["panes"] for tab in item["tabs"])
@@ -378,13 +500,13 @@ while True:
                 control_connection = HostClient(host_socket, "relay")
                 for execution in control_connection.call("list")["agents"]:
                     assert execution["cwd"] == str(harness.root), execution
-                    control_connection.call("terminate", instance=execution["instance"], mode="force")
+                    control_connection.call("terminate", instance=execution["instance"], epoch=execution["epoch"], mode="terminate")
             except (OSError, AssertionError):
                 pass
         if control_connection is not None:
             if agent_pid is not None and host_socket.exists():
                 try:
-                    control_connection.call("terminate", instance=agent["instance"], mode="force")
+                    control_connection.call("terminate", instance=agent["instance"], epoch=agent["epoch"], mode="terminate")
                     if host is not None:
                         host.wait(timeout=10)
                     else:

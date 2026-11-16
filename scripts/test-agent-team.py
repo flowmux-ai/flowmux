@@ -376,6 +376,45 @@ class TeamTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'No unique'):
                 team.source_context(args, 'flowmux')
 
+    def test_managed_origin_uses_host_before_stale_pane_and_codex_environment(self):
+        host = self.job / 'host.sock'
+        host.touch()
+        args = type('Args', (), dict(socket=None, pane=None))()
+        origin = {'socket': str(self.socket), 'pane': 'current'}
+        with patch.dict(os.environ, FLOWMUX_AGENT_INSTANCE_ID='instance', FLOWMUX_AGENT_HOST_EPOCH='epoch',
+                        FLOWMUX_SOCKET_PATH=str(host), FLOWMUX_PANE_ID='stale'), \
+                patch.object(team, 'flowmux', return_value=origin) as rpc:
+            self.assertEqual(team.source_context(args, 'flowmux'), (str(self.socket), 'current'))
+            rpc.assert_called_once_with('flowmux', str(host), 'identify')
+            with patch.dict(os.environ, CODEX_THREAD_ID='native-session'):
+                self.assertEqual(team.source_context(args, 'flowmux'), (str(self.socket), 'current'))
+                rpc.assert_called_with('flowmux', str(host), 'identify', '--session', 'native-session')
+            args.socket = str(self.socket)
+            args.pane = 'current'
+            self.assertEqual(team.source_context(args, 'flowmux'), (str(self.socket), 'current'))
+            rpc.assert_called_with('flowmux', str(host), 'identify')
+            args.pane = 'stale'
+            with self.assertRaisesRegex(ValueError, 'originating pane'):
+                team.source_context(args, 'flowmux')
+            args.pane = None
+            args.socket = str(host)
+            with self.assertRaisesRegex(ValueError, 'originating window'):
+                team.source_context(args, 'flowmux')
+            rpc.side_effect = RuntimeError('no_attached_view')
+            with self.assertRaisesRegex(RuntimeError, 'no_attached_view'):
+                team.source_context(args, 'flowmux')
+
+    def test_partial_managed_context_does_not_fall_back_to_ordinary_pane(self):
+        args = type('Args', (), dict(socket=None, pane=None))()
+        for marker in ('FLOWMUX_AGENT_INSTANCE_ID', 'FLOWMUX_AGENT_HOST_EPOCH'):
+            with self.subTest(marker=marker), \
+                    patch.dict(os.environ, {marker: 'partial', 'FLOWMUX_PANE_ID': 'stale',
+                                           'FLOWMUX_SOCKET_PATH': str(self.socket)}), \
+                    patch.object(team, 'flowmux', side_effect=RuntimeError('missing managed context')) as rpc:
+                with self.assertRaisesRegex(RuntimeError, 'missing managed context'):
+                    team.source_context(args, 'flowmux')
+                rpc.assert_called_once_with('flowmux', str(self.socket), 'identify')
+
     def test_local_origin_cannot_be_replaced_by_another_pane(self):
         args = type('Args', (), dict(socket=None, pane='replacement'))()
         with patch.dict(os.environ, FLOWMUX_SOCKET_PATH=str(self.socket), FLOWMUX_PANE_ID='source'):
