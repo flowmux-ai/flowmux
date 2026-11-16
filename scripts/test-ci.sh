@@ -30,6 +30,7 @@ run_phase() {
 
 # Never inherit the invoking pane's socket, identity, or persistent state.
 for variable in ${!FLOWMUX_@}; do unset "$variable"; done
+unset CODEX_THREAD_ID CODEX_SESSION_ID CLAUDECODE
 test_root=$(mktemp -d /tmp/fm-ci.XXXXXX)
 trap 'result=$?; echo "CI_GATE_EXIT=$result"; rm -rf "$test_root"' EXIT
 export TMPDIR="$test_root/tmp" FLOWMUX_RUNTIME_DIR="$test_root/run"

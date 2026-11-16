@@ -8,14 +8,37 @@ The existing SSH GUI coverage harness owns GUI startup and normal shutdown.
 """
 
 import argparse
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import shlex
 import socket
 import subprocess
+import sys
 import tempfile
 import time
+
+
+def focus_gui(socket_path):
+    # Workspace selection alone does not make the isolated GUI a foreground app.
+    pid = int(Path(socket_path).stem.removeprefix("flowmux-"))
+    if sys.platform == "darwin":
+        # The native main-thread harness activates AppKit before replay starts.
+        return
+    else:
+        from Xlib import X, display
+        with closing(display.Display()) as connection:
+            for window in connection.screen().root.query_tree().children:
+                owner = window.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
+                if (owner is not None and int(owner.value[0]) == pid
+                        and window.get_attributes().map_state == X.IsViewable):
+                    window.set_input_focus(X.RevertToParent, X.CurrentTime)
+                    connection.sync()
+                    assert connection.get_input_focus().focus.id == window.id
+                    break
+            else:
+                raise AssertionError(f"No mapped isolated Flowmux window for PID {pid}")
 
 
 def main():
@@ -218,6 +241,7 @@ int main(int argc, char **argv) {
                         background = next(w["id"] for w in rpc("workspace_tree")["tree"]["workspaces"]
                                           if w["id"] != workspace)
                         rpc("workspace_focus", workspace=workspace if visible else background)
+                        focus_gui(args.socket)
                         hook("turn-start", "running")
                         before = len(completions())
                         # A persistent composer or old response must not complete a native turn.

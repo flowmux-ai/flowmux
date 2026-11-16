@@ -846,6 +846,16 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
+    async fn wait_for_split_pane_layout(controller: &WindowController, frame: &gtk::Widget) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !frame.is_mapped() || frame.width() <= 0 || frame.width() >= controller.stack.width()
+        {
+            assert!(Instant::now() < deadline, "split pane layout must be ready");
+            glib::timeout_future(Duration::from_millis(5)).await;
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     async fn wait_for_detached_widget_release(widget: &glib::WeakRef<gtk::Widget>) {
         if let Some(widget) = widget.upgrade() {
             assert!(widget.parent().is_none(), "widget must detach immediately");
@@ -1050,12 +1060,6 @@ mod tests {
         controller.render_workspace(&store.get_workspace(second).await.unwrap());
         controller.activate_workspace(first).await;
         controller.window.present();
-        glib::timeout_future(Duration::from_millis(100)).await;
-
-        controller.toggle_pane_zoom(first_pane);
-        glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(100)).await;
-        // A static marker distinguishes the zoomed pane from an empty/other
-        // workspace without comparing blinking cursors or shell startup output.
         let frame = controller
             .pane_registry
             .borrow()
@@ -1063,6 +1067,16 @@ mod tests {
             .unwrap()
             .downcast::<gtk::Frame>()
             .unwrap();
+        wait_for_split_pane_layout(&controller, frame.upcast_ref()).await;
+        controller.toggle_pane_zoom(first_pane);
+        assert_eq!(controller.zoomed_pane(), Some(first_pane));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while controller.pane_zoom.transition.borrow().is_some() {
+            assert!(Instant::now() < deadline, "pane zoom transition timed out");
+            glib::timeout_future(Duration::from_millis(5)).await;
+        }
+        // A static marker distinguishes the zoomed pane from an empty/other
+        // workspace without comparing blinking cursors or shell startup output.
         let child = frame.child().unwrap();
         frame.set_child(None::<&gtk::Widget>);
         let marked = gtk::Overlay::new();
@@ -1343,16 +1357,24 @@ mod tests {
 
         if animations_enabled {
             controller.activate_workspace(first).await;
-            glib::timeout_future(Duration::from_millis(100)).await;
             let frame = controller
                 .pane_registry
                 .borrow()
                 .pane_frame(first_pane)
                 .unwrap();
+            wait_for_split_pane_layout(&controller, &frame).await;
             let original_width = frame.width();
             controller.toggle_pane_zoom(first_pane);
+            assert_eq!(controller.zoomed_pane(), Some(first_pane));
             let overlay = controller.content_overlay.last_child().unwrap().downgrade();
-            glib::timeout_future(Duration::from_millis(80)).await;
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while frame.width() <= original_width {
+                assert!(
+                    Instant::now() < deadline,
+                    "pane zoom must resize the live pane"
+                );
+                glib::timeout_future(Duration::from_millis(5)).await;
+            }
             assert!(
                 frame.width() > original_width && frame.width() < controller.stack.width(),
                 "zoom must resize the live pane towards its destination during animation"

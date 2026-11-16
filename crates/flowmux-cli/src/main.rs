@@ -1491,7 +1491,6 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         );
     }
     let compact_snapshot = compact_snapshot(&cmd);
-    let mut cmd = cmd;
     // `-` reads the script from stdin, avoiding shell quoting of JavaScript.
     if let Cmd::Browser {
         op: BrowserOp::Eval { source: script, .. } | BrowserOp::EvalAsync { body: script, .. },

@@ -439,6 +439,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some() {
         #[cfg(test)]
         crate::ui::ghostty_pane::check_normal_agent_status_below_cursor().await;
+        // Workspace selection cannot suppress completions in an inactive app.
+        let native_app = objc2_app_kit::NSApplication::sharedApplication(
+            objc2::MainThreadMarker::new().unwrap(),
+        );
+        native_app.setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
+        native_app.finishLaunching();
+        #[allow(deprecated)]
+        native_app.activateIgnoringOtherApps(true);
+        controller.window.present();
+        wait_until("agent hook window active", || controller.window.is_active()).await;
         controller.options.borrow_mut().system_notifications_enabled = false;
         let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
         let handler = Arc::new(crate::ipc_handler::GuiHandler::new(

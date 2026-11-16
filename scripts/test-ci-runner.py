@@ -24,6 +24,8 @@ args = sys.argv[1:]
 with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps({'name': name, 'args': args,
         'socket': os.environ.get('FLOWMUX_SOCKET_PATH'),
+        'agent_context': {key: os.environ.get(key) for key in
+                          ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDECODE')},
         'tmp': os.environ.get('TMPDIR'),
         'runtime': os.environ.get('FLOWMUX_RUNTIME_DIR'),
         'desktop': os.environ.get('XDG_CURRENT_DESKTOP'),
@@ -311,11 +313,14 @@ time.sleep(60)
 
     def test_linux_failure_preserves_isolation_without_coverage_or_retries(self):
         result, calls = self.run_script('test-ci.sh', 'linux', TEST_EXIT='17',
+                                       CODEX_THREAD_ID='live-thread', CODEX_SESSION_ID='live-session',
+                                       CLAUDECODE='1',
                                        XDG_CURRENT_DESKTOP='ubuntu:GNOME', XDG_SESSION_DESKTOP='ubuntu')
         self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
         desktop = [call for call in calls if call['name'] == 'xvfb-run']
         self.assertEqual(len(desktop), 1, 'a failed test must not be retried')
         self.assertIsNone(desktop[0]['socket'])
+        self.assertTrue(all(value is None for value in desktop[0]['agent_context'].values()))
         self.assertEqual(desktop[0]['desktop'], '')
         self.assertEqual(desktop[0]['session_desktop'], '')
         self.assertTrue(desktop[0]['runtime'].startswith('/tmp/fm-ci.'))

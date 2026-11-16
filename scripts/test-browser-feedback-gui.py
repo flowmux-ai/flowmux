@@ -69,6 +69,11 @@ def exercise(h, gui, Atspi):
                           and node.get_action_iface() and node.get_action_iface().get_n_actions()))] if root else []
         return matches[-1] if matches else None
 
+    def comment_text():
+        # AT-SPI visibility follows GTK mapping asynchronously after reopening.
+        node = gui.wait_for(lambda: named("Requested change"), "request editor visible")
+        return Atspi.Text.get_text(node, 0, -1)
+
     def click(name, parent=None):
         node = gui.wait_for(lambda: named(name, parent, actionable=True), name)
         assert node.get_state_set().contains(Atspi.StateType.SENSITIVE), name
@@ -146,8 +151,7 @@ def exercise(h, gui, Atspi):
         xtest.fake_input(connection, X.KeyRelease, key)
         connection.sync()
     gui.wait_for(lambda: named("Selection cancelled. Your previous request is kept."), "Escape cancels")
-    comment = named("Requested change")
-    assert "Make this button blue" in Atspi.Text.get_text(comment, 0, -1)
+    assert "Make this button blue" in comment_text()
     # Simulate a page layout update between the native click and async capture.
     h.rpc(sock, "browser_eval", pane=pane, source="window.addEventListener('click', () => setTimeout(() => document.querySelector('#target').style.marginLeft = '300px', 0), {capture:true, once:true}); 'ready'")
     click("Select another element")
@@ -155,7 +159,7 @@ def exercise(h, gui, Atspi):
     native_click(content, 160, 90)
     gui.wait_for(lambda: named("The selected element or viewport changed. Select the element again.")
                  or named("The selected element or viewport changed during capture. Select the element again."), "changed layout rejected")
-    assert "Make this button blue" in Atspi.Text.get_text(named("Requested change"), 0, -1)
+    assert "Make this button blue" in comment_text()
     assert list((h.root / "cache/flowmux/browser-feedback").glob("*.png")) == [image]
     h.rpc(sock, "browser_eval", pane=pane, source="document.querySelector('#target').style.marginLeft = '40px'; 'reset'")
     h.pass_check("typing during selection cannot edit the page; changed capture geometry preserves the previous draft")
@@ -165,7 +169,7 @@ def exercise(h, gui, Atspi):
         time.sleep(.4)
         native_click(content, 80, y)
         gui.wait_for(lambda: named(message), "unsafe target rejected")
-        assert "Make this button blue" in Atspi.Text.get_text(named("Requested change"), 0, -1)
+        assert "Make this button blue" in comment_text()
     assert h.rpc(sock, "browser_title", pane=pane)["browser_result"]["value"] == "Feedback fixture"
     h.pass_check("password fields and embedded content are rejected without losing the existing request")
     click("Close", named("Requested change").get_parent().get_parent().get_parent().get_parent())
@@ -177,7 +181,7 @@ def exercise(h, gui, Atspi):
         connection.sync()
     gui.wait_for(lambda: h.rpc(sock, "browser_eval", pane=pane, source="document.querySelector('#edit').value")["browser_result"]["value"] != "UNCHANGED", "normal editing restored after cancellation")
     click("Request change")
-    assert "Make this button blue" in Atspi.Text.get_text(named("Requested change"), 0, -1)
+    assert "Make this button blue" in comment_text()
     h.pass_check("empty requests rejected; URL secrets excluded; Escape and panel close preserve the draft")
 
     receiver = h.root / "codex"
@@ -215,7 +219,7 @@ finally:
     send_to_fixture()
     gui.wait_for(lambda: named("This agent is busy or waiting for approval. Send again when it is ready."), "busy rejected")
     assert not (h.root / "receipt.bin").exists()
-    assert "Make this button blue" in Atspi.Text.get_text(named("Requested change"), 0, -1)
+    assert "Make this button blue" in comment_text()
     report("idle")
     send_to_fixture()
     gui.wait_for(lambda: named("Request sent to agent. The captured image is kept for the agent to read."), "delivery confirmed")
@@ -223,7 +227,7 @@ finally:
     assert data.startswith(b"\x1b[200~Requested UI change:") and data.endswith(b"\x1b[201~\r"), data
     assert b"Make this button blue" in data and b"button#target" in data and str(image).encode() in data
     assert b"PRIVATE_TOKEN" not in data and b"PRIVATE_VALUE" not in data
-    assert Atspi.Text.get_text(named("Requested change"), 0, -1) == ""
+    assert comment_text() == ""
     h.pass_check("busy agent receives no input; retry delivers the comment, context and existing image path exactly once")
     h.rpc(sock, "browser_eval", pane=pane, source="document.querySelector('#target').focus(); 'ready'")
     click("Select another element")
