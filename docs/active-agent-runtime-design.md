@@ -72,6 +72,32 @@ Flowmux 코드 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`.
 
 기존 [Session Flow 설계](agent-session-flow-design.md)의 “앱 종료 후 지속 실행은 범위 밖”은 그 기능의 경계다. 본 제안은 그 밖의 실행 계층을 추가하며 계보 모델을 대체하지 않는다.
 
+### 현재 상태 판정 점검과 이관 조건
+
+**현재 판정기는 UI 상태 표현에 재사용할 수 있지만, 그 결과를 바로 자동 종료 조건으로 사용할 수는 없다.** 아래는 문서 상단의 Flowmux 리비전을 기준으로 확인한 제약이다. 현재 코드에 이 문서의 자동 종료 기능이 이미 구현되어 있다는 의미는 아니다.
+
+| 점검 대상과 코드 근거 | 확인한 제약 | 설계에 반영할 조건 |
+| --- | --- | --- |
+| [cmd_hooks.rs](../crates/flowmux-cli/src/cmd_hooks.rs)의 Claude Stop, [hook_install.rs](../crates/flowmux-cli/src/hook_install.rs)의 `CLAUDE_EVENTS`, `agent_runtime.rs`의 `TurnStopped` | Claude Stop은 shell·예약 작업이 남아 있어도 응답 종료를 보고한다. 현재 설치 이벤트에는 SubagentStart/SubagentStop이 없고, 비 Codex Stop은 UI를 Idle로 만들 수 있다 | root 응답 완료와 전체 작업 완료를 분리. provider별 child/tool/백그라운드 작업 관측 범위와 누락 여부 확인이 선행되어야 함 |
+| `agent_runtime.rs`의 `CodexRootProgressObserved`, `remember_settled_codex_turn`, [hooks.rs](../crates/flowmux-cli/src/hooks.rs)의 `hook_seq` | 완료된 동일 turn의 늦은 progress가 Working을 복구할 수 있다. 완료 ID 보관은 32개로 제한되며 hook seq는 hook 생성 시점의 벽시계 값이다 | 큰 seq를 새 작업의 증거로 사용하지 않음. 완료된 작업의 지연 이벤트, 명시적 재개, 실제 새 작업을 구분하고 이력 밖 사건은 확인 불가로 처리 |
+| [core/lib.rs](../crates/flowmux-core/src/lib.rs)의 `public_status`, `AgentStatusEvidence`, `agent_runtime.rs`의 화면 보정 | UI Done은 `Idle && !seen`이다. evidence의 UTC 시각은 표시 근거가 성립한 시각이며, 완료 이후에도 변경된 spinner가 Working을 복구할 수 있다 | seen·표시 상태·근거 출처와 독립된 작업 완료 기록 및 단조 시간 deadline 필요. 화면 변화만으로 완료를 취소하거나 새 완료 시각을 만들지 않음 |
+| `agent_runtime.rs`의 surface 기반 ledger와 `forget_cleared_agent_surfaces`, [polling.rs](../crates/flowmux/src/ui/window/polling.rs), [window/agent_bar.rs](../crates/flowmux/src/ui/window/agent_bar.rs), [ipc_handler.rs](../crates/flowmux/src/ipc_handler.rs) | workspace 제거 시 ledger가 사라진다. 프로세스 관측·VTE 화면 관측·Codex Stop의 250ms 후 확정 예약은 GUI에 의존한다 | managed ledger는 InstanceId로 유지. hooks 수신·프로세스 관측·headless 화면 보정·지연 확정을 모두 Host로 이관 |
+
+공개 `StateStore` API를 사용하는 독립 메모리 재현에서 다음 순서를 확인했다. seq 값은 순서를 설명하기 위한 입력값이며 원본 provider 인과 순서를 보증하지 않는다.
+
+```text
+TurnStarted(turn-1, seq=10)
+→ CodexTurnStopped(turn-1, seq=20) → grace 확정: Idle / Completed
+→ CodexRootProgressObserved(turn-1, seq=30): Working / outcome 없음
+→ CodexTurnStopped(turn-1, seq=40, stop_hook_active=false): Working 유지
+```
+
+따라서 UI Working만 따라 타이머를 취소하면 완료된 실행을 계속 유지할 수 있다. 반대로 같은 turn의 모든 후속 이벤트를 버리면 실제 stop-hook 재시도나 명시적 작업 재개를 놓친다. 작업 identity와 재개 근거를 검증하는 공통 전이 규칙이 필요하다. `ProgressObserved`처럼 작업 식별 정보가 부족한 이벤트도 같은 분류를 거쳐야 한다.
+
+재사용할 것은 Codex 부모·자식 상관관계, 관측된 child 완료까지 부모 완료를 미루는 규칙, permission/tool/session wait와 해결된 wait 중복 제거, 재시도 구분, 새 진행으로 잠정 Stop을 무효화하는 규칙, 화면 fingerprint와 완료 후 동일 spinner 억제다. **관측된 child가 없다는 사실만으로 실제 하위 작업이 없다고 증명하지는 않는다.** Antigravity의 `fully_idle == false` 방어와 Gemini 등에서 사용하는 600ms 안정된 ready 화면도 유지하되, 필드 누락이나 화면 추정만으로 전체 완료를 확정하지 않는다.
+
+일반 IPC Ping은 현재도 [handler.rs](../crates/flowmux-daemon/src/handler.rs)에서 Pong으로 응답하며 작업 상태를 바꾸지 않는다. 이 계약은 유지한다. 보완 대상은 의미가 불명확한 진행 이벤트와 UI 보정이 종료 판단에 섞이는 경로다.
+
 ## 4. Agents 목록과 상호작용
 
 왼쪽 하단 기존 Agents 영역을 확장한다. 현재 workspace 필터와 무관한 전체 활성 목록이 기본이다. 기존 가로 Agents bar를 켰다면 같은 registry의 축약 표현을 사용한다. Agent sessions 기록 목록과는 분리한다.
@@ -232,6 +258,22 @@ UI의 `Working/Idle` 전이를 종료 타이머에 직접 연결하지 않는다
 
 미확인 이벤트 때문에 보류할 때 기존 deadline은 이력으로 보존한다. 같은 완료 작업의 잡음임이 확인되면 원래 deadline으로 돌아가며 30분을 다시 주지 않는다. 실제 새 작업이었다면 이전 완료 기준을 버리고 그 작업의 완료 확인부터 다시 계산한다. 보류 중 deadline이 지나도 검증을 통과하기 전에는 종료하지 않는다.
 
+### UI와 독립된 완료 기록 및 이벤트 정규화
+
+종료 판단 상태는 기존 ledger에 연결된 별도 기록으로 관리한다. 새 상태 판정기를 GUI에 하나 더 만들지 않는다.
+
+| 기록 | 갱신 계약 |
+| --- | --- |
+| 작업 identity와 generation | InstanceId·native session·root/child/task 관계로 식별. 검증된 새 작업 또는 명시적 재개 때만 generation 변경 |
+| 작업 판정 | `진행 중 / 완료 확인 / 확인 불가`. UI `AgentStatus`, seen, outcome과 분리하며 미해결 wait·작업 및 보류 이유를 참조 |
+| 완료 근거와 `verified_completed_at` | 해당 generation의 전체 완료가 최초 검증된 단조 시각. 중복 Stop·UI Done·근거 출처 변경으로 덮어쓰지 않음 |
+| 관측 범위와 공백·상충 | provider adapter가 보장하는 root/child/tool/백그라운드 작업 범위, 누락 또는 재검증 필요 여부. 살아 있는 유휴 MCP 서버와 진행 중 요청을 구분 |
+| ledger revision과 deadline 이력 | revision은 Host 내 경합 방지 토큰이며 provider 사건 순서가 아님. 확인 불가 전의 완료 근거·deadline을 보존하여 재검증 결과에 따라 복구 또는 폐기 |
+
+Host는 입력 이벤트를 `실제 새 작업 / 현재 작업 진행 또는 명시적 재개 / 중복·과거 사건 / 유지보수 신호 / 확인 불가`로 정규화한 뒤 공통 ledger에 적용한다. 완료된 turn의 progress는 더 큰 hook seq만으로 재개하지 않는다. 명시적 재개는 stop-hook 재시도와 재사용된 child의 새 작업을 포함하며, 같은 ID를 쓴다는 이유만으로 거절하지 않는다. 실제 재개가 확인되면 이전 완료 기준을 폐기한다. 제한된 완료 이력에서 제거된 ID나 원본 순서를 알 수 없는 사건은 재조회로 해결하기 전까지 확인 불가다.
+
+managed 실행에서는 Host가 이 기록과 UI projection을 함께 갱신한다. tab/pane/workspace 제거는 attachment만 지우며 ledger·미해결 wait·완료 기록·예약된 확정을 지우지 않는다. 일반 terminal의 surface 기반 경로는 유지하되 공유한 전이 규칙을 사용한다. GUI의 2초 프로세스 polling, VTE 화면 보정, IPC handler의 Stop 지연 확정에 의존하는 경로를 Host 관측으로 대체하고, GUI 없이도 같은 입력 순서가 같은 결과를 내는지 검증한다.
+
 예: 10:00 완료·GUI 미연결 → 10:30 종료 후보. 10:12 ping과 10:20 같은 turn의 지연 Stop은 10:30을 바꾸지 않는다. 10:20 실제 새 작업 시작 → 10:25 완료라면 10:55로 변경한다. 10:29 GUI 재연결이면 자동 종료를 취소한다. 계속 작업 중이거나 승인 대기라면 10:30에도 유지한다.
 
 ### 만료 시 경합과 안전한 종료
@@ -329,10 +371,11 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 ## 9. 적용 범위와 구현 순서
 
 1. **Host/VT/relay 수직 검증:** 테스트 command 하나를 Host 소유 PTY로 실행한다. GUI/relay 종료 후 동일 PID·start identity의 카운터가 계속 증가하고, 다시 붙으면 현재 화면과 입력이 복원되어야 한다. Linux와 macOS에서 격리된 실행으로 확인한다. VT 호환성 gate를 먼저 해결한다.
-2. **관리되는 시작과 수명 정책:** `New Agent`, 제안 CLI `flowmux agent run -- <argv>`, 기존 명시적 resume/fork의 launch 준비를 Host로 연결한다. launch 환경·native session identity 확인·중복 방지, 작업 완료 근거와 잡음 구분, GUI 미연결 30분 정책, 안전한 유휴 종료 계약과 빈 Host 종료를 함께 검증한다. tab 연결 실패는 살아 있는 실행을 목록의 Background로 남긴다. provider별 관측·종료 capability 검증 없이 자동 종료를 켜지 않는다.
-3. **목록/위치/열기/종료:** 기존 Agents 영역과 bar projection을 registry로 연결한다. UI·CLI가 같은 제어 API를 사용하고 숨겨진 실행도 조회·종료 가능하게 한다.
-4. **DnD/이동/재연결:** 기존 tab 이동의 widget 보존 경로를 재사용하고 `application/x-flowmux-agent-instance` payload를 추가한다. 버전·instance ID·Host scope만 허용한다. 파일 drop이나 기존 tab MIME과 혼동하지 않는다. 이 단계에 다른 GUI로의 이동과 restore 경합을 포함한다.
-5. **기존 실행과 공존/출시:** wrapper가 감지한 기존 GUI-owned agent는 `Tab-bound`로 표시하고 현재 위치로 이동 가능하게 한다. 임의의 살아 있는 PTY를 소유권 이전한 것처럼 표시하지 않는다. 새 managed launch를 기본 제공하되 기존 쉘 명령을 일괄 가로채는 변경은 별도로 검증한다.
+2. **상태 회귀 고정과 Host 이관:** 먼저 동일 turn의 완료 후 지연 progress/반복 Stop, 명시적 재개, child 재사용·누락을 fixtures로 고정한다. 공통 전이를 추출하고 managed ledger를 InstanceId로 분리한다. Host로 hooks·프로세스·화면 관측과 지연 확정을 옮긴 뒤 GUI 없는 상태 및 workspace 제거 후에도 ledger가 유지되는지 검증한다. 기존 UI·일반 terminal 회귀도 함께 확인한다.
+3. **관리되는 시작과 수명 정책:** `New Agent`, 제안 CLI `flowmux agent run -- <argv>`, 기존 명시적 resume/fork의 launch 준비를 Host로 연결한다. launch 환경·native session identity 확인·중복 방지를 검증한다. provider별 전체 작업 관측과 안전한 유휴 종료 capability를 먼저 검증한 다음, 별도 완료 기록에 30분 deadline과 빈 Host 종료를 연결한다. tab 연결 실패는 살아 있는 실행을 목록의 Background로 남긴다. capability 검증 없이 자동 종료를 켜지 않는다.
+4. **목록/위치/열기/종료:** 기존 Agents 영역과 bar projection을 registry로 연결한다. UI·CLI가 같은 제어 API를 사용하고 숨겨진 실행도 조회·종료 가능하게 한다.
+5. **DnD/이동/재연결:** 기존 tab 이동의 widget 보존 경로를 재사용하고 `application/x-flowmux-agent-instance` payload를 추가한다. 버전·instance ID·Host scope만 허용한다. 파일 drop이나 기존 tab MIME과 혼동하지 않는다. 이 단계에 다른 GUI로의 이동과 restore 경합을 포함한다.
+6. **기존 실행과 공존/출시:** wrapper가 감지한 기존 GUI-owned agent는 `Tab-bound`로 표시하고 현재 위치로 이동 가능하게 한다. 임의의 살아 있는 PTY를 소유권 이전한 것처럼 표시하지 않는다. 새 managed launch를 기본 제공하되 기존 쉘 명령을 일괄 가로채는 변경은 별도로 검증한다.
 
 일반 shell에서 임의로 실행한 모든 프로세스를 자동으로 지속 실행으로 전환하는 것은 초기 범위가 아니다. 사용자가 그 실행도 지속시키려면 처음부터 managed launch를 써야 한다. 기존 세션을 종료하여 전환하거나 자동 resume하지 않는다. `Tab-bound` 실행의 종료는 해당 provider identity에 안전하게 보낼 수 있는 기존 interrupt/종료 경로만 제공하고, 불가능하면 위치로 이동하게 한다. 관리 실행과 같은 detach 보장을 표시하지 않는다.
 
@@ -359,6 +402,13 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | GUI 없이 승인·입력·재시도 대기 또는 child 실행 | root Stop/idle 화면만으로 종료 예약하지 않음. 전체 작업 완료 후부터 30분 |
 | 완료 후 ping·metadata·spinner·중복 Stop 반복 | 최초 완료 시각과 deadline 유지. 짧은 실제 작업은 새 generation과 새 완료 기준 사용 |
 | 늦은 start/progress·역순·중복·child 재사용 | 원본 identity/순서로 과거 사건 배제. 근거 없으면 보류, 실제 진행 중 작업 조기 종료 없음 |
+| 완료 확정 → 동일 turn의 더 큰 seq progress → 반복 Stop | 지연 사건임이 확인되면 최초 완료와 deadline 유지. 확인 불가이면 보류하며 단순 seq 증가로 새 generation을 만들지 않음 |
+| 완료된 동일 turn의 명시적 stop-hook 재시도·실제 재개 | 같은 ID라도 재개 근거를 검증해 작업 유지, 이전 완료 기준 폐기. 새 전체 완료부터 30분 계산 |
+| UI Done/seen·evidence 출처·spinner 보정 변경 | UI 표시가 바뀌어도 완료 기록을 직접 갱신하지 않음. 새 작업 근거 없는 화면 충돌은 재검증·보류 |
+| 완료 이력의 32개 한계 초과·identity 없는 progress | 이력 밖 사건을 새 작업 또는 무해한 사건으로 단정하지 않음. 재검증 전 자동 종료 보류 |
+| Claude root Stop 뒤 shell·예약·하위 작업 잔존 | 응답 완료만 기록하고 전체 완료 확정하지 않음. 관측 범위가 불완전하면 보존 |
+| workspace 삭제 후 managed hook·child 완료 도착 | InstanceId ledger와 wait·완료 기록 유지, 기존 실행에 적용. 일반 terminal 정리는 기존 계약 유지 |
+| GUI 없이 Stop grace 만료·화면 의존 provider 상태 변화 | Host에서 지연 확정·headless 관측 지속. 화면만으로 전체 작업 완료를 증명하지 않음 |
 | 미확인 이벤트 뒤 잡음/새 작업으로 확정 | 잡음이면 원래 deadline 복구, 실제 작업이면 새 완료 기준 적용. 미확인 동안 종료 없음 |
 | hook 누락·미지원 provider·process 검사 실패 | 확인 불가와 이유 표시, 자동 종료 보류. 무출력/저CPU/시간 경과만으로 완료 판정하지 않음 |
 | 두 GUI 중 하나 종료·마지막 GUI 재연결 | 하나라도 관리 연결이 있으면 자동 종료 없음. 관리 handshake가 tab 복원보다 먼저 종료 예약 취소 |
@@ -384,6 +434,8 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 타이머와 이벤트 순서 단위 테스트는 주입 가능한 시계로 30분 경계를 검증한다. 통합 검증에서는 실제 provider별로 GUI 종료 전후 PID/start identity·PTY·InstanceId의 동일성과 진행 연속성, resume/spawn 호출 없음, 현재 화면 복원, 실제 30분 종료 및 마지막 Host 종료를 확인한다. 테스트용 짧은 timeout만으로 실시간 정책 검증을 대체하지 않는다.
 
 ## 11. 남은 검증과 범위 밖
+
+상태 판정 점검의 기준 검증으로 `cargo test -p flowmux-daemon --lib state_store::tests`를 실행해 **187개 통과, 실패 0개, 필터 제외 28개**를 확인했고 daemon library build도 통과했다. 독립 메모리 `StateStore` 재현에서는 §3의 동일 turn 지연 progress 문제와 workspace 제거 후 presence 및 해당 surface의 이벤트 적용 대상이 사라지는 것을 확인했다. 이는 기존 코드의 동작 확인이며, 제안한 Host 수명 정책의 통과 결과가 아니다. 재현 도구는 임시 경로에서 실행했고 사용자 GUI·에이전트에는 연결하지 않았다.
 
 이번 결과물은 코드 근거와 구현 계약을 정리한 설계다. 런타임 수정·외부 프로그램 실행·실제 UI 성능 측정은 수행하지 않았다. 미확정 항목은 headless VT 엔진과 VTE 호환성, 플랫폼별 GUI 종료 생존, provider별 전체 작업 관측 및 안전한 유휴 종료 계약이다. 이 검증 없이 모든 provider의 30분 자동 종료와 작업 보존을 동시에 보장한다고 주장하지 않는다. 근거가 부족하면 실행 보존을 우선한다.
 
