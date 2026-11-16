@@ -10,6 +10,7 @@ pub(super) struct TornOffTerminal {
     pub window: glib::WeakRef<adw::ApplicationWindow>,
     pub title: String,
     pub pid: Rc<Cell<Option<i32>>>,
+    pub managed_agent: bool,
 }
 
 // Exit callbacks outlive the source window after tear-off; never retain its widget tree.
@@ -162,6 +163,15 @@ impl TerminationPresenter {
                 tracing::info!(pane = %exit.pane, status = exit.status, "child exited");
                 return;
             }
+            // Relay death disconnects a view; the Host owns Agent termination.
+            if presenter
+                .torn_off_terminals
+                .borrow()
+                .get(&exit.surface)
+                .is_some_and(|terminal| terminal.managed_agent)
+            {
+                return;
+            }
             // A tab can move or close while evidence is collected.
             let torn_title = presenter
                 .torn_off_terminals
@@ -180,6 +190,14 @@ impl TerminationPresenter {
                 };
                 let pane = registry.borrow().pane_for_surface(exit.surface);
                 let Some(pane) = pane else { return };
+                if presenter
+                    .store
+                    .surface_agent_binding(pane, exit.surface)
+                    .await
+                    .is_some()
+                {
+                    return;
+                }
                 let workspace = registry.borrow().workspace_of_pane(pane);
                 let Some(workspace) = workspace else { return };
                 let Some(ws) = presenter.store.get_workspace(workspace).await else {
@@ -440,6 +458,32 @@ mod tests {
         let (dialog, _) = build_termination_dialog(&report, Some("ws"));
         assert_eq!(dialog.response_label("close"), "Close workspace");
         assert!(dialog.body().contains("last tab in workspace ws"));
+    }
+
+    #[gtk::test]
+    async fn managed_relay_signal_preserves_binding_without_termination_dialog() {
+        let (c, ws, pane) = setup("com.flowmux.App.UiTest.ManagedRelayExit").await;
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let (_, _, surface, _) = c
+            .store
+            .ensure_agent_view(pane, binding, "Agent".into(), "/tmp".into())
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(ws, pane, surface, None)
+            .await
+            .unwrap();
+        signal(&c, pane, surface, libc::SIGTERM, false).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(c.current_termination_dialog().is_none());
+        assert!(!c.termination_presenting.get());
+        assert_eq!(
+            c.store.surface_agent_binding(pane, surface).await,
+            Some(binding)
+        );
+        c.window.destroy();
     }
 
     #[gtk::test]

@@ -248,12 +248,22 @@ pub struct HostClient(pub Client);
 impl HostClient {
     pub async fn connect(socket: &Path, role: ClientRole) -> anyhow::Result<Self> {
         let client = Self(Client::connect(socket).await?);
-        client
+        let hello = client
             .call(HostRequest::Hello {
                 version: PROTOCOL_VERSION,
                 role,
             })
             .await?;
+        anyhow::ensure!(
+            matches!(
+                hello,
+                HostResponse::Hello {
+                    version: PROTOCOL_VERSION,
+                    ..
+                }
+            ),
+            "unexpected Agent Host handshake response"
+        );
         Ok(client)
     }
 
@@ -269,6 +279,42 @@ impl HostClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn client_rejects_missing_or_incompatible_hello() {
+        use crate::protocol::{Envelope, Payload};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        for response in [
+            HostResponse::Ok,
+            HostResponse::Hello {
+                version: PROTOCOL_VERSION + 1,
+                epoch: Uuid::new_v4(),
+                connection: 1,
+            },
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let socket = root.path().join("host.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read, mut write) = stream.into_split();
+                let mut line = String::new();
+                BufReader::new(read).read_line(&mut line).await.unwrap();
+                let request: Envelope = serde_json::from_str(&line).unwrap();
+                let reply = Envelope {
+                    id: request.id,
+                    payload: Payload::Response(Response::AgentHost { response }),
+                };
+                write
+                    .write_all(format!("{}\n", serde_json::to_string(&reply).unwrap()).as_bytes())
+                    .await
+                    .unwrap();
+            });
+            assert!(HostClient::connect(&socket, ClientRole::Gui).await.is_err());
+            server.await.unwrap();
+        }
+    }
 
     #[test]
     fn lease_and_frame_roundtrip_keep_epoch_and_generation() {

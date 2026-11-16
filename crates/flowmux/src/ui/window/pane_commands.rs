@@ -39,6 +39,55 @@ impl WindowController {
         }
 
         match cmd {
+            GtkCommand::OpenAgentView { pane, agent, ack } => {
+                let result = async {
+                    let binding = flowmux_core::AgentViewBinding {
+                        instance: agent.instance,
+                        epoch: agent.epoch,
+                    };
+                    let (workspace, source, surface, created) = self
+                        .store
+                        .ensure_agent_view(pane, binding, agent.label, agent.cwd)
+                        .await?;
+                    let disconnected = self
+                        .pane_registry
+                        .borrow()
+                        .terminals
+                        .get(&surface)
+                        .is_some_and(|terminal| terminal.pid.get().is_none());
+                    if disconnected {
+                        self.pane_registry
+                            .borrow_mut()
+                            .detach_surface_widget(source, surface);
+                    }
+                    if !self.pane_registry.borrow().has_surface(source, surface) {
+                        if let Err(error) = self
+                            .attach_or_rerender_surface(workspace, source, surface, None)
+                            .await
+                        {
+                            if created {
+                                self.store.close_surface(source, surface).await;
+                            }
+                            return Err(error);
+                        }
+                    }
+                    if source != pane {
+                        self.move_surface(source, surface, None, pane, usize::MAX)
+                            .await?;
+                    }
+                    self.store.set_active_surface(pane, surface).await;
+                    let workspace = self
+                        .store
+                        .workspace_for_pane(pane)
+                        .await
+                        .ok_or("Agent destination pane closed")?;
+                    self.sync_pane_active_from_store(workspace, pane).await;
+                    self.focus_pane(pane);
+                    Ok((pane, surface))
+                }
+                .await;
+                let _ = ack.send(result);
+            }
             GtkCommand::CloseTerminatedSurface { pane, surface, ack } => {
                 let current_pane = self
                     .pane_registry

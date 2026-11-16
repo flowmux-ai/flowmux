@@ -542,6 +542,12 @@ pub enum Request {
         shell: Option<String>,
     },
 
+    /// Connect an existing managed execution in the selected GUI pane.
+    AgentViewOpen {
+        pane: PaneId,
+        instance: flowmux_core::AgentInstanceId,
+    },
+
     /// `flowmux split <pane> --right|--down`
     PaneSplit {
         pane: PaneId,
@@ -1582,6 +1588,7 @@ mod tests {
             title_locked: false,
             kind: term(),
             scrollback: None,
+            agent_binding: None,
             agent: None,
         };
         shell.agent = Some(AgentPresence::new(
@@ -1601,6 +1608,7 @@ mod tests {
                         title_locked: false,
                         kind: SurfaceKind::Browser { initial_url: None },
                         scrollback: None,
+                        agent_binding: None,
                         agent: None,
                     },
                 ],

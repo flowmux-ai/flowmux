@@ -9,6 +9,7 @@
 #![cfg_attr(all(test, target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod activity;
+mod agent_host;
 mod bridge;
 mod browser_automation;
 mod builtin_icons;
@@ -280,6 +281,13 @@ fn main() -> anyhow::Result<()> {
     store.spawn_persist(rt.handle());
 
     let (bridge, rx) = Bridge::new();
+    bridge
+        .agent_idle_timeout
+        .send_replace(flowmux_config::options::load().agent_idle_timeout_minutes);
+    let _agent_host_management = rt.block_on(agent_host::start(
+        paths::agent_host_socket(),
+        bridge.agent_idle_timeout.subscribe(),
+    ));
     let daemon_handler = DaemonHandler::new(store.clone());
     // Hand the GTK controller the same notifier cell the daemon
     // handler uses to send `AddNotification`. gnome-shell's

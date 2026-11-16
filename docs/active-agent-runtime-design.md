@@ -106,11 +106,11 @@ TurnStarted(turn-1, seq=10)
 
 | 연결 지점 | 확인한 상태 | 다음 구현의 완료 조건 |
 | --- | --- | --- |
-| [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed` | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI 앱의 상시 관리 연결은 아직 연결 전 | 저장된 managed tab 복원 전에 관리 handshake 완료. tab이 없어도 연결 유지. 일회성 조회·hook·relay가 GUI 연결을 대신하지 않음 |
+| [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed`, [GUI 관리 연결](../crates/flowmux/src/agent_host.rs) | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI는 tab과 독립된 상시 연결·재접속 및 설정 변경 전파를 수행함 | 최초 관리 연결을 tab 복원 전에 시도한다. handshake 실패 시 tab 복원까지 막는 gate는 자동 회수 활성화 전에 추가. 일회성 조회·hook·relay는 GUI 연결을 대신하지 않음 |
 | 같은 파일의 `HostHandler` | Host 제어 요청과 Ping만 처리하며 기존 provider lifecycle hook은 처리하지 않음 | InstanceId·process/native identity 검증 후 hook을 공통 ledger로 전달. detach된 실행의 사건도 처리. 이 경로 없이 shim을 Host 주소로 전환하지 않음 |
 | `agent_runtime.rs`의 lifecycle ledger | SurfaceId 기반이며 workspace 제거 시 정리됨 | managed ledger와 wait·Stop grace 예약은 InstanceId에 귀속. 화면 이동·제거와 무관하게 Host가 계속 관측하고 확정 |
 | [retirement.rs](../crates/flowmux-daemon/src/agent_host/retirement.rs)의 `WorkDisposition` | `Working / VerifiedComplete / Unknown`, 최초 완료 시각·revision·단조 시간 deadline을 제공함. 전체 완료 검증 adapter와 실제 자동 종료는 연결 전 | §5의 정규화 결과만 입력. `completion_verified` 호출 전 root·child·tool·wait와 관측 공백 확인. 만료 후에도 provider의 안전한 유휴 종료 수락 필요 |
-| [workspace_view.rs](../crates/flowmux/src/ui/workspace_view.rs)의 terminal 복원 | 일반 terminal의 shell 생성·native resume·scrollback 복원 경로를 사용함 | managed binding에서는 기존 실행에 relay만 연결. Host 실패·epoch 불일치를 shell 생성이나 자동 native resume으로 대체하지 않음 |
+| [workspace_view.rs](../crates/flowmux/src/ui/workspace_view.rs)의 terminal 복원 | managed binding이 있으면 relay만 생성하고 기존 실행에 연결. 일반 terminal의 shell·native resume·scrollback 경로는 별도 유지 | Host 실패·epoch 불일치는 연결 오류로 유지. 실제 provider TUI와 macOS 복원 검증, 연결 완료 ACK 기반 표시를 추가 |
 
 따라서 기존 `AgentStatus`에 상태 하나를 추가하는 것으로 해결하지 않는다. 기존 UI 판정은 보존하면서 **관측과 완료 기록의 소유자를 Host로 옮기고, 그 검증 결과를 회수 정책에 연결**한다. 완료 관측이나 안전한 종료가 지원되지 않는 provider는 보류 이유를 표시하고 실행을 유지한다.
 
@@ -212,7 +212,7 @@ InstanceId는 한 번의 실행을 식별한다. 다시 실행하면 새 ID다. 
 
 `PaneSurface.kind`는 terminal로 유지하고 optional managed binding을 추가하는 방안을 우선한다. 새 surface 종류로 terminal 기능 전체를 복제하지 않는다. 렌더러가 binding을 보고 local spawn 또는 agent attach를 선택한다. 구버전이 binding을 무시해 일반 shell/resume을 시작하지 않도록 persisted schema/version gate를 함께 변경한다. downgrade 때는 명시적으로 미지원 binding을 안내한다.
 
-저장 schema는 현재 v3다. binding 도입으로 버전을 올릴 때 [state/lib.rs](../crates/flowmux-state/src/lib.rs)의 `load_from`에 있는 `root_dir → location` 변환은 **v3 미만에만** 적용한다. 이미 `location`이 있는 v3 파일을 legacy로 재해석하지 않는다. 기존 백업·window ownership·SSH location·tab 순서·일반 terminal scrollback을 보존하고, binding은 로컬 terminal에만 허용한다. tab 이동과 `clone_without_scrollback`도 binding을 보존한다. managed 화면은 Host snapshot을 사용하며 저장된 scrollback이나 title 기반 native session 추정으로 실행을 복원하지 않는다.
+저장 schema는 binding 도입으로 v3에서 **v4로 변경했다**. [state/lib.rs](../crates/flowmux-state/src/lib.rs)의 `load_from`에 있는 `root_dir → location` 변환은 **v3 미만에만** 적용한다. 이미 `location`이 있는 v3 파일을 legacy로 재해석하지 않는다. 기존 백업·window ownership·SSH location·tab 순서·일반 terminal scrollback을 보존하고, binding은 로컬 terminal에만 허용한다. tab 이동과 `clone_without_scrollback`도 binding을 보존한다. managed 화면은 Host snapshot을 사용하며 저장된 scrollback이나 title 기반 native session 추정으로 실행을 복원하지 않는다.
 
 ### 프로세스와 화면의 상태 전이
 
@@ -494,14 +494,15 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 - `flowmux-daemon --agent-host`를 추가했다. 별도의 socket·epoch·registry를 소유하며 workspace/window state를 claim하지 않는다. Host가 agent PTY의 유일한 reader/writer이며 화면 연결의 EOF는 agent에 종료 신호를 보내지 않는다. launch 요청 ID와 내용 digest로 재시도를 구분하고, 실행 환경은 요청자가 전달한 값을 사용하며 registry·진단 출력에는 저장하지 않는다. PTY 등록이나 process identity 확인 실패 시 실행 gate를 취소하고 child를 회수한 뒤 실패를 보고한다.
 - headless terminal 모델에는 `alacritty_terminal`을 사용한다. 원본 escape stream을 재생하는 대신 primary/alternate screen·history·cursor·입력 모드의 렌더 결과를 전송한다. query 응답은 Host에서 한 번 처리하고 clipboard·알림·title escape는 재연결 시 재실행하지 않는다. 느린 화면 연결에는 크기가 제한된 chunk와 sequence 기반 snapshot을 제공한다. 입력 queue가 가득 차도 terminal query 응답을 버리지 않고 PTY 읽기에 backpressure를 적용한다.
 - 숨겨진 `flowmuxctl agent-relay` 진입점으로 기존 instance에 명시적으로 연결할 수 있다. 준비·확정·취소·이전 lease 교체를 구분하며 확정 전 기존 입력 소유자를 유지한다. input sequence와 digest로 중복 입력을 방지한다. 화면 읽기와 입력 connection을 분리하고, 수락 전 Busy 재시도 중에도 화면 출력과 signal 처리를 계속한다. 입력은 한 요청씩 처리하며 relay 종료는 detach만 수행한다.
+- GUI는 tab과 별개의 관리 연결을 유지하며 Options의 대기 시간 변경을 Host에 전달한다. `flowmux agent open <instance> --pane <pane>`은 실제 registry의 실행을 확인해 managed tab을 열거나 기존 tab을 이동한다. 같은 GUI에서 반복 열기는 기존 binding을 재사용한다. 저장된 InstanceId·epoch와 workspace/pane/tab으로 자동 재연결하며 native resume·일반 shell·저장 scrollback으로 대체하지 않는다. managed tab의 relay 종료는 연결 해제로 처리하고, Agent 종료로 오인하는 일반 terminal 종료 대화상자는 띄우지 않는다.
 - 명시적 interrupt/terminate/force 및 자연 종료 관측을 추가했다. Linux에서는 pidfd를 먼저 열고 birth identity를 확인한 뒤 신호를 보내 PID 재사용에 의한 오종료를 막는다. 관측된 소유 자식과 PTY EOF까지 확인하고, 마지막 실행 회수와 최종 화면 전달을 마치면 Host·socket도 정리한다. 실행 없는 초기 Host의 launch 대기는 최대 10초이며 정상 종료 후 상주 재시작하지 않는다.
 
 | 다음 구현 단계 | 완료 조건과 현재 제한 |
 | --- | --- |
-| GUI에서 Host 시작·관리 연결 | 플랫폼의 GUI 종료 정리와 독립된 시작, 중복 Host 방지, 옵션 변경 전파. 현재 격리 fixture가 명시적으로 Host와 관리 connection을 만든다 |
+| GUI에서 Host 시작·관리 연결 | 상시 GUI 관리 연결과 옵션 변경 전파는 연결됨. 플랫폼의 GUI 종료 정리와 독립된 시작·중복 Host 방지는 구현 전이며 fixture가 Host를 명시적으로 시작. 최초 handshake 실패 시 managed 복원 보류 gate 필요 |
 | provider 관측과 완료 adapter | 기존 hook·process·screen 규칙을 InstanceId 기준으로 이관하고 §3의 지연 progress 문제를 정규화. 현재 Host는 provider hook 및 pane context 명령을 처리하지 않으므로 설치 shim을 기본 managed 실행으로 전환하지 않음 |
-| GUI launch·저장 binding·재연결 | 일반 terminal과 managed binding을 구분하고 자동 native resume보다 live Host 조회를 우선. 현재 재연결은 fixture가 relay를 명시적으로 실행하며 자동 layout 복원은 구현 전 |
-| Agents 목록·열기·이동·종료 | registry 기반 목록, 실제 표시 위치, 목적지 선택, pane drop, 명시적 종료 UI. 현재 backend lease·종료 요청만 있음 |
+| GUI launch·저장 binding·재연결 | 명시적 기존 instance 열기와 저장 binding의 자동 layout 재연결을 추가. 기본 provider launch·resume/fork의 Host 이관, 연결 완료 ACK·실패 UI는 추가 구현 필요 |
+| Agents 목록·열기·이동·종료 | CLI의 기존 실행 열기·같은 GUI의 tab 이동은 제공. registry 기반 목록, Host의 실제 표시 위치, 목적지 선택, pane drop, 명시적 종료 UI는 구현 전 |
 | 안전한 자동 회수 | 전체 완료 및 provider의 원자적 idle 종료 수락 후 설정 시간 적용. 현재 후보 판정기만 있으며 실제 30분 자동 종료는 검증 전 |
 | 성능·프로세스 경계·플랫폼 | 프로세스 관측의 중복 전체 스캔 제거, terminal control string·hyperlink의 메모리 상한, synchronized-update timeout 및 buffer 해제 시 결합 문자 상한 검증, 독립 session으로 빠르게 분리되는 자식의 추적, macOS 종료 신호·containment 검증 필요. Linux의 pidfd 미지원 환경에서 안전한 대체 경로 없이 PID 신호로 후퇴하지 않음 |
 
@@ -511,9 +512,23 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 
 상태 판정 점검의 기준 검증으로 `cargo test -p flowmux-daemon --lib state_store::tests`를 실행해 **187개 통과, 실패 0개, 필터 제외 28개**를 확인했고 daemon library build도 통과했다. 독립 메모리 `StateStore` 재현에서는 §3의 동일 turn 지연 progress 문제와 workspace 제거 후 presence 및 해당 surface의 이벤트 적용 대상이 사라지는 것을 확인했다. 이는 기존 코드의 동작 확인이며, 제안한 Host 수명 정책의 통과 결과가 아니다. 재현 도구는 임시 경로에서 실행했고 사용자 GUI·에이전트에는 연결하지 않았다.
 
-독립 Host 기반의 Linux live 검증은 [test-agent-host-gui.py](../scripts/test-agent-host-gui.py)에 기록했다. 별도의 Xvfb·D-Bus·XDG 경로에서 가짜 agent를 한 번 실행하고 실제 Flowmux/VTE의 alternate screen과 한글 입력 왕복, 512KiB 입력 backpressure 중 현재 화면 갱신과 입력 보존, GUI 정상 종료 및 SIGKILL 중 counter 진행, GUI 재실행 후 명시적 relay 연결의 동일 InstanceId·PID·생성 시각·화면·입력, agent 자연 종료 후 reap·빈 Host 종료·socket 제거를 확인했다. 사용자 GUI와 실행 중인 agent는 유지했다. Host와 GUI 관리 connection은 fixture가 명시적으로 시작하므로 이 검증은 GUI의 Host 시작·서비스 분리, 실제 provider 작업·자동 binding 복원·실제 30분 자동 종료·macOS 생존 검증을 대신하지 않는다.
+독립 Host 기반의 Linux live 검증은 [test-agent-host-gui.py](../scripts/test-agent-host-gui.py)에 기록했다. 별도의 Xvfb·D-Bus·XDG 경로에서 가짜 agent를 한 번 실행하고 다음을 확인했다. 한글 입력 검사는 매번 다른 확인값을 사용하여 재연결 snapshot의 과거 ACK를 성공으로 오인하지 않는다.
 
-Host 기반 변경의 workspace build, Clippy(`--all-targets -- -D warnings`), format 검사는 통과했다. Linux 공유 CI의 workspace 단계에서 daemon library **234개 통과·1개 ignored**, IPC **84개 통과**, CLI **135개 통과·1개 ignored**, terminal **30개 통과**를 확인했다. 전체 CI는 Diff Review의 `diff_review_native_smoke`에서 composer 스크롤의 가시성 검사 timeout으로 실패했고, 같은 검사는 격리된 단독 실행에서도 실패했다. Host 기반 변경 전 `83acccdc`를 별도 checkout하여 같은 소스·검사를 실행했을 때도 같은 지점에서 실패했다. CI는 workspace 단계에서 중단되었으므로 뒤쪽 GUI suite 전체를 통과했다고 보지 않는다. 앞선 CI에서 발견한 Host 입력 queue 부하 테스트의 타이밍 의존은 gate로 제거했다. relay 수정 전 바이너리는 위 512KiB live 검사의 화면 갱신 단계에서 실패했고, 수정 후 바이너리는 여섯 시나리오를 모두 통과했다.
+- 실제 Flowmux/VTE의 alternate screen·한글 화면 및 새 입력 왕복.
+- `agent open`의 중복 tab 방지, tab 닫기·재열기 및 pane 이동 후 동일 실행·새 입력 유지. relay만 종료한 뒤 다른 pane에서 다시 열어도 끊어진 widget을 재사용하지 않고 같은 실행에 재연결.
+- 512KiB 입력 backpressure 중 현재 화면 갱신 및 대기 입력 보존.
+- GUI 정상 종료·SIGKILL 중 작업 진행과 동일 PID·생성 시각 유지. relay 종료·재연결 이후에도 한 번의 window 닫기 요청으로 정상 종료하며 일반 terminal은 GUI와 함께 종료.
+- GUI 재실행 시 별도의 attach 명령 없이 같은 workspace/pane/tab과 InstanceId로 자동 재연결. agent spawn 횟수는 한 번.
+- 잘못된 epoch와 Host 부재를 화면에 오류로 표시하고 binding 유지. 저장된 shell override·자동 native resume·새 Host 시작으로 대체하지 않음.
+- agent 자연 종료 후 reap·빈 Host 종료·socket 제거.
+
+사용자 GUI와 실행 중인 agent는 유지했다. Host 시작과 agent launch는 fixture가 명시적으로 수행하며, GUI 관리 연결·tab 생성과 저장 binding 복원은 제품 경로를 사용한다. 이 검증은 GUI의 Host 시작·서비스 분리, 실제 provider 작업·실제 30분 자동 종료·macOS 생존 검증을 대신하지 않는다. 후속 단위 검증은 core **181개**, state **91개**, daemon library **235개·1개 ignored**, CLI binary **178개**와 library **135개·1개 ignored**, GUI 관리 연결 **2개**가 통과했다.
+
+Host 기반 변경의 workspace build, Clippy(`--all-targets -- -D warnings`), format 검사는 통과했다. 관리 연결·저장 tab 복원 변경 단계에서 실행한 Linux 공유 CI의 GUI 단위 검사 결과는 **940개 통과·2개 실패·4개 ignored**다. 실패한 `program_title_persists_until_agent_exit_without_cwd_change`와 `terminal_cwd_change_updates_tab_and_window_title_and_ignores_shell_ps1_echo`는 일반 terminal의 제목 갱신 검사이며, 별도의 Xvfb·D-Bus·XDG 경로에서 두 검사를 함께 재실행하면 **2개 모두 통과**했다. 전체 실행에서 실패한 원인은 확정하지 않았으며 CI 성공으로 기록하지 않는다. workspace 단계 이후 GUI suite 전체는 실행되지 않았다.
+
+후속 relay 종료 수정에서는 GUI build·Clippy·format 및 위 live 검사 **10개**가 통과했다. relay 신호 종료를 Agent 종료로 오인하여 일반 종료 대화상자를 띄우던 문제도 수정했다. 해당 회귀 검사와 기존 일반 terminal·별도 창의 종료 처리 검사, 위 제목 검사 두 개를 같은 격리 환경에서 실행해 **12개 모두 통과**했다. 최종 수정 뒤 공유 CI 전체는 재실행하지 않았다.
+
+이전 기반 구현 검증에서는 Diff Review의 `diff_review_native_smoke`가 composer 스크롤 가시성 timeout으로 실패했고, Host 기반 변경 전 `83acccdc`에서도 같은 실패를 재현했다. 이번 공유 CI에서는 해당 검사가 통과했다. 앞서 발견한 Host 입력 queue 부하 검사의 타이밍 의존은 gate로 제거했다. 512KiB live 검사와 끊어진 relay의 pane 이동 검사는 각각 수정 전 실패를 재현했고, 수정 후에는 현재 화면과 새로운 입력 ACK로 복구를 확인했다.
 
 설계 검토 단계에서는 외부 프로그램 실행·실제 UI 성능 측정을 수행하지 않았다. 기반 구현의 terminal projection은 일부 Unicode·style·query·history 동작과 Linux VTE 왕복을 확인한 단계이며, provider TUI 전체 및 palette/theme·IME·mouse·resize 호환성은 추가 검증이 필요하다. 플랫폼별 GUI 종료 생존, provider별 전체 작업 관측 및 안전한 유휴 종료 계약도 출시 전 확인한다. 이 검증 없이 모든 provider의 자동 종료와 작업 보존을 동시에 보장한다고 주장하지 않는다. 근거가 부족하면 실행 보존을 우선한다.
 

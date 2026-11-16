@@ -470,6 +470,7 @@ impl Handler for GuiHandler {
                 }
                 Request::WorkspaceCreate { .. }
                 | Request::WorkspaceFocus { .. }
+                | Request::AgentViewOpen { .. }
                 | Request::SurfaceCreate { .. } => self.handle_workspace_verb(req).await,
                 Request::TeamSpawn { .. }
                 | Request::PaneSplit { .. }
@@ -573,6 +574,57 @@ impl GuiHandler {
     /// Dispatch for the workspace verb group (split out of the `handle` match).
     async fn handle_workspace_verb(&self, req: Request) -> Response {
         match req {
+            Request::AgentViewOpen { pane, instance } => {
+                use flowmux_ipc::agent_host::{
+                    ClientRole, HostClient, HostRequest, HostResponse, ProcessState,
+                };
+                if self.inner.store().workspace_for_pane(pane).await.is_none() {
+                    return Response::Error(RpcError::NotFound(pane.to_string()));
+                }
+                let lookup = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    let client = HostClient::connect(
+                        &flowmux_config::paths::agent_host_socket(),
+                        ClientRole::Observer,
+                    )
+                    .await?;
+                    let HostResponse::List { agents, .. } = client.call(HostRequest::List).await?
+                    else {
+                        anyhow::bail!("unexpected Agent Host list response");
+                    };
+                    agents
+                        .into_iter()
+                        .find(|agent| {
+                            agent.instance == instance && agent.state == ProcessState::Running
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("Agent is not running: {instance}"))
+                })
+                .await;
+                let agent = match lookup {
+                    Ok(Ok(agent)) => agent,
+                    Ok(Err(error)) => {
+                        return Response::Error(RpcError::InvalidArgument(error.to_string()))
+                    }
+                    Err(_) => {
+                        return Response::Error(RpcError::Busy(
+                            "Agent Host lookup timed out".into(),
+                        ))
+                    }
+                };
+                let (ack, reply) = oneshot::channel();
+                if self
+                    .bridge
+                    .send(GtkCommand::OpenAgentView { pane, agent, ack })
+                    .await
+                    .is_err()
+                {
+                    return Response::Error(RpcError::Internal("bridge closed".into()));
+                }
+                match reply.await {
+                    Ok(Ok((pane, id))) => Response::SurfaceCreated { id, pane },
+                    Ok(Err(error)) => Response::Error(RpcError::InvalidArgument(error)),
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                }
+            }
             Request::WorkspaceCreate { background, .. } => {
                 // Create the model, then require the GUI to materialize it.
                 let resp = self.inner.handle(req.clone()).await;

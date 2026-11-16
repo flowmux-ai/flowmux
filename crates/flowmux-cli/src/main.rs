@@ -455,9 +455,7 @@ enum Cmd {
         op: ThemeOp,
     },
 
-    /// Make the flowmux-browser SKILL discoverable to local agents
-    /// (Claude Code, OpenCode, Codex CLI, Cline, Antigravity). Run after every `flowmux`
-    /// install / upgrade to re-sync the on-disk skill files.
+    /// Open managed Agent executions or install and inspect local agent skills.
     Agent {
         #[command(subcommand)]
         op: AgentOp,
@@ -951,6 +949,12 @@ enum MediaAction {
 
 #[derive(Subcommand)]
 enum AgentOp {
+    /// Open an existing Host execution in a pane, preserving its process.
+    Open {
+        instance: flowmux_core::AgentInstanceId,
+        #[arg(long)]
+        pane: Option<PaneId>,
+    },
     /// Mirror the embedded SKILL.md into each supported agent's
     /// user-level location. Idempotent: a no-op when the file is
     /// already up to date. Fails on existing-but-different files
@@ -1368,6 +1372,9 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             }
             return Ok(());
         }
+        Cmd::Agent {
+            op: AgentOp::Open { .. },
+        } => {}
         Cmd::Agent { op } => return run_agent_op(op, cli.json),
         // Plain identity/capability probes work offline. Session identity
         // resolves a live binding instead of the shared server environment.

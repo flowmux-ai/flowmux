@@ -619,6 +619,12 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         },
         Cmd::ListBrowsers => unreachable!("handled before request build"),
         Cmd::Theme { .. } => unreachable!("handled before request build"),
+        Cmd::Agent {
+            op: AgentOp::Open { instance, pane },
+        } => Request::AgentViewOpen {
+            instance,
+            pane: resolve_pane(pane)?,
+        },
         Cmd::Agent { .. } => unreachable!("handled before request build"),
         Cmd::Hooks { .. } => unreachable!("handled before request build"),
         Cmd::Doctor => unreachable!("handled before request build"),

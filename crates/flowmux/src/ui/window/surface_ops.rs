@@ -559,6 +559,7 @@ impl WindowController {
             title_locked: false,
             kind: torn.kind.clone(),
             scrollback: None,
+            agent_binding: torn.agent_binding,
             agent: None,
         };
         let workspace = Workspace {
@@ -625,6 +626,7 @@ impl WindowController {
         let surface_id = torn.surface;
         let editor = torn.editor.clone();
         let terminal = torn.terminal.clone();
+        let managed_agent = torn.agent_binding.is_some();
         let editor_for_focus = editor.clone();
         let pane = Self::build_torn_off_pane(torn, &title, window_ref.clone());
         stack.add_named(&pane, Some(&workspace_id.to_string()));
@@ -655,6 +657,7 @@ impl WindowController {
                     window: window.downgrade(),
                     title: title.clone(),
                     pid: terminal.pid.clone(),
+                    managed_agent,
                 },
             );
             // The widget alone does not own the PTY; release it on either close path.
@@ -854,7 +857,8 @@ impl WindowController {
             tracing::warn!(%error, "cannot materialize tab for tear-off");
             return;
         }
-        let Some(torn) = self
+        let binding = self.store.surface_agent_binding(pane, surface).await;
+        let Some(mut torn) = self
             .pane_registry
             .borrow_mut()
             .take_surface_for_tearoff(pane, surface, &title)
@@ -863,6 +867,7 @@ impl WindowController {
             return;
         };
 
+        torn.agent_binding = binding;
         self.present_torn_off_surface(&app, torn);
         match self.store.close_surface(pane, surface).await {
             None => {

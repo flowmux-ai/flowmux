@@ -171,7 +171,11 @@ pub async fn run(socket: &Path, instance: AgentInstanceId, epoch: Uuid) -> anyho
     let mut terminate = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut resize = signal(SignalKind::window_change())?;
-    let control = Arc::new(HostClient::connect(socket, ClientRole::Relay).await?);
+    let control = Arc::new(
+        HostClient::connect(socket, ClientRole::Relay)
+            .await
+            .context("Cannot reconnect Agent: Agent Host is unavailable")?,
+    );
     let frame_reader = HostClient::connect(socket, ClientRole::Observer).await?;
     let HostResponse::Prepared { key, .. } = control
         .call(HostRequest::PrepareAttach {

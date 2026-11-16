@@ -25,7 +25,7 @@ pub mod session_history;
 pub use agent_sessions::{default_agent_session_store, AgentSessionStore, SavedAgentSession};
 pub use instance_lock::{try_acquire_state_lock, InstanceLock};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Window size and maximized state, saved on exit and restored on next launch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -157,7 +157,7 @@ pub fn load_from(path: &Path) -> Result<State, StateError> {
     let text = std::fs::read_to_string(path)?;
     let mut raw: serde_json::Value = serde_json::from_str(&text)?;
     let version = checked_schema_version(&raw)?;
-    if version < u64::from(SCHEMA_VERSION) {
+    if version < 3 {
         for workspace in raw["workspaces"]
             .as_array_mut()
             .ok_or_else(|| StateError::Invalid("workspaces must be an array".into()))?
@@ -178,8 +178,8 @@ pub fn load_from(path: &Path) -> Result<State, StateError> {
                 serde_json::json!({"type": "local", "root_dir": root}),
             );
         }
-        raw["schema_version"] = SCHEMA_VERSION.into();
     }
+    raw["schema_version"] = SCHEMA_VERSION.into();
     let mut state: State = serde_json::from_value(raw)?;
     validate_locations(&state)?;
     if version < u64::from(SCHEMA_VERSION) {
@@ -266,6 +266,17 @@ fn validate_locations(state: &State) -> Result<(), StateError> {
             } => {
                 for surface in surfaces {
                     kind(&surface.kind, remote)?;
+                    if let Some(binding) = surface.agent_binding {
+                        if remote
+                            || !matches!(surface.kind, SurfaceKind::Terminal { .. })
+                            || binding.instance.0.is_nil()
+                            || binding.epoch.is_nil()
+                        {
+                            return Err(StateError::Invalid(
+                                "invalid managed Agent binding".into(),
+                            ));
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -428,7 +439,7 @@ fn bind_codex_title_sessions(state: &State, store: &AgentSessionStore, codex_hom
             let flowmux_core::SurfaceKind::Terminal { cwd: Some(cwd), .. } = &tab.kind else {
                 return;
             };
-            if tab.title_locked {
+            if tab.title_locked || tab.agent_binding.is_some() {
                 return;
             }
             let session = session_history::codex_session_for_title(codex_home, &tab.title, cwd);
@@ -707,6 +718,7 @@ mod tests {
                             cwd: None,
                         },
                         scrollback: Some("old output".into()),
+                        agent_binding: None,
                         agent: None,
                     }],
                 },
@@ -1123,7 +1135,7 @@ mod tests {
             "load never rewrites source"
         );
         save_to(&path, &migrated).unwrap();
-        assert_eq!(load_from(&path).unwrap().schema_version, 3);
+        assert_eq!(load_from(&path).unwrap().schema_version, SCHEMA_VERSION);
         assert_eq!(std::fs::read(&backup).unwrap(), bytes);
 
         std::fs::write(&path, &bytes).unwrap();
@@ -1132,6 +1144,104 @@ mod tests {
         assert!(save_to(&path, &migrated).is_err());
         assert_eq!(std::fs::read(&backup).unwrap(), b"earlier backup");
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn v3_migration_preserves_locations_ownership_and_managed_binding_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let tab = SurfaceId::new();
+        let original = state_with_owned_workspace(WindowOwner::current(), None, tab);
+        let mut raw = serde_json::to_value(&original).unwrap();
+        raw["schema_version"] = 3.into();
+        let bytes = serde_json::to_vec(&raw).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let mut migrated = load_from(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&migrated.workspaces).unwrap(),
+            raw["workspaces"]
+        );
+        assert_eq!(migrated.windows, original.windows);
+        assert_eq!(migrated.workspace_owners, original.workspace_owners);
+        assert_eq!(
+            std::fs::read(path.with_extension("json.v3.bak")).unwrap(),
+            bytes
+        );
+        let pane = migrated.workspaces[0].surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut migrated.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = surfaces
+            .iter_mut()
+            .find(|surface| surface.id == tab)
+            .unwrap();
+        surface.agent_binding = Some(binding);
+        surface.scrollback = None;
+        save_to(&path, &migrated).unwrap();
+        let restored = load_from(&path).unwrap();
+        assert_eq!(restored.schema_version, 4);
+        assert_eq!(
+            restored.workspaces[0].surfaces[0]
+                .root_pane
+                .find_surface_ref(pane, tab)
+                .unwrap()
+                .agent_binding,
+            Some(binding)
+        );
+        let mut remote = ssh_state();
+        let mut raw_remote = serde_json::to_value(&remote).unwrap();
+        raw_remote["schema_version"] = 3.into();
+        let remote_path = dir.path().join("remote.json");
+        std::fs::write(&remote_path, serde_json::to_vec(&raw_remote).unwrap()).unwrap();
+        remote = load_from(&remote_path).unwrap();
+        assert_eq!(
+            serde_json::to_value(remote.workspaces).unwrap(),
+            raw_remote["workspaces"]
+        );
+    }
+
+    #[test]
+    fn managed_binding_rejects_browser_and_nil_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let tab = SurfaceId::new();
+        let mut state = state_with_owned_workspace(WindowOwner::current(), None, tab);
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = &mut surfaces[0];
+        surface.agent_binding = Some(flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: Uuid::nil(),
+        });
+        assert!(save_to(&path, &state).is_err());
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = &mut surfaces[0];
+        surface.agent_binding.as_mut().unwrap().epoch = Uuid::new_v4();
+        surface.kind = SurfaceKind::Browser { initial_url: None };
+        assert!(save_to(&path, &state).is_err());
+        assert!(!path.exists());
     }
 
     fn ssh_state() -> State {

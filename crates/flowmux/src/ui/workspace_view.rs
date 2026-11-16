@@ -225,6 +225,7 @@ pub struct TornOffSurface {
     pub surface: SurfaceId,
     pub title: String,
     pub kind: SurfaceKind,
+    pub agent_binding: Option<flowmux_core::AgentViewBinding>,
     pub content: gtk::Widget,
     pub focus: gtk::Widget,
     pub editor: Option<EditorPane>,
@@ -1190,6 +1191,7 @@ impl PaneRegistry {
             surface,
             title,
             kind,
+            agent_binding: None,
             content,
             focus,
             editor,
@@ -4153,13 +4155,21 @@ fn build_panel(
                 terminal
             } else {
                 let opts = (callbacks.read_options)();
+                let managed = surface.agent_binding.is_some();
                 let inherited_shell = argv.first().map(String::as_str);
-                let requested_shell = preferred_shell(
-                    shell.as_deref().or(inherited_shell),
-                    opts.default_shell.as_deref(),
-                )
-                .map(str::to_string);
-                let mut argv = argv;
+                let requested_shell = (!managed)
+                    .then(|| {
+                        preferred_shell(
+                            shell.as_deref().or(inherited_shell),
+                            opts.default_shell.as_deref(),
+                        )
+                    })
+                    .flatten()
+                    .map(str::to_string);
+                let mut argv = match surface.agent_binding {
+                    Some(binding) => agent_relay_argv(binding)?,
+                    None => argv,
+                };
                 let mut resolved_shell = None;
                 let mut shell_warning = None;
                 if let Some(requested_shell) = requested_shell.as_deref() {
@@ -4199,15 +4209,19 @@ fn build_panel(
                 let font = theme.terminal_font(&opts);
                 let resume_command = take_restored_agent_shell_command(
                     surface.id,
-                    opts.auto_resume_agent_sessions,
+                    opts.auto_resume_agent_sessions && !managed,
                     flowmux_state::default_agent_session_store(),
                 );
                 #[cfg(target_os = "macos")]
-                let resume_command = registry
-                    .borrow_mut()
-                    .pending_terminal_commands
-                    .remove(&surface.id)
-                    .or(resume_command);
+                let resume_command = if managed {
+                    None
+                } else {
+                    registry
+                        .borrow_mut()
+                        .pending_terminal_commands
+                        .remove(&surface.id)
+                        .or(resume_command)
+                };
                 let is_resuming_agent = resume_command.is_some();
                 let mut resume_input = None;
                 if let Some(command) = resume_command {
@@ -4232,7 +4246,7 @@ fn build_panel(
                     pane_id,
                     surface.id,
                     argv,
-                    cwd.clone(),
+                    if managed { None } else { cwd.clone() },
                     extra_env,
                     opts.scrollback_lines_or_default(),
                     callbacks.clone(),
@@ -4247,7 +4261,7 @@ fn build_panel(
                     opts.terminal_minimap_opacity,
                 );
                 if let Some(scrollback) = scrollback_to_restore(
-                    opts.restore_terminal_scrollback,
+                    opts.restore_terminal_scrollback && !managed,
                     is_resuming_agent,
                     surface.scrollback.as_ref(),
                 ) {
@@ -4470,6 +4484,23 @@ fn preferred_shell<'a>(per_tab: Option<&'a str>, default: Option<&'a str>) -> Op
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| default.map(str::trim).filter(|value| !value.is_empty()))
+}
+
+fn agent_relay_argv(binding: flowmux_core::AgentViewBinding) -> Result<Vec<String>, String> {
+    let cli = flowmux_terminal::find_flowmuxctl()
+        .ok_or("Cannot reconnect Agent: flowmuxctl is unavailable")?;
+    Ok(vec![
+        cli.to_string_lossy().into_owned(),
+        "--socket".into(),
+        flowmux_config::paths::agent_host_socket()
+            .to_string_lossy()
+            .into_owned(),
+        "agent-relay".into(),
+        "--instance".into(),
+        binding.instance.to_string(),
+        "--epoch".into(),
+        binding.epoch.to_string(),
+    ])
 }
 
 fn take_restored_agent_shell_command(

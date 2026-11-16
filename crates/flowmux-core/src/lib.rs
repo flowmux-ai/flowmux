@@ -146,6 +146,9 @@ fn truncate_tab_title(title: &str) -> String {
 /// Restore a local terminal's cwd title after its program has ended.
 /// User-renamed titles and non-local terminal surfaces are preserved.
 pub fn normalize_unlocked_terminal_title(surface: &mut PaneSurface) -> bool {
+    if surface.agent_binding.is_some() {
+        return false;
+    }
     if surface.title_locked {
         return false;
     }
@@ -502,6 +505,9 @@ pub struct PaneSurface {
     #[serde(default)]
     pub title_locked: bool,
     pub kind: SurfaceKind,
+    /// Reconnect to this Host execution; never recreate it from saved state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_binding: Option<AgentViewBinding>,
     /// Best-effort terminal history replayed on the next launch. Legacy state
     /// is plain text; new VTE snapshots preserve display attributes as HTML.
     /// Bounded by [`TERMINAL_SCROLLBACK_MAX_BYTES`] before it reaches state.
@@ -511,6 +517,13 @@ pub struct PaneSurface {
     /// Never persisted; a restored tab starts without agent presence.
     #[serde(skip)]
     pub agent: Option<AgentPresence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentViewBinding {
+    pub instance: AgentInstanceId,
+    pub epoch: Uuid,
 }
 
 /// A pane is either a leaf (rendered content) or a binary split. This
@@ -1377,7 +1390,7 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
-        if surface.title_locked {
+        if surface.title_locked || surface.agent_binding.is_some() {
             return false;
         }
         // The `$HOME` lookup runs only after the surface is found and only for a
@@ -1404,6 +1417,9 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
+        if surface.agent_binding.is_some() {
+            return false;
+        }
         let SurfaceKind::Terminal { cwd, .. } = &mut surface.kind else {
             return false;
         };
@@ -1442,6 +1458,9 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
+        if surface.agent_binding.is_some() {
+            return false;
+        }
         if !matches!(
             surface.kind,
             SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. }
@@ -1995,6 +2014,7 @@ impl PaneSurface {
             title: title.into(),
             title_locked: false,
             kind: SurfaceKind::Terminal { shell: None, cwd },
+            agent_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2008,6 +2028,7 @@ impl PaneSurface {
             kind: SurfaceKind::Browser {
                 initial_url: Some(url),
             },
+            agent_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2022,6 +2043,7 @@ impl PaneSurface {
                 workspace_root,
                 session: EditorSessionState::default(),
             },
+            agent_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2040,6 +2062,7 @@ impl PaneContent {
                         title: surface.title.clone(),
                         title_locked: surface.title_locked,
                         kind: surface.kind.clone(),
+                        agent_binding: surface.agent_binding,
                         scrollback: None,
                         agent: surface.agent.clone(),
                     })

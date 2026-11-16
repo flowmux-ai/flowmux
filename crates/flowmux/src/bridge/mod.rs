@@ -392,6 +392,11 @@ pub enum GtkCommand {
     NewSurface {
         pane: PaneId,
     },
+    OpenAgentView {
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+        ack: oneshot::Sender<Result<(PaneId, SurfaceId), String>>,
+    },
     /// Open a new tab in the target pane and run tig in its shell.
     OpenTig {
         pane: PaneId,
@@ -905,6 +910,7 @@ pub enum GtkCommand {
 #[derive(Clone)]
 pub struct Bridge {
     pub tx: async_channel::Sender<GtkCommand>,
+    pub agent_idle_timeout: tokio::sync::watch::Sender<u32>,
     priority_tx: async_channel::Sender<GtkCommand>,
     control_tx: async_channel::Sender<GtkCommand>,
 }
@@ -983,6 +989,7 @@ impl Bridge {
         (
             Self {
                 tx,
+                agent_idle_timeout: tokio::sync::watch::channel(30).0,
                 priority_tx,
                 control_tx,
             },

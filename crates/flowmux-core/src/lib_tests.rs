@@ -1582,6 +1582,7 @@ fn normalize_resets_unlocked_title_to_cwd_after_relaunch() {
             cwd: Some(cwd.clone()),
         },
         scrollback: None,
+        agent_binding: None,
         agent: None,
     };
     let changed = normalize_unlocked_terminal_title(&mut surface);
@@ -1604,6 +1605,7 @@ fn agent_presence_is_never_persisted() {
             cwd: None,
         },
         scrollback: None,
+        agent_binding: None,
         agent: Some(AgentPresence::new(
             "claude",
             AgentActivity::Running,
@@ -1621,6 +1623,34 @@ fn agent_presence_is_never_persisted() {
     assert!(back.agent.is_none());
     assert_eq!(back.id, surface.id);
     assert_eq!(back.title, surface.title);
+}
+
+#[test]
+fn managed_view_binding_survives_snapshot_without_local_history_or_title_changes() {
+    let binding = AgentViewBinding {
+        instance: AgentInstanceId::new(),
+        epoch: Uuid::new_v4(),
+    };
+    let mut surface = PaneSurface::terminal("Agent in progress", Some("/tmp/agent".into()));
+    surface.agent_binding = Some(binding);
+    let id = surface.id;
+    let mut pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: id,
+            surfaces: vec![surface],
+        },
+    };
+    let pane_id = pane.first_leaf_id().unwrap();
+    assert!(!pane.set_surface_scrollback(pane_id, id, "relay history".into()));
+    assert!(!pane.set_surface_cwd(pane_id, id, "/tmp/relay".into()));
+    let snapshot = pane.clone_without_scrollback();
+    let decoded: Pane = serde_json::from_value(serde_json::to_value(snapshot).unwrap()).unwrap();
+    let mut restored = decoded.find_surface_ref(pane_id, id).unwrap().clone();
+    assert_eq!(restored.agent_binding, Some(binding));
+    assert!(restored.scrollback.is_none());
+    assert!(!normalize_unlocked_terminal_title(&mut restored));
+    assert_eq!(restored.title, "Agent in progress");
 }
 
 #[test]
@@ -4441,6 +4471,7 @@ fn normalize_keeps_user_renamed_titles() {
             cwd: Some("/tmp".into()),
         },
         scrollback: None,
+        agent_binding: None,
         agent: None,
     };
     let changed = normalize_unlocked_terminal_title(&mut surface);
@@ -4462,6 +4493,7 @@ fn normalize_keeps_already_cwd_matching_titles() {
             cwd: Some(cwd),
         },
         scrollback: None,
+        agent_binding: None,
         agent: None,
     };
     let changed = normalize_unlocked_terminal_title(&mut surface);
@@ -4477,6 +4509,7 @@ fn normalize_skips_browser_surfaces() {
         title_locked: false,
         kind: SurfaceKind::Browser { initial_url: None },
         scrollback: None,
+        agent_binding: None,
         agent: None,
     };
     let changed = normalize_unlocked_terminal_title(&mut surface);
@@ -4495,6 +4528,7 @@ fn normalize_falls_back_to_default_when_cwd_is_missing() {
             cwd: None,
         },
         scrollback: None,
+        agent_binding: None,
         agent: None,
     };
     let changed = normalize_unlocked_terminal_title(&mut surface);

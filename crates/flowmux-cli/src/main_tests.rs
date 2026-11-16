@@ -4,6 +4,27 @@
 use super::*;
 
 #[test]
+fn agent_open_targets_existing_instance_and_explicit_pane() {
+    let instance = flowmux_core::AgentInstanceId::new();
+    let pane = PaneId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "agent",
+        "open",
+        &instance.to_string(),
+        "--pane",
+        &pane.to_string(),
+    ])
+    .unwrap();
+    assert!(
+        matches!(build_request(cli.cmd).unwrap(), Request::AgentViewOpen {
+        instance: id, pane: target,
+    } if id == instance && target == pane)
+    );
+    assert!(Cli::try_parse_from(["flowmuxctl", "agent", "open", "invalid-id"]).is_err());
+}
+
+#[test]
 fn agent_explanation_requires_explicit_mode_and_exact_surface() {
     let surface = SurfaceId::new();
     let cli = Cli::try_parse_from([

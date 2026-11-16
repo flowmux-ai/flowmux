@@ -87,6 +87,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::NewSurface { .. }
             | GtkCommand::OpenTig { .. }
             | GtkCommand::CreateSurface { .. }
+            | GtkCommand::OpenAgentView { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
@@ -2994,6 +2995,7 @@ impl WindowController {
             | GtkCommand::SplitPane { pane, .. }
             | GtkCommand::TeamSpawn { pane, .. }
             | GtkCommand::NewSurface { pane }
+            | GtkCommand::OpenAgentView { pane, .. }
             | GtkCommand::NewBrowserSurface { pane }
             | GtkCommand::OpenTig { pane }
             | GtkCommand::ActivateSurface { pane, .. }
@@ -3021,6 +3023,7 @@ impl WindowController {
                 | GtkCommand::SplitPane { .. }
                 | GtkCommand::TeamSpawn { .. }
                 | GtkCommand::CreateSurface { .. }
+                | GtkCommand::OpenAgentView { .. }
                 | GtkCommand::NewSurface { .. }
                 | GtkCommand::CloseSurface { .. }
                 | GtkCommand::ConfirmCloseSurface { .. }
@@ -3130,6 +3133,7 @@ impl WindowController {
             | GtkCommand::NewSurface { .. }
             | GtkCommand::OpenTig { .. }
             | GtkCommand::CreateSurface { .. }
+            | GtkCommand::OpenAgentView { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
