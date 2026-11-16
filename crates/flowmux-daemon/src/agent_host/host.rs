@@ -2142,6 +2142,8 @@ impl TerminalActor {
         let completed = transition.completed;
         let completion_message = transition.completion_message;
         if let Some(report) = transition.report {
+            let failed = report.activity == Some(flowmux_core::AgentActivity::Idle)
+                && report.turn_outcome == Some(flowmux_core::AgentTurnOutcome::Failed);
             if let Some(presence) = &mut self.presence {
                 presence.apply_report(report, false);
             } else {
@@ -2164,7 +2166,13 @@ impl TerminalActor {
                         title: format!(
                             "{} {}",
                             agent.provider,
-                            if completed { "ready" } else { "needs input" }
+                            if failed {
+                                "failed"
+                            } else if completed {
+                                "ready"
+                            } else {
+                                "needs input"
+                            }
                         ),
                         body: completion_message
                             .or_else(|| {
@@ -2173,14 +2181,18 @@ impl TerminalActor {
                                     .and_then(|p| p.status_text().map(str::to_owned))
                             })
                             .unwrap_or_else(|| {
-                                if completed {
+                                if failed {
+                                    "Response failed"
+                                } else if completed {
                                     "task complete"
                                 } else {
                                     "Waiting for input"
                                 }
                                 .into()
                             }),
-                        level: if completed {
+                        level: if failed {
+                            flowmux_core::NotificationLevel::Error
+                        } else if completed {
                             flowmux_core::NotificationLevel::TurnCompleted
                         } else {
                             flowmux_core::NotificationLevel::NeedsInput
@@ -2721,6 +2733,72 @@ mod tests {
             .map(|(n, _)| serde_json::to_vec(n).unwrap().len())
             .sum();
         assert!(bytes <= MAX_NOTIFICATION_LOG_BYTES);
+    }
+
+    #[tokio::test]
+    async fn failed_turns_notify_once_without_a_gui_and_reset_for_new_work() {
+        use flowmux_core::{AgentTurnOutcome, NotificationLevel};
+        use flowmux_ipc::protocol::AgentLifecycleEvent as Event;
+        let fixture = Fixture::new().await;
+        let launcher = fixture.client(ClientRole::Relay).await;
+        let mut launch = fixture.launch("sleep 30");
+        launch.provider = "antigravity".into();
+        let HostResponse::Launched { agent } =
+            launcher.call(HostRequest::Launch { launch }).await.unwrap()
+        else {
+            panic!()
+        };
+        drop(launcher);
+        let hook = fixture.client(ClientRole::Hook).await;
+        let observer = fixture.client(ClientRole::Observer).await;
+        let mut seq = 0;
+        let mut ids = Vec::new();
+        for turn in ["first", "second"] {
+            seq += 1;
+            hook.call(lifecycle_event(
+                &agent,
+                seq,
+                Event::TurnStarted {
+                    turn_id: Some(turn.into()),
+                    status_text: "Working".into(),
+                },
+            ))
+            .await
+            .unwrap();
+            for _ in 0..2 {
+                seq += 1;
+                hook.call(lifecycle_event(
+                    &agent,
+                    seq,
+                    Event::TurnFinished {
+                        outcome: AgentTurnOutcome::Failed,
+                        message: Some("Fixture unauthorized".into()),
+                        status_text: "Response failed".into(),
+                    },
+                ))
+                .await
+                .unwrap();
+                let HostResponse::List { notifications, .. } =
+                    observer.call(HostRequest::List).await.unwrap()
+                else {
+                    panic!()
+                };
+                assert_eq!(notifications.len(), ids.len() + 1);
+                let notice = &notifications.last().unwrap().notification;
+                assert_eq!(notice.level, NotificationLevel::Error);
+                assert_eq!(notice.title, "antigravity failed");
+                assert_eq!(notice.body, "Fixture unauthorized");
+                assert!(notice.source_pane.is_none());
+            }
+            let HostResponse::List { notifications, .. } =
+                observer.call(HostRequest::List).await.unwrap()
+            else {
+                panic!()
+            };
+            let id = notifications.last().unwrap().notification.id;
+            assert!(!ids.contains(&id));
+            ids.push(id);
+        }
     }
 
     #[tokio::test]

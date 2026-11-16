@@ -385,6 +385,8 @@ while True:
                     expected = "failed"
                 fixture.wait_for(lambda: presence()["status"] == "idle", "Host settles the stable ready screen with no GUI")
                 assert presence()["turn_outcome"] == expected, presence()
+                if expected == "failed":
+                    assert len([n for n in host_notifications() if n["notification"]["level"] == "error"]) == 1, host_notifications()
                 count = len(host_notifications())
                 time.sleep(1.1)
                 assert len(host_notifications()) == count, "screen poll duplicated completion"
@@ -427,7 +429,22 @@ while True:
                     if name == "gemini":
                         fixture.wait_for(lambda: presence()["status"] == "idle", "headless cancellation settles")
                         assert presence()["turn_outcome"] == "canceled", presence()
+                        hook("session-start", session="failed-screen")
+                        hook("turn-start", session="failed-screen")
+                        frame("✕ Fixture unauthorized\nType your message")
+                        fixture.wait_for(lambda: presence()["status"] == "idle", "headless failure settles")
+                        assert presence()["turn_outcome"] == "failed", presence()
+                        assert len([n for n in host_notifications() if n["notification"]["level"] == "error"]) == 1, host_notifications()
                 h.pass_check(name + ": headless live screen/title settlement preserves continuation, outcome, process identity and notification deduplication")
+            if name == "antigravity":
+                hook("session-start", session="native-failure")
+                hook("turn-start", session="native-failure")
+                for _ in range(2):
+                    hook("stop", session="native-failure", payload={"reason": "ERROR", "error": "Fixture unauthorized"})
+                    assert presence()["turn_outcome"] == "failed", presence()
+                    errors = [n for n in host_notifications() if n["notification"]["level"] == "error"]
+                    assert len(errors) == 1 and errors[0]["notification"]["body"] == "Fixture unauthorized", errors
+                h.pass_check("Antigravity: repeated native failure produces one causal Error notification without a GUI")
             if name == "codex":
                 child = {"agent_id": "child", "turn_id": "child-new"}
                 hook("running", payload=child)

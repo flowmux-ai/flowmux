@@ -273,7 +273,11 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
         let id = self.notification_id(
             &key,
             transition.notification_scope.clone(),
-            transition.completed,
+            transition.completed
+                || transition.report.as_ref().is_some_and(|report| {
+                    report.activity == Some(flowmux_core::AgentActivity::Idle)
+                        && report.turn_outcome == Some(AgentTurnOutcome::Failed)
+                }),
         )?;
         self.claim_notification(&key, id).then_some(id)
     }

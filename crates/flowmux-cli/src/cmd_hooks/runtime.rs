@@ -217,6 +217,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn managed_failed_stop_uses_only_the_causal_host_event() {
+        let target = HookTarget::Managed {
+            instance: AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+            pid: 42,
+            process_start: 123,
+        };
+        let input = hooks::ClaudeHookInput {
+            session_id: Some("session".into()),
+            reason: Some("ERROR".into()),
+            error: Some("Fixture unauthorized".into()),
+            ..Default::default()
+        };
+        let requests = super::super::runtime_generic_stop_requests(
+            "antigravity",
+            "antigravity",
+            "Antigravity",
+            &input,
+            None,
+            None,
+            Some(target),
+        );
+        assert!(matches!(requests.as_slice(), [Request::AgentHost {
+            request: HostRequest::Lifecycle {
+                event: AgentLifecycleEvent::TurnFinished {
+                    outcome: flowmux_core::AgentTurnOutcome::Failed, message, ..
+                }, ..
+            }
+        }] if message.as_deref() == Some("Fixture unauthorized")));
+    }
+
+    #[test]
     fn managed_events_keep_execution_identity_and_never_claim_a_tab() {
         let instance = AgentInstanceId::new();
         let epoch = uuid::Uuid::new_v4();

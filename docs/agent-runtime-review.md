@@ -41,6 +41,22 @@
   29개 통과·exit 0 (`/tmp/fm-runtime-wait-after-live.log`,
   `/tmp/fm-gui-rc0y4z93`). 해당 runtime의 잔여 process가 없다.
 
+### AR-003 · medium · 화면에서 확인한 headless 실패의 오류 알림 누락
+
+- 원인: Host의 전이 알림은 완료와 입력 대기에만 인과 ID를 부여했다.
+  Cline·Gemini의 화면 실패는 Idle/Failed로 표시돼도 오류 알림이 없었다.
+- 재현: GUI 없는 Host에서 실패 전이를 반복한 회귀 검사가 알림 0건으로 실패했다
+  (`/tmp/fm-runtime-failure-before-tests.log`).
+- 조치: Idle/Failed도 Host의 응답별 알림 receipt를 사용하고 Error로 보관한다.
+  managed Antigravity의 native 실패 hook은 추가 Notify를 보내지 않아 중복을 막는다.
+  일반 Tab-bound 실패 알림과 입력 대기의 NeedsInput 동작은 유지한다.
+- 검증: 실패 반복·새 작업의 별도 실패 회귀 검사와 managed/Tab-bound CLI 검사
+  2개 통과. 격리 live 30개 통과·exit 0
+  (`/tmp/fm-runtime-failure-after-live.log`, `/tmp/fm-gui-5xr7w63n`). 실제
+  Cline·Gemini 화면 실패와 Antigravity native 실패의 Error 1건 보관, GUI의
+  bell 복원과 desktop 재전송 방지를 확인했다. stdout/event PASS 수가 일치하며
+  해당 runtime의 잔여 process가 없다. 전체 Linux gate 결과는 별도로 기록한다.
+
 ## 완료 전 확인할 범위
 
 - 새 변경을 포함한 Linux 공유 CI 전체와 runtime live phase.

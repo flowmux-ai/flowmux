@@ -1076,6 +1076,8 @@ fn runtime_generic_stop_requests(
     use flowmux_core::AgentActivity::Idle;
     use hooks::*;
 
+    let managed = matches!(surface, Some(HookTarget::Managed { .. }));
+
     if let Some(request) = generic_resume_return_forget_request(
         agent,
         input.reason.as_deref(),
@@ -1159,7 +1161,7 @@ fn runtime_generic_stop_requests(
                     }
                 },
             )];
-            if outcome == Some(flowmux_core::AgentTurnOutcome::Failed) {
+            if outcome == Some(flowmux_core::AgentTurnOutcome::Failed) && !managed {
                 requests.push(build_failure_notify(
                     agent_display_name,
                     input.error.as_deref().or(input.message.as_deref()),
@@ -1182,7 +1184,7 @@ fn runtime_generic_stop_requests(
             Some(outcome.status_text()),
             input.session_id.as_deref(),
         )];
-        if outcome == flowmux_core::AgentTurnOutcome::Failed {
+        if outcome == flowmux_core::AgentTurnOutcome::Failed && !managed {
             requests.push(build_failure_notify(
                 agent_display_name,
                 body.as_deref(),
