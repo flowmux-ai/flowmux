@@ -172,8 +172,12 @@ int main(int argc, char **argv) {
                 expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
                 assert value["status"] in expected, value
                 if event == "stop" and activity == "idle":
-                    assert value.get("turn_outcome") == "completed", value
-                    assert value.get("status_text") == "Response completed", value
+                    outcome, label = {
+                        "ERROR": ("failed", "Response failed"),
+                        "USER_CANCELED": ("canceled", "Turn interrupted"),
+                    }.get(fields.get("terminationReason"), ("completed", "Response completed"))
+                    assert value.get("turn_outcome") == outcome, value
+                    assert value.get("status_text") == label, value
                 elif event == "interrupt" and activity == "idle":
                     assert value.get("turn_outcome") == "canceled", value
                 elif event == "stop-failure":
