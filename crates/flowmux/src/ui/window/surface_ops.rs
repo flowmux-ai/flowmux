@@ -603,7 +603,7 @@ impl WindowController {
             {
                 let bridge = sidebar_bridge.clone();
                 move || {
-                    let _ = bridge.tx.try_send(GtkCommand::ShowSshDialog);
+                    bridge.send_from_ui(GtkCommand::ShowSshDialog);
                 }
             },
             sidebar_bridge,

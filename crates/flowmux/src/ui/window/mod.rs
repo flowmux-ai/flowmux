@@ -1733,7 +1733,7 @@ impl WindowController {
             {
                 let bridge = bridge.clone();
                 move || {
-                    let _ = bridge.tx.try_send(GtkCommand::ShowSshDialog);
+                    bridge.send_from_ui(GtkCommand::ShowSshDialog);
                 }
             },
             bridge.clone(),
@@ -4405,6 +4405,9 @@ async fn dispatch_guarded(controller: &WindowController, cmd: GtkCommand) {
             "GTK command handler panicked; the window keeps serving commands"
         );
     }
+    // Ready channel futures do not yield: let GTK process input and paint
+    // between commands, including hook updates served during another dispatch.
+    glib::timeout_future_with_priority(glib::Priority::DEFAULT_IDLE, Duration::ZERO).await;
 }
 
 /// Poll `future` to completion, turning a panic inside any poll into `Err`.
@@ -4876,6 +4879,45 @@ mod tests {
         assert_eq!(
             dirty_editor_dialog_body(&["한글.txt".into()]),
             "“한글.txt” has unsaved changes."
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn queued_commands_allow_gtk_events_before_the_queue_drains() {
+        let (controller, workspace, _) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.DispatchFairness").await;
+        let (bridge, rx) = Bridge::new();
+        for _ in 0..63 {
+            bridge.tx.try_send(GtkCommand::RefreshWindowTitle).unwrap();
+        }
+        let (ack, reply) = oneshot::channel();
+        bridge
+            .tx
+            .try_send(GtkCommand::QueryAgentSurfaceVisible {
+                surface: SurfaceId::new(),
+                ack,
+            })
+            .unwrap();
+        let remaining = Rc::new(Cell::new(None));
+        let observed = remaining.clone();
+        let queue = bridge.tx.clone();
+        // GTK layout and paint run below the dispatch task's default priority.
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
+            observed.set(Some(queue.len()));
+            glib::ControlFlow::Break
+        });
+        spawn_dispatch_loop(rx.clone(), controller.clone());
+        glib::future_with_timeout(Duration::from_secs(2), reply)
+            .await
+            .unwrap()
+            .unwrap();
+        glib::timeout_future(Duration::from_millis(10)).await;
+        rx.close();
+        controller.drop_workspace(workspace);
+        assert!(
+            remaining.get().is_some_and(|count| count > 0),
+            "queued commands starved GTK events until the entire queue drained"
         );
     }
 

@@ -279,7 +279,7 @@ impl FlowPanel {
     }
 
     fn send(&self, action: FlowAction) {
-        let _ = self.bridge.tx.try_send(GtkCommand::SessionFlow(action));
+        self.bridge.send_from_ui(GtkCommand::SessionFlow(action));
     }
 
     pub fn show_workspace(
@@ -433,9 +433,7 @@ impl FlowPanel {
                 glib::ControlFlow::Continue
             } else {
                 running.set(false);
-                let _ = bridge
-                    .tx
-                    .try_send(GtkCommand::SessionFlow(FlowAction::SaveView));
+                bridge.send_from_ui(GtkCommand::SessionFlow(FlowAction::SaveView));
                 glib::ControlFlow::Break
             }
         });

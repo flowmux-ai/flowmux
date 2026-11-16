@@ -383,7 +383,7 @@ impl Sidebar {
         flow_button.set_focus_on_click(false);
         let flow_bridge = bridge.clone();
         flow_button.connect_clicked(move |_| {
-            let _ = flow_bridge.tx.try_send(GtkCommand::SessionFlow(
+            flow_bridge.send_from_ui(GtkCommand::SessionFlow(
                 crate::ui::session_flow::FlowAction::ToggleActive,
             ));
         });
@@ -392,15 +392,11 @@ impl Sidebar {
         let usage = UsagePopover::new(tokio_handle.clone());
         let usage_bridge = bridge.clone();
         usage.connect_bar_clicked(move |enabled| {
-            let _ = usage_bridge
-                .tx
-                .try_send(GtkCommand::SetUsageBarEnabled { enabled });
+            usage_bridge.send_from_ui(GtkCommand::SetUsageBarEnabled { enabled });
         });
         let usage_bridge = bridge.clone();
         usage.connect_pins_changed(move |pins| {
-            let _ = usage_bridge
-                .tx
-                .try_send(GtkCommand::SetUsageBarPins { pins });
+            usage_bridge.send_from_ui(GtkCommand::SetUsageBarPins { pins });
         });
         usage
             .button()
@@ -2737,6 +2733,48 @@ mod tests {
             boundary.upcast_ref(),
             Some(boundary.clone().upcast()),
             false
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn footer_click_survives_a_full_refresh_queue() {
+        let (bridge, rx) = crate::bridge::Bridge::new();
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            || {},
+            bridge.clone(),
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+            false,
+        );
+        let mut queued = 0;
+        while bridge.tx.try_send(GtkCommand::RefreshWindowTitle).is_ok() {
+            queued += 1;
+        }
+        descendant_widgets(&sidebar.root)
+            .into_iter()
+            .find(|widget| widget.widget_name() == "flowmux-session-flow-button")
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap()
+            .emit_clicked();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(1)).await;
+        for _ in 0..queued {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                GtkCommand::RefreshWindowTitle
+            ));
+        }
+        let command = gtk::glib::future_with_timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("a full refresh queue dropped the click")
+            .unwrap();
+        assert!(matches!(
+            command,
+            GtkCommand::SessionFlow(crate::ui::session_flow::FlowAction::ToggleActive)
         ));
     }
 

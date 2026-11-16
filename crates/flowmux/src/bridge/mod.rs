@@ -966,6 +966,16 @@ impl BridgeReceiver {
 }
 
 impl Bridge {
+    /// Enqueue a GTK callback's command even when refresh work fills the queue.
+    pub fn send_from_ui(&self, command: GtkCommand) {
+        if let Err(async_channel::TrySendError::Full(command)) = self.tx.try_send(command) {
+            let tx = self.tx.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = tx.send(command).await;
+            });
+        }
+    }
+
     pub fn new() -> (Self, BridgeReceiver) {
         let (tx, rx) = async_channel::bounded(GTK_COMMAND_QUEUE_CAPACITY);
         let (priority_tx, priority) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
