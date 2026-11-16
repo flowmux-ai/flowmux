@@ -631,7 +631,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::Fix => unreachable!("handled before request build"),
         Cmd::PtyTee { .. } => unreachable!("handled before request build"),
         Cmd::Identify { .. } => unreachable!("handled before request build"),
-        Cmd::Capabilities | Cmd::AgentRelay { .. } => unreachable!("handled before request build"),
+        Cmd::Capabilities | Cmd::AgentRelay(_) => unreachable!("handled before request build"),
     })
 }
 
@@ -640,13 +640,23 @@ fn ssh_op_to_request(op: SshOp) -> anyhow::Result<Request> {
     use flowmux_ipc::protocol::SshRequest;
     let request = match op {
         SshOp::Host(args) => {
-            let cli = Cli::try_parse_from(
-                ["flowmux", "ssh", "connect"]
+            use clap::FromArgMatches;
+            // Rebuilding the entire CLI here exhausts small thread stacks.
+            let command = SshOp::augment_subcommands(
+                clap::Command::new("flowmux ssh").arg(
+                    clap::Arg::new("json")
+                        .long("json")
+                        .global(true)
+                        .action(clap::ArgAction::SetTrue),
+                ),
+            );
+            let matches = command.try_get_matches_from(
+                ["flowmux ssh", "connect"]
                     .into_iter()
                     .map(String::from)
                     .chain(args),
             )?;
-            return build_request(cli.cmd);
+            return ssh_op_to_request(SshOp::from_arg_matches(&matches)?);
         }
         SshOp::Connect {
             host,
@@ -787,6 +797,12 @@ mod ssh_tests {
             create(&["flowmux", "ssh"]),
             create(&["flowmux", "ssh", "connect"])
         );
+        assert!(build_request(
+            Cli::try_parse_from(["flowmux", "ssh", "devbox", "--json"])
+                .unwrap()
+                .cmd
+        )
+        .is_ok());
         for arguments in [
             vec!["flowmux", "ssh", "devbox", "--port", "0"],
             vec!["flowmux", "ssh", "devbox", "--cwd", "relative"],

@@ -21,6 +21,7 @@ use std::str::FromStr;
 
 use flowmux_cli::{agent, doctor, hook_install};
 mod agent_relay;
+mod agent_run;
 mod batch;
 mod cmd_hooks;
 mod cmd_ops;
@@ -98,12 +99,7 @@ struct Cli {
 enum Cmd {
     /// Internal: attach a terminal view to the same live Host process.
     #[command(hide = true)]
-    AgentRelay {
-        #[arg(long)]
-        instance: flowmux_core::AgentInstanceId,
-        #[arg(long)]
-        epoch: uuid::Uuid,
-    },
+    AgentRelay(agent_relay::AgentRelayArgs),
     /// Daemon health probe.
     Ping,
 
@@ -949,6 +945,10 @@ enum MediaAction {
 
 #[derive(Subcommand)]
 enum AgentOp {
+    /// Start an agent in the background Host and open its live view.
+    Run(agent_run::AgentRunArgs),
+    /// List Host executions, including agents without an open tab.
+    Ls,
     /// Open an existing Host execution in a pane, preserving its process.
     Open {
         instance: flowmux_core::AgentInstanceId,
@@ -1356,11 +1356,16 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     // Local-only commands — handled before the daemon connect so they
     // work without a running flowmux GUI.
     match &cmd {
-        Cmd::AgentRelay { instance, epoch } => {
+        Cmd::AgentRelay(agent_relay::AgentRelayArgs {
+            instance,
+            epoch,
+            require_gui,
+        }) => {
             return agent_relay::run(
                 &cli.socket.clone().unwrap_or_else(paths::agent_host_socket),
                 *instance,
                 *epoch,
+                *require_gui,
             )
             .await
         }
@@ -1372,6 +1377,10 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             }
             return Ok(());
         }
+        Cmd::Agent {
+            op: AgentOp::Run(args),
+        } => return agent_run::run(args, cli.socket.clone(), cli.json).await,
+        Cmd::Agent { op: AgentOp::Ls } => return agent_run::list(cli.json).await,
         Cmd::Agent {
             op: AgentOp::Open { .. },
         } => {}

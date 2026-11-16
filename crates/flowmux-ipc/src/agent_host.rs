@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_INPUT_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +151,9 @@ pub enum HostRequest {
         epoch: Uuid,
         request_id: Uuid,
         view: Option<AgentViewLocation>,
+        /// GUI relays cannot attach before a management handshake cancels retirement.
+        #[serde(default)]
+        require_gui: bool,
         /// Explicit move from a known lease; never silently steal input.
         replace: Option<AttachmentKey>,
     },

@@ -28,6 +28,7 @@ assets = [
     ["target/release/flowmux",     "usr/bin/", "755"],
     ["target/release/flowmux-md-viewer", "usr/bin/", "755"],
     ["target/release/flowmuxctl",  "usr/lib/flowmux/", "755"],
+    ["target/release/flowmux-daemon", "usr/lib/flowmux/", "755"],
     ["../../resources/desktop/com.flowmux.App.desktop", "usr/share/applications/", "644"],
     ["../../resources/desktop/com.flowmux.App.Markdown.desktop", "usr/share/applications/", "644"],
     ["../../resources/icons/flowmux-markdown.svg", "usr/share/icons/hicolor/scalable/apps/com.flowmux.App.Markdown.svg", "644"],

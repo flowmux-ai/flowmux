@@ -3,7 +3,7 @@
 # Flowmux 활성 Agents와 지속 실행 설계
 
 상태: 구현 진행 중. GUI 미연결 수명 정책은 사용자 결정 반영. 작성·갱신일: 2026-11-16.
-Flowmux 최초 분석 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`. Host 기반 구현과 후속 연결 지점 점검 기준: `cb076585`.
+Flowmux 최초 분석 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`. Host 기반 연결과 provider 판정 계획 기준: `32a4fafc`. 이후 명시적 launch·사용자 서비스 시작·관리 연결 gate 변경과 검증 결과는 §11에 별도로 구분한다.
 외부 참고 구현 코드 기준: `ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`.
 외부 소스는 읽기만 했으며 코드·자산은 가져오지 않았다. 아래 외부 경로는 해당 리비전의 저장소 상대 경로다. 소스와 테스트를 검토했지만 외부 프로그램을 실행하여 검증하지는 않았다.
 
@@ -106,10 +106,11 @@ TurnStarted(turn-1, seq=10)
 
 | 연결 지점 | 확인한 상태 | 다음 구현의 완료 조건 |
 | --- | --- | --- |
-| [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed`, [GUI 관리 연결](../crates/flowmux/src/agent_host.rs) | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI는 tab과 독립된 상시 연결·재접속 및 설정 변경 전파를 수행함 | 최초 관리 연결을 tab 복원 전에 시도한다. handshake 실패 시 tab 복원까지 막는 gate는 자동 회수 활성화 전에 추가. 일회성 조회·hook·relay는 GUI 연결을 대신하지 않음 |
+| [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed`, [GUI 관리 연결](../crates/flowmux/src/agent_host.rs) | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI는 tab과 독립된 상시 연결·재접속 및 설정 변경 전파를 수행함. 후속 변경은 GUI relay의 준비·확정 모두에 관리 연결을 요구함 | 최초 관리 연결은 tab 복원 전에 시도하며 미등록 상태에서는 입력 소유권을 넘기지 않음. 일회성 조회·hook·relay는 GUI 연결을 대신하지 않음. 향후 자동 종료 수락과도 같은 revision 경계에서 직렬화 |
 | 같은 파일의 `HostHandler` | Host 제어 요청과 Ping만 처리하며 기존 provider lifecycle hook은 처리하지 않음 | InstanceId·process/native identity 검증 후 hook을 공통 ledger로 전달. detach된 실행의 사건도 처리. 이 경로 없이 shim을 Host 주소로 전환하지 않음 |
 | `agent_runtime.rs`의 lifecycle ledger | SurfaceId 기반이며 workspace 제거 시 정리됨 | managed ledger와 wait·Stop grace 예약은 InstanceId에 귀속. 화면 이동·제거와 무관하게 Host가 계속 관측하고 확정 |
 | [retirement.rs](../crates/flowmux-daemon/src/agent_host/retirement.rs)의 `WorkDisposition` | `Working / VerifiedComplete / Unknown`, 최초 완료 시각·revision·단조 시간 deadline을 제공함. 전체 완료 검증 adapter와 실제 자동 종료는 연결 전 | §5의 정규화 결과만 입력. `completion_verified` 호출 전 root·child·tool·wait와 관측 공백 확인. 만료 후에도 provider의 안전한 유휴 종료 수락 필요 |
+| `host.rs`의 `TerminalActor` 입력 처리 | PTY 입력 수락과 interrupt는 `observation_uncertain`을 호출한다. 입력 ACK는 provider가 새 작업을 수락했다는 증거가 아님 | 초안 입력·커서 이동·상태 조회와 실제 요청 제출을 구분. provider의 작업 수락 확인 후에만 generation 변경. 작업을 시작하지 않은 입력이면 기존 완료 기준을 재검증해 복구 |
 | [workspace_view.rs](../crates/flowmux/src/ui/workspace_view.rs)의 terminal 복원 | managed binding이 있으면 relay만 생성하고 기존 실행에 연결. 일반 terminal의 shell·native resume·scrollback 경로는 별도 유지 | Host 실패·epoch 불일치는 연결 오류로 유지. 실제 provider TUI와 macOS 복원 검증, 연결 완료 ACK 기반 표시를 추가 |
 
 따라서 기존 `AgentStatus`에 상태 하나를 추가하는 것으로 해결하지 않는다. 기존 UI 판정은 보존하면서 **관측과 완료 기록의 소유자를 Host로 옮기고, 그 검증 결과를 회수 정책에 연결**한다. 완료 관측이나 안전한 종료가 지원되지 않는 provider는 보류 이유를 표시하고 실행을 유지한다.
@@ -209,6 +210,23 @@ Host는 사용자·실행 환경별 하나다. 기존 GUI PID socket과 별도�
 
 Linux의 사용자 서비스 관리자를 사용할 수 있으면 GUI와 별도의 transient service에서 Host를 시작하는 경로를 우선 검증한다. 기존 [process_scope.rs](../crates/flowmux/src/process_scope.rs)의 terminal scope 연결은 Host 시작과 구분하며, relay의 scope 종료가 Host에 전파되지 않아야 한다. `setsid`와 stdio 분리만으로는 GUI cgroup에서 벗어나지 않는다. 서비스 관리자 미지원 환경·Flatpak·macOS는 해당 환경의 시작/종료 경계를 따로 검증하고, 실패 시 살아 있는 Host를 종료하거나 중복 생성하지 않고 시작 실패 이유를 반환한다.
 
+### Host 시작과 플랫폼별 소유권
+
+Host 시작은 **명시적 새 실행 요청**에만 허용한다. 기존 실행 열기·저장 tab 복원·GUI 관리 연결·목록 조회는 기존 Host에 연결만 한다. 시작 책임과 재연결 책임을 분리하여, 마지막 에이전트가 끝난 뒤 GUI의 재접속 루프가 빈 Host를 되살리지 않게 한다.
+
+| 경로 | 시작·실패 계약 |
+| --- | --- |
+| `flowmux agent run -- <argv>` / 향후 GUI `New Agent` | argv·실행 파일·cwd·로컬 목적지를 검증한 뒤 기존 Host handshake. endpoint 부재·connection refused 때만 사용자 서비스 시작 시도 |
+| 응답 없는 Host·버전 불일치·권한 오류 | 기존 프로세스·socket·서비스를 교체하지 않고 오류 반환. 새 Host 또는 provider resume으로 우회하지 않음 |
+| Linux 사용자 서비스 | `systemd-run --user`의 transient **service**로 시작. GUI/terminal scope와 별도 cgroup에서 Host·agent를 소유. `--service-type=exec`, `Restart=no`, `--collect`, `UMask=0077`, stdin 분리 적용 |
+| 동시 launch | socket 경로에 대응하는 동일 unit 이름과 Host lock으로 시작 중복을 제어. 서비스 제출 성공과 별개로 protocol handshake 후에만 launch 전달 |
+| 서비스 관리자 부재·시작 timeout | 요청 실패 이유 표시. GUI 아래에서 직접 spawn하는 fallback은 제공하지 않음. 이미 제출된 서비스는 늦게 시작할 수 있으므로 후속 요청은 기존 Host부터 확인 |
+| Flatpak·macOS | 현재 명시적 시작 구현의 지원 밖. macOS는 launchd 등 GUI와 독립된 소유권을 검증한 뒤 연결. 그전에는 명시적 시작 오류를 반환하며 생존 보장을 표시하지 않음 |
+
+서비스에는 runtime/config/state 경로 등 필요한 최소 환경만 전달한다. provider 인증 정보·pane/surface ID를 서비스 unit 속성에 넣지 않는다. 실행별 argv·cwd·환경은 기존 `LaunchAgent` 요청으로 전달하며 shell 확장 없이 보존한다. `flowmux-daemon` 탐색은 기존 bundled helper 배치를 재사용하고 배포 패키지에 함께 포함한다.
+
+launch 응답이 유실되면 실행 결과를 확인 불가로 표시하고 request ID로 확인한다. tab 열기만 실패했다면 수락한 실행은 Background로 유지하고 instance ID와 다시 열기 경로를 반환한다. 사용자가 재시도했다는 이유로 같은 명령을 자동 실행하지 않는다. 이 시작 경로는 §5의 완료 판정·자동 회수 활성화와 독립적이다.
+
 ### 제안 모델
 
 | 모델 | 필요한 필드와 소유자 |
@@ -279,6 +297,7 @@ UI의 `Working/Idle` 전이를 종료 타이머에 직접 연결하지 않는다
 | 관측 | 종료 판단에 주는 영향 |
 | --- | --- |
 | provider가 수락한 새 요청/turn, 새 작업 ID의 tool·하위 작업 시작, 상관관계가 검증된 실제 진행 | 새 작업 generation으로 처리하거나 현재 작업을 계속 유지. 기존 종료 후보 무효화 |
+| terminal 키 입력·paste·입력 ACK·interrupt | 입력 수락만으로 새 작업이나 완료를 확정하지 않음. 우선 종료를 보류하고 provider의 요청 수락·재개·취소 결과로 재검증. 초안 편집 등 비작업 입력이면 기존 완료 기준 복구 |
 | root turn 완료 | root 완료만 기록. 해당 작업에 연결된 child/tool/비동기 작업과 미해결 wait가 없어야 전체 완료 가능 |
 | 부모가 완료돼도 하위 에이전트·백그라운드 명령이 진행 중 | 작업 유지. 살아 있는 MCP 서버 자체와 현재 실행 중인 MCP 요청은 구분 |
 | heartbeat, 연결 ping, 상태 조회 응답, metadata·제목·spinner·타이머 재도색, terminal query | 생존/표시 근거만 갱신. 작업 generation·완료 시각·deadline을 바꾸지 않음 |
@@ -359,6 +378,8 @@ GUI 재실행은 **살아 있는 동일 InstanceId·PID/start identity·PTY에 �
 
 ### 열기/이동 트랜잭션
 
+GUI의 관리 handshake로 종료 후보를 먼저 취소한 뒤 화면을 준비한다. GUI relay는 `PrepareAttach`에 `require_gui=true`를 전달하며 Host는 준비와 확정 시점 모두에 등록된 GUI가 있는지 확인한다. 판정 범위가 Host 전체이므로 다른 GUI를 포함해 하나라도 연결되어 있으면 전역 자동 회수는 중단된다. 새 Host가 GUI의 재접속 주기보다 먼저 준비될 수 있어 relay는 같은 요청 ID로 Busy 응답만 최대 5초 재시도한다. 관리 연결이 끝내 등록되지 않으면 binding을 연결 오류로 남기며, 준비·확정 실패는 기존 입력 소유권을 빼앗지 않는다. 이 검사는 실제 자동 종료를 수락하는 직렬 경계를 대신하지 않는다.
+
 1. GUI가 instance ID와 대상 workspace/pane, layout generation을 포함해 열기를 요청한다. Host는 실행 생존과 attachment 소유자를 확인한다.
 2. 목적지에 연결 중 placeholder tab을 준비한다. 이미 같은 GUI에서 열린 실행이면 기존 tab widget을 이동하는 경로를 먼저 사용한다.
 3. 새 연결이 필요한 경우 Host가 짧은 attachment 예약을 발급한다. 이전 연결은 입력 권한을 보유한 채 유지하고, 새 연결에는 snapshot만 제공한다.
@@ -429,7 +450,7 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 
 ## 9. 적용 범위와 구현 순서
 
-1. **Host/VT/relay 수직 검증:** 테스트 command 하나를 Host 소유 PTY로 실행한다. GUI/relay 종료 후 동일 PID·start identity의 카운터가 계속 증가하고, 다시 붙으면 현재 화면과 입력이 복원되어야 한다. Linux와 macOS에서 격리된 실행으로 확인한다. VT 호환성 gate를 먼저 해결한다.
+1. **Host/VT/relay 수직 검증:** 테스트 command 하나를 Host 소유 PTY로 실행한다. fixture의 직접 Host 시작과 제품의 사용자 서비스 시작을 구분한다. GUI/relay 종료 후 동일 PID·start identity의 카운터가 계속 증가하고, 다시 붙으면 현재 화면과 입력이 복원되어야 한다. Linux에서는 GUI와 다른 service cgroup을 확인하고, macOS에서는 독립 소유권을 검증한다. VT 호환성 gate를 먼저 해결한다.
 2. **상태 회귀 고정과 Host 이관:** 먼저 동일 turn의 완료 후 지연 progress/반복 Stop, 명시적 재개, child 재사용·누락을 fixtures로 고정한다. 공통 전이를 추출하고 managed ledger를 InstanceId로 분리한다. Host로 hooks·프로세스·화면 관측과 지연 확정을 옮긴 뒤 GUI 없는 상태 및 workspace 제거 후에도 ledger가 유지되는지 검증한다. 기존 UI·일반 terminal 회귀도 함께 확인한다.
 3. **관리되는 시작과 수명 정책:** `New Agent`, 제안 CLI `flowmux agent run -- <argv>`, 기존 명시적 resume/fork의 launch 준비를 Host로 연결한다. launch 환경·native session identity 확인·중복 방지를 검증한다. provider별 전체 작업 관측과 안전한 유휴 종료 capability를 먼저 검증한 다음, 별도 완료 기록에 30분 deadline과 빈 Host 종료를 연결한다. tab 연결 실패는 살아 있는 실행을 목록의 Background로 남긴다. capability 검증 없이 자동 종료를 켜지 않는다.
 4. **목록/위치/열기/종료:** 기존 Agents 영역과 bar projection을 registry로 연결한다. UI·CLI가 같은 제어 API를 사용하고 숨겨진 실행도 조회·종료 가능하게 한다.
@@ -458,6 +479,9 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | 모든 tab/pane/workspace 닫기, GUI 연결 유지 | managed 실행 유지, 자동 종료 없음. 일반 terminal 동작은 기존과 동일 |
 | 마지막 GUI 닫기, 작업 30분 이상 진행 | 시간과 관계없이 동일 실행·하위 작업 생존. 재연결 시 Background 또는 저장된 view에서 현재 TUI 표시 |
 | GUI 강제 종료 | Host와 실행 생존. stale 위치 해제. 새 GUI에서 중복 native resume 없음 |
+| Linux 제품 launch 후 GUI·relay scope 종료 | Host와 agent가 동일 사용자 service cgroup에 있고 GUI cgroup과 분리됨. 격리된 GUI의 종료 경계에서도 동일 PID/start identity·진행 유지 |
+| 목록·저장 tab 복원·잘못된 launch·서비스 시작 실패 | 조회/복원/검증 실패는 Host를 시작하지 않음. 서비스 실패·비호환 Host를 직접 spawn으로 우회하지 않음. 동시 시작은 Host 하나 |
+| launch 응답 유실·수락 후 tab 열기 실패 | launch 자동 재전송 없음. 결과 확인 경로 제공. 확인된 실행은 Background에 남고 기존 instance를 열 수 있음 |
 | GUI 재시작의 관리 연결·저장 binding 복원 | managed tab 생성 전에 관리 handshake로 종료 후보 무효화. fixture의 명시적 relay 실행 없이 기존 위치에서 동일 instance 연결 |
 | 저장된 binding의 Host 조회 실패·epoch 변경 | 연결 실패 상태와 재시도 경로 표시. shell/agent 재생성·native resume·prompt 재전송 없음 |
 | binding schema 갱신·tab 이동 | v2/v3의 location·window ownership·tab 순서·일반 scrollback 보존. managed binding 이동/저장 유지, 구버전의 오실행 방지 |
@@ -469,6 +493,7 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | 완료 확정 → 동일 turn의 더 큰 seq progress → 반복 Stop | 지연 사건임이 확인되면 최초 완료와 deadline 유지. 확인 불가이면 보류하며 단순 seq 증가로 새 generation을 만들지 않음 |
 | 완료된 동일 turn의 명시적 stop-hook 재시도·실제 재개 | 같은 ID라도 재개 근거를 검증해 작업 유지, 이전 완료 기준 폐기. 새 전체 완료부터 30분 계산 |
 | UI Done/seen·evidence 출처·spinner 보정 변경 | UI 표시가 바뀌어도 완료 기록을 직접 갱신하지 않음. 새 작업 근거 없는 화면 충돌은 재검증·보류 |
+| 완료 후 초안 편집·커서 이동·paste·interrupt | 입력 ACK만으로 generation 변경·완료 확정 없음. 비작업 입력이면 최초 완료/deadline 복구, 실제 새 작업이면 해당 작업 완료부터 다시 계산 |
 | 완료 이력의 32개 한계 초과·identity 없는 progress | 이력 밖 사건을 새 작업 또는 무해한 사건으로 단정하지 않음. 재검증 전 자동 종료 보류 |
 | Claude root Stop 뒤 shell·예약·하위 작업 잔존 | 응답 완료만 기록하고 전체 완료 확정하지 않음. 관측 범위가 불완전하면 보존 |
 | workspace 삭제 후 managed hook·child 완료 도착 | InstanceId ledger와 wait·완료 기록 유지, 기존 실행에 적용. 일반 terminal 정리는 기존 계약 유지 |
@@ -477,6 +502,7 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | hook 누락·미지원 provider·process 검사 실패 | 확인 불가와 이유 표시, 자동 종료 보류. 무출력/저CPU/시간 경과만으로 완료 판정하지 않음 |
 | 완료 확인 뒤 hook 전달 실패·관측 채널 단절 | 기존 완료 기록과 deadline을 보존하되 자동 종료 보류. 복구 후 같은 완료 작업임을 재검증하면 원래 deadline 복구, 실제 새 작업이면 이전 완료 기준 폐기 |
 | 두 GUI 중 하나 종료·마지막 GUI 재연결 | 하나라도 관리 연결이 있으면 자동 종료 없음. 관리 handshake가 tab 복원보다 먼저 종료 예약 취소 |
+| 관리 handshake 실패·준비 후 GUI EOF·관리 연결 복구 | GUI relay의 준비/확정을 거절하고 기존 owner·프로세스 유지. 관리 연결 복구 후 같은 실행에 연결. CLI/relay의 handshake만으로 GUI 등록을 대체하지 않음 |
 | deadline과 새 작업·GUI 연결 경합 | 먼저 수락된 상태 전이와 revision으로 결정. 오래된 callback 무효, provider가 busy면 종료 거절 |
 | 자동 종료 중 응답 지연·새 자율 작업 | idle 종료 계약 검증, 임의 SIGTERM/강제 kill 전환 없음. 계약 미지원은 보존 |
 | 마지막 실행 종료·소유 자식 잔존·동시 launch | 자식 회수 전 Host 유지. 모두 정리하면 Host 종료, 수락한 launch 유실·중복 없음 |
@@ -511,11 +537,15 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 - GUI는 tab과 별개의 관리 연결을 유지하며 Options의 대기 시간 변경을 Host에 전달한다. `flowmux agent open <instance> --pane <pane>`은 실제 registry의 실행을 확인해 managed tab을 열거나 기존 tab을 이동한다. 같은 GUI에서 반복 열기는 기존 binding을 재사용한다. 저장된 InstanceId·epoch와 workspace/pane/tab으로 자동 재연결하며 native resume·일반 shell·저장 scrollback으로 대체하지 않는다. managed tab의 relay 종료는 연결 해제로 처리하고, Agent 종료로 오인하는 일반 terminal 종료 대화상자는 띄우지 않는다.
 - 명시적 interrupt/terminate/force 및 자연 종료 관측을 추가했다. Linux에서는 pidfd를 먼저 열고 birth identity를 확인한 뒤 신호를 보내 PID 재사용에 의한 오종료를 막는다. 관측된 소유 자식과 PTY EOF까지 확인하고, 마지막 실행 회수와 최종 화면 전달을 마치면 Host·socket도 정리한다. 실행 없는 초기 Host의 launch 대기는 최대 10초이며 정상 종료 후 상주 재시작하지 않는다.
 
+**`32a4fafc` 이후 변경:** [agent_host.rs](../crates/flowmux-cli/src/agent_host.rs)에 Linux 사용자 서비스 기반 명시적 시작, [agent_run.rs](../crates/flowmux-cli/src/agent_run.rs)에 `agent run`·`agent ls`를 추가했다. 실행 전 목적지 검증, 기존 Host 우선 연결, argv·launch 환경 전달, tab 열기 실패 후 Background 유지, Debian 패키지의 daemon 포함을 다룬다. [live 검사](../scripts/test-agent-host-gui.py)의 `--service-start` 경로에서 제품 CLI 시작, GUI와 별도 service cgroup, GUI 정상 종료·SIGKILL 뒤 동일 agent 실행의 진행과 실제 VTE 재연결을 포함한 **12개 검사 통과**를 확인했다. fixture provider를 사용한 결과이며 실제 provider의 완료 판정과 자동 종료는 계속 미활성 상태다.
+
+이번 변경은 GUI relay에 관리 연결 gate를 추가한다. 관리 연결이 없으면 준비를 거절하고, 준비 후 마지막 GUI가 끊기면 확정을 거절하며 기존 owner를 유지한다. 관리 연결 복구 후 동일 프로세스에 연결하는 Host 회귀 검사가 통과했다. 이 계약을 모르는 Host에 조용히 연결하지 않도록 Host protocol을 **v2**로 올렸다. 구버전 Host는 종료·교체하지 않고 버전 오류를 반환하므로 살아 있는 실행을 새 Host나 resume으로 대체하지 않는다.
+
 | 다음 구현 단계 | 완료 조건과 현재 제한 |
 | --- | --- |
-| GUI에서 Host 시작·관리 연결 | 상시 GUI 관리 연결과 옵션 변경 전파는 연결됨. 플랫폼의 GUI 종료 정리와 독립된 시작·중복 Host 방지는 구현 전이며 fixture가 Host를 명시적으로 시작. 최초 handshake 실패 시 managed 복원 보류 gate 필요 |
+| 명시적 Host 시작·GUI 관리 연결 | 상시 GUI 관리 연결·옵션 변경 전파·관리 연결 gate를 추가. Linux CLI의 독립 service 시작과 GUI 종료 경계 live 검사 통과. GUI `New Agent` 연결·플랫폼별 시작·자동 종료 수락과 handshake 경합 검증은 남음 |
 | provider 관측과 완료 adapter | 기존 hook·process·screen 규칙을 InstanceId 기준으로 이관하고 §3의 지연 progress 문제를 정규화. 현재 Host는 provider hook 및 pane context 명령을 처리하지 않으므로 설치 shim을 기본 managed 실행으로 전환하지 않음 |
-| GUI launch·저장 binding·재연결 | 명시적 기존 instance 열기와 저장 binding의 자동 layout 재연결을 추가. 기본 provider launch·resume/fork의 Host 이관, 연결 완료 ACK·실패 UI는 추가 구현 필요 |
+| GUI launch·저장 binding·재연결 | 명시적 기존 instance 열기와 저장 binding의 자동 layout 재연결, CLI `agent run`을 추가. 기본 provider launch·resume/fork의 Host 이관, 연결 완료 ACK·실패 UI는 추가 구현 필요 |
 | Agents 목록·열기·이동·종료 | CLI의 기존 실행 열기·같은 GUI의 tab 이동은 제공. registry 기반 목록, Host의 실제 표시 위치, 목적지 선택, pane drop, 명시적 종료 UI는 구현 전 |
 | 안전한 자동 회수 | 전체 완료 및 provider의 원자적 idle 종료 수락 후 설정 시간 적용. 현재 후보 판정기만 있으며 실제 30분 자동 종료는 검증 전 |
 | 성능·프로세스 경계·플랫폼 | 프로세스 관측의 중복 전체 스캔 제거, terminal control string·hyperlink의 메모리 상한, synchronized-update timeout 및 buffer 해제 시 결합 문자 상한 검증, 독립 session으로 빠르게 분리되는 자식의 추적, macOS 종료 신호·containment 검증 필요. Linux의 pidfd 미지원 환경에서 안전한 대체 경로 없이 PID 신호로 후퇴하지 않음 |
@@ -532,11 +562,14 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 - `agent open`의 중복 tab 방지, tab 닫기·재열기 및 pane 이동 후 동일 실행·새 입력 유지. relay만 종료한 뒤 다른 pane에서 다시 열어도 끊어진 widget을 재사용하지 않고 같은 실행에 재연결.
 - 512KiB 입력 backpressure 중 현재 화면 갱신 및 대기 입력 보존.
 - GUI 정상 종료·SIGKILL 중 작업 진행과 동일 PID·생성 시각 유지. relay 종료·재연결 이후에도 한 번의 window 닫기 요청으로 정상 종료하며 일반 terminal은 GUI와 함께 종료.
+- GUI가 모두 종료된 동안 실제 GUI relay의 attach 거절과 기존 프로세스 보존. 관리 연결을 다시 등록한 GUI는 같은 실행에 재연결.
 - GUI 재실행 시 별도의 attach 명령 없이 같은 workspace/pane/tab과 InstanceId로 자동 재연결. agent spawn 횟수는 한 번.
 - 잘못된 epoch와 Host 부재를 화면에 오류로 표시하고 binding 유지. 저장된 shell override·자동 native resume·새 Host 시작으로 대체하지 않음.
 - agent 자연 종료 후 reap·빈 Host 종료·socket 제거.
 
-사용자 GUI와 실행 중인 agent는 유지했다. Host 시작과 agent launch는 fixture가 명시적으로 수행하며, GUI 관리 연결·tab 생성과 저장 binding 복원은 제품 경로를 사용한다. 이 검증은 GUI의 Host 시작·서비스 분리, 실제 provider 작업·실제 30분 자동 종료·macOS 생존 검증을 대신하지 않는다. 후속 단위 검증은 core **181개**, state **91개**, daemon library **235개·1개 ignored**, CLI binary **178개**와 library **135개·1개 ignored**, GUI 관리 연결 **2개**가 통과했다.
+사용자 GUI와 실행 중인 agent는 유지했다. 위의 최초 검증에서 Host 시작과 agent launch는 fixture가 명시적으로 수행했으며, GUI 관리 연결·tab 생성과 저장 binding 복원은 제품 경로를 사용했다. 이후 `--service-start` 검증에서는 제품 `agent run`으로 시작하고 Host·agent가 같은 service cgroup, GUI는 다른 cgroup임을 확인했다. `agent ls`와 잘못된 launch는 Host를 시작하지 않았다. 두 경로 모두 실제 provider 작업·실제 30분 자동 종료·macOS 생존 검증을 대신하지 않는다. 앞선 단위 검증은 core **181개**, state **91개**, daemon library **235개·1개 ignored**, CLI binary **178개**와 library **135개·1개 ignored**, GUI 관리 연결 **2개**가 통과했다.
+
+사용자 서비스·관리 연결 gate 변경 후 검증에서는 CLI binary **179개**, CLI library **137개·1개 ignored**, daemon library **236개·1개 ignored**, IPC library **85개**, terminal library **30개**, GUI 관리 연결 **2개**가 통과했다. CLI 확장 과정에서 재현된 작은 thread stack의 parser overflow는 relay 인자 builder 분리와 SSH 별칭의 전체 CLI 재파싱 제거로 수정했다. 추가 stack 크기 설정 없이 CLI 전체 검사가 통과했으며 기존 SSH 인자·검증 규칙은 유지했다. 제품 binary build, workspace Clippy(`--all-targets -- -D warnings`), format 검사도 통과했다. 이 단계에서 공유 CI 전체를 재실행한 것은 아니다.
 
 Host 기반 변경의 workspace build, Clippy(`--all-targets -- -D warnings`), format 검사는 통과했다. 관리 연결·저장 tab 복원 변경 단계에서 실행한 Linux 공유 CI의 GUI 단위 검사 결과는 **940개 통과·2개 실패·4개 ignored**다. 실패한 `program_title_persists_until_agent_exit_without_cwd_change`와 `terminal_cwd_change_updates_tab_and_window_title_and_ignores_shell_ps1_echo`는 일반 terminal의 제목 갱신 검사이며, 별도의 Xvfb·D-Bus·XDG 경로에서 두 검사를 함께 재실행하면 **2개 모두 통과**했다. 전체 실행에서 실패한 원인은 확정하지 않았으며 CI 성공으로 기록하지 않는다. workspace 단계 이후 GUI suite 전체는 실행되지 않았다.
 

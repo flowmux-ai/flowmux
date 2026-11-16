@@ -196,7 +196,9 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
         };
 
     match op {
-        AgentOp::Open { .. } => unreachable!("handled by the GUI request path"),
+        AgentOp::Open { .. } | AgentOp::Run(_) | AgentOp::Ls => {
+            unreachable!("handled by the managed-agent request path")
+        }
         AgentOp::Install {
             agent: slugs,
             force,

@@ -16,6 +16,16 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+#[derive(clap::Args)]
+pub(crate) struct AgentRelayArgs {
+    #[arg(long)]
+    pub instance: AgentInstanceId,
+    #[arg(long)]
+    pub epoch: Uuid,
+    #[arg(long)]
+    pub require_gui: bool,
+}
+
 struct TerminalGuard {
     termios: libc::termios,
     flags: [(i32, i32); 2],
@@ -166,7 +176,12 @@ async fn send_input(
     }
 }
 
-pub async fn run(socket: &Path, instance: AgentInstanceId, epoch: Uuid) -> anyhow::Result<()> {
+pub async fn run(
+    socket: &Path,
+    instance: AgentInstanceId,
+    epoch: Uuid,
+    require_gui: bool,
+) -> anyhow::Result<()> {
     let mut hangup = signal(SignalKind::hangup())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
@@ -177,16 +192,39 @@ pub async fn run(socket: &Path, instance: AgentInstanceId, epoch: Uuid) -> anyho
             .context("Cannot reconnect Agent: Agent Host is unavailable")?,
     );
     let frame_reader = HostClient::connect(socket, ClientRole::Observer).await?;
-    let HostResponse::Prepared { key, .. } = control
-        .call(HostRequest::PrepareAttach {
-            instance,
-            epoch,
-            request_id: Uuid::new_v4(),
-            view: None,
-            replace: None,
-        })
-        .await?
-    else {
+    let request = HostRequest::PrepareAttach {
+        instance,
+        epoch,
+        request_id: Uuid::new_v4(),
+        view: None,
+        require_gui,
+        replace: None,
+    };
+    // A newly started Host can precede the GUI's next management reconnect.
+    let prepare = async {
+        loop {
+            match control.call(request.clone()).await {
+                Err(error)
+                    if require_gui
+                        && matches!(
+                            error.downcast_ref::<HostRpcError>(),
+                            Some(HostRpcError(RpcError::Busy(_)))
+                        ) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                response => return response,
+            }
+        }
+    };
+    let response = tokio::select! {
+        _ = hangup.recv() => return Ok(()),
+        _ = terminate.recv() => return Ok(()),
+        _ = interrupt.recv() => return Ok(()),
+        response = tokio::time::timeout(Duration::from_secs(5), prepare) =>
+            response.context("Cannot reconnect Agent: GUI management or attachment remained unavailable")??,
+    };
+    let HostResponse::Prepared { key, .. } = response else {
         bail!("unexpected Agent Host attachment response");
     };
     let HostResponse::Attached { frame, .. } = control

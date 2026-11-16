@@ -36,8 +36,8 @@ pub async fn start(
     mut minutes: watch::Receiver<u32>,
 ) -> tokio::task::JoinHandle<()> {
     let initial_minutes = *minutes.borrow_and_update();
-    // shortcut: failed handshakes do not gate tab restore; require confirmed
-    // GUI registration before enabling automatic idle retirement.
+    // GUI relays require a registered management connection before attaching.
+    // A failed handshake leaves saved bindings disconnected, never resumed.
     let mut client = connect(&socket, initial_minutes).await;
     tokio::spawn(async move {
         loop {
@@ -91,7 +91,7 @@ mod tests {
                 };
                 let response = if matches!(request, HostRequest::Hello { .. }) {
                     HostResponse::Hello {
-                        version: 1,
+                        version: flowmux_ipc::agent_host::PROTOCOL_VERSION,
                         epoch: uuid::Uuid::new_v4(),
                         connection: 1,
                     }

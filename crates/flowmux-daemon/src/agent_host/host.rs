@@ -573,6 +573,7 @@ struct Lease {
     connection: u64,
     request: Uuid,
     view: Option<AgentViewLocation>,
+    require_gui: bool,
     prepared: Instant,
     transfer: Option<Transfer>,
     input_sequence: u64,
@@ -696,6 +697,7 @@ impl TerminalActor {
                 epoch,
                 request_id,
                 view,
+                require_gui,
                 replace,
             } => {
                 if instance != self.instance || epoch != self.host.epoch {
@@ -703,10 +705,14 @@ impl TerminalActor {
                         "Agent Host epoch or instance changed".into(),
                     ));
                 }
+                if require_gui {
+                    self.require_gui_connection()?;
+                }
                 if let Some(pending) = self.pending.as_ref() {
                     if pending.request == request_id
                         && pending.connection == connection
                         && pending.view == view
+                        && pending.require_gui == require_gui
                     {
                         let key = pending.key;
                         let frame = self.frame(key, 0, 0)?;
@@ -739,6 +745,7 @@ impl TerminalActor {
                     connection,
                     request: request_id,
                     view,
+                    require_gui,
                     prepared: Instant::now(),
                     transfer: None,
                     input_sequence: 0,
@@ -763,6 +770,9 @@ impl TerminalActor {
                     .is_some_and(|lease| lease.key == key && lease.connection == connection)
                 {
                     return Err(stale_lease());
+                }
+                if self.pending.as_ref().is_some_and(|lease| lease.require_gui) {
+                    self.require_gui_connection()?;
                 }
                 self.resize(size)?;
                 self.active = self.pending.take();
@@ -866,6 +876,22 @@ impl TerminalActor {
             _ => Err(RpcError::InvalidArgument(
                 "unexpected agent terminal command".into(),
             )),
+        }
+    }
+
+    fn require_gui_connection(&self) -> Result<()> {
+        if self
+            .host
+            .registry()
+            .connections
+            .values()
+            .any(|role| *role == ClientRole::Gui)
+        {
+            Ok(())
+        } else {
+            Err(RpcError::Busy(
+                "Cannot reconnect Agent: GUI management connection is not registered".into(),
+            ))
         }
     }
 
@@ -1257,6 +1283,7 @@ mod tests {
                 epoch: agent.epoch,
                 request_id: Uuid::new_v4(),
                 view: None,
+                require_gui: false,
                 replace,
             })
             .await
@@ -1392,6 +1419,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gui_attachment_requires_management_at_prepare_and_commit() {
+        let fixture = Fixture::new().await;
+        let old = fixture.client(ClientRole::Relay).await;
+        let agent = fixture
+            .launch_agent(
+                &old,
+                "stty -echo; while IFS= read -r line; do printf 'ACK:%s\\n' \"$line\"; done",
+            )
+            .await;
+        let new = fixture.client(ClientRole::Relay).await;
+        let mut request = HostRequest::PrepareAttach {
+            instance: agent.instance,
+            epoch: agent.epoch,
+            request_id: Uuid::new_v4(),
+            view: None,
+            require_gui: true,
+            replace: None,
+        };
+        assert!(new.call(request.clone()).await.is_err());
+        // A rejected preparation must not reserve a lease or change ownership.
+        let old_key = attach(&old, &agent).await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let HostRequest::PrepareAttach { replace, .. } = &mut request else {
+            unreachable!()
+        };
+        *replace = Some(old_key);
+        let HostResponse::Prepared { key, .. } = new.call(request).await.unwrap() else {
+            panic!("expected prepared");
+        };
+        drop(gui);
+        timeout(Duration::from_secs(2), async {
+            while fixture
+                .host
+                .registry()
+                .connections
+                .values()
+                .any(|role| *role == ClientRole::Gui)
+            {
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let commit = HostRequest::CommitAttach {
+            key,
+            size: TerminalSize { rows: 8, cols: 80 },
+        };
+        assert!(new.call(commit.clone()).await.is_err());
+        old.call(HostRequest::Input {
+            key: old_key,
+            sequence: 1,
+            data: b"old owner preserved\n".to_vec(),
+        })
+        .await
+        .unwrap();
+        wait_text(&old, old_key, "ACK:old owner preserved").await;
+        let _gui = fixture.client(ClientRole::Gui).await;
+        new.call(commit).await.unwrap();
+        new.call(HostRequest::Input {
+            key,
+            sequence: 1,
+            data: b"same execution\n".to_vec(),
+        })
+        .await
+        .unwrap();
+        wait_text(&new, key, "ACK:same execution").await;
+        assert_eq!(
+            flowmux_procmon::process_start_time(agent.pid.unwrap()),
+            agent.process_start
+        );
+    }
+
+    #[tokio::test]
     async fn attachment_move_commits_only_after_prepare_and_abort_preserves_owner() {
         let fixture = Fixture::new().await;
         let gui = fixture.client(ClientRole::Gui).await;
@@ -1410,6 +1510,7 @@ mod tests {
                 epoch: agent.epoch,
                 request_id: Uuid::new_v4(),
                 view: None,
+                require_gui: false,
                 replace: None
             })
             .await

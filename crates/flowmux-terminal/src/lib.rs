@@ -130,15 +130,24 @@ fn is_executable_file(path: &Path) -> bool {
 /// shell directly so the absence of OSC alarms degrades gracefully
 /// instead of breaking the terminal entirely.
 pub fn find_flowmuxctl() -> Option<PathBuf> {
+    find_bundled_helper("flowmuxctl")
+}
+
+/// Locate the Host in the same development, package, and PATH layouts as the CLI.
+pub fn find_flowmux_daemon() -> Option<PathBuf> {
+    find_bundled_helper("flowmux-daemon")
+}
+
+fn find_bundled_helper(name: &str) -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let cand = dir.join("flowmuxctl");
+            let cand = dir.join(name);
             if cand.is_file() {
                 return Some(cand);
             }
         }
         if let Some(prefix) = exe.parent().and_then(|p| p.parent()) {
-            let cand = prefix.join("lib").join("flowmux").join("flowmuxctl");
+            let cand = prefix.join("lib").join("flowmux").join(name);
             if cand.is_file() {
                 return Some(cand);
             }
@@ -146,7 +155,7 @@ pub fn find_flowmuxctl() -> Option<PathBuf> {
     }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            let cand = dir.join("flowmuxctl");
+            let cand = dir.join(name);
             if cand.is_file() {
                 return Some(cand);
             }

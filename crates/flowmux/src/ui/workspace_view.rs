@@ -4496,6 +4496,7 @@ fn agent_relay_argv(binding: flowmux_core::AgentViewBinding) -> Result<Vec<Strin
             .to_string_lossy()
             .into_owned(),
         "agent-relay".into(),
+        "--require-gui".into(),
         "--instance".into(),
         binding.instance.to_string(),
         "--epoch".into(),

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Verify same-process Host reconnection through an isolated Flowmux/VTE view.
 
-The fixture launches the Host and agent explicitly. GUI management, opening and
-saved tab reconnection use the application's own paths, without native resume.
+By default the fixture launches the Host explicitly. --service-start exercises
+the product's agent run command and a real Linux user service. GUI management,
+opening and saved tab reconnection use product paths, without native resume.
 """
 
 import argparse
@@ -14,6 +15,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -34,7 +36,7 @@ class HostClient:
         self.stream.connect(str(path))
         self.reader = self.stream.makefile("rb")
         self.identifier = 0
-        self.call("hello", version=1, role=role)
+        self.call("hello", version=2, role=role)
 
     def call(self, op, **fields):
         self.identifier += 1
@@ -56,6 +58,8 @@ def main():
     parser.add_argument("--gui", default=str(ROOT / "target/debug/flowmux"))
     parser.add_argument("--cli", default=str(ROOT / "target/debug/flowmuxctl"))
     parser.add_argument("--host", default=str(ROOT / "target/debug/flowmux-daemon"))
+    parser.add_argument("--service-start", action="store_true",
+                        help="launch through agent run and the real systemd user manager")
     parser.add_argument("--protected-pid", type=int, action="append", default=[])
     args = parser.parse_args()
     for name in ("gui", "cli", "host"):
@@ -68,15 +72,17 @@ def main():
     control_connection = None
     agent_pid = None
     birth = None
+    host_pid = None
+    host_birth = None
+    host_socket = harness.root / "run/flowmux-agent-host.sock"
     try:
         harness.start_display()
         app, gui_socket = harness.window("agent-host-first")
-        host_socket = harness.root / "run/flowmux-agent-host.sock"
-        with (harness.root / "host.log").open("w") as log:
-            host = harness.spawn([args.host, "--agent-host", "--socket", str(host_socket)],
-                                 stdout=log, stderr=log, cwd=harness.root)
-        fixture.wait_for(host_socket.exists, "Agent Host socket")
-        control_connection = HostClient(host_socket, "relay")
+        if not args.service_start:
+            with (harness.root / "host.log").open("w") as log:
+                host = harness.spawn([args.host, "--agent-host", "--socket", str(host_socket)],
+                                     stdout=log, stderr=log, cwd=harness.root)
+            fixture.wait_for(host_socket.exists, "Agent Host socket")
         provider = harness.root / "fixture-agent.py"
         provider.write_text('''import os, select, sys, time, tty
 from pathlib import Path
@@ -109,15 +115,6 @@ while True:
             if len(text) > 1024: text = 'bulk'
             print('\\x1b[4;1HACK:<' + text + '>\\x1b[K', end='', flush=True)
 ''')
-        launch = {"request_id": str(uuid.uuid4()), "provider": "fixture", "label": "isolated Agent Host fixture",
-                  "argv": ["/usr/bin/python3", "-u", str(provider), str(harness.root)],
-                  "cwd": str(harness.root), "env": list(harness.env.items()) + [["TERM", "xterm-256color"]],
-                  "size": {"rows": 24, "cols": 80}}
-        agent = control_connection.call("launch", launch=launch)["agent"]
-        agent_pid = agent["pid"]
-        assert agent["state"] == "running", agent
-        birth = Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
-
         def pane(path):
             if not harness.tree(path):
                 harness.rpc(path, "workspace_create", root=str(harness.root),
@@ -138,6 +135,51 @@ while True:
                          "ordinary shell PID")
         shell_pid = int(re.search(r"GUI-SHELL:(\d+)", harness.screen(gui_socket, target)).group(1))
         shell_birth = Path(f"/proc/{shell_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+        if args.service_start:
+            launch_env = dict(harness.env)
+            # Only the service-submission client uses the user's manager bus;
+            # the GUI, VTE and saved state keep their isolated test session.
+            launch_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ.get(
+                "DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
+            cli = [args.cli, "--socket", str(gui_socket), "--json", "agent"]
+            empty = subprocess.run(cli + ["ls"], env=launch_env, check=True, capture_output=True, text=True)
+            assert json.loads(empty.stdout) == [] and not host_socket.exists()
+            invalid = subprocess.run(cli + ["run", "--pane", target, "--", "/flowmux-missing-agent"],
+                                     env=launch_env, capture_output=True, text=True)
+            assert invalid.returncode != 0 and not host_socket.exists()
+            launched = subprocess.run(cli + ["run", "--pane", target, "--cwd", str(harness.root),
+                "--", "/usr/bin/python3", "-u", str(provider), str(harness.root)],
+                env=launch_env, check=True, capture_output=True, text=True, timeout=30)
+            result = json.loads(launched.stdout)
+            agent = result["agent"]
+            agent_surface = result["view"]["surface_created"]["id"]
+            assert Path(args.cli).with_name("flowmux-daemon").samefile(args.host)
+        control_connection = HostClient(host_socket, "relay")
+        if not args.service_start:
+            launch = {"request_id": str(uuid.uuid4()), "provider": "fixture", "label": "isolated Agent Host fixture",
+                      "argv": ["/usr/bin/python3", "-u", str(provider), str(harness.root)],
+                      "cwd": str(harness.root), "env": list(harness.env.items()) + [["TERM", "xterm-256color"]],
+                      "size": {"rows": 24, "cols": 80}}
+            agent = control_connection.call("launch", launch=launch)["agent"]
+        agent_pid = agent["pid"]
+        assert agent["state"] == "running", agent
+        birth = Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+        host_pid, _, _ = struct.unpack("3i", control_connection.stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        assert host_pid not in harness.protected_pids
+        host_birth = Path(f"/proc/{host_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+
+        def host_alive():
+            stat = Path(f"/proc/{host_pid}/stat")
+            return stat.exists() and stat.read_text().rsplit(") ", 1)[1].split()[19] == host_birth
+
+        if args.service_start:
+            cgroup = Path(f"/proc/{host_pid}/cgroup").read_text()
+            assert "flowmux-agent-host-" in cgroup and cgroup.strip().endswith(".service"), cgroup
+            assert cgroup != Path(f"/proc/{app.pid}/cgroup").read_text()
+            assert cgroup == Path(f"/proc/{agent_pid}/cgroup").read_text()
+            listed = subprocess.run(cli + ["ls"], env=launch_env, check=True, capture_output=True, text=True)
+            assert [item["instance"] for item in json.loads(listed.stdout)] == [agent["instance"]]
+            harness.pass_check("agent run starts an independent user service; list and invalid launches do not start a Host")
         command = [args.cli, "--socket", str(gui_socket), "--json", "agent", "open", agent["instance"],
                    "--pane", target]
         opened = subprocess.run(command, env=harness.env, check=True, capture_output=True, text=True)
@@ -205,13 +247,22 @@ while True:
         before = int((harness.root / "progress").read_text())
         harness.close_window(app)
         fixture.wait_for(lambda: int((harness.root / "progress").read_text()) >= before + 5, "work continues with GUI closed")
-        assert host.poll() is None
+        assert host_alive()
         assert Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19] == birth
         shell_stat = Path(f"/proc/{shell_pid}/stat")
         fixture.wait_for(lambda: not shell_stat.exists() or shell_stat.read_text().rsplit(") ", 1)[1].split()[19] != shell_birth,
                          "ordinary GUI-owned shell exits")
         harness.pass_check("closing the isolated GUI leaves the same agent/PTY running and progressing")
         harness.pass_check("ordinary terminal exits with GUI while managed Agent continues")
+        blocked = subprocess.run(
+            [args.cli, "--socket", str(host_socket), "agent-relay", "--require-gui",
+             "--instance", agent["instance"], "--epoch", agent["epoch"]],
+            env=harness.env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+        assert blocked.returncode != 0 and "GUI management" in blocked.stderr, blocked
+        assert f"SESSION:{agent_pid}" not in blocked.stdout
+        assert host_alive()
+        assert Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19] == birth
+        harness.pass_check("GUI relay refuses attachment without a registered management connection and preserves execution")
         app, gui_socket = harness.window("agent-host-reopened")
         instances = control_connection.call("list")["agents"]
         assert len(instances) == 1 and instances[0]["instance"] == agent["instance"]
@@ -226,7 +277,7 @@ while True:
         assert app.wait(timeout=10) == -signal.SIGKILL
         fixture.wait_for(lambda: int((harness.root / "progress").read_text()) >= before + 5,
                          "work continues after GUI crash")
-        assert host.poll() is None
+        assert host_alive()
         app, gui_socket = harness.window("agent-host-after-crash")
         verify_view(gui_socket)
         assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
@@ -257,7 +308,7 @@ while True:
         assert f"SESSION:{agent_pid}" not in harness.screen(gui_socket, target)
         assert not sentinel.exists()
         assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
-        assert host.poll() is None
+        assert host_alive()
         harness.pass_check("stale epoch preserves the binding and reports failure without shell fallback or duplicate launch")
         harness.close_window(app)
         state, tab = saved_agent_tab()
@@ -266,8 +317,11 @@ while True:
         app, gui_socket = harness.window("agent-host-epoch-recovered")
         verify_view(gui_socket)
         harness.send(gui_socket, target, "quit")
-        host.wait(timeout=10)
-        assert host.returncode == 0, host.returncode
+        if host is not None:
+            host.wait(timeout=10)
+            assert host.returncode == 0, host.returncode
+        else:
+            fixture.wait_for(lambda: not host_alive() and not host_socket.exists(), "empty service Host exits")
         fixture.wait_for(lambda: not Path(f"/proc/{agent_pid}").exists(), "agent reaped")
         assert not host_socket.exists()
         harness.pass_check("natural agent exit is reaped promptly; empty Host exits and releases its socket")
@@ -282,11 +336,24 @@ while True:
         harness.pass_check("missing Host leaves saved Agent tab disconnected; no Host restart, shell fallback or native resume")
         harness.close_window(app)
     finally:
+        if args.service_start and control_connection is None and host_socket.exists():
+            # A launch can succeed even if opening the tab loses its reply.
+            # Recover only this isolated Host's fixture executions for cleanup.
+            try:
+                control_connection = HostClient(host_socket, "relay")
+                for execution in control_connection.call("list")["agents"]:
+                    assert execution["cwd"] == str(harness.root), execution
+                    control_connection.call("terminate", instance=execution["instance"], mode="force")
+            except (OSError, AssertionError):
+                pass
         if control_connection is not None:
-            if host is not None and host.poll() is None and agent_pid is not None:
+            if agent_pid is not None and host_socket.exists():
                 try:
                     control_connection.call("terminate", instance=agent["instance"], mode="force")
-                    host.wait(timeout=10)
+                    if host is not None:
+                        host.wait(timeout=10)
+                    else:
+                        fixture.wait_for(lambda: not host_socket.exists(), "fixture service cleanup", timeout=10)
                 except (OSError, AssertionError, subprocess.TimeoutExpired):
                     pass
             control_connection.close()
