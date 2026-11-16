@@ -553,6 +553,7 @@ time.sleep(60)
             'test-team-reuse-gui.py', 'test-team-usage-gui.py',
             'test-session-save-gui.py', 'test-session-flow-gui.py',
             'test-pty-spawn-failure-gui.py', 'test-agent-host-gui.py', 'test-terminal-read-screen-gui.py',
+            'test-terminal-load-gui.py',
             'test-terminal-image-links-gui.py', 'test-ipc-recovery-gui.py',
             'test-polling-delay-gui.py', 'test-editor-io-gui.py',
             'test-editor-renderer-gui.py', 'test-lazy-restore-gui.py',
@@ -570,7 +571,7 @@ time.sleep(60)
                                           '--', '--nocapture'], ['build', '--workspace', '--locked']])
                 timings = [json.loads(line.split('=', 1)[1]) for line in result.stdout.splitlines()
                            if line.startswith('CI_TEST_RESULT=')]
-                self.assertEqual(len(timings), 29 if suite == 'extended' else 27)
+                self.assertEqual(len(timings), 30 if suite == 'extended' else 28)
                 self.assertEqual(len({row['test'] for row in timings}), len(timings))
                 self.assertTrue(all(row['exit_code'] == 0 and row['elapsed_seconds'] >= 0
                                     for row in timings))

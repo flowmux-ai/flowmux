@@ -71,6 +71,51 @@ impl WindowController {
         self.render_activity_panel(&model);
     }
 
+    pub(super) fn schedule_agent_display_refresh(&self, workspace: WorkspaceId) {
+        self.agent_bar
+            .pending_workspaces
+            .borrow_mut()
+            .insert(workspace);
+        if self.agent_bar.display_refresh_task.borrow().is_some() {
+            return;
+        }
+        let controller = self.clone();
+        let task = glib::MainContext::default().spawn_local_with_priority(
+            glib::Priority::DEFAULT_IDLE,
+            async move {
+                loop {
+                    // Coalesce across terminals and let input/layout run before overview work.
+                    glib::timeout_future_with_priority(
+                        glib::Priority::DEFAULT_IDLE,
+                        Duration::from_millis(100),
+                    )
+                    .await;
+                    let workspaces =
+                        std::mem::take(&mut *controller.agent_bar.pending_workspaces.borrow_mut());
+                    for workspace in workspaces {
+                        controller.update_workspace_agent_status(workspace).await;
+                        // A ready store lock does not yield between workspace rows.
+                        glib::timeout_future_with_priority(
+                            glib::Priority::DEFAULT_IDLE,
+                            Duration::ZERO,
+                        )
+                        .await;
+                    }
+                    controller.refresh_agent_displays().await;
+                    if controller.agent_bar.pending_workspaces.borrow().is_empty() {
+                        break;
+                    }
+                }
+                controller
+                    .agent_bar
+                    .display_refresh_task
+                    .borrow_mut()
+                    .take();
+            },
+        );
+        *self.agent_bar.display_refresh_task.borrow_mut() = Some(task);
+    }
+
     pub(super) async fn refresh_activity_panel(&self) {
         let model = self.store.agent_bar_model().await;
         self.render_activity_panel(&model);
@@ -94,6 +139,11 @@ impl WindowController {
     }
 
     pub(super) async fn sync_workspace_agent_status(&self, workspace: WorkspaceId) {
+        self.update_workspace_agent_status(workspace).await;
+        self.refresh_agent_displays().await;
+    }
+
+    async fn update_workspace_agent_status(&self, workspace: WorkspaceId) {
         let attention = self.store.workspace_agent_attention_status(workspace).await;
         self.sidebar.set_agent_status(workspace, attention);
         // Teardown can restore titles without a cwd change or a new OSC title.
@@ -133,7 +183,7 @@ impl WindowController {
             }
         }
         self.refresh_window_title().await;
-        self.sync_workspace_label(workspace).await;
+        self.update_workspace_label(workspace).await;
     }
     pub(super) async fn sync_workspace_agent_status_from_store(&self, workspace: WorkspaceId) {
         self.sync_workspace_agent_status(workspace).await;
@@ -308,7 +358,7 @@ impl WindowController {
         let ws_id = changed
             .map(|(workspace, _)| workspace)
             .or(settled.workspace)?;
-        self.sync_workspace_agent_status(ws_id).await;
+        self.schedule_agent_display_refresh(ws_id);
         Some(ws_id)
     }
     pub(super) async fn refresh_all_agent_screen_statuses(&self) {

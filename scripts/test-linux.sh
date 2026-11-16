@@ -82,6 +82,9 @@ TMPDIR=/tmp run_test agent-host python3 scripts/test-agent-host-gui.py \
 run_test terminal-read-screen python3 scripts/test-terminal-read-screen-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp run_test terminal-load python3 scripts/test-terminal-load-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 TMPDIR=/tmp run_test terminal-image-links python3 scripts/test-terminal-image-links-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"

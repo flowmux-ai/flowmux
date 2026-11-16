@@ -487,14 +487,12 @@ impl WindowController {
                             .set_surface_title(surface, &latest);
                     }
                 }
-                // A status change already syncs the workspace label, so one
-                // title tick refreshes the agent displays once, not twice.
+                // A status change already schedules the workspace display refresh.
                 let synced = self
                     .refresh_agent_screen_status(surface, Some(signal_title))
                     .await;
                 if let Some(ws_id) = titled.filter(|ws_id| synced != Some(*ws_id)) {
-                    self.refresh_window_title().await;
-                    self.sync_workspace_label(ws_id).await;
+                    self.schedule_agent_display_refresh(ws_id);
                 }
             }
             GtkCommand::TerminalContentsChanged { surface } => {

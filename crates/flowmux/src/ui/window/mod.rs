@@ -328,6 +328,8 @@ struct AgentBarState {
     bar: AgentBar,
     /// Surfaces flagged for attention (e.g. an agent awaiting input).
     attentions: Rc<RefCell<HashSet<SurfaceId>>>,
+    display_refresh_task: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
+    pending_workspaces: Rc<RefCell<HashSet<WorkspaceId>>>,
 }
 
 /// Shared file-browser panel and per-pane focus/state bookkeeping.
@@ -2008,6 +2010,8 @@ impl WindowController {
             agent_bar: AgentBarState {
                 bar: agent_bar,
                 attentions: agent_bar_attentions,
+                display_refresh_task: Rc::default(),
+                pending_workspaces: Rc::default(),
             },
             pane_zoom: PaneZoomState::default(),
             agent_office: Rc::new(RefCell::new(None)),
@@ -2040,6 +2044,14 @@ impl WindowController {
             cwd_poll_generation: Rc::new(Cell::new(0)),
             window_close: WindowCloseState::default(),
         };
+        let refresh_task = controller.agent_bar.display_refresh_task.clone();
+        let pending_workspaces = controller.agent_bar.pending_workspaces.clone();
+        controller.window.connect_unrealize(move |_| {
+            if let Some(task) = refresh_task.borrow_mut().take() {
+                task.abort();
+            }
+            pending_workspaces.borrow_mut().clear();
+        });
         controller.install_process_callbacks();
         controller.install_state_flush_on_close();
         controller.install_cwd_polling_fallback();
@@ -2527,6 +2539,11 @@ impl WindowController {
     }
 
     async fn sync_workspace_label(&self, ws_id: WorkspaceId) {
+        self.update_workspace_label(ws_id).await;
+        self.refresh_agent_displays().await;
+    }
+
+    async fn update_workspace_label(&self, ws_id: WorkspaceId) {
         let Some(mut ws) = self.store.get_workspace_without_scrollback(ws_id).await else {
             return;
         };
@@ -2557,7 +2574,6 @@ impl WindowController {
 
         let details = workspace_row_details(&ws, &mru);
         self.sidebar.upsert_with_details(&ws, details);
-        self.refresh_agent_displays().await;
     }
 
     /// Handle a pane focus event, update MRU, and sync label/subtitles. Focusing
@@ -6238,6 +6254,7 @@ mod tests {
             store.surface_title(pane, surface).await.as_deref(),
             Some("vim src/main.rs"),
         );
+        wait_for_agent_display_refresh(&controller).await;
         assert_eq!(
             controller.window.title().map(|s| s.to_string()).as_deref(),
             Some("flowmux - vim src/main.rs"),
@@ -6263,6 +6280,7 @@ mod tests {
                 .as_deref(),
             Some(initial_title.as_str())
         );
+        wait_for_agent_display_refresh(&controller).await;
         assert_eq!(
             controller.window.title().as_deref(),
             Some(format!("flowmux - {initial_title}").as_str())
@@ -6701,6 +6719,7 @@ mod tests {
             })
             .await
             .unwrap_or_else(|_| panic!("timed out waiting for OSC title {expected:?}"));
+            wait_for_agent_display_refresh(controller).await;
         }
 
         adw::init().expect("libadwaita should initialize in GTK test");
@@ -11112,6 +11131,71 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
+    async fn wait_for_agent_display_refresh(controller: &WindowController) {
+        for _ in 0..200 {
+            if controller.agent_bar.display_refresh_task.borrow().is_none() {
+                return;
+            }
+            glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        panic!("agent display refresh did not finish");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_display_burst_yields_and_renders_latest_state() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.AgentDisplayBurst").await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        for tick in 0..20 {
+            let mut agent = flowmux_core::AgentPresence::new(
+                "codex",
+                flowmux_core::AgentActivity::Running,
+                Some(std::process::id()),
+            );
+            agent.custom_status = Some(format!("burst {tick}"));
+            controller
+                .store
+                .set_agent_activity(surface, Some(agent))
+                .await;
+            controller.schedule_agent_display_refresh(workspace);
+        }
+        assert!(
+            !agent_bar_visible(&controller),
+            "burst must not render synchronously"
+        );
+        let input_ran = Rc::new(Cell::new(false));
+        let ran = input_ran.clone();
+        let overview = controller.agent_bar.bar.root.clone();
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
+            assert!(
+                !overview.is_visible(),
+                "input/layout must precede overview rendering"
+            );
+            ran.set(true);
+            glib::ControlFlow::Break
+        });
+        wait_for_agent_display_refresh(&controller).await;
+        assert!(input_ran.get());
+        assert!(agent_bar_label_texts(&controller)
+            .iter()
+            .any(|text| text == "burst 19"));
+        assert!(!agent_bar_label_texts(&controller)
+            .iter()
+            .any(|text| text == "burst 0"));
+
+        controller.window.present();
+        controller.schedule_agent_display_refresh(workspace);
+        controller.window.destroy();
+        assert!(controller.agent_bar.display_refresh_task.borrow().is_none());
+        assert!(controller.agent_bar.pending_workspaces.borrow().is_empty());
+    }
+
+    #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn terminal_content_dispatch_refreshes_agent_items_without_focus_event() {
         use vte::prelude::*;
@@ -11155,6 +11239,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::TerminalContentsChanged { surface })
             .await;
+        wait_for_agent_display_refresh(&controller).await;
         assert!(agent_bar_visible(&controller));
         assert!(agent_bar_label_texts(&controller)
             .iter()
@@ -11178,6 +11263,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::TerminalContentsChanged { surface })
             .await;
+        wait_for_agent_display_refresh(&controller).await;
         assert!(agent_bar_label_texts(&controller)
             .iter()
             .any(|text| text == "blocked"));
@@ -11309,6 +11395,7 @@ mod tests {
             Some(flowmux_core::AgentStatus::Working),
             "hidden workspace output must update the shared Agent model"
         );
+        wait_for_agent_display_refresh(&controller).await;
         assert!(
             agent_bar_label_texts(&controller)
                 .iter()
@@ -11343,6 +11430,7 @@ mod tests {
             })
             .await;
         ack_rx.await.unwrap();
+        wait_for_agent_display_refresh(&controller).await;
         assert!(controller
             .sidebar
             .workspace_row_contains(background_workspace, "Working (1s - esc to interrupt)"));
@@ -11371,6 +11459,7 @@ mod tests {
             })
             .await;
         ack_rx.await.unwrap();
+        wait_for_agent_display_refresh(&controller).await;
         assert!(
             controller
                 .sidebar
