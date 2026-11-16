@@ -33,16 +33,30 @@ impl Dimensions for Size {
 struct Size(TerminalSize);
 
 #[derive(Clone, Default)]
-struct Events(Arc<Mutex<Vec<Event>>>);
+struct Events {
+    replies: Arc<Mutex<Vec<Event>>>,
+    title: Arc<Mutex<Option<String>>>,
+}
 
 impl EventListener for Events {
     fn send_event(&self, event: Event) {
+        match event {
+            Event::Title(title) => {
+                *self.title.lock().unwrap() = Some(title);
+                return;
+            }
+            Event::ResetTitle => {
+                *self.title.lock().unwrap() = None;
+                return;
+            }
+            _ => {}
+        }
         // Queries are bounded by one PTY read; discard non-transport effects.
         if matches!(
             event,
             Event::PtyWrite(_) | Event::ColorRequest(..) | Event::TextAreaSizeRequest(_)
         ) {
-            self.0.lock().unwrap().push(event);
+            self.replies.lock().unwrap().push(event);
         }
     }
 }
@@ -187,7 +201,7 @@ impl Terminal {
 
     fn take_replies(&self) -> Vec<u8> {
         let mut replies = Vec::new();
-        for event in self.events.0.lock().unwrap().drain(..) {
+        for event in self.events.replies.lock().unwrap().drain(..) {
             let reply = match event {
                 Event::PtyWrite(reply) => reply,
                 Event::ColorRequest(index, format) => {
@@ -269,6 +283,31 @@ impl Terminal {
             .snapshot
             .get_or_insert_with(|| Arc::from(self.previous.as_ref().unwrap().snapshot()));
         (self.sequence, true, self.size, snapshot.clone())
+    }
+
+    pub fn status_signals(&self) -> (String, Option<String>) {
+        let mut screen = String::new();
+        // Match the GUI's recent live rows; replaced frames stay in history.
+        for line in i32::from(self.size.rows).saturating_sub(80).max(0)..i32::from(self.size.rows) {
+            for column in 0..usize::from(self.size.cols) {
+                let cell = &self.term.grid()[Line(line)][Column(column)];
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                screen.push(if cell.c.is_control() { ' ' } else { cell.c });
+                screen.extend(
+                    cell.zerowidth()
+                        .unwrap_or_default()
+                        .iter()
+                        .copied()
+                        .take(MAX_COMBINING)
+                        .filter(|c| !c.is_control()),
+                );
+            }
+            screen.truncate(screen.trim_end_matches(' ').len());
+            screen.push('\n');
+        }
+        (screen, self.events.title.lock().unwrap().clone())
     }
 
     fn project(&self) -> Projection {
@@ -521,6 +560,39 @@ fn default_color(index: usize) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_signals_use_live_cells_and_title_without_styles_or_old_frames() {
+        let mut terminal = Terminal::new(TerminalSize { rows: 4, cols: 40 });
+        terminal.feed(b"old spinner\r\n\x1b]2;Working\x07\x1b[2J\x1b[H");
+        terminal.feed("\x1b[31m한글 e\u{301}\x1b[0m\r\nType your message".as_bytes());
+        let (screen, title) = terminal.status_signals();
+        assert_eq!(screen, "한글 e\u{301}\nType your message\n\n\n");
+        assert_eq!(title.as_deref(), Some("Working"));
+        terminal.feed(b"\x1b[?1049h\x1b[2J\x1b[HReady\x1b]2;\x07");
+        let (screen, title) = terminal.status_signals();
+        assert_eq!(screen, "Ready\n\n\n\n");
+        assert!(title.as_deref().is_none_or(str::is_empty));
+    }
+
+    #[test]
+    fn status_signals_bound_recent_rows_and_wait_for_synchronized_output() {
+        let mut terminal = Terminal::new(TerminalSize {
+            rows: 100,
+            cols: 40,
+        });
+        terminal.feed(b"old spinner\x1b[100;1HType your message");
+        let (screen, _) = terminal.status_signals();
+        assert_eq!(screen.lines().count(), 80);
+        assert!(!screen.contains("spinner"));
+        assert!(screen.contains("Type your message"));
+        terminal.feed(b"\x1b[?2026h\x1b[2J\x1b[Hnew frame");
+        assert!(!terminal.status_signals().0.contains("new frame"));
+        terminal.flush_sync();
+        // The first row is outside the 80-row observation window.
+        assert!(!terminal.status_signals().0.contains("new frame"));
+        assert!(!terminal.status_signals().0.contains("Type your message"));
+    }
 
     #[test]
     fn history_overlap_matches_the_longest_retained_suffix_in_repeated_output() {

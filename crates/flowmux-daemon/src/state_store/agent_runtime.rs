@@ -861,69 +861,11 @@ impl StateStore {
             return AgentLifecycleResult::default();
         };
         let presence = located.presence;
-        let Some(session) = presence.session_id.as_deref() else {
+        let Some((seq, event)) =
+            runtime.provider_screen_settlement(surface, &presence, screen, title)
+        else {
             return AgentLifecycleResult::default();
         };
-        let key = (surface, presence.name.clone(), session.to_string());
-        if presence.source.as_deref() != Some("flowmux:hook") || lifecycle_has_waits(&runtime, &key)
-        {
-            return AgentLifecycleResult::default();
-        }
-        let Some(turn) = runtime.provider_turns.get_mut(&key) else {
-            return AgentLifecycleResult::default();
-        };
-        let status = detect_agent_status_from_signals(Some(screen), title);
-        if status == Some(AgentStatus::Working) {
-            turn.saw_working |= detect_agent_progress_text(Some(screen)).is_some();
-            turn.idle_frame = None;
-            return AgentLifecycleResult::default();
-        }
-        let ready = screen
-            .lines()
-            .rev()
-            .filter(|line| !line.trim().is_empty())
-            .take(12)
-            .any(|line| {
-                let line = line.to_ascii_lowercase();
-                line.contains("type your message")
-                    || line.contains("ask anything")
-                    || (presence.name == "antigravity" && line.trim() == "❯")
-            });
-        let observed = provider_terminal_outcome(&presence.name, screen);
-        if status != Some(AgentStatus::Idle)
-            || !ready
-            || (turn.stop.is_none() && !turn.saw_working && observed.is_none())
-        {
-            turn.idle_frame = None;
-            return AgentLifecycleResult::default();
-        }
-        let fingerprint = agent_screen_fingerprint(Some(screen), title, false);
-        match turn.idle_frame {
-            Some((previous, since)) if previous == fingerprint => {
-                if since.elapsed() < std::time::Duration::from_millis(600) {
-                    return AgentLifecycleResult::default();
-                }
-            }
-            _ => {
-                turn.idle_frame = Some((fingerprint, tokio::time::Instant::now()));
-                return AgentLifecycleResult::default();
-            }
-        }
-        let outcome = observed.unwrap_or(if turn.stop.is_some() {
-            AgentTurnOutcome::Completed
-        } else {
-            // shortcut: silent cancellation and lost Stop are indistinguishable until providers emit a terminal hook.
-            AgentTurnOutcome::Unknown
-        });
-        let (message, status_text) = if outcome == AgentTurnOutcome::Completed {
-            turn.stop.clone().expect("completed turns have a stop")
-        } else {
-            (None, outcome.status_text().to_string())
-        };
-        let seq = runtime
-            .last_seq
-            .get(&key)
-            .and_then(|seq| seq.checked_add(1));
         drop(runtime);
         // A concurrent new turn has a newer sequence and rejects this settlement.
         self.report_agent_lifecycle_with_visibility(
@@ -931,12 +873,8 @@ impl StateStore {
             &presence.name,
             presence.pid,
             seq,
-            session,
-            AgentLifecycleEvent::TurnFinished {
-                outcome,
-                message,
-                status_text,
-            },
+            presence.session_id.as_deref().unwrap(),
+            event,
             visible,
         )
         .await

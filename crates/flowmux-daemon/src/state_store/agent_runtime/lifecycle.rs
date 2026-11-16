@@ -13,6 +13,86 @@ pub(crate) struct LifecycleTransition {
 }
 
 impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
+    /// A ready screen settles display state, never whole-provider completion.
+    pub(crate) fn provider_screen_settlement(
+        &mut self,
+        owner: Owner,
+        presence: &AgentPresence,
+        screen: &str,
+        title: Option<&str>,
+    ) -> Option<(Option<u64>, AgentLifecycleEvent)> {
+        let session = presence.session_id.as_deref()?;
+        let key = (owner, presence.name.clone(), session.to_string());
+        if presence.source.as_deref() != Some("flowmux:hook") || lifecycle_has_waits(self, &key) {
+            return None;
+        }
+        let turn = self.provider_turns.get_mut(&key)?;
+        let status = detect_agent_status_from_signals(Some(screen), title);
+        if status == Some(AgentStatus::Working) {
+            turn.saw_working |= detect_agent_progress_text(Some(screen)).is_some();
+            turn.idle_frame = None;
+            return None;
+        }
+        let ready = screen
+            .lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty())
+            .take(12)
+            .any(|line| {
+                let line = line.to_ascii_lowercase();
+                line.contains("type your message")
+                    || line.contains("ask anything")
+                    || (presence.name == "antigravity" && line.trim() == "❯")
+            });
+        let observed = provider_terminal_outcome(&presence.name, screen);
+        if status != Some(AgentStatus::Idle)
+            || !ready
+            || (turn.stop.is_none() && !turn.saw_working && observed.is_none())
+        {
+            turn.idle_frame = None;
+            return None;
+        }
+        let fingerprint = agent_screen_fingerprint(Some(screen), title, false);
+        match turn.idle_frame {
+            Some((previous, since)) if previous == fingerprint => {
+                if since.elapsed() < std::time::Duration::from_millis(600) {
+                    return None;
+                }
+            }
+            _ => {
+                turn.idle_frame = Some((fingerprint, tokio::time::Instant::now()));
+                return None;
+            }
+        }
+        let outcome = observed.unwrap_or(if turn.stop.is_some() {
+            AgentTurnOutcome::Completed
+        } else {
+            // shortcut: silent cancellation and lost Stop are indistinguishable until providers emit a terminal hook.
+            AgentTurnOutcome::Unknown
+        });
+        let (message, status_text) = if outcome == AgentTurnOutcome::Completed {
+            turn.stop.clone().expect("completed turns have a stop")
+        } else {
+            (None, outcome.status_text().to_string())
+        };
+        let seq = self.last_seq.get(&key).and_then(|seq| seq.checked_add(1));
+        Some((
+            seq,
+            AgentLifecycleEvent::TurnFinished {
+                outcome,
+                message,
+                status_text,
+            },
+        ))
+    }
+
+    pub(crate) fn has_provider_turn(&self, owner: Owner, presence: &AgentPresence) -> bool {
+        presence.session_id.as_ref().is_some_and(|session| {
+            self.provider_turns
+                .contains_key(&(owner, presence.name.clone(), session.clone()))
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn native_session(
         &mut self,

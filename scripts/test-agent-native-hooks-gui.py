@@ -138,6 +138,12 @@ while True:
     progress = root / (name + '-progress')
     progress.with_suffix('.tmp').write_text(str(counter))
     progress.with_suffix('.tmp').replace(progress)
+    frame_path = root / (name + '-frame')
+    if frame_path.exists():
+        frame = json.loads(frame_path.read_text())
+        frame_path.unlink()
+        print('\x1b]2;' + frame['title'] + '\x07\x1b[2J\x1b[H' + frame['screen'].replace('\n', '\r\n'), end='', flush=True)
+        (root / (name + '-frame-seen')).write_text(frame['id'])
     command = root / (name + '-command')
     if command.exists():
         task = json.loads(command.read_text())
@@ -344,6 +350,59 @@ while True:
                 assert presence() == current_presence, "explicit notification altered native lifecycle state"
                 assert len(desktop_adds()) == headless_desktop_before, "headless notification tried to send a desktop effect"
                 h.pass_check("notify, notify-complete and notify-stream retain headless notifications and unchanged lifecycle; stream survives 32 seconds of silence with exact output")
+            if name in ("gemini", "antigravity", "cline"):
+                def frame(screen, title=""):
+                    token = uuid.uuid4().hex
+                    path = h.root / (name + "-frame")
+                    temporary = path.with_suffix(".tmp")
+                    temporary.write_text(json.dumps({"id": token, "screen": screen, "title": title}))
+                    temporary.replace(path)
+                    seen = h.root / (name + "-frame-seen")
+                    fixture.wait_for(lambda: seen.exists() and seen.read_text() == token, "provider renders a live frame")
+
+                hook("session-start", session="screen-session")
+                hook("turn-start", session="screen-session")
+                frame("Type your message", "⠋ Executing Hook")
+                if name != "cline":
+                    hook("stop", session="screen-session")
+                time.sleep(1.1)
+                assert presence()["status"] == "working", "working title completed the response"
+                if name != "cline":
+                    hook("turn-start", session="screen-session")
+                    frame("Type your message")
+                    time.sleep(1.1)
+                    assert presence()["status"] == "working", "old Stop completed the continuation"
+                    frame("Type your message", "⠋ Executing Hook")
+                    hook("stop", session="screen-session")
+                    time.sleep(1.1)
+                    assert presence()["status"] == "working"
+                    frame("Type your message")
+                    expected = "completed"
+                else:
+                    frame("⠋ Thinking... (esc to cancel)\nType your message")
+                    time.sleep(.6)
+                    frame("* Error: Fixture unauthorized\nAsk anything")
+                    expected = "failed"
+                fixture.wait_for(lambda: presence()["status"] == "idle", "Host settles the stable ready screen with no GUI")
+                assert presence()["turn_outcome"] == expected, presence()
+                count = len(host_notifications())
+                time.sleep(1.1)
+                assert len(host_notifications()) == count, "screen poll duplicated completion"
+                assert Path(f"/proc/{agent['pid']}/stat").read_text().rsplit(") ", 1)[1].split()[19] == birth
+                assert not next(n for n in host_call("list")["agents"] if n["instance"] == agent["instance"])["view"]
+                app, gui = h.window("headless-screen-result-" + name)
+                outcome_label = "Response completed" if expected == "completed" else "Response failed"
+                fixture.wait_for(lambda: outcome_label + " · Background" in agent_summary(name),
+                                 "Agents displays the result observed without any GUI")
+                h.close_window(app)
+                if name != "cline":
+                    hook("session-start", session="canceled-screen")
+                    hook("turn-start", session="canceled-screen")
+                    frame("ℹ Request cancelled.\nType your message")
+                    if name == "gemini":
+                        fixture.wait_for(lambda: presence()["status"] == "idle", "headless cancellation settles")
+                        assert presence()["turn_outcome"] == "canceled", presence()
+                h.pass_check(name + ": headless live screen/title settlement preserves continuation, outcome, process identity and notification deduplication")
             if name == "codex":
                 child = {"agent_id": "child", "turn_id": "child-new"}
                 hook("running", payload=child)

@@ -2212,6 +2212,31 @@ impl TerminalActor {
             self.settle_codex = None;
             return;
         }
+        if let Some(presence) = self
+            .presence
+            .as_ref()
+            .filter(|presence| self.lifecycle.has_provider_turn(self.instance, presence))
+        {
+            let (screen, title) = self.terminal.status_signals();
+            if let Some((seq, event)) = self.lifecycle.provider_screen_settlement(
+                self.instance,
+                presence,
+                &screen,
+                title.as_deref(),
+            ) {
+                if let Some(transition) = self.lifecycle.reduce(
+                    self.instance,
+                    &presence.name,
+                    presence.pid,
+                    seq,
+                    presence.session_id.as_deref().unwrap(),
+                    event,
+                    Some(presence),
+                ) {
+                    self.project_lifecycle(transition, None);
+                }
+            }
+        }
         if !self
             .settle_codex
             .as_ref()

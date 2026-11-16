@@ -132,7 +132,7 @@ TurnStarted(turn-1, seq=10)
 | 연결 지점 | 확인한 상태 | 다음 구현의 완료 조건 |
 | --- | --- | --- |
 | [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed`, [GUI 관리 연결](../crates/flowmux/src/agent_host.rs) | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI는 tab과 독립된 상시 연결·재접속 및 설정 변경 전파를 수행함. 후속 변경은 GUI relay의 준비·확정 모두에 관리 연결을 요구함 | 최초 관리 연결은 tab 복원 전에 시도하며 미등록 상태에서는 입력 소유권을 넘기지 않음. 일회성 조회·hook·relay는 GUI 연결을 대신하지 않음. 향후 자동 종료 수락과도 같은 revision 경계에서 직렬화 |
-| 같은 파일의 `HostHandler` | 후속 구현에서 InstanceId·epoch·root PID/birth와 native session을 검증하여 lifecycle hook을 공통 reducer로 전달. CLI native hook routing·browser/terminal/workspace context·lifecycle 및 명시적 알림도 연결함 | headless 화면 관측·provider 전체 완료 검증·기타 미지원 명령 연결은 남음 |
+| 같은 파일의 `HostHandler` | 후속 구현에서 InstanceId·epoch·root PID/birth와 native session을 검증하여 lifecycle hook을 공통 reducer로 전달. CLI native hook routing·browser/terminal/workspace context·lifecycle 및 명시적 알림도 연결함 | Gemini·Antigravity·Cline의 화면 의존 상태 판정을 Host에도 연결함. provider 전체 완료 검증·기타 미지원 명령 연결은 남음 |
 | 공통 `lifecycle.rs`와 `TerminalActor`의 ledger | 일반 terminal은 SurfaceId, managed 실행은 InstanceId 기반. Host가 managed wait·Codex Stop grace를 소유하여 tab/GUI 제거 후에도 유지함 | 전체 작업 완료 검증과 회수 정책 연결. UI의 idle 추정만으로 자동 종료하지 않음 |
 | [retirement.rs](../crates/flowmux-daemon/src/agent_host/retirement.rs)의 `WorkDisposition` | `Working / VerifiedComplete / Unknown`, 최초 완료 시각·revision·단조 시간 deadline을 제공함. 전체 완료 검증 adapter와 실제 자동 종료는 연결 전 | §5의 정규화 결과만 입력. `completion_verified` 호출 전 root·child·tool·wait와 관측 공백 확인. 만료 후에도 provider의 안전한 유휴 종료 수락 필요 |
 | `host.rs`의 `TerminalActor` 입력 처리 | PTY 입력 수락과 interrupt는 `observation_uncertain`을 호출한다. 입력 ACK는 provider가 새 작업을 수락했다는 증거가 아님 | 초안 입력·커서 이동·상태 조회와 실제 요청 제출을 구분. provider의 작업 수락 확인 후에만 generation 변경. 작업을 시작하지 않은 입력이면 기존 완료 기준을 재검증해 복구 |
@@ -580,6 +580,8 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 
 ### 구현 진행 기록
 
+후속 코드 리뷰·액션 아이템과 최신 검증은 [runtime 검증 기록](agent-runtime-review.md)에서 관리한다. 화면 의존 provider의 ready 판정은 일반 terminal과 Host가 같은 reducer를 사용한다. 이는 UI 응답 결과 판정이며 전체 provider 완료나 자동 종료 수락은 아니다.
+
 - `AgentInstanceId`를 pane/surface ID와 별개로 추가했다.
 - [retirement.rs](../crates/flowmux-daemon/src/agent_host/retirement.rs)에 Host에서 사용할 단조 시간 기반 회수 후보 판정기를 추가했다. GUI 연결 집합, 작업 generation, 최초 완료 시각, 판정 보류/재검증, revision 기반 만료 재검사를 다룬다. 이 모듈은 프로세스를 종료하지 않으며, provider의 전체 완료 검증과 원자적 유휴 종료 수락을 대신하지 않는다.
 - 설정 저장·범위 제한 및 Options의 분 단위 입력을 추가했다. 명시적으로 실행한 Host는 시작 시 설정을 읽으며 GUI 관리 연결의 timeout 변경 요청도 받는다. **provider의 전체 완료 검증이 아직 연결되지 않아 자동 종료는 실행하지 않는다.** 기존 에이전트의 종료 동작도 이 설정만으로 바뀌지 않는다.
@@ -936,7 +938,7 @@ Wayland에서 접근성 `do_action`만으로 메뉴를 재열 때 popup이 표�
 | 다음 구현 단계 | 완료 조건과 현재 제한 |
 | --- | --- |
 | 명시적 Host 시작·GUI 관리 연결 | 상시 GUI 관리 연결·옵션 변경 전파·관리 연결 gate를 추가. Linux CLI의 독립 service 시작과 GUI 종료 경계 live 검사 통과. GUI `New Agent` 연결과 기존 Host 대상 live 검사 통과. GUI cold service startup·플랫폼별 시작·자동 종료 수락과 handshake 경합 검증은 남음 |
-| provider 관측과 완료 adapter | 공통 reducer·Host InstanceId ledger·native hook routing·세션 경계와 read-only `identify`·Team context는 연결. browser·terminal·workspace 생성/전환 명령의 Host routing·GTK source 재검증, 보관된 Codex 완료 ID의 지연 root 이벤트 거절과 명시적 재시도 중 완료 중복 제거, Host lifecycle·명시적 알림 보관·GUI 동기화를 추가. managed `agent open`도 현재 source를 검증해 같은 GUI의 열기·이동 경로를 사용. headless 화면 관측·provider 전체 완료·이력 밖/identity 없는 사건의 재검증·기타 미지원 명령과 알림의 임의 pane override는 남음. 설치 shim의 기본 실행을 managed로 전환하지 않음 |
+| provider 관측과 완료 adapter | 공통 reducer·Host InstanceId ledger·native hook routing·세션 경계와 read-only `identify`·Team context는 연결. browser·terminal·workspace 생성/전환 명령의 Host routing·GTK source 재검증, 보관된 Codex 완료 ID의 지연 root 이벤트 거절과 명시적 재시도 중 완료 중복 제거, Host lifecycle·명시적 알림 보관·GUI 동기화를 추가. managed `agent open`도 현재 source를 검증해 같은 GUI의 열기·이동 경로를 사용. provider 전체 완료·이력 밖/identity 없는 사건의 재검증·기타 미지원 명령과 알림의 임의 pane override는 남음. 설치 shim의 기본 실행을 managed로 전환하지 않음 |
 | GUI launch·저장 binding·재연결 | 명시적 기존 instance 열기와 저장 binding의 자동 layout 재연결, CLI `agent run`을 추가. Sessions Resume을 Host로 전환하고 같은 native 실행의 재사용·생존을 검증. New Agent와 Session Flow resume/fork의 Host 연결·생존 검증도 추가. 초기 화면 ready ACK·Connecting/실패 UI·실제 relay 확인 뒤 열기 성공 응답과 같은 Host의 오래된 복원 tab 조정을 추가. offline 디스크 binding의 선제 조정은 추가 구현 필요 |
 | Agents 목록·열기·이동·종료 | registry 기반 백그라운드 목록·상태·연결 손실 표시, managed InstanceId drop, 기존 위치 포커스·재연결과 Tab-bound 표시·탭 이동 제공. Host의 실제 relay 검증·전역 위치 보고·Open/Visible 구분과 중단·정상 종료·제한 시간 후 강제 종료 UI/CLI, 로컬 terminal pane·새 workspace 목적지 선택기를 추가. tab strip 앞/뒤 삽입·같은 pane 재정렬에 GUI 간 명시적 인계·최종 GTK 승인을 연결. 같은 Host의 crash 후 복원 tab 조정은 추가. offline 디스크 binding의 선제 조정과 응답 유실 rollback, 사용자 정렬 모드와 Recently ended는 남음 |
 | 안전한 자동 회수 | 전체 완료 및 provider의 원자적 idle 종료 수락 후 설정 시간 적용. 현재 후보 판정기만 있으며 실제 30분 자동 종료는 검증 전 |
