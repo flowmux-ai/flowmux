@@ -2,6 +2,143 @@
 
 # Agent sessions
 
+## Running agents and closing tabs
+
+On Linux, **New Agent**, **Resume in new tab**, and Session Flow resume/fork
+start local managed executions in the independent Agent Host. Closing their tab
+detaches the view; closing Flowmux leaves the execution running. Reopening it
+connects to the same process. An already running matching native session is
+reused. Host failure, OS shutdown, and expired external credentials can still
+interrupt work. macOS and Flatpak lifetime behavior has not been verified.
+
+The **Agents** list includes executions without a tab as **Background**.
+**Connecting** means the relay has not acknowledged the initial screen transfer.
+**Open** means a connected tab is hidden; **Visible** means its tab and workspace
+are shown. Drag the row's handle to another pane to move or open its view. A normal
+shell command such as `claude` remains **Tab-bound** and may stop when its tab
+or Flowmux closes. Existing live terminal processes are not automatically
+converted; use **New Agent** or the managed CLI for a new persistent execution.
+
+Clicking an execution open in this window focuses its existing tab. Clicking a **Background**
+execution first asks where to open it. **Agent actions → Open in… / Move to…**
+offers this window's local terminal panes, including other workspaces, or
+**New workspace** in the agent's project directory. The current workspace's
+terminal pane is selected by default when available. Confirming reconnects or
+moves the same execution; cancelling leaves the layout alone. If the selected
+pane closes before confirmation, choose again. A view open in another window can
+move into the selected pane using the same local Agent Host. SSH panes are excluded.
+
+Drag the handle beside an execution to a pane body to open or move its tab.
+Drop on the left or right half of a tab to insert before or after it, including
+reordering within the same pane. A Background execution reconnects to the same
+process at that position. Dropping on its own tab leaves its order unchanged.
+The handle also supports dragging between Flowmux windows on the same local Host.
+The original view keeps input until the destination writes its initial screen
+and the destination GUI admits the move. Closing the destination, a failed screen
+write, or a connection timeout leaves the original view usable. An uncertain
+control response is not automatically retried.
+
+Dragging a managed Agent tab outside its window opens the same execution in a
+new Flowmux window. The original tab closes after the new view is ready; other
+tabs stay in place. If the new window cannot start, the original view remains
+usable. Closing the detached tab or window leaves the execution in Background.
+
+When restoring a saved layout, Flowmux checks the surviving Host's last committed
+view. An obsolete saved Agent tab is removed without taking the execution from
+its current view or Background state; ordinary terminal tabs are preserved.
+The winning saved tab reconnects automatically after a GUI crash. Use Agents
+to explicitly open a new view when an obsolete saved tab has been removed.
+
+An unterminated synchronized screen update is released after the terminal
+parser's 150ms deadline, including without further provider output. PTY closure
+also releases the final screen. OSC control strings exceeding 64KiB are discarded;
+normal output resumes at their terminator or the next escape sequence.
+
+```sh
+flowmux agent run --background --cwd /path/to/project -- claude
+flowmux agent ls
+flowmux agent open INSTANCE_ID --pane PANE_ID
+flowmux agent interrupt INSTANCE_ID
+flowmux agent terminate INSTANCE_ID
+# Only after normal termination has timed out (5 seconds):
+flowmux agent terminate INSTANCE_ID --force
+```
+
+Omit `--background` to open the new execution in the current pane, or provide
+`--pane PANE_ID`. **Agent actions** provides the same interrupt and termination
+controls. Ctrl+C may interrupt work or exit the provider. Termination can lose
+work; GUI termination requires confirmation. Normal termination shows
+**Stopping** until observed exit. A timeout enables explicit force termination;
+it does not automatically kill the execution. A CLI acceptance receipt does not
+mean the process has exited; check `agent ls`. If a control response is lost,
+inspect the execution before retrying. Controls never start a missing Host.
+Automatic retirement of idle agents is currently disabled.
+
+Inside a managed execution, `flowmux identify` and the Flowmux Team context
+check resolve the current view through the Host, including after a drag or GUI
+restart. Inherited pane IDs are not used. An optional `identify --session ID`
+must match the observed native session. A detached execution returns
+`no_attached_view`; it never selects another pane. Missing or invalid managed
+identity and an unavailable Host fail without a GUI fallback.
+
+Managed browser operations and terminal read, input, focus, resize, split and
+tab operations also go through the Host. Implicit pane/workspace arguments use
+the verified source; explicit targets remain explicit. The Host checks the caller
+and source again for every operation, and GTK checks the actual source before
+applying an effect. A move during a CLI operation or batch fails clearly instead
+of using the old pane; commands are never automatically replayed. Long browser
+operations hold attachment transfer until their response. `workspace current`
+returns the source workspace, including when another workspace is visible.
+`workspace new` creates a workspace in that same GUI and waits for its terminal
+to be materialized. `--background` keeps the visible workspace; without it the
+new workspace becomes visible. `--root`, `--name` and `--team` retain their usual
+meaning; an omitted root uses the calling process's working directory.
+`workspace focus ID` activates that exact workspace in the current GUI without
+moving or relaunching the Agent. Both commands require an attached view and
+fail without choosing another window when the execution is in Background.
+An explicit `--socket` must name the managed Host or its current GUI. Inherited
+native session variables do not redirect these commands; use `identify --session`
+to request an explicit native session match. `session-name` also uses the verified
+workspace and surface.
+
+`agent open INSTANCE_ID` opens that execution in the verified source pane.
+`--pane ID` opens or moves its view to that exact pane in the same GUI. Opening
+the calling execution reuses its tab; opening another execution preserves the
+caller identity. A detached caller cannot use this command to choose a window
+or reconnect itself. A successful open response waits for the owning relay's
+initial screen ACK and the GUI's verification of that relay. Input stays disabled
+until then. The ACK confirms writing the snapshot to the relay PTY; it does not
+prove VTE has rendered every byte. A closed, moved or failed destination returns
+an error while preserving the execution. Connection errors remain visible in the
+tab; reopen it from Agents to retry. After a timeout, close that tab first.
+Failures never trigger a replacement execution or automatically repeat the open.
+
+Commands outside this routing scope fail with
+`operation does not support managed context`. They are not sent to another GUI.
+This routing is not a cross-window move transaction.
+
+Native lifecycle hooks store input requests and turn-completion notifications in
+the Host, even with no tab or GUI. Connected GUIs share the notification history,
+read state and deletion. Reopening a GUI imports history without replaying old
+desktop notifications. Desktop delivery is claimed once across registered GUIs;
+failed or ambiguous delivery is not retried. The Host keeps at most 50 entries
+within a 128 KiB serialized log, evicting read entries first. Opening a notification
+follows the execution's current view; a Background execution shows the destination
+picker without starting another provider process.
+
+Managed `notify`, `notify-complete` and `notify-stream` also store notifications
+in the Host without requiring a tab or GUI. Omit `--pane`: notifications belong
+to the calling execution and follow its verified view when opened. Inherited
+pane or native-session variables cannot redirect them; copying the managed
+environment into an unrelated process does not grant access. An explicit
+`--socket` must name the Host or the currently verified GUI. A headless execution
+can name only its Host. Each stream notification uses a fresh authenticated
+connection, so silence beyond the IPC idle timeout does not lose the next event.
+Ambiguous sends are not replayed. Explicit completion text does not change the
+Agent's lifecycle state or establish that its work is finished.
+
+## Saved sessions
+
 Click **Agent sessions** in the side-panel footer or press **Ctrl+Alt+J** to toggle
 the right-side session panel. While open, it follows the focused terminal tab's
 Claude Code, Codex, OpenCode, Antigravity (`agy`), Cline, or Gemini CLI identity.
@@ -40,9 +177,10 @@ To resume a session, select it and click **Resume in new tab**:
   delete a resumed session's transcript at its next launch in that project when
   no new message had been sent after resuming.
 
-All six agents open a new tab in the saved project directory and preserve the
-original tab and draft. The new tab uses the normal configured terminal shell;
-exiting the agent returns to that shell in the selected project directory.
+All six agents open a tab in the saved project directory and preserve the
+original tab and draft. Managed launches use the configured shell's startup
+environment and then execute the provider. Exiting the provider ends that
+execution; it does not open a replacement shell.
 On Linux, OpenCode retains its XDG/config overrides,
 Antigravity retains its home, Gemini CLI retains `GEMINI_CLI_HOME`, and Cline retains its directory overrides and
 `--config` / `--data-dir` arguments, including isolated sandbox storage.
@@ -50,8 +188,9 @@ Automatic window restoration also retains Gemini and Cline storage overrides
 captured from their running process.
 
 Another session can be opened while the focused agent is working or waiting for
-input; the original tab remains untouched. The currently active session cannot
-be opened again from that tab. The session ID remains visible for manual use.
+input; the original tab remains untouched. Selecting a live managed session
+focuses its existing view or reconnects its Background execution. The session ID
+remains visible for manual use.
 
 ## Session Flow
 
