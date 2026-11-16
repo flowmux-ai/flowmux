@@ -3447,6 +3447,7 @@ pub fn detect_agent_status_from_signals(
         .and_then(|_| recent().position(is_agent_idle_prompt_line))
         .unwrap_or(12);
     let newest_blocked = recent().take(live_lines).position(|line| {
+        let lowercase = line.to_ascii_lowercase();
         is_agent_usage_limit_status_line(line)
             || [
                 "do you want to",
@@ -3466,7 +3467,7 @@ pub fn detect_agent_status_from_signals(
                 "action required",
             ]
             .into_iter()
-            .any(|needle| contains_ascii_case_insensitive(line, needle))
+            .any(|needle| lowercase.contains(needle))
     });
     let newest_working = recent()
         .take(live_lines)
@@ -3790,6 +3791,8 @@ fn detect_agent_name_from_screen_status_line(line: &str) -> Option<&'static str>
 }
 
 fn line_has_agent_status_cue(line: &str) -> bool {
+    // Normalize once for all cues instead of scanning byte windows for each one.
+    let lowercase = line.to_ascii_lowercase();
     [
         "action required",
         "needs input",
@@ -3810,7 +3813,7 @@ fn line_has_agent_status_cue(line: &str) -> bool {
         "idle",
     ]
     .into_iter()
-    .any(|needle| contains_ascii_case_insensitive(line, needle))
+    .any(|needle| lowercase.contains(needle))
 }
 
 fn agent_name_in_text(text: &str) -> Option<&'static str> {

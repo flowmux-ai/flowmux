@@ -5,6 +5,30 @@ use super::*;
 use std::str::FromStr;
 
 #[test]
+fn agent_status_cues_handle_long_mixed_case_terminal_output() {
+    let history = "일반 터미널 출력, no status here. ".repeat(300);
+    for line in [
+        "CoDeX WoRkInG (3s • esc to interrupt)",
+        "CoDeX ReQuIrEs ApPrOvAl",
+        "CoDeX IdLe",
+    ] {
+        let screen = format!("{history}\n{line}");
+        assert_eq!(
+            detect_agent_name_from_signals(Some(&screen), None),
+            Some("codex")
+        );
+        assert!(line_has_agent_status_cue(line));
+    }
+    let screen = format!("{history}\nCoDeX ReQuIrEs ApPrOvAl");
+    assert_eq!(
+        detect_agent_status_from_signals(Some(&screen), None),
+        Some(AgentStatus::Blocked)
+    );
+    assert!(!line_has_agent_status_cue(&history));
+    assert!(!line_has_agent_status_cue(""));
+}
+
+#[test]
 fn adding_live_tabs_preserves_existing_terminal_titles() {
     for added in [
         PaneSurface::terminal("new", None),
