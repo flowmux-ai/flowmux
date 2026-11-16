@@ -208,9 +208,10 @@ pub mod id {
     id_newtype!(SurfaceId);
     id_newtype!(PaneId);
     id_newtype!(NotificationId);
+    id_newtype!(AgentInstanceId);
 }
 
-pub use id::{NotificationId, PaneId, SurfaceId, WorkspaceId};
+pub use id::{AgentInstanceId, NotificationId, PaneId, SurfaceId, WorkspaceId};
 
 pub mod ssh;
 pub use ssh::{SshForwardSpec, SshTarget, SshWorkspaceConfig, WorkspaceLocation};
