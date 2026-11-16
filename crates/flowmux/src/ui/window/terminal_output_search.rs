@@ -1011,11 +1011,33 @@ mod tests {
         assert_eq!(whole, chunks);
         assert!(whole.contains(&wide));
         assert!(terminal.find_output_match("DUPLICATE", 0, 0));
-        glib::timeout_future(Duration::from_millis(50)).await;
-        let first_position = terminal.widget.vadjustment().unwrap().value();
+        let adjustment = terminal.widget.vadjustment().unwrap();
+        // VTE publishes its search scroll on a later GTK frame under suite load.
+        for _ in 0..50 {
+            if adjustment.value() > adjustment.lower()
+                && adjustment.value() < adjustment.upper() - adjustment.page_size()
+            {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert!(
+            adjustment.value() > adjustment.lower()
+                && adjustment.value() < adjustment.upper() - adjustment.page_size()
+        );
+        let first_position = adjustment.value();
         assert!(terminal.find_output_match("DUPLICATE", 0, 1));
-        glib::timeout_future(Duration::from_millis(50)).await;
-        assert!(terminal.widget.vadjustment().unwrap().value() > first_position);
+        for _ in 0..50 {
+            if adjustment.value() > first_position {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert!(
+            adjustment.value() > first_position,
+            "second occurrence did not scroll: first={first_position}, second={}",
+            adjustment.value()
+        );
         terminal.widget.set_scrollback_lines(100);
         terminal.widget.feed("tail\r\n".repeat(150).as_bytes());
         glib::timeout_future(Duration::from_millis(100)).await;

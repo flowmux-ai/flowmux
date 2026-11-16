@@ -71,6 +71,18 @@
 - fixture: Options 검사는 실행을 만든 후 수행한다. 실행 없는 Host는 10초 후
   종료하므로, launch 전 Options 검사로 시간을 늘리면 fixture가 이전 연결을 사용했다.
 
+### AR-005 · medium · 공유 gate의 검색 스크롤 관측 경합
+
+- 관측: 첫 Linux gate는 GUI 958개 통과·1개 실패·4개 ignored 뒤 exit 101이었다.
+  `output_search_chunks_preserve_wraps_duplicates_and_alternate_screen`이 고정
+  50ms 후 두 번째 검색 위치가 첫 번째보다 큰지 확인하다 실패했다
+  (`/tmp/fm-runtime-review-shared-ci.log`). 같은 binary의 격리 단독 실행은 통과했다
+  (`/tmp/fm-search-before-isolated.log`). 제품의 검색 결함으로 확정하지 않는다.
+- 조치: 첫 검색의 scrollback 진입과 두 번째 검색의 전진을 GTK main loop에서
+  각각 최대 1초 관측한다. 두 검색의 위치 비교 조건을 유지하고 실패 위치를 출력한다.
+- 검증: 수정 후 Options·terminal search GTK 21개 통과
+  (`/tmp/fm-runtime-options-search-tests.log`). 전체 gate에서 재검증한다.
+
 ## 완료 전 확인할 범위
 
 - 새 변경을 포함한 Linux 공유 CI 전체와 runtime live phase.
