@@ -40,6 +40,8 @@ fn lifecycle_trace_event(event: &AgentLifecycleEvent) -> (&'static str, Option<u
         WaitStarted { item_id, .. } => ("tool_wait", Some(item_id.as_str())),
         WaitResolved { item_id } => ("tool_resolved", Some(item_id.as_str())),
         TurnStopped { .. } => ("turn_stopped", None),
+        TurnStopRequested { .. } => ("stop_requested", None),
+        TurnFinished { .. } => ("turn_finished", None),
         CodexSubagentStarted { turn_id, .. } => ("child_started", Some(turn_id.as_str())),
         CodexChildProgressObserved { turn_id, .. } => ("child_progress", Some(turn_id.as_str())),
         CodexSubagentStopped { turn_id, .. } => ("child_stopped", Some(turn_id.as_str())),
@@ -169,6 +171,46 @@ struct CompletionNotification {
     claimed: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ProviderTurn {
+    stop: Option<(Option<String>, String)>,
+    saw_working: bool,
+    idle_frame: Option<(u64, tokio::time::Instant)>,
+}
+
+fn provider_terminal_outcome(agent: &str, screen: &str) -> Option<AgentTurnOutcome> {
+    // Stop at the newest submitted prompt; an earlier failure belongs to history.
+    for line in screen
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if line.starts_with("> ") || (line.starts_with("❯ ") && !line.contains("Ask anything")) {
+            break;
+        }
+        if agent == "gemini" {
+            if line.starts_with("✦ ") {
+                break;
+            }
+            if line.starts_with("✕ ") {
+                return Some(AgentTurnOutcome::Failed);
+            }
+            let text = line.trim_start_matches(['ℹ', '⚠', ' ']);
+            if matches!(text, "Request cancelled." | "User cancelled the request.")
+                || text.starts_with("Agent execution stopped:")
+                || text.starts_with("Agent execution blocked:")
+            {
+                return Some(AgentTurnOutcome::Canceled);
+            }
+        }
+        if agent == "cline" && line.starts_with("* Error:") {
+            return Some(AgentTurnOutcome::Failed);
+        }
+    }
+    None
+}
+
 #[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
     /// Latest recognized retry frame per live surface, including an empty frame.
@@ -176,6 +218,7 @@ pub(super) struct AgentLifecycleRuntime {
     /// One receipt per session's most recently completed response. Accepted new
     /// work retires it; notification-log retention does not.
     completion_notifications: HashMap<AgentLifecycleKey, CompletionNotification>,
+    provider_turns: HashMap<AgentLifecycleKey, ProviderTurn>,
     /// Local process polls found neither an agent nor an out-of-tree transport.
     screen_absent: HashSet<SurfaceId>,
     /// One record per tool-use id: Some while waiting, None once resolved.
@@ -212,6 +255,7 @@ struct LifecycleCheckpoint {
     last_seq: Option<u64>,
     boundary_seq: Option<u64>,
     codex_turn: Option<CodexTurnLedger>,
+    provider_turn: Option<ProviderTurn>,
 }
 
 impl LifecycleCheckpoint {
@@ -227,10 +271,12 @@ impl LifecycleCheckpoint {
             last_seq: runtime.last_seq.get(key).cloned(),
             boundary_seq: runtime.boundary_seq.get(key).cloned(),
             codex_turn: runtime.codex_turns.get(&(key.0, key.2.clone())).cloned(),
+            provider_turn: runtime.provider_turns.get(key).cloned(),
         }
     }
 
     fn restore(self, runtime: &mut AgentLifecycleRuntime) {
+        restore_entry(&mut runtime.provider_turns, &self.key, self.provider_turn);
         restore_entry(
             &mut runtime.completion_notifications,
             &self.key,
@@ -647,6 +693,7 @@ fn clear_agent_lifecycle_runtime(
     lifecycle
         .completion_notifications
         .retain(|key, _| keep_wait_key(key));
+    lifecycle.provider_turns.retain(|key, _| keep_wait_key(key));
     lifecycle.waits.retain(|key, _| keep_wait_key(key));
     lifecycle
         .permission_waits
@@ -677,6 +724,112 @@ fn clear_agent_lifecycle_runtime(
 }
 
 impl StateStore {
+    pub async fn pending_provider_surfaces(&self) -> Vec<SurfaceId> {
+        self.agents
+            .lifecycle
+            .lock()
+            .await
+            .provider_turns
+            .keys()
+            .map(|key| key.0)
+            .collect()
+    }
+
+    /// Hooks can be vetoed, and some TUIs omit cancellation hooks. A stable ready
+    /// frame corroborates a pending stop; elapsed time alone never completes work.
+    pub async fn settle_provider_turn_from_screen(
+        &self,
+        surface: SurfaceId,
+        screen: &str,
+        title: Option<&str>,
+        visible: bool,
+    ) -> AgentLifecycleResult {
+        let mut runtime = self.agents.lifecycle.lock().await;
+        let Some(located) = self.located_agent_presence(surface).await else {
+            return AgentLifecycleResult::default();
+        };
+        let presence = located.presence;
+        let Some(session) = presence.session_id.as_deref() else {
+            return AgentLifecycleResult::default();
+        };
+        let key = (surface, presence.name.clone(), session.to_string());
+        if presence.source.as_deref() != Some("flowmux:hook") || lifecycle_has_waits(&runtime, &key)
+        {
+            return AgentLifecycleResult::default();
+        }
+        let Some(turn) = runtime.provider_turns.get_mut(&key) else {
+            return AgentLifecycleResult::default();
+        };
+        let status = detect_agent_status_from_signals(Some(screen), title);
+        if status == Some(AgentStatus::Working) {
+            turn.saw_working |= detect_agent_progress_text(Some(screen)).is_some();
+            turn.idle_frame = None;
+            return AgentLifecycleResult::default();
+        }
+        let ready = screen
+            .lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty())
+            .take(12)
+            .any(|line| {
+                let line = line.to_ascii_lowercase();
+                line.contains("type your message")
+                    || line.contains("ask anything")
+                    || (presence.name == "antigravity" && line.trim() == "❯")
+            });
+        let observed = provider_terminal_outcome(&presence.name, screen);
+        if status != Some(AgentStatus::Idle)
+            || !ready
+            || (turn.stop.is_none() && !turn.saw_working && observed.is_none())
+        {
+            turn.idle_frame = None;
+            return AgentLifecycleResult::default();
+        }
+        let fingerprint = agent_screen_fingerprint(Some(screen), title, false);
+        match turn.idle_frame {
+            Some((previous, since)) if previous == fingerprint => {
+                if since.elapsed() < std::time::Duration::from_millis(600) {
+                    return AgentLifecycleResult::default();
+                }
+            }
+            _ => {
+                turn.idle_frame = Some((fingerprint, tokio::time::Instant::now()));
+                return AgentLifecycleResult::default();
+            }
+        }
+        let outcome = observed.unwrap_or(if turn.stop.is_some() {
+            AgentTurnOutcome::Completed
+        } else {
+            // shortcut: silent cancellation and lost Stop are indistinguishable until providers emit a terminal hook.
+            AgentTurnOutcome::Unknown
+        });
+        let (message, status_text) = if outcome == AgentTurnOutcome::Completed {
+            turn.stop.clone().expect("completed turns have a stop")
+        } else {
+            (None, outcome.status_text().to_string())
+        };
+        let seq = runtime
+            .last_seq
+            .get(&key)
+            .and_then(|seq| seq.checked_add(1));
+        drop(runtime);
+        // A concurrent new turn has a newer sequence and rejects this settlement.
+        self.report_agent_lifecycle_with_visibility(
+            surface,
+            &presence.name,
+            presence.pid,
+            seq,
+            session,
+            AgentLifecycleEvent::TurnFinished {
+                outcome,
+                message,
+                status_text,
+            },
+            visible,
+        )
+        .await
+    }
+
     /// Snapshot lifecycle and presence under the same lock order as reporting.
     /// A read must not acknowledge a result, resolve a wait, or scan processes.
     pub async fn explain_agents(
@@ -1330,6 +1483,8 @@ impl StateStore {
         let terminal_boundary = matches!(
             &lifecycle_event,
             AgentLifecycleEvent::TurnStopped { .. }
+                | AgentLifecycleEvent::TurnFinished { .. }
+                | AgentLifecycleEvent::TurnStopRequested { .. }
                 | AgentLifecycleEvent::CodexTurnStopped { .. }
                 | AgentLifecycleEvent::CodexTurnInterrupted { .. }
                 | AgentLifecycleEvent::SessionWaitResolved { resume: false, .. }
@@ -1401,6 +1556,11 @@ impl StateStore {
                 turn_id,
                 status_text,
             } => {
+                if matches!(agent.as_str(), "gemini" | "antigravity" | "cline") {
+                    runtime
+                        .provider_turns
+                        .insert(wait_key.clone(), ProviderTurn::default());
+                }
                 runtime.waits.remove(&wait_key);
                 if agent == "codex" {
                     clear_codex_root_permission_scopes(&mut runtime, &wait_key);
@@ -1422,6 +1582,10 @@ impl StateStore {
                 Some((Running, None, status_text))
             }
             AgentLifecycleEvent::ProgressObserved { status_text } => {
+                if let Some(turn) = runtime.provider_turns.get_mut(&wait_key) {
+                    turn.stop = None;
+                    turn.idle_frame = None;
+                }
                 if agent == "codex" {
                     if let Some(ledger) = runtime
                         .codex_turns
@@ -1653,6 +1817,38 @@ impl StateStore {
                 } else {
                     None
                 }
+            }
+            AgentLifecycleEvent::TurnStopRequested {
+                message,
+                status_text,
+            } if matches!(agent.as_str(), "gemini" | "antigravity") => {
+                if current
+                    .as_ref()
+                    .is_some_and(|c| c.presence.turn_outcome == Some(AgentTurnOutcome::Completed))
+                    && !runtime.provider_turns.contains_key(&wait_key)
+                {
+                    None
+                } else {
+                    let turn = runtime.provider_turns.entry(wait_key.clone()).or_default();
+                    turn.stop = Some((message, status_text));
+                    turn.idle_frame = None;
+                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
+                        Running,
+                        None,
+                        "Finishing response".into(),
+                    ))
+                }
+            }
+            AgentLifecycleEvent::TurnFinished {
+                outcome,
+                message,
+                status_text,
+            } if agent != "codex" => {
+                turn_finished = true;
+                completed = outcome == AgentTurnOutcome::Completed;
+                turn_outcome = Some(outcome);
+                completion_message = message.clone();
+                Some((Idle, message, status_text))
             }
             AgentLifecycleEvent::TurnStopped {
                 message,
@@ -1939,6 +2135,7 @@ impl StateStore {
         };
 
         if turn_finished {
+            runtime.provider_turns.remove(&wait_key);
             // A root boundary is session-wide, but Codex shares the session id
             // with child threads. Preserve child waits while parent completion
             // is deferred; clear them only at actual turn settlement.
@@ -3256,6 +3453,345 @@ fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPrese
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn settle_ready_provider(
+        store: &StateStore,
+        surface: SurfaceId,
+        screen: &str,
+    ) -> AgentLifecycleResult {
+        store
+            .settle_provider_turn_from_screen(surface, screen, None, false)
+            .await;
+        for turn in store
+            .agents
+            .lifecycle
+            .lock()
+            .await
+            .provider_turns
+            .values_mut()
+        {
+            if let Some((_, since)) = &mut turn.idle_frame {
+                *since -= std::time::Duration::from_secs(1);
+            }
+        }
+        store
+            .settle_provider_turn_from_screen(surface, screen, None, false)
+            .await
+    }
+
+    #[tokio::test]
+    async fn provider_stop_waits_for_ready_frame_and_continuation_retires_it() {
+        for agent in ["gemini", "antigravity"] {
+            let store = StateStore::new_lazy_ephemeral(State::default());
+            let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+            let ws = store.get_workspace(workspace).await.unwrap();
+            let pane = &ws.surfaces[0].root_pane;
+            let surface = pane
+                .active_surface_id(pane.first_leaf_id().unwrap())
+                .unwrap();
+            for (seq, event) in [
+                (
+                    10,
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Working".into(),
+                    },
+                ),
+                (
+                    20,
+                    AgentLifecycleEvent::TurnStopRequested {
+                        message: None,
+                        status_text: "Completed".into(),
+                    },
+                ),
+            ] {
+                let result = store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        agent,
+                        None,
+                        Some(seq),
+                        "session",
+                        event,
+                        false,
+                    )
+                    .await;
+                assert!(!result.completed);
+            }
+            let ready = "Type your message";
+            assert!(
+                !store
+                    .settle_provider_turn_from_screen(
+                        surface,
+                        ready,
+                        Some("⠋ Executing Hook"),
+                        false
+                    )
+                    .await
+                    .completed
+            );
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                AgentStatus::Working
+            );
+            // A later hook vetoes the stop and starts a continuation.
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    None,
+                    Some(30),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Continuing".into(),
+                    },
+                    false,
+                )
+                .await;
+            assert!(
+                !settle_ready_provider(&store, surface, ready)
+                    .await
+                    .completed
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    None,
+                    Some(40),
+                    "session",
+                    AgentLifecycleEvent::TurnStopRequested {
+                        message: Some("Done".into()),
+                        status_text: "Completed".into(),
+                    },
+                    false,
+                )
+                .await;
+            let finished = settle_ready_provider(&store, surface, ready).await;
+            assert!(finished.completed);
+            let id = finished.notification_id.unwrap();
+            assert!(
+                store
+                    .claim_agent_notification(surface, agent, "session", id)
+                    .await
+            );
+            assert!(
+                !store
+                    .claim_agent_notification(surface, agent, "session", id)
+                    .await
+            );
+            assert!(
+                !settle_ready_provider(&store, surface, ready)
+                    .await
+                    .completed
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_failures_cancellation_and_missing_stop_never_notify_success() {
+        for (agent, screen, requested, expected) in [
+            ("gemini", "> request\n⚠ Agent execution blocked: continue\n✦ Final response\nType your message", true, AgentTurnOutcome::Completed),
+            (
+                "gemini",
+                "> request\n✕ Fixture unauthorized\nType your message",
+                true,
+                AgentTurnOutcome::Failed,
+            ),
+            (
+                "gemini",
+                "> request\nℹ Request cancelled.\nType your message",
+                false,
+                AgentTurnOutcome::Canceled,
+            ),
+            (
+                "gemini",
+                "> request\n⚠ Agent execution blocked: test\nType your message",
+                false,
+                AgentTurnOutcome::Canceled,
+            ),
+            (
+                "cline",
+                "❯ request\n❯ Ask anything...",
+                false,
+                AgentTurnOutcome::Unknown,
+            ),
+            (
+                "gemini",
+                "> old\n✕ Old failure\n> new\n✦ Done\nType your message",
+                true,
+                AgentTurnOutcome::Completed,
+            ),
+        ] {
+            let store = StateStore::new_lazy_ephemeral(State::default());
+            let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+            let ws = store.get_workspace(workspace).await.unwrap();
+            let pane = &ws.surfaces[0].root_pane;
+            let surface = pane
+                .active_surface_id(pane.first_leaf_id().unwrap())
+                .unwrap();
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    None,
+                    Some(10),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Working".into(),
+                    },
+                    false,
+                )
+                .await;
+            store
+                .settle_provider_turn_from_screen(
+                    surface,
+                    "⠋ Thinking... (esc to cancel)\nType your message",
+                    None,
+                    false,
+                )
+                .await;
+            if requested {
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        agent,
+                        None,
+                        Some(20),
+                        "session",
+                        AgentLifecycleEvent::TurnStopRequested {
+                            message: None,
+                            status_text: "Completed".into(),
+                        },
+                        false,
+                    )
+                    .await;
+            }
+            let result = settle_ready_provider(&store, surface, screen).await;
+            assert_eq!(
+                result.completed,
+                expected == AgentTurnOutcome::Completed,
+                "{agent}: {screen}"
+            );
+            let presence = store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence;
+            assert_eq!(presence.status, AgentStatus::Idle, "{agent}: {screen}");
+            assert_eq!(presence.turn_outcome, Some(expected), "{agent}: {screen}");
+            store.report_agent_screen_signals_with_visibility(surface, Some("Type your message"), Some("⠋ Working..."), false).await;
+            let settled = store.located_agent_presence(surface).await.unwrap().presence;
+            assert_eq!(settled.status, AgentStatus::Idle);
+            assert_eq!(settled.turn_outcome, Some(expected));
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_composers_and_completed_prose_cannot_end_a_native_turn() {
+        for agent in ["gemini", "antigravity", "cline"] {
+            for visible in [false, true] {
+                let store = StateStore::new_lazy_ephemeral(State::default());
+                let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+                let ws = store.get_workspace(workspace).await.unwrap();
+                let pane = &ws.surfaces[0].root_pane;
+                let surface = pane
+                    .active_surface_id(pane.first_leaf_id().unwrap())
+                    .unwrap();
+                let screen = format!("{agent}\nTask completed\nType your message");
+                for (seq, event, expected) in [
+                    (
+                        1,
+                        AgentLifecycleEvent::TurnStarted {
+                            turn_id: None,
+                            status_text: "Starting turn".into(),
+                        },
+                        AgentStatus::Working,
+                    ),
+                    (
+                        2,
+                        AgentLifecycleEvent::TurnStopped {
+                            message: None,
+                            status_text: "Completed".into(),
+                        },
+                        AgentStatus::Idle,
+                    ),
+                    (
+                        3,
+                        AgentLifecycleEvent::TurnStarted {
+                            turn_id: None,
+                            status_text: "Starting turn".into(),
+                        },
+                        AgentStatus::Working,
+                    ),
+                ] {
+                    store
+                        .report_agent_lifecycle_with_visibility(
+                            surface,
+                            agent,
+                            None,
+                            Some(seq),
+                            "session",
+                            event,
+                            visible,
+                        )
+                        .await;
+                    store
+                        .report_agent_screen_signals_with_visibility(
+                            surface,
+                            Some(&screen),
+                            None,
+                            visible,
+                        )
+                        .await;
+                    let presence = store
+                        .located_agent_presence(surface)
+                        .await
+                        .unwrap()
+                        .presence;
+                    assert_eq!(presence.status, expected, "{agent}, seq {seq}");
+                    assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+                    assert_eq!(
+                        presence.status_evidence.unwrap().source,
+                        flowmux_core::AgentEvidenceSource::Hook
+                    );
+                    if expected == AgentStatus::Idle {
+                        assert_eq!(
+                            presence.public_status(),
+                            if visible {
+                                AgentStatus::Idle
+                            } else {
+                                AgentStatus::Done
+                            }
+                        );
+                        let stopping = format!("{agent}\n⠋ Executing Hook: flowmux hooks {agent} stop\nType your message");
+                        store
+                            .report_agent_screen_signals_with_visibility(
+                                surface,
+                                Some(&stopping),
+                                Some(&format!("⠋ {agent}")),
+                                visible,
+                            )
+                            .await;
+                        let stopped = store
+                            .located_agent_presence(surface)
+                            .await
+                            .unwrap()
+                            .presence;
+                        assert_eq!(stopped.status, AgentStatus::Idle, "{agent}: trailing title");
+                        assert_eq!(stopped.turn_outcome, Some(AgentTurnOutcome::Completed));
+                    }
+                }
+            }
+        }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn decision_trace_records_rejections_and_transitions_without_payload_text() {

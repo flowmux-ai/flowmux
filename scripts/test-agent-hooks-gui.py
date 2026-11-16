@@ -44,7 +44,18 @@ int main(int argc, char **argv) {
             printf("\\033[2J\\033[H"); fputs(WORKING_FRAME, stdout);
         }
         if (!strncmp(line, "screen-completed", 16)) {
-            printf("\\033[2J\\033[H"); fputs(COMPLETED_FRAME, stdout);
+            printf("\\033]0;\\007\\033[2J\\033[H"); fputs(COMPLETED_FRAME, stdout);
+        }
+        if (!strncmp(line, "screen-ready", 12)) {
+            printf("\\033]0;Ready\\007\\033[2J\\033[H"); fputs("Type your message\\n", stdout);
+        }
+        if (!strncmp(line, "screen-hook-exit", 16)) {
+            printf("\\033]0;⠋ Working...\\007\\033[2J\\033[H");
+            fputs("⠋ Executing Hook: flowmux hooks stop\\nType your message\\n", stdout);
+        }
+        if (!strncmp(line, "screen-gemini-narrow", 20)) {
+            printf("\\033[2J\\033[H");
+            fputs("⠇ Inspecting the project\\n(esc to cancel, 5s)\\n? for shortcuts\\n* Type your message or @path/to/file\\n", stdout);
         }
         if (!strncmp(line, "screen-approved", 15)) {
             printf("\\033[2J\\033[H"); fputs(APPROVED_FRAME, stdout);
@@ -86,8 +97,8 @@ int main(int argc, char **argv) {
         return response
 
     with (root / "events.jsonl").open("w", buffering=1) as evidence:
-        for name in ("claude", "codex"):
-            executable = root / name
+        for name in ("claude", "codex", "gemini", "antigravity", "cline"):
+            executable = root / ("agy" if name == "antigravity" else name)
             subprocess.run(["cc", str(source), "-o", str(executable)], check=True, timeout=30)
             created = rpc("workspace_create", name=f"Hook regression {name}", root=str(root))
             workspace = created["workspace_created"]["id"]
@@ -124,7 +135,13 @@ int main(int argc, char **argv) {
 
             def hook(event, activity, **fields):
                 payload = dict(session_id=f"fixture-{name}", hook_event_name=event,
-                               cwd=str(root), future_extension={"ignored": True}, **fields)
+                               cwd=str(root), future_extension={"ignored": True})
+                payload.update(fields)
+                if name == "cline":
+                    payload["taskId"] = payload.pop("session_id")
+                    payload.update(agent_id="agent-root", parent_agent_id=None,
+                                   sessionContext={"rootSessionId": "ui-session"})
+                session_id = payload.get("session_id", payload.get("taskId"))
                 command = [args.cli, "--socket", args.socket, "hooks", name, event]
                 if other_surface:
                     command = ["/bin/sh", "-c", '"$@"; result=$?; exit $result',
@@ -141,13 +158,13 @@ int main(int argc, char **argv) {
                 while True:
                     value = observed()
                     if (value and value["activity"] == activity
-                            and value.get("session_id") == payload["session_id"]):
+                            and value.get("session_id") == session_id):
                         break
                     assert time.monotonic() < deadline, (
                         name, event, payload, activity, value,
                         rpc("pane_read_screen", pane=pane))
                     time.sleep(.05)
-                assert value["name"] == name and value["session_id"] == payload["session_id"], value
+                assert value["name"] == name and value["session_id"] == session_id, value
                 assert value["source"] == "flowmux:hook", value
                 assert value["status_evidence"]["source"] == "hook", value
                 statuses = {"running": ("working",), "needs_input": ("blocked",),
@@ -181,6 +198,82 @@ int main(int argc, char **argv) {
                     time.sleep(.05)
 
             try:
+                if name in ("gemini", "antigravity", "cline"):
+                    if name == "gemini":
+                        rpc("pane_send_keys", pane=pane, keys="screen-gemini-narrow\r")
+                        deadline = time.monotonic() + 5
+                        while observed()["status"] != "working" and time.monotonic() < deadline:
+                            time.sleep(.05)
+                        assert observed()["status"] == "working", observed()
+
+                    def completions():
+                        return [e for e in rpc("notifications_list", unread_only=False)["notifications"]["entries"]
+                                if e.get("surface") == surface and e["level"] == "turn_completed"]
+
+                    for visible in (False, True):
+                        background = next(w["id"] for w in rpc("workspace_tree")["tree"]["workspaces"]
+                                          if w["id"] != workspace)
+                        rpc("workspace_focus", workspace=workspace if visible else background)
+                        hook("turn-start", "running")
+                        before = len(completions())
+                        # A persistent composer or old response must not complete a native turn.
+                        rpc("pane_send_keys", pane=pane, keys="screen-completed\r")
+                        time.sleep(1)
+                        assert observed()["status"] == "working", observed()
+                        assert len(completions()) == before
+                        if name == "antigravity":
+                            hook("stop", "running", fullyIdle=False)
+                        if name == "gemini":
+                            hook("notification", "needs_input", notification_type="ToolPermission")
+                            hook("running", "running", hook_event_name="AfterTool")
+                        if name == "cline":
+                            hook("notification", "needs_input", hook_event_name="agent_error",
+                                 error={"name": "Error", "message": "Unauthorized"})
+                            assert observed().get("turn_outcome") == "failed", observed()
+                            hook("turn-start", "running")
+                        if name in ("gemini", "antigravity"):
+                            rpc("pane_send_keys", pane=pane, keys="screen-hook-exit\r")
+                            hook("stop", "running", fullyIdle=True)
+                            time.sleep(1)
+                            assert observed()["status"] == "working", observed()
+                            assert len(completions()) == before
+                            # A later hook vetoes the stop and starts more work.
+                            hook("turn-start", "running")
+                            time.sleep(.7)
+                            assert len(completions()) == before
+                            hook("stop", "running", fullyIdle=True)
+                            rpc("pane_send_keys", pane=pane, keys="screen-ready\r")
+                            deadline = time.monotonic() + 6
+                            while observed()["status"] == "working":
+                                assert time.monotonic() < deadline, observed()
+                                time.sleep(.1)
+                        else:
+                            hook("stop", "idle", fullyIdle=True)
+                        expected = before + (0 if visible else 1)
+                        deadline = time.monotonic() + 5
+                        while len(completions()) < expected and time.monotonic() < deadline:
+                            time.sleep(.05)
+                        assert len(completions()) == expected, completions()
+                        rpc("pane_send_keys", pane=pane, keys="screen-hook-exit\r")
+                        time.sleep(.5)
+                        assert observed()["status"] in ("idle", "done"), observed()
+                        assert observed().get("turn_outcome") == "completed", observed()
+                        rpc("pane_send_keys", pane=pane, keys="screen-ready\r")
+                        hook("stop", "idle", fullyIdle=True)
+                        time.sleep(.3)
+                        assert len(completions()) == expected, completions()
+                        hook("turn-start", "running")
+                        time.sleep(1)
+                        assert observed()["status"] == "working", observed()
+                    if name == "antigravity":
+                        before = len(completions())
+                        for reason, outcome in (("ERROR", "failed"), ("USER_CANCELED", "canceled")):
+                            hook("turn-start", "running")
+                            hook("stop", "idle", fullyIdle=True, terminationReason=reason)
+                            assert observed().get("turn_outcome") == outcome, observed()
+                            assert len(completions()) == before
+                    print(f"PASS: {name} visible/hidden progress, completion, deduplication and next turn", flush=True)
+                    continue
                 if name == "claude":
                     hook("session-start", "idle")
                     hook("prompt-submit", "running")

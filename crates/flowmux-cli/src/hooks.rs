@@ -29,7 +29,12 @@ const HOOK_NOTIFY_TIMEOUT: Duration = Duration::from_millis(750);
 /// release doesn't break us.
 #[derive(Debug, Default, Deserialize)]
 pub struct ClaudeHookInput {
-    #[serde(default, rename = "type")]
+    #[serde(
+        default,
+        rename = "type",
+        alias = "hookName",
+        alias = "hook_event_name"
+    )]
     pub event_type: Option<String>,
     #[serde(
         default,
@@ -65,7 +70,7 @@ pub struct ClaudeHookInput {
     #[serde(default)]
     pub notification_type: Option<String>,
     /// Claude `StopFailure` error category, such as `rate_limit`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_hook_error")]
     pub error: Option<String>,
     /// `Stop` payload sometimes carries the trailing assistant text
     /// (Claude). Legacy Codex `notify` payloads called the same thing
@@ -108,6 +113,18 @@ pub struct ClaudeHookInput {
     pub stop_hook_active: bool,
 }
 
+fn deserialize_hook_error<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| {
+        value
+            .as_str()
+            .or_else(|| value.get("message")?.as_str())
+            .map(str::to_owned)
+    }))
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct ClineSessionContext {
     #[serde(default, rename = "rootSessionId")]
@@ -119,13 +136,15 @@ impl ClaudeHookInput {
         self.parent_agent_id
             .as_deref()
             .is_some_and(|id| !id.trim().is_empty())
-            || self
-                .cline_session_context
-                .as_ref()
-                .and_then(|context| context.root_session_id.as_deref())
-                .filter(|id| !id.trim().is_empty())
-                .zip(self.session_id.as_deref())
-                .is_some_and(|(root, session)| root != session)
+            // Cline 3 root agents have a conversation ID distinct from the UI session ID.
+            || (self.agent_id.is_none()
+                && self
+                    .cline_session_context
+                    .as_ref()
+                    .and_then(|context| context.root_session_id.as_deref())
+                    .filter(|id| !id.trim().is_empty())
+                    .zip(self.session_id.as_deref())
+                    .is_some_and(|(root, session)| root != session))
     }
 }
 
@@ -1570,11 +1589,29 @@ mod tests {
     }
 
     #[test]
+    fn cline_error_payload_preserves_session_and_child_identity() {
+        let input = parse_agent_hook_payload(
+            r#"{
+            "taskId":"child", "parent_agent_id":"parent",
+            "sessionContext":{"rootSessionId":"root"},
+            "hookName":"agent_error",
+            "error":{"name":"Error","message":"Unauthorized","stack":"ignored"}
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(input.session_id.as_deref(), Some("child"));
+        assert!(input.is_cline_child());
+        assert_eq!(input.event_type.as_deref(), Some("agent_error"));
+        assert_eq!(input.error.as_deref(), Some("Unauthorized"));
+    }
+
+    #[test]
     fn cline_root_and_legacy_payloads_remain_accepted() {
         for payload in [
             r#"{"taskId":"root"}"#,
             r#"{"taskId":"root","parent_agent_id":null,"sessionContext":{"rootSessionId":"root"}}"#,
             r#"{"taskId":"root","parent_agent_id":"","sessionContext":null}"#,
+            r#"{"taskId":"root","agent_id":"agent-root","parent_agent_id":null,"sessionContext":{"rootSessionId":"ui-session"}}"#,
         ] {
             let input = parse_agent_hook_payload(payload).unwrap();
             assert!(!input.is_cline_child(), "{payload}");

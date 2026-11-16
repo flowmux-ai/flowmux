@@ -2124,7 +2124,7 @@ fn prune_nested_flowmux_notify_json(value: &mut Value) -> bool {
 
 // ---- Cline ----------------------------------------------------------
 
-const CLINE_HOOK_MARKER: &str = "flowmux-hook cline v2";
+const CLINE_HOOK_MARKER: &str = "flowmux-hook cline v3";
 
 #[derive(Debug, Clone, Copy)]
 struct ClineEvent {
@@ -2137,45 +2137,70 @@ struct ClineEvent {
 const CLINE_EVENTS: &[ClineEvent] = &[
     ClineEvent {
         name: "TaskStart",
-        subcommand: "session-start",
+        subcommand: "turn-start",
     },
     ClineEvent {
         name: "TaskResume",
-        subcommand: "session-start",
+        subcommand: "turn-start",
     },
     ClineEvent {
         name: "UserPromptSubmit",
-        subcommand: "running",
+        subcommand: "turn-start",
     },
     ClineEvent {
         name: "TaskComplete",
         subcommand: "stop",
     },
+    ClineEvent {
+        name: "TaskError",
+        subcommand: "notification",
+    },
+    ClineEvent {
+        name: "TaskCancel",
+        subcommand: "interrupt",
+    },
+    ClineEvent {
+        name: "SessionShutdown",
+        subcommand: "session-end",
+    },
 ];
 
 /// Cline's current global hook directory plus its legacy global directory when
-/// that tree already exists. `CLINE_HOOKS_DIR` is the documented runtime
-/// override and takes precedence when set.
+/// that tree already exists. `CLINE_HOOKS_DIR` overrides the install destination;
+/// Cline 3 discovers hooks under `CLINE_DIR/hooks` and the legacy global root.
 fn cline_hook_dirs() -> Vec<PathBuf> {
-    if let Some(path) = std::env::var_os("CLINE_HOOKS_DIR") {
-        if !path.is_empty() {
-            return vec![PathBuf::from(path)];
-        }
-    }
-    dirs::home_dir()
-        .map(|home| cline_hook_dirs_for_home(&home))
-        .unwrap_or_default()
+    cline_hook_dirs_with_env(
+        dirs::home_dir().as_deref(),
+        std::env::var_os("CLINE_DIR").as_deref(),
+        std::env::var_os("CLINE_HOOKS_DIR").as_deref(),
+    )
 }
 
-fn cline_hook_dirs_for_home(home: &Path) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    let current_root = home.join(".cline");
-    if current_root.exists() {
-        dirs.push(current_root.join("hooks"));
+fn cline_hook_dirs_with_env(
+    home: Option<&Path>,
+    cline_dir: Option<&std::ffi::OsStr>,
+    hooks_dir: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    if let Some(path) = hooks_dir.filter(|path| !path.is_empty()) {
+        return vec![PathBuf::from(path)];
     }
-    let legacy_root = home.join("Documents").join("Cline");
-    if legacy_root.exists() {
-        dirs.push(legacy_root.join("Hooks"));
+    let mut dirs = Vec::new();
+    if let Some(root) = cline_dir.filter(|path| !path.is_empty()) {
+        dirs.push(PathBuf::from(root).join("hooks"));
+    } else if let Some(root) = home
+        .map(|home| home.join(".cline"))
+        .filter(|root| root.exists())
+    {
+        dirs.push(root.join("hooks"));
+    }
+    if let Some(legacy_root) = home
+        .map(|home| home.join("Documents/Cline"))
+        .filter(|root| root.exists())
+    {
+        let hooks = legacy_root.join("Hooks");
+        if !dirs.contains(&hooks) {
+            dirs.push(hooks);
+        }
     }
     dirs
 }
@@ -2802,6 +2827,10 @@ const GEMINI_EVENTS: &[GeminiEvent] = &[
     },
     GeminiEvent {
         name: "BeforeAgent",
+        subcommand: "turn-start",
+    },
+    GeminiEvent {
+        name: "AfterTool",
         subcommand: "running",
     },
     GeminiEvent {
@@ -3426,12 +3455,58 @@ mod tests {
         fs::create_dir_all(dir.path().join("Documents/Cline")).unwrap();
 
         assert_eq!(
-            cline_hook_dirs_for_home(dir.path()),
+            cline_hook_dirs_with_env(Some(dir.path()), None, None),
             vec![
                 dir.path().join(".cline/hooks"),
                 dir.path().join("Documents/Cline/Hooks"),
             ]
         );
+    }
+
+    #[test]
+    fn cline_custom_root_and_installer_override_apply_to_the_whole_lifecycle() {
+        let home = tmp();
+        let custom = home.path().join("custom-cline");
+        let legacy = home.path().join("Documents/Cline/Hooks");
+        fs::create_dir_all(&legacy).unwrap();
+        let dirs = cline_hook_dirs_with_env(Some(home.path()), Some(custom.as_os_str()), None);
+        assert_eq!(dirs, vec![custom.join("hooks"), legacy]);
+        install_cline_in_dirs(&dirs, "flowmux").unwrap();
+        assert_eq!(
+            check_cline_in_dirs(&dirs).status,
+            HookCheckStatus::Installed
+        );
+        for dir in &dirs {
+            for (name, command) in [
+                ("TaskCancel", "interrupt"),
+                ("SessionShutdown", "session-end"),
+            ] {
+                assert!(fs::read_to_string(dir.join(name))
+                    .unwrap()
+                    .contains(&format!("hooks cline {command}")));
+            }
+        }
+        uninstall_cline_in_dirs(&dirs).unwrap();
+        assert_eq!(check_cline_in_dirs(&dirs).status, HookCheckStatus::Missing);
+        let explicit = home.path().join("explicit-hooks");
+        assert_eq!(
+            cline_hook_dirs_with_env(
+                Some(home.path()),
+                Some(custom.as_os_str()),
+                Some(explicit.as_os_str())
+            ),
+            vec![explicit]
+        );
+        assert_eq!(
+            cline_hook_dirs_with_env(None, Some(custom.as_os_str()), None),
+            vec![custom.join("hooks")]
+        );
+        assert!(cline_hook_dirs_with_env(
+            None,
+            Some(std::ffi::OsStr::new("")),
+            Some(std::ffi::OsStr::new(""))
+        )
+        .is_empty());
     }
 
     #[test]
@@ -4861,7 +4936,8 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
     fn gemini_hook_entries_follow_the_official_schema_and_event_mapping() {
         let expected = [
             ("SessionStart", "session-start"),
-            ("BeforeAgent", "running"),
+            ("BeforeAgent", "turn-start"),
+            ("AfterTool", "running"),
             ("AfterAgent", "stop"),
             ("SessionEnd", "session-end"),
             ("Notification", "notification"),

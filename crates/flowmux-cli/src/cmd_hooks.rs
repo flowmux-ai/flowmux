@@ -1040,8 +1040,28 @@ pub(crate) fn build_generic_stop_requests(
         return Vec::new();
     }
 
-    let body = normalized_activity_text(input.last_assistant_message.as_deref());
-    let status_text = completed_activity_text(body.as_deref());
+    let outcome = if reported_agent.eq_ignore_ascii_case("antigravity") {
+        match input.reason.as_deref() {
+            Some("ERROR") => Some(flowmux_core::AgentTurnOutcome::Failed),
+            Some("USER_CANCELED") => Some(flowmux_core::AgentTurnOutcome::Canceled),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let body = normalized_activity_text(if outcome.is_some() {
+        input
+            .error
+            .as_deref()
+            .or(input.message.as_deref())
+            .or(input.last_assistant_message.as_deref())
+    } else {
+        input.last_assistant_message.as_deref()
+    });
+    let status_text = outcome.map_or_else(
+        || completed_activity_text(body.as_deref()),
+        |outcome| outcome.status_text().to_string(),
+    );
     if reported_agent.eq_ignore_ascii_case("codex") {
         if let (Some(surface), Some(session_id), Some(turn_id)) = (
             surface,
@@ -1062,6 +1082,75 @@ pub(crate) fn build_generic_stop_requests(
                 },
             )];
         }
+    }
+
+    if !reported_agent.eq_ignore_ascii_case("codex") {
+        if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+            let mut requests = vec![build_agent_lifecycle_update(
+                agent,
+                pid,
+                pane,
+                surface,
+                session_id,
+                if let Some(outcome) = outcome {
+                    AgentLifecycleEvent::TurnFinished {
+                        outcome,
+                        message: body,
+                        status_text,
+                    }
+                } else if reported_agent.eq_ignore_ascii_case("gemini")
+                    || reported_agent.eq_ignore_ascii_case("antigravity")
+                {
+                    AgentLifecycleEvent::TurnStopRequested {
+                        message: body,
+                        status_text,
+                    }
+                } else {
+                    AgentLifecycleEvent::TurnStopped {
+                        message: body,
+                        status_text,
+                    }
+                },
+            )];
+            if outcome == Some(flowmux_core::AgentTurnOutcome::Failed) {
+                requests.push(build_failure_notify(
+                    agent_display_name,
+                    input.error.as_deref().or(input.message.as_deref()),
+                    pane,
+                    Some(surface),
+                ));
+            }
+            return requests;
+        }
+    }
+
+    if let Some(outcome) = outcome {
+        let mut requests = vec![build_activity_update_with_metadata(
+            agent,
+            Some(Idle),
+            pid,
+            pane,
+            surface,
+            body.as_deref(),
+            Some(outcome.status_text()),
+            input.session_id.as_deref(),
+        )];
+        if outcome == flowmux_core::AgentTurnOutcome::Failed {
+            requests.push(build_failure_notify(
+                agent_display_name,
+                body.as_deref(),
+                pane,
+                surface,
+            ));
+        }
+        return requests;
+    }
+
+    // Without session routing, a provisional stop cannot be corroborated.
+    if reported_agent.eq_ignore_ascii_case("gemini")
+        || reported_agent.eq_ignore_ascii_case("antigravity")
+    {
+        return Vec::new();
     }
 
     vec![
@@ -1164,7 +1253,15 @@ pub(crate) async fn run_generic_agent_hook_event(
             Some("SessionStart")
         }
         ("codex", AgentHookEvent::TurnStart { .. }) => Some("UserPromptSubmit"),
-        ("gemini", AgentHookEvent::Running { .. }) => Some("BeforeAgent"),
+        ("gemini", AgentHookEvent::TurnStart { .. }) => Some("BeforeAgent"),
+        ("gemini", AgentHookEvent::Running { .. })
+            if input
+                .event_type
+                .as_deref()
+                .is_none_or(|event| event == "BeforeAgent") =>
+        {
+            Some("BeforeAgent")
+        }
         ("antigravity", AgentHookEvent::TurnStart { .. }) => Some("PreInvocation"),
         _ => None,
     };
@@ -1251,9 +1348,30 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
         AgentHookEvent::Notification { .. } => {
-            let msg = normalized_activity_text(input.message.as_deref());
+            let msg = normalized_activity_text(input.message.as_deref().or(input.error.as_deref()));
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
-            if reported_agent.eq_ignore_ascii_case("codex") {
+            if let (true, Some(surface), Some(session_id)) = (
+                reported_agent.eq_ignore_ascii_case("cline")
+                    && input.event_type.as_deref() == Some("agent_error"),
+                surface,
+                input.session_id.as_deref(),
+            ) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::SessionWaitStarted {
+                        context: None,
+                        outcome: Some(flowmux_core::AgentTurnOutcome::Failed),
+                        reason: flowmux_core::AgentWaitReason::ApiFailure,
+                        message: msg.clone(),
+                        status_text: status_text.to_string(),
+                        scope: Some("api_failure".into()),
+                    },
+                ));
+            } else if reported_agent.eq_ignore_ascii_case("codex") {
                 if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
                     // PermissionRequest has no call identity, so even identical
                     // Bash/apply_patch inputs are not safe correlation keys when
@@ -1341,6 +1459,18 @@ pub(crate) async fn run_generic_agent_hook_event(
                         input.session_id.as_deref(),
                     ));
                 }
+            } else if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref())
+            {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Working".into(),
+                    },
+                ));
             } else {
                 reqs.push(build_activity_update_with_metadata(
                     &agent,
@@ -1355,6 +1485,22 @@ pub(crate) async fn run_generic_agent_hook_event(
             }
         }
         AgentHookEvent::TurnStart { .. } => {
+            // Cline's root task boundary also establishes the session after `/new`.
+            if reported_agent.eq_ignore_ascii_case("cline")
+                && matches!(
+                    input.event_type.as_deref(),
+                    Some("agent_start" | "agent_resume" | "TaskStart" | "TaskResume")
+                )
+            {
+                reqs.push(build_generic_session_start_request(
+                    reported_agent,
+                    &agent,
+                    &input,
+                    pid,
+                    pane,
+                    surface,
+                ));
+            }
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
                 let lifecycle = if reported_agent.eq_ignore_ascii_case("codex") {
                     match (input.agent_id.as_deref(), input.turn_id.as_deref()) {
@@ -1438,22 +1584,26 @@ pub(crate) async fn run_generic_agent_hook_event(
             }
         }
         AgentHookEvent::Interrupt { .. } => {
-            if let (Some(surface), Some(session_id), Some(turn_id)) = (
-                surface,
-                input.session_id.as_deref(),
-                input.turn_id.as_deref(),
-            ) {
-                reqs.push(build_agent_lifecycle_update(
-                    &agent,
-                    pid,
-                    pane,
-                    surface,
-                    session_id,
-                    AgentLifecycleEvent::CodexTurnInterrupted {
-                        turn_id: turn_id.to_string(),
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                let lifecycle = if reported_agent.eq_ignore_ascii_case("codex") {
+                    input.turn_id.as_ref().map(|turn_id| {
+                        AgentLifecycleEvent::CodexTurnInterrupted {
+                            turn_id: turn_id.clone(),
+                            status_text: "Turn interrupted".into(),
+                        }
+                    })
+                } else {
+                    Some(AgentLifecycleEvent::TurnFinished {
+                        outcome: flowmux_core::AgentTurnOutcome::Canceled,
+                        message: normalized_activity_text(input.message.as_deref()),
                         status_text: "Turn interrupted".into(),
-                    },
-                ));
+                    })
+                };
+                if let Some(lifecycle) = lifecycle {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent, pid, pane, surface, session_id, lifecycle,
+                    ));
+                }
             }
         }
         // Generic starts retain unknown activity. OpenCode's selected TUI route

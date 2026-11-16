@@ -251,6 +251,10 @@ impl WindowController {
         for (workspace, _) in changed {
             self.sync_workspace_agent_status(workspace).await;
         }
+        // A ready terminal stops repainting; revisit pending native boundaries.
+        for surface in self.store.pending_provider_surfaces().await {
+            self.refresh_agent_screen_status(surface, None).await;
+        }
     }
     pub(super) async fn poll_terminal_cwds(&self) {
         let inputs = self.pane_registry.borrow().terminal_cwd_poll_inputs();

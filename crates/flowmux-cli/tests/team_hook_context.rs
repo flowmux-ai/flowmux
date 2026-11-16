@@ -56,7 +56,7 @@ fn native_prompt_hooks_activate_only_installed_lead_skills() {
         (
             "gemini",
             "gemini-profile/.gemini/skills",
-            "running",
+            "turn-start",
             "BeforeAgent",
         ),
         (

@@ -2264,6 +2264,36 @@ fn antigravity_hook_stdout_contract_is_valid_json() {
 }
 
 #[test]
+fn native_provider_completion_uses_atomic_lifecycle_delivery() {
+    use crate::cmd_hooks::build_generic_stop_requests;
+    let surface = SurfaceId::new();
+    let input = crate::hooks::ClaudeHookInput {
+        session_id: Some("native-session".into()),
+        last_assistant_message: Some("finished".into()),
+        ..Default::default()
+    };
+    for agent in ["gemini", "antigravity", "cline", "opencode"] {
+        let requests =
+            build_generic_stop_requests(agent, agent, agent, &input, None, None, Some(surface));
+        assert!(
+            matches!(requests.as_slice(), [Request::AgentLifecycleUpdate {
+                surface: got_surface, session_id,
+                lifecycle,
+                ..
+            }] if *got_surface == surface && session_id == "native-session"
+                && match lifecycle {
+                    flowmux_ipc::protocol::AgentLifecycleEvent::TurnStopRequested { message, .. }
+                        if matches!(agent, "gemini" | "antigravity") => message.as_deref() == Some("finished"),
+                    flowmux_ipc::protocol::AgentLifecycleEvent::TurnStopped { message, .. }
+                        if matches!(agent, "cline" | "opencode") => message.as_deref() == Some("finished"),
+                    _ => false,
+                }),
+            "{agent}: {requests:?}"
+        );
+    }
+}
+
+#[test]
 fn antigravity_non_idle_stop_preserves_working_state() {
     use crate::cmd_hooks::build_generic_stop_requests;
     use crate::hooks::ClaudeHookInput;
@@ -2287,6 +2317,7 @@ fn antigravity_non_idle_stop_preserves_working_state() {
     .is_empty());
 
     for fully_idle in [Some(true), None] {
+        let surface = SurfaceId::new();
         let requests = build_generic_stop_requests(
             "Antigravity",
             "antigravity",
@@ -2294,23 +2325,86 @@ fn antigravity_non_idle_stop_preserves_working_state() {
             &input(fully_idle),
             None,
             None,
-            None,
+            Some(surface),
         );
-        assert!(matches!(
-            requests.as_slice(),
-            [
-                Request::AgentActivityUpdate {
-                    agent,
-                    activity: Some(flowmux_core::AgentActivity::Idle),
-                    session_id: Some(session_id),
+        assert!(
+            matches!(requests.as_slice(), [Request::AgentLifecycleUpdate {
+            lifecycle: flowmux_ipc::protocol::AgentLifecycleEvent::TurnStopRequested { message, .. }, ..
+        }] if message.as_deref() == Some("finished the task"))
+        );
+        assert!(build_generic_stop_requests(
+            "Antigravity",
+            "antigravity",
+            "Antigravity",
+            &input(fully_idle),
+            None,
+            None,
+            None
+        )
+        .is_empty());
+    }
+}
+
+#[test]
+fn antigravity_termination_reasons_preserve_outcome() {
+    use crate::cmd_hooks::build_generic_stop_requests;
+    use flowmux_ipc::protocol::AgentLifecycleEvent;
+    for (reason, outcome) in [
+        ("ERROR", flowmux_core::AgentTurnOutcome::Failed),
+        ("USER_CANCELED", flowmux_core::AgentTurnOutcome::Canceled),
+    ] {
+        for fully_idle in [Some(true), None, Some(false)] {
+            let input: crate::hooks::ClaudeHookInput = serde_json::from_value(serde_json::json!({
+                "conversationId": "conversation-1", "terminationReason": reason,
+                "fullyIdle": fully_idle, "error": {"message": "details"},
+            }))
+            .unwrap();
+            let requests = build_generic_stop_requests(
+                "Antigravity",
+                "antigravity",
+                "Antigravity",
+                &input,
+                None,
+                None,
+                Some(SurfaceId::new()),
+            );
+            if fully_idle == Some(false) {
+                assert!(requests.is_empty());
+            } else {
+                assert!(
+                    matches!(requests.first(), Some(Request::AgentLifecycleUpdate {
+                    lifecycle: AgentLifecycleEvent::TurnFinished { outcome: actual, message, .. }, ..
+                }) if *actual == outcome && message.as_deref() == Some("details")),
+                    "{requests:?}"
+                );
+            }
+            assert_eq!(
+                requests.iter().any(|request| matches!(
+                    request,
+                    Request::Notify {
+                        level: NotificationLevel::Error,
+                        ..
+                    }
+                )),
+                fully_idle != Some(false) && outcome == flowmux_core::AgentTurnOutcome::Failed
+            );
+            let fallback = build_generic_stop_requests(
+                "Antigravity",
+                "antigravity",
+                "Antigravity",
+                &input,
+                None,
+                None,
+                None,
+            );
+            assert!(!fallback.iter().any(|request| matches!(
+                request,
+                Request::Notify {
+                    level: NotificationLevel::TurnCompleted,
                     ..
-                },
-                Request::Notify { title, body, .. }
-            ] if agent == "antigravity"
-                && session_id == "conversation-1"
-                && title == "Antigravity ready"
-                && body == "finished the task"
-        ));
+                }
+            )));
+        }
     }
 }
 
@@ -2465,6 +2559,21 @@ async fn cline_child_hooks_never_reach_the_root_tab() {
                 surface: Some(SurfaceId::new()),
                 args: vec![payload.into()],
             },
+            AgentHookEvent::TurnStart {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
+            AgentHookEvent::Interrupt {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
+            AgentHookEvent::SessionEnd {
+                pane: None,
+                surface: Some(SurfaceId::new()),
+                args: vec![payload.into()],
+            },
             AgentHookEvent::Stop {
                 pane: None,
                 surface: Some(SurfaceId::new()),
@@ -2481,6 +2590,114 @@ async fn cline_child_hooks_never_reach_the_root_tab() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn cline_task_boundaries_register_before_start_and_cancel_without_turn_id() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    for event_type in [
+        "agent_start",
+        "agent_resume",
+        "TaskStart",
+        "TaskResume",
+        "UserPromptSubmit",
+        "agent_cancel",
+        "SessionShutdown",
+    ] {
+        let surface = SurfaceId::new();
+        // Repeated task boundaries must preserve request order and session identity.
+        for _ in 0..2 {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("flowmux.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let payload =
+                serde_json::json!({"type": event_type, "taskId": "next-session"}).to_string();
+            let event = match event_type {
+                "agent_cancel" => AgentHookEvent::Interrupt {
+                    pane: None,
+                    surface: Some(surface),
+                    args: vec![payload],
+                },
+                "SessionShutdown" => AgentHookEvent::SessionEnd {
+                    pane: None,
+                    surface: Some(surface),
+                    args: vec![payload],
+                },
+                _ => AgentHookEvent::TurnStart {
+                    pane: None,
+                    surface: Some(surface),
+                    args: vec![payload],
+                },
+            };
+            let starts_session = matches!(
+                event_type,
+                "agent_start" | "agent_resume" | "TaskStart" | "TaskResume"
+            );
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read, mut write) = stream.into_split();
+                let mut reader = tokio::io::BufReader::new(read);
+                let mut requests = Vec::new();
+                for _ in 0..if starts_session { 2 } else { 1 } {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await.unwrap();
+                    let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+                    let Payload::Request(request) = envelope.payload else {
+                        panic!("expected request")
+                    };
+                    requests.push(request);
+                    let response = Envelope {
+                        id: envelope.id,
+                        payload: Payload::Response(Response::Ok),
+                    };
+                    write
+                        .write_all(
+                            format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+                requests
+            });
+            run_generic_agent_hook_event("Cline", &event, Some(socket))
+                .await
+                .unwrap();
+            let requests = server.await.unwrap();
+            if starts_session {
+                assert!(matches!(&requests[0], Request::AgentActivityUpdate {
+                    session_id: Some(session), custom_status: Some(status), ..
+                } if session == "next-session" && status == "Ready"));
+            }
+            match requests.last().unwrap() {
+                Request::AgentLifecycleUpdate {
+                    session_id,
+                    lifecycle,
+                    ..
+                } => {
+                    assert_eq!(session_id, "next-session");
+                    if event_type == "agent_cancel" {
+                        assert!(matches!(
+                            lifecycle,
+                            AgentLifecycleEvent::TurnFinished {
+                                outcome: flowmux_core::AgentTurnOutcome::Canceled,
+                                ..
+                            }
+                        ));
+                    } else {
+                        assert!(matches!(lifecycle, AgentLifecycleEvent::TurnStarted { .. }));
+                    }
+                }
+                Request::AgentActivityUpdate {
+                    session_id: Some(session),
+                    status: None,
+                    ..
+                } if event_type == "SessionShutdown" => assert_eq!(session, "next-session"),
+                request => panic!("unexpected {request:?}"),
+            }
+        }
+    }
 }
 
 #[tokio::test]

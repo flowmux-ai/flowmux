@@ -395,6 +395,19 @@ pub enum AgentLifecycleEvent {
         message: Option<String>,
         status_text: String,
     },
+    /// Provider hooks run before other handlers can request continuation.
+    /// Confirm the ready terminal before publishing successful completion.
+    TurnStopRequested {
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+    },
+    TurnFinished {
+        outcome: flowmux_core::AgentTurnOutcome,
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+    },
     CodexSubagentStarted {
         agent_id: String,
         turn_id: String,

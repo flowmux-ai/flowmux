@@ -3005,10 +3005,14 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
         ("codex", AgentStatus::Idle),
         ("opencode", AgentStatus::Idle),
         ("gemini", AgentStatus::Idle),
+        ("antigravity", AgentStatus::Idle),
+        ("cline", AgentStatus::Idle),
         ("claude", AgentStatus::Working),
         ("codex", AgentStatus::Working),
         ("opencode", AgentStatus::Working),
         ("gemini", AgentStatus::Working),
+        ("antigravity", AgentStatus::Working),
+        ("cline", AgentStatus::Working),
     ] {
         let mut surface = PaneSurface::terminal("agent", None);
         let surface_id = surface.id;
@@ -4154,6 +4158,28 @@ fn detector_reads_agent_name_from_osc_and_screen_signals() {
         detect_agent_name_from_signals(Some("gemini working"), None),
         Some("gemini")
     );
+}
+
+#[test]
+fn gemini_narrow_cancel_row_is_working_above_a_persistent_composer() {
+    // LoadingIndicator renders the timer separately at narrow widths.
+    for elapsed in ["0s", "2m 22s", "1h 5s"] {
+        let screen = format!(
+            "⠇ Inspecting the project\n(esc to cancel, {elapsed})\n? for shortcuts\n* Type your message or @path/to/file\ngemini-3.8-flash"
+        );
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&screen), None),
+            Some(AgentStatus::Working),
+            "{screen}"
+        );
+        assert_eq!(
+            detect_agent_progress_text(Some(&screen)),
+            Some(format!("(esc to cancel, {elapsed})").as_str())
+        );
+    }
+    for row in ["(esc to cancel, )", "(esc to cancel, tomorrow)"] {
+        assert_eq!(detect_agent_status_from_signals(Some(row), None), None);
+    }
 }
 
 #[test]

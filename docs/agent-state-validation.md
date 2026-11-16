@@ -2,6 +2,71 @@
 
 # Agent state validation
 
+## Gemini, Antigravity and Cline native lifecycle — 2026-11-16
+
+Installed and exercised Gemini CLI 0.68.0, Antigravity CLI (`agy`) 1.4.12,
+and Cline CLI 3.0.74 under `~/.local/share/flowmux/provider-validation/bin`.
+The existing defaults (Gemini 0.19.4, agy 1.2.11 and Cline 2.18.0) and the
+running user Flowmux were not replaced or restarted. Candidate GUI validation
+used an isolated checkout, XDG/runtime directories and Xvfb, excluding other
+concurrent UI changes. User application PID 501550 remained running.
+
+Reproduced problems and fixes:
+
+- Gemini's narrow `(esc to cancel, 5s)` progress row was missed. The persistent
+  composer could then look idle during real work. BeforeAgent now starts a turn;
+  AfterTool resumes progress after a wait.
+- Cline 3 root payloads have a `taskId` different from `rootSessionId`, with
+  `parent_agent_id: null`. They were incorrectly rejected as child events.
+  Explicit parent identity is now authoritative, with a legacy fallback.
+- Cline TaskStart/TaskResume register the session before starting work, so `/new`
+  does not leave hooks bound to the old conversation. TaskError preserves
+  object-valued errors; TaskCancel and SessionShutdown are installed too.
+  Installer, doctor and removal now honor `CLINE_DIR/hooks` as well as the
+  explicit `CLINE_HOOKS_DIR` override and existing legacy hook directory.
+- agy's ERROR and USER_CANCELED termination reasons previously became successful
+  completions. They now retain Failed/Canceled outcomes; `fullyIdle: false`
+  remains provisional. Failed hooks carry a correlated error notification.
+- Gemini AfterAgent also runs after some errors, and Gemini/agy stop hooks can
+  be vetoed by later hooks. Successful stops now propose completion; a stable
+  ready composer with no progress corroborates it. Progress or a new turn
+  retires the proposal. A timer alone never declares completion.
+- Explicit error/cancellation rows settle without a success notification. When
+  native cancellation is missing, observed work followed by a stable ready
+  composer can release Working with an Unknown outcome. This fallback cannot
+  distinguish a silent cancellation from a lost stop hook.
+- Late working titles without a progress row no longer reopen settled turns.
+  Completion and notification claims share the existing atomic lifecycle path.
+
+Live evidence includes the actual Gemini shell tool (`sleep 4`), normal
+completion, HTTP 401 failure and Esc cancellation. A real AfterAgent hook slept
+three seconds and blocked once, causing a continuation: two hook invocations
+produced exactly one success notification after the final invocation. Cline's
+real TUI completed requests, registered a new conversation after `/new`, and
+returned to idle without a success notification after Esc. Cline 3.0.74 emitted
+SessionShutdown on cancellation, clearing native session identity while the
+TUI process remained alive. The next request registered and completed again.
+
+Model responses came from deterministic localhost API fixtures using the real
+CLI executables. This verifies native hooks, terminal frames and Flowmux state,
+not cloud authentication. Gemini cloud login requested OAuth, Cline's existing
+credentials returned Unauthorized, and agy required sign-in. agy's actual
+model/tool cycle remains unverified; its lifecycle payloads are replayed.
+
+The GUI regression matrix covers Claude/Codex plus Gemini/agy/Cline, including
+visible/hidden completion, duplicate stops, delayed continuation, agy failure
+and cancellation, Cline errors, stale frames and permission waits. CLI, core and
+daemon unit/integration tests passed. Targeted Clippy passed with the existing
+unrelated `clippy::redundant_locals` lint allowed. Full shared CI and macOS were
+not run. Local artifacts include `unit-followup.log`, `clippy-followup.log`,
+`hooks-live-followup.log`, native payloads and state timelines.
+
+Candidate hooks and the candidate GUI must be used together: the added lifecycle
+messages are not supported by an already running older GUI. Global managed hooks
+were returned to the installed `~/.local/bin/flowmuxctl`; test configurations use
+the candidate CLI. After adopting the candidate app, run its `hooks setup` for
+the three providers. Do not point new hook messages at an old running app.
+
 ## Pending attention and completed-turn history — 2026-10-30
 
 The change retains warning presentation for a read-but-unresolved input request.

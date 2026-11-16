@@ -237,7 +237,66 @@ impl WindowController {
         if screen.is_none() && title.is_none() && !is_ssh {
             return None;
         }
-        let (ws_id, _) = self
+        let settled = if !is_ssh {
+            self.store
+                .settle_provider_turn_from_screen(
+                    surface,
+                    screen.as_deref().unwrap_or_default(),
+                    title.as_deref(),
+                    self.is_agent_surface_visible(surface),
+                )
+                .await
+        } else {
+            Default::default()
+        };
+        if settled.workspace.is_some() {
+            if let Some(located) = self.store.located_agent_presence(surface).await {
+                let presence = &located.presence;
+                let failed = presence.turn_outcome == Some(flowmux_core::AgentTurnOutcome::Failed);
+                let deliver = if let (Some(id), Some(session)) =
+                    (settled.notification_id, presence.session_id.as_deref())
+                {
+                    self.store
+                        .claim_agent_notification(surface, &presence.name, session, id)
+                        .await
+                } else {
+                    failed
+                };
+                if deliver {
+                    let (ack, _) = tokio::sync::oneshot::channel();
+                    Box::pin(
+                        self.dispatch_notification_command(GtkCommand::AddNotification {
+                            id: settled.notification_id,
+                            pane: Some(located.pane),
+                            surface: Some(surface),
+                            workspace: Some(located.workspace),
+                            title: format!(
+                                "{} {}",
+                                presence.name,
+                                if failed { "failed" } else { "ready" }
+                            ),
+                            body: settled.completion_message.clone().unwrap_or_else(|| {
+                                presence
+                                    .status_text()
+                                    .unwrap_or("Response ended")
+                                    .to_string()
+                            }),
+                            level: if failed {
+                                flowmux_core::NotificationLevel::Error
+                            } else {
+                                flowmux_core::NotificationLevel::TurnCompleted
+                            },
+                            ack,
+                        }),
+                    )
+                    .await;
+                }
+                if let Some(entry) = crate::activity::ActivityEntry::from_hook_presence(located) {
+                    self.activities.push(entry);
+                }
+            }
+        }
+        let changed = self
             .store
             .report_agent_screen_signals_with_visibility(
                 surface,
@@ -245,7 +304,10 @@ impl WindowController {
                 title.as_deref(),
                 self.is_agent_surface_visible(surface),
             )
-            .await?;
+            .await;
+        let ws_id = changed
+            .map(|(workspace, _)| workspace)
+            .or(settled.workspace)?;
         self.sync_workspace_agent_status(ws_id).await;
         Some(ws_id)
     }

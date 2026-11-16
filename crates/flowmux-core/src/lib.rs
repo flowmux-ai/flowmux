@@ -799,6 +799,18 @@ impl Pane {
                     // or Blocked state that screen-idle settlement cannot undo.
                     return Some(false);
                 }
+                // Providers can leave a working OSC title while their completion hook exits.
+                if source == "flowmux:screen"
+                    && status == AgentStatus::Working
+                    && status_text.is_none()
+                    && existing_agent.is_some_and(|agent| {
+                        agent.source.as_deref() == Some("flowmux:hook")
+                            && agent.status == AgentStatus::Idle
+                            && agent.turn_outcome.is_some()
+                    })
+                {
+                    return Some(false);
+                }
                 let explicit_screen_idle = source == "flowmux:screen"
                     && status == AgentStatus::Idle
                     && status_text.is_some();
@@ -3493,6 +3505,22 @@ pub fn detect_agent_status_from_signals(
 fn is_agent_working_status_line(line: &str) -> bool {
     let decorated = line.trim_start() != trim_agent_status_prefix(line);
     let line = trim_agent_status_prefix(line);
+    // Gemini puts its cancel timer on a separate row in narrow terminals.
+    if line
+        .strip_prefix("(esc to cancel, ")
+        .and_then(|elapsed| elapsed.strip_suffix(')'))
+        .is_some_and(|elapsed| {
+            !elapsed.trim().is_empty()
+                && elapsed.split_whitespace().all(|token| {
+                    let bytes = token.as_bytes();
+                    bytes.len() > 1
+                        && matches!(bytes.last(), Some(b's' | b'm' | b'h'))
+                        && bytes[..bytes.len() - 1].iter().all(u8::is_ascii_digit)
+                })
+        })
+    {
+        return true;
+    }
     // Both TUIs use changing action labels, and Claude uses whimsical verbs.
     // Match the live clock/control shape, not an ever-growing verb dictionary.
     if decorated
