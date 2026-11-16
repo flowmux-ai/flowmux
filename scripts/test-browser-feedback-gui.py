@@ -95,6 +95,13 @@ def exercise(h, gui, Atspi):
 
     h.rpc(sock, "browser_eval", pane=pane, source="document.querySelector('#edit').focus(); 'ready'")
     click("Request change")
+    gui.wait_for(lambda: named("Select an element. Escape cancels; Tab and Enter select a focused element."), "picker started")
+    time.sleep(.2)
+    click("Request change")
+    gui.wait_for(lambda: named("Select an element. Escape cancels; Tab and Enter select a focused element.") is None, "toolbar closes the picker panel")
+    gui.wait_for(lambda: h.rpc(sock, "browser_eval", pane=pane, source="String(!!globalThis.__flowmuxFeedback)")["browser_result"]["value"] == "false", "toolbar removes the active picker")
+    h.pass_check("pressing Request change again cancels active selection like Close")
+    click("Request change")
     time.sleep(.5)
     with closing(display.Display(h.env["DISPLAY"])) as connection:
         key = connection.keysym_to_keycode(XK.string_to_keysym("x"))
@@ -124,6 +131,13 @@ def exercise(h, gui, Atspi):
     gui.wait_for(lambda: named("Request copied, including the local screenshot path."), "copy confirmed")
     details = "\n".join(node.get_name() for node in walk(application()))
     assert "button#target" in details and "PRIVATE_TOKEN" not in details and "PRIVATE_VALUE" not in details and "HIDDEN_SECRET" not in details
+    click("Request change")
+    gui.wait_for(lambda: named("Requested change") is None, "toolbar closes the captured request")
+    click("Request change")
+    comment = gui.wait_for(lambda: named("Requested change"), "toolbar reopens the draft")
+    assert "Make this button blue" in Atspi.Text.get_text(comment, 0, -1)
+    assert h.rpc(sock, "browser_eval", pane=pane, source="String(!!globalThis.__flowmuxFeedback)")["browser_result"]["value"] == "false"
+    h.pass_check("toolbar close preserves the captured request and reopens without picking again")
     click("Select another element")
     time.sleep(.4)
     with closing(display.Display(h.env["DISPLAY"])) as connection:

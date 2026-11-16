@@ -230,12 +230,17 @@ impl BrowserFeedback {
             let weak = Rc::downgrade(&this);
             button.connect_clicked(move |_| {
                 if let Some(this) = weak.upgrade() {
-                    if action == 0 && this.capture.borrow().is_some() && !this.picking.get() {
-                        this.panel.set_visible(!this.panel.is_visible());
+                    if action == 0
+                        && !this.panel.is_visible()
+                        && this.capture.borrow().is_some()
+                        && !this.picking.get()
+                    {
+                        this.panel.set_visible(true);
                     } else {
                         (this.callback.borrow_mut())(
                             surface,
                             match action {
+                                0 if this.panel.is_visible() => Action::Cancel,
                                 1 => Action::Cancel,
                                 2 => Action::Copy,
                                 _ => Action::Pick,
