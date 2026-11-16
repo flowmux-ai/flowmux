@@ -168,13 +168,17 @@ try:
         gui.wait_for(lambda: cli("browser", "title", pane) in ("Sign in", "Signed in"), "fixture document loaded")
         return pane
 
-    def walk(node):
+    def walk(node, reverse=False):
         node.clear_cache()
-        yield node
-        for index in range(node.get_child_count()):
+        if not reverse:
+            yield node
+        indices = range(node.get_child_count())
+        for index in reversed(indices) if reverse else indices:
             child = node.get_child_at_index(index)
             if child:
-                yield from walk(child)
+                yield from walk(child, reverse)
+        if reverse:
+            yield node
 
     def lookup(name, actionable=False, showing=True, role=None, last=False):
         desktop = Atspi.get_desktop(0)
@@ -182,15 +186,18 @@ try:
         for index in range(desktop.get_child_count()):
             app = desktop.get_child_at_index(index)
             if app.get_process_id() == process.pid:
-                matches = [node for node in walk(app) if node.get_name() == name
-                           and (role is None or node.get_role() == role)
-                           and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING))
-                           and (not actionable or node.get_state_set().contains(Atspi.StateType.SENSITIVE))]
-                return matches[-1 if last else 0] if matches else None
+                for node in walk(app, reverse=last):
+                    if (node.get_name() == name
+                            and (role is None or node.get_role() == role)
+                            and (not showing or node.get_state_set().contains(Atspi.StateType.SHOWING))
+                            and (not actionable or node.get_state_set().contains(Atspi.StateType.SENSITIVE))):
+                        return node
+                return None
         return None
 
     def find(name, actionable=False):
-        return gui.wait_for(lambda: lookup(name, actionable), name, timeout=15)
+        # Find the newest dialog first; paused Secret Service calls time out in 2s.
+        return gui.wait_for(lambda: lookup(name, actionable, last=True), name, timeout=15)
 
     def click(name):
         button = gui.wait_for(lambda: lookup(name, actionable=True, role=Atspi.Role.PUSH_BUTTON, last=True), name)
