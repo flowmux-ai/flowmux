@@ -26,6 +26,7 @@ use tracing::{error, info};
 mod agent_runtime;
 mod program_runtime;
 pub use agent_runtime::{AgentLifecycleResult, CodexGraceSettlement, LocatedAgentPresence};
+pub(crate) use agent_runtime::{AgentLifecycleRuntime, LifecycleTransition};
 
 fn remote_cwd_for_pane(tree: &Pane, pane: PaneId) -> Option<String> {
     let content = tree.find_leaf_content(pane)?;

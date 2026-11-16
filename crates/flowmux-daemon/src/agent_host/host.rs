@@ -3,7 +3,8 @@
 
 use super::retirement::RetirementPolicy;
 use super::terminal::Terminal;
-use flowmux_core::AgentInstanceId;
+use crate::state_store::{AgentLifecycleRuntime, CodexGraceSettlement, LifecycleTransition};
+use flowmux_core::{AgentInstanceId, AgentPresence};
 use flowmux_ipc::agent_host::*;
 use flowmux_ipc::server::{ConnectionContext, Handler};
 use flowmux_ipc::{Request, Response, RpcError};
@@ -115,10 +116,11 @@ impl AgentHost {
         }
     }
 
-    fn require_connection(&self, connection: u64, mutate: bool) -> Result<()> {
+    fn require_connection(&self, connection: u64, request: &HostRequest) -> Result<()> {
         match self.registry().connections.get(&connection) {
             Some(ClientRole::Gui | ClientRole::Relay) => Ok(()),
-            Some(ClientRole::Observer) if !mutate => Ok(()),
+            Some(ClientRole::Observer) if request.is_query() => Ok(()),
+            Some(ClientRole::Hook) if matches!(request, HostRequest::Lifecycle { .. }) => Ok(()),
             _ => Err(RpcError::InvalidArgument(
                 "Host handshake required for this connection".into(),
             )),
@@ -160,7 +162,7 @@ impl AgentHost {
                 connection,
             });
         }
-        self.require_connection(connection, !request.is_query())?;
+        self.require_connection(connection, &request)?;
         match request {
             HostRequest::Hello { .. } => unreachable!(),
             HostRequest::KeepAlive => Ok(HostResponse::Ok),
@@ -191,6 +193,7 @@ impl AgentHost {
             request => {
                 let instance = match &request {
                     HostRequest::PrepareAttach { instance, .. }
+                    | HostRequest::Lifecycle { instance, .. }
                     | HostRequest::Terminate { instance, .. } => *instance,
                     HostRequest::CommitAttach { key, .. }
                     | HostRequest::AbortAttach { key }
@@ -291,7 +294,7 @@ impl AgentHost {
                     ));
                 }
                 return Ok(HostResponse::Launched {
-                    agent: registry.entries[instance].agent.clone(),
+                    agent: Box::new(registry.entries[instance].agent.clone()),
                 });
             }
             // Bound tombstones as well: they retain launch idempotence for this epoch.
@@ -319,6 +322,7 @@ impl AgentHost {
                         exit_status: None,
                         view: None,
                         error: None,
+                        presence: None,
                     },
                     commands: None,
                     final_frame: None,
@@ -388,7 +392,9 @@ impl AgentHost {
                 tokio::spawn(actor.run());
                 // Identity and policy exist before provider hooks can fire.
                 gate.release();
-                Ok(HostResponse::Launched { agent })
+                Ok(HostResponse::Launched {
+                    agent: Box::new(agent),
+                })
             }
             Err(error) => {
                 let mut registry = self.registry();
@@ -400,7 +406,7 @@ impl AgentHost {
                 entry.agent.state = ProcessState::Failed;
                 entry.agent.error = Some(error.into());
                 Ok(HostResponse::Launched {
-                    agent: entry.agent.clone(),
+                    agent: Box::new(entry.agent.clone()),
                 })
             }
         }
@@ -596,6 +602,9 @@ struct TerminalActor {
     root_status: Option<i32>,
     eof: bool,
     stopping: Option<(i32, Instant)>,
+    lifecycle: AgentLifecycleRuntime<AgentInstanceId>,
+    presence: Option<AgentPresence>,
+    settle_codex: Option<(Instant, CodexGraceSettlement)>,
 }
 
 impl TerminalActor {
@@ -625,6 +634,9 @@ impl TerminalActor {
             root_status: None,
             eof: false,
             stopping: None,
+            lifecycle: AgentLifecycleRuntime::default(),
+            presence: None,
+            settle_codex: None,
         }
     }
 
@@ -677,6 +689,7 @@ impl TerminalActor {
                             Err(_) => self.fail("unable to reap agent root process"),
                         }
                     }
+                    self.settle_lifecycle();
                     self.reap_descendants();
                     if let Some((signal,deadline)) = self.stopping {
                         self.signal_owned(if Instant::now() >= deadline {libc::SIGKILL} else {signal});
@@ -692,6 +705,58 @@ impl TerminalActor {
 
     fn command(&mut self, connection: u64, request: HostRequest) -> Result<HostResponse> {
         match request {
+            HostRequest::Lifecycle {
+                instance,
+                epoch,
+                pid,
+                process_start,
+                session_id,
+                seq,
+                event,
+            } => {
+                if instance != self.instance || epoch != self.host.epoch {
+                    return Err(RpcError::NotFound(
+                        "Agent Host epoch or instance changed".into(),
+                    ));
+                }
+                // shortcut: root-only identity until native session/process hook routing is connected.
+                if self.root_status.is_some()
+                    || self.stopping.is_some()
+                    || pid != self.pty.child_pid() as u32
+                    || self.owned.get(&pid) != Some(&process_start)
+                    || flowmux_procmon::process_start_time(pid) != Some(process_start)
+                {
+                    return Err(RpcError::InvalidArgument(
+                        "agent process identity changed".into(),
+                    ));
+                }
+                if session_id.is_empty()
+                    || session_id.len() > 256
+                    || serde_json::to_vec(&event).map_or(true, |bytes| bytes.len() > 64 * 1024)
+                {
+                    return Err(RpcError::InvalidArgument(
+                        "invalid agent lifecycle event".into(),
+                    ));
+                }
+                let provider = self.host.registry().entries[&instance]
+                    .agent
+                    .provider
+                    .clone();
+                let transition = self.lifecycle.reduce(
+                    instance,
+                    &provider,
+                    Some(pid),
+                    Some(seq),
+                    &session_id,
+                    event,
+                    self.presence.as_ref(),
+                );
+                let applied = transition.is_some();
+                if let Some(transition) = transition {
+                    self.project_lifecycle(transition);
+                }
+                Ok(HostResponse::LifecycleReceipt { applied })
+            }
             HostRequest::PrepareAttach {
                 instance,
                 epoch,
@@ -1063,6 +1128,60 @@ impl TerminalActor {
         registry.revision += 1;
     }
 
+    fn project_lifecycle(&mut self, transition: LifecycleTransition) {
+        if let Some(grace) = transition.settle_codex_after_grace {
+            self.settle_codex = Some((Instant::now() + Duration::from_millis(250), grace));
+        }
+        if let Some(report) = transition.report {
+            if let Some(presence) = &mut self.presence {
+                presence.apply_report(report, false);
+            } else {
+                self.presence = AgentPresence::from_report(report, false);
+            }
+            let mut registry = self.host.registry();
+            registry
+                .entries
+                .get_mut(&self.instance)
+                .unwrap()
+                .agent
+                .presence = self.presence.clone();
+            // Display completion is not proof that all provider work is finished.
+            registry.policy.observation_uncertain(self.instance);
+            registry.revision += 1;
+        }
+    }
+
+    fn settle_lifecycle(&mut self) {
+        if self.root_status.is_some() || self.stopping.is_some() {
+            self.settle_codex = None;
+            return;
+        }
+        if !self
+            .settle_codex
+            .as_ref()
+            .is_some_and(|(deadline, _)| Instant::now() >= *deadline)
+        {
+            return;
+        }
+        let (_, grace) = self.settle_codex.take().unwrap();
+        let Some(presence) = self.presence.as_ref() else {
+            return;
+        };
+        let Some(session) = presence.session_id.as_deref() else {
+            return;
+        };
+        if let Some(transition) = self.lifecycle.settle_codex(
+            self.instance,
+            presence.pid,
+            grace.stop_seq,
+            session,
+            &grace.turn_id,
+            Some(presence),
+        ) {
+            self.project_lifecycle(transition);
+        }
+    }
+
     fn finished(&mut self) {
         let (sequence, snapshot, size, data) = self.terminal.frame(0);
         let final_frame = self.active.as_mut().map(|lease| {
@@ -1081,6 +1200,7 @@ impl TerminalActor {
         registry.policy.remove_reaped(self.instance);
         let entry = registry.entries.get_mut(&self.instance).unwrap();
         entry.agent.state = ProcessState::Exited;
+        entry.agent.presence = None;
         entry.agent.exit_status = self.root_status;
         entry.agent.view = None;
         entry.commands = None;
@@ -1253,7 +1373,7 @@ mod tests {
                 panic!("expected launch")
             };
             assert_eq!(agent.state, ProcessState::Running);
-            agent
+            *agent
         }
     }
 
@@ -1270,6 +1390,284 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn lifecycle_event(
+        agent: &AgentInstance,
+        seq: u64,
+        event: flowmux_ipc::protocol::AgentLifecycleEvent,
+    ) -> HostRequest {
+        HostRequest::Lifecycle {
+            instance: agent.instance,
+            epoch: agent.epoch,
+            pid: agent.pid.unwrap(),
+            process_start: agent.process_start.unwrap(),
+            session_id: "same-native-session".into(),
+            seq,
+            event,
+        }
+    }
+
+    #[tokio::test]
+    async fn detached_lifecycle_keeps_waits_and_settles_codex_without_a_gui() {
+        use flowmux_core::{AgentStatus, AgentWaitReason};
+        use flowmux_ipc::protocol::AgentLifecycleEvent as Event;
+        let fixture = Fixture::new().await;
+        let launcher = fixture.client(ClientRole::Relay).await;
+        let mut launch = fixture.launch("while IFS= read -r line; do :; done");
+        launch.provider = "codex".into();
+        let HostResponse::Launched { agent } =
+            launcher.call(HostRequest::Launch { launch }).await.unwrap()
+        else {
+            panic!("expected launch");
+        };
+        drop(launcher);
+        let hook = fixture.client(ClientRole::Hook).await;
+        let events = [
+            (
+                1,
+                Event::TurnStarted {
+                    turn_id: Some("parent".into()),
+                    status_text: "Working".into(),
+                },
+            ),
+            (
+                100,
+                Event::CodexSubagentStarted {
+                    agent_id: "child".into(),
+                    turn_id: "child-turn".into(),
+                },
+            ),
+            (
+                101,
+                Event::PermissionWaitStarted {
+                    reason: AgentWaitReason::Approval,
+                    scope: Some("child:child:child-turn".into()),
+                    message: None,
+                    status_text: "Approval required".into(),
+                },
+            ),
+            (
+                2,
+                Event::CodexTurnStopped {
+                    turn_id: "parent".into(),
+                    message: None,
+                    status_text: "Completed".into(),
+                    stop_hook_active: false,
+                },
+            ),
+        ];
+        for (seq, event) in events {
+            assert!(matches!(
+                hook.call(lifecycle_event(&agent, seq, event))
+                    .await
+                    .unwrap(),
+                HostResponse::LifecycleReceipt { applied: true }
+            ));
+        }
+        sleep(Duration::from_millis(600)).await;
+        {
+            let registry = fixture.host.registry();
+            assert!(!registry
+                .connections
+                .values()
+                .any(|role| *role == ClientRole::Gui));
+            let presence = registry.entries[&agent.instance]
+                .agent
+                .presence
+                .as_ref()
+                .unwrap();
+            assert_eq!(presence.status, AgentStatus::Blocked);
+            assert_eq!(presence.pending_waits.len(), 1);
+        }
+        hook.call(lifecycle_event(
+            &agent,
+            102,
+            Event::CodexSubagentStopped {
+                agent_id: "child".into(),
+                turn_id: "child-turn".into(),
+            },
+        ))
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(3), async {
+            loop {
+                if fixture.host.registry().entries[&agent.instance]
+                    .agent
+                    .presence
+                    .as_ref()
+                    .is_some_and(|presence| presence.status == AgentStatus::Idle)
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("Host must settle Stop without a GUI timer");
+        assert!(fixture
+            .host
+            .registry()
+            .policy
+            .deadline(agent.instance)
+            .is_none());
+        // A duplicate cannot complete again, and old settlement cannot finish new work.
+        assert!(matches!(
+            hook.call(lifecycle_event(
+                &agent,
+                2,
+                Event::CodexTurnStopped {
+                    turn_id: "parent".into(),
+                    message: None,
+                    status_text: "Completed".into(),
+                    stop_hook_active: false
+                }
+            ))
+            .await
+            .unwrap(),
+            HostResponse::LifecycleReceipt { applied: false }
+        ));
+        hook.call(lifecycle_event(
+            &agent,
+            3,
+            Event::TurnStarted {
+                turn_id: Some("next".into()),
+                status_text: "Working".into(),
+            },
+        ))
+        .await
+        .unwrap();
+        hook.call(lifecycle_event(
+            &agent,
+            4,
+            Event::CodexTurnStopped {
+                turn_id: "next".into(),
+                message: None,
+                status_text: "Completed".into(),
+                stop_hook_active: false,
+            },
+        ))
+        .await
+        .unwrap();
+        hook.call(lifecycle_event(
+            &agent,
+            5,
+            Event::TurnStarted {
+                turn_id: Some("newer".into()),
+                status_text: "Working".into(),
+            },
+        ))
+        .await
+        .unwrap();
+        sleep(Duration::from_millis(600)).await;
+        let registry = fixture.host.registry();
+        let entry = &registry.entries[&agent.instance];
+        assert_eq!(
+            entry.agent.presence.as_ref().unwrap().status,
+            AgentStatus::Working
+        );
+        assert_eq!(entry.agent.state, ProcessState::Running);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_ingress_rejects_foreign_epoch_process_and_session_without_mutation() {
+        use flowmux_ipc::protocol::AgentLifecycleEvent as Event;
+        let fixture = Fixture::new().await;
+        let launcher = fixture.client(ClientRole::Relay).await;
+        let first = fixture.launch_agent(&launcher, "sleep 30").await;
+        let second = fixture.launch_agent(&launcher, "sleep 30").await;
+        let hook = fixture.client(ClientRole::Hook).await;
+        let start = || Event::TurnStarted {
+            turn_id: Some("turn".into()),
+            status_text: "Working".into(),
+        };
+        hook.call(lifecycle_event(&first, 1, start()))
+            .await
+            .unwrap();
+        let mut invalid = lifecycle_event(&first, 100, start());
+        if let HostRequest::Lifecycle { epoch, .. } = &mut invalid {
+            *epoch = Uuid::new_v4();
+        }
+        assert!(hook.call(invalid).await.is_err());
+        let mut foreign = first.clone();
+        foreign.instance = second.instance;
+        assert!(hook
+            .call(lifecycle_event(&foreign, 100, start()))
+            .await
+            .is_err());
+        for session in [String::new(), "x".repeat(257)] {
+            let mut invalid = lifecycle_event(&first, 100, start());
+            if let HostRequest::Lifecycle { session_id, .. } = &mut invalid {
+                *session_id = session;
+            }
+            assert!(hook.call(invalid).await.is_err());
+        }
+        assert!(hook
+            .call(lifecycle_event(
+                &first,
+                100,
+                Event::ProgressObserved {
+                    status_text: "x".repeat(64 * 1024),
+                }
+            ))
+            .await
+            .is_err());
+        foreign = first.clone();
+        foreign.process_start = foreign.process_start.map(|start| start.wrapping_add(1));
+        assert!(hook
+            .call(lifecycle_event(&foreign, 100, start()))
+            .await
+            .is_err());
+        assert!(hook
+            .call(HostRequest::Terminate {
+                instance: first.instance,
+                mode: TerminateMode::Force
+            })
+            .await
+            .is_err());
+        let mut wrong_session = lifecycle_event(&first, 100, start());
+        if let HostRequest::Lifecycle { session_id, .. } = &mut wrong_session {
+            *session_id = "foreign-session".into();
+        }
+        assert!(matches!(
+            hook.call(wrong_session).await.unwrap(),
+            HostResponse::LifecycleReceipt { applied: false }
+        ));
+        let observer = fixture.client(ClientRole::Observer).await;
+        assert!(observer
+            .call(lifecycle_event(&first, 2, start()))
+            .await
+            .is_err());
+        let HostResponse::List { agents, .. } = observer.call(HostRequest::List).await.unwrap()
+        else {
+            panic!("expected list");
+        };
+        assert_eq!(
+            agents
+                .iter()
+                .find(|agent| agent.instance == first.instance)
+                .unwrap()
+                .presence
+                .as_ref()
+                .unwrap()
+                .seq,
+            Some(1)
+        );
+        assert!(agents
+            .iter()
+            .find(|agent| agent.instance == second.instance)
+            .unwrap()
+            .presence
+            .is_none());
+        assert!(matches!(
+            hook.call(lifecycle_event(&first, 2, start()))
+                .await
+                .unwrap(),
+            HostResponse::LifecycleReceipt { applied: true }
+        ));
+        hook.call(lifecycle_event(&second, 1, start()))
+            .await
+            .unwrap();
     }
 
     async fn prepare(

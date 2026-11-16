@@ -3,7 +3,7 @@
 //! epoch; persisted view bindings never establish process liveness.
 
 use crate::{client::Client, Request, Response, RpcError};
-use flowmux_core::{AgentInstanceId, PaneId, SurfaceId, WorkspaceId};
+use flowmux_core::{AgentInstanceId, AgentPresence, PaneId, SurfaceId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -81,6 +81,7 @@ pub enum ClientRole {
     Gui,
     Relay,
     Observer,
+    Hook,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +125,9 @@ pub struct AgentInstance {
     pub exit_status: Option<i32>,
     pub view: Option<AgentViewLocation>,
     pub error: Option<String>,
+    /// Host-owned hook state; independent of any attached terminal surface.
+    #[serde(default)]
+    pub presence: Option<AgentPresence>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +150,15 @@ pub enum HostRequest {
         launch: LaunchAgent,
     },
     List,
+    Lifecycle {
+        instance: AgentInstanceId,
+        epoch: Uuid,
+        pid: u32,
+        process_start: u64,
+        session_id: String,
+        seq: u64,
+        event: crate::protocol::AgentLifecycleEvent,
+    },
     PrepareAttach {
         instance: AgentInstanceId,
         epoch: Uuid,
@@ -220,8 +233,12 @@ pub enum HostResponse {
         connection: u64,
     },
     Ok,
+    LifecycleReceipt {
+        /// Accepted by the ledger; a display transition is not required.
+        applied: bool,
+    },
     Launched {
-        agent: AgentInstance,
+        agent: Box<AgentInstance>,
     },
     List {
         epoch: Uuid,

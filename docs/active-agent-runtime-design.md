@@ -308,7 +308,7 @@ deadline은 `max(last_gui_disconnected_at, verified_completed_at) + 30분`이다
 
 ### 실제 작업과 일시적 이벤트 구분
 
-UI의 `Working/Idle` 전이를 종료 타이머에 직접 연결하지 않는다. 기존 `agent_runtime.rs`의 turn/child/wait ledger와 완료 중복 제거를 확장하여 종료 판단에 쓸 근거를 별도로 제공한다. 현재 ledger는 surface에 결합되어 있고 일부 provider의 관측은 불완전하므로 그대로 자동 종료에 사용 가능한 것으로 간주하지 않는다.
+UI의 `Working/Idle` 전이를 종료 타이머에 직접 연결하지 않는다. 기존 `agent_runtime.rs`의 turn/child/wait ledger와 완료 중복 제거를 확장하여 종료 판단에 쓸 근거를 별도로 제공한다. 공통 ledger와 hook 전이는 소유자 ID를 분리했지만 기존 저장·관측 호출부는 surface를 사용하고 일부 provider의 관측은 불완전하므로 그대로 자동 종료에 사용 가능한 것으로 간주하지 않는다.
 
 | 관측 | 종료 판단에 주는 영향 |
 | --- | --- |
@@ -567,10 +567,22 @@ Runtime 구현 완료 판정에는 unit test와 IPC test뿐 아니라 실제 Flo
 
 이번 변경은 GUI relay에 관리 연결 gate를 추가한다. 관리 연결이 없으면 준비를 거절하고, 준비 후 마지막 GUI가 끊기면 확정을 거절하며 기존 owner를 유지한다. 관리 연결 복구 후 동일 프로세스에 연결하는 Host 회귀 검사가 통과했다. 이 계약을 모르는 Host에 조용히 연결하지 않도록 Host protocol을 **v2**로 올렸다. 구버전 Host는 종료·교체하지 않고 버전 오류를 반환하므로 살아 있는 실행을 새 Host나 resume으로 대체하지 않는다.
 
+**공통 lifecycle 판정 분리:** [lifecycle.rs](../crates/flowmux-daemon/src/state_store/agent_runtime/lifecycle.rs)로 hook identity·순서 검사, child/tool/wait 전이와 Codex Stop grace 판정을 옮겼다. ledger와 session별 checkpoint는 소유자 ID를 매개변수로 받으며 기존 일반 terminal 경로는 `SurfaceId`, 화면 없는 단위 검증은 `AgentInstanceId`를 사용한다. workspace 적용·알림 전달·보고 거절 시 복구는 기존 `StateStore` 호출부에 남겼다. 이 분리 자체는 기존 판정 결과를 보존하며, 완료 후 늦은 progress의 의미 정규화·전체 완료 검증을 추가하지 않는다.
+
+**Host lifecycle ingress:** 후속 변경에서 `Hook` 연결 역할과 `Lifecycle` 요청을 추가했다. Host는 InstanceId·epoch·root PID·process birth를 검사하고 registry의 provider와 native session별로 공유 reducer를 호출한다. Hook 연결은 lifecycle 전달만 허용하며 GUI 관리 연결로 계산하지 않는다. TerminalActor가 ledger·presence와 Codex Stop grace 타이머를 소유하므로 GUI EOF나 tab 이동으로 대기 상태를 지우지 않는다. 늦은 grace는 새 turn이나 종료 중인 root를 완료시키지 않으며, idle 표시는 전체 완료 검증이나 자동 회수 예약에 사용하지 않는다. `List` 응답에는 Host가 소유한 `presence`를 추가했다.
+
+이 ingress는 root identity로 전달하는 하위 protocol 단계다. 설치된 CLI hook의 Host routing, native SessionStart/SessionEnd 및 세션 교체, nested provider process 식별, 화면 기반 provider의 headless 관측, GUI의 상태 투영·알림은 아직 연결하지 않았다. 기존 shim/default launch 경로를 이 ingress로 전환하지 않으며, managed routing 실패를 GUI socket 탐색으로 우회하는 기능도 추가하지 않는다.
+
+공유 reducer 분리와 Host ingress의 Linux 검증에서 daemon library **241개·1개 ignored**, IPC library **85개**, CLI library **137개·1개 ignored**가 통과했다. 잘못된 epoch·InstanceId·process birth·session·payload, 권한 제한, GUI 없는 child/wait 보존과 Codex grace, 오래된 Stop 뒤 새 turn을 검사했다. 기존 5개 provider의 GUI native hook 재생도 통과했다. 격리 GUI의 직접 Host 경로는 **12개 live 검사**에서 승인 대기 보존, GUI 없는 완료·다음 turn, 중복 Stop 무효, 동일 PID·화면·한글 입력 복원을 확인했다. lifecycle 전달은 fixture의 직접 RPC이며 제품 hook routing을 검증한 결과는 아니다.
+
+최종 binary로 `--service-start` 경로의 **13개 live 검사**도 통과했다. 실제 `agent run`의 사용자 서비스 시작과 GUI 분리, GUI 정상 종료·SIGKILL 후 실행 유지, layout 복원과 자연 종료 뒤 빈 Host 정리를 포함한다. 제품 binary build, workspace Clippy(`--all-targets -- -D warnings`), format 검사도 통과했다. 추가한 lifecycle 상태는 launch 응답의 메모리 크기를 늘리므로 해당 응답의 agent를 box로 보관하며 JSON 형식은 유지한다.
+
+컴파일과 병행한 첫 live 실행은 기존 512KiB 입력 ACK 대기 중 GUI IPC timeout으로 실패했고, 컴파일을 분리한 재실행은 통과했다. 실패 원인은 확정하지 않았다. 테스트의 control/hook 연결은 입력 부하 단계 뒤 새로 열어 서버의 idle connection 만료와 lifecycle 검사를 분리했다. 이번 단계에서 전체 공유 CI와 macOS 검증은 수행하지 않았다.
+
 | 다음 구현 단계 | 완료 조건과 현재 제한 |
 | --- | --- |
 | 명시적 Host 시작·GUI 관리 연결 | 상시 GUI 관리 연결·옵션 변경 전파·관리 연결 gate를 추가. Linux CLI의 독립 service 시작과 GUI 종료 경계 live 검사 통과. GUI `New Agent` 연결·플랫폼별 시작·자동 종료 수락과 handshake 경합 검증은 남음 |
-| provider 관측과 완료 adapter | 기존 hook·process·screen 규칙을 InstanceId 기준으로 이관하고 §3의 지연 progress 문제를 정규화. 현재 Host는 provider hook 및 pane context 명령을 처리하지 않으므로 설치 shim을 기본 managed 실행으로 전환하지 않음 |
+| provider 관측과 완료 adapter | 공통 hook·Stop grace 판정과 소유자 ID 분리는 완료. Host의 InstanceId ledger·hook ingress·process/headless 관측 연결과 §3의 지연 progress 정규화는 남음. 현재 Host는 provider hook 및 pane context 명령을 처리하지 않으므로 설치 shim을 기본 managed 실행으로 전환하지 않음 |
 | GUI launch·저장 binding·재연결 | 명시적 기존 instance 열기와 저장 binding의 자동 layout 재연결, CLI `agent run`을 추가. 기본 provider launch·resume/fork의 Host 이관, 연결 완료 ACK·실패 UI는 추가 구현 필요 |
 | Agents 목록·열기·이동·종료 | CLI의 기존 실행 열기·같은 GUI의 tab 이동은 제공. registry 기반 목록, Host의 실제 표시 위치, 목적지 선택, pane drop, 명시적 종료 UI는 구현 전 |
 | 안전한 자동 회수 | 전체 완료 및 provider의 원자적 idle 종료 수락 후 설정 시간 적용. 현재 후보 판정기만 있으며 실제 30분 자동 종료는 검증 전 |

@@ -5,6 +5,8 @@
 //! lock still precedes the state lock; persistence and GUI effects stay with
 //! their existing owners. StateStore clones share one runtime, not copies.
 
+mod lifecycle;
+
 use super::StateStore;
 use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_completion, detect_agent_idle_name_from_signals,
@@ -17,6 +19,7 @@ use flowmux_core::{
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
+pub(crate) use lifecycle::LifecycleTransition;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
@@ -95,8 +98,8 @@ pub struct LocatedAgentPresence {
     pub presence: AgentPresence,
 }
 
-type AgentLifecycleKey = (SurfaceId, String, String);
-type AgentScopeSequences = HashMap<AgentLifecycleKey, HashMap<String, u64>>;
+type AgentLifecycleKey<Owner = SurfaceId> = (Owner, String, String);
+type AgentScopeSequences<Owner> = HashMap<AgentLifecycleKey<Owner>, HashMap<String, u64>>;
 const SESSION_PERMISSION_SCOPE: &str = "session";
 const SESSION_WAIT_SCOPE: &str = "session";
 
@@ -212,40 +215,41 @@ fn provider_terminal_outcome(agent: &str, screen: &str) -> Option<AgentTurnOutco
 }
 
 #[derive(Debug, Default)]
-pub(super) struct AgentLifecycleRuntime {
-    /// Latest recognized retry frame per live surface, including an empty frame.
-    retry_screen_fingerprints: HashMap<SurfaceId, u64>,
+pub(crate) struct AgentLifecycleRuntime<Owner = SurfaceId> {
+    /// Latest recognized retry frame per owner, including an empty frame.
+    retry_screen_fingerprints: HashMap<Owner, u64>,
     /// One receipt per session's most recently completed response. Accepted new
     /// work retires it; notification-log retention does not.
-    completion_notifications: HashMap<AgentLifecycleKey, CompletionNotification>,
-    provider_turns: HashMap<AgentLifecycleKey, ProviderTurn>,
+    completion_notifications: HashMap<AgentLifecycleKey<Owner>, CompletionNotification>,
+    provider_turns: HashMap<AgentLifecycleKey<Owner>, ProviderTurn>,
     /// Local process polls found neither an agent nor an out-of-tree transport.
-    screen_absent: HashSet<SurfaceId>,
+    screen_absent: HashSet<Owner>,
     /// One record per tool-use id: Some while waiting, None once resolved.
     /// Keep resolved ids until the turn boundary so duplicate or reordered
     /// hook deliveries cannot reopen them. Distinct calls keep distinct ids.
-    pub(super) waits: HashMap<AgentLifecycleKey, HashMap<String, Option<PendingAgentWait>>>,
-    pub(super) permission_waits: HashMap<AgentLifecycleKey, HashMap<String, PendingAgentWait>>,
-    pub(super) permission_event_seq: AgentScopeSequences,
-    pub(super) session_waits: HashMap<AgentLifecycleKey, HashMap<String, PendingAgentWait>>,
-    pub(super) session_wait_event_seq: AgentScopeSequences,
+    pub(super) waits: HashMap<AgentLifecycleKey<Owner>, HashMap<String, Option<PendingAgentWait>>>,
+    pub(super) permission_waits:
+        HashMap<AgentLifecycleKey<Owner>, HashMap<String, PendingAgentWait>>,
+    pub(super) permission_event_seq: AgentScopeSequences<Owner>,
+    pub(super) session_waits: HashMap<AgentLifecycleKey<Owner>, HashMap<String, PendingAgentWait>>,
+    pub(super) session_wait_event_seq: AgentScopeSequences<Owner>,
     /// Highest non-child event observed, used to reject delayed terminal
     /// boundaries and native SessionStart. Codex child ordering is tracked by
     /// the child-specific sequence maps below so its start/Stop ingress race
     /// cannot invalidate a legitimate parent Stop.
-    pub(super) last_seq: HashMap<AgentLifecycleKey, u64>,
+    pub(super) last_seq: HashMap<AgentLifecycleKey<Owner>, u64>,
     /// Latest root/session boundary. Deltas older than this belong to a prior
     /// turn even when a different parallel item arrived later.
-    pub(super) boundary_seq: HashMap<AgentLifecycleKey, u64>,
-    pub(super) ended: HashMap<AgentLifecycleKey, EndedAgentLifecycle>,
-    pub(super) ended_order: VecDeque<AgentLifecycleKey>,
-    pub(super) codex_turns: HashMap<(SurfaceId, String), CodexTurnLedger>,
+    pub(super) boundary_seq: HashMap<AgentLifecycleKey<Owner>, u64>,
+    pub(super) ended: HashMap<AgentLifecycleKey<Owner>, EndedAgentLifecycle>,
+    pub(super) ended_order: VecDeque<AgentLifecycleKey<Owner>>,
+    pub(super) codex_turns: HashMap<(Owner, String), CodexTurnLedger>,
 }
 
 // A rejected report restores only the session this event can mutate. Other
 // sessions and bounded tombstones never participate in a per-event copy.
-struct LifecycleCheckpoint {
-    key: AgentLifecycleKey,
+struct LifecycleCheckpoint<Owner = SurfaceId> {
+    key: AgentLifecycleKey<Owner>,
     completion_notification: Option<CompletionNotification>,
     waits: Option<HashMap<String, Option<PendingAgentWait>>>,
     permission_waits: Option<HashMap<String, PendingAgentWait>>,
@@ -258,8 +262,8 @@ struct LifecycleCheckpoint {
     provider_turn: Option<ProviderTurn>,
 }
 
-impl LifecycleCheckpoint {
-    fn capture(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> Self {
+impl<Owner: Copy + Eq + Hash> LifecycleCheckpoint<Owner> {
+    fn capture(runtime: &AgentLifecycleRuntime<Owner>, key: &AgentLifecycleKey<Owner>) -> Self {
         Self {
             key: key.clone(),
             completion_notification: runtime.completion_notifications.get(key).copied(),
@@ -275,7 +279,7 @@ impl LifecycleCheckpoint {
         }
     }
 
-    fn restore(self, runtime: &mut AgentLifecycleRuntime) {
+    fn restore(self, runtime: &mut AgentLifecycleRuntime<Owner>) {
         restore_entry(&mut runtime.provider_turns, &self.key, self.provider_turn);
         restore_entry(
             &mut runtime.completion_notifications,
@@ -421,9 +425,9 @@ fn set_codex_ledger_owner_if_missing(ledger: &mut CodexTurnLedger, pid: Option<u
     }
 }
 
-fn remember_ended_agent_lifecycle(
-    runtime: &mut AgentLifecycleRuntime,
-    key: AgentLifecycleKey,
+fn remember_ended_agent_lifecycle<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: AgentLifecycleKey<Owner>,
     pid: Option<u32>,
     seq: Option<u64>,
     reactivate_on_process_return: bool,
@@ -514,9 +518,9 @@ fn explain_agent_children(
     })
 }
 
-fn pending_wait_summary(
-    runtime: &AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn pending_wait_summary<Owner: Copy + Eq + Hash>(
+    runtime: &AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
 ) -> Vec<AgentWaitSummary> {
     let mut summary = BTreeMap::<_, AgentWaitSummary>::new();
     let tool = runtime
@@ -567,7 +571,10 @@ fn pending_wait_summary(
     summary.into_values().collect()
 }
 
-fn lifecycle_has_waits(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> bool {
+fn lifecycle_has_waits<Owner: Copy + Eq + Hash>(
+    runtime: &AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
+) -> bool {
     runtime
         .waits
         .get(key)
@@ -582,9 +589,9 @@ fn lifecycle_has_waits(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey)
             .is_some_and(|scopes| !scopes.is_empty())
 }
 
-fn clear_permission_scope(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_permission_scope<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
     scope: &str,
 ) -> bool {
     let removed = runtime
@@ -601,9 +608,9 @@ fn clear_permission_scope(
     removed
 }
 
-fn clear_permission_scope_if_newer(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_permission_scope_if_newer<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
     scope: &str,
     seq: Option<u64>,
 ) -> bool {
@@ -633,9 +640,9 @@ fn clear_permission_scope_if_newer(
     true
 }
 
-fn clear_codex_root_permission_scopes(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_codex_root_permission_scopes<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
 ) {
     if let Some(scopes) = runtime.permission_waits.get_mut(key) {
         scopes.retain(|scope, _| !scope.starts_with("root:"));
@@ -645,16 +652,16 @@ fn clear_codex_root_permission_scopes(
     }
 }
 
-fn clear_permission_event_seq_for_key(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_permission_event_seq_for_key<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
 ) {
     runtime.permission_event_seq.remove(key);
 }
 
-fn clear_session_wait_scope(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_session_wait_scope<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
     scope: &str,
 ) -> bool {
     let removed = runtime
@@ -671,21 +678,21 @@ fn clear_session_wait_scope(
     removed
 }
 
-fn clear_session_wait_event_seq_for_key(
-    runtime: &mut AgentLifecycleRuntime,
-    key: &AgentLifecycleKey,
+fn clear_session_wait_event_seq_for_key<Owner: Copy + Eq + Hash>(
+    runtime: &mut AgentLifecycleRuntime<Owner>,
+    key: &AgentLifecycleKey<Owner>,
 ) {
     runtime.session_wait_event_seq.remove(key);
 }
 
-fn clear_agent_lifecycle_runtime(
-    lifecycle: &mut AgentLifecycleRuntime,
-    surface: SurfaceId,
+fn clear_agent_lifecycle_runtime<Owner: Copy + Eq + Hash>(
+    lifecycle: &mut AgentLifecycleRuntime<Owner>,
+    surface: Owner,
     agent: Option<&str>,
     session_id: Option<&str>,
     expected_pid: Option<u32>,
 ) {
-    let keep_wait_key = |(key_surface, key_agent, key_session): &AgentLifecycleKey| {
+    let keep_wait_key = |(key_surface, key_agent, key_session): &AgentLifecycleKey<Owner>| {
         *key_surface != surface
             || agent.is_some_and(|agent| !key_agent.eq_ignore_ascii_case(agent))
             || session_id.is_some_and(|session| key_session != session)
@@ -1414,7 +1421,7 @@ impl StateStore {
         lifecycle_event: AgentLifecycleEvent,
         surface_visible: bool,
     ) -> AgentLifecycleResult {
-        use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
+        use flowmux_core::AgentActivity::Idle;
         if !self.is_local_agent_surface(surface_id).await {
             tracing::debug!(target: "flowmux_agent", reason = "unsupported_surface", changed = false, "agent decision");
             return AgentLifecycleResult::default();
@@ -1425,781 +1432,34 @@ impl StateStore {
         let wait_key = (surface_id, agent.clone(), session_id.to_string());
         let current = self.located_agent_presence(surface_id).await;
         trace_agent_before(current.as_ref());
-        // SessionEnd/dead-PID teardown leaves a bounded tombstone. A native
-        // SessionStart normally establishes the next epoch. The one exception
-        // is a live outer agent returning after a nested agent owned the pane:
-        // process polling must first restore the same process identity, and the
-        // returning hook must match the displaced live PID with a newer event.
-        if let Some(ended) = runtime.ended.get(&wait_key) {
-            let can_reactivate = ended.reactivate_on_process_return
-                && current.as_ref().is_some_and(|located| {
-                    located.presence.name.eq_ignore_ascii_case(&agent)
-                        && located.presence.source.as_deref()
-                            == Some(flowmux_core::AGENT_SOURCE_PROC)
-                })
-                && ended.pid.zip(pid).is_some_and(|(ended, incoming)| {
-                    ended == incoming && flowmux_procmon::pid_alive(ended)
-                })
-                && seq.is_some_and(|incoming| ended.seq.is_none_or(|floor| incoming > floor));
-            if !can_reactivate {
-                tracing::debug!(target: "flowmux_agent", reason = "ended_session", changed = false, "agent decision");
-                return AgentLifecycleResult::default();
-            }
-            runtime.ended.remove(&wait_key);
-            runtime.ended_order.retain(|ended| ended != &wait_key);
-        }
-        if agent == "codex"
-            && runtime
-                .codex_turns
-                .get(&(surface_id, session_id.to_string()))
-                .and_then(|ledger| ledger.owner_pid)
-                .zip(pid)
-                .is_some_and(|(owner, incoming)| owner != incoming)
-        {
-            tracing::debug!(target: "flowmux_agent", reason = "owner_pid_mismatch", changed = false, "agent decision");
-            return AgentLifecycleResult::default();
-        }
-        if current.as_ref().is_some_and(|located| {
-            let presence = &located.presence;
-            let authoritative_other_agent = !presence.name.eq_ignore_ascii_case(&agent)
-                && matches!(
-                    presence.source.as_deref(),
-                    Some("flowmux:hook") | Some(flowmux_core::AGENT_SOURCE_PROC)
-                );
-            let other_session = presence.name.eq_ignore_ascii_case(&agent)
-                && presence
-                    .session_id
-                    .as_deref()
-                    .is_some_and(|current| current != session_id);
-            let live_other_pid = presence.name.eq_ignore_ascii_case(&agent)
-                && presence.pid.zip(pid).is_some_and(|(current, incoming)| {
-                    current != incoming && flowmux_procmon::pid_alive(current)
-                });
-            authoritative_other_agent || other_session || live_other_pid
-        }) {
-            tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
-            return AgentLifecycleResult::default();
-        }
-        let terminal_boundary = matches!(
-            &lifecycle_event,
-            AgentLifecycleEvent::TurnStopped { .. }
-                | AgentLifecycleEvent::TurnFinished { .. }
-                | AgentLifecycleEvent::TurnStopRequested { .. }
-                | AgentLifecycleEvent::CodexTurnStopped { .. }
-                | AgentLifecycleEvent::CodexTurnInterrupted { .. }
-                | AgentLifecycleEvent::SessionWaitResolved { resume: false, .. }
-        );
-        let mut sequence_floor = runtime.boundary_seq.get(&wait_key).copied();
-        if terminal_boundary {
-            sequence_floor = sequence_floor.max(runtime.last_seq.get(&wait_key).copied());
-        }
-        if match (sequence_floor, seq) {
-            (Some(floor), Some(incoming)) => incoming <= floor,
-            (Some(_), None) => true,
-            _ => false,
-        } {
-            tracing::debug!(target: "flowmux_agent", reason = "stale_sequence", changed = false, "agent decision");
-            return AgentLifecycleResult::default();
-        }
         let runtime_before = current
             .is_none()
             .then(|| LifecycleCheckpoint::capture(&runtime, &wait_key));
-        let codex_child_event = agent == "codex"
-            && (matches!(
-                &lifecycle_event,
-                AgentLifecycleEvent::CodexSubagentStarted { .. }
-                    | AgentLifecycleEvent::CodexChildProgressObserved { .. }
-                    | AgentLifecycleEvent::CodexSubagentStopped { .. }
-            ) || matches!(
-                &lifecycle_event,
-                AgentLifecycleEvent::PermissionWaitStarted {
-                    scope: Some(scope),
-                    ..
-                } if scope.starts_with("child:")
-            ));
-        if let Some(seq) = seq.filter(|_| !codex_child_event) {
-            runtime
-                .last_seq
-                .entry(wait_key.clone())
-                .and_modify(|current| *current = (*current).max(seq))
-                .or_insert(seq);
-            if matches!(&lifecycle_event, AgentLifecycleEvent::TurnStarted { .. }) {
-                runtime.boundary_seq.insert(wait_key.clone(), seq);
-            }
-        }
-        let notification_scope = match &lifecycle_event {
-            AgentLifecycleEvent::WaitStarted { item_id, .. } => {
-                Some((AgentWaitScope::Tool, item_id.clone()))
-            }
-            AgentLifecycleEvent::PermissionWaitStarted { scope, .. } => Some((
-                AgentWaitScope::Permission,
-                scope
-                    .clone()
-                    .unwrap_or_else(|| SESSION_PERMISSION_SCOPE.into()),
-            )),
-            AgentLifecycleEvent::SessionWaitStarted { scope, .. } => Some((
-                AgentWaitScope::Session,
-                scope.clone().unwrap_or_else(|| SESSION_WAIT_SCOPE.into()),
-            )),
-            _ => None,
+        let Some(transition) = runtime.reduce(
+            surface_id,
+            &agent,
+            pid,
+            seq,
+            session_id,
+            lifecycle_event,
+            current.as_ref().map(|located| &located.presence),
+        ) else {
+            return AgentLifecycleResult::default();
         };
-        let waits_before = pending_wait_summary(&runtime, &wait_key);
-        let mut completed = false;
-        let mut turn_finished = false;
-        let turn_boundary_seq = seq;
-        let mut settle_codex_after_grace = None;
-        let mut completion_message = None;
-        let mut turn_outcome = None;
-        let mut no_transition_reason = "ledger_only";
-        let decision = match lifecycle_event {
-            AgentLifecycleEvent::TurnStarted {
-                turn_id,
-                status_text,
-            } => {
-                if matches!(agent.as_str(), "gemini" | "antigravity" | "cline") {
-                    runtime
-                        .provider_turns
-                        .insert(wait_key.clone(), ProviderTurn::default());
-                }
-                runtime.waits.remove(&wait_key);
-                if agent == "codex" {
-                    clear_codex_root_permission_scopes(&mut runtime, &wait_key);
-                    let ledger = runtime
-                        .codex_turns
-                        .entry((surface_id, session_id.to_string()))
-                        .or_default();
-                    set_codex_ledger_owner_if_missing(ledger, pid);
-                    ledger.pending_parent_stop = None;
-                    if turn_id.is_some() {
-                        ledger.current_parent_turn = turn_id;
-                    }
-                } else {
-                    runtime.permission_waits.remove(&wait_key);
-                    clear_permission_event_seq_for_key(&mut runtime, &wait_key);
-                    runtime.session_waits.remove(&wait_key);
-                    clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
-                }
-                Some((Running, None, status_text))
-            }
-            AgentLifecycleEvent::ProgressObserved { status_text } => {
-                if let Some(turn) = runtime.provider_turns.get_mut(&wait_key) {
-                    turn.stop = None;
-                    turn.idle_frame = None;
-                }
-                if agent == "codex" {
-                    if let Some(ledger) = runtime
-                        .codex_turns
-                        .get_mut(&(surface_id, session_id.to_string()))
-                    {
-                        let supersedes_stop = ledger.active_children.is_empty()
-                            && ledger.pending_parent_stop.as_ref().is_some_and(|pending| {
-                                match (pending.seq, seq) {
-                                    (Some(stop), Some(incoming)) => incoming > stop,
-                                    (None, Some(_)) => true,
-                                    _ => false,
-                                }
-                            });
-                        if supersedes_stop {
-                            ledger.pending_parent_stop = None;
-                        }
-                    }
-                }
-                (!lifecycle_has_waits(&runtime, &wait_key)).then_some((Running, None, status_text))
-            }
-            AgentLifecycleEvent::CodexRootProgressObserved {
-                turn_id,
-                status_text,
-            } => {
-                if agent == "codex" {
-                    if let Some(ledger) = runtime
-                        .codex_turns
-                        .get_mut(&(surface_id, session_id.to_string()))
-                    {
-                        let supersedes_stop =
-                            ledger.pending_parent_stop.as_ref().is_some_and(|pending| {
-                                match (pending.seq, seq) {
-                                    (Some(stop), Some(incoming)) => incoming > stop,
-                                    (None, Some(_)) => true,
-                                    _ => false,
-                                }
-                            });
-                        if supersedes_stop {
-                            ledger.pending_parent_stop = None;
-                        }
-                        ledger.current_parent_turn = Some(turn_id);
-                    }
-                }
-                (!lifecycle_has_waits(&runtime, &wait_key)).then_some((Running, None, status_text))
-            }
-            AgentLifecycleEvent::PermissionWaitStarted {
-                reason,
-                message,
-                status_text,
-                scope,
-            } => {
-                let scope = scope.unwrap_or_else(|| SESSION_PERMISSION_SCOPE.to_string());
-                let newer = match (
-                    runtime
-                        .permission_event_seq
-                        .get(&wait_key)
-                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
-                        .copied(),
-                    seq,
-                ) {
-                    (Some(current), Some(incoming)) => incoming > current,
-                    (Some(_), None) => false,
-                    _ => true,
-                };
-                if newer {
-                    if let Some(seq) = seq {
-                        runtime
-                            .permission_event_seq
-                            .entry(wait_key.clone())
-                            .or_default()
-                            .insert(scope.to_string(), seq);
-                    }
-                    record_scope_wait(
-                        runtime
-                            .permission_waits
-                            .entry(wait_key.clone())
-                            .or_default(),
-                        scope,
-                        reason,
-                        Some(AgentWaitContext {
-                            actor: flowmux_core::AgentWaitActor::User,
-                            ..Default::default()
-                        }),
-                    );
-                    Some((NeedsInput, message, status_text))
-                } else {
-                    None
-                }
-            }
-            AgentLifecycleEvent::SessionWaitStarted {
-                context,
-                outcome,
-                reason,
-                message,
-                status_text,
-                scope,
-            } => {
-                let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
-                let newer = match (
-                    runtime
-                        .session_wait_event_seq
-                        .get(&wait_key)
-                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
-                        .copied(),
-                    seq,
-                ) {
-                    (Some(current), Some(incoming)) => incoming > current,
-                    (Some(_), None) => false,
-                    _ => true,
-                };
-                if newer {
-                    if let Some(seq) = seq {
-                        runtime
-                            .session_wait_event_seq
-                            .entry(wait_key.clone())
-                            .or_default()
-                            .insert(scope.to_string(), seq);
-                    }
-                    let baseline = runtime.retry_screen_fingerprints.get(&surface_id).copied();
-                    let scopes = runtime.session_waits.entry(wait_key.clone()).or_default();
-                    let before = scopes
-                        .get(&scope)
-                        .map(|wait| (wait.notification_id, wait.reason));
-                    record_scope_wait(scopes, scope.clone(), reason, context);
-                    let wait = scopes.get_mut(&scope).unwrap();
-                    if before != Some((wait.notification_id, wait.reason)) {
-                        wait.screen_baseline = baseline;
-                    }
-                    turn_outcome = outcome;
-                    Some((NeedsInput, message, status_text))
-                } else {
-                    None
-                }
-            }
-            AgentLifecycleEvent::SessionWaitResolved {
-                status_text,
-                resume,
-                scope,
-            } => {
-                let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
-                let newer = match (
-                    runtime
-                        .session_wait_event_seq
-                        .get(&wait_key)
-                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
-                        .copied(),
-                    seq,
-                ) {
-                    (Some(current), Some(incoming)) => incoming > current,
-                    (Some(_), None) => false,
-                    _ => true,
-                };
-                if !newer {
-                    None
-                } else {
-                    if let Some(seq) = seq {
-                        runtime
-                            .session_wait_event_seq
-                            .entry(wait_key.clone())
-                            .or_default()
-                            .insert(scope.to_string(), seq);
-                    }
-                    clear_session_wait_scope(&mut runtime, &wait_key, &scope);
-                    if !resume {
-                        // Ending a wait is not evidence that a failed response succeeded.
-                        turn_outcome = current.as_ref().and_then(|c| c.presence.turn_outcome);
-                        if let Some(seq) = seq {
-                            runtime.boundary_seq.insert(wait_key.clone(), seq);
-                        }
-                    }
-                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
-                        if resume { Running } else { Idle },
-                        None,
-                        status_text,
-                    ))
-                }
-            }
-            AgentLifecycleEvent::ToolBatchFinished { status_text } => {
-                let scope = SESSION_PERMISSION_SCOPE;
-                let newer = match (
-                    runtime
-                        .permission_event_seq
-                        .get(&wait_key)
-                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
-                        .copied(),
-                    seq,
-                ) {
-                    (Some(current), Some(incoming)) => incoming > current,
-                    (Some(_), None) => false,
-                    _ => true,
-                };
-                if newer {
-                    if let Some(seq) = seq {
-                        runtime
-                            .permission_event_seq
-                            .entry(wait_key.clone())
-                            .or_default()
-                            .insert(scope.to_string(), seq);
-                    }
-                    clear_permission_scope(&mut runtime, &wait_key, SESSION_PERMISSION_SCOPE);
-                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
-                        Running,
-                        None,
-                        status_text,
-                    ))
-                } else {
-                    None
-                }
-            }
-            AgentLifecycleEvent::WaitStarted {
-                reason,
-                item_id,
-                message,
-                status_text,
-            } => {
-                let waits = runtime.waits.entry(wait_key.clone()).or_default();
-                if let std::collections::hash_map::Entry::Vacant(wait) = waits.entry(item_id) {
-                    wait.insert(Some(PendingAgentWait::new(reason)));
-                    Some((NeedsInput, message, status_text))
-                } else {
-                    None
-                }
-            }
-            AgentLifecycleEvent::WaitResolved { item_id } => {
-                let waits = runtime.waits.entry(wait_key.clone()).or_default();
-                let resolved_active = waits.insert(item_id, None).flatten().is_some();
-                if resolved_active && !lifecycle_has_waits(&runtime, &wait_key) {
-                    Some((Running, None, "Working".into()))
-                } else {
-                    None
-                }
-            }
-            AgentLifecycleEvent::TurnStopRequested {
-                message,
-                status_text,
-            } if matches!(agent.as_str(), "gemini" | "antigravity") => {
-                if current
-                    .as_ref()
-                    .is_some_and(|c| c.presence.turn_outcome == Some(AgentTurnOutcome::Completed))
-                    && !runtime.provider_turns.contains_key(&wait_key)
-                {
-                    None
-                } else {
-                    let turn = runtime.provider_turns.entry(wait_key.clone()).or_default();
-                    turn.stop = Some((message, status_text));
-                    turn.idle_frame = None;
-                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
-                        Running,
-                        None,
-                        "Finishing response".into(),
-                    ))
-                }
-            }
-            AgentLifecycleEvent::TurnFinished {
-                outcome,
-                message,
-                status_text,
-            } if agent != "codex" => {
-                turn_finished = true;
-                completed = outcome == AgentTurnOutcome::Completed;
-                turn_outcome = Some(outcome);
-                completion_message = message.clone();
-                Some((Idle, message, status_text))
-            }
-            AgentLifecycleEvent::TurnStopped {
-                message,
-                status_text,
-            } if agent != "codex" => {
-                turn_finished = true;
-                completed = true;
-                turn_outcome = Some(AgentTurnOutcome::Completed);
-                completion_message = message.clone();
-                Some((Idle, message, status_text))
-            }
-            AgentLifecycleEvent::CodexSubagentStarted { agent_id, turn_id }
-            | AgentLifecycleEvent::CodexChildProgressObserved { agent_id, turn_id }
-                if agent == "codex" =>
-            {
-                let child_key = (agent_id.clone(), turn_id.clone());
-                let has_waits = lifecycle_has_waits(&runtime, &wait_key);
-                let ledger = runtime
-                    .codex_turns
-                    .entry((surface_id, session_id.to_string()))
-                    .or_default();
-                set_codex_ledger_owner_if_missing(ledger, pid);
-                let newer = seq.is_none_or(|incoming| {
-                    ledger
-                        .child_event_seq
-                        .get(&child_key)
-                        .is_none_or(|current| incoming > *current)
-                        && ledger
-                            .child_agent_event_seq
-                            .get(&agent_id)
-                            .is_none_or(|current| incoming > *current)
-                });
-                if !newer {
-                    tracing::debug!(target: "flowmux_agent", reason = "stale_child_sequence", changed = false, "agent decision");
-                    return AgentLifecycleResult::default();
-                }
-                if let Some(seq) = seq {
-                    ledger.child_event_seq.insert(child_key, seq);
-                    ledger.child_agent_event_seq.insert(agent_id.clone(), seq);
-                }
-                ledger.active_children.insert(agent_id, turn_id);
-                if has_waits {
-                    None
-                } else {
-                    let count = ledger.active_children.len();
-                    Some((
-                        Running,
-                        None,
-                        format!(
-                            "{count} active Codex subagent{}",
-                            if count == 1 { "" } else { "s" }
-                        ),
-                    ))
-                }
-            }
-            AgentLifecycleEvent::CodexSubagentStopped { agent_id, turn_id } if agent == "codex" => {
-                let child_key = (agent_id.clone(), turn_id.clone());
-                let (remaining_children, pending) = {
-                    let ledger = runtime
-                        .codex_turns
-                        .entry((surface_id, session_id.to_string()))
-                        .or_default();
-                    set_codex_ledger_owner_if_missing(ledger, pid);
-                    let newer = seq.is_none_or(|incoming| {
-                        ledger
-                            .child_event_seq
-                            .get(&child_key)
-                            .is_none_or(|current| incoming > *current)
-                            && ledger
-                                .child_agent_event_seq
-                                .get(&agent_id)
-                                .is_none_or(|current| incoming > *current)
-                    });
-                    if !newer {
-                        tracing::debug!(target: "flowmux_agent", reason = "stale_child_sequence", changed = false, "agent decision");
-                        return AgentLifecycleResult::default();
-                    }
-                    if let Some(seq) = seq {
-                        ledger.child_event_seq.insert(child_key, seq);
-                        ledger.child_agent_event_seq.insert(agent_id.clone(), seq);
-                    }
-                    let matches_current_turn = ledger
-                        .active_children
-                        .get(&agent_id)
-                        .is_some_and(|active_turn| active_turn == &turn_id);
-                    if !matches_current_turn {
-                        tracing::debug!(target: "flowmux_agent", reason = "child_turn_mismatch", changed = false, "agent decision");
-                        return AgentLifecycleResult::default();
-                    }
-                    ledger.active_children.remove(&agent_id);
-                    let remaining = ledger.active_children.len();
-                    let pending = (remaining == 0)
-                        .then(|| ledger.pending_parent_stop.clone())
-                        .flatten();
-                    (remaining, pending)
-                };
-                clear_permission_scope_if_newer(
-                    &mut runtime,
-                    &wait_key,
-                    &format!("child:{agent_id}:{turn_id}"),
-                    seq,
-                );
-                if let Some(pending) = pending {
-                    let ledger = runtime
-                        .codex_turns
-                        .get_mut(&(surface_id, session_id.to_string()))
-                        .expect("Codex ledger remains present");
-                    if ledger
-                        .settled_parent_turns
-                        .iter()
-                        .any(|settled| settled == &pending.turn_id)
-                    {
-                        None
-                    } else {
-                        settle_codex_after_grace = Some(CodexGraceSettlement {
-                            turn_id: pending.turn_id,
-                            stop_seq: pending.seq,
-                        });
-                        (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
-                            Running,
-                            None,
-                            "Finishing Codex turn".into(),
-                        ))
-                    }
-                } else if lifecycle_has_waits(&runtime, &wait_key) {
-                    None
-                } else if remaining_children > 0 {
-                    Some((
-                        Running,
-                        None,
-                        format!(
-                            "{remaining_children} active Codex subagent{}",
-                            if remaining_children == 1 { "" } else { "s" }
-                        ),
-                    ))
-                } else {
-                    Some((Running, None, "Working".into()))
-                }
-            }
-            AgentLifecycleEvent::CodexTurnStopped {
-                turn_id,
-                message,
-                status_text,
-                stop_hook_active,
-            } if agent == "codex" => {
-                let ledger_key = (surface_id, session_id.to_string());
-                let (superseded, already_settled, child_count) = {
-                    let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
-                    set_codex_ledger_owner_if_missing(ledger, pid);
-                    (
-                        ledger
-                            .current_parent_turn
-                            .as_ref()
-                            .is_some_and(|current| current != &turn_id),
-                        ledger
-                            .settled_parent_turns
-                            .iter()
-                            .any(|settled| settled == &turn_id),
-                        ledger.active_children.len(),
-                    )
-                };
-                if superseded || (already_settled && !stop_hook_active) {
-                    no_transition_reason = "stale_or_settled_turn";
-                    None
-                } else {
-                    clear_permission_scope_if_newer(
-                        &mut runtime,
-                        &wait_key,
-                        &format!("root:{turn_id}"),
-                        seq,
-                    );
-                    let has_waits = lifecycle_has_waits(&runtime, &wait_key);
-                    let ledger = runtime
-                        .codex_turns
-                        .get_mut(&ledger_key)
-                        .expect("Codex ledger remains present");
-                    if stop_hook_active {
-                        ledger
-                            .settled_parent_turns
-                            .retain(|settled| settled != &turn_id);
-                    }
-                    ledger.pending_parent_stop = Some(PendingCodexStop {
-                        turn_id: turn_id.clone(),
-                        message,
-                        status_text,
-                        notify_completion: !already_settled,
-                        outcome: AgentTurnOutcome::Completed,
-                        seq,
-                    });
-                    if child_count == 0 {
-                        settle_codex_after_grace = Some(CodexGraceSettlement {
-                            turn_id,
-                            stop_seq: seq,
-                        });
-                        (!has_waits).then_some((Running, None, "Finishing Codex turn".into()))
-                    } else if has_waits {
-                        None
-                    } else {
-                        Some((
-                            Running,
-                            None,
-                            format!(
-                                "{child_count} active Codex subagent{}",
-                                if child_count == 1 { "" } else { "s" }
-                            ),
-                        ))
-                    }
-                }
-            }
-            AgentLifecycleEvent::CodexTurnInterrupted {
-                turn_id,
-                status_text,
-            } if agent == "codex" => {
-                let ledger_key = (surface_id, session_id.to_string());
-                let (superseded, already_settled, child_count) = {
-                    let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
-                    set_codex_ledger_owner_if_missing(ledger, pid);
-                    (
-                        ledger
-                            .current_parent_turn
-                            .as_ref()
-                            .is_some_and(|current| current != &turn_id),
-                        ledger
-                            .settled_parent_turns
-                            .iter()
-                            .any(|settled| settled == &turn_id),
-                        ledger.active_children.len(),
-                    )
-                };
-                if superseded || already_settled {
-                    no_transition_reason = "stale_or_settled_turn";
-                    None
-                } else {
-                    clear_permission_scope_if_newer(
-                        &mut runtime,
-                        &wait_key,
-                        &format!("root:{turn_id}"),
-                        seq,
-                    );
-                    let has_waits = lifecycle_has_waits(&runtime, &wait_key);
-                    let ledger = runtime
-                        .codex_turns
-                        .get_mut(&ledger_key)
-                        .expect("Codex ledger remains present");
-                    if child_count == 0 {
-                        ledger.pending_parent_stop = Some(PendingCodexStop {
-                            turn_id: turn_id.clone(),
-                            message: None,
-                            status_text,
-                            notify_completion: false,
-                            outcome: AgentTurnOutcome::Canceled,
-                            seq,
-                        });
-                        settle_codex_after_grace = Some(CodexGraceSettlement {
-                            turn_id,
-                            stop_seq: seq,
-                        });
-                        (!has_waits).then_some((Running, None, "Finishing interrupted turn".into()))
-                    } else {
-                        ledger.pending_parent_stop = Some(PendingCodexStop {
-                            turn_id,
-                            message: None,
-                            status_text,
-                            notify_completion: false,
-                            outcome: AgentTurnOutcome::Canceled,
-                            seq,
-                        });
-                        if has_waits {
-                            None
-                        } else {
-                            Some((
-                                Running,
-                                None,
-                                format!(
-                                    "{child_count} active Codex subagent{}",
-                                    if child_count == 1 { "" } else { "s" }
-                                ),
-                            ))
-                        }
-                    }
-                }
-            }
-            _ => None,
-        };
-
-        if turn_finished {
-            runtime.provider_turns.remove(&wait_key);
-            // A root boundary is session-wide, but Codex shares the session id
-            // with child threads. Preserve child waits while parent completion
-            // is deferred; clear them only at actual turn settlement.
-            runtime.waits.remove(&wait_key);
-            runtime.permission_waits.remove(&wait_key);
-            clear_permission_event_seq_for_key(&mut runtime, &wait_key);
-            runtime.session_waits.remove(&wait_key);
-            clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
-            if let Some(seq) = turn_boundary_seq {
-                runtime.boundary_seq.insert(wait_key.clone(), seq);
-            }
-        }
-
-        let pending_waits = pending_wait_summary(&runtime, &wait_key);
-        // A partial resolution changes the visible reasons even while activity
-        // stays blocked. Duplicate deliveries leave both facts and UI untouched.
-        let decision = decision.or_else(|| {
-            (pending_waits != waits_before && !pending_waits.is_empty()).then(|| {
-                let presence = current.as_ref().map(|located| &located.presence);
-                (
-                    NeedsInput,
-                    presence.and_then(|p| p.message.clone()),
-                    presence
-                        .and_then(|p| p.custom_status.clone())
-                        .unwrap_or_else(|| "Waiting for input".into()),
-                )
-            })
-        });
-        let Some((activity, message, custom_status)) = decision else {
-            let reason = if lifecycle_has_waits(&runtime, &wait_key) {
-                "pending_waits"
-            } else {
-                no_transition_reason
-            };
-            tracing::debug!(target: "flowmux_agent", reason, changed = false,
-                deferred = settle_codex_after_grace.is_some(), "agent decision");
+        let LifecycleTransition {
+            report,
+            notification_scope,
+            mut completed,
+            mut completion_message,
+            settle_codex_after_grace,
+        } = transition;
+        let Some(report) = report else {
             return AgentLifecycleResult {
                 settle_codex_after_grace,
                 ..AgentLifecycleResult::default()
             };
         };
-        let report_seq = if seq
-            .zip(current.as_ref().and_then(|located| located.presence.seq))
-            .is_some_and(|(incoming, current)| incoming <= current)
-        {
-            None
-        } else {
-            seq
-        };
-        let report = AgentStatusReport {
-            name: agent,
-            status: None,
-            activity: Some(activity),
-            pid,
-            source: Some("flowmux:hook".into()),
-            seq: report_seq,
-            message,
-            custom_status: Some(custom_status),
-            pending_waits: Some(pending_waits),
-            turn_outcome,
-            session_id: Some(session_id.to_string()),
-            session_name: None,
-            messaging_socket: None,
-        };
+        let activity = report.activity.expect("lifecycle reports carry activity");
         let workspace = self
             .apply_agent_status_report(surface_id, report, surface_visible)
             .await
@@ -2474,79 +1734,21 @@ impl StateStore {
         turn_id: &str,
         surface_visible: bool,
     ) -> AgentLifecycleResult {
-        use flowmux_core::AgentActivity::Idle;
-
         let mut runtime = self.agents.lifecycle.lock().await;
         let wait_key = (surface_id, "codex".to_string(), session_id.to_string());
-        if runtime.ended.contains_key(&wait_key) {
-            tracing::debug!(target: "flowmux_agent", reason = "ended_session", changed = false, "agent decision");
-            return AgentLifecycleResult::default();
-        }
         let current = self.located_agent_presence(surface_id).await;
-        if !current.as_ref().is_some_and(|located| {
-            located.presence.name.eq_ignore_ascii_case("codex")
-                && located.presence.session_id.as_deref() == Some(session_id)
-                && located
-                    .presence
-                    .pid
-                    .zip(pid)
-                    .is_none_or(|(current, incoming)| current == incoming)
-        }) {
-            tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
-            return AgentLifecycleResult::default();
-        }
         let before = LifecycleCheckpoint::capture(&runtime, &wait_key);
-        let pending = {
-            let Some(ledger) = runtime
-                .codex_turns
-                .get_mut(&(surface_id, session_id.to_string()))
-            else {
-                tracing::debug!(target: "flowmux_agent", reason = "no_turn_ledger", changed = false, "agent decision");
-                return AgentLifecycleResult::default();
-            };
-            if ledger
-                .owner_pid
-                .zip(pid)
-                .is_some_and(|(owner, incoming)| owner != incoming)
-                || !ledger.active_children.is_empty()
-                || ledger
-                    .pending_parent_stop
-                    .as_ref()
-                    .is_none_or(|pending| pending.turn_id != turn_id || pending.seq != seq)
-            {
-                tracing::debug!(target: "flowmux_agent", reason = "superseded_or_active_children", changed = false, "agent decision");
-                return AgentLifecycleResult::default();
-            }
-            let pending = ledger.pending_parent_stop.take().unwrap();
-            remember_settled_codex_turn(ledger, pending.turn_id.clone());
-            ledger.current_parent_turn = None;
-            pending
-        };
-        runtime.waits.remove(&wait_key);
-        runtime.permission_waits.remove(&wait_key);
-        clear_permission_event_seq_for_key(&mut runtime, &wait_key);
-        runtime.session_waits.remove(&wait_key);
-        clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
-        if let Some(seq) = seq {
-            runtime.boundary_seq.insert(wait_key.clone(), seq);
-        }
-        let report = AgentStatusReport {
-            pending_waits: None,
-            turn_outcome: Some(pending.outcome),
-            name: "codex".into(),
-            status: None,
-            activity: Some(Idle),
+        let Some(transition) = runtime.settle_codex(
+            surface_id,
             pid,
-            source: Some("flowmux:hook".into()),
-            // The provisional Stop report already owns this sequence. The
-            // aggregate settlement is the second phase of the same event.
-            seq: None,
-            message: pending.message.clone(),
-            custom_status: Some(pending.status_text),
-            session_id: Some(session_id.to_string()),
-            session_name: None,
-            messaging_socket: None,
+            seq,
+            session_id,
+            turn_id,
+            current.as_ref().map(|located| &located.presence),
+        ) else {
+            return AgentLifecycleResult::default();
         };
+        let report = transition.report.expect("settled turns carry a report");
         let workspace = self
             .apply_agent_status_report(surface_id, report, surface_visible)
             .await
@@ -2557,7 +1759,7 @@ impl StateStore {
             return AgentLifecycleResult::default();
         }
         self.allow_agent_screen_restore(surface_id).await;
-        let notification_id = pending.notify_completion.then(|| {
+        let notification_id = transition.completed.then(|| {
             runtime
                 .completion_notifications
                 .entry(wait_key)
@@ -2568,11 +1770,8 @@ impl StateStore {
         AgentLifecycleResult {
             notification_id,
             workspace,
-            completed: pending.notify_completion,
-            completion_message: pending
-                .notify_completion
-                .then_some(pending.message)
-                .flatten(),
+            completed: transition.completed,
+            completion_message: transition.completion_message,
             settle_codex_after_grace: None,
         }
     }

@@ -70,6 +70,7 @@ def main():
     options.write_text(json.dumps({"default_shell": "/bin/sh", "auto_resume_agent_sessions": True}))
     host = None
     control_connection = None
+    hook_connection = None
     agent_pid = None
     birth = None
     host_pid = None
@@ -164,6 +165,17 @@ while True:
         agent_pid = agent["pid"]
         assert agent["state"] == "running", agent
         birth = Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+
+        def lifecycle(seq, event, **fields):
+            return hook_connection.call(
+                "lifecycle", instance=agent["instance"], epoch=agent["epoch"],
+                pid=agent_pid, process_start=int(birth), session_id="fixture-session",
+                seq=seq, event={"event": event, **fields})
+
+        def presence():
+            agents = control_connection.call("list")["agents"]
+            return next(item for item in agents if item["instance"] == agent["instance"])["presence"]
+
         host_pid, _, _ = struct.unpack("3i", control_connection.stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         assert host_pid not in harness.protected_pids
         host_birth = Path(f"/proc/{host_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
@@ -244,6 +256,15 @@ while True:
         fixture.wait_for(lambda: "ACK:<bulk>" in harness.screen(gui_socket, target),
                          "all queued input reaches the original agent")
         harness.pass_check("input backpressure keeps current screen updates flowing and preserves queued input")
+        # The input stress phase can outlast the RPC server's idle timeout.
+        control_connection.close()
+        control_connection = HostClient(host_socket, "relay")
+        hook_connection = HostClient(host_socket, "hook")
+        assert lifecycle(1, "turn_started", status_text="Working")["applied"]
+        assert lifecycle(2, "wait_started", reason="approval", item_id="approval-1",
+                         status_text="Approval required")["applied"]
+        waiting = presence()
+        assert waiting["status"] == "blocked" and len(waiting["pending_waits"]) == 1, waiting
         before = int((harness.root / "progress").read_text())
         harness.close_window(app)
         fixture.wait_for(lambda: int((harness.root / "progress").read_text()) >= before + 5, "work continues with GUI closed")
@@ -254,6 +275,17 @@ while True:
                          "ordinary GUI-owned shell exits")
         harness.pass_check("closing the isolated GUI leaves the same agent/PTY running and progressing")
         harness.pass_check("ordinary terminal exits with GUI while managed Agent continues")
+        assert presence() == waiting
+        assert lifecycle(3, "wait_resolved", item_id="approval-1")["applied"]
+        assert lifecycle(4, "turn_stopped", status_text="Completed")["applied"]
+        completed = presence()
+        assert completed["activity"] == "idle" and not completed.get("pending_waits"), completed
+        revision = control_connection.call("list")["revision"]
+        assert not lifecycle(4, "turn_stopped", status_text="Completed")["applied"]
+        assert control_connection.call("list")["revision"] == revision
+        assert lifecycle(5, "turn_started", status_text="Working")["applied"]
+        assert presence()["status"] == "working"
+        harness.pass_check("Host preserves approval waits after GUI exit and applies lifecycle transitions without a GUI; duplicate Stop is inert")
         blocked = subprocess.run(
             [args.cli, "--socket", str(host_socket), "agent-relay", "--require-gui",
              "--instance", agent["instance"], "--epoch", agent["epoch"]],
@@ -266,6 +298,7 @@ while True:
         app, gui_socket = harness.window("agent-host-reopened")
         instances = control_connection.call("list")["agents"]
         assert len(instances) == 1 and instances[0]["instance"] == agent["instance"]
+        assert instances[0]["presence"]["status"] == "working"
         verify_view(gui_socket)
         assert (harness.root / "starts").read_text().splitlines() == [str(agent_pid)]
         assert Path(f"/proc/{agent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19] == birth
@@ -336,6 +369,8 @@ while True:
         harness.pass_check("missing Host leaves saved Agent tab disconnected; no Host restart, shell fallback or native resume")
         harness.close_window(app)
     finally:
+        if hook_connection is not None:
+            hook_connection.close()
         if args.service_start and control_connection is None and host_socket.exists():
             # A launch can succeed even if opening the tab loses its reply.
             # Recover only this isolated Host's fixture executions for cleanup.
