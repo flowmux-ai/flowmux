@@ -162,7 +162,7 @@ fn build_dialog(
             row("Keep browser session data", &persist_check),
             row("Resume agent sessions on reopen", &auto_resume_check),
             row(
-                "Background agent idle timeout (minutes)",
+                "Background agent idle timeout (not active)",
                 &agent_idle_timeout,
             ),
             row("Restore terminal scrollback", &scrollback_check),
@@ -1378,8 +1378,10 @@ fn build_agent_idle_timeout_spin(initial: u32) -> gtk::SpinButton {
     )));
     spin.set_halign(gtk::Align::End);
     spin.set_widget_name("flowmux-agent-idle-timeout");
+    // Providers do not yet support verified cooperative idle shutdown.
+    spin.set_sensitive(false);
     spin.set_tooltip_text(Some(
-        "Keep completed background agents for this many minutes after all Flowmux windows close. Unfinished work and approval waits are preserved.",
+        "Automatic cleanup is not available for current agents. Background agents keep running until you end them from Agents.",
     ));
     spin
 }
@@ -1614,6 +1616,11 @@ mod tests {
             .downcast::<gtk::SpinButton>()
             .unwrap();
         assert_eq!(timeout.value_as_int(), 30);
+        assert!(!timeout.is_sensitive());
+        assert!(widgets.iter().any(|widget| widget
+            .clone()
+            .downcast::<gtk::Label>()
+            .is_ok_and(|label| label.text() == "Background agent idle timeout (not active)")));
         let calls_before = applied.borrow().len();
         timeout.set_value(45.0);
         assert_eq!(applied.borrow().len(), calls_before + 1);

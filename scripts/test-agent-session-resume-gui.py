@@ -277,6 +277,18 @@ int main(int argc, char **argv) {
                      process_start=birth, session_id=session, seq=1, event=dict(event="started", status="idle"))
         gui.wait_for(lambda: find(Atspi.Role.LABEL, "Ready · Visible"), "native registry presence")
         if args.new_agent:
+            click(Atspi.Role.PUSH_BUTTON, "Options")
+            gui.wait_for(lambda: find(Atspi.Role.LABEL, "Background agent idle timeout (not active)"),
+                         "honest inactive cleanup label")
+            # Locate the saved timeout rather than the display/font spin controls.
+            label = find(Atspi.Role.LABEL, "Background agent idle timeout (not active)")
+            row = label.get_parent()
+            timeout = next(row.get_child_at_index(i) for i in range(row.get_child_count())
+                           if row.get_child_at_index(i).get_role() == Atspi.Role.SPIN_BUTTON)
+            assert not timeout.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            assert timeout.get_value_iface().get_current_value() == 30
+            click(Atspi.Role.PUSH_BUTTON, "Close")
+            h.pass_check("Options labels automatic cleanup inactive and disables its saved timeout")
             click(Atspi.Role.PUSH_BUTTON, "New Agent")
             click(Atspi.Role.PUSH_BUTTON, "Cancel")
             assert (h.root / "starts").read_text().splitlines() == [str(pid)]

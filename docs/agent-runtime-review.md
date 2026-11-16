@@ -57,6 +57,20 @@
   bell 복원과 desktop 재전송 방지를 확인했다. stdout/event PASS 수가 일치하며
   해당 runtime의 잔여 process가 없다. 전체 Linux gate 결과는 별도로 기록한다.
 
+### AR-004 · medium · 비활성 자동 회수를 작동하는 설정처럼 표시
+
+- 원인: provider 전체 완료와 안전한 유휴 종료 계약이 없어 자동 회수가 비활성인데,
+  Options는 timeout을 편집하게 하고 설정 시간 후 회수한다고 안내했다.
+- 조치: 값을 보존하며 입력을 비활성화하고, 보이는 행에 `not active`를 표시한다.
+  tooltip은 자동 회수가 없으며 Agents의 명시적 종료가 필요하다고 안내한다.
+- 검증: Options·terminal search GTK 검사 21개 통과. 격리 New Agent live
+  10개 통과·exit 0 (`/tmp/fm-runtime-options-after-live2.log`,
+  `/tmp/fm-gui-f24occ1i`). 실제 표시·spin 비활성·30분 값 보존, 동일 PID/birth의
+  tab·GUI 종료 생존과 복원을 확인했다. stdout/event PASS 수 일치와 잔여 process
+  부재도 확인했다. 이는 자동 회수 기능의 구현이 아니다.
+- fixture: Options 검사는 실행을 만든 후 수행한다. 실행 없는 Host는 10초 후
+  종료하므로, launch 전 Options 검사로 시간을 늘리면 fixture가 이전 연결을 사용했다.
+
 ## 완료 전 확인할 범위
 
 - 새 변경을 포함한 Linux 공유 CI 전체와 runtime live phase.
