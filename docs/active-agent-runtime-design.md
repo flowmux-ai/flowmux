@@ -3,7 +3,7 @@
 # Flowmux 활성 Agents와 지속 실행 설계
 
 상태: 구현 진행 중. GUI 미연결 수명 정책은 사용자 결정 반영. 작성·갱신일: 2026-11-16.
-Flowmux 코드 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`.
+Flowmux 최초 분석 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`. Host 기반 구현과 후속 연결 지점 점검 기준: `dfc1f61f`.
 외부 참고 구현 코드 기준: `ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`.
 외부 소스는 읽기만 했으며 코드·자산은 가져오지 않았다. 아래 외부 경로는 해당 리비전의 저장소 상대 경로다. 소스와 테스트를 검토했지만 외부 프로그램을 실행하여 검증하지는 않았다.
 
@@ -57,6 +57,8 @@ Flowmux 코드 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`.
 
 ## 3. 현재 Flowmux와 필요한 변경
 
+다음 표는 최초 분석에서 확인한 구조와 변경 방향이다. 이후 Host 기반 구현의 연결 상태는 이 절의 마지막 표와 §11에서 구분한다.
+
 | 현재 코드 | 확인한 사실 | 필요한 변경 |
 | --- | --- | --- |
 | [ghostty_pane.rs](../crates/flowmux/src/ui/ghostty_pane.rs), `spawn`, `close_pty` | GUI가 `Pty::spawn_gated`로 자식을 만들고 master의 복제 FD를 VTE에 연결한다. GUI가 수명을 소유한다 | Agent tab은 실제 agent PTY 대신 연결용 relay만 소유 |
@@ -74,7 +76,7 @@ Flowmux 코드 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`.
 
 ### 현재 상태 판정 점검과 이관 조건
 
-**현재 판정기는 UI 상태 표현에 재사용할 수 있지만, 그 결과를 바로 자동 종료 조건으로 사용할 수는 없다.** 아래는 문서 상단의 Flowmux 리비전을 기준으로 확인한 제약이다. 현재 코드에 이 문서의 자동 종료 기능이 이미 구현되어 있다는 의미는 아니다.
+**현재 판정기는 UI 상태 표현에 재사용할 수 있지만, 그 결과를 바로 자동 종료 조건으로 사용할 수는 없다.** 아래는 문서 상단의 최초 분석 리비전을 기준으로 확인한 제약이다. 현재 코드에 이 문서의 자동 종료 기능이 이미 구현되어 있다는 의미는 아니다.
 
 | 점검 대상과 코드 근거 | 확인한 제약 | 설계에 반영할 조건 |
 | --- | --- | --- |
@@ -97,6 +99,20 @@ TurnStarted(turn-1, seq=10)
 재사용할 것은 Codex 부모·자식 상관관계, 관측된 child 완료까지 부모 완료를 미루는 규칙, permission/tool/session wait와 해결된 wait 중복 제거, 재시도 구분, 새 진행으로 잠정 Stop을 무효화하는 규칙, 화면 fingerprint와 완료 후 동일 spinner 억제다. **관측된 child가 없다는 사실만으로 실제 하위 작업이 없다고 증명하지는 않는다.** Antigravity의 `fully_idle == false` 방어와 Gemini 등에서 사용하는 600ms 안정된 ready 화면도 유지하되, 필드 누락이나 화면 추정만으로 전체 완료를 확정하지 않는다.
 
 일반 IPC Ping은 현재도 [handler.rs](../crates/flowmux-daemon/src/handler.rs)에서 Pong으로 응답하며 작업 상태를 바꾸지 않는다. 이 계약은 유지한다. 보완 대상은 의미가 불명확한 진행 이벤트와 UI 보정이 종료 판단에 섞이는 경로다.
+
+### Host 기반 구현 이후의 연결 상태
+
+`dfc1f61f`에는 PTY를 유지하는 Host와 회수 후보 정책이 있지만, **실행 생존의 구현과 작업 완료 판정의 구현은 별개**다. 현재 연결 상태를 기준으로 다음 작업을 구분한다.
+
+| 연결 지점 | 확인한 상태 | 다음 구현의 완료 조건 |
+| --- | --- | --- |
+| [host.rs](../crates/flowmux-daemon/src/agent_host/host.rs)의 `Hello`와 `connection_closed` | GUI 역할의 handshake/EOF가 정책의 연결 집합을 갱신한다. GUI 앱의 상시 관리 연결은 아직 연결 전 | 저장된 managed tab 복원 전에 관리 handshake 완료. tab이 없어도 연결 유지. 일회성 조회·hook·relay가 GUI 연결을 대신하지 않음 |
+| 같은 파일의 `HostHandler` | Host 제어 요청과 Ping만 처리하며 기존 provider lifecycle hook은 처리하지 않음 | InstanceId·process/native identity 검증 후 hook을 공통 ledger로 전달. detach된 실행의 사건도 처리. 이 경로 없이 shim을 Host 주소로 전환하지 않음 |
+| `agent_runtime.rs`의 lifecycle ledger | SurfaceId 기반이며 workspace 제거 시 정리됨 | managed ledger와 wait·Stop grace 예약은 InstanceId에 귀속. 화면 이동·제거와 무관하게 Host가 계속 관측하고 확정 |
+| [retirement.rs](../crates/flowmux-daemon/src/agent_host/retirement.rs)의 `WorkDisposition` | `Working / VerifiedComplete / Unknown`, 최초 완료 시각·revision·단조 시간 deadline을 제공함. 전체 완료 검증 adapter와 실제 자동 종료는 연결 전 | §5의 정규화 결과만 입력. `completion_verified` 호출 전 root·child·tool·wait와 관측 공백 확인. 만료 후에도 provider의 안전한 유휴 종료 수락 필요 |
+| [workspace_view.rs](../crates/flowmux/src/ui/workspace_view.rs)의 terminal 복원 | 일반 terminal의 shell 생성·native resume·scrollback 복원 경로를 사용함 | managed binding에서는 기존 실행에 relay만 연결. Host 실패·epoch 불일치를 shell 생성이나 자동 native resume으로 대체하지 않음 |
+
+따라서 기존 `AgentStatus`에 상태 하나를 추가하는 것으로 해결하지 않는다. 기존 UI 판정은 보존하면서 **관측과 완료 기록의 소유자를 Host로 옮기고, 그 검증 결과를 회수 정책에 연결**한다. 완료 관측이나 안전한 종료가 지원되지 않는 provider는 보류 이유를 표시하고 실행을 유지한다.
 
 ## 4. Agents 목록과 상호작용
 
@@ -178,6 +194,8 @@ Host는 사용자·실행 환경별 하나다. 기존 GUI PID socket과 별도�
 
 프로세스 분리만으로 플랫폼의 앱 종료 정리를 벗어났다고 간주하지 않는다. Linux의 cgroup과 macOS의 앱 coalition/launchd 수명을 검증하고 필요한 경우 사용자 서비스에서 Host를 시작한다. GUI 강제 종료에도 Host·PTY·실제 에이전트가 생존하는 것을 플랫폼별 출시 조건으로 삼는다. 사용자 서비스가 빈 Host를 무조건 재시작하지 않도록 정상 종료와 명시적 시작을 구분한다.
 
+Linux의 사용자 서비스 관리자를 사용할 수 있으면 GUI와 별도의 transient service에서 Host를 시작하는 경로를 우선 검증한다. 기존 [process_scope.rs](../crates/flowmux/src/process_scope.rs)의 terminal scope 연결은 Host 시작과 구분하며, relay의 scope 종료가 Host에 전파되지 않아야 한다. `setsid`와 stdio 분리만으로는 GUI cgroup에서 벗어나지 않는다. 서비스 관리자 미지원 환경·Flatpak·macOS는 해당 환경의 시작/종료 경계를 따로 검증하고, 실패 시 살아 있는 Host를 종료하거나 중복 생성하지 않고 시작 실패 이유를 반환한다.
+
 ### 제안 모델
 
 | 모델 | 필요한 필드와 소유자 |
@@ -193,6 +211,8 @@ Host는 사용자·실행 환경별 하나다. 기존 GUI PID socket과 별도�
 InstanceId는 한 번의 실행을 식별한다. 다시 실행하면 새 ID다. Native SessionKey는 대화와 설정 scope를 식별한다. pane/surface는 화면 위치다. 세 ID를 서로 대체하지 않는다. 시작 직후 native ID가 없어도 실행 목록은 표시할 수 있다.
 
 `PaneSurface.kind`는 terminal로 유지하고 optional managed binding을 추가하는 방안을 우선한다. 새 surface 종류로 terminal 기능 전체를 복제하지 않는다. 렌더러가 binding을 보고 local spawn 또는 agent attach를 선택한다. 구버전이 binding을 무시해 일반 shell/resume을 시작하지 않도록 persisted schema/version gate를 함께 변경한다. downgrade 때는 명시적으로 미지원 binding을 안내한다.
+
+저장 schema는 현재 v3다. binding 도입으로 버전을 올릴 때 [state/lib.rs](../crates/flowmux-state/src/lib.rs)의 `load_from`에 있는 `root_dir → location` 변환은 **v3 미만에만** 적용한다. 이미 `location`이 있는 v3 파일을 legacy로 재해석하지 않는다. 기존 백업·window ownership·SSH location·tab 순서·일반 terminal scrollback을 보존하고, binding은 로컬 terminal에만 허용한다. tab 이동과 `clone_without_scrollback`도 binding을 보존한다. managed 화면은 Host snapshot을 사용하며 저장된 scrollback이나 title 기반 native session 추정으로 실행을 복원하지 않는다.
 
 ### 프로세스와 화면의 상태 전이
 
@@ -347,11 +367,11 @@ GUI 재실행은 **살아 있는 동일 InstanceId·PID/start identity·PTY에 �
 - terminal query 응답 주체는 Host 하나다. query를 VTE까지 그대로 전달해 이중 응답하거나, 재연결 snapshot이 과거 OSC 알림·클립보드 쓰기·bell을 재실행하지 않게 한다. snapshot은 표시 상태만 복원한다.
 - VTE의 IME·selection·scrollback·키/마우스 인코딩을 유지하되 Host가 가진 입력 모드와 일치시킨다. relay의 local echo/canonical mode가 입력을 다시 처리하지 않도록 raw transport 계약을 둔다.
 
-현재 workspace에는 headless VT 상태 엔진이 확인되지 않았고 GUI의 `vte4`만 사용한다. 간단한 escape 문자열 제거기를 새로 만들어 대체하지 않는다. 구현 1단계에서 유지보수되는 VT 라이브러리의 snapshot/mode 지원을 검증하고 선택한다. **엔진 선정과 VTE 호환성은 아직 미확정이며 이 검증을 통과하기 전에는 지속 실행을 출시하지 않는다.** 필요한 검증은 cursor/alternate screen/resize/한글·wide glyph/paste/mouse/queries/scrollback과 지원 provider의 실제 TUI다.
+최초 분석 당시에는 GUI의 `vte4`만 사용했으며, Host 기반 구현에서 `alacritty_terminal` headless 엔진을 추가했다. 간단한 escape 문자열 제거기로 대체하지 않는다. Linux VTE의 일부 왕복 검증은 통과했지만 **provider TUI와 플랫폼별 호환성 검증을 마치기 전에는 지속 실행을 출시하지 않는다.** 남은 검증은 cursor/alternate screen/resize/한글·wide glyph/paste/mouse/queries/scrollback과 지원 provider의 실제 TUI다. 현재 검증 범위는 §11에 기록한다.
 
 ## 7. 제어 프로토콜·hook·저장
 
-아래 이름은 제안이며 현재 제공되는 CLI/API가 아니다.
+아래 이름은 제품 계약을 설명하는 제안이다. 현재 Host 제어 프로토콜의 구현 범위는 [agent_host.rs](../crates/flowmux-ipc/src/agent_host.rs)와 §11에 기록하며, 목록 구독·provider hooks·context router가 모두 제공된다는 의미는 아니다.
 
 | 요청 | 계약 |
 | --- | --- |
@@ -425,6 +445,9 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | 모든 tab/pane/workspace 닫기, GUI 연결 유지 | managed 실행 유지, 자동 종료 없음. 일반 terminal 동작은 기존과 동일 |
 | 마지막 GUI 닫기, 작업 30분 이상 진행 | 시간과 관계없이 동일 실행·하위 작업 생존. 재연결 시 Background 또는 저장된 view에서 현재 TUI 표시 |
 | GUI 강제 종료 | Host와 실행 생존. stale 위치 해제. 새 GUI에서 중복 native resume 없음 |
+| GUI 재시작의 관리 연결·저장 binding 복원 | managed tab 생성 전에 관리 handshake로 종료 후보 무효화. fixture의 명시적 relay 실행 없이 기존 위치에서 동일 instance 연결 |
+| 저장된 binding의 Host 조회 실패·epoch 변경 | 연결 실패 상태와 재시도 경로 표시. shell/agent 재생성·native resume·prompt 재전송 없음 |
+| binding schema 갱신·tab 이동 | v2/v3의 location·window ownership·tab 순서·일반 scrollback 보존. managed binding 이동/저장 유지, 구버전의 오실행 방지 |
 | 미연결 중 작업 완료 | 완료 확인 29분 59초에는 유지, 30분에 안전한 종료 재검사. 실제 exit/reap 후 종료 결과 저장 |
 | 이미 완료된 상태에서 GUI 종료 | 연결 해제부터 30분 계산. 과거 완료를 근거로 즉시 종료하지 않음 |
 | GUI 없이 승인·입력·재시도 대기 또는 child 실행 | root Stop/idle 화면만으로 종료 예약하지 않음. 전체 작업 완료 후부터 30분 |
