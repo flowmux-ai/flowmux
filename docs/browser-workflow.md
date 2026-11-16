@@ -5,6 +5,39 @@ Flowmux can diagnose the current browser environment, reserve a tab for a local
 agent task, hand control to the user, and report an action's observed outcome.
 These features use the existing Linux WebKitGTK and macOS WKWebView panes.
 
+## Request a change to a page element
+
+Choose **Request change** in the browser toolbar, then click the element to
+change. Flowmux highlights the element and previews a capture of its visible
+area, its CSS selector, text, selected computed styles, and page URL. Write the
+requested change and use **Send to agent** to choose a local agent in the same
+workspace. **Copy request** copies the same request for manual delivery.
+
+The request includes a local PNG path; the receiving agent needs a tool that can
+read local images. It must locate the source itself: a DOM selector is not a
+source file mapping. Busy agents, approval waits, changed sessions, and terminals
+with existing input reject delivery and leave the request available for retry.
+There is no automatic retry or queued submission.
+
+Escape cancels selection. **Close** hides the panel while keeping its draft;
+**Select another element** replaces the capture and keeps the comment. Drafts
+last only while the browser tab stays open. Selection requires a visible tab
+and an unreserved browser; finish or clear an agent's browser task first.
+Navigation cancels an in-progress selection. Page text entry is blocked while
+selecting. If the element moves or the viewport changes during capture, select
+it again; the previous draft is kept.
+
+The picker supports the top-level document and open shadow roots. Iframe
+contents and closed shadow roots are not individually selectable. Tab and Enter
+can select a focused element. Form fields are excluded from context extraction;
+select a surrounding label or container instead. URL credentials, query strings
+and fragments are omitted. **Images can still contain private information**,
+so inspect the preview before sending or copying.
+
+Unsent captures are removed when replaced or when the tab closes. Sent or copied
+captures stay in Flowmux's cache under `browser-feedback/` so the recipient can
+read them later; remove these PNGs when they are no longer needed.
+
 ## Choose an observation scope
 
 For a known target, use `find PANE --role button --name Save --exact --dense --max-chars 6000`.

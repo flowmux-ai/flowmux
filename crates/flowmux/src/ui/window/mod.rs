@@ -1278,6 +1278,7 @@ fn add_resize_handle(
 mod agent_bar;
 mod agent_office;
 mod browser_commands;
+mod browser_feedback;
 mod command_palette;
 mod file_browser;
 #[cfg(all(test, feature = "native-smoke", target_os = "macos"))]
@@ -3145,6 +3146,9 @@ impl WindowController {
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
             GtkCommand::SessionFlow(action) => self.dispatch_session_flow(action).await,
             GtkCommand::OpenDiffReview { pane } => self.open_diff_review(pane).await,
+            GtkCommand::BrowserFeedback { surface, action } => {
+                self.browser_feedback(surface, action).await
+            }
             GtkCommand::RefreshReviewTargets => self.refresh_review_targets().await,
             GtkCommand::FocusReviewTarget {
                 pane,

@@ -9,6 +9,7 @@ pub(crate) mod browser_color_scheme;
 mod browser_control;
 mod browser_dialogs;
 mod browser_downloads;
+pub(crate) mod browser_feedback;
 mod browser_file_chooser;
 mod browser_import;
 pub mod browser_pane;

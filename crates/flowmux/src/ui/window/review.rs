@@ -116,10 +116,9 @@ impl WindowController {
         self.refresh_review_targets().await;
     }
 
-    pub(super) async fn refresh_review_targets(&self) {
-        if self.reviews.borrow().is_empty() {
-            return;
-        }
+    pub(super) async fn feedback_targets(
+        &self,
+    ) -> Vec<(WorkspaceId, crate::ui::review_window::ReviewTarget)> {
         let mut targets = Vec::new();
         for item in self.store.agent_bar_model().await.items {
             let Some(located) = self.store.located_agent_presence(item.surface).await else {
@@ -163,6 +162,14 @@ impl WindowController {
                 },
             ));
         }
+        targets
+    }
+
+    pub(super) async fn refresh_review_targets(&self) {
+        if self.reviews.borrow().is_empty() {
+            return;
+        }
+        let targets = self.feedback_targets().await;
         for review in self.reviews.borrow().values() {
             review.set_targets(
                 targets
@@ -183,40 +190,67 @@ impl WindowController {
         let Some(review) = self.reviews.borrow().get(&pane).cloned() else {
             return;
         };
-        let Some(located) = self
+        let workspace = review
+            .workspace
+            .get()
+            .or_else(|| self.pane_registry.borrow().workspace_of_pane(pane));
+        let Some(workspace) = workspace else {
+            return;
+        };
+        let (workspace, target_pane, surface) = match self
+            .deliver_feedback(workspace, &target, &prompt, || {})
+            .await
+        {
+            Ok(location) => location,
+            Err(error) => {
+                review.present();
+                review.delivery_message(&error);
+                self.refresh_review_targets().await;
+                return;
+            }
+        };
+        review.hide();
+        if let Some(target_review) = self.reviews.borrow().get(&target_pane) {
+            target_review.hide();
+        }
+        self.open_activity_target(workspace, target_pane, surface)
+            .await;
+        self.clipboard_toast
+            .show_with_message("Feedback sent to agent");
+    }
+    pub(super) async fn deliver_feedback(
+        &self,
+        workspace: WorkspaceId,
+        target: &crate::ui::review_window::ReviewTarget,
+        prompt: &str,
+        before_paste: impl FnOnce(),
+    ) -> Result<(WorkspaceId, PaneId, SurfaceId), String> {
+        let located = self
             .store
             .located_agent_presence(target.surface)
             .await
             .filter(|p| target.matches(&p.presence))
-        else {
-            review.delivery_message(
-                "This agent ended or restarted. Select its current session and try again.",
-            );
-            self.refresh_review_targets().await;
-            return;
-        };
+            .ok_or("This agent ended or restarted. Select its current session and try again.")?;
+        if located.workspace != workspace {
+            return Err("Choose an agent in this workspace.".into());
+        }
         if located
             .presence
             .pid
             .is_some_and(|pid| !flowmux_procmon::pid_alive(pid))
         {
-            review.delivery_message(
-                "This agent process has exited. Select another agent or use Copy review.",
+            return Err(
+                "This agent process has exited. Select another agent or copy the request.".into(),
             );
-            self.refresh_review_targets().await;
-            return;
         }
         if !matches!(
             located.presence.status,
             flowmux_core::AgentStatus::Idle | flowmux_core::AgentStatus::Done
         ) {
-            review.delivery_message(
-                "This agent is busy or waiting for approval. Send again when it is ready.",
+            return Err(
+                "This agent is busy or waiting for approval. Send again when it is ready.".into(),
             );
-            return;
         }
-        // A screen-only agent has no PID/session identity. Bind a menu choice
-        // to its SSH channel so it cannot survive disconnect or replacement.
         let same_connection = {
             let registry = self.pane_registry.borrow();
             match registry.ssh.get(&located.workspace) {
@@ -227,50 +261,26 @@ impl WindowController {
             }
         };
         if !same_connection {
-            review.delivery_message(
-                "This SSH terminal disconnected or reconnected. Select its current agent and try again.",
-            );
-            self.refresh_review_targets().await;
-            return;
+            return Err("This SSH terminal disconnected or reconnected. Select its current agent and try again.".into());
         }
         let terminal = self
             .pane_registry
             .borrow()
             .terminals
             .get(&located.surface)
-            .cloned();
-        let Some(terminal) = terminal else {
-            review.delivery_message("This agent terminal is no longer available.");
-            return;
-        };
-        if review
-            .workspace
-            .get()
-            .is_some_and(|workspace| workspace != located.workspace)
-        {
-            review.delivery_message("Choose an agent in this workspace.");
-            return;
-        }
+            .cloned()
+            .ok_or("This agent terminal is no longer available.")?;
         let (column, row) = terminal.widget.cursor_position();
         let (line, _) = terminal
             .widget
             .text_range_format(vte::Format::Text, row, 0, row + 1, 0);
         if !empty_agent_prompt(&target.name, line.as_deref().unwrap_or_default(), column) {
-            review.present();
-            review.delivery_message("The agent already has input, or its prompt is not ready. Clear or submit that input, then send again. Your feedback is saved.");
-            return;
+            return Err("The agent already has input, or its prompt is not ready. Clear or submit that input, then send again. Your feedback is saved.".into());
         }
-        // Paste as one bracketed block; do not feed embedded newlines as keys.
-        terminal.widget.paste_text(&prompt);
-        terminal.write_input(b"\r").ok();
-        review.hide();
-        if let Some(target_review) = self.reviews.borrow().get(&located.pane) {
-            target_review.hide();
-        }
-        self.open_activity_target(located.workspace, located.pane, located.surface)
-            .await;
-        self.clipboard_toast
-            .show_with_message("Feedback sent to agent");
+        before_paste();
+        terminal.widget.paste_text(prompt);
+        terminal.write_input(b"\r").map_err(|_| "The request may have been pasted, but Enter failed. Inspect the terminal before sending again.".to_string())?;
+        Ok((located.workspace, located.pane, located.surface))
     }
 }
 

@@ -32,6 +32,7 @@ thread_local! {
 
 #[derive(Clone)]
 pub struct BrowserPane {
+    pub(crate) feedback: Rc<crate::ui::browser_feedback::BrowserFeedback>,
     pub(crate) control: crate::ui::browser_control::BrowserControl,
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
@@ -611,8 +612,14 @@ impl BrowserPane {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        root.append(&chrome);
+        let feedback = crate::ui::browser_feedback::BrowserFeedback::new(
+            surface_id,
+            callbacks.on_browser_feedback.clone(),
+        );
+        chrome.append(&feedback.button);
+        root.append(&crate::ui::browser_chrome::toolbar_container(&chrome));
         root.append(&control.bar);
+        root.append(&feedback.panel);
         root.add_css_class("flowmux-browser");
         root.append(&find_bar);
         root.append(&control.content(&web_view));
@@ -844,6 +851,7 @@ impl BrowserPane {
         }
 
         Self {
+            feedback,
             control,
             pane_id,
             root,
@@ -923,6 +931,7 @@ impl BrowserPane {
     }
 
     pub fn prepare_for_close(&self) {
+        self.feedback.stop();
         self.control.close();
         self.stop_loading();
         // Related popup views share a process with their opener.

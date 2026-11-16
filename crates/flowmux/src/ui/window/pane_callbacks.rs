@@ -370,6 +370,12 @@ impl PaneCallbackRouter {
                     );
                 }))
             },
+            on_browser_feedback: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |surface, action| {
+                    dispatch_detached(&bridge, GtkCommand::BrowserFeedback { surface, action });
+                }))
+            },
             on_browser_uri_changed: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, surface, url| {

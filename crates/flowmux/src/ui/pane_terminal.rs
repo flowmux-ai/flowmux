@@ -144,6 +144,7 @@ pub struct PaneCallbacks {
     /// controller refreshes the window title / VCS sidebar and records the
     /// cwd so a new tab in the pane inherits it.
     pub on_terminal_cwd_changed: Rc<RefCell<dyn FnMut(PaneId, SurfaceId, PathBuf)>>,
+    pub(crate) on_browser_feedback: crate::ui::browser_feedback::Callback,
     /// WebKit reported that a browser pane navigated to a new URL.
     pub on_browser_uri_changed: Rc<RefCell<dyn FnMut(PaneId, SurfaceId, String)>>,
     /// WebKit reported that a browser pane's page title changed.
@@ -228,6 +229,7 @@ impl PaneCallbacks {
             tab_drag_drop_committed: Rc::new(Cell::new(false)),
             tab_drag_split_candidate: Rc::new(RefCell::new(None)),
             on_terminal_cwd_changed: Rc::new(RefCell::new(|_, _, _| {})),
+            on_browser_feedback: Rc::new(RefCell::new(|_, _| {})),
             on_browser_uri_changed: Rc::new(RefCell::new(|_, _, _| {})),
             on_browser_title_changed: Rc::new(RefCell::new(|_, _, _| {})),
             on_terminal_title_changed: Rc::new(RefCell::new(|_, _, _| {})),

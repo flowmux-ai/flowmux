@@ -652,6 +652,7 @@ below are defaults and can be customized in Options.
 | Feature | How to use |
 |---|---|
 | Code Review | Pane menu/footer button or `Ctrl+Alt+E`; toggles back to the previous tab. Review working changes or recent commits, add code comments and send them to a selected running agent. Scope follows the pane's repository/worktree. |
+| Browser change request | Browser toolbar **Request change** → select an element → inspect its capture/context → describe the change → **Send to agent** in the same workspace. Sends a local screenshot path; read it with an image tool and locate the source before editing. Busy agents or existing terminal input leave the request available for retry. **Copy request** supports manual delivery. |
 | Terminal search | `Ctrl+Shift+F` with terminal focus searches that terminal. `Ctrl+Alt+Shift+F` or the magnifier next to Files searches all open terminal tabs, including SSH. Results jump/highlight; Refresh updates results. Only retained scrollback is searchable. |
 | Files and editor | Files button; double-click a file to edit. `Ctrl+S` / macOS `Cmd+S` saves. Search with editor focus searches editor content/workspace instead of terminal output. |
 | Worktrees | Worktrees sidebar manages repository worktrees; select the intended pane/project first. |

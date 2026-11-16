@@ -64,6 +64,15 @@ pub(super) fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     button
 }
 
+pub(super) fn toolbar_container(bar: &gtk::Box) -> gtk::ScrolledWindow {
+    // Let overflow controls move before their minimum width enlarges the window.
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .child(bar)
+        .build()
+}
+
 impl BrowserChrome {
     pub fn new(bookmarks: &gtk::MenuButton, downloads: &gtk::MenuButton, profile: &str) -> Self {
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);

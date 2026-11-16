@@ -419,6 +419,10 @@ pub enum GtkCommand {
     OpenDiffReview {
         pane: Option<PaneId>,
     },
+    BrowserFeedback {
+        surface: SurfaceId,
+        action: crate::ui::browser_feedback::Action,
+    },
     RefreshReviewTargets,
     FocusReviewTarget {
         pane: PaneId,

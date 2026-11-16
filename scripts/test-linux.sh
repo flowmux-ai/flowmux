@@ -41,6 +41,9 @@ run_test browser-source python3 scripts/test-browser-source-gui.py \
 run_test browser-bookmarks python3 scripts/test-browser-bookmarks-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+run_test browser-feedback python3 scripts/test-browser-feedback-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_test browser-import python3 scripts/test-browser-import-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"

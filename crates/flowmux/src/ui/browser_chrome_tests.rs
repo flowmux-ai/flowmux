@@ -255,7 +255,7 @@ pub(crate) async fn check() {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
         );
-        for width in [wide_width, 720, 480] {
+        for width in [wide_width, 480, 720, 480] {
             window.set_default_size(width, 720);
             #[cfg(target_os = "macos")]
             pane.resize_native_test_window(width, 720);
@@ -290,6 +290,7 @@ pub(crate) async fn check() {
                 "Forward",
                 "Reload page",
                 "Import cookies for this site",
+                "Request a change to a page element",
             ] {
                 assert!(
                     button(&toolbar, name).is_mapped(),
