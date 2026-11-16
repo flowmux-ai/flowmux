@@ -3,7 +3,7 @@
 # Flowmux 활성 Agents와 지속 실행 설계
 
 상태: 구현 진행 중. GUI 미연결 수명 정책은 사용자 결정 반영. 작성·갱신일: 2026-11-16.
-Flowmux 최초 분석 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`. Host 기반 구현과 후속 연결 지점 점검 기준: `dfc1f61f`.
+Flowmux 최초 분석 기준: `502d7b9e56e933fdb234347c554dcd0ff03461ac`. Host 기반 구현과 후속 연결 지점 점검 기준: `cb076585`.
 외부 참고 구현 코드 기준: `ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`.
 외부 소스는 읽기만 했으며 코드·자산은 가져오지 않았다. 아래 외부 경로는 해당 리비전의 저장소 상대 경로다. 소스와 테스트를 검토했지만 외부 프로그램을 실행하여 검증하지는 않았다.
 
@@ -113,6 +113,19 @@ TurnStarted(turn-1, seq=10)
 | [workspace_view.rs](../crates/flowmux/src/ui/workspace_view.rs)의 terminal 복원 | managed binding이 있으면 relay만 생성하고 기존 실행에 연결. 일반 terminal의 shell·native resume·scrollback 경로는 별도 유지 | Host 실패·epoch 불일치는 연결 오류로 유지. 실제 provider TUI와 macOS 복원 검증, 연결 완료 ACK 기반 표시를 추가 |
 
 따라서 기존 `AgentStatus`에 상태 하나를 추가하는 것으로 해결하지 않는다. 기존 UI 판정은 보존하면서 **관측과 완료 기록의 소유자를 Host로 옮기고, 그 검증 결과를 회수 정책에 연결**한다. 완료 관측이나 안전한 종료가 지원되지 않는 provider는 보류 이유를 표시하고 실행을 유지한다.
+
+### Provider별 상태 판정 적용 계획
+
+`cb076585`의 [설치 이벤트](../crates/flowmux-cli/src/hook_install.rs), [hook 변환](../crates/flowmux-cli/src/cmd_hooks.rs), `agent_runtime.rs`를 기준으로 다음을 구분한다. 아래는 현재 코드의 관측 범위와 보완 계획이며 provider의 실제 동작 검증 결과가 아니다.
+
+| Provider | 현재 코드에서 얻는 근거 | Host 이관 때 유지·보완할 계약 |
+| --- | --- | --- |
+| Codex | root/child turn identity, child 진행·종료, permission scope, 부모 Stop의 grace 확정과 완료 turn 이력 | 부모·자식의 서로 다른 turn ID와 재사용된 child를 유지. 완료 후 큰 seq의 progress를 새 작업으로 단정하는 경로를 정규화하고, 관측되지 않은 child·비동기 작업 및 Stop veto를 재검증 |
+| Claude | prompt/tool 시작·종료, permission·입력 대기, Stop/StopFailure. 설치 이벤트에 SubagentStart/SubagentStop은 없음 | 응답 Stop을 전체 완료로 승격하지 않음. 하위·백그라운드 작업 관측을 보완하고, permission batch는 PostToolBatch까지, 해결된 tool-use ID는 turn/session 경계까지 유지 |
+| Gemini / Antigravity | 일반 Stop을 잠정 기록한 뒤 안정된 ready 화면으로 UI 완료 보정. Antigravity의 `fully_idle == false`는 Stop 적용을 막음 | 600ms 화면 안정 조건은 기존 UI 보정으로 유지. `fully_idle` 누락·idle 화면만으로 전체 완료를 확정하지 않고, GUI 없는 headless 관측과 전체 작업 재검증을 연결 |
+| Cline | TaskStart/TaskResume/UserPromptSubmit, TaskComplete/TaskCancel/TaskError 및 session 종료 hook | TaskComplete·취소를 작업 종료 후보로 사용하되 미해결 작업·재시도와 관측 범위를 확인. TaskError 통지만으로 실패 작업이 끝났다고 단정하지 않음 |
+
+각 provider의 자동 회수 활성화에는 **GUI 없이 유효한 관측, 전체 작업 완료 재검증, 새 작업 시작과 경합하지 않는 유휴 종료 수락**이 모두 필요하다. 코드에서 이벤트 이름을 찾았거나 UI 완료 검사가 통과한 사실은 이 세 조건의 검증을 대신하지 않는다. 위 표 밖의 provider·버전·hook 미설치 경로도 같은 기준을 적용하며, 지원 근거가 없으면 실행을 보존한다. 현재 Host에는 provider hook 전달과 완료 adapter가 연결되지 않았으므로 모든 provider의 실제 자동 회수는 미활성 상태다.
 
 ## 4. Agents 목록과 상호작용
 
@@ -278,7 +291,7 @@ UI의 `Working/Idle` 전이를 종료 타이머에 직접 연결하지 않는다
 
 1. 현재 실행 identity와 작업 generation에 대응하는 신뢰 가능한 완료 또는 작업 없음 확인이 있다. 성공·실패·사용자 취소 모두 실제로 종료된 작업이면 해당한다. 재시도 예정 상태는 완료가 아니다.
 2. root와 연결된 하위 에이전트, tool 호출, 백그라운드 작업이 끝났고 승인·입력 대기 및 알려진 예약 실행이 남아 있지 않다. 재사용된 child도 식별하며 부모/자식의 서로 다른 turn ID를 하나로 혼동하지 않는다.
-3. 관측 공백이나 상충이 없다. hook 미지원·유실, process 검사 실패, 화면상 idle만 관측한 경우는 완료를 증명하지 못한다. provider adapter가 재조회로 해결하지 못하면 유지한다.
+3. 관측 공백이나 상충이 없다. hook 미지원·유실, process 검사 실패, 화면상 idle만 관측한 경우는 완료를 증명하지 못한다. 완료 확인 이후에도 관측 경로의 유효성을 확인하며, 전달 실패·단절이 확인되면 기존 완료 기록만으로 종료하지 않는다. provider adapter가 재조회로 해결하지 못하면 유지한다.
 
 미확인 이벤트 때문에 보류할 때 기존 deadline은 이력으로 보존한다. 같은 완료 작업의 잡음임이 확인되면 원래 deadline으로 돌아가며 30분을 다시 주지 않는다. 실제 새 작업이었다면 이전 완료 기준을 버리고 그 작업의 완료 확인부터 다시 계산한다. 보류 중 deadline이 지나도 검증을 통과하기 전에는 종료하지 않는다.
 
@@ -423,7 +436,7 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 5. **DnD/이동/재연결:** 기존 tab 이동의 widget 보존 경로를 재사용하고 `application/x-flowmux-agent-instance` payload를 추가한다. 버전·instance ID·Host scope만 허용한다. 파일 drop이나 기존 tab MIME과 혼동하지 않는다. 이 단계에 다른 GUI로의 이동과 restore 경합을 포함한다.
 6. **기존 실행과 공존/출시:** wrapper가 감지한 기존 GUI-owned agent는 `Tab-bound`로 표시하고 현재 위치로 이동 가능하게 한다. 임의의 살아 있는 PTY를 소유권 이전한 것처럼 표시하지 않는다. 새 managed launch를 기본 제공하되 기존 쉘 명령을 일괄 가로채는 변경은 별도로 검증한다.
 
-상태 판정 이관의 완료 조건은 세 가지다. 첫째, 기존 이벤트 fixtures에 대한 일반 terminal의 UI 결과가 유지되어야 한다. 둘째, 같은 fixtures를 GUI·surface 없이 managed InstanceId에 적용해 child/wait·완료 기록과 deadline을 검증해야 한다. 셋째, 실제 provider의 전체 관측과 유휴 종료 계약을 확인한 뒤 자동 종료를 활성화해야 한다. 앞의 두 단계가 통과해도 세 번째 조건을 만족하지 않으면 그 provider의 자동 종료를 지원한다고 표시하지 않는다.
+상태 판정 이관의 완료 조건은 세 가지다. 첫째, 기존 이벤트 fixtures에 대한 일반 terminal의 UI 결과가 유지되어야 한다. 둘째, 같은 fixtures를 GUI·surface 없이 managed InstanceId에 적용해 child/wait·완료 기록과 deadline을 검증해야 한다. 셋째, §3의 provider별로 전체 관측과 재조회 방법, 유휴 종료 수락 방식, 실제 검증한 버전·결과를 기록한 뒤 자동 종료를 활성화해야 한다. 앞의 두 단계가 통과해도 세 번째 조건을 만족하지 않으면 그 provider의 자동 종료를 지원한다고 표시하지 않는다.
 
 일반 shell에서 임의로 실행한 모든 프로세스를 자동으로 지속 실행으로 전환하는 것은 초기 범위가 아니다. 사용자가 그 실행도 지속시키려면 처음부터 managed launch를 써야 한다. 기존 세션을 종료하여 전환하거나 자동 resume하지 않는다. `Tab-bound` 실행의 종료는 해당 provider identity에 안전하게 보낼 수 있는 기존 interrupt/종료 경로만 제공하고, 불가능하면 위치로 이동하게 한다. 관리 실행과 같은 detach 보장을 표시하지 않는다.
 
@@ -462,6 +475,7 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | GUI 없이 Stop grace 만료·화면 의존 provider 상태 변화 | Host에서 지연 확정·headless 관측 지속. 화면만으로 전체 작업 완료를 증명하지 않음 |
 | 미확인 이벤트 뒤 잡음/새 작업으로 확정 | 잡음이면 원래 deadline 복구, 실제 작업이면 새 완료 기준 적용. 미확인 동안 종료 없음 |
 | hook 누락·미지원 provider·process 검사 실패 | 확인 불가와 이유 표시, 자동 종료 보류. 무출력/저CPU/시간 경과만으로 완료 판정하지 않음 |
+| 완료 확인 뒤 hook 전달 실패·관측 채널 단절 | 기존 완료 기록과 deadline을 보존하되 자동 종료 보류. 복구 후 같은 완료 작업임을 재검증하면 원래 deadline 복구, 실제 새 작업이면 이전 완료 기준 폐기 |
 | 두 GUI 중 하나 종료·마지막 GUI 재연결 | 하나라도 관리 연결이 있으면 자동 종료 없음. 관리 handshake가 tab 복원보다 먼저 종료 예약 취소 |
 | deadline과 새 작업·GUI 연결 경합 | 먼저 수락된 상태 전이와 revision으로 결정. 오래된 callback 무효, provider가 busy면 종료 거절 |
 | 자동 종료 중 응답 지연·새 자율 작업 | idle 종료 계약 검증, 임의 SIGTERM/강제 kill 전환 없음. 계약 미지원은 보존 |
