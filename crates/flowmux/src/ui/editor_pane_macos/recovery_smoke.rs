@@ -38,38 +38,49 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
             &format!("document.documentElement.style.colorScheme === '{scheme}'"),
         )
         .await;
-        assert_eq!(
-            javascript(
-                pane,
-                r#"
+        let contrast = javascript(
+            pane,
+            r#"
             (() => {
                 const sample = document.createElement('span');
                 sample.style.background = 'var(--panel)';
                 document.body.append(sample);
-                const ctx = document.createElement('canvas').getContext('2d');
+                // Canvas readback can be randomized by WebKit tracking protection.
                 const luminance = color => {
-                    ctx.fillStyle = color;
-                    ctx.fillRect(0, 0, 1, 1);
-                    const rgb = [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3).map(v => {
-                        v /= 255;
+                    const srgb = color.match(/^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)\)$/);
+                    const legacy = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+                    if (!srgb && !legacy) throw new Error(`Unexpected opaque sRGB color: ${color}`);
+                    const rgb = (srgb || legacy).slice(1).map(value => {
+                        const v = Number(value) / (srgb ? 1 : 255);
                         return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
                     });
                     return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
                 };
-                const bg = luminance(getComputedStyle(sample).backgroundColor);
-                const readable = ['--warning', '--danger'].every(variable => {
+                const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+                if (ratio(luminance('rgb(0, 0, 0)'), luminance('color(srgb 1 1 1)')) !== 21)
+                    throw new Error('Black/white contrast must be 21');
+                const background = getComputedStyle(sample).backgroundColor;
+                const bg = luminance(background);
+                const colors = ['--warning', '--danger'].map(variable => {
                     sample.style.color = `var(${variable})`;
-                    const fg = luminance(getComputedStyle(sample).color);
-                    return (Math.max(bg, fg) + 0.05) / (Math.min(bg, fg) + 0.05) >= 4.5;
+                    const color = getComputedStyle(sample).color;
+                    return { variable, color, ratio: ratio(bg, luminance(color)) };
                 });
                 sample.remove();
-                return String(readable);
+                return JSON.stringify({ background, colors });
             })()
-        "#
-            )
-            .await,
-            "true",
-            "editor status contrast in {theme}"
+        "#,
+        )
+        .await;
+        println!("EDITOR_STATUS_CONTRAST theme={theme} {contrast}");
+        let contrast: serde_json::Value = serde_json::from_str(&contrast).unwrap();
+        assert!(
+            contrast["colors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|color| color["ratio"].as_f64().unwrap() >= 4.5),
+            "editor status contrast in {theme}: {contrast}"
         );
     }
     pane.apply_appearance(original);
