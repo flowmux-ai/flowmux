@@ -127,6 +127,15 @@ pub fn runtime_socket_for_pid(pid: u32) -> PathBuf {
     }
 }
 
+/// Stable managed-agent endpoint, independent of the current GUI pointer.
+pub fn agent_host_socket() -> PathBuf {
+    runtime_socket().with_file_name(if base_runtime_dir().is_some() || is_flatpak_sandbox() {
+        "flowmux-agent-host.sock".to_owned()
+    } else {
+        format!("flowmux-agent-host-{}.sock", whoami())
+    })
+}
+
 /// `$HOME/.config/opencode/` (or analogous) bypassing the
 /// flatpak-private `XDG_CONFIG_HOME` so the hook installer drops
 /// agent plugin files where the host-side agent actually reads them.
@@ -168,6 +177,10 @@ mod tests {
         let pid = runtime_socket_for_pid(std::process::id());
         let legacy = runtime_socket();
         assert_ne!(pid, legacy);
+        let host = agent_host_socket();
+        assert_ne!(host, pid);
+        assert_ne!(host, legacy);
+        assert_eq!(host.parent(), legacy.parent());
     }
 
     #[test]

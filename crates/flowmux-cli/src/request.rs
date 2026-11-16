@@ -625,7 +625,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::Fix => unreachable!("handled before request build"),
         Cmd::PtyTee { .. } => unreachable!("handled before request build"),
         Cmd::Identify { .. } => unreachable!("handled before request build"),
-        Cmd::Capabilities => unreachable!("handled before request build"),
+        Cmd::Capabilities | Cmd::AgentRelay { .. } => unreachable!("handled before request build"),
     })
 }
 

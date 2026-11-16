@@ -40,6 +40,17 @@ impl SpawnGate {
         drop(self);
     }
 
+    /// Abort a parked launch before it can execute provider code.
+    pub fn cancel(mut self) {
+        use std::os::fd::AsRawFd;
+        if let Some(fd) = self.0.take() {
+            let byte = 0u8;
+            unsafe {
+                libc::write(fd.as_raw_fd(), &byte as *const u8 as *const libc::c_void, 1);
+            }
+        }
+    }
+
     #[cfg(test)]
     fn raw_fd(&self) -> RawFd {
         use std::os::fd::AsRawFd;
@@ -90,6 +101,56 @@ impl Pty {
         rows: u16,
         oom_score_adj: Option<i32>,
     ) -> io::Result<(Pty, SpawnGate)> {
+        Self::spawn_with_envp(
+            argv,
+            cwd,
+            build_envp(extra_env)?,
+            cols,
+            rows,
+            oom_score_adj,
+            false,
+        )
+    }
+
+    /// Managed agents receive the launcher's complete environment instead of
+    /// inheriting credentials and provider settings from a long-lived Host.
+    /// `argv[0]` must already be resolved to an absolute executable path.
+    pub fn spawn_gated_with_environment(
+        argv: &[&str],
+        cwd: &Path,
+        environment: &[(String, String)],
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<(Pty, SpawnGate)> {
+        if argv
+            .first()
+            .is_none_or(|program| !Path::new(program).is_absolute())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "managed executable must be absolute",
+            ));
+        }
+        Self::spawn_with_envp(
+            argv,
+            Some(cwd),
+            build_envp_from(std::iter::empty(), environment)?,
+            cols,
+            rows,
+            None,
+            true,
+        )
+    }
+
+    fn spawn_with_envp(
+        argv: &[&str],
+        cwd: Option<&Path>,
+        c_env: Vec<CString>,
+        cols: u16,
+        rows: u16,
+        oom_score_adj: Option<i32>,
+        strict_cwd: bool,
+    ) -> io::Result<(Pty, SpawnGate)> {
         if argv.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty argv"));
         }
@@ -105,7 +166,6 @@ impl Pty {
         let mut argv_ptrs: Vec<*const libc::c_char> = c_argv.iter().map(|s| s.as_ptr()).collect();
         argv_ptrs.push(std::ptr::null());
 
-        let c_env = build_envp(extra_env)?;
         let mut env_ptrs: Vec<*const libc::c_char> = c_env.iter().map(|s| s.as_ptr()).collect();
         env_ptrs.push(std::ptr::null());
 
@@ -192,11 +252,15 @@ impl Pty {
                     }
                 }
                 libc::close(gate_read);
+                if byte != 1 {
+                    libc::_exit(125);
+                }
             }
             if let Some(ref c) = c_cwd {
-                // Ignore chdir failure: better to exec in the wrong dir than to
-                // leave a half-spawned child. (Mirrors common shell behavior.)
-                unsafe { libc::chdir(c.as_ptr()) };
+                // Preserve ordinary-shell fallback; managed work must use its requested cwd.
+                if unsafe { libc::chdir(c.as_ptr()) } != 0 && strict_cwd {
+                    unsafe { libc::_exit(126) };
+                }
             }
             unsafe {
                 // execvpe(3) is a glibc/BSD extension absent on macOS, so there
@@ -571,6 +635,84 @@ mod tests {
         let mut buf = [0u8; 64];
         let n = pty.read(&mut buf).expect("read");
         assert!(String::from_utf8_lossy(&buf[..n]).contains("go"));
+    }
+
+    #[test]
+    fn managed_environment_does_not_inherit_host_settings_and_invalid_cwd_never_executes() {
+        let cwd = std::env::current_dir().unwrap();
+        let (mut pty, gate) = Pty::spawn_gated_with_environment(
+            &["/usr/bin/env"],
+            &cwd,
+            &[("ONLY".into(), "isolated".into())],
+            80,
+            24,
+        )
+        .unwrap();
+        gate.release();
+        let mut output = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            assert!(poll_readable(pty.master_fd(), 5000));
+            let n = pty.read(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            output.extend_from_slice(&buffer[..n]);
+        }
+        assert_eq!(String::from_utf8(output).unwrap().trim(), "ONLY=isolated");
+        assert!(Pty::spawn_gated_with_environment(&["env"], &cwd, &[], 80, 24).is_err());
+        let missing = cwd.join(format!(".missing-agent-cwd-{}", std::process::id()));
+        assert!(!missing.exists());
+        let (mut pty, gate) = Pty::spawn_gated_with_environment(
+            &["/bin/sh", "-c", "printf must-not-execute"],
+            &missing,
+            &[],
+            80,
+            24,
+        )
+        .unwrap();
+        gate.release();
+        assert!(poll_readable(pty.master_fd(), 5000));
+        assert_eq!(pty.read(&mut buffer).unwrap(), 0);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = pty.try_wait().unwrap() {
+                assert!(libc::WIFEXITED(status));
+                assert_eq!(libc::WEXITSTATUS(status), 126);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn cancelled_gate_never_executes_even_when_a_duplicate_writer_remains_open() {
+        let (mut pty, gate) = Pty::spawn_gated(
+            &["/bin/sh", "-c", "printf must-not-execute"],
+            None,
+            &[],
+            80,
+            24,
+            None,
+        )
+        .unwrap();
+        let duplicate = unsafe { libc::dup(gate.raw_fd()) };
+        assert!(duplicate >= 0);
+        let _duplicate = unsafe { OwnedFd::from_raw_fd(duplicate) };
+        gate.cancel();
+        assert!(poll_readable(pty.master_fd(), 5000));
+        assert_eq!(pty.read(&mut [0; 128]).unwrap(), 0);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = pty.try_wait().unwrap() {
+                assert!(libc::WIFEXITED(status));
+                assert_eq!(libc::WEXITSTATUS(status), 125);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

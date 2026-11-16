@@ -489,6 +489,9 @@ pub struct AgentLifecycleNotification {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Request {
+    AgentHost {
+        request: crate::agent_host::HostRequest,
+    },
     Ssh {
         request: SshRequest,
     },
@@ -1282,6 +1285,9 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    AgentHost {
+        response: crate::agent_host::HostResponse,
+    },
     TerminalProgramStatus {
         snapshot: Option<TerminalProgramSnapshot>,
     },

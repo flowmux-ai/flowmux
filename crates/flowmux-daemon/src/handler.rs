@@ -104,6 +104,9 @@ impl Handler for DaemonHandler {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async move {
             match req {
+                Request::AgentHost { .. } => Response::Error(RpcError::Unimplemented(
+                    "persistent agent requests require the agent Host socket".into(),
+                )),
                 Request::Ping => Response::Pong,
 
                 Request::WorkspaceCreate {

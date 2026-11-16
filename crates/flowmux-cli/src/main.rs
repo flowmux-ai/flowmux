@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use flowmux_cli::{agent, doctor, hook_install};
+mod agent_relay;
 mod batch;
 mod cmd_hooks;
 mod cmd_ops;
@@ -95,6 +96,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Internal: attach a terminal view to the same live Host process.
+    #[command(hide = true)]
+    AgentRelay {
+        #[arg(long)]
+        instance: flowmux_core::AgentInstanceId,
+        #[arg(long)]
+        epoch: uuid::Uuid,
+    },
     /// Daemon health probe.
     Ping,
 
@@ -1343,6 +1352,14 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     // Local-only commands — handled before the daemon connect so they
     // work without a running flowmux GUI.
     match &cmd {
+        Cmd::AgentRelay { instance, epoch } => {
+            return agent_relay::run(
+                &cli.socket.clone().unwrap_or_else(paths::agent_host_socket),
+                *instance,
+                *epoch,
+            )
+            .await
+        }
         Cmd::Theme { op } => return run_theme_op(op),
         Cmd::ListBrowsers => {
             for s in flowmux_cookies::discover_sources() {
