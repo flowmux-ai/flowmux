@@ -29,6 +29,7 @@ with open(os.environ['CALLS'], 'a') as log:
         'desktop': os.environ.get('XDG_CURRENT_DESKTOP'),
         'session_desktop': os.environ.get('XDG_SESSION_DESKTOP'),
         'skills': os.environ.get('FLOWMUX_SKILLS_SMOKE_ONLY'),
+        'options_zoom': os.environ.get('FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY'),
         'boot_restore': os.environ.get('FLOWMUX_RESTORED_ROOTS_SMOKE_ONLY'),
         'ssh_preview': os.environ.get('FLOWMUX_SSH_PREVIEW_SMOKE_ONLY'),
         'keyboard': os.environ.get('FLOWMUX_EDITOR_FOCUS_SMOKE_ONLY'),
@@ -62,6 +63,7 @@ if name == 'cargo' and 'flowmux-state' in args and 'flowmux-procmon' in args:
     sys.exit(int(os.environ.get('NATIVE_STATE_EXIT', '0')))
 if name == 'cargo' and 'macos_native' in args:
     for flag, prefix, marker in [('FLOWMUX_SESSION_FLOW_SMOKE_ONLY', 'SESSION_FLOW', 'MACOS_SESSION_FLOW_LAYOUT_OK'),
+                                  ('FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY', 'OPTIONS_ZOOM', 'MACOS_OPTIONS_ZOOM_DISPLAY_OK'),
                                   ('FLOWMUX_BROWSER_DEADLINE_SMOKE_ONLY', 'BROWSER_DEADLINE', 'MACOS_BROWSER_SCRIPT_DEADLINE_OK'),
                                   ('FLOWMUX_OFFICE_STRESS_SMOKE_ONLY', 'OFFICE_STABILITY', 'OFFICE_STABILITY_OK cycles=12'),
                                   ('FLOWMUX_BROWSER_CHROME_SMOKE_ONLY', 'BROWSER_CHROME', 'BROWSER_CHROME_LAYOUT_OK'),
@@ -340,6 +342,17 @@ time.sleep(60)
                     **{phase + '_EXIT': '41'})
                 self.assertEqual(result.returncode, 41, result.stdout + result.stderr)
 
+    def test_macos_options_zoom_gate_requires_success_and_marker(self):
+        for exit_code, marker, expected in [(0, '1', 0), (41, '1', 41), (0, '0', 1)]:
+            with self.subTest(exit_code=exit_code, marker=marker):
+                result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin',
+                    OPTIONS_ZOOM_EXIT=str(exit_code), OPTIONS_ZOOM_MARKER=marker)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                native = [c for c in calls if 'macos_native' in c['args']]
+                self.assertEqual(len(native), 15 if expected == 0 else 2)
+                self.assertEqual(native[1]['options_zoom'], '1')
+                self.assertIsNone(native[1]['socket'])
+
     def test_macos_skill_gate_runs_and_propagates_failure(self):
         for exit_code in (0, 21):
             with self.subTest(exit_code=exit_code):
@@ -347,9 +360,9 @@ time.sleep(60)
                                                 SKILLS_TEST_EXIT=str(exit_code))
                 self.assertEqual(result.returncode, exit_code, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 15 if exit_code == 0 else 5)
+                self.assertEqual(len(native), 16 if exit_code == 0 else 6)
                 self.assertIsNone(native[0]['skills'])
-                self.assertEqual(native[4]['skills'], '1')
+                self.assertEqual(native[5]['skills'], '1')
 
     def test_macos_keyboard_gate_requires_success_and_completion_marker(self):
         for exit_code, marker, expected in [(0, '1', 0), (29, '1', 29), (0, '0', 1)]:
@@ -359,9 +372,9 @@ time.sleep(60)
                     KEYBOARD_TEST_EXIT=str(exit_code), KEYBOARD_MARKER=marker)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 15 if expected == 0 else 4)
-                self.assertEqual(native[3]['keyboard'], '1')
-                self.assertIsNone(native[3]['socket'])
+                self.assertEqual(len(native), 16 if expected == 0 else 5)
+                self.assertEqual(native[4]['keyboard'], '1')
+                self.assertIsNone(native[4]['socket'])
 
     def test_macos_gate_uses_cairo_despite_inherited_renderer(self):
         for renderer in ('', 'gl'):
@@ -370,7 +383,7 @@ time.sleep(60)
                                                 GSK_RENDERER=renderer)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 native = [c for c in calls if 'macos_native' in c['args']]
-                self.assertEqual(len(native), 15)
+                self.assertEqual(len(native), 16)
                 self.assertTrue(all(c['renderer'] == 'cairo' for c in native))
                 preview = next(c for c in native if c['ssh_preview'] == '1')
                 self.assertTrue(preview['tmp'].endswith('/macos-native-long-temporary-directory'))
@@ -571,7 +584,7 @@ time.sleep(60)
         result, calls = self.run_script('test-ci.sh', 'macos', TEST_OS='Darwin')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         native = [c for c in calls if 'macos_native' in c['args']]
-        self.assertEqual(len(native), 14)
+        self.assertEqual(len(native), 15)
         self.assertNotIn('office-stability.log', result.stdout)
         self.assertIn('MACOS_BROWSER_SCRIPT_DEADLINE_OK', result.stdout)
 
