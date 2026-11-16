@@ -329,6 +329,12 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
         }),
     );
     let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
+    let new_agent = gtk::gio::ActionEntry::builder("new-agent")
+        .activate({
+            let bridge = bridge.clone();
+            move |_, _, _| bridge.send_from_ui(GtkCommand::NewAgent)
+        })
+        .build();
     let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
     let toggle_session_flow = make_toggle_session_flow_action(bridge.clone());
     let review_bridge = bridge.clone();
@@ -534,6 +540,7 @@ pub fn install_actions(controller: &crate::ui::window::WindowController, bridge:
         toggle_pane_zoom,
         toggle_workspace_overview,
         toggle_session_panel,
+        new_agent,
         toggle_session_flow,
         open_diff_review,
         next_workspace,
@@ -1099,7 +1106,10 @@ fn make_close_surface_action(
 /// GDK's launch context carries the compositor activation token, so the new
 /// Wayland window receives keyboard focus instead of leaving input in the old
 /// window. macOS uses a subprocess because GAppInfo cannot launch command lines.
-fn new_window_executable(current_exe: Option<PathBuf>, argv0: Option<PathBuf>) -> Option<PathBuf> {
+pub(crate) fn new_window_executable(
+    current_exe: Option<PathBuf>,
+    argv0: Option<PathBuf>,
+) -> Option<PathBuf> {
     current_exe.filter(|path| path.exists()).or(argv0)
 }
 

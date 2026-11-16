@@ -24,6 +24,12 @@ pub(crate) struct AgentRelayArgs {
     pub epoch: Uuid,
     #[arg(long)]
     pub require_gui: bool,
+    #[arg(long, requires = "replace_generation")]
+    pub replace_lease: Option<Uuid>,
+    #[arg(long, requires = "replace_lease", value_parser = clap::value_parser!(u64).range(1..))]
+    pub replace_generation: Option<u64>,
+    #[arg(long, requires = "require_gui")]
+    pub ready_token: Option<Uuid>,
 }
 
 struct TerminalGuard {
@@ -176,11 +182,57 @@ async fn send_input(
     }
 }
 
+async fn acknowledge_snapshot(
+    client: &HostClient,
+    key: AttachmentKey,
+    sequence: u64,
+    ready_token: Option<Uuid>,
+) -> anyhow::Result<()> {
+    if let Some(token) = ready_token {
+        let socket = std::env::var_os("FLOWMUX_SOCKET_PATH")
+            .context("Agent destination GUI socket is missing")?;
+        let surface = std::env::var("FLOWMUX_SURFACE_ID")
+            .context("Agent destination surface is missing")?
+            .parse()?;
+        let response = tokio::time::timeout(Duration::from_secs(3), async {
+            flowmux_ipc::client::Client::connect(Path::new(&socket))
+                .await?
+                .call(flowmux_ipc::Request::AgentViewReady {
+                    surface,
+                    token,
+                    key,
+                    sequence,
+                })
+                .await
+        })
+        .await
+        .context("Agent destination admission timed out; not retried")??;
+        anyhow::ensure!(
+            matches!(response, flowmux_ipc::Response::Ok),
+            "Agent destination admission failed: {response:?}"
+        );
+        return Ok(());
+    }
+    let response = tokio::time::timeout(
+        Duration::from_secs(3),
+        client.call(HostRequest::ViewReady { key, sequence }),
+    )
+    .await
+    .context("Agent view ready acknowledgement timed out; not retried")??;
+    anyhow::ensure!(
+        matches!(response, HostResponse::Ok),
+        "unexpected Agent view ready response"
+    );
+    Ok(())
+}
+
 pub async fn run(
     socket: &Path,
     instance: AgentInstanceId,
     epoch: Uuid,
     require_gui: bool,
+    replace: Option<AttachmentKey>,
+    ready_token: Option<Uuid>,
 ) -> anyhow::Result<()> {
     let mut hangup = signal(SignalKind::hangup())?;
     let mut terminate = signal(SignalKind::terminate())?;
@@ -197,8 +249,17 @@ pub async fn run(
         epoch,
         request_id: Uuid::new_v4(),
         view: None,
+        surface: require_gui
+            .then(|| {
+                std::env::var("FLOWMUX_SURFACE_ID")
+                    .context("Agent GUI surface is missing")?
+                    .parse()
+                    .context("Agent GUI surface is invalid")
+            })
+            .transpose()?,
         require_gui,
-        replace: None,
+        gui_ready: ready_token.is_some(),
+        replace,
     };
     // A newly started Host can precede the GUI's next management reconnect.
     let prepare = async {
@@ -206,6 +267,7 @@ pub async fn run(
             match control.call(request.clone()).await {
                 Err(error)
                     if require_gui
+                        && replace.is_none()
                         && matches!(
                             error.downcast_ref::<HostRpcError>(),
                             Some(HostRpcError(RpcError::Busy(_)))
@@ -264,6 +326,10 @@ pub async fn run(
                     let frame = next?;
                     if frame.data.is_empty() {
                         if frame.ended {let _ = control.call(HostRequest::Detach {key}).await; break;}
+                        if !initialized && frame.next_offset.is_none() {
+                            acknowledge_snapshot(&control, key, frame.sequence, ready_token).await?;
+                            initialized = true;
+                        }
                     } else {
                         input_modes.observe_output(frame.data.as_bytes());
                         current = Some((frame,0));
@@ -282,8 +348,11 @@ pub async fn run(
                             *offset += n;
                             if *offset == frame.data.len() {
                                 if frame.next_offset.is_none() {
-                                    initialized = true;
                                     if frame.ended {let _ = control.call(HostRequest::Detach {key}).await; break;}
+                                    if !initialized {
+                                        acknowledge_snapshot(&control, key, frame.sequence, ready_token).await?;
+                                        initialized = true;
+                                    }
                                 }
                                 current = None;
                             }
@@ -323,4 +392,77 @@ pub async fn run(
     // EOF releases the input lease. Never retry an ambiguous control mutation.
     drop(control);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Args {
+        #[command(flatten)]
+        relay: AgentRelayArgs,
+    }
+
+    #[test]
+    fn takeover_requires_both_lease_and_nonzero_generation() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let base = ["relay", "--instance", id, "--epoch", id];
+        let ordinary = Args::try_parse_from(base).unwrap();
+        assert!(ordinary.relay.replace_lease.is_none());
+        assert!(ordinary.relay.replace_generation.is_none());
+        assert!(ordinary.relay.ready_token.is_none());
+        for suffix in [
+            vec!["--replace-lease", id],
+            vec!["--replace-generation", "1"],
+            vec!["--replace-lease", id, "--replace-generation", "0"],
+            vec!["--replace-lease", "invalid", "--replace-generation", "1"],
+            vec!["--ready-token", id],
+            vec![
+                "--ready-token",
+                id,
+                "--replace-lease",
+                id,
+                "--replace-generation",
+                "1",
+            ],
+        ] {
+            assert!(Args::try_parse_from(base.into_iter().chain(suffix)).is_err());
+        }
+        let explicit = Args::try_parse_from(base.into_iter().chain([
+            "--replace-lease",
+            id,
+            "--replace-generation",
+            "42",
+        ]))
+        .unwrap();
+        assert_eq!(
+            explicit.relay.replace_lease,
+            Some(Uuid::parse_str(id).unwrap())
+        );
+        assert_eq!(explicit.relay.replace_generation, Some(42));
+        let admitted = Args::try_parse_from(base.into_iter().chain([
+            "--require-gui",
+            "--replace-lease",
+            id,
+            "--replace-generation",
+            "42",
+            "--ready-token",
+            id,
+        ]))
+        .unwrap();
+        assert_eq!(
+            admitted.relay.ready_token,
+            Some(Uuid::parse_str(id).unwrap())
+        );
+        let opened =
+            Args::try_parse_from(
+                base.into_iter()
+                    .chain(["--require-gui", "--ready-token", id]),
+            )
+            .unwrap();
+        assert!(opened.relay.replace_lease.is_none());
+        assert_eq!(opened.relay.ready_token, Some(Uuid::parse_str(id).unwrap()));
+    }
 }

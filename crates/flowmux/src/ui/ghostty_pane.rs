@@ -71,6 +71,7 @@ pub struct GhosttyPane {
     /// PID of the spawned shell.
     pub pid: Rc<Cell<Option<i32>>>,
     pub program_status_generation: uuid::Uuid,
+    pub(crate) agent_connection: Rc<RefCell<Option<super::agent_connection::AgentConnection>>>,
     /// Last cwd returned by [`Self::poll_cwd_if_changed`], so the poller only
     /// reports real changes.
     last_polled_cwd: Rc<RefCell<Option<PathBuf>>>,
@@ -1281,6 +1282,7 @@ impl GhosttyPane {
             search_entry,
             pid,
             program_status_generation,
+            agent_connection: Rc::new(RefCell::new(None)),
             last_polled_cwd: Rc::new(RefCell::new(None)),
             scrollback_dirty,
             terminal_scrollbar: scrollbar,

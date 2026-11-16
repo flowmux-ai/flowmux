@@ -8,8 +8,15 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 13;
 pub const MAX_INPUT_BYTES: usize = 16 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum NativeSessionEvent {
+    Started { status: flowmux_core::AgentStatus },
+    Ended,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalSize {
@@ -41,6 +48,7 @@ impl Default for TerminalSize {
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchAgent {
+    /// UUIDv7; an evicted result's timestamp cannot be reused to launch again.
     pub request_id: Uuid,
     pub provider: String,
     pub label: String,
@@ -50,6 +58,16 @@ pub struct LaunchAgent {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub size: TerminalSize,
+    /// Check the managed fork source at Host admission, before starting a child.
+    #[serde(default)]
+    pub fork_source: Option<ForkSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForkSource {
+    pub instance: AgentInstanceId,
+    pub epoch: Uuid,
+    pub session_id: String,
 }
 
 impl std::fmt::Debug for LaunchAgent {
@@ -101,6 +119,38 @@ pub struct AgentViewLocation {
     pub visible: bool,
 }
 
+impl AgentViewLocation {
+    /// Visibility changes do not change the source of an admitted command.
+    pub fn same_target(&self, other: &Self) -> bool {
+        self.window == other.window
+            && self.workspace == other.workspace
+            && self.pane == other.pane
+            && self.surface == other.surface
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentAttachment {
+    pub key: AttachmentKey,
+    pub relay_pid: Option<u32>,
+    pub relay_start: Option<u64>,
+    /// The owning relay acknowledged writing the initial snapshot to its PTY.
+    pub ready: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentViewReport {
+    pub key: AttachmentKey,
+    pub location: AgentViewLocation,
+}
+
+/// Last committed GUI surface, retained while detached to reject stale restores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentViewOwner {
+    pub key: AttachmentKey,
+    pub surface: SurfaceId,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessState {
@@ -122,8 +172,15 @@ pub struct AgentInstance {
     pub process_start: Option<u64>,
     pub boot_id: Option<String>,
     pub state: ProcessState,
+    /// Graceful termination timed out; explicit force is now available.
+    #[serde(default)]
+    pub force_terminate_allowed: bool,
     pub exit_status: Option<i32>,
     pub view: Option<AgentViewLocation>,
+    #[serde(default)]
+    pub attachment: Option<AgentAttachment>,
+    #[serde(default)]
+    pub view_owner: Option<AgentViewOwner>,
     pub error: Option<String>,
     /// Host-owned hook state; independent of any attached terminal surface.
     #[serde(default)]
@@ -139,6 +196,22 @@ pub enum TerminateMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedNotification {
+    pub instance: AgentInstanceId,
+    pub epoch: Uuid,
+    pub provider: String,
+    pub label: String,
+    pub notification: flowmux_core::Notification,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationAction {
+    Read,
+    Dismiss,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum HostRequest {
     Hello {
@@ -150,6 +223,37 @@ pub enum HostRequest {
         launch: LaunchAgent,
     },
     List,
+    /// Explicit notification from the managed execution, even without a GUI view.
+    Notify {
+        instance: AgentInstanceId,
+        epoch: Uuid,
+        notification: crate::protocol::AgentLifecycleNotification,
+    },
+    UpdateNotifications {
+        epoch: Uuid,
+        ids: Vec<flowmux_core::NotificationId>,
+        action: NotificationAction,
+    },
+    ClaimNotification {
+        epoch: Uuid,
+        id: flowmux_core::NotificationId,
+    },
+    /// Read the calling managed process's current verified view; never starts or attaches.
+    ResolveContext {
+        instance: AgentInstanceId,
+        epoch: Uuid,
+        session_id: Option<String>,
+    },
+    /// Forward one view operation without racing an attachment transfer.
+    DispatchContext {
+        context: AgentViewReport,
+        session_id: Option<String>,
+        request: Box<crate::Request>,
+    },
+    /// Full live view snapshot for this management connection; never claims input ownership.
+    ReportViews {
+        views: Vec<AgentViewReport>,
+    },
     Lifecycle {
         instance: AgentInstanceId,
         epoch: Uuid,
@@ -158,21 +262,51 @@ pub enum HostRequest {
         session_id: String,
         seq: u64,
         event: crate::protocol::AgentLifecycleEvent,
+        #[serde(default)]
+        notification: Option<crate::protocol::AgentLifecycleNotification>,
+    },
+    NativeSession {
+        instance: AgentInstanceId,
+        epoch: Uuid,
+        pid: u32,
+        process_start: u64,
+        session_id: String,
+        seq: u64,
+        event: NativeSessionEvent,
     },
     PrepareAttach {
         instance: AgentInstanceId,
         epoch: Uuid,
         request_id: Uuid,
+        /// Must be None; only the owning GUI can publish verified locations.
         view: Option<AgentViewLocation>,
+        /// GUI surface being restored or explicitly opened, never a liveness claim.
+        #[serde(default)]
+        surface: Option<SurfaceId>,
         /// GUI relays cannot attach before a management handshake cancels retirement.
         #[serde(default)]
         require_gui: bool,
+        /// Explicit GUI opens/moves finalize through the destination's GTK lane.
+        #[serde(default)]
+        gui_ready: bool,
         /// Explicit move from a known lease; never silently steal input.
         replace: Option<AttachmentKey>,
     },
     CommitAttach {
         key: AttachmentKey,
         size: TerminalSize,
+    },
+    /// A replacement retains the old owner until this snapshot-write ACK.
+    ViewReady {
+        key: AttachmentKey,
+        sequence: u64,
+    },
+    GuiViewReady {
+        key: AttachmentKey,
+        surface: SurfaceId,
+        sequence: u64,
+        relay_pid: u32,
+        relay_start: u64,
     },
     AbortAttach {
         key: AttachmentKey,
@@ -197,6 +331,7 @@ pub enum HostRequest {
     },
     Terminate {
         instance: AgentInstanceId,
+        epoch: Uuid,
         mode: TerminateMode,
     },
     SetIdleTimeout {
@@ -206,7 +341,10 @@ pub enum HostRequest {
 
 impl HostRequest {
     pub fn is_query(&self) -> bool {
-        matches!(self, Self::List | Self::Frame { .. } | Self::KeepAlive)
+        matches!(
+            self,
+            Self::List | Self::ResolveContext { .. } | Self::Frame { .. } | Self::KeepAlive
+        )
     }
 }
 
@@ -237,6 +375,9 @@ pub enum HostResponse {
         /// Accepted by the ledger; a display transition is not required.
         applied: bool,
     },
+    NotificationClaimed {
+        claimed: bool,
+    },
     Launched {
         agent: Box<AgentInstance>,
     },
@@ -244,6 +385,15 @@ pub enum HostResponse {
         epoch: Uuid,
         revision: u64,
         agents: Vec<AgentInstance>,
+        notifications: Vec<ManagedNotification>,
+    },
+    Context {
+        key: AttachmentKey,
+        location: AgentViewLocation,
+        socket: PathBuf,
+    },
+    Dispatched {
+        response: Box<crate::Response>,
     },
     Prepared {
         key: AttachmentKey,
@@ -288,7 +438,7 @@ impl HostClient {
     }
 
     pub async fn call(&self, request: HostRequest) -> anyhow::Result<HostResponse> {
-        match self.0.call(Request::AgentHost { request }).await? {
+        match self.0.call_raw(Request::AgentHost { request }).await? {
             Response::AgentHost { response } => Ok(response),
             Response::Error(error) => Err(HostRpcError(error).into()),
             _ => anyhow::bail!("unexpected agent host response"),
@@ -334,6 +484,33 @@ mod tests {
             assert!(HostClient::connect(&socket, ClientRole::Gui).await.is_err());
             server.await.unwrap();
         }
+    }
+
+    #[test]
+    fn view_report_roundtrip_keeps_current_attachment_and_location() {
+        let report = AgentViewReport {
+            key: AttachmentKey {
+                instance: AgentInstanceId::new(),
+                epoch: Uuid::new_v4(),
+                lease: Uuid::new_v4(),
+                generation: 7,
+            },
+            location: AgentViewLocation {
+                window: Uuid::new_v4(),
+                workspace: WorkspaceId::new(),
+                pane: PaneId::new(),
+                surface: SurfaceId::new(),
+                visible: false,
+            },
+        };
+        let request = HostRequest::ReportViews {
+            views: vec![report.clone()],
+        };
+        let encoded = serde_json::to_string(&request).unwrap();
+        let HostRequest::ReportViews { views } = serde_json::from_str(&encoded).unwrap() else {
+            panic!("wrong request");
+        };
+        assert_eq!(views, vec![report]);
     }
 
     #[test]

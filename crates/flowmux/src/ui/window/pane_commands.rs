@@ -6,6 +6,258 @@ use super::*;
 const OPEN_TIG_SHELL_COMMAND: &str = "tig\r";
 
 impl WindowController {
+    pub(super) async fn open_agent_view(
+        &self,
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let (pane, surface) = self.open_agent_view_at(pane, agent, None).await?;
+        self.wait_for_agent_view(pane, surface, binding).await
+    }
+
+    async fn wait_for_agent_view(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        binding: flowmux_core::AgentViewBinding,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        let generation = self
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&surface)
+            .ok_or("Agent view closed before connection")?
+            .program_status_generation;
+        let started = std::time::Instant::now();
+        loop {
+            if self.store.surface_agent_binding(pane, surface).await != Some(binding) {
+                return Err("Agent destination changed before connection".into());
+            }
+            if !self
+                .pane_registry
+                .borrow()
+                .terminals
+                .get(&surface)
+                .is_some_and(|terminal| {
+                    terminal.program_status_generation == generation && terminal.pid.get().is_some()
+                })
+            {
+                return Err("Agent view disconnected. The execution was not stopped; reopen it from Agents to retry.".into());
+            }
+            let agent = {
+                let registry = self.bridge.agent_registry.borrow();
+                registry
+                    .available
+                    .then(|| {
+                        registry
+                            .agents
+                            .iter()
+                            .find(|agent| {
+                                agent.instance == binding.instance && agent.epoch == binding.epoch
+                            })
+                            .cloned()
+                    })
+                    .flatten()
+            };
+            if let Some(agent) = agent {
+                if !matches!(agent.state, flowmux_ipc::agent_host::ProcessState::Running) {
+                    return Err("Agent ended before the view connected".into());
+                }
+                if self
+                    .verified_agent_location(&agent)
+                    .await
+                    .is_some_and(|location| location.pane == pane && location.surface == surface)
+                {
+                    self.refresh_agent_connections().await;
+                    return Ok((pane, surface));
+                }
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(10) {
+                return Err("Agent view connection timed out. Close this tab and reopen it from Agents to retry.".into());
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    pub(super) async fn open_agent_view_at(
+        &self,
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+        tab_anchor: Option<(SurfaceId, bool)>,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        if let Some((target, _)) = tab_anchor {
+            if !self
+                .pane_registry
+                .borrow()
+                .surface_tabs
+                .get(&pane)
+                .is_some_and(|tabs| tabs.iter().any(|(id, _)| *id == target))
+            {
+                return Err("Agent destination tab closed".into());
+            }
+        }
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let takeover = agent
+            .attachment
+            .as_ref()
+            .filter(|attachment| attachment.ready)
+            .map(|attachment| attachment.key);
+        let takeover = if self.verified_agent_location(&agent).await.is_none() {
+            let workspace = self
+                .store
+                .workspace_for_pane(pane)
+                .await
+                .ok_or("Agent destination pane closed")?;
+            Some(crate::ui::agent_connection::AgentViewTakeover {
+                previous: takeover,
+                token: uuid::Uuid::new_v4(),
+                pane,
+                workspace,
+            })
+        } else {
+            None
+        };
+        let (workspace, source, surface, created) = self
+            .store
+            .ensure_agent_view(pane, binding, agent.label, agent.cwd)
+            .await?;
+        let disconnected = self
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&surface)
+            .is_some_and(|terminal| terminal.pid.get().is_none());
+        if disconnected || takeover.is_some() {
+            self.pane_registry
+                .borrow_mut()
+                .detach_surface_widget(source, surface);
+        }
+        if !self.pane_registry.borrow().has_surface(source, surface) {
+            if let Some(takeover) = takeover {
+                self.pane_registry
+                    .borrow_mut()
+                    .pending_agent_takeovers
+                    .insert(surface, takeover);
+            }
+            if let Err(error) = self
+                .attach_or_rerender_surface(workspace, source, surface, None)
+                .await
+            {
+                self.pane_registry
+                    .borrow_mut()
+                    .pending_agent_takeovers
+                    .remove(&surface);
+                if created {
+                    self.store.close_surface(source, surface).await;
+                }
+                return Err(error);
+            }
+        }
+        // Reconnecting a detached widget can change the strip's positions.
+        let target_index = match tab_anchor {
+            Some((target, after)) => {
+                let registry = self.pane_registry.borrow();
+                let tabs = registry
+                    .surface_tabs
+                    .get(&pane)
+                    .ok_or("Agent destination pane closed")?;
+                let target_index = tabs
+                    .iter()
+                    .position(|(id, _)| *id == target)
+                    .ok_or("Agent destination tab closed")?;
+                let src_index = tabs.iter().position(|(id, _)| *id == surface);
+                if target == surface {
+                    target_index
+                } else {
+                    crate::ui::workspace_view::tab_drop_final_index(target_index, after, src_index)
+                }
+            }
+            None => usize::MAX,
+        };
+        if source != pane || tab_anchor.is_some() {
+            self.move_surface(source, surface, None, pane, target_index)
+                .await?;
+        }
+        self.store.set_active_surface(pane, surface).await;
+        let workspace = self
+            .store
+            .workspace_for_pane(pane)
+            .await
+            .ok_or("Agent destination pane closed")?;
+        self.sync_pane_active_from_store(workspace, pane).await;
+        self.focus_pane(pane);
+        Ok((pane, surface))
+    }
+
+    pub(super) async fn open_managed_agent(
+        &self,
+        pane: Option<PaneId>,
+        tab_anchor: Option<(SurfaceId, bool)>,
+        payload: crate::ui::workspace_view::ManagedAgentDndPayload,
+    ) -> Result<(), String> {
+        let agent = self.lookup_managed_agent(&payload).await?;
+        let existing_view = self
+            .store
+            .agent_view(flowmux_core::AgentViewBinding {
+                instance: agent.instance,
+                epoch: agent.epoch,
+            })
+            .await;
+        let pane = if let Some(pane) = pane {
+            pane
+        } else if let Some((workspace, pane, surface)) = existing_view {
+            self.close_agent_office();
+            self.dismiss_workspace_overview_immediately();
+            self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+                .await;
+            self.window.present();
+            if self
+                .verified_agent_location(&agent)
+                .await
+                .is_some_and(|location| location.pane == pane && location.surface == surface)
+            {
+                return self
+                    .wait_for_agent_view(
+                        pane,
+                        surface,
+                        flowmux_core::AgentViewBinding {
+                            instance: agent.instance,
+                            epoch: agent.epoch,
+                        },
+                    )
+                    .await
+                    .map(|_| ());
+            }
+            pane
+        } else {
+            self.show_managed_agent_destination(payload, agent).await;
+            return Ok(());
+        };
+        let workspace = self
+            .store
+            .workspace_for_pane(pane)
+            .await
+            .ok_or("Agent destination pane closed")?;
+        if self.pane_registry.borrow().ssh.contains_key(&workspace) {
+            return Err("Local agents cannot open in an SSH pane".into());
+        }
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let (_, surface) = self.open_agent_view_at(pane, agent, tab_anchor).await?;
+        self.wait_for_agent_view(pane, surface, binding).await?;
+        self.refresh_agent_displays().await;
+        Ok(())
+    }
+
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
@@ -16,6 +268,7 @@ impl WindowController {
             | GtkCommand::ResizePane { pane, .. }
             | GtkCommand::CloseFocused { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::CloseMovedAgentView { pane, .. }
             | GtkCommand::ConfirmCloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. } => zoomed.is_some_and(|zoom| {
                 let registry = self.pane_registry.borrow();
@@ -39,54 +292,42 @@ impl WindowController {
         }
 
         match cmd {
+            GtkCommand::OpenManagedAgent {
+                pane,
+                tab_anchor,
+                payload,
+                ack,
+            } => {
+                let controller = self.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let result = controller
+                        .open_managed_agent(pane, tab_anchor, payload)
+                        .await;
+                    if let Err(error) = &result {
+                        controller.clipboard_toast.show_with_message(error);
+                    }
+                    let _ = ack.send(result);
+                });
+            }
             GtkCommand::OpenAgentView { pane, agent, ack } => {
-                let result = async {
-                    let binding = flowmux_core::AgentViewBinding {
-                        instance: agent.instance,
-                        epoch: agent.epoch,
-                    };
-                    let (workspace, source, surface, created) = self
-                        .store
-                        .ensure_agent_view(pane, binding, agent.label, agent.cwd)
-                        .await?;
-                    let disconnected = self
-                        .pane_registry
-                        .borrow()
-                        .terminals
-                        .get(&surface)
-                        .is_some_and(|terminal| terminal.pid.get().is_none());
-                    if disconnected {
-                        self.pane_registry
-                            .borrow_mut()
-                            .detach_surface_widget(source, surface);
+                let binding = flowmux_core::AgentViewBinding {
+                    instance: agent.instance,
+                    epoch: agent.epoch,
+                };
+                // Apply guarded effects now; waiting for ready must not block close/cancel commands.
+                match self.open_agent_view_at(pane, agent, None).await {
+                    Ok((pane, surface)) => {
+                        let controller = self.clone();
+                        gtk::glib::spawn_future_local(async move {
+                            let result =
+                                controller.wait_for_agent_view(pane, surface, binding).await;
+                            let _ = ack.send(result);
+                        });
                     }
-                    if !self.pane_registry.borrow().has_surface(source, surface) {
-                        if let Err(error) = self
-                            .attach_or_rerender_surface(workspace, source, surface, None)
-                            .await
-                        {
-                            if created {
-                                self.store.close_surface(source, surface).await;
-                            }
-                            return Err(error);
-                        }
+                    Err(error) => {
+                        let _ = ack.send(Err(error));
                     }
-                    if source != pane {
-                        self.move_surface(source, surface, None, pane, usize::MAX)
-                            .await?;
-                    }
-                    self.store.set_active_surface(pane, surface).await;
-                    let workspace = self
-                        .store
-                        .workspace_for_pane(pane)
-                        .await
-                        .ok_or("Agent destination pane closed")?;
-                    self.sync_pane_active_from_store(workspace, pane).await;
-                    self.focus_pane(pane);
-                    Ok((pane, surface))
                 }
-                .await;
-                let _ = ack.send(result);
             }
             GtkCommand::CloseTerminatedSurface { pane, surface, ack } => {
                 let current_pane = self
@@ -369,6 +610,10 @@ impl WindowController {
             }
             GtkCommand::CloseSurface { pane, surface, ack } => {
                 self.close_surface_command(pane, surface, true, ack).await;
+            }
+            GtkCommand::CloseMovedAgentView { pane, surface, .. } => {
+                let (ack, _) = oneshot::channel();
+                self.close_surface_command(pane, surface, false, ack).await;
             }
             GtkCommand::ConfirmCloseSurface { pane, surface, ack } => {
                 if self.confirm_close_tab(pane, surface).await {

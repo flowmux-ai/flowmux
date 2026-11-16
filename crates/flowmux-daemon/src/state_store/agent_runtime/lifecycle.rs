@@ -13,6 +13,62 @@ pub(crate) struct LifecycleTransition {
 }
 
 impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn native_session(
+        &mut self,
+        owner: Owner,
+        agent: &str,
+        pid: u32,
+        session: &str,
+        seq: u64,
+        started: bool,
+        current: Option<&AgentPresence>,
+    ) -> bool {
+        let key = (owner, agent.to_ascii_lowercase(), session.to_string());
+        let floor = self
+            .last_seq
+            .get(&key)
+            .copied()
+            .into_iter()
+            .chain(self.ended.get(&key).and_then(|ended| ended.seq))
+            .chain(current.and_then(|presence| presence.seq))
+            .max();
+        if floor.is_some_and(|floor| seq <= floor) {
+            return false;
+        }
+        let same_session = current.is_some_and(|presence| {
+            presence.name.eq_ignore_ascii_case(agent)
+                && presence.pid == Some(pid)
+                && presence.session_id.as_deref() == Some(session)
+        });
+        // Repeated starts must not erase waits or in-flight child work.
+        if started && same_session || !started && !same_session {
+            return false;
+        }
+        if started {
+            if let Some(previous) = current.and_then(|presence| {
+                presence.session_id.as_ref().map(|session| {
+                    (
+                        (owner, presence.name.to_ascii_lowercase(), session.clone()),
+                        presence.pid,
+                        presence.seq,
+                    )
+                })
+            }) {
+                remember_ended_agent_lifecycle(self, previous.0, previous.1, previous.2, false);
+            }
+            clear_agent_lifecycle_runtime(self, owner, None, None, None);
+            self.ended.remove(&key);
+            self.ended_order.retain(|ended| ended != &key);
+            self.last_seq.insert(key.clone(), seq);
+            self.boundary_seq.insert(key, seq);
+        } else {
+            clear_agent_lifecycle_runtime(self, owner, Some(agent), Some(session), Some(pid));
+            remember_ended_agent_lifecycle(self, key, Some(pid), Some(seq), false);
+        }
+        true
+    }
+
     // The caller validates local surface or Host/process ownership first.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn reduce(
@@ -81,6 +137,30 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
         }) {
             tracing::debug!(target: "flowmux_agent", reason = "identity_mismatch", changed = false, "agent decision");
             return None;
+        }
+        if agent == "codex" {
+            let root_turn = match &lifecycle_event {
+                AgentLifecycleEvent::TurnStarted { turn_id, .. } => turn_id.as_deref(),
+                AgentLifecycleEvent::CodexRootProgressObserved { turn_id, .. } => {
+                    Some(turn_id.as_str())
+                }
+                _ => None,
+            };
+            let settled = root_turn.is_some_and(|turn| {
+                runtime
+                    .codex_turns
+                    .get(&(owner, session_id.to_string()))
+                    .is_some_and(|ledger| {
+                        ledger.current_parent_turn.as_deref() != Some(turn)
+                            && ledger.settled_parent_turns.iter().any(|id| id == turn)
+                    })
+            });
+            // Hook timestamps cannot reopen a settled turn; an active Stop retry can.
+            // shortcut: Only retained IDs are deduplicated; revalidate provider work before retirement.
+            if settled {
+                tracing::debug!(target: "flowmux_agent", reason = "settled_root_event", changed = false, "agent decision");
+                return None;
+            }
         }
         let terminal_boundary = matches!(
             &lifecycle_event,
@@ -551,27 +631,15 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                     seq,
                 );
                 if let Some(pending) = pending {
-                    let ledger = runtime
-                        .codex_turns
-                        .get_mut(&(owner, session_id.to_string()))
-                        .expect("Codex ledger remains present");
-                    if ledger
-                        .settled_parent_turns
-                        .iter()
-                        .any(|settled| settled == &pending.turn_id)
-                    {
-                        None
-                    } else {
-                        settle_codex_after_grace = Some(CodexGraceSettlement {
-                            turn_id: pending.turn_id,
-                            stop_seq: pending.seq,
-                        });
-                        (!lifecycle_has_waits(runtime, &wait_key)).then_some((
-                            Running,
-                            None,
-                            "Finishing Codex turn".into(),
-                        ))
-                    }
+                    settle_codex_after_grace = Some(CodexGraceSettlement {
+                        turn_id: pending.turn_id,
+                        stop_seq: pending.seq,
+                    });
+                    (!lifecycle_has_waits(runtime, &wait_key)).then_some((
+                        Running,
+                        None,
+                        "Finishing Codex turn".into(),
+                    ))
                 } else if lifecycle_has_waits(runtime, &wait_key) {
                     None
                 } else if remaining_children > 0 {
@@ -594,7 +662,7 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                 stop_hook_active,
             } if agent == "codex" => {
                 let ledger_key = (owner, session_id.to_string());
-                let (superseded, already_settled, child_count) = {
+                let (superseded, already_settled, resumed, child_count) = {
                     let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
                     set_codex_ledger_owner_if_missing(ledger, pid);
                     (
@@ -606,10 +674,11 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                             .settled_parent_turns
                             .iter()
                             .any(|settled| settled == &turn_id),
+                        ledger.current_parent_turn.as_ref() == Some(&turn_id),
                         ledger.active_children.len(),
                     )
                 };
-                if superseded || (already_settled && !stop_hook_active) {
+                if superseded || (already_settled && !stop_hook_active && !resumed) {
                     no_transition_reason = "stale_or_settled_turn";
                     None
                 } else {
@@ -624,11 +693,8 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                         .codex_turns
                         .get_mut(&ledger_key)
                         .expect("Codex ledger remains present");
-                    if stop_hook_active {
-                        ledger
-                            .settled_parent_turns
-                            .retain(|settled| settled != &turn_id);
-                    }
+                    // Keep completion history when an explicit retry resumes the same ID.
+                    ledger.current_parent_turn = Some(turn_id.clone());
                     ledger.pending_parent_stop = Some(PendingCodexStop {
                         turn_id: turn_id.clone(),
                         message,
@@ -662,7 +728,7 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                 status_text,
             } if agent == "codex" => {
                 let ledger_key = (owner, session_id.to_string());
-                let (superseded, already_settled, child_count) = {
+                let (superseded, already_settled, resumed, child_count) = {
                     let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
                     set_codex_ledger_owner_if_missing(ledger, pid);
                     (
@@ -674,10 +740,11 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
                             .settled_parent_turns
                             .iter()
                             .any(|settled| settled == &turn_id),
+                        ledger.current_parent_turn.as_ref() == Some(&turn_id),
                         ledger.active_children.len(),
                     )
                 };
-                if superseded || already_settled {
+                if superseded || (already_settled && !resumed) {
                     no_transition_reason = "stale_or_settled_turn";
                     None
                 } else {
@@ -951,6 +1018,239 @@ mod tests {
             status_text: "Completed".into(),
             stop_hook_active: false,
         }
+    }
+
+    fn settle(
+        runtime: &mut AgentLifecycleRuntime<AgentInstanceId>,
+        instance: AgentInstanceId,
+        grace: CodexGraceSettlement,
+        presence: &mut Option<AgentPresence>,
+    ) -> LifecycleTransition {
+        let transition = runtime
+            .settle_codex(
+                instance,
+                Some(std::process::id()),
+                grace.stop_seq,
+                "session",
+                &grace.turn_id,
+                presence.as_ref(),
+            )
+            .expect("matching Stop settles");
+        project(presence, transition.report.clone());
+        transition
+    }
+
+    #[test]
+    fn settled_codex_root_events_preserve_completion_and_newer_waits() {
+        let mut runtime = AgentLifecycleRuntime::<AgentInstanceId>::default();
+        let instance = AgentInstanceId::new();
+        let mut presence = None;
+        apply(
+            &mut runtime,
+            instance,
+            "codex",
+            10,
+            start("old"),
+            &mut presence,
+        );
+        let stopped = apply(
+            &mut runtime,
+            instance,
+            "codex",
+            20,
+            stop("old"),
+            &mut presence,
+        );
+        assert!(
+            settle(
+                &mut runtime,
+                instance,
+                stopped.settle_codex_after_grace.unwrap(),
+                &mut presence,
+            )
+            .completed
+        );
+        let key = (instance, "codex".to_string(), "session".to_string());
+        for with_new_turn in [false, true] {
+            if with_new_turn {
+                apply(
+                    &mut runtime,
+                    instance,
+                    "codex",
+                    30,
+                    start("new"),
+                    &mut presence,
+                );
+                apply(
+                    &mut runtime,
+                    instance,
+                    "codex",
+                    40,
+                    AgentLifecycleEvent::PermissionWaitStarted {
+                        reason: AgentWaitReason::Approval,
+                        scope: Some("root:new".into()),
+                        message: None,
+                        status_text: "Approval required".into(),
+                    },
+                    &mut presence,
+                );
+            }
+            let before = presence.clone();
+            let last_seq = runtime.last_seq[&key];
+            let boundary_seq = runtime.boundary_seq[&key];
+            for event in [
+                start("old"),
+                AgentLifecycleEvent::CodexRootProgressObserved {
+                    turn_id: "old".into(),
+                    status_text: "Delayed progress".into(),
+                },
+            ] {
+                assert!(runtime
+                    .reduce(
+                        instance,
+                        "codex",
+                        Some(std::process::id()),
+                        Some(1000),
+                        "session",
+                        event,
+                        presence.as_ref(),
+                    )
+                    .is_none());
+                assert_eq!(presence, before);
+                assert_eq!(runtime.last_seq[&key], last_seq);
+                assert_eq!(runtime.boundary_seq[&key], boundary_seq);
+            }
+        }
+        assert_eq!(presence.as_ref().unwrap().pending_waits.len(), 1);
+        let stopped = apply(
+            &mut runtime,
+            instance,
+            "codex",
+            50,
+            stop("new"),
+            &mut presence,
+        );
+        assert!(
+            settle(
+                &mut runtime,
+                instance,
+                stopped.settle_codex_after_grace.unwrap(),
+                &mut presence,
+            )
+            .completed
+        );
+        assert_eq!(presence.unwrap().status, AgentStatus::Idle);
+    }
+
+    #[test]
+    fn codex_explicit_retry_keeps_completion_dedup_across_progress_and_children() {
+        let mut runtime = AgentLifecycleRuntime::<AgentInstanceId>::default();
+        let instance = AgentInstanceId::new();
+        let mut presence = None;
+        apply(
+            &mut runtime,
+            instance,
+            "codex",
+            10,
+            start("root"),
+            &mut presence,
+        );
+        for (seq, event) in [
+            (
+                11,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "reused-child".into(),
+                    turn_id: "old-child-turn".into(),
+                },
+            ),
+            (
+                12,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "reused-child".into(),
+                    turn_id: "old-child-turn".into(),
+                },
+            ),
+        ] {
+            apply(&mut runtime, instance, "codex", seq, event, &mut presence);
+        }
+        let stopped = apply(
+            &mut runtime,
+            instance,
+            "codex",
+            20,
+            stop("root"),
+            &mut presence,
+        );
+        assert!(
+            settle(
+                &mut runtime,
+                instance,
+                stopped.settle_codex_after_grace.unwrap(),
+                &mut presence,
+            )
+            .completed
+        );
+        let mut retry = stop("root");
+        if let AgentLifecycleEvent::CodexTurnStopped {
+            stop_hook_active, ..
+        } = &mut retry
+        {
+            *stop_hook_active = true;
+        }
+        apply(&mut runtime, instance, "codex", 30, retry, &mut presence);
+        apply(
+            &mut runtime,
+            instance,
+            "codex",
+            31,
+            AgentLifecycleEvent::CodexRootProgressObserved {
+                turn_id: "root".into(),
+                status_text: "Explicit retry is working".into(),
+            },
+            &mut presence,
+        );
+        assert_eq!(presence.as_ref().unwrap().status, AgentStatus::Working);
+        apply(
+            &mut runtime,
+            instance,
+            "codex",
+            100,
+            AgentLifecycleEvent::CodexChildProgressObserved {
+                agent_id: "reused-child".into(),
+                turn_id: "new-child-turn".into(),
+            },
+            &mut presence,
+        );
+        let stopped = apply(
+            &mut runtime,
+            instance,
+            "codex",
+            32,
+            stop("root"),
+            &mut presence,
+        );
+        assert!(stopped.settle_codex_after_grace.is_none());
+        let stopped = apply(
+            &mut runtime,
+            instance,
+            "codex",
+            101,
+            AgentLifecycleEvent::CodexSubagentStopped {
+                agent_id: "reused-child".into(),
+                turn_id: "new-child-turn".into(),
+            },
+            &mut presence,
+        );
+        assert!(
+            !settle(
+                &mut runtime,
+                instance,
+                stopped.settle_codex_after_grace.unwrap(),
+                &mut presence,
+            )
+            .completed
+        );
+        assert_eq!(presence.unwrap().status, AgentStatus::Idle);
     }
 
     #[test]

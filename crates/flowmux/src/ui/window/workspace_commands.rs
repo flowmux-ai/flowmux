@@ -4,29 +4,41 @@
 use super::*;
 
 impl WindowController {
+    async fn materialize_workspace(&self, id: WorkspaceId, activate: bool) -> Result<(), String> {
+        // Use the authoritative pane ids so later split/close commands find them.
+        let ws = self
+            .store
+            .get_workspace(id)
+            .await
+            .ok_or("Workspace no longer exists")?;
+        if activate {
+            self.render_workspace(&ws);
+            self.activate_workspace(id).await;
+        } else {
+            self.render_workspace_with_activation(&ws, false);
+            self.sync_workspace_label(id).await;
+        }
+        Ok(())
+    }
+
     pub(super) async fn dispatch_workspace_command(&self, cmd: GtkCommand) {
         match cmd {
+            GtkCommand::CreateWorkspace {
+                name,
+                root,
+                team,
+                activate,
+                ack,
+            } => {
+                let id = self.store.create_workspace_kind(name, root, team).await;
+                let result = self.materialize_workspace(id, activate).await;
+                if result.is_err() {
+                    self.store.remove_workspace(id).await;
+                }
+                let _ = ack.send(result.map(|()| id));
+            }
             GtkCommand::WorkspaceCreated { id, activate, ack } => {
-                // Pull the authoritative workspace (with the store's
-                // pane ids) instead of fabricating new ones — otherwise
-                // `focused_pane` gets a UUID that doesn't exist in the
-                // store and split / close shortcuts no-op.
-                let result = match self.store.get_workspace(id).await {
-                    Some(ws) if activate => {
-                        self.render_workspace(&ws);
-                        self.activate_workspace(id).await;
-                        Ok(())
-                    }
-                    Some(ws) => {
-                        // `--background`: render behind the visible workspace
-                        // like a restored one, so the user keeps their view.
-                        self.render_workspace_with_activation(&ws, false);
-                        self.sync_workspace_label(id).await;
-                        Ok(())
-                    }
-                    None => Err("Workspace no longer exists".into()),
-                };
-                let _ = ack.send(result);
+                let _ = ack.send(self.materialize_workspace(id, activate).await);
             }
             GtkCommand::NewWorkspace { root, team } => {
                 // Prefer the focused pane's cwd so a new tab opens

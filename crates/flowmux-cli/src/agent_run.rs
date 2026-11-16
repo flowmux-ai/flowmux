@@ -3,9 +3,8 @@
 
 use super::*;
 use flowmux_ipc::agent_host::{
-    ClientRole, HostClient, HostRequest, HostResponse, LaunchAgent, ProcessState,
+    ClientRole, HostClient, HostRequest, HostResponse, LaunchAgent, ProcessState, TerminateMode,
 };
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -24,28 +23,6 @@ pub(crate) struct AgentRunArgs {
 }
 
 fn launch_request(args: &AgentRunArgs) -> anyhow::Result<LaunchAgent> {
-    let mut argv = args.argv.clone();
-    let first = argv.first().context("agent executable is required")?;
-    let program = Path::new(first);
-    let resolved = if program.components().count() > 1 || program.is_absolute() {
-        std::path::absolute(program)?
-    } else {
-        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-            .map(|directory| directory.join(program))
-            .find(|path| executable(path))
-            .with_context(|| format!("agent executable not found: {first}"))?
-    };
-    anyhow::ensure!(executable(&resolved), "agent executable is not executable");
-    let provider = program
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("agent")
-        .to_string();
-    // Keep a shim's path: canonicalizing it may bypass provider argument setup.
-    argv[0] = std::path::absolute(resolved)?
-        .to_str()
-        .context("agent path must be UTF-8")?
-        .into();
     let environment = std::env::vars_os()
         .map(|(key, value)| {
             Ok((
@@ -57,22 +34,11 @@ fn launch_request(args: &AgentRunArgs) -> anyhow::Result<LaunchAgent> {
             ))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let cwd = std::path::absolute(args.cwd.as_deref().unwrap_or(Path::new(".")))?;
-    anyhow::ensure!(cwd.is_dir(), "agent working directory does not exist");
-    Ok(LaunchAgent {
-        request_id: uuid::Uuid::new_v4(),
-        label: provider.clone(),
-        provider,
-        argv,
-        cwd,
-        env: environment,
-        size: Default::default(),
-    })
-}
-
-fn executable(path: &Path) -> bool {
-    path.metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    flowmux_cli::agent_host::prepare_launch(
+        args.argv.clone(),
+        args.cwd.as_deref().unwrap_or(Path::new(".")),
+        environment,
+    )
 }
 
 pub(crate) async fn run(
@@ -104,29 +70,9 @@ pub(crate) async fn run(
         );
         Some((gui, pane))
     };
-    let request_id = launch.request_id;
-    let host = flowmux_cli::agent_host::connect_for_launch(&paths::agent_host_socket()).await?;
-    let response = tokio::time::timeout(
-        Duration::from_secs(15),
-        host.call(HostRequest::Launch { launch }),
-    )
-    .await
-    .context("Agent Host launch request timed out")
-    .and_then(|response| response)
-    .with_context(|| format!("Agent launch result unknown (request {request_id}); inspect `flowmux agent ls` before retrying"))?;
-    let HostResponse::Launched { agent } = response else {
-        anyhow::bail!(
-            "unexpected Agent Host launch response; inspect `flowmux agent ls` before retrying"
-        );
-    };
-    anyhow::ensure!(
-        agent.state == ProcessState::Running,
-        "Agent {} failed to start: {}",
-        agent.instance,
-        agent.error.as_deref().unwrap_or("unknown failure")
-    );
+    let agent = flowmux_cli::agent_host::launch(&paths::agent_host_socket(), launch).await?;
     let view = if let Some((gui, pane)) = destination {
-        match gui.call(Request::AgentViewOpen { pane, instance: agent.instance }).await {
+        match gui.call(Request::AgentViewOpen { pane, instance: agent.instance, expected_attachment: None }).await {
             Ok(response @ Response::SurfaceCreated { .. }) => Some(response),
             result => anyhow::bail!("Agent {} is running in the background; opening its view failed: {result:?}. Use `flowmux agent open {}` to reconnect", agent.instance, agent.instance),
         }
@@ -172,9 +118,78 @@ pub(crate) async fn list(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) async fn control(
+    instance: flowmux_core::AgentInstanceId,
+    mode: TerminateMode,
+    json: bool,
+) -> anyhow::Result<()> {
+    let socket = paths::agent_host_socket();
+    let binding = tokio::time::timeout(Duration::from_secs(2), async {
+        let host = HostClient::connect(&socket, ClientRole::Observer).await?;
+        let HostResponse::List { agents, .. } = host.call(HostRequest::List).await? else {
+            anyhow::bail!("unexpected Agent Host list response");
+        };
+        let agent = agents
+            .into_iter()
+            .find(|agent| agent.instance == instance)
+            .context("Execution is not in the current Agent Host")?;
+        anyhow::ensure!(
+            matches!(agent.state, ProcessState::Running | ProcessState::Stopping),
+            "Agent is not running: {:?}",
+            agent.state
+        );
+        Ok::<_, anyhow::Error>(flowmux_core::AgentViewBinding {
+            instance,
+            epoch: agent.epoch,
+        })
+    })
+    .await
+    .context("Agent Host lookup timed out; no control request sent")??;
+    flowmux_cli::agent_host::control(&socket, binding, mode).await?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"instance": instance, "epoch": binding.epoch, "mode": mode, "accepted": true})
+        );
+    } else {
+        println!(
+            "{mode:?} accepted for {instance}. Use `flowmux agent ls` to check the observed state."
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_parser_requires_exact_instance_and_explicit_force() {
+        let id = flowmux_core::AgentInstanceId::new();
+        let instance = id.to_string();
+        for force in [false, true] {
+            let mut args = vec!["flowmuxctl", "agent", "terminate", &instance];
+            if force {
+                args.push("--force");
+            }
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(matches!(cli.cmd, Cmd::Agent {
+                op: AgentOp::Terminate { instance, force: parsed_force }
+            } if instance == id && parsed_force == force));
+        }
+        let cli = Cli::try_parse_from(["flowmuxctl", "agent", "interrupt", &instance]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Agent {
+            op: AgentOp::Interrupt { instance }
+        } if instance == id));
+        for args in [
+            vec!["flowmuxctl", "agent", "terminate"],
+            vec!["flowmuxctl", "agent", "terminate", "all", "--force"],
+            vec!["flowmuxctl", "agent", "interrupt", "not-an-instance"],
+            vec!["flowmuxctl", "agent", "interrupt", &instance, "--force"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
 
     #[test]
     fn launch_preserves_literal_arguments_and_validates_before_startup() {
@@ -203,6 +218,16 @@ mod tests {
         assert_eq!(launch.cwd, root.path());
         assert!(launch.argv[0].starts_with('/'));
         assert_eq!(launch.provider, "sh");
+        let agy = root.path().join("agy");
+        std::os::unix::fs::symlink("/bin/sh", &agy).unwrap();
+        let launch = launch_request(&AgentRunArgs {
+            pane: None,
+            background: true,
+            cwd: Some(root.path().into()),
+            argv: vec![agy.to_str().unwrap().into()],
+        })
+        .unwrap();
+        assert_eq!(launch.provider, "antigravity");
         assert!(Cli::try_parse_from([
             "flowmuxctl",
             "agent",

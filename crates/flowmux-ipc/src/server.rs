@@ -28,6 +28,10 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn query_timeout(request: &Request) -> Option<Duration> {
     match request {
+        Request::InAgentView { request, .. }
+        | Request::AgentHost {
+            request: crate::agent_host::HostRequest::DispatchContext { request, .. },
+        } => query_timeout(request),
         Request::AgentHost { request } if request.is_query() => Some(QUERY_TIMEOUT),
         Request::BrowserOnSurface { request, .. } | Request::BrowserWithTask { request, .. } => {
             query_timeout(request)
@@ -504,6 +508,49 @@ async fn read_line_bounded<R: AsyncBufRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_wrappers_keep_query_deadlines_and_never_cancel_mutations() {
+        use crate::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey, HostRequest};
+        let context = AgentViewReport {
+            key: AttachmentKey {
+                instance: flowmux_core::AgentInstanceId::new(),
+                epoch: uuid::Uuid::new_v4(),
+                lease: uuid::Uuid::new_v4(),
+                generation: 1,
+            },
+            location: AgentViewLocation {
+                window: uuid::Uuid::new_v4(),
+                workspace: flowmux_core::WorkspaceId::new(),
+                pane: flowmux_core::PaneId::new(),
+                surface: flowmux_core::SurfaceId::new(),
+                visible: false,
+            },
+        };
+        for request in [
+            Request::PaneReadScreen {
+                pane: context.location.pane,
+            },
+            Request::PaneClose {
+                pane: context.location.pane,
+            },
+        ] {
+            let expected = query_timeout(&request);
+            let gui = Request::InAgentView {
+                context: context.clone(),
+                request: Box::new(request.clone()),
+            };
+            assert_eq!(query_timeout(&gui), expected);
+            let host = Request::AgentHost {
+                request: HostRequest::DispatchContext {
+                    context: context.clone(),
+                    session_id: None,
+                    request: Box::new(request),
+                },
+            };
+            assert_eq!(query_timeout(&host), expected);
+        }
+    }
 
     #[tokio::test]
     async fn connection_identity_is_stable_and_closed_on_eof_and_cancellation() {

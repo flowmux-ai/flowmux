@@ -255,7 +255,12 @@ def flowmux(cli, socket, *args):
 
 def source_context(args, cli):
     session = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")
-    if session:
+    if os.environ.get("FLOWMUX_AGENT_INSTANCE_ID") is not None or os.environ.get("FLOWMUX_AGENT_HOST_EPOCH") is not None:
+        # A managed child retains its Host address even after its view moves.
+        origin = flowmux(cli, os.environ.get("FLOWMUX_SOCKET_PATH"), "identify",
+                         *(["--session", session] if session else []))
+        socket, pane = origin["socket"], origin["pane"]
+    elif session:
         # Shared Codex servers inherit the first terminal's environment, not this session's.
         origin = flowmux(cli, args.socket or os.environ.get("FLOWMUX_SOCKET_PATH"),
                          "identify", "--session", session)

@@ -1625,7 +1625,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn closing_dialog_releases_widget_graph() {
+    async fn closing_dialog_releases_widget_graph() {
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.OptionsRelease")
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
@@ -1649,17 +1649,25 @@ mod tests {
             .collect();
 
         dialog.present();
-        let context = gtk::glib::MainContext::default();
-        while context.pending() {
-            context.iteration(false);
-        }
+        gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
         dialog.close();
         drop(dialog);
-        while context.pending() {
-            context.iteration(false);
+        for _ in 0..40 {
+            if widgets.iter().all(|widget| widget.upgrade().is_none()) {
+                break;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
         }
 
-        assert!(widgets.iter().all(|widget| widget.upgrade().is_none()));
+        assert!(
+            widgets.iter().all(|widget| widget.upgrade().is_none()),
+            "closed Options retained widgets: {:?}",
+            widgets
+                .iter()
+                .filter_map(|widget| widget.upgrade())
+                .map(|widget| (widget.type_().name(), widget.widget_name()))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

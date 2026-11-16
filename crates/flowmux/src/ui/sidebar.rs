@@ -28,6 +28,7 @@ use crate::ui::update_banner::UpdateBanner;
 use crate::ui::usage_popover::UsagePopover;
 use crate::ui::workspace_view::{
     read_tab_dnd_payload_from_drop, tab_dnd_content_formats, tab_dnd_formats_accept_payload,
+    MANAGED_AGENT_DND_MIME,
 };
 use crate::ui::{
     agent_icon, agent_status_css_class, agent_status_icon_name, agent_status_indicator,
@@ -160,6 +161,7 @@ pub struct Sidebar {
     activity_list: gtk::Box,
     activity_summary: gtk::Label,
     activity_rows: Rc<RefCell<HashMap<SurfaceId, ActivityRowWidget>>>,
+    managed_agents: super::managed_agents::ManagedAgents,
     activity_split: gtk::Paned,
     activity_layout: Rc<ActivityPanelLayoutState>,
     activity_has_agents: Rc<Cell<bool>>,
@@ -607,6 +609,8 @@ impl Sidebar {
         root_box.append(&activity_split);
         root_box.append(&footer);
 
+        let managed_agents = super::managed_agents::ManagedAgents::new();
+        activity_list.append(&managed_agents.root);
         Self {
             header,
             root: root_box,
@@ -621,6 +625,7 @@ impl Sidebar {
             activity_list,
             activity_summary,
             activity_rows: Rc::new(RefCell::new(HashMap::new())),
+            managed_agents,
             activity_split,
             activity_layout,
             activity_has_agents,
@@ -945,10 +950,18 @@ impl Sidebar {
         current: &[ActivityNowEntry],
         focused_surface: Option<SurfaceId>,
     ) {
-        let has_agents = !current.is_empty();
+        self.managed_agents.render(
+            &self.bridge.agent_registry.borrow(),
+            &self.bridge,
+            self.tab_drag_drop_state(),
+        );
+        let has_agents = !current.is_empty() || self.managed_agents.root.get_visible();
         self.activity_has_agents.set(has_agents);
         let summary = flowmux_core::AgentAttentionSummary::from_attention(
-            current.iter().map(ActivityNowEntry::attention),
+            current
+                .iter()
+                .map(ActivityNowEntry::attention)
+                .chain(self.managed_agents.attention()),
         );
         crate::ui::update_agent_attention_summary(&self.activity_summary, summary);
         self.notification_popover.set_live_attention(summary);
@@ -959,6 +972,7 @@ impl Sidebar {
             current,
             focused_surface,
             self.bridge.clone(),
+            self.tab_drag_drop_state(),
         );
         set_activity_panel_visible(
             &self.activity_panel,
@@ -1105,6 +1119,7 @@ fn activity_list(office_button: &gtk::Button) -> (gtk::Widget, gtk::Box, gtk::Bu
     sort_button.set_widget_name("flowmux-agent-sort-button");
     header.append(office_button);
     header.append(&sort_button);
+    header.append(&super::managed_agents::new_agent_button());
     root.append(&header);
     let summary = crate::ui::agent_attention_summary_label();
     root.append(&summary);
@@ -1131,7 +1146,11 @@ struct ActivityRowWidget {
 }
 
 impl ActivityRowWidget {
-    fn new(entry: &ActivityNowEntry, bridge: Bridge) -> Self {
+    fn new(
+        entry: &ActivityNowEntry,
+        bridge: Bridge,
+        drop_state: (Rc<Cell<bool>>, Rc<Cell<bool>>),
+    ) -> Self {
         let button = gtk::Button::new();
         button.add_css_class("flat");
         button.add_css_class("flowmux-agent-bar-item");
@@ -1141,6 +1160,23 @@ impl ActivityRowWidget {
         button.set_child(Some(&content));
         let target = Rc::new(Cell::new((entry.workspace, entry.pane, entry.surface)));
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let handle = gtk::Image::from_icon_name("list-drag-handle-symbolic");
+        handle.set_tooltip_text(Some("Drag agent tab to a pane"));
+        handle.set_cursor_from_name(Some("grab"));
+        handle.set_pixel_size(14);
+        handle.update_property(&[gtk::accessible::Property::Label("Drag agent tab to a pane")]);
+        let drag = gtk::DragSource::new();
+        drag.set_actions(gtk::gdk::DragAction::MOVE);
+        crate::ui::workspace_view::prepare_agent_tab_drag(&drag, &handle, drop_state);
+        let drag_target = target.clone();
+        drag.connect_prepare(move |_, _, _| {
+            let (_, pane, surface) = drag_target.get();
+            Some(crate::ui::workspace_view::agent_tab_dnd_content_provider(
+                pane, surface,
+            ))
+        });
+        handle.add_controller(drag);
+        root.append(&handle);
         button.set_hexpand(true);
         root.append(&button);
         let click_target = target.clone();
@@ -1197,13 +1233,16 @@ impl ActivityRowWidget {
             .map(|at| format_relative_time(&at));
         self.when.set_label(when.as_deref().unwrap_or_default());
         self.when.set_visible(when.is_some());
-        self.button
-            .set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
+        self.button.set_tooltip_text(Some(&format!(
+            "{}\n\n{}",
+            flowmux_core::agent_status_tooltip(
                 &entry.agent,
                 &entry.status_text,
                 entry.status_evidence,
                 &entry.pending_waits,
-            )));
+            ),
+            super::TAB_BOUND_AGENT_TOOLTIP
+        )));
         for (class, enabled) in [
             (
                 "flowmux-agent-bar-working",
@@ -1227,6 +1266,7 @@ fn render_activity_rows(
     current: &[ActivityNowEntry],
     focused_surface: Option<SurfaceId>,
     bridge: Bridge,
+    drop_state: (Rc<Cell<bool>>, Rc<Cell<bool>>),
 ) {
     let mut rows = rows.borrow_mut();
     rows.retain(|surface, row| {
@@ -1239,7 +1279,7 @@ fn render_activity_rows(
     let mut previous: Option<gtk::Widget> = None;
     for entry in current {
         let row = rows.entry(entry.surface).or_insert_with(|| {
-            let row = ActivityRowWidget::new(entry, bridge.clone());
+            let row = ActivityRowWidget::new(entry, bridge.clone(), drop_state.clone());
             content.append(&row.root);
             row
         });
@@ -1269,6 +1309,7 @@ fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label, gtk:
     agent.set_hexpand(true);
     agent.add_css_class("caption-heading");
     heading.append(&agent);
+    heading.append(&super::tab_bound_agent_label());
     let when = gtk::Label::new(None);
     when.add_css_class("caption");
     when.add_css_class("dim-label");
@@ -1332,14 +1373,13 @@ pub(crate) async fn check_stable_activity_rows() {
         &current,
         Some(surface),
         bridge.clone(),
+        Default::default(),
     );
     window.present();
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
     let button = rows.borrow()[&surface].button.clone();
-    assert_eq!(
-        button.parent().unwrap().first_child(),
-        Some(button.clone().upcast())
-    );
+    let handle = button.prev_sibling().expect("separate agent drag handle");
+    assert!(handle.is::<gtk::Image>());
     assert!(
         button.next_sibling().is_none(),
         "an agent row has one navigation target"
@@ -1371,8 +1411,27 @@ pub(crate) async fn check_stable_activity_rows() {
         &current,
         Some(surface),
         bridge.clone(),
+        Default::default(),
     );
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    let controllers = handle.observe_controllers();
+    let drag = (0..controllers.n_items())
+        .find_map(|i| controllers.item(i)?.downcast::<gtk::DragSource>().ok())
+        .expect("agent row drag source");
+    let provider = drag
+        .emit_by_name::<Option<gtk::gdk::ContentProvider>>("prepare", &[&0.0_f64, &0.0_f64])
+        .expect("agent tab payload");
+    let payload = provider
+        .value(gtk::glib::Type::STRING)
+        .unwrap()
+        .get::<String>()
+        .unwrap();
+    let parsed = crate::ui::workspace_view::parse_tab_dnd_payload(&payload).unwrap();
+    assert_eq!((parsed.src_pane, parsed.src_surface), (target.1, target.2));
+    assert!(
+        parsed.surface.is_none(),
+        "agent drags must move the existing tab"
+    );
     assert_eq!(content.first_child(), button.parent());
     assert!(
         button.is_focus(),
@@ -1400,6 +1459,7 @@ pub(crate) async fn check_stable_activity_rows() {
         &current,
         Some(surface),
         bridge.clone(),
+        Default::default(),
     );
     assert!(retained_content.upgrade().is_none());
     assert!(spinner.upgrade().is_none());
@@ -1409,7 +1469,15 @@ pub(crate) async fn check_stable_activity_rows() {
     assert!(button.is_focus());
     assert!(button.tooltip_text().unwrap().contains("Waiting for input"));
     current.rotate_left(1);
-    render_activity_rows(&content, &rows, &store, &current, None, bridge.clone());
+    render_activity_rows(
+        &content,
+        &rows,
+        &store,
+        &current,
+        None,
+        bridge.clone(),
+        Default::default(),
+    );
     assert_eq!(content.last_child(), button.parent());
     assert!(
         button.is_focus(),
@@ -1427,8 +1495,19 @@ pub(crate) async fn check_stable_activity_rows() {
         "reused rows must route to the current location"
     );
     let removed = button.downgrade();
+    drop(handle);
+    drop(controllers);
+    drop(drag);
     drop(button);
-    render_activity_rows(&content, &rows, &store, &[], None, bridge);
+    render_activity_rows(
+        &content,
+        &rows,
+        &store,
+        &[],
+        None,
+        bridge,
+        Default::default(),
+    );
     assert!(content.first_child().is_none());
     assert!(rows.borrow().is_empty());
     gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
@@ -1705,7 +1784,9 @@ fn attach_tab_drop_to_row(
 }
 
 fn sidebar_tab_drop_accepts_formats(formats: &gtk::gdk::ContentFormats) -> bool {
-    !formats.contain_mime_type(WORKSPACE_DND_MIME) && tab_dnd_formats_accept_payload(formats)
+    !formats.contain_mime_type(WORKSPACE_DND_MIME)
+        && !formats.contain_mime_type(MANAGED_AGENT_DND_MIME)
+        && tab_dnd_formats_accept_payload(formats)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1805,6 +1886,7 @@ fn workspace_creation_items(
 ) -> Vec<crate::ui::overlay_menu::MenuItem> {
     use crate::ui::overlay_menu::MenuItem;
     let team_bridge = bridge.clone();
+    let agent_bridge = bridge.clone();
     let bridge = bridge.clone();
     vec![
         MenuItem::Action {
@@ -1814,6 +1896,10 @@ fn workspace_creation_items(
         MenuItem::Action {
             label: "New SSH Workspace",
             activate: Box::new(move || on_new_ssh()),
+        },
+        MenuItem::Action {
+            label: "New Agent…",
+            activate: Box::new(move || agent_bridge.send_from_ui(GtkCommand::NewAgent)),
         },
         MenuItem::Action {
             label: "New Team Workspace",
@@ -2552,7 +2638,7 @@ mod tests {
         let ssh_calls = Rc::new(Cell::new(0));
         let calls = ssh_calls.clone();
         let items = workspace_creation_items(&bridge, Rc::new(move || calls.set(calls.get() + 1)));
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 4);
         let MenuItem::Action { label, activate } = &items[0] else {
             panic!("missing local action")
         };
@@ -2571,6 +2657,12 @@ mod tests {
         assert_eq!(ssh_calls.get(), 1);
         assert!(rx.try_recv().is_err());
         let MenuItem::Action { label, activate } = &items[2] else {
+            panic!("missing agent action")
+        };
+        assert_eq!(*label, "New Agent…");
+        activate();
+        assert!(matches!(rx.recv().await.unwrap(), GtkCommand::NewAgent));
+        let MenuItem::Action { label, activate } = &items[3] else {
             panic!("missing Team action")
         };
         assert_eq!(*label, "New Team Workspace");
@@ -2630,7 +2722,12 @@ mod tests {
             Some("Workspace creation options")
         );
 
-        for choice in [None, Some("New Team Workspace"), Some("New SSH Workspace")] {
+        for choice in [
+            None,
+            Some("New Agent…"),
+            Some("New Team Workspace"),
+            Some("New SSH Workspace"),
+        ] {
             menu_button.emit_clicked();
             let scrim = overlay.last_child().unwrap();
             assert!(
@@ -2642,7 +2739,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|widget| widget.downcast().ok())
                 .collect();
-            assert_eq!(items.len(), 3);
+            assert_eq!(items.len(), 4);
             assert!(
                 rx.try_recv().is_err(),
                 "opening the menu created a workspace"
@@ -2653,7 +2750,9 @@ mod tests {
                     .find(|button| button.label().as_deref() == Some(label))
                     .unwrap()
                     .emit_clicked();
-                if label == "New Team Workspace" {
+                if label == "New Agent…" {
+                    assert!(matches!(rx.recv().await.unwrap(), GtkCommand::NewAgent));
+                } else if label == "New Team Workspace" {
                     assert!(matches!(
                         rx.recv().await.unwrap(),
                         GtkCommand::NewWorkspace { team: true, .. }
@@ -3181,6 +3280,13 @@ mod tests {
             Some("flowmux-agent-codex-symbolic")
         );
         assert_eq!(icon.pixel_size(), 14);
+        assert!(descendant_labels(&selected)
+            .iter()
+            .any(|label| label.label() == "Tab-bound"));
+        assert!(selected
+            .tooltip_text()
+            .unwrap()
+            .contains(super::super::TAB_BOUND_AGENT_TOOLTIP));
         assert_eq!(
             icon.next_sibling()
                 .unwrap()
@@ -3790,14 +3896,23 @@ mod tests {
     }
 
     #[test]
-    fn workspace_drag_formats_are_rejected_by_sidebar_tab_target() {
+    fn sidebar_tab_target_rejects_workspace_and_managed_agent_formats() {
         let workspace_provider = workspace_dnd_content_provider(WorkspaceId::new());
         let formats = workspace_provider.formats();
 
         assert!(formats.contain_mime_type(WORKSPACE_DND_MIME));
         assert!(formats.contains_type(gtk::glib::types::Type::STRING));
         assert!(!sidebar_tab_drop_accepts_formats(&formats));
-        assert!(sidebar_tab_drop_accepts_formats(&tab_dnd_content_formats()));
+        let managed_formats = gtk::gdk::ContentFormats::builder()
+            .add_mime_type(MANAGED_AGENT_DND_MIME)
+            .add_type(gtk::glib::types::Type::STRING)
+            .build();
+        assert!(!sidebar_tab_drop_accepts_formats(&managed_formats));
+        let tab_formats = gtk::gdk::ContentFormats::builder()
+            .add_mime_type(crate::ui::workspace_view::TAB_DND_MIME)
+            .add_type(gtk::glib::types::Type::STRING)
+            .build();
+        assert!(sidebar_tab_drop_accepts_formats(&tab_formats));
 
         let legacy_tab_formats = gtk::gdk::ContentFormats::builder()
             .add_type(gtk::glib::types::Type::STRING)

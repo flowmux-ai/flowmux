@@ -18,6 +18,12 @@ pub type PaneTerminal = GhosttyPane;
 
 #[derive(Debug, Clone)]
 pub enum TabDropCommand {
+    OpenManagedAgent {
+        payload: crate::ui::workspace_view::ManagedAgentDndPayload,
+        dst_pane: PaneId,
+        /// Target tab and whether to insert after it; None appends on a pane-body drop.
+        tab_anchor: Option<(SurfaceId, bool)>,
+    },
     MoveToPane {
         src_pane: PaneId,
         surface: SurfaceId,

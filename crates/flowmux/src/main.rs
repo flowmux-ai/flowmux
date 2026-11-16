@@ -287,6 +287,9 @@ fn main() -> anyhow::Result<()> {
     let _agent_host_management = rt.block_on(agent_host::start(
         paths::agent_host_socket(),
         bridge.agent_idle_timeout.subscribe(),
+        bridge.agent_view_reports.subscribe(),
+        bridge.agent_registry.clone(),
+        bridge.tx.clone(),
     ));
     let daemon_handler = DaemonHandler::new(store.clone());
     // Hand the GTK controller the same notifier cell the daemon

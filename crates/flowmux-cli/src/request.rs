@@ -19,6 +19,18 @@ fn load_request(
 /// arm maps 1:1 to an existing `Request::Browser*` variant, so the new
 /// namespace and the hidden hyphenated aliases share one handler path.
 pub(crate) fn browser_op_to_request(op: BrowserOp) -> anyhow::Result<Request> {
+    browser_op_with_context(op, None)
+}
+
+fn browser_op_with_context(
+    op: BrowserOp,
+    context: Option<&flowmux_ipc::agent_host::AgentViewLocation>,
+) -> anyhow::Result<Request> {
+    let pane_from_env = || {
+        context
+            .map(|context| context.pane)
+            .or_else(super::pane_from_env)
+    };
     use flowmux_ipc::protocol::{BrowserLoadAction, BrowserReadQuery};
     let request = match op {
         BrowserOp::Record { .. } => anyhow::bail!("recording requires the CLI capture loop"),
@@ -398,6 +410,21 @@ pub(crate) fn browser_wait_condition(
     Ok(condition)
 }
 pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
+    build_request_with_context(cmd, None)
+}
+
+pub(crate) fn build_request_with_context(
+    cmd: Cmd,
+    context: Option<&flowmux_ipc::agent_host::AgentViewLocation>,
+) -> anyhow::Result<Request> {
+    let resolve_pane = |pane: Option<PaneId>| match context {
+        Some(context) => Ok(pane.unwrap_or(context.pane)),
+        None => super::resolve_pane(pane),
+    };
+    let resolve_workspace = |workspace: Option<WorkspaceId>| match context {
+        Some(context) => Ok(workspace.unwrap_or(context.workspace)),
+        None => super::resolve_workspace(workspace),
+    };
     Ok(match cmd {
         Cmd::Ping => Request::Ping,
         Cmd::Ssh { op } => ssh_op_to_request(op)?,
@@ -542,7 +569,11 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
             {
                 anyhow::bail!("--receipt requires an action on an existing browser tab");
             }
-            let request = browser_op_to_request(op)?;
+            let request = if context.is_some() {
+                browser_op_with_context(op, context)?
+            } else {
+                browser_op_to_request(op)?
+            };
             let request = if receipt.enabled {
                 Request::BrowserReceipt {
                     request: Box::new(request),
@@ -624,6 +655,7 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         } => Request::AgentViewOpen {
             instance,
             pane: resolve_pane(pane)?,
+            expected_attachment: None,
         },
         Cmd::Agent { .. } => unreachable!("handled before request build"),
         Cmd::Hooks { .. } => unreachable!("handled before request build"),
@@ -950,5 +982,61 @@ mod ssh_tests {
         ])
         .unwrap();
         assert!(build_request(cli.cmd).is_err());
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn managed_builders_use_current_context_and_preserve_explicit_targets() {
+    let context = flowmux_ipc::agent_host::AgentViewLocation {
+        window: uuid::Uuid::new_v4(),
+        workspace: WorkspaceId::new(),
+        pane: PaneId::new(),
+        surface: flowmux_core::SurfaceId::new(),
+        visible: false,
+    };
+    for verb in ["read-screen", "capture-pane", "focus-pane", "close-pane"] {
+        let cmd = Cli::try_parse_from(["flowmux", verb]).unwrap().cmd;
+        let req = build_request_with_context(cmd, Some(&context)).unwrap();
+        let encoded = serde_json::to_value(req).unwrap();
+        assert_eq!(encoded["pane"], context.pane.to_string());
+        let explicit = PaneId::new();
+        let cmd = Cli::try_parse_from(["flowmux", verb, &format!("pane:{explicit}")])
+            .unwrap()
+            .cmd;
+        let req = build_request_with_context(cmd, Some(&context)).unwrap();
+        assert_eq!(
+            serde_json::to_value(req).unwrap()["pane"],
+            explicit.to_string()
+        );
+    }
+    let cmd = Cli::try_parse_from(["flowmux", "browser", "open", "about:blank"])
+        .unwrap()
+        .cmd;
+    assert!(
+        matches!(build_request_with_context(cmd, Some(&context)).unwrap(), Request::BrowserOpen { target_pane: Some(pane), .. } if pane == context.pane)
+    );
+    let cmd = Cli::try_parse_from(["flowmux", "new-tab"]).unwrap().cmd;
+    assert!(
+        matches!(build_request_with_context(cmd, Some(&context)).unwrap(), Request::SurfaceCreate { workspace, .. } if workspace == context.workspace)
+    );
+    let instance = flowmux_core::AgentInstanceId::new();
+    for explicit in [None, Some(PaneId::new())] {
+        let mut args = vec![
+            "flowmux".into(),
+            "agent".into(),
+            "open".into(),
+            instance.to_string(),
+        ];
+        if let Some(pane) = explicit {
+            args.extend(["--pane".into(), pane.to_string()]);
+        }
+        let cmd = Cli::try_parse_from(args).unwrap().cmd;
+        let request = build_request_with_context(cmd, Some(&context)).unwrap();
+        assert!(request.supports_agent_context());
+        assert!(
+            matches!(request, Request::AgentViewOpen { instance: actual, pane, expected_attachment: None }
+            if actual == instance && pane == explicit.unwrap_or(context.pane))
+        );
     }
 }

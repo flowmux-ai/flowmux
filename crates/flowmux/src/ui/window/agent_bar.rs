@@ -5,6 +5,25 @@ use super::*;
 use vte::prelude::TerminalExt;
 
 impl WindowController {
+    pub(super) async fn agent_display_model(
+        &self,
+        mut model: flowmux_core::AgentBarModel,
+    ) -> flowmux_core::AgentBarModel {
+        let mut items = Vec::new();
+        for item in model.items {
+            let binding = self
+                .store
+                .surface_agent_binding(item.pane, item.surface)
+                .await;
+            if binding.is_none() {
+                items.push(item);
+            }
+        }
+        model.items = items;
+        model.visible = !model.items.is_empty();
+        model
+    }
+
     fn hide_agent_bar(&self) {
         self.agent_bar.bar.render(
             &flowmux_core::AgentBarModel {
@@ -46,7 +65,116 @@ impl WindowController {
             .refresh_activity_panel(&current, focused_surface);
     }
 
+    pub(super) async fn verified_agent_location(
+        &self,
+        agent: &flowmux_ipc::agent_host::AgentInstance,
+    ) -> Option<flowmux_ipc::agent_host::AgentViewLocation> {
+        let attachment = agent.attachment.as_ref()?;
+        if !attachment.ready {
+            return None;
+        }
+        let (workspace, pane, surface) = self
+            .store
+            .agent_view(flowmux_core::AgentViewBinding {
+                instance: agent.instance,
+                epoch: agent.epoch,
+            })
+            .await?;
+        let registry = self.pane_registry.borrow();
+        let terminal = registry.terminals.get(&surface)?;
+        let terminal_pid = terminal.pid.get().and_then(|pid| u32::try_from(pid).ok());
+        let relay_pid = attachment.relay_pid;
+        // The terminal owns either the relay directly or its pty-tee parent.
+        if terminal_pid.is_none()
+            || attachment.relay_start.is_none()
+            || relay_pid.and_then(flowmux_procmon::process_start_time) != attachment.relay_start
+            || (terminal_pid != relay_pid
+                && relay_pid.and_then(flowmux_procmon::parent_pid) != terminal_pid)
+        {
+            return None;
+        }
+        Some(flowmux_ipc::agent_host::AgentViewLocation {
+            window: self.flow.owner,
+            workspace,
+            pane,
+            surface,
+            visible: false,
+        })
+    }
+
+    pub(super) async fn agent_context_is_current(
+        &self,
+        context: &flowmux_ipc::agent_host::AgentViewReport,
+    ) -> bool {
+        let agent = {
+            let registry = self.bridge.agent_registry.borrow();
+            if !registry.available {
+                return false;
+            }
+            registry
+                .agents
+                .iter()
+                .find(|agent| {
+                    agent.instance == context.key.instance
+                        && agent.epoch == context.key.epoch
+                        && agent
+                            .attachment
+                            .as_ref()
+                            .is_some_and(|attachment| attachment.key == context.key)
+                })
+                .cloned()
+        };
+        let Some(agent) = agent else {
+            return false;
+        };
+        self.verified_agent_location(&agent)
+            .await
+            .is_some_and(|location| location.same_target(&context.location))
+    }
+
+    pub(super) async fn publish_agent_views(&self) {
+        use flowmux_ipc::agent_host::AgentViewReport;
+
+        let agents = self.bridge.agent_registry.borrow().agents.clone();
+        let mut reports = Vec::new();
+        let minimized = self
+            .window
+            .surface()
+            .and_then(|surface| surface.downcast::<gtk::gdk::Toplevel>().ok())
+            .is_some_and(|toplevel| {
+                toplevel
+                    .state()
+                    .contains(gtk::gdk::ToplevelState::MINIMIZED)
+            });
+        for agent in agents {
+            let Some(mut location) = self.verified_agent_location(&agent).await else {
+                continue;
+            };
+            let registry = self.pane_registry.borrow();
+            location.visible = self.window.is_mapped()
+                && !minimized
+                && self.visible_workspace() == Some(location.workspace)
+                && registry.active_surface(location.pane) == Some(location.surface)
+                && registry
+                    .terminals
+                    .get(&location.surface)
+                    .is_some_and(|terminal| terminal.widget.is_mapped());
+            reports.push(AgentViewReport {
+                key: agent.attachment.unwrap().key,
+                location,
+            });
+        }
+        reports.sort_by_key(|report| report.key.instance.0);
+        if !self.window.is_realized() {
+            reports.clear();
+        }
+        // Each GTK observation is a heartbeat; the manager must not renew cached locations.
+        self.bridge.agent_view_reports.send_replace(reports);
+    }
+
     pub(super) async fn refresh_agent_displays(&self) {
+        self.refresh_agent_connections().await;
+        self.publish_agent_views().await;
         if self
             .reviews
             .borrow()
@@ -63,12 +191,91 @@ impl WindowController {
                 .view
                 .render(&self.sidebar.workspace_titles().borrow(), &model);
         }
+        let model = self.agent_display_model(model).await;
         if self.options.borrow().agent_bar_mode {
             self.render_agent_bar(&model);
         } else {
             self.hide_agent_bar();
         }
+        self.agent_bar
+            .bar
+            .render_managed(&model, self.options.borrow().agent_bar_mode);
         self.render_activity_panel(&model);
+    }
+
+    pub(super) async fn refresh_agent_connections(&self) {
+        let snapshot = self.bridge.agent_registry.borrow().clone();
+        let terminals: Vec<_> = self
+            .pane_registry
+            .borrow()
+            .terminals
+            .iter()
+            .map(|(surface, terminal)| (*surface, terminal.clone()))
+            .collect();
+        for (surface, terminal) in terminals {
+            let binding = terminal
+                .agent_connection
+                .borrow()
+                .as_ref()
+                .map(|connection| connection.binding);
+            let Some(binding) = binding else { continue };
+            let agent = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.instance == binding.instance && agent.epoch == binding.epoch);
+            let ready = if snapshot.available && terminal.pid.get().is_some() {
+                if let Some(agent) = agent {
+                    self.verified_agent_location(agent)
+                        .await
+                        .is_some_and(|location| location.surface == surface)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            let connection = terminal.agent_connection.borrow();
+            let Some(connection) = connection.as_ref() else {
+                continue;
+            };
+            if ready {
+                connection.last_ready.set(
+                    agent
+                        .and_then(|agent| agent.attachment.as_ref())
+                        .map(|a| a.key),
+                );
+            } else if snapshot.available
+                && agent
+                    .and_then(|agent| agent.view_owner)
+                    .is_some_and(|owner| connection.superseded_by(surface, owner))
+            {
+                self.bridge.send_from_ui(GtkCommand::CloseMovedAgentView {
+                    pane: terminal.id(),
+                    surface,
+                    owner: agent.and_then(|agent| agent.view_owner).unwrap(),
+                    terminal_generation: terminal.program_status_generation,
+                });
+            }
+            let error = if terminal.pid.get().is_none() {
+                Some("Agent connection failed. Reopen from Agents to retry.")
+            } else if agent.is_some_and(|agent| {
+                matches!(
+                    agent.state,
+                    flowmux_ipc::agent_host::ProcessState::Exited
+                        | flowmux_ipc::agent_host::ProcessState::Failed
+                )
+            }) {
+                Some("Agent execution ended.")
+            } else if !snapshot.available && connection.was_ready.get() {
+                Some("Agent Host unavailable. Waiting for the existing Host.")
+            } else if !ready && connection.started.elapsed() >= std::time::Duration::from_secs(10) {
+                Some("Agent connection timed out. Close this tab and reopen from Agents to retry.")
+            } else {
+                None
+            };
+            terminal.widget.set_input_enabled(ready);
+            connection.render(ready, error);
+        }
     }
 
     pub(super) fn schedule_agent_display_refresh(&self, workspace: WorkspaceId) {
@@ -117,7 +324,9 @@ impl WindowController {
     }
 
     pub(super) async fn refresh_activity_panel(&self) {
-        let model = self.store.agent_bar_model().await;
+        let model = self
+            .agent_display_model(self.store.agent_bar_model().await)
+            .await;
         self.render_activity_panel(&model);
     }
 
@@ -388,6 +597,31 @@ impl WindowController {
             return false;
         };
 
+        if let Some(binding) = entry.managed {
+            let payload = crate::ui::workspace_view::ManagedAgentDndPayload {
+                version: 1,
+                host: flowmux_config::paths::agent_host_socket(),
+                instance: binding.instance,
+                epoch: binding.epoch,
+            };
+            if let Err(error) = self.open_managed_agent(None, None, payload).await {
+                self.clipboard_toast.show_with_message(&error);
+                return false;
+            }
+            if let Some((_, pane, surface)) = self.store.agent_view(binding).await {
+                self.reveal_notification_prompt(pane, surface);
+            }
+            if self.notifications.mark_read(id) {
+                if let Some(desktop_id) = entry.desktop_id.clone() {
+                    self.close_desktop_notifications(vec![desktop_id]);
+                }
+                self.clear_notification_attention_for_entry(&entry);
+                self.refresh_launcher_badge();
+            }
+            self.window.present();
+            return true;
+        }
+
         // A tab can move to another pane/workspace after its notification was recorded.
         let target = {
             let registry = self.pane_registry.borrow();
@@ -421,14 +655,7 @@ impl WindowController {
                 .show_with_message("Could not open the source tab.");
             return false;
         }
-        let review = self.reviews.borrow().get(&pane).cloned();
-        if let Some(review) = review {
-            review.hide();
-            self.focus_pane(pane);
-        }
-        if let Some(terminal) = self.pane_registry.borrow().terminals.get(&surface) {
-            terminal.scroll_to_bottom();
-        }
+        self.reveal_notification_prompt(pane, surface);
 
         let desktop_id = entry.desktop_id.clone();
         let changed = self.notifications.mark_read(id);
@@ -442,6 +669,16 @@ impl WindowController {
 
         self.window.present();
         true
+    }
+    fn reveal_notification_prompt(&self, pane: PaneId, surface: SurfaceId) {
+        let review = self.reviews.borrow().get(&pane).cloned();
+        if let Some(review) = review {
+            review.hide();
+            self.focus_pane(pane);
+        }
+        if let Some(terminal) = self.pane_registry.borrow().terminals.get(&surface) {
+            terminal.scroll_to_bottom();
+        }
     }
     pub(super) fn close_desktop_notifications(&self, desktop_ids: Vec<String>) {
         self.notifications.close_desktop_notifications(desktop_ids);

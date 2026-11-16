@@ -18,7 +18,7 @@ fn agent_open_targets_existing_instance_and_explicit_pane() {
     .unwrap();
     assert!(
         matches!(build_request(cli.cmd).unwrap(), Request::AgentViewOpen {
-        instance: id, pane: target,
+        instance: id, pane: target, expected_attachment: None,
     } if id == instance && target == pane)
     );
     assert!(Cli::try_parse_from(["flowmuxctl", "agent", "open", "invalid-id"]).is_err());

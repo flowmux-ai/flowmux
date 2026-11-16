@@ -62,7 +62,6 @@ async fn materialize_workspace(
 ) -> Result<(), String> {
     let (ack, reply) = oneshot::channel();
     bridge
-        .tx
         .send(GtkCommand::WorkspaceCreated { id, activate, ack })
         .await
         .map_err(|_| "bridge closed".to_string())?;
@@ -77,7 +76,6 @@ async fn split_pane(
 ) -> Result<flowmux_core::PaneId, String> {
     let (ack, reply) = oneshot::channel();
     bridge
-        .tx
         .send(GtkCommand::SplitPane {
             pane,
             direction,
@@ -91,7 +89,6 @@ async fn split_pane(
 async fn activate_workspace(bridge: &Bridge, id: flowmux_core::WorkspaceId) -> Result<(), String> {
     let (ack, reply) = oneshot::channel();
     bridge
-        .tx
         .send(GtkCommand::ActivateWorkspace { id, ack: Some(ack) })
         .await
         .map_err(|_| "bridge closed".to_string())?;
@@ -317,7 +314,7 @@ impl TryFrom<Request> for BrowserActionRequest {
 }
 
 pub struct GuiHandler {
-    inner: DaemonHandler,
+    inner: std::sync::Arc<DaemonHandler>,
     bridge: Bridge,
     /// Agent-session store rooted at `$XDG_DATA_HOME/flowmux/agent-sessions/`.
     /// `None` when the XDG data dir is unavailable (very rare on Linux, but
@@ -337,7 +334,7 @@ impl GuiHandler {
         session_store: Option<flowmux_state::AgentSessionStore>,
     ) -> Self {
         Self {
-            inner,
+            inner: std::sync::Arc::new(inner),
             bridge,
             session_store,
         }
@@ -373,6 +370,43 @@ impl Handler for GuiHandler {
         peer_pid: Option<u32>,
     ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async move {
+            if let Request::AgentViewReady {
+                surface,
+                token,
+                key,
+                sequence,
+            } = req
+            {
+                let Some((relay_pid, relay_start)) = peer_pid.and_then(|pid| {
+                    flowmux_procmon::process_start_time(pid).map(|start| (pid, start))
+                }) else {
+                    return Response::Error(RpcError::InvalidArgument(
+                        "Agent relay identity unavailable".into(),
+                    ));
+                };
+                let (ack, reply) = oneshot::channel();
+                if self
+                    .bridge
+                    .send(GtkCommand::CommitAgentViewReady {
+                        surface,
+                        token,
+                        key,
+                        sequence,
+                        relay_pid,
+                        relay_start,
+                        ack,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return Response::Error(RpcError::Internal("bridge closed".into()));
+                }
+                return match reply.await {
+                    Ok(Ok(())) => Response::Ok,
+                    Ok(Err(error)) => Response::Error(RpcError::InvalidArgument(error)),
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                };
+            }
             let Request::AgentSurfaceCurrent { agent } = req else {
                 return self.handle(req).await;
             };
@@ -459,6 +493,47 @@ impl Handler for GuiHandler {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async move {
             match req {
+                Request::InAgentView { context, request } => {
+                    if !request.supports_agent_context() {
+                        return Response::Error(RpcError::InvalidArgument(
+                            "operation does not support managed context; request not started"
+                                .into(),
+                        ));
+                    }
+                    let missing = || {
+                        Response::Error(RpcError::NotFound("no_attached_view: source changed before GUI admission; request not started".into()))
+                    };
+                    let (ack, reply) = oneshot::channel();
+                    if self
+                        .bridge
+                        .send(GtkCommand::CheckAgentView {
+                            context: context.clone(),
+                            ack,
+                        })
+                        .await
+                        .is_err()
+                        || !reply.await.unwrap_or(false)
+                    {
+                        return missing();
+                    }
+                    if matches!(*request, Request::WorkspaceCurrent) {
+                        return Response::WorkspaceCurrent {
+                            id: Some(context.location.workspace),
+                        };
+                    }
+                    let (bridge, rejected) = self.bridge.in_agent_view(context);
+                    let scoped = Self {
+                        inner: self.inner.clone(),
+                        bridge,
+                        session_store: self.session_store.clone(),
+                    };
+                    let response = scoped.handle(*request).await;
+                    if rejected.load(std::sync::atomic::Ordering::Acquire) {
+                        missing()
+                    } else {
+                        response
+                    }
+                }
                 Request::Ssh { request } => {
                     let (ack, rx) = oneshot::channel();
                     let _ = self.bridge.send(GtkCommand::Ssh { request, ack }).await;
@@ -574,42 +649,31 @@ impl GuiHandler {
     /// Dispatch for the workspace verb group (split out of the `handle` match).
     async fn handle_workspace_verb(&self, req: Request) -> Response {
         match req {
-            Request::AgentViewOpen { pane, instance } => {
-                use flowmux_ipc::agent_host::{
-                    ClientRole, HostClient, HostRequest, HostResponse, ProcessState,
-                };
+            Request::AgentViewOpen {
+                pane,
+                instance,
+                expected_attachment,
+            } => {
                 if self.inner.store().workspace_for_pane(pane).await.is_none() {
                     return Response::Error(RpcError::NotFound(pane.to_string()));
                 }
-                let lookup = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-                    let client = HostClient::connect(
-                        &flowmux_config::paths::agent_host_socket(),
-                        ClientRole::Observer,
-                    )
-                    .await?;
-                    let HostResponse::List { agents, .. } = client.call(HostRequest::List).await?
-                    else {
-                        anyhow::bail!("unexpected Agent Host list response");
-                    };
-                    agents
-                        .into_iter()
-                        .find(|agent| {
-                            agent.instance == instance && agent.state == ProcessState::Running
-                        })
-                        .ok_or_else(|| anyhow::anyhow!("Agent is not running: {instance}"))
-                })
-                .await;
-                let agent = match lookup {
-                    Ok(Ok(agent)) => agent,
-                    Ok(Err(error)) => {
-                        return Response::Error(RpcError::InvalidArgument(error.to_string()))
-                    }
-                    Err(_) => {
-                        return Response::Error(RpcError::Busy(
-                            "Agent Host lookup timed out".into(),
-                        ))
-                    }
+                let agent = match crate::agent_host::lookup_running(
+                    &flowmux_config::paths::agent_host_socket(),
+                    instance,
+                    None,
+                )
+                .await
+                {
+                    Ok(agent) => agent,
+                    Err(error) => return Response::Error(error),
                 };
+                if expected_attachment.is_some_and(|expected| {
+                    agent.attachment.as_ref().map(|attachment| attachment.key) != Some(expected)
+                }) {
+                    return Response::Error(RpcError::InvalidArgument(
+                        "The agent's view changed while opening the window. Move it again from Agents.".into(),
+                    ));
+                }
                 let (ack, reply) = oneshot::channel();
                 if self
                     .bridge
@@ -625,19 +689,39 @@ impl GuiHandler {
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }
-            Request::WorkspaceCreate { background, .. } => {
-                // Create the model, then require the GUI to materialize it.
-                let resp = self.inner.handle(req.clone()).await;
-                let id = match &resp {
-                    Response::WorkspaceCreated { id } => *id,
-                    _ => return resp,
-                };
-                match materialize_workspace(&self.bridge, id, !background).await {
-                    Ok(()) => Response::WorkspaceCreated { id },
-                    Err(error) => {
-                        self.inner.store().remove_workspace(id).await;
-                        Response::Error(RpcError::Internal(error))
+            Request::WorkspaceCreate {
+                name,
+                root,
+                team,
+                background,
+            } => {
+                let (ack, reply) = oneshot::channel();
+                if self
+                    .bridge
+                    .send(GtkCommand::CreateWorkspace {
+                        name,
+                        root: root.clone(),
+                        team,
+                        activate: !background,
+                        ack,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return Response::Error(RpcError::Internal("bridge closed".into()));
+                }
+                match reply.await {
+                    Ok(Ok(id)) => {
+                        let store = self.inner.store().clone();
+                        tokio::spawn(async move {
+                            if let Ok(Some(info)) = flowmux_vcs::inspect(&root).await {
+                                store.replace_git_info(id, Some(info)).await;
+                            }
+                        });
+                        Response::WorkspaceCreated { id }
                     }
+                    Ok(Err(error)) => Response::Error(RpcError::Internal(error)),
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }
             Request::WorkspaceFocus { workspace } => {
@@ -674,7 +758,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 if let Err(error) = self
                     .bridge
-                    .tx
                     .send(GtkCommand::CreateSurface {
                         workspace,
                         cwd,
@@ -707,7 +790,6 @@ impl GuiHandler {
                 let (ack, reply) = oneshot::channel();
                 if self
                     .bridge
-                    .tx
                     .send(GtkCommand::TeamSpawn {
                         pane,
                         cwd,
@@ -739,7 +821,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::PaneSendKeys {
                         pane,
                         keys,
@@ -777,7 +858,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 if let Err(error) = self
                     .bridge
-                    .tx
                     .send(GtkCommand::TerminalOutputObserved {
                         surface,
                         alternate_screen,
@@ -796,7 +876,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 if let Err(error) = self
                     .bridge
-                    .tx
                     .send(GtkCommand::TerminalProgramStatusObserved {
                         surface,
                         snapshot,
@@ -828,7 +907,6 @@ impl GuiHandler {
                     let (ack, reply) = oneshot::channel();
                     let _ = self
                         .bridge
-                        .tx
                         .send(GtkCommand::ActivateSurface {
                             pane,
                             surface,
@@ -874,7 +952,6 @@ impl GuiHandler {
                     let (tx, rx) = oneshot::channel();
                     let _ = self
                         .bridge
-                        .tx
                         .send(GtkCommand::CloseSurface {
                             pane,
                             surface,
@@ -892,7 +969,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::FocusPane { pane, ack: tx })
                     .await;
                 match rx.await {
@@ -905,7 +981,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::ResizePane {
                         pane,
                         ratio,
@@ -931,7 +1006,6 @@ impl GuiHandler {
                         let (tx, rx) = oneshot::channel();
                         let _ = self
                             .bridge
-                            .tx
                             .send(GtkCommand::CloseFocused { pane, ack: tx })
                             .await;
                         match rx.await {
@@ -1013,9 +1087,7 @@ impl GuiHandler {
             } => {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
-                    .bridge
-                    .tx
-                    .send(GtkCommand::BrowserOpenSplit {
+                    .bridge.send(GtkCommand::BrowserOpenSplit {
                         target_pane,
                         url,
                         direction,
@@ -1603,7 +1675,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::OpenNotificationWithAck { id, ack: tx })
                     .await;
                 match rx.await {
@@ -1615,7 +1686,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::OpenOldestUnreadNotification { ack: tx })
                     .await;
                 match rx.await {
@@ -1627,7 +1697,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::MarkNotificationRead { id, ack: tx })
                     .await;
                 match rx.await {
@@ -1639,7 +1708,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::ClearNotifications { ack: tx })
                     .await;
                 match rx.await {
@@ -1685,7 +1753,6 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .bridge
-            .tx
             .send(GtkCommand::PaneSendKeys {
                 pane,
                 keys: keys.to_string(),
@@ -1707,7 +1774,6 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .bridge
-            .tx
             .send(GtkCommand::RenameSurface {
                 pane,
                 surface,
@@ -1726,7 +1792,6 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .bridge
-            .tx
             .send(GtkCommand::CloseFocused { pane, ack: tx })
             .await;
         match rx.await {
@@ -1738,7 +1803,6 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
     async fn remove_workspace(&self, id: flowmux_core::WorkspaceId) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
         self.bridge
-            .tx
             .send(GtkCommand::RemoveWorkspace {
                 id,
                 // Skip workspace confirmation; dirty-editor checks still apply.

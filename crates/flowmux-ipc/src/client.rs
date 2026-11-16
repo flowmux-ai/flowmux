@@ -9,6 +9,8 @@ use tokio::sync::Mutex;
 pub struct Client {
     inner: Mutex<Inner>,
     socket: PathBuf,
+    agent_view: Option<(crate::agent_host::AgentViewReport, Option<String>)>,
+    agent_notification: Option<flowmux_core::AgentViewBinding>,
     next_id: std::sync::atomic::AtomicU64,
 }
 
@@ -47,6 +49,8 @@ impl Client {
                 writer: w,
             }),
             socket,
+            agent_view: None,
+            agent_notification: None,
             next_id: std::sync::atomic::AtomicU64::new(1),
         })
     }
@@ -55,7 +59,93 @@ impl Client {
         &self.socket
     }
 
+    /// Reuse the authenticated Host connection; never send a managed effect directly to a GUI.
+    pub fn in_agent_view(
+        mut self,
+        context: crate::agent_host::AgentViewReport,
+        session_id: Option<String>,
+    ) -> Self {
+        self.agent_view = Some((context, session_id));
+        self
+    }
+
+    /// Notifications belong to the execution and do not require an attached view.
+    pub fn in_agent_notifications(mut self, binding: flowmux_core::AgentViewBinding) -> Self {
+        self.agent_notification = Some(binding);
+        self
+    }
+
     pub async fn call(&self, req: Request) -> anyhow::Result<Response> {
+        if let Some(binding) = self.agent_notification {
+            let Request::Notify {
+                title, body, level, ..
+            } = req
+            else {
+                anyhow::bail!("managed notification connection only supports notifications");
+            };
+            let response = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                // Streams can be silent longer than the server's connection idle timeout.
+                let host = crate::agent_host::HostClient::connect(
+                    &self.socket,
+                    crate::agent_host::ClientRole::Observer,
+                )
+                .await?;
+                host.0
+                    .call_raw(Request::AgentHost {
+                        request: crate::agent_host::HostRequest::Notify {
+                            instance: binding.instance,
+                            epoch: binding.epoch,
+                            notification: crate::protocol::AgentLifecycleNotification {
+                                title,
+                                body,
+                                level,
+                            },
+                        },
+                    })
+                    .await
+            })
+            .await
+            .context("managed notification timed out; outcome unknown; request was not retried")?
+            .context(
+                "managed notification response lost; outcome unknown; request was not retried",
+            )?;
+            return match response {
+                Response::AgentHost {
+                    response: crate::agent_host::HostResponse::Ok,
+                } => Ok(Response::Ok),
+                Response::Error(error) => Ok(Response::Error(error)),
+                other => Err(anyhow!(
+                    "unexpected managed notification response: {other:?}"
+                )),
+            };
+        }
+        let Some((context, session_id)) = &self.agent_view else {
+            return self.call_raw(req).await;
+        };
+        anyhow::ensure!(
+            req.supports_agent_context(),
+            "operation does not support managed context; request not started"
+        );
+        let response = self
+            .call_raw(Request::AgentHost {
+                request: crate::agent_host::HostRequest::DispatchContext {
+                    context: context.clone(),
+                    session_id: session_id.clone(),
+                    request: Box::new(req),
+                },
+            })
+            .await
+            .context("managed command response lost; outcome unknown; request was not retried")?;
+        match response {
+            Response::AgentHost {
+                response: crate::agent_host::HostResponse::Dispatched { response },
+            } => Ok(*response),
+            Response::Error(error) => Ok(Response::Error(error)),
+            other => Err(anyhow!("unexpected managed dispatch response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn call_raw(&self, req: Request) -> anyhow::Result<Response> {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -128,6 +218,162 @@ mod tests {
     use crate::protocol::{Event, RpcError};
     use flowmux_core::{NotificationLevel, WorkspaceId};
     use tokio::net::UnixListener;
+
+    #[tokio::test]
+    async fn managed_dispatch_wraps_once_and_never_replays_a_lost_effect() {
+        use crate::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey, HostRequest};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("host.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let context = AgentViewReport {
+            key: AttachmentKey {
+                instance: flowmux_core::AgentInstanceId::new(),
+                epoch: uuid::Uuid::new_v4(),
+                lease: uuid::Uuid::new_v4(),
+                generation: 1,
+            },
+            location: AgentViewLocation {
+                window: uuid::Uuid::new_v4(),
+                workspace: WorkspaceId::new(),
+                pane: flowmux_core::PaneId::new(),
+                surface: flowmux_core::SurfaceId::new(),
+                visible: true,
+            },
+        };
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .in_agent_view(context.clone(), Some("native".into()));
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            let Payload::Request(Request::AgentHost {
+                request:
+                    HostRequest::DispatchContext {
+                        context: actual,
+                        session_id,
+                        request,
+                    },
+            }) = envelope.payload
+            else {
+                panic!("missing Host wrapper")
+            };
+            assert_eq!(actual, context);
+            assert_eq!(session_id.as_deref(), Some("native"));
+            assert!(matches!(*request, Request::PaneSendKeys { .. }));
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        assert!(client
+            .call(Request::AgentHost {
+                request: HostRequest::KeepAlive
+            })
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("does not support"));
+        let error = client
+            .call(Request::PaneSendKeys {
+                pane: flowmux_core::PaneId::new(),
+                keys: "once".into(),
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outcome unknown"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_notification_needs_no_view_and_never_replays_a_lost_effect() {
+        use crate::agent_host::HostRequest;
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("host.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .in_agent_notifications(binding);
+        let server = tokio::spawn(async move {
+            let (initial, _) = listener.accept().await.unwrap();
+            drop(initial);
+            let (stream, _) = listener.accept().await.unwrap();
+            let (r, mut w) = stream.into_split();
+            let mut reader = BufReader::new(r);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            assert!(matches!(
+                envelope.payload,
+                Payload::Request(Request::AgentHost {
+                    request: HostRequest::Hello { .. }
+                })
+            ));
+            let response = Envelope {
+                id: envelope.id,
+                payload: Payload::Response(Response::AgentHost {
+                    response: crate::agent_host::HostResponse::Hello {
+                        version: crate::agent_host::PROTOCOL_VERSION,
+                        epoch: binding.epoch,
+                        connection: 1,
+                    },
+                }),
+            };
+            w.write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes())
+                .await
+                .unwrap();
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            let Payload::Request(Request::AgentHost {
+                request:
+                    HostRequest::Notify {
+                        instance,
+                        epoch,
+                        notification,
+                    },
+            }) = envelope.payload
+            else {
+                panic!("missing execution notification wrapper")
+            };
+            assert_eq!(instance, binding.instance);
+            assert_eq!(epoch, binding.epoch);
+            assert_eq!(notification.title, "build");
+            assert_eq!(notification.body, "done");
+            assert_eq!(notification.level, NotificationLevel::Info);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        assert!(client
+            .call(Request::Ping)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("only supports notifications"));
+        let error = client
+            .call(Request::Notify {
+                pane: Some(flowmux_core::PaneId::new()),
+                surface: Some(flowmux_core::SurfaceId::new()),
+                title: "build".into(),
+                body: "done".into(),
+                level: NotificationLevel::Info,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outcome unknown"));
+        server.await.unwrap();
+    }
 
     #[tokio::test]
     async fn call_uses_matching_response_id_and_ignores_events() {

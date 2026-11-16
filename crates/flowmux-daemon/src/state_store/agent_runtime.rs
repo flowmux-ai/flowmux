@@ -174,6 +174,111 @@ struct CompletionNotification {
     claimed: bool,
 }
 
+impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
+    fn notification_id(
+        &mut self,
+        key: &AgentLifecycleKey<Owner>,
+        notification_scope: Option<(AgentWaitScope, String)>,
+        completed: bool,
+    ) -> Option<NotificationId> {
+        notification_scope
+            .and_then(|(kind, scope)| {
+                let wait = match kind {
+                    AgentWaitScope::Tool => self
+                        .waits
+                        .get(key)
+                        .and_then(|waits| waits.get(&scope))
+                        .and_then(Option::as_ref),
+                    AgentWaitScope::Permission => self
+                        .permission_waits
+                        .get(key)
+                        .and_then(|waits| waits.get(&scope)),
+                    AgentWaitScope::Session => self
+                        .session_waits
+                        .get(key)
+                        .and_then(|waits| waits.get(&scope)),
+                };
+                wait.map(|wait| wait.notification_id)
+            })
+            .or_else(|| {
+                completed.then(|| {
+                    self.completion_notifications
+                        .entry(key.clone())
+                        .or_default()
+                        .id
+                })
+            })
+    }
+
+    fn claim_notification(
+        &mut self,
+        key: &AgentLifecycleKey<Owner>,
+        notification_id: NotificationId,
+    ) -> bool {
+        if let Some(completion) = self
+            .completion_notifications
+            .get_mut(key)
+            .filter(|completion| completion.id == notification_id)
+        {
+            return !std::mem::replace(&mut completion.claimed, true);
+        }
+        let AgentLifecycleRuntime {
+            waits,
+            permission_waits,
+            session_waits,
+            ..
+        } = self;
+        let candidate = waits
+            .get_mut(key)
+            .into_iter()
+            .flat_map(HashMap::values_mut)
+            .filter_map(Option::as_mut)
+            .chain(
+                permission_waits
+                    .get_mut(key)
+                    .into_iter()
+                    .flat_map(HashMap::values_mut),
+            )
+            .chain(
+                session_waits
+                    .get_mut(key)
+                    .into_iter()
+                    .flat_map(HashMap::values_mut),
+            )
+            .find(|wait| wait.notification_id == notification_id);
+        if let Some(wait) = candidate.filter(|wait| !wait.notification_claimed) {
+            wait.notification_claimed = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn claim_transition_notification(
+        &mut self,
+        owner: Owner,
+        provider: &str,
+        session: &str,
+        transition: &LifecycleTransition,
+    ) -> Option<NotificationId> {
+        let key = (owner, provider.to_ascii_lowercase(), session.to_owned());
+        if transition
+            .report
+            .as_ref()
+            .and_then(|report| report.activity)
+            != Some(flowmux_core::AgentActivity::Idle)
+        {
+            self.completion_notifications.remove(&key);
+        }
+        let id = self.notification_id(
+            &key,
+            transition.notification_scope.clone(),
+            transition.completed,
+        )?;
+        self.claim_notification(&key, id).then_some(id)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct ProviderTurn {
     stop: Option<(Option<String>, String)>,
@@ -405,6 +510,7 @@ fn agent_screen_fingerprint(
 }
 
 fn remember_settled_codex_turn(ledger: &mut CodexTurnLedger, turn_id: String) {
+    ledger.settled_screen_idle = false;
     if ledger
         .settled_parent_turns
         .iter()
@@ -413,7 +519,6 @@ fn remember_settled_codex_turn(ledger: &mut CodexTurnLedger, turn_id: String) {
         return;
     }
     ledger.settled_parent_turns.push_back(turn_id);
-    ledger.settled_screen_idle = false;
     while ledger.settled_parent_turns.len() > 32 {
         ledger.settled_parent_turns.pop_front();
     }
@@ -920,43 +1025,7 @@ impl StateStore {
     ) -> bool {
         let mut runtime = self.agents.lifecycle.lock().await;
         let key = (surface, agent.to_ascii_lowercase(), session.to_owned());
-        if let Some(completion) = runtime
-            .completion_notifications
-            .get_mut(&key)
-            .filter(|completion| completion.id == notification_id)
-        {
-            return !std::mem::replace(&mut completion.claimed, true);
-        }
-        let AgentLifecycleRuntime {
-            waits,
-            permission_waits,
-            session_waits,
-            ..
-        } = &mut *runtime;
-        let candidate = waits
-            .get_mut(&key)
-            .into_iter()
-            .flat_map(HashMap::values_mut)
-            .filter_map(Option::as_mut)
-            .chain(
-                permission_waits
-                    .get_mut(&key)
-                    .into_iter()
-                    .flat_map(HashMap::values_mut),
-            )
-            .chain(
-                session_waits
-                    .get_mut(&key)
-                    .into_iter()
-                    .flat_map(HashMap::values_mut),
-            )
-            .find(|wait| wait.notification_id == notification_id);
-        if let Some(wait) = candidate.filter(|wait| !wait.notification_claimed) {
-            wait.notification_claimed = true;
-            true
-        } else {
-            false
-        }
+        runtime.claim_notification(&key, notification_id)
     }
 
     pub async fn is_ssh_surface(&self, surface: SurfaceId) -> bool {
@@ -1475,35 +1544,10 @@ impl StateStore {
             }
             self.allow_agent_screen_restore(surface_id).await;
         }
-        let notification_id = notification_scope
-            .and_then(|(kind, scope)| {
-                let wait = match kind {
-                    AgentWaitScope::Tool => runtime
-                        .waits
-                        .get(&wait_key)
-                        .and_then(|waits| waits.get(&scope))
-                        .and_then(Option::as_ref),
-                    AgentWaitScope::Permission => runtime
-                        .permission_waits
-                        .get(&wait_key)
-                        .and_then(|waits| waits.get(&scope)),
-                    AgentWaitScope::Session => runtime
-                        .session_waits
-                        .get(&wait_key)
-                        .and_then(|waits| waits.get(&scope)),
-                };
-                wait.map(|wait| wait.notification_id)
-            })
-            .filter(|_| workspace.is_some())
-            .or_else(|| {
-                (workspace.is_some() && completed).then(|| {
-                    runtime
-                        .completion_notifications
-                        .entry(wait_key)
-                        .or_default()
-                        .id
-                })
-            });
+        let notification_id = workspace
+            .is_some()
+            .then(|| runtime.notification_id(&wait_key, notification_scope, completed))
+            .flatten();
         drop(runtime);
         AgentLifecycleResult {
             notification_id,

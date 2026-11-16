@@ -43,6 +43,7 @@ use tokio::sync::oneshot;
 fn notification_summary(entry: NotificationEntry) -> NotificationSummary {
     NotificationSummary {
         id: entry.id,
+        managed: entry.managed,
         title: entry.title,
         body: entry.body,
         level: entry.level,
@@ -68,7 +69,8 @@ fn should_suppress_notification(
 fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
     matches!(
         command,
-        GtkCommand::WorkspaceCreated { .. }
+        GtkCommand::CreateWorkspace { .. }
+            | GtkCommand::WorkspaceCreated { .. }
             | GtkCommand::NewWorkspace { .. }
             | GtkCommand::RemoveWorkspace { .. }
             | GtkCommand::RemoveAllWorkspaces { .. }
@@ -88,9 +90,11 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::OpenTig { .. }
             | GtkCommand::CreateSurface { .. }
             | GtkCommand::OpenAgentView { .. }
+            | GtkCommand::OpenManagedAgent { pane: Some(_), .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::CloseMovedAgentView { .. }
             | GtkCommand::ConfirmCloseSurface { .. }
             | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
@@ -107,6 +111,8 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::OpenUrlInBrowserTab { .. }
             | GtkCommand::OpenBrowserPopup { .. }
             | GtkCommand::ShowOptionsDialog
+            | GtkCommand::NewAgent
+            | GtkCommand::ControlManagedAgent { .. }
             | GtkCommand::ToggleAgentOffice
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
@@ -602,6 +608,8 @@ pub struct WindowController {
     sidebar_split: gtk::Paned,
     worktrees: WorktreePanelState,
     sessions: sessions::SessionPanelState,
+    new_agent_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
+    agent_destination_dialog: Rc<RefCell<Option<adw::AlertDialog>>>,
     flow: session_flow::FlowState,
     reviews:
         Rc<RefCell<std::collections::HashMap<PaneId, Rc<crate::ui::review_window::ReviewWindow>>>>,
@@ -611,7 +619,6 @@ pub struct WindowController {
     pane_zoom: PaneZoomState,
     workspace_overview: workspace_overview::WorkspaceOverviewState,
     content_overlay: gtk::Overlay,
-    #[cfg(target_os = "linux")]
     tokio_handle: Option<tokio::runtime::Handle>,
     #[cfg(target_os = "linux")]
     scope_isolation: Rc<RefCell<Option<crate::process_scope::ScopeIsolation>>>,
@@ -1286,6 +1293,9 @@ mod command_palette;
 mod file_browser;
 #[cfg(all(test, feature = "native-smoke", target_os = "macos"))]
 pub(crate) mod macos_smoke;
+mod managed_agent_control;
+mod managed_agent_destination;
+mod new_agent;
 mod notification_commands;
 mod notification_coordinator;
 mod pane_callbacks;
@@ -1688,6 +1698,23 @@ impl WindowController {
         let worktree_removals_in_progress = Rc::new(RefCell::new(HashSet::new()));
         let worktree_tokio_handle = tokio_handle.clone();
         let notifications = NotificationStore::new();
+        if let Some(handle) = tokio_handle.clone() {
+            let bridge = bridge.clone();
+            notifications.set_managed_update_handler(Rc::new(move |epoch, ids, action| {
+                let bridge = bridge.clone();
+                handle.spawn(async move {
+                    let result = crate::agent_host::notification_request(
+                        flowmux_ipc::agent_host::HostRequest::UpdateNotifications { epoch, ids, action }
+                    ).await;
+                    if !matches!(result, Ok(flowmux_ipc::agent_host::HostResponse::Ok)) {
+                        tracing::warn!(?result, "Agent notification update failed; not retried");
+                        let _ = bridge.send(GtkCommand::ManagedNotificationError {
+                            message: "Could not confirm the Agent notification change. Its state will be refreshed from the Host.".into(),
+                        }).await;
+                    }
+                });
+            }));
+        }
         let activities = ActivityStore::new();
         let stack = gtk::Stack::new();
         stack.set_transition_type(gtk::StackTransitionType::Crossfade);
@@ -1756,7 +1783,7 @@ impl WindowController {
             .usage
             .bar
             .set_font(&theme.terminal_font(&initial_options));
-        let agent_bar = AgentBar::new(bridge.clone());
+        let agent_bar = AgentBar::new(bridge.clone(), sidebar.tab_drag_drop_state());
         let agent_bar_attentions = Rc::new(RefCell::new(HashSet::new()));
 
         let pane_registry: Rc<RefCell<PaneRegistry>> =
@@ -1987,6 +2014,8 @@ impl WindowController {
             ),
             sidebar_split: split,
             sessions: sessions::SessionPanelState::new(session_panel),
+            new_agent_dialog: Default::default(),
+            agent_destination_dialog: Default::default(),
             flow: session_flow::FlowState::new(flow_panel),
             reviews: Rc::new(RefCell::new(std::collections::HashMap::new())),
             worktrees: WorktreePanelState {
@@ -2018,7 +2047,6 @@ impl WindowController {
             agent_office: Rc::new(RefCell::new(None)),
             workspace_overview: workspace_overview::WorkspaceOverviewState::default(),
             content_overlay,
-            #[cfg(target_os = "linux")]
             tokio_handle: tokio_handle.clone(),
             #[cfg(target_os = "linux")]
             scope_isolation: Rc::new(RefCell::new(None)),
@@ -2059,6 +2087,7 @@ impl WindowController {
         controller.install_editor_session_persistence();
         controller.install_scrollback_persistence();
         controller.install_agent_process_polling();
+        controller.install_agent_view_polling();
         polling::install_heap_trim();
         controller
     }
@@ -2986,6 +3015,9 @@ impl WindowController {
     /// close the agent office or unzoom the pane the user is looking at.
     fn command_targets_background_pane(&self, cmd: &GtkCommand) -> bool {
         let pane = match cmd {
+            GtkCommand::OpenManagedAgent {
+                pane: Some(pane), ..
+            } => *pane,
             GtkCommand::BrowserOpenSplit {
                 target_pane: Some(pane),
                 ..
@@ -3000,6 +3032,7 @@ impl WindowController {
             | GtkCommand::OpenTig { pane }
             | GtkCommand::ActivateSurface { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::CloseMovedAgentView { pane, .. }
             | GtkCommand::ConfirmCloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. }
             | GtkCommand::RenameSurface { pane, .. }
@@ -3011,9 +3044,89 @@ impl WindowController {
     }
 
     pub async fn dispatch(&self, cmd: GtkCommand) {
+        let cmd = match cmd {
+            GtkCommand::CommitAgentViewReady {
+                surface,
+                token,
+                key,
+                sequence,
+                relay_pid,
+                relay_start,
+                ack,
+            } => {
+                let _ = ack.send(
+                    self.commit_agent_view_ready(
+                        surface,
+                        token,
+                        key,
+                        sequence,
+                        relay_pid,
+                        relay_start,
+                    )
+                    .await,
+                );
+                return;
+            }
+            command @ GtkCommand::CloseMovedAgentView {
+                pane,
+                surface,
+                owner,
+                terminal_generation,
+            } => {
+                let owns_old_view =
+                    self.pane_registry
+                        .borrow()
+                        .terminals
+                        .get(&surface)
+                        .is_some_and(|terminal| {
+                            terminal.id() == pane
+                                && terminal.program_status_generation == terminal_generation
+                                && terminal.agent_connection.borrow().as_ref().is_some_and(
+                                    |connection| connection.superseded_by(surface, owner),
+                                )
+                        });
+                let superseded = {
+                    let snapshot = self.bridge.agent_registry.borrow();
+                    snapshot.available
+                        && snapshot.agents.iter().any(|agent| {
+                            agent.instance == owner.key.instance
+                                && agent.epoch == owner.key.epoch
+                                && agent.view_owner == Some(owner)
+                        })
+                };
+                if !owns_old_view
+                    || !superseded
+                    || self.store.surface_agent_binding(pane, surface).await
+                        != Some(flowmux_core::AgentViewBinding {
+                            instance: owner.key.instance,
+                            epoch: owner.key.epoch,
+                        })
+                {
+                    return;
+                }
+                command
+            }
+            GtkCommand::CheckAgentView { context, ack } => {
+                let _ = ack.send(self.agent_context_is_current(&context).await);
+                return;
+            }
+            GtkCommand::InAgentView {
+                context,
+                command,
+                rejected,
+            } => {
+                if !self.agent_context_is_current(&context).await {
+                    rejected.store(true, std::sync::atomic::Ordering::Release);
+                    return;
+                }
+                *command
+            }
+            command => command,
+        };
         let office_data_change = matches!(
             &cmd,
-            GtkCommand::WorkspaceCreated { .. }
+            GtkCommand::CreateWorkspace { .. }
+                | GtkCommand::WorkspaceCreated { .. }
                 | GtkCommand::NewWorkspace { .. }
                 | GtkCommand::RemoveWorkspace { .. }
                 | GtkCommand::RemoveAllWorkspaces { .. }
@@ -3026,6 +3139,7 @@ impl WindowController {
                 | GtkCommand::OpenAgentView { .. }
                 | GtkCommand::NewSurface { .. }
                 | GtkCommand::CloseSurface { .. }
+                | GtkCommand::CloseMovedAgentView { .. }
                 | GtkCommand::ConfirmCloseSurface { .. }
                 | GtkCommand::CloseTerminatedSurface { .. }
                 | GtkCommand::RenameSurface { .. }
@@ -3062,6 +3176,11 @@ impl WindowController {
             self.clear_pane_zoom();
         }
         match cmd {
+            GtkCommand::InAgentView { .. }
+            | GtkCommand::CheckAgentView { .. }
+            | GtkCommand::CommitAgentViewReady { .. } => {
+                unreachable!("agent guard was unwrapped before dispatch")
+            }
             GtkCommand::SshCwd {
                 workspace,
                 generation,
@@ -3094,6 +3213,8 @@ impl WindowController {
             | GtkCommand::SetUsageBarEnabled { .. }
             | GtkCommand::SetUsageBarPins { .. }
             | GtkCommand::OpenActivityTarget { .. }
+            | GtkCommand::AgentRegistryChanged
+            | GtkCommand::ManagedNotificationError { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::OpenNotification { .. }
             | GtkCommand::ListNotifications { .. }
@@ -3111,7 +3232,8 @@ impl WindowController {
             | GtkCommand::OpenAgentBarItem { .. }) => {
                 self.dispatch_notification_command(command).await;
             }
-            command @ (GtkCommand::WorkspaceCreated { .. }
+            command @ (GtkCommand::CreateWorkspace { .. }
+            | GtkCommand::WorkspaceCreated { .. }
             | GtkCommand::NewWorkspace { .. }
             | GtkCommand::RemoveWorkspace { .. }
             | GtkCommand::RemoveAllWorkspaces { .. }
@@ -3134,9 +3256,11 @@ impl WindowController {
             | GtkCommand::OpenTig { .. }
             | GtkCommand::CreateSurface { .. }
             | GtkCommand::OpenAgentView { .. }
+            | GtkCommand::OpenManagedAgent { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
+            | GtkCommand::CloseMovedAgentView { .. }
             | GtkCommand::ConfirmCloseSurface { .. }
             | GtkCommand::CloseTerminatedSurface { .. }
             | GtkCommand::RenameSurface { .. }
@@ -3162,6 +3286,21 @@ impl WindowController {
             | GtkCommand::TogglePaneZoom { .. }
             | GtkCommand::ResizePane { .. }) => {
                 self.dispatch_pane_command(command).await;
+            }
+            GtkCommand::NewAgent => self.show_new_agent_dialog(),
+            GtkCommand::ChooseManagedAgentDestination { payload } => {
+                let result = self.choose_managed_agent_destination(payload).await;
+                if let Err(error) = result {
+                    self.clipboard_toast.show_with_message(&error);
+                }
+            }
+            GtkCommand::ControlManagedAgent { binding, mode } => {
+                let controller = self.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    if let Err(error) = controller.control_managed_agent(binding, mode).await {
+                        show_error_dialog(&controller.window, "Cannot control agent", &error).await;
+                    }
+                });
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
             GtkCommand::SessionFlow(action) => self.dispatch_session_flow(action).await,
@@ -4449,8 +4588,8 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
             // Preserve mutation order while serving observations during SSH I/O
-            // and confirmation dialogs. Control messages only read state or update
-            // hook telemetry; they cannot close or replace widgets.
+            // and confirmation dialogs. Control messages read state, update hook
+            // telemetry or admit a waiting relay; they cannot close or replace widgets.
             let dispatch = dispatch_guarded(&controller, cmd);
             tokio::pin!(dispatch);
             loop {
@@ -6149,6 +6288,8 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn terminal_cwd_change_updates_tab_and_window_title_and_ignores_shell_ps1_echo() {
+        use vte::prelude::TerminalExt;
+
         adw::init().expect("libadwaita should initialize in GTK test");
         // Use absolute paths under /tmp to avoid $HOME effects. Absolute-path
         // PS1 matching is sufficient to verify this flow.
@@ -6178,7 +6319,11 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
+        // Keep shell startup titles from racing the synthetic OSC events below.
+        controller.options.borrow_mut().default_shell = Some("/bin/cat".into());
+        let direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
         controller.render_workspace(&ws);
+        drop(direct_pty);
         controller.focused_pane.set(Some(pane));
         controller.dispatch(GtkCommand::RefreshWindowTitle).await;
 
@@ -6193,6 +6338,17 @@ mod tests {
         // User runs `cd flowmux-ui-cwd-flow-two`. In bash, PROMPT_COMMAND
         // (OSC 7 cwd) emits before PS1 expansion (OSC 0/2 window title), so
         // dispatch in the same order.
+        let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+        terminal
+            .widget
+            .feed(format!("\x1b]7;file://localhost{}\x07", next.display()).as_bytes());
+        for _ in 0..40 {
+            if terminal.announced_current_dir().as_ref() == Some(&next) {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert_eq!(terminal.announced_current_dir().as_ref(), Some(&next));
         controller
             .dispatch(GtkCommand::TerminalCwdChanged {
                 pane,
@@ -6258,6 +6414,7 @@ mod tests {
             store.surface_title(pane, surface).await.as_deref(),
             Some("vim src/main.rs"),
         );
+        controller.poll_terminal_cwds().await;
         wait_for_agent_display_refresh(&controller).await;
         assert_eq!(
             controller.window.title().map(|s| s.to_string()).as_deref(),
@@ -6755,11 +6912,26 @@ mod tests {
         controller.focused_pane.set(Some(pane));
         controller.dispatch(GtkCommand::RefreshWindowTitle).await;
 
-        store
-            .reconcile_process_agents(&[(surface, Some("claude"))])
-            .await;
         // Use actual VTE OSC parsing, including its duplicate-title coalescer.
         let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while terminal.pid.get().is_none() {
+                glib::timeout_future(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("fixture process must start before polling");
+        // Keep the synthetic agent alive through real /bin/cat process polls;
+        // release its PID only when simulating exit below.
+        let mut presence = flowmux_core::AgentPresence::new(
+            "claude",
+            flowmux_core::AgentActivity::Idle,
+            Some(std::process::id()),
+        );
+        presence.source = Some(flowmux_core::AGENT_SOURCE_PROC.into());
+        store
+            .set_agent_activity(surface, Some(presence.clone()))
+            .await;
         terminal.widget.feed(b"\x1b]2;Claude Code\x07");
         dispatch_title_event(&controller, &rx, "Claude Code").await;
         assert_eq!(
@@ -6787,6 +6959,10 @@ mod tests {
 
         // Ctrl+C may not emit OSC titles or leave an alternate screen. Process
         // teardown must restore every displayed name even though cwd is unchanged.
+        presence.pid = None;
+        store
+            .set_agent_activity(surface, Some(presence.clone()))
+            .await;
         assert_eq!(
             store.reconcile_process_agents(&[(surface, None)]).await,
             vec![(ws_id, None)]
@@ -6829,15 +7005,19 @@ mod tests {
         );
 
         // The same agent title must be delivered again on restart.
+        presence.pid = Some(std::process::id());
         store
-            .reconcile_process_agents(&[(surface, Some("claude"))])
+            .set_agent_activity(surface, Some(presence.clone()))
             .await;
         terminal.widget.feed(b"\x1b]2;Claude Code\x07");
         dispatch_title_event(&controller, &rx, "Claude Code").await;
+        controller.poll_agent_processes().await;
         assert_eq!(
             store.get_workspace(ws_id).await.unwrap().name,
             "Claude Code"
         );
+        presence.pid = None;
+        store.set_agent_activity(surface, Some(presence)).await;
         store.reconcile_process_agents(&[(surface, None)]).await;
         controller
             .dispatch(GtkCommand::SetAgentStatus { workspace: ws_id })
@@ -10168,19 +10348,26 @@ mod tests {
         controller.focus_pane(pane);
         gtk::glib::timeout_future(Duration::from_millis(100)).await;
 
-        let created = controller
-            .store
-            .create_workspace(Some("agent".into()), std::env::temp_dir())
-            .await;
         let (ack, reply) = oneshot::channel();
         controller
-            .dispatch(GtkCommand::WorkspaceCreated {
-                id: created,
+            .dispatch(GtkCommand::CreateWorkspace {
+                name: Some("agent".into()),
+                root: std::env::temp_dir(),
+                team: true,
                 activate: false,
                 ack,
             })
             .await;
-        reply.await.unwrap().unwrap();
+        let created = reply.await.unwrap().unwrap();
+        let model = controller.store.get_workspace(created).await.unwrap();
+        // Automatic labels follow cwd; --name does not set a custom title.
+        assert_eq!(
+            model.name,
+            std::env::temp_dir().file_name().unwrap().to_str().unwrap()
+        );
+        assert!(
+            matches!(model.location, flowmux_core::WorkspaceLocation::Team { root_dir } if root_dir == std::env::temp_dir())
+        );
         gtk::glib::timeout_future(Duration::from_millis(100)).await;
         assert!(
             controller.surfaces.borrow().contains_key(&created),
@@ -10195,24 +10382,104 @@ mod tests {
         assert_eq!(controller.focused_pane.get(), Some(pane));
 
         // The default path still switches to the new workspace.
-        let foreground = controller
-            .store
-            .create_workspace(Some("user".into()), std::env::temp_dir())
-            .await;
         let (ack, reply) = oneshot::channel();
         controller
-            .dispatch(GtkCommand::WorkspaceCreated {
-                id: foreground,
+            .dispatch(GtkCommand::CreateWorkspace {
+                name: Some("user".into()),
+                root: std::env::temp_dir(),
+                team: false,
                 activate: true,
                 ack,
             })
             .await;
-        reply.await.unwrap().unwrap();
+        let foreground = reply.await.unwrap().unwrap();
         assert_eq!(
             controller.stack.visible_child_name().as_deref(),
             Some(foreground.to_string().as_str())
         );
         assert_eq!(controller.store.active_workspace().await, Some(foreground));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn stale_managed_layout_commands_preserve_model_and_focus() {
+        use flowmux_ipc::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey};
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.StaleManagedWorkspace").await;
+        controller.activate_workspace(workspace).await;
+        let before = controller.store.list_workspaces().await;
+        let context = AgentViewReport {
+            key: AttachmentKey {
+                instance: flowmux_core::AgentInstanceId::new(),
+                epoch: uuid::Uuid::new_v4(),
+                lease: uuid::Uuid::new_v4(),
+                generation: 1,
+            },
+            location: AgentViewLocation {
+                window: uuid::Uuid::new_v4(),
+                workspace,
+                pane,
+                surface: flowmux_core::SurfaceId::new(),
+                visible: false,
+            },
+        };
+        let (create, created) = oneshot::channel();
+        let (focus, focused) = oneshot::channel();
+        let (open, opened) = oneshot::channel();
+        for command in [
+            GtkCommand::CreateWorkspace {
+                name: None,
+                root: std::env::temp_dir(),
+                team: false,
+                activate: true,
+                ack: create,
+            },
+            GtkCommand::ActivateWorkspace {
+                id: WorkspaceId::new(),
+                ack: Some(focus),
+            },
+            GtkCommand::OpenAgentView {
+                pane,
+                agent: flowmux_ipc::agent_host::AgentInstance {
+                    instance: context.key.instance,
+                    epoch: context.key.epoch,
+                    provider: "fixture".into(),
+                    label: "Must not open".into(),
+                    cwd: std::env::temp_dir(),
+                    pid: None,
+                    process_start: None,
+                    boot_id: None,
+                    state: flowmux_ipc::agent_host::ProcessState::Running,
+                    force_terminate_allowed: false,
+                    exit_status: None,
+                    view: None,
+                    attachment: None,
+                    view_owner: None,
+                    error: None,
+                    presence: None,
+                },
+                ack: open,
+            },
+        ] {
+            let rejected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            controller
+                .dispatch(GtkCommand::InAgentView {
+                    context: context.clone(),
+                    command: Box::new(command),
+                    rejected: rejected.clone(),
+                })
+                .await;
+            assert!(rejected.load(std::sync::atomic::Ordering::Acquire));
+        }
+        assert!(created.await.is_err());
+        assert!(focused.await.is_err());
+        assert!(opened.await.is_err());
+        assert_eq!(controller.store.list_workspaces().await, before);
+        assert_eq!(controller.store.active_workspace().await, Some(workspace));
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(workspace.to_string().as_str())
+        );
     }
 
     /// The background guards must not change what happens in the workspace
@@ -11220,9 +11487,16 @@ mod tests {
             .get(&surface)
             .cloned()
             .expect("surface should have a terminal widget");
+        // A live PID keeps the controller's real process poll from removing this fixture.
+        let mut presence = flowmux_core::AgentPresence::new(
+            "codex",
+            flowmux_core::AgentActivity::Idle,
+            Some(std::process::id()),
+        );
+        presence.source = Some(flowmux_core::AGENT_SOURCE_PROC.into());
         controller
             .store
-            .reconcile_process_agents(&[(surface, Some("codex"))])
+            .set_agent_activity(surface, Some(presence))
             .await;
 
         terminal
@@ -11264,6 +11538,7 @@ mod tests {
         assert!(terminal
             .screen_text()
             .is_some_and(|text| text.contains("codex needs approval")));
+        controller.poll_agent_processes().await;
         controller
             .dispatch(GtkCommand::TerminalContentsChanged { surface })
             .await;
@@ -11690,6 +11965,363 @@ mod tests {
         assert!(!sidebar_label_texts(&controller)
             .iter()
             .any(|text| text == "Input 1"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn stale_moved_agent_close_preserves_the_current_surface_and_zoom() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.StaleAgentClose").await;
+        controller
+            .split_pane(pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        controller.activate_workspace(workspace).await;
+        controller.window.present();
+        for _ in 0..100 {
+            if controller.stack.width() > 0 && controller.stack.is_mapped() {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        controller
+            .dispatch(GtkCommand::TogglePaneZoom { pane })
+            .await;
+        for _ in 0..100 {
+            if controller.pane_zoom.transition.borrow().is_none() {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        assert_eq!(controller.zoomed_pane(), Some(pane));
+        let before =
+            serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap()).unwrap();
+        let terminal_generation =
+            controller.pane_registry.borrow().terminals[&surface].program_status_generation;
+        controller
+            .dispatch(GtkCommand::CloseMovedAgentView {
+                pane,
+                surface,
+                owner: flowmux_ipc::agent_host::AgentViewOwner {
+                    surface: SurfaceId::new(),
+                    key: flowmux_ipc::agent_host::AttachmentKey {
+                        instance: flowmux_core::AgentInstanceId::new(),
+                        epoch: uuid::Uuid::new_v4(),
+                        lease: uuid::Uuid::new_v4(),
+                        generation: 1,
+                    },
+                },
+                terminal_generation,
+            })
+            .await;
+        assert_eq!(controller.zoomed_pane(), Some(pane));
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane),
+            Some(surface)
+        );
+        assert_eq!(
+            serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap()).unwrap(),
+            before
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn restored_agent_cleanup_rechecks_owner_terminal_generation_and_explicit_open() {
+        use crate::ui::agent_connection::AgentViewTakeover;
+        use flowmux_ipc::agent_host::{AgentInstance, AgentViewOwner, AttachmentKey, ProcessState};
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.RestoredAgentCleanup").await;
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let (_, _, surface, _) = controller
+            .store
+            .ensure_agent_view(pane, binding, "Obsolete Agent".into(), "/tmp".into())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, surface, None)
+            .await
+            .unwrap();
+        let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+        let owner = AgentViewOwner {
+            key: AttachmentKey {
+                instance: binding.instance,
+                epoch: binding.epoch,
+                lease: uuid::Uuid::new_v4(),
+                generation: 2,
+            },
+            surface: SurfaceId::new(),
+        };
+        controller.bridge.agent_registry.send_modify(|snapshot| {
+            snapshot.agents.push(AgentInstance {
+                instance: binding.instance,
+                epoch: binding.epoch,
+                provider: "fixture".into(),
+                label: "Current Agent".into(),
+                cwd: "/tmp".into(),
+                pid: None,
+                process_start: None,
+                boot_id: None,
+                state: ProcessState::Running,
+                force_terminate_allowed: false,
+                exit_status: None,
+                view: None,
+                attachment: None,
+                view_owner: Some(owner),
+                error: None,
+                presence: None,
+            })
+        });
+        let command = |owner, terminal_generation| GtkCommand::CloseMovedAgentView {
+            pane,
+            surface,
+            owner,
+            terminal_generation,
+        };
+        // An unavailable Host and delayed commands cannot delete a newer view.
+        controller
+            .dispatch(command(owner, terminal.program_status_generation))
+            .await;
+        assert!(controller.store.agent_view(binding).await.is_some());
+        controller
+            .bridge
+            .agent_registry
+            .send_modify(|snapshot| snapshot.available = true);
+        controller
+            .dispatch(command(owner, uuid::Uuid::new_v4()))
+            .await;
+        assert!(controller.store.agent_view(binding).await.is_some());
+        controller
+            .dispatch(command(
+                AgentViewOwner {
+                    surface: SurfaceId::new(),
+                    ..owner
+                },
+                terminal.program_status_generation,
+            ))
+            .await;
+        assert!(controller.store.agent_view(binding).await.is_some());
+        terminal
+            .agent_connection
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .takeover = Some(AgentViewTakeover {
+            previous: None,
+            token: uuid::Uuid::new_v4(),
+            pane,
+            workspace,
+        });
+        controller
+            .dispatch(command(owner, terminal.program_status_generation))
+            .await;
+        assert!(controller.store.agent_view(binding).await.is_some());
+        terminal
+            .agent_connection
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .takeover = None;
+        controller
+            .dispatch(command(owner, terminal.program_status_generation))
+            .await;
+        assert!(controller.store.agent_view(binding).await.is_none());
+        assert!(controller.store.get_workspace(workspace).await.is_some());
+        assert!(!controller.pane_registry.borrow().has_surface(pane, surface));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn stale_agent_admission_preserves_the_destination_layout() {
+        use crate::ui::agent_connection::{AgentConnection, AgentViewTakeover};
+        use flowmux_ipc::agent_host::AttachmentKey;
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.AgentAdmission").await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let previous = AttachmentKey {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+            lease: uuid::Uuid::new_v4(),
+            generation: 1,
+        };
+        let next = AttachmentKey {
+            generation: 2,
+            lease: uuid::Uuid::new_v4(),
+            ..previous
+        };
+        let binding = flowmux_core::AgentViewBinding {
+            instance: previous.instance,
+            epoch: previous.epoch,
+        };
+        let token = uuid::Uuid::new_v4();
+        let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+        let pid = u32::try_from(terminal.pid.get().unwrap()).unwrap();
+        let birth = flowmux_procmon::process_start_time(pid).unwrap();
+        *terminal.agent_connection.borrow_mut() =
+            Some(AgentConnection::new(binding, &gtk::Overlay::new()));
+        let before =
+            serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap()).unwrap();
+        let (ack, reply) = tokio::sync::oneshot::channel();
+        controller
+            .dispatch(GtkCommand::CommitAgentViewReady {
+                surface,
+                token,
+                key: next,
+                sequence: 0,
+                relay_pid: pid,
+                relay_start: birth,
+                ack,
+            })
+            .await;
+        assert!(reply
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("No explicit move"));
+        for (candidate_token, candidate_pane, key) in [
+            (uuid::Uuid::new_v4(), pane, next),
+            (token, PaneId::new(), next),
+            (token, pane, previous),
+        ] {
+            terminal
+                .agent_connection
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .takeover = Some(AgentViewTakeover {
+                previous: Some(previous),
+                token,
+                pane: candidate_pane,
+                workspace,
+            });
+            assert!(controller
+                .commit_agent_view_ready(surface, candidate_token, key, 0, pid, birth)
+                .await
+                .unwrap_err()
+                .contains("changed before admission"));
+        }
+        terminal
+            .agent_connection
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .started = std::time::Instant::now() - Duration::from_secs(11);
+        assert!(controller
+            .commit_agent_view_ready(surface, token, next, 0, pid, birth)
+            .await
+            .unwrap_err()
+            .contains("timed out before admission"));
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane),
+            Some(surface)
+        );
+        assert_eq!(
+            serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap()).unwrap(),
+            before
+        );
+        terminal.agent_connection.borrow_mut().take();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn managed_drop_rejects_a_closed_target_tab_before_creating_a_view() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.AgentDropTarget").await;
+        let agent = flowmux_ipc::agent_host::AgentInstance {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+            provider: "codex".into(),
+            label: "Missing target".into(),
+            cwd: "/tmp".into(),
+            pid: None,
+            process_start: None,
+            boot_id: None,
+            state: flowmux_ipc::agent_host::ProcessState::Running,
+            force_terminate_allowed: false,
+            exit_status: None,
+            view: None,
+            attachment: None,
+            view_owner: None,
+            error: None,
+            presence: None,
+        };
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let before =
+            serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap()).unwrap();
+        for after in [false, true] {
+            assert_eq!(
+                controller
+                    .open_agent_view_at(pane, agent.clone(), Some((SurfaceId::new(), after)))
+                    .await
+                    .unwrap_err(),
+                "Agent destination tab closed"
+            );
+            assert!(controller.store.agent_view(binding).await.is_none());
+            assert_eq!(
+                serde_json::to_value(controller.store.get_workspace(workspace).await.unwrap())
+                    .unwrap(),
+                before
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn missing_host_does_not_reclassify_managed_views_as_tab_bound() {
+        let (controller, _, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.AgentOwnership").await;
+        let ordinary = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let (_, _, managed, _) = controller
+            .store
+            .ensure_agent_view(
+                pane,
+                flowmux_core::AgentViewBinding {
+                    instance: flowmux_core::AgentInstanceId::new(),
+                    epoch: uuid::Uuid::new_v4(),
+                },
+                "Managed test".into(),
+                PathBuf::from("/tmp"),
+            )
+            .await
+            .unwrap();
+        for surface in [ordinary, managed] {
+            controller
+                .store
+                .set_agent_activity(
+                    surface,
+                    Some(flowmux_core::AgentPresence::new(
+                        "codex",
+                        flowmux_core::AgentActivity::Running,
+                        Some(42),
+                    )),
+                )
+                .await;
+        }
+        let model = controller.store.agent_bar_model().await;
+        assert!(model.items.iter().any(|item| item.surface == managed));
+        assert!(controller.bridge.agent_registry.borrow().agents.is_empty());
+        let model = controller.agent_display_model(model).await;
+        assert_eq!(model.items.len(), 1);
+        assert_eq!(model.items[0].surface, ordinary);
     }
 
     #[cfg(not(target_os = "macos"))]

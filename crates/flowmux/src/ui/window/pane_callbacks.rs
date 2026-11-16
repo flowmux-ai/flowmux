@@ -317,6 +317,16 @@ impl PaneCallbackRouter {
                 let bridge = bridge.clone();
                 Rc::new(move |command| {
                     dispatch_with_ack_result(&bridge, |ack| match command {
+                        TabDropCommand::OpenManagedAgent {
+                            payload,
+                            dst_pane,
+                            tab_anchor,
+                        } => GtkCommand::OpenManagedAgent {
+                            pane: Some(dst_pane),
+                            tab_anchor,
+                            payload,
+                            ack,
+                        },
                         TabDropCommand::MoveToPane {
                             src_pane,
                             surface,

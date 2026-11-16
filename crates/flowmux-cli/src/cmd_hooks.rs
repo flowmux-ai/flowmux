@@ -4,6 +4,9 @@
 use super::*;
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 
+mod runtime;
+use runtime::{build_runtime_activity_update, build_runtime_lifecycle_update, HookTarget};
+
 const RESUME_RETURNED_REASON: &str = "flowmux_resume_returned";
 const FLOWMUX_AGENT_NAME_ENV: &str = "FLOWMUX_AGENT_NAME";
 
@@ -497,8 +500,18 @@ pub(crate) async fn run_claude_hook_event(
     use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
     use hooks::*;
     let input = read_claude_hook_input();
-    let pane = cli_pane.or_else(pane_from_env);
-    let surface = cli_surface.or_else(surface_from_env);
+    let managed = match HookTarget::managed_from_env("claude") {
+        Ok(target) => target,
+        Err(error) => {
+            tracing::debug!(target: "flowmux_hook", %error, "managed hook context rejected");
+            return Ok(());
+        }
+    };
+    let pane = managed
+        .is_none()
+        .then(|| cli_pane.or_else(pane_from_env))
+        .flatten();
+    let surface = managed.or_else(|| cli_surface.or_else(surface_from_env).map(HookTarget::Tab));
     let context_event = match event {
         ClaudeHookEvent::SessionStart => Some("SessionStart"),
         ClaudeHookEvent::PromptSubmit => Some("UserPromptSubmit"),
@@ -527,7 +540,7 @@ pub(crate) async fn run_claude_hook_event(
             let body = normalized_activity_text(input.last_assistant_message.as_deref());
             let status_text = completed_activity_text(body.as_deref());
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -539,7 +552,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Idle),
                     pid,
@@ -553,7 +566,7 @@ pub(crate) async fn run_claude_hook_event(
                     agent_display_name,
                     body.as_deref(),
                     pane,
-                    surface,
+                    surface.and_then(HookTarget::tab),
                 ));
             }
         }
@@ -574,7 +587,7 @@ pub(crate) async fn run_claude_hook_event(
                 });
             let status_text = message.as_deref().unwrap_or("API request failed");
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -597,7 +610,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(NeedsInput),
                     pid,
@@ -612,7 +625,7 @@ pub(crate) async fn run_claude_hook_event(
                 agent_display_name,
                 message.as_deref(),
                 pane,
-                surface,
+                surface.and_then(HookTarget::tab),
             ));
         }
         ClaudeHookEvent::Notification => {
@@ -624,7 +637,7 @@ pub(crate) async fn run_claude_hook_event(
                         (surface, input.session_id.as_deref())
                     {
                         let resumed = notification_type == Some("quota_auto_resume_fired");
-                        reqs.push(build_agent_lifecycle_update(
+                        reqs.push(build_runtime_lifecycle_update(
                             &agent,
                             pid,
                             pane,
@@ -691,11 +704,11 @@ pub(crate) async fn run_claude_hook_event(
                                 ),
                             }
                         };
-                        reqs.push(build_agent_lifecycle_update(
+                        reqs.push(build_runtime_lifecycle_update(
                             &agent, pid, pane, surface, session_id, lifecycle,
                         ));
                     } else {
-                        reqs.push(build_activity_update_with_metadata(
+                        reqs.push(build_runtime_activity_update(
                             &agent,
                             Some(NeedsInput),
                             pid,
@@ -713,7 +726,7 @@ pub(crate) async fn run_claude_hook_event(
                 notification_type,
                 msg.as_deref(),
                 pane,
-                surface,
+                surface.and_then(HookTarget::tab),
             ) {
                 reqs.push(notification);
             }
@@ -724,7 +737,7 @@ pub(crate) async fn run_claude_hook_event(
             // first authoritative boundary after every parallel permission in
             // this model-call batch has resolved.
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -746,7 +759,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(NeedsInput),
                     pid,
@@ -761,13 +774,20 @@ pub(crate) async fn run_claude_hook_event(
                 agent_display_name,
                 msg.as_deref(),
                 pane,
-                surface,
+                surface.and_then(HookTarget::tab),
             ));
         }
         // SessionStart registers the agent's presence (and PID, for the
         // liveness sweep) without claiming it is working yet.
+        ClaudeHookEvent::SessionStart if managed.is_some() => {
+            reqs.push(runtime::session_start(
+                managed.unwrap(),
+                input.session_id.as_deref(),
+                flowmux_core::AgentStatus::Idle,
+            ));
+        }
         ClaudeHookEvent::SessionStart => {
-            reqs.push(build_activity_update_with_metadata(
+            reqs.push(build_runtime_activity_update(
                 &agent,
                 Some(Idle),
                 pid,
@@ -781,7 +801,7 @@ pub(crate) async fn run_claude_hook_event(
         // A new prompt starts a root turn and clears waits from the previous turn.
         ClaudeHookEvent::PromptSubmit => {
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -793,7 +813,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Running),
                     pid,
@@ -818,7 +838,7 @@ pub(crate) async fn run_claude_hook_event(
                     input.session_id.as_deref(),
                     input.tool_use_id.as_deref(),
                 ) {
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent,
                         pid,
                         pane,
@@ -842,7 +862,7 @@ pub(crate) async fn run_claude_hook_event(
                 } else if let (Some(surface), Some(session_id)) =
                     (surface, input.session_id.as_deref())
                 {
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent,
                         pid,
                         pane,
@@ -866,7 +886,7 @@ pub(crate) async fn run_claude_hook_event(
                         },
                     ));
                 } else {
-                    reqs.push(build_activity_update_with_metadata(
+                    reqs.push(build_runtime_activity_update(
                         &agent,
                         Some(NeedsInput),
                         pid,
@@ -882,12 +902,12 @@ pub(crate) async fn run_claude_hook_event(
                         agent_display_name,
                         None,
                         pane,
-                        surface,
+                        surface.and_then(HookTarget::tab),
                     ));
                 }
             } else {
                 if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent,
                         pid,
                         pane,
@@ -896,7 +916,7 @@ pub(crate) async fn run_claude_hook_event(
                         AgentLifecycleEvent::ProgressObserved { status_text },
                     ));
                 } else {
-                    reqs.push(build_activity_update_with_metadata(
+                    reqs.push(build_runtime_activity_update(
                         &agent,
                         Some(Running),
                         pid,
@@ -915,7 +935,7 @@ pub(crate) async fn run_claude_hook_event(
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
                 if claude_tool_needs_input(input.tool_name.as_deref()) {
                     if let Some(tool_use_id) = input.tool_use_id.as_deref() {
-                        reqs.push(build_agent_lifecycle_update(
+                        reqs.push(build_runtime_lifecycle_update(
                             &agent,
                             pid,
                             pane,
@@ -927,7 +947,7 @@ pub(crate) async fn run_claude_hook_event(
                         ));
                     }
                 }
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -938,7 +958,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Running),
                     pid,
@@ -952,7 +972,7 @@ pub(crate) async fn run_claude_hook_event(
         }
         ClaudeHookEvent::PostToolBatch => {
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -963,7 +983,7 @@ pub(crate) async fn run_claude_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Running),
                     pid,
@@ -979,7 +999,7 @@ pub(crate) async fn run_claude_hook_event(
         // daemon PID sweep is the backstop for a hard kill that skips
         // SessionEnd too.
         ClaudeHookEvent::SessionEnd => {
-            reqs.push(build_activity_update_with_metadata(
+            reqs.push(build_runtime_activity_update(
                 &agent,
                 None,
                 pid,
@@ -989,14 +1009,18 @@ pub(crate) async fn run_claude_hook_event(
                 Some("Session ended"),
                 input.session_id.as_deref(),
             ));
-            if let Some(request) =
-                claude_session_end_forget_request(&agent, input.reason.as_deref(), surface)
-            {
+            if let Some(request) = claude_session_end_forget_request(
+                &agent,
+                input.reason.as_deref(),
+                surface.and_then(HookTarget::tab),
+            ) {
                 reqs.push(request);
             }
         }
     };
-    if let Some(client) = hooks::connect_daemon(socket).await {
+    if managed.is_some() {
+        runtime::send_managed(socket, reqs).await;
+    } else if let Some(client) = hooks::connect_daemon(socket).await {
         hooks::send_hook_requests(&client, reqs).await;
     }
     Ok(())
@@ -1019,21 +1043,44 @@ pub(crate) fn write_antigravity_hook_response<W: std::io::Write>(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn build_generic_stop_requests(
     reported_agent: &str,
     agent: &str,
     agent_display_name: &str,
     input: &hooks::ClaudeHookInput,
     pid: Option<u32>,
+    pane: Option<PaneId>,
+    surface: Option<SurfaceId>,
+) -> Vec<Request> {
+    runtime_generic_stop_requests(
+        reported_agent,
+        agent,
+        agent_display_name,
+        input,
+        pid,
+        pane,
+        surface.map(HookTarget::Tab),
+    )
+}
+
+fn runtime_generic_stop_requests(
+    reported_agent: &str,
+    agent: &str,
+    agent_display_name: &str,
+    input: &hooks::ClaudeHookInput,
+    pid: Option<u32>,
     pane: Option<flowmux_core::PaneId>,
-    surface: Option<flowmux_core::SurfaceId>,
+    surface: Option<HookTarget>,
 ) -> Vec<Request> {
     use flowmux_core::AgentActivity::Idle;
     use hooks::*;
 
-    if let Some(request) =
-        generic_resume_return_forget_request(agent, input.reason.as_deref(), surface)
-    {
+    if let Some(request) = generic_resume_return_forget_request(
+        agent,
+        input.reason.as_deref(),
+        surface.and_then(HookTarget::tab),
+    ) {
         return vec![request];
     }
     if reported_agent.eq_ignore_ascii_case("antigravity") && input.fully_idle == Some(false) {
@@ -1068,7 +1115,7 @@ pub(crate) fn build_generic_stop_requests(
             input.session_id.as_deref(),
             input.turn_id.as_deref(),
         ) {
-            return vec![build_agent_lifecycle_update(
+            return vec![build_runtime_lifecycle_update(
                 agent,
                 pid,
                 pane,
@@ -1086,7 +1133,7 @@ pub(crate) fn build_generic_stop_requests(
 
     if !reported_agent.eq_ignore_ascii_case("codex") {
         if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-            let mut requests = vec![build_agent_lifecycle_update(
+            let mut requests = vec![build_runtime_lifecycle_update(
                 agent,
                 pid,
                 pane,
@@ -1117,7 +1164,7 @@ pub(crate) fn build_generic_stop_requests(
                     agent_display_name,
                     input.error.as_deref().or(input.message.as_deref()),
                     pane,
-                    Some(surface),
+                    Some(surface).and_then(HookTarget::tab),
                 ));
             }
             return requests;
@@ -1125,7 +1172,7 @@ pub(crate) fn build_generic_stop_requests(
     }
 
     if let Some(outcome) = outcome {
-        let mut requests = vec![build_activity_update_with_metadata(
+        let mut requests = vec![build_runtime_activity_update(
             agent,
             Some(Idle),
             pid,
@@ -1140,7 +1187,7 @@ pub(crate) fn build_generic_stop_requests(
                 agent_display_name,
                 body.as_deref(),
                 pane,
-                surface,
+                surface.and_then(HookTarget::tab),
             ));
         }
         return requests;
@@ -1154,7 +1201,7 @@ pub(crate) fn build_generic_stop_requests(
     }
 
     vec![
-        build_activity_update_with_metadata(
+        build_runtime_activity_update(
             agent,
             Some(Idle),
             pid,
@@ -1164,7 +1211,12 @@ pub(crate) fn build_generic_stop_requests(
             Some(&status_text),
             input.session_id.as_deref(),
         ),
-        build_stop_notify(agent_display_name, body.as_deref(), pane, surface),
+        build_stop_notify(
+            agent_display_name,
+            body.as_deref(),
+            pane,
+            surface.and_then(HookTarget::tab),
+        ),
     ]
 }
 
@@ -1228,8 +1280,15 @@ pub(crate) async fn run_generic_agent_hook_event(
     // single source of truth for pane/surface attribution. Non-flatpak
     // callers leave the flags unset and we recover the values from
     // env, preserving the legacy code path.
-    let pane = cli_pane.or(env_pane);
-    let surface = cli_surface.or(env_surface);
+    let managed = match HookTarget::managed_from_env(reported_agent) {
+        Ok(target) => target,
+        Err(error) => {
+            tracing::debug!(target: "flowmux_hook", %error, "managed hook context rejected");
+            return Ok(());
+        }
+    };
+    let pane = managed.is_none().then_some(cli_pane.or(env_pane)).flatten();
+    let surface = managed.or_else(|| cli_surface.or(env_surface).map(HookTarget::Tab));
     use flowmux_core::AgentActivity::{NeedsInput, Running};
     let pid = if inherited_wrapper_conflicts_with(reported_agent) {
         None
@@ -1296,6 +1355,7 @@ pub(crate) async fn run_generic_agent_hook_event(
     // tab, so it is not the agent PID either.
     let mut session_route = None;
     let (pane, surface, pid) = if reported_agent.eq_ignore_ascii_case("codex")
+        && managed.is_none()
         && started_by_codex_app_server()
     {
         let Some(session_id) = input.session_id.as_deref() else {
@@ -1314,7 +1374,7 @@ pub(crate) async fn run_generic_agent_hook_event(
             return Ok(());
         };
         session_route = Some((client, other_session));
-        (Some(pane), Some(surface), None)
+        (Some(pane), Some(HookTarget::Tab(surface)), None)
     } else {
         (pane, surface, pid)
     };
@@ -1331,13 +1391,13 @@ pub(crate) async fn run_generic_agent_hook_event(
             &agent,
             pid,
             pane,
-            surface,
+            surface.and_then(HookTarget::tab),
             input.session_id.as_deref(),
         ));
     }
     match event {
         AgentHookEvent::Stop { .. } => {
-            reqs.extend(build_generic_stop_requests(
+            reqs.extend(runtime_generic_stop_requests(
                 reported_agent,
                 &agent,
                 agent_display_name,
@@ -1356,7 +1416,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 surface,
                 input.session_id.as_deref(),
             ) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -1377,7 +1437,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     // Bash/apply_patch inputs are not safe correlation keys when
                     // parallel or repeated calls coexist. Preserve a coarse
                     // turn marker until an authoritative root boundary.
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent,
                         pid,
                         pane,
@@ -1396,7 +1456,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                         },
                     ));
                 } else {
-                    reqs.push(build_activity_update_with_metadata(
+                    reqs.push(build_runtime_activity_update(
                         &agent,
                         Some(NeedsInput),
                         pid,
@@ -1408,7 +1468,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     ));
                 }
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(NeedsInput),
                     pid,
@@ -1423,7 +1483,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 agent_display_name,
                 msg.as_deref(),
                 pane,
-                surface,
+                surface.and_then(HookTarget::tab),
             ));
         }
         AgentHookEvent::Running { .. } => {
@@ -1444,11 +1504,11 @@ pub(crate) async fn run_generic_agent_hook_event(
                             status_text: "Working".into(),
                         },
                     };
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent, pid, pane, surface, session_id, lifecycle,
                     ));
                 } else {
-                    reqs.push(build_activity_update_with_metadata(
+                    reqs.push(build_runtime_activity_update(
                         &agent,
                         Some(Running),
                         pid,
@@ -1461,7 +1521,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 }
             } else if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref())
             {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -1472,7 +1532,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     },
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Running),
                     pid,
@@ -1492,7 +1552,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     Some("agent_start" | "agent_resume" | "TaskStart" | "TaskResume")
                 )
             {
-                reqs.push(build_generic_session_start_request(
+                reqs.push(runtime_generic_session_start_request(
                     reported_agent,
                     &agent,
                     &input,
@@ -1527,11 +1587,11 @@ pub(crate) async fn run_generic_agent_hook_event(
                         status_text: "Starting turn".into(),
                     }
                 };
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent, pid, pane, surface, session_id, lifecycle,
                 ));
             } else {
-                reqs.push(build_activity_update_with_metadata(
+                reqs.push(build_runtime_activity_update(
                     &agent,
                     Some(Running),
                     pid,
@@ -1550,7 +1610,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 input.agent_id.as_deref(),
                 input.turn_id.as_deref(),
             ) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -1570,7 +1630,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 input.agent_id.as_deref(),
                 input.turn_id.as_deref(),
             ) {
-                reqs.push(build_agent_lifecycle_update(
+                reqs.push(build_runtime_lifecycle_update(
                     &agent,
                     pid,
                     pane,
@@ -1600,7 +1660,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     })
                 };
                 if let Some(lifecycle) = lifecycle {
-                    reqs.push(build_agent_lifecycle_update(
+                    reqs.push(build_runtime_lifecycle_update(
                         &agent, pid, pane, surface, session_id, lifecycle,
                     ));
                 }
@@ -1609,7 +1669,7 @@ pub(crate) async fn run_generic_agent_hook_event(
         // Generic starts retain unknown activity. OpenCode's selected TUI route
         // can also provide an authoritative initial status without a completion.
         AgentHookEvent::SessionStart { .. } => {
-            reqs.push(build_generic_session_start_request(
+            reqs.push(runtime_generic_session_start_request(
                 reported_agent,
                 &agent,
                 &input,
@@ -1619,7 +1679,7 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
         AgentHookEvent::SessionEnd { .. } => {
-            reqs.push(build_activity_update_with_metadata(
+            reqs.push(build_runtime_activity_update(
                 &agent,
                 None,
                 pid,
@@ -1631,6 +1691,10 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
     };
+    if managed.is_some() {
+        runtime::send_managed(socket, reqs).await;
+        return Ok(());
+    }
     let client = match session_route {
         Some((client, _)) => Some(client),
         None => hooks::connect_daemon(socket).await,
@@ -1641,13 +1705,32 @@ pub(crate) async fn run_generic_agent_hook_event(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn build_generic_session_start_request(
     reported_agent: &str,
     agent: &str,
     input: &hooks::ClaudeHookInput,
     pid: Option<u32>,
+    pane: Option<PaneId>,
+    surface: Option<SurfaceId>,
+) -> Request {
+    runtime_generic_session_start_request(
+        reported_agent,
+        agent,
+        input,
+        pid,
+        pane,
+        surface.map(HookTarget::Tab),
+    )
+}
+
+fn runtime_generic_session_start_request(
+    reported_agent: &str,
+    agent: &str,
+    input: &hooks::ClaudeHookInput,
+    pid: Option<u32>,
     pane: Option<flowmux_core::PaneId>,
-    surface: Option<flowmux_core::SurfaceId>,
+    surface: Option<HookTarget>,
 ) -> Request {
     use flowmux_core::AgentActivity;
     let activity = match input.session_status.as_deref() {
@@ -1660,6 +1743,17 @@ pub(crate) fn build_generic_session_start_request(
         reported_agent.eq_ignore_ascii_case("opencode")
             && input.source.as_deref() == Some("tui-route")
     });
+    if let Some(target @ HookTarget::Managed { .. }) = surface {
+        return runtime::session_start(
+            target,
+            input.session_id.as_deref(),
+            activity.map_or(
+                flowmux_core::AgentStatus::Unknown,
+                flowmux_core::AgentActivity::status,
+            ),
+        );
+    }
+    let surface = surface.and_then(HookTarget::tab);
     if let Some(activity) = activity {
         hooks::build_activity_update_with_metadata(
             agent,

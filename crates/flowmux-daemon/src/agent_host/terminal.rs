@@ -10,8 +10,10 @@ use alacritty_terminal::term::{Config, Osc52, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 use alacritty_terminal::Term;
 use flowmux_ipc::agent_host::TerminalSize;
+use flowmux_notify::stream::MAX_OSC_PAYLOAD;
 use std::fmt::Write;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 const HISTORY_CELLS: usize = 100_000;
 const MAX_COMBINING: usize = 32;
@@ -54,10 +56,20 @@ struct Projection {
     trailer: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OscState {
+    Ground,
+    Escape,
+    Payload,
+    Overflow,
+}
+
 pub(super) struct Terminal {
     term: Term<Events>,
-    // shortcut: bound OSC storage and synchronized updates before enabling managed GUI launch.
+    // shortcut: synchronized batches bypass the combining bound; cap them before release.
     parser: Processor,
+    osc_state: OscState,
+    osc: Vec<u8>,
     events: Events,
     size: TerminalSize,
     dirty: bool,
@@ -79,6 +91,8 @@ impl Terminal {
         Self {
             term: Term::new(config, &Size(size), events.clone()),
             parser: Processor::new(),
+            osc_state: OscState::Ground,
+            osc: Vec::new(),
             events,
             size,
             dirty: true,
@@ -90,6 +104,64 @@ impl Terminal {
     }
 
     pub fn feed(&mut self, data: &[u8]) -> Vec<u8> {
+        // The upstream std parser grows OSC storage without a limit. Admit a
+        // complete bounded payload, or cancel before it enters that parser.
+        let mut start = 0;
+        for (index, &byte) in data.iter().enumerate() {
+            match self.osc_state {
+                OscState::Ground => {
+                    if byte == 0x1b {
+                        self.osc_state = OscState::Escape;
+                    }
+                }
+                OscState::Escape => {
+                    if byte == b']' {
+                        self.advance(&data[start..index]);
+                        start = index + 1;
+                        self.osc_state = OscState::Payload;
+                    } else if matches!(byte, 0x18 | 0x1a | 0x20..=0x7e) {
+                        self.osc_state = OscState::Ground;
+                    }
+                }
+                OscState::Payload => {
+                    if matches!(byte, 0x07 | 0x18 | 0x1a | 0x1b) {
+                        let mut payload = std::mem::take(&mut self.osc);
+                        self.advance(b"]");
+                        self.advance(&payload);
+                        payload.clear();
+                        self.osc = payload;
+                        self.advance(&data[index..=index]);
+                        self.osc_state = if byte == 0x1b {
+                            OscState::Escape
+                        } else {
+                            OscState::Ground
+                        };
+                    } else if self.osc.len() == MAX_OSC_PAYLOAD {
+                        self.osc.clear();
+                        self.advance(b"\x18");
+                        self.osc_state = OscState::Overflow;
+                    } else {
+                        self.osc.push(byte);
+                    }
+                    start = index + 1;
+                }
+                OscState::Overflow => {
+                    if byte == 0x1b {
+                        self.advance(&data[index..=index]);
+                        self.osc_state = OscState::Escape;
+                    } else if matches!(byte, 0x07 | 0x18 | 0x1a) {
+                        self.osc_state = OscState::Ground;
+                    }
+                    start = index + 1;
+                }
+            }
+        }
+        self.advance(&data[start..]);
+        self.dirty = true;
+        self.take_replies()
+    }
+
+    fn advance(&mut self, data: &[u8]) {
         let mut start = 0;
         for index in data
             .iter()
@@ -101,7 +173,19 @@ impl Terminal {
             start = index + 1;
         }
         self.parser.advance(&mut self.term, &data[start..]);
+    }
+
+    pub fn sync_deadline(&self) -> Option<Instant> {
+        self.parser.sync_timeout().sync_timeout()
+    }
+
+    pub fn flush_sync(&mut self) -> Vec<u8> {
+        self.parser.stop_sync(&mut self.term);
         self.dirty = true;
+        self.take_replies()
+    }
+
+    fn take_replies(&self) -> Vec<u8> {
         let mut replies = Vec::new();
         for event in self.events.0.lock().unwrap().drain(..) {
             let reply = match event {
@@ -551,6 +635,96 @@ mod tests {
         }
         let mut view = Terminal::new(TerminalSize::default());
         assert!(view.feed(data.as_bytes()).is_empty());
+    }
+
+    #[test]
+    fn osc_storage_is_bounded_across_reads_and_recovers_without_partial_hyperlinks() {
+        for ending in [b"\x07".as_slice(), b"\x1b\\", b"\x18", b"\x1a"] {
+            let mut source = Terminal::new(TerminalSize::default());
+            source.feed(b"\x1b]8;;https://oversized.example/");
+            for _ in 0..256 {
+                source.feed(&[b'x'; 1024]);
+                assert!(source.osc.len() <= MAX_OSC_PAYLOAD);
+                assert!(source.osc.capacity() <= MAX_OSC_PAYLOAD);
+            }
+            assert_eq!(source.osc_state, OscState::Overflow);
+            assert!(source.osc.is_empty());
+            assert!(visible(&source)[0].trim().is_empty());
+            source.feed(ending);
+            let mut replies = Vec::new();
+            for byte in b"plain\x1b]8;id=one;https://example.com\x1b\\linked\x1b]8;;\x07\x1b[6n" {
+                replies.extend(source.feed(&[*byte]));
+            }
+            assert_eq!(replies, b"\x1b[1;12R");
+            assert!(visible(&source)[0].starts_with("plainlinked"));
+            let grid = source.term.grid();
+            assert!(grid[Line(0)][Column(0)].hyperlink().is_none());
+            assert_eq!(
+                grid[Line(0)][Column(5)].hyperlink().unwrap().uri(),
+                "https://example.com"
+            );
+        }
+    }
+
+    #[test]
+    fn ignored_escape_bytes_cannot_bypass_the_osc_storage_limit() {
+        for byte in [0x00, 0x07, 0x19, 0x1b, 0x1f, 0x7f, 0x80, 0xff] {
+            let mut source = Terminal::new(TerminalSize::default());
+            source.feed(&[0x1b, byte, b']']);
+            source.feed(&vec![b'x'; MAX_OSC_PAYLOAD + 1]);
+            assert_eq!(source.osc_state, OscState::Overflow, "{byte:x}");
+            assert!(source.osc.is_empty());
+            source.feed(b"\x07recovered");
+            assert!(visible(&source)[0].starts_with("recovered"));
+        }
+    }
+
+    #[test]
+    fn bounded_osc_preserves_queries_nested_escapes_and_synchronized_output() {
+        let mut source = Terminal::new(TerminalSize::default());
+        let mut replies = Vec::new();
+        for byte in b"\x1b]2;unfinished\x1b]4;1;?\x07\x1b[?2026h\x1b]8;;https://example.com\x1b\\linked\x1b[?2026l" {
+            replies.extend(source.feed(&[*byte]));
+        }
+        assert_eq!(replies, b"\x1b]4;1;rgb:cdcd/0000/0000\x07");
+        assert!(source.sync_deadline().is_none());
+        assert!(visible(&source)[0].starts_with("linked"));
+        assert_eq!(
+            source.term.grid()[Line(0)][Column(0)]
+                .hyperlink()
+                .unwrap()
+                .uri(),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn synchronized_output_flushes_pending_queries_once_and_resumes_normal_updates() {
+        let size = TerminalSize { rows: 3, cols: 12 };
+        let mut source = Terminal::new(size);
+        source.feed(b"before");
+        let (sequence, _, _, _) = source.frame(0);
+        assert!(source
+            .feed("\x1b[?2026h\r\n한글 e\u{301}\x1b[6n".as_bytes())
+            .is_empty());
+        assert!(source.sync_deadline().is_some());
+        assert_eq!(source.frame(sequence).0, sequence);
+        assert_eq!(source.flush_sync(), b"\x1b[2;7R");
+        assert!(source.sync_deadline().is_none());
+        let (next, _, _, _) = source.frame(sequence);
+        assert!(next > sequence);
+        assert!(visible(&source)[1].contains("한글 e\u{301}"));
+        let mut view = Terminal::new(size);
+        view.feed(source.frame(0).3.as_bytes());
+        assert_eq!(visible(&source), visible(&view));
+        assert!(source.flush_sync().is_empty());
+        assert_eq!(source.frame(next).0, next);
+        assert!(source.feed(b"\x1b[?2026l\r\nnext").is_empty());
+        assert!(source.frame(next).3.contains("next"));
+
+        source.feed(b"\x1b[?2026h\x1b[Hcompleted\x1b[?2026l");
+        assert!(source.sync_deadline().is_none());
+        assert!(source.frame(0).3.contains("completed"));
     }
 
     #[test]

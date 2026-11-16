@@ -4,8 +4,86 @@
 use super::*;
 
 impl WindowController {
+    fn sync_managed_notifications(&self) {
+        let snapshot = self.bridge.agent_registry.borrow().clone();
+        let (fresh, close) = self.notifications.sync_managed(&snapshot, self.flow.owner);
+        let titles = self.sidebar.workspace_titles();
+        for entry in self
+            .notifications
+            .entries()
+            .into_iter()
+            .filter(|n| n.managed.is_some())
+        {
+            let workspace_label = entry.workspace.and_then(|id| {
+                titles
+                    .borrow()
+                    .iter()
+                    .find(|(ws, _)| *ws == id)
+                    .map(|(_, title)| title.clone())
+            });
+            let surface_label = entry
+                .surface
+                .and_then(|id| self.pane_registry.borrow().surface_title_text(id))
+                .or(entry.surface_label);
+            self.notifications.set_source_labels(
+                entry.id,
+                entry.agent,
+                workspace_label,
+                surface_label,
+            );
+        }
+        self.close_desktop_notifications(close);
+        for id in fresh {
+            let Some(entry) = self.notifications.find(id) else {
+                continue;
+            };
+            if should_suppress_notification(
+                entry.level,
+                self.is_source_focused(entry.pane, entry.surface),
+            ) {
+                self.notifications.mark_read(id);
+                continue;
+            }
+            if entry.level == flowmux_core::NotificationLevel::NeedsInput {
+                let flags = AgentNotificationVisualFlags::for_unread(
+                    self.options.borrow().agent_notification_target,
+                    false,
+                );
+                if flags.agent_bar {
+                    if let Some(surface) = entry.surface {
+                        self.mark_agent_bar_attention(surface);
+                    }
+                }
+                if flags.workspace {
+                    if let Some(workspace) = entry.workspace {
+                        self.sidebar.mark_attention(workspace);
+                    }
+                }
+            }
+            if self.options.borrow().system_notifications_enabled {
+                self.notifications
+                    .deliver_managed_notification(entry, self.bridge.clone());
+            }
+        }
+        self.refresh_launcher_badge();
+        self.sidebar.refresh_notification_popover();
+    }
+
     pub(super) async fn dispatch_notification_command(&self, cmd: GtkCommand) {
         match cmd {
+            GtkCommand::ManagedNotificationError { message } => {
+                self.notifications.reset_managed_delivery();
+                self.sync_managed_notifications();
+                self.clipboard_toast.show_with_message(&message);
+            }
+            GtkCommand::AgentRegistryChanged => {
+                tracing::debug!(
+                    agents = self.bridge.agent_registry.borrow().agents.len(),
+                    "rendering Agent Host registry"
+                );
+                self.refresh_agent_displays().await;
+                self.sync_managed_notifications();
+            }
             GtkCommand::AddActivity { entry } => {
                 if self.activities.push(entry) {
                     self.refresh_activity_panel().await;

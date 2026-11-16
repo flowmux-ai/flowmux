@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pub mod agent_bar;
+mod agent_connection;
 pub(crate) mod agent_office;
 mod browser_bookmarks;
 mod browser_capture;
@@ -23,6 +24,7 @@ pub mod keybindings_panel;
 pub mod macos_ime;
 #[cfg(target_os = "macos")]
 pub mod macos_layer;
+mod managed_agents;
 mod notification_popover;
 pub mod options_dialog;
 pub mod overlay_menu;
@@ -51,6 +53,16 @@ use flowmux_core::AgentStatus;
 use gtk::prelude::*;
 
 pub use window::{spawn_dispatch_loop, WindowController};
+
+pub(crate) const TAB_BOUND_AGENT_TOOLTIP: &str = "This agent is tied to its terminal tab. Closing the tab or Flowmux may stop it. Start a local persistent execution with New Agent or flowmux agent run.";
+
+pub(crate) fn tab_bound_agent_label() -> gtk::Label {
+    let label = gtk::Label::new(Some("Tab-bound"));
+    label.add_css_class("caption");
+    label.add_css_class("dim-label");
+    label.set_tooltip_text(Some(TAB_BOUND_AGENT_TOOLTIP));
+    label
+}
 
 pub(crate) fn agent_attention_summary_label() -> gtk::Label {
     let label = gtk::Label::new(None);

@@ -843,6 +843,23 @@ impl WindowController {
     }
 
     pub(super) async fn tear_off_surface(&self, pane: PaneId, surface: SurfaceId) {
+        if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
+            let controller = self.clone();
+            glib::spawn_future_local(async move {
+                if let Err(error) = controller
+                    .tear_off_managed_agent(pane, surface, binding)
+                    .await
+                {
+                    show_error_dialog(
+                        &controller.window,
+                        "Cannot move agent to a new window",
+                        &error,
+                    )
+                    .await;
+                }
+            });
+            return;
+        }
         let Some(app) = self.window.application() else {
             tracing::warn!(%pane, %surface, "tab tear-off skipped: window has no application");
             return;

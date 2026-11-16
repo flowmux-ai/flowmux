@@ -34,7 +34,7 @@ thiserror = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.10"
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
 chrono = { version = "0.4", features = ["serde"] }
 # Use system roots for private CAs and bundled roots when the system store
 # lacks a public CA needed by a provider endpoint.

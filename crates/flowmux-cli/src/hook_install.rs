@@ -532,7 +532,7 @@ pub(crate) fn shim_script(agent: &str) -> String {
     let canonical_agent = if agent == "agy" { "antigravity" } else { agent };
     let codex_local = if agent == "codex" {
         r#"
-if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
+if [ -n "${FLOWMUX_SURFACE_ID:-}${FLOWMUX_AGENT_INSTANCE_ID:-}" ]; then
   local_codex=1
   for arg in "$@"; do
     case "$arg" in
@@ -600,7 +600,7 @@ fi
 # flowmux agent wrapper shim (managed by `flowmux fix`).
 # Records the real {agent} PID and transparently exec's the real binary.
 # Native hooks report lifecycle state; process scanning is the fallback.
-if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
+if [ -n "${{FLOWMUX_SURFACE_ID:-}}${{FLOWMUX_AGENT_INSTANCE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
   export FLOWMUX_AGENT_NAME={canonical_agent}
 fi
@@ -3709,16 +3709,18 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&real, fs::Permissions::from_mode(0o755)).unwrap();
-        let run = |args: &[&str], inside: bool, supported: bool| {
-            let output = Command::new("/bin/bash")
+        let run = |args: &[&str], context: Option<&str>, supported: bool| {
+            let mut command = Command::new("/bin/bash");
+            command
                 .arg(&shim)
                 .args(args)
                 .env_clear()
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-                .env("FLOWMUX_SURFACE_ID", if inside { "surface" } else { "" })
-                .env("FAKE_HELP", if supported { "  --no-daemon" } else { "" })
-                .output()
-                .unwrap();
+                .env("FAKE_HELP", if supported { "  --no-daemon" } else { "" });
+            if let Some(context) = context {
+                command.env(context, "identity");
+            }
+            let output = command.output().unwrap();
             assert!(output.status.success(), "{:?}", output);
             String::from_utf8(output.stdout)
                 .unwrap()
@@ -3745,18 +3747,23 @@ mod tests {
         ] {
             let mut expected = vec!["--no-daemon"];
             expected.extend(&args);
-            assert_eq!(run(&args, true, true), expected);
+            for context in ["FLOWMUX_SURFACE_ID", "FLOWMUX_AGENT_INSTANCE_ID"] {
+                assert_eq!(run(&args, Some(context), true), expected);
+            }
         }
         for args in [
             vec!["--no-daemon", "resume", "session-id"],
             vec!["--remote", "unix:///tmp/provider.sock"],
             vec!["--remote=wss://example.test"],
         ] {
-            assert_eq!(run(&args, true, true), args);
+            for context in ["FLOWMUX_SURFACE_ID", "FLOWMUX_AGENT_INSTANCE_ID"] {
+                assert_eq!(run(&args, Some(context), true), args);
+            }
         }
         let args = ["resume", "session-id"];
-        assert_eq!(run(&args, false, true), args);
-        assert_eq!(run(&args, true, false), args);
+        assert_eq!(run(&args, None, true), args);
+        assert_eq!(run(&args, Some("FLOWMUX_SURFACE_ID"), false), args);
+        assert_eq!(run(&args, Some("FLOWMUX_AGENT_INSTANCE_ID"), false), args);
     }
 
     #[test]
