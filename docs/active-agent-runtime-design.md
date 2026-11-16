@@ -115,6 +115,22 @@ TurnStarted(turn-1, seq=10)
 
 따라서 기존 `AgentStatus`에 상태 하나를 추가하는 것으로 해결하지 않는다. 기존 UI 판정은 보존하면서 **관측과 완료 기록의 소유자를 Host로 옮기고, 그 검증 결과를 회수 정책에 연결**한다. 완료 관측이나 안전한 종료가 지원되지 않는 provider는 보류 이유를 표시하고 실행을 유지한다.
 
+### 공통 판정 로직의 Host 이관 계약
+
+`e51c7798`의 호출 경로를 기준으로, [agent_runtime.rs](../crates/flowmux-daemon/src/state_store/agent_runtime.rs)의 `report_agent_lifecycle_with_visibility`는 local surface 검사·현재 presence 조회·lifecycle ledger 갱신·workspace 상태 적용·알림 식별자 생성을 함께 수행한다. Host에 이 메서드를 그대로 호출하거나 가짜 workspace/surface를 만들어 연결하지 않는다. **이벤트 판정과 ledger 갱신을 기존 경로에서 분리해 일반 terminal과 managed 실행이 같은 규칙을 호출**하도록 한다.
+
+| 현재 결합 지점 | 분리 후 책임과 보존 조건 |
+| --- | --- |
+| `AgentLifecycleKey = (SurfaceId, provider, native session)` 및 Codex turn key | 일반 terminal은 기존 surface 소유권 유지. managed ledger는 Host epoch·InstanceId에 귀속하고 provider/native session·process identity를 검증. attachment의 surface를 ledger identity로 사용하지 않음 |
+| `report_agent_lifecycle_with_visibility`의 identity·sequence 검사와 child/tool/wait 전이 | 공통 전이 로직에 유지. provider별 중복 제거, 종료 session tombstone, child별 순서, permission batch와 해결된 tool ID의 보관 범위를 그대로 보존. 종료 정책용 의미 분류는 §5의 정규화 계약에 따라 추가 |
+| `LifecycleCheckpoint`와 `apply_agent_status_report` | 일반 terminal의 보고 거절 시 해당 session만 복구하는 기존 동작 유지. managed 실행의 수락 여부는 Host identity·revision으로 결정하며 GUI/workspace 부재나 UI 변경 없음 때문에 유효한 ledger 갱신을 취소하지 않음. 거절된 사건은 다른 session의 ledger를 변경하지 않음 |
+| [ipc_handler.rs](../crates/flowmux/src/ipc_handler.rs)의 Codex Stop grace 예약 | managed 예약은 Host가 소유. callback에 실행 identity·작업 generation·Stop 식별자를 결합하고 최신 revision을 재검사. detach 후에도 실행하되 새 진행·child/wait·identity 변경으로 무효화된 Stop은 완료로 확정하지 않음 |
+| `pending_provider_surfaces`, `settle_provider_turn_from_screen`와 GUI process polling | managed 실행은 Host PTY의 headless 화면·소유 process 관측 사용. 기존 fingerprint·안정된 ready 화면 규칙은 UI 보정으로 재사용하며 전체 작업 완료 근거로 승격하지 않음 |
+| `forget_cleared_agent_surfaces`와 tab/pane/workspace 정리 | 일반 terminal의 정리 계약 유지. managed 화면 제거는 attachment만 정리하며 ledger·wait·예약된 확정은 보존. 실제 session/process 종료에서만 해당 실행의 수명 기록을 정리 |
+| `AgentLifecycleResult`의 workspace·알림 결과 | 공통 판정 결과에서 UI projection·알림 처리를 분리. managed 갱신은 화면 없는 상태에서도 성공하며, 재연결은 기존 Host 상태를 읽음. 재연결을 새 작업이나 새 완료 알림으로 처리하지 않음 |
+
+Host hook ingress도 같은 이관 범위다. 현재 [hooks.rs](../crates/flowmux-cli/src/hooks.rs)의 lifecycle 요청은 surface를 요구하고 GUI socket 전달 경로를 사용하므로, managed 요청에는 실행 identity를 명시하고 Host에서 검증한 뒤 공통 전이에 전달한다. 다른 실행의 사건은 거절하며, 대상 실행은 맞지만 작업 관계가 불명확한 사건은 자동 종료를 보류한다. Host 부재·epoch 불일치·detach를 이유로 다른 GUI socket에 전달하지 않는다. pane 명령은 현재 attachment를 조회하며 화면이 없으면 명확한 오류를 반환한다. 이 경로와 기존 hook 설치·`doctor` 검증이 갖춰지기 전에는 기본 shim을 managed 실행으로 바꾸지 않는다.
+
 ### Provider별 상태 판정 적용 계획
 
 `cb076585`의 [설치 이벤트](../crates/flowmux-cli/src/hook_install.rs), [hook 변환](../crates/flowmux-cli/src/cmd_hooks.rs), `agent_runtime.rs`를 기준으로 다음을 구분한다. 아래는 현재 코드의 관측 범위와 보완 계획이며 provider의 실제 동작 검증 결과가 아니다.
@@ -459,6 +475,14 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 
 상태 판정 이관의 완료 조건은 세 가지다. 첫째, 기존 이벤트 fixtures에 대한 일반 terminal의 UI 결과가 유지되어야 한다. 둘째, 같은 fixtures를 GUI·surface 없이 managed InstanceId에 적용해 child/wait·완료 기록과 deadline을 검증해야 한다. 셋째, §3의 provider별로 전체 관측과 재조회 방법, 유휴 종료 수락 방식, 실제 검증한 버전·결과를 기록한 뒤 자동 종료를 활성화해야 한다. 앞의 두 단계가 통과해도 세 번째 조건을 만족하지 않으면 그 provider의 자동 종료를 지원한다고 표시하지 않는다.
 
+상태 판정 변경은 다음 순서로 적용하고 각 단계의 검증을 구분한다.
+
+1. 현재 hook·wait·child·역순 사건 fixtures로 일반 terminal의 결과를 고정한 뒤 공통 전이 로직을 분리한다. 최초 분리에는 종료 정책이나 provider launch 변경을 섞지 않는다.
+2. InstanceId 기준 Host ingress와 ledger, Stop grace·process/headless 관측을 연결한다. 화면이 없는 실행 및 tab/pane/workspace 삭제 후 사건도 같은 전이로 처리하고 GUI socket 우회를 차단한다.
+3. §5의 의미 정규화와 완료 기록을 회수 후보 정책에 연결한다. 잠정 root 완료와 전체 완료를 구분하며, 실제 자동 종료는 provider별 전체 관측·안전한 유휴 종료 검증 전까지 비활성으로 유지한다.
+4. hook·context 라우팅 검증 후 GUI의 기본 실행·resume/fork를 Host launch로 연결한다. 격리된 실제 provider에서 GUI 종료·재실행 후 동일 프로세스와 현재 화면·layout 복원을 확인한다.
+5. provider별 완료/종료 계약을 검증한 경로부터 설정 시간의 자동 회수를 활성화한다. 작업 중·승인/입력/재시도 대기 보존과 마지막 소유 자식 정리 후 Host 종료를 함께 검증한다.
+
 일반 shell에서 임의로 실행한 모든 프로세스를 자동으로 지속 실행으로 전환하는 것은 초기 범위가 아니다. 사용자가 그 실행도 지속시키려면 처음부터 managed launch를 써야 한다. 기존 세션을 종료하여 전환하거나 자동 resume하지 않는다. `Tab-bound` 실행의 종료는 해당 provider identity에 안전하게 보낼 수 있는 기존 interrupt/종료 경로만 제공하고, 불가능하면 위치로 이동하게 한다. 관리 실행과 같은 detach 보장을 표시하지 않는다.
 
 ### 변경이 도달해야 하는 곳
@@ -496,6 +520,8 @@ Host의 환경을 모든 실행에 공통 상속시키지 않는다. launch 요�
 | 완료 후 초안 편집·커서 이동·paste·interrupt | 입력 ACK만으로 generation 변경·완료 확정 없음. 비작업 입력이면 최초 완료/deadline 복구, 실제 새 작업이면 해당 작업 완료부터 다시 계산 |
 | 완료 이력의 32개 한계 초과·identity 없는 progress | 이력 밖 사건을 새 작업 또는 무해한 사건으로 단정하지 않음. 재검증 전 자동 종료 보류 |
 | Claude root Stop 뒤 shell·예약·하위 작업 잔존 | 응답 완료만 기록하고 전체 완료 확정하지 않음. 관측 범위가 불완전하면 보존 |
+| 같은 lifecycle fixture의 일반 terminal·화면 없는 managed 실행 적용 | 기존 일반 terminal의 UI·알림 계약 유지. managed child/tool/wait 결과는 attachment 유무와 무관하며 GUI 부재 때문에 유효한 전이를 되돌리지 않음 |
+| 거절된 hook·늦은 grace callback·다른 session의 동시 갱신 | 잘못된 identity는 거절, 만료된 확정은 무효. 해당 사건과 무관한 session의 ledger 보존. managed hook을 다른 GUI socket에 우회 전달하지 않음 |
 | workspace 삭제 후 managed hook·child 완료 도착 | InstanceId ledger와 wait·완료 기록 유지, 기존 실행에 적용. 일반 terminal 정리는 기존 계약 유지 |
 | GUI 없이 Stop grace 만료·화면 의존 provider 상태 변화 | Host에서 지연 확정·headless 관측 지속. 화면만으로 전체 작업 완료를 증명하지 않음 |
 | 미확인 이벤트 뒤 잡음/새 작업으로 확정 | 잡음이면 원래 deadline 복구, 실제 작업이면 새 완료 기준 적용. 미확인 동안 종료 없음 |
