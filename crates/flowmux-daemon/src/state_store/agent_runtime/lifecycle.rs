@@ -896,6 +896,11 @@ impl<Owner: Copy + Eq + Hash> AgentLifecycleRuntime<Owner> {
         }
 
         let pending_waits = pending_wait_summary(runtime, &wait_key);
+        if !waits_before.is_empty() || !pending_waits.is_empty() {
+            if let Some(turn) = runtime.provider_turns.get_mut(&wait_key) {
+                turn.idle_frame = None;
+            }
+        }
         // A partial resolution changes the visible reasons even while activity
         // stays blocked. Duplicate deliveries leave both facts and UI untouched.
         let decision = decision.or_else(|| {
@@ -1097,6 +1102,102 @@ mod tests {
             message: None,
             status_text: "Completed".into(),
             stop_hook_active: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_ready_stability_restarts_across_permission_waits() {
+        for agent in ["gemini", "antigravity"] {
+            let owner = AgentInstanceId::new();
+            let mut runtime = AgentLifecycleRuntime::default();
+            let mut presence = None;
+            apply(&mut runtime, owner, agent, 1, start("turn"), &mut presence);
+            apply(
+                &mut runtime,
+                owner,
+                agent,
+                2,
+                AgentLifecycleEvent::TurnStopRequested {
+                    message: None,
+                    status_text: "Completed".into(),
+                },
+                &mut presence,
+            );
+            assert!(runtime
+                .provider_screen_settlement(
+                    owner,
+                    presence.as_ref().unwrap(),
+                    "Type your message",
+                    None
+                )
+                .is_none());
+            let key = (owner, agent.to_string(), "session".to_string());
+            runtime
+                .provider_turns
+                .get_mut(&key)
+                .unwrap()
+                .idle_frame
+                .as_mut()
+                .unwrap()
+                .1 -= std::time::Duration::from_secs(1);
+            apply(
+                &mut runtime,
+                owner,
+                agent,
+                3,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    reason: AgentWaitReason::Approval,
+                    scope: None,
+                    message: None,
+                    status_text: "Approval required".into(),
+                },
+                &mut presence,
+            );
+            assert!(runtime
+                .provider_screen_settlement(
+                    owner,
+                    presence.as_ref().unwrap(),
+                    "Type your message",
+                    None
+                )
+                .is_none());
+            apply(
+                &mut runtime,
+                owner,
+                agent,
+                4,
+                AgentLifecycleEvent::ToolBatchFinished {
+                    status_text: "Working".into(),
+                },
+                &mut presence,
+            );
+            assert!(
+                runtime
+                    .provider_screen_settlement(
+                        owner,
+                        presence.as_ref().unwrap(),
+                        "Type your message",
+                        None
+                    )
+                    .is_none(),
+                "{agent}: a wait must invalidate pre-wait screen stability"
+            );
+            runtime
+                .provider_turns
+                .get_mut(&key)
+                .unwrap()
+                .idle_frame
+                .as_mut()
+                .unwrap()
+                .1 -= std::time::Duration::from_secs(1);
+            assert!(runtime
+                .provider_screen_settlement(
+                    owner,
+                    presence.as_ref().unwrap(),
+                    "Type your message",
+                    None
+                )
+                .is_some());
         }
     }
 

@@ -396,6 +396,31 @@ while True:
                                  "Agents displays the result observed without any GUI")
                 h.close_window(app)
                 if name != "cline":
+                    hook("session-start", session="wait-screen")
+                    hook("turn-start", session="wait-screen")
+                    frame("Type your message", "⠋ Executing Hook")
+                    hook("stop", session="wait-screen")
+                    frame("Type your message")
+                    # Sample a ready frame, then enter a wait before it can settle.
+                    time.sleep(.35)
+                    client = host_fixture.HostClient(socket, "hook")
+                    try:
+                        def lifecycle(event):
+                            return client.call("lifecycle", instance=agent["instance"], epoch=agent["epoch"],
+                                pid=agent["pid"], process_start=agent["process_start"], session_id="wait-screen",
+                                seq=time.time_ns(), event=event, notification=None)
+                        lifecycle({"event": "permission_wait_started", "reason": "approval",
+                                   "scope": None, "message": None, "status_text": "Approval required"})
+                        time.sleep(.8)
+                        assert presence()["status"] == "blocked", presence()
+                        lifecycle({"event": "tool_batch_finished", "status_text": "Working"})
+                        time.sleep(.35)
+                        assert presence()["status"] == "working", "pre-wait ready time caused premature completion"
+                        fixture.wait_for(lambda: presence()["status"] == "idle", "fresh ready stability after wait resolution")
+                    finally:
+                        client.close()
+                    h.pass_check(name + ": approval wait invalidates pre-wait screen stability and restarts the ready grace")
+                if name != "cline":
                     hook("session-start", session="canceled-screen")
                     hook("turn-start", session="canceled-screen")
                     frame("ℹ Request cancelled.\nType your message")

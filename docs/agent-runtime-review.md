@@ -27,6 +27,20 @@
   확인했다. 두 private runtime에 잔여 process가 없다. Workspace Clippy
   (`--all-targets -- -D warnings`), format·diff 공백 검사도 통과했다.
 
+### AR-002 · medium · 승인 대기 전의 ready 안정화 시간 재사용
+
+- 원인: 잠정 Stop의 ready frame을 관측한 후 승인 대기에 들어갔다가 해제되면,
+  이전 `idle_frame`의 시간을 그대로 사용했다. 대기 해제 직후 완료로 표시할 수 있었다.
+- 재현: 공통 reducer의 InstanceId 회귀 검사가 수정 전 실패했다
+  (`/tmp/fm-runtime-wait-before-tests.log`).
+- 조치: 대기 진입·해결 전이에서 provider 화면 안정화 기록을 무효화한다.
+  승인·입력·session 대기와 같은 공통 ledger의 경계를 사용하므로 GUI가 없는
+  경우와 일반 terminal에 같은 규칙을 적용한다.
+- 검증: provider 관련 단위 검사 4개 통과. Gemini·Antigravity의 실제 Host에서
+  대기 해제 직후 Working 유지와 새 ready grace를 확인했다. 격리 live 전체
+  29개 통과·exit 0 (`/tmp/fm-runtime-wait-after-live.log`,
+  `/tmp/fm-gui-rc0y4z93`). 해당 runtime의 잔여 process가 없다.
+
 ## 완료 전 확인할 범위
 
 - 새 변경을 포함한 Linux 공유 CI 전체와 runtime live phase.
