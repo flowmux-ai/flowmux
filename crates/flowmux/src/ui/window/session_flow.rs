@@ -479,6 +479,8 @@ impl WindowController {
         let Some(catalog) = catalog.as_ref() else {
             return;
         };
+        self.flow.panel.restore_views(&catalog.views);
+        let visible = self.flow.panel.select_workspace(active);
         let mut workspace_anchors: HashMap<WorkspaceId, BTreeSet<SessionKey>> = HashMap::new();
         let mut running = BTreeSet::new();
         let mut forkable = HashMap::new();
@@ -493,16 +495,22 @@ impl WindowController {
             else {
                 continue;
             };
-            workspace_anchors
-                .entry(anchor.workspace)
-                .or_default()
-                .insert(key.clone());
-            running.insert(key.clone());
+            if visible {
+                workspace_anchors
+                    .entry(anchor.workspace)
+                    .or_default()
+                    .insert(key.clone());
+                running.insert(key.clone());
+            }
             if idle.contains(&focused.surface) && catalog.forkable.contains(key) {
                 forkable.insert(focused.surface, key.clone());
             }
         }
         self.pane_registry.borrow_mut().session_flow_forkable = forkable;
+        // Hidden panels still refresh fork eligibility and saved open state.
+        if !visible {
+            return;
+        }
         let keys = active
             .and_then(|id| workspace_anchors.get(&id).cloned())
             .unwrap_or_default();
@@ -542,7 +550,6 @@ impl WindowController {
                 )
             })
             .collect();
-        self.flow.panel.restore_views(&catalog.views);
         self.flow.panel.set_nodes(
             catalog.snapshot.lineage.clone(),
             nodes,
@@ -2540,8 +2547,9 @@ mod tests {
             let mut catalog = controller.flow.catalog.borrow_mut();
             let catalog = catalog.as_mut().unwrap();
             catalog.bindings.insert(surface, key.clone());
+            catalog.forkable.insert(key.clone());
             catalog.available.insert(
-                key,
+                key.clone(),
                 HistorySession {
                     agent: SessionAgent::Claude,
                     id: "parent".into(),
@@ -2555,11 +2563,39 @@ mod tests {
         }
         *controller.flow.targets.borrow_mut() = controller.flow_anchors().await;
         assert_eq!(controller.flow.targets.borrow().len(), 1);
+        controller.flow.panel.status.set_text("unrendered");
         controller.refresh_session_flow(false).await;
         assert!(
             controller.flow.last_load.get().is_none(),
             "complete hidden catalog was rescanned"
         );
+        assert_eq!(controller.flow.panel.status.text(), "unrendered");
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .session_flow_forkable
+                .get(&surface),
+            Some(&key),
+            "hidden panels must still update fork eligibility"
+        );
+        let anchors = controller.flow.targets.borrow().clone();
+        controller.flow.panel.toggle(ws_id);
+        controller.render_session_flow(&anchors).await;
+        assert_ne!(controller.flow.panel.status.text(), "unrendered");
+        let other = store
+            .create_workspace(Some("closed".into()), std::env::temp_dir())
+            .await;
+        store.set_active_workspace(Some(other)).await;
+        controller.render_session_flow(&anchors).await;
+        assert!(!controller.flow.panel.root.is_visible());
+        store.set_active_workspace(Some(ws_id)).await;
+        controller.render_session_flow(&anchors).await;
+        assert!(
+            controller.flow.panel.root.is_visible(),
+            "workspace switches must restore the saved open state"
+        );
+        controller.flow.panel.toggle(ws_id);
         presence.session_id = Some("replacement".into());
         store
             .set_agent_activity(surface, Some(presence))

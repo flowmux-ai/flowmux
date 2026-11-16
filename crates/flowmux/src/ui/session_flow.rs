@@ -288,6 +288,17 @@ impl FlowPanel {
         graph: Lineage,
         anchors: BTreeSet<SessionKey>,
     ) {
+        self.select_workspace(workspace);
+        let mut scene = self.scene.borrow_mut();
+        self.empty.set_visible(graph.is_empty());
+        scene.graph = graph;
+        scene.anchors = anchors;
+        drop(scene);
+        self.area.queue_draw();
+        self.animate();
+    }
+
+    pub fn select_workspace(&self, workspace: Option<WorkspaceId>) -> bool {
         let mut scene = self.scene.borrow_mut();
         if scene.workspace != workspace {
             scene.fit_during_settle = false;
@@ -296,17 +307,13 @@ impl FlowPanel {
             scene.space_pan = false;
         }
         scene.workspace = workspace;
-        self.empty.set_visible(graph.is_empty());
-        scene.graph = graph;
-        scene.anchors = anchors;
         let view = scene.view().cloned().unwrap_or_default();
         drop(scene);
         self.root.set_visible(view.open);
         if view.open && view.height > 0 {
             self.host.set_position(view.height);
         }
-        self.area.queue_draw();
-        self.animate();
+        view.open
     }
 
     pub fn toggle(&self, workspace: WorkspaceId) {

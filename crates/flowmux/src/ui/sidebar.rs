@@ -1129,6 +1129,7 @@ struct ActivityRowWidget {
     root: gtk::Box,
     button: gtk::Button,
     when: gtk::Label,
+    summary: gtk::Label,
     entry: ActivityNowEntry,
     target: Rc<Cell<(WorkspaceId, flowmux_core::PaneId, SurfaceId)>>,
 }
@@ -1140,7 +1141,7 @@ impl ActivityRowWidget {
         button.add_css_class("flowmux-agent-bar-item");
         button.set_vexpand(false);
         button.set_valign(gtk::Align::Start);
-        let (content, when) = activity_row_content(entry);
+        let (content, when, summary) = activity_row_content(entry);
         button.set_child(Some(&content));
         let target = Rc::new(Cell::new((entry.workspace, entry.pane, entry.surface)));
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1165,6 +1166,7 @@ impl ActivityRowWidget {
             root,
             button,
             when,
+            summary,
             entry: entry.clone(),
             target,
         }
@@ -1172,9 +1174,24 @@ impl ActivityRowWidget {
 
     fn update(&mut self, entry: &ActivityNowEntry, store: &ActivityStore, focused: bool) {
         if self.entry != *entry {
-            let (content, when) = activity_row_content(entry);
-            self.button.set_child(Some(&content));
-            self.when = when;
+            let visual_status = |entry: &ActivityNowEntry| {
+                crate::ui::agent_attention_visual_status(entry.status, entry.attention())
+            };
+            if self.entry.agent != entry.agent
+                || self.entry.color != entry.color
+                || visual_status(&self.entry) != visual_status(entry)
+                || self.entry.seen != entry.seen
+            {
+                let (content, when, summary) = activity_row_content(entry);
+                self.button.set_child(Some(&content));
+                self.when = when;
+                self.summary = summary;
+            } else if self.entry.status_text != entry.status_text
+                || self.entry.surface_label != entry.surface_label
+            {
+                self.summary
+                    .set_label(&format!("{} · {}", entry.status_text, entry.surface_label));
+            }
             self.entry = entry.clone();
         }
         self.target
@@ -1239,7 +1256,7 @@ fn render_activity_rows(
     }
 }
 
-fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label) {
+fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label, gtk::Label) {
     let visual_status = crate::ui::agent_attention_visual_status(entry.status, entry.attention());
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     row.set_margin_top(2);
@@ -1277,7 +1294,7 @@ fn activity_row_content(entry: &ActivityNowEntry) -> (gtk::Box, gtk::Label) {
     summary.add_css_class(agent_status_css_class(visual_status, entry.seen));
     text.append(&summary);
     row.append(&text);
-    (row, when)
+    (row, when, summary)
 }
 
 #[cfg(test)]
@@ -1331,7 +1348,15 @@ pub(crate) async fn check_stable_activity_rows() {
         button.next_sibling().is_none(),
         "an agent row has one navigation target"
     );
-    let removed_content = button.child().unwrap().downgrade();
+    let retained_content = button.child().unwrap().downgrade();
+    let spinner = button
+        .child()
+        .unwrap()
+        .first_child()
+        .unwrap()
+        .next_sibling()
+        .unwrap()
+        .downgrade();
     assert!(button.grab_focus());
     assert!(button.is_focus());
     let adjustment = scroll.vadjustment();
@@ -1362,10 +1387,31 @@ pub(crate) async fn check_stable_activity_rows() {
         "status refresh moved the scroll position"
     );
     assert!(
-        removed_content.upgrade().is_none(),
-        "old content must release its widgets"
+        retained_content.upgrade() == button.child(),
+        "text refresh must preserve content and spinner"
     );
-    assert!(button.tooltip_text().unwrap().contains("Reviewing patch"));
+    assert!(spinner.upgrade().unwrap().is::<gtk::Spinner>());
+    assert_eq!(
+        rows.borrow()[&surface].summary.label(),
+        "Reviewing patch · Task 0"
+    );
+    current[0].status = AgentStatus::Blocked;
+    current[0].status_text = "Waiting for input".into();
+    render_activity_rows(
+        &content,
+        &rows,
+        &store,
+        &current,
+        Some(surface),
+        bridge.clone(),
+    );
+    assert!(retained_content.upgrade().is_none());
+    assert!(spinner.upgrade().is_none());
+    assert!(rows.borrow()[&surface]
+        .summary
+        .has_css_class(agent_status_css_class(AgentStatus::Blocked, true)));
+    assert!(button.is_focus());
+    assert!(button.tooltip_text().unwrap().contains("Waiting for input"));
     current.rotate_left(1);
     render_activity_rows(&content, &rows, &store, &current, None, bridge.clone());
     assert_eq!(content.last_child(), button.parent());

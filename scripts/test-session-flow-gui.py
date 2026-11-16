@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
         pid = int(gui.wait_for(lambda: re.search(r"fixture-pid:(\d+)", h.screen(socket, pane)),
                               "fixture agent").group(1))
 
-        def find(role, name=None):
+        def find(role, name=None, prefix=None):
             desktop = Atspi.get_desktop(0)
             desktop.clear_cache()
             pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
@@ -106,6 +106,7 @@ int main(int argc, char **argv) {
                     continue
                 node.clear_cache()
                 if (node.get_role() == role and (name is None or node.get_name() == name)
+                        and (prefix is None or node.get_name().startswith(prefix))
                         and node.get_state_set().contains(Atspi.StateType.SHOWING)):
                     return node
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
@@ -152,6 +153,14 @@ int main(int argc, char **argv) {
         gui.wait_for(lambda: imported(first), "new session imported with panel hidden", timeout=12)
         gui.wait_for(menu_enabled, "new idle session fork enabled", timeout=8)
         h.pass_check("new idle session enables Fork without opening Session Flow")
+        for index in range(3):
+            text = f"Progress update {index}"
+            h.rpc(socket, "agent_activity_update", pane=pane, surface=surface, agent="claude",
+                  pid=pid, source="flowmux:hook", session_id=first,
+                  seq=time.time_ns(), activity="idle", custom_status=text)
+            gui.wait_for(lambda: find(Atspi.Role.LABEL, prefix=text + " · "),
+                         "updated activity row text")
+        h.pass_check("activity row text updates without changing agent state")
         report(first, "running")
         gui.wait_for(lambda: not menu_enabled(), "working session fork disabled", timeout=8)
         report(first)
@@ -167,6 +176,15 @@ int main(int argc, char **argv) {
         gui.wait_for(menu_enabled, "changed session fork enabled", timeout=8)
         h.pass_check("same-pane session replacement and delayed history recover automatically")
         assert find(Atspi.Role.PUSH_BUTTON, "Fit") is None, "Session Flow was opened by the test"
+        button = gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Session Flow"), "Flow button")
+        assert button.get_action_iface().do_action(0)
+        gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "opened Session Flow")
+        other = h.rpc(socket, "workspace_create", name="Closed Flow", root=str(h.root))["workspace_created"]["id"]
+        h.rpc(socket, "workspace_focus", workspace=other)
+        gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit") is None, "new workspace hides Flow")
+        h.rpc(socket, "workspace_focus", workspace=workspace)
+        gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "saved open Flow restored")
+        h.pass_check("workspace switching restores Flow visibility after hidden rendering was skipped")
         h.close_window(process)
     finally:
         if connection is not None:

@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use vte::prelude::*;
 
-const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const REFRESH_INTERVAL: Duration = Duration::from_millis(200);
 const PREVIEW_SCROLL_ROWS: i64 = 25;
 
 #[derive(Default)]
@@ -455,6 +455,8 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     if state.columns.replace(columns) != columns {
         // VTE reflows absolute text rows when a split changes the width.
         state.text_row_offset.set(0);
+        // Identical pixel runs still have a different horizontal scale.
+        state.raster.borrow_mut().take();
     }
     // Alternate-screen TUIs own their history; preview only VTE's current screen.
     if state.alternate_screen.get()
@@ -536,6 +538,9 @@ fn refresh_visible_screen(
 
 fn replace_pixel_rows(state: &MinimapState, mut rows: Vec<Vec<VtePixelRun>>, limit: usize) {
     rows.truncate(limit);
+    if *state.pixel_rows.borrow() == rows {
+        return;
+    }
     *state.pixel_rows.borrow_mut() = rows;
     state.raster.borrow_mut().take();
 }
@@ -753,6 +758,75 @@ fn pointer_target(
 mod tests {
     use super::*;
 
+    #[test]
+    fn unchanged_pixels_retain_raster_but_changed_colors_and_rows_invalidate_it() {
+        let state = MinimapState::default();
+        let rows = vec![vec![VtePixelRun {
+            column: 2,
+            len: 3,
+            color: Some([255, 0, 0]),
+        }]];
+        replace_pixel_rows(&state, rows.clone(), 1);
+        let raster = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 48, 100).unwrap();
+        *state.raster.borrow_mut() = Some((raster.clone(), gtk::gdk::RGBA::WHITE));
+        let mut clipped_rows = rows.clone();
+        clipped_rows.push(Vec::new());
+        replace_pixel_rows(&state, clipped_rows, 1);
+        assert_eq!(
+            state.raster.borrow().as_ref().unwrap().0.to_raw_none(),
+            raster.to_raw_none()
+        );
+
+        let mut recolored = rows.clone();
+        recolored[0][0].color = Some([0, 255, 0]);
+        replace_pixel_rows(&state, recolored, 1);
+        assert!(state.raster.borrow().is_none());
+
+        *state.raster.borrow_mut() = Some((raster, gtk::gdk::RGBA::WHITE));
+        replace_pixel_rows(&state, rows, 0);
+        assert!(state.pixel_rows.borrow().is_empty());
+        assert!(state.raster.borrow().is_none());
+    }
+
+    #[gtk::test]
+    async fn unchanged_screen_reuses_raster_but_changed_columns_invalidate_it() {
+        let term = vte::Terminal::new();
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        minimap.set_width(48);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
+
+        let raster = minimap.state.raster.borrow().as_ref().unwrap().0.clone();
+        refresh_now(&term, minimap.widget(), &minimap.state);
+        assert_eq!(
+            minimap
+                .state
+                .raster
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .0
+                .to_raw_none(),
+            raster.to_raw_none()
+        );
+
+        let rows = minimap.state.pixel_rows.borrow().clone();
+        let columns = term.column_count();
+        term.set_size(columns / 2, term.row_count());
+        assert_ne!(term.column_count(), columns);
+        refresh_now(&term, minimap.widget(), &minimap.state);
+        assert_eq!(*minimap.state.pixel_rows.borrow(), rows);
+        assert!(minimap.state.raster.borrow().is_none());
+        window.close();
+    }
+
     #[gtk::test]
     async fn refresh_is_not_postponed_by_new_requests() {
         let term = vte::Terminal::new();
@@ -765,9 +839,10 @@ mod tests {
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
 
         schedule_refresh(&term, &area, state.clone());
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL * 3 / 4).await;
+        assert!(state.refresh_source.borrow().is_some());
         schedule_refresh(&term, &area, state.clone());
-        gtk::glib::timeout_future(Duration::from_millis(75)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL / 2).await;
         assert!(state.refresh_source.borrow().is_none());
         window.close();
     }
@@ -807,7 +882,7 @@ mod tests {
         window.set_default_size(800, 600);
         window.set_child(Some(&overlay));
         window.present();
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
 
         let mut observed_rows = Vec::new();
         for index in 0..24 {
@@ -832,7 +907,7 @@ mod tests {
             observed_rows[23] > observed_rows[12],
             "minimap stopped updating"
         );
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert_eq!(minimap.state.columns.get(), term.column_count() as usize);
         assert!(minimap.state.refresh_source.borrow().is_none());
         window.close();
@@ -981,17 +1056,17 @@ mod tests {
         window.set_default_size(1_200, 700);
         window.set_child(Some(&split));
         window.present();
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
 
         let output = (0..2_000)
             .map(|index| format!("{index:04} {}\r\n", "x".repeat(index % 180 + 20)))
             .collect::<String>();
         term.feed(output.as_bytes());
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         term.feed(b"\x1b[H\x1b[2J\x1b[3J");
         gtk::glib::timeout_future(Duration::from_millis(150)).await;
         term.feed(output.as_bytes());
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert!(minimap.state.text_row_offset.get() > 0);
 
         let columns = term.column_count();
@@ -1002,7 +1077,7 @@ mod tests {
         split.set_position(600);
         gtk::glib::timeout_future(Duration::from_millis(20)).await;
         assert_eq!(term.column_count(), columns);
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
 
         assert!(
             minimap
@@ -1035,10 +1110,10 @@ mod tests {
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
 
         term.feed("history\r\n".repeat(600).as_bytes());
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         term.feed(b"\x1b[?1049h\x1b[H\x1b[2JCODEX\x1b[10;1HFOOTER\x1b[H");
         minimap.set_alternate_screen(true);
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert!(!minimap.widget().is_visible());
         assert!(minimap.state.pixel_rows.borrow().is_empty());
         assert!(minimap.state.refresh_source.borrow().is_none());
@@ -1055,19 +1130,19 @@ mod tests {
         assert_eq!(adjustment.value(), before);
 
         term.feed(b"\x1b[HUPDATED");
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert!(minimap.state.pixel_rows.borrow().is_empty());
         assert!(minimap.state.refresh_source.borrow().is_none());
         minimap.set_enabled(false);
         assert!(!minimap.widget().is_visible());
         minimap.set_enabled(true);
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert!(!minimap.widget().is_visible());
         assert!(minimap.state.pixel_rows.borrow().is_empty());
 
         term.feed(b"\x1b[?1049l");
         minimap.set_alternate_screen(false);
-        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        gtk::glib::timeout_future(REFRESH_INTERVAL + Duration::from_millis(100)).await;
         assert!(minimap.widget().is_mapped());
         assert!(minimap.state.pixel_rows.borrow().len() > term.row_count() as usize);
         let bottom = adjustment.value();

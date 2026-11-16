@@ -228,7 +228,10 @@ pub(crate) fn vte_html_pixel_rows(
 }
 
 pub(crate) fn terminal_cell_width(ch: char) -> usize {
-    if ch.is_zero_width() {
+    // Printable ASCII needs no Unicode width lookup across the GLib FFI.
+    if (' '..='~').contains(&ch) {
+        1
+    } else if ch.is_zero_width() {
         0
     } else if ch.is_wide() {
         2
@@ -509,6 +512,23 @@ fn with_terminal_line_endings(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_width_matches_glib_for_ascii_and_unicode() {
+        for ch in (0..=127)
+            .filter_map(char::from_u32)
+            .chain("한글界é\u{301}\u{200b}\u{200d}🙂\u{fe0f}".chars())
+        {
+            let expected = if ch.is_zero_width() {
+                0
+            } else if ch.is_wide() {
+                2
+            } else {
+                1
+            };
+            assert_eq!(terminal_cell_width(ch), expected, "{ch:?}");
+        }
+    }
 
     #[test]
     fn plain_snapshot_drops_viewport_padding_and_an_idle_prompt() {
