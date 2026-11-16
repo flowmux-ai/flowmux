@@ -42,9 +42,6 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
             pane,
             r#"
             (() => {
-                const sample = document.createElement('span');
-                sample.style.background = 'var(--panel)';
-                document.body.append(sample);
                 // Canvas readback can be randomized by WebKit tracking protection.
                 const luminance = color => {
                     const srgb = color.match(/^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)\)$/);
@@ -59,15 +56,23 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
                 const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
                 if (ratio(luminance('rgb(0, 0, 0)'), luminance('color(srgb 1 1 1)')) !== 21)
                     throw new Error('Black/white contrast must be 21');
-                const background = getComputedStyle(sample).backgroundColor;
-                const bg = luminance(background);
-                const colors = ['--warning', '--danger'].map(variable => {
-                    sample.style.color = `var(${variable})`;
-                    const color = getComputedStyle(sample).color;
-                    return { variable, color, ratio: ratio(bg, luminance(color)) };
+                const colors = ['document-state', 'document-state is-conflict'].map(className => {
+                    // Resolve each real status style on a fresh, rendered node inside the modal.
+                    const sample = document.createElement('span');
+                    sample.className = className;
+                    sample.textContent = 'Status contrast';
+                    sample.style.background = 'var(--panel)';
+                    document.getElementById('recovery-dialog').append(sample);
+                    if (!sample.getBoundingClientRect().width) throw new Error('Status sample is not rendered');
+                    const style = getComputedStyle(sample);
+                    const color = style.color, background = style.backgroundColor;
+                    const result = { className, color, background,
+                        warning: style.getPropertyValue('--warning'), danger: style.getPropertyValue('--danger'),
+                        ratio: ratio(luminance(background), luminance(color)) };
+                    sample.remove();
+                    return result;
                 });
-                sample.remove();
-                return JSON.stringify({ background, colors });
+                return JSON.stringify({ colors });
             })()
         "#,
         )
