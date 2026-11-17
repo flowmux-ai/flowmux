@@ -4,6 +4,33 @@
 use super::*;
 
 impl WindowController {
+    pub fn cancel_tab_drag(&self) -> bool {
+        let sources = self
+            .pane_registry
+            .borrow()
+            .surface_tabs
+            .values()
+            .flatten()
+            .filter_map(|(_, tab)| tab.first_child())
+            .flat_map(|button| {
+                let controllers = button.observe_controllers();
+                (0..controllers.n_items())
+                    .filter_map(move |i| controllers.item(i).and_downcast::<gtk::DragSource>())
+            })
+            .filter(|source| source.drag().is_some())
+            .collect::<Vec<_>>();
+        if sources.is_empty() {
+            return false;
+        }
+        // GTK can still deliver the pending target drop after cancelling its source.
+        self.callbacks.tab_drag_drop_committed.set(true);
+        self.callbacks.tab_drag_split_candidate.borrow_mut().take();
+        for source in sources {
+            source.drag_cancel();
+        }
+        true
+    }
+
     /// Remove a pane from the live widget tree by re-parenting its
     /// surviving sibling into the slot the parent `gtk::Paned`
     /// occupied. Every other pane's widget instance — and therefore
@@ -449,8 +476,23 @@ impl WindowController {
             .unwrap_or_else(|| self.window.clone())
     }
 
+    pub(super) fn workspace_sidebar(&self, workspace: WorkspaceId) -> Sidebar {
+        self.detached_workspaces
+            .borrow()
+            .get(&workspace)
+            .map(|host| host.sidebar.clone())
+            .unwrap_or_else(|| self.sidebar.clone())
+    }
+
     pub(super) fn upsert_workspace_sidebar(&self, workspace: &Workspace) {
         self.sidebar.upsert(workspace);
+        self.sidebar.set_workspace_visible(
+            workspace.id,
+            !self
+                .detached_workspaces
+                .borrow()
+                .contains_key(&workspace.id),
+        );
         if let Some(host) = self.detached_workspaces.borrow().get(&workspace.id) {
             host.sidebar.upsert(workspace);
         }
@@ -723,7 +765,7 @@ impl WindowController {
         let select_bridge = self.bridge.clone();
         let close_bridge = self.bridge.clone();
         let ssh_bridge = self.bridge.clone();
-        let sidebar = Sidebar::new(
+        let mut sidebar = Sidebar::new(
             move |id| select_bridge.send_from_ui(GtkCommand::ActivateWorkspace { id, ack: None }),
             move |id| {
                 let (ack, _) = oneshot::channel();
@@ -740,11 +782,14 @@ impl WindowController {
             self.notifications.tokio_handle(),
             self.options.borrow().agent_bar_mode,
         );
+        sidebar.share_tab_drag_drop_state(&self.sidebar);
         sidebar.upsert(&self.store.get_workspace(workspace).await.unwrap());
         sidebar.select_workspace(workspace);
         let split =
             build_split_window_shell(&sidebar, &stack, self.sidebar_split.position().max(260));
-        set_window_content(&window, &split);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&split));
+        set_window_content(&window, &overlay);
         self.detached_workspaces.borrow_mut().insert(
             workspace,
             DetachedWorkspace {
@@ -753,6 +798,7 @@ impl WindowController {
                 sidebar,
             },
         );
+        self.sidebar.set_workspace_visible(workspace, false);
         self.refresh_detached_terminals();
         crate::keybindings::install_actions_for_window(self, self.bridge.clone(), &window);
         let windows = Rc::downgrade(&self.detached_workspaces);
@@ -817,6 +863,7 @@ impl WindowController {
                 .reorder_surface_in_pane(src_pane, surface, target_index)
                 .await
                 .is_some()
+                || self.store.surface_title(src_pane, surface).await.is_some()
             {
                 self.pane_registry.borrow_mut().reorder_surface_widget(
                     src_pane,
@@ -837,11 +884,14 @@ impl WindowController {
         }
         let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
             return match surface_model {
-                Some(surface_model) => {
+                Some(surface_model)
+                    if src_pane.0.is_nil()
+                        && matches!(surface_model.kind, SurfaceKind::Editor { .. }) =>
+                {
                     self.import_surface_to_pane(surface_model, dst_pane, target_index)
                         .await
                 }
-                None => Err("source pane no longer exists".to_string()),
+                _ => Err("source pane is not owned by this Flowmux instance".to_string()),
             };
         };
 
@@ -851,11 +901,6 @@ impl WindowController {
             .borrow_mut()
             .detach_surface_for_move(src_pane, surface);
         let Some(moving) = moving else {
-            if let Some(surface_model) = surface_model {
-                return self
-                    .import_surface_to_pane(surface_model, dst_pane, target_index)
-                    .await;
-            }
             return Err("source surface is not rendered".to_string());
         };
 
@@ -1165,11 +1210,14 @@ impl WindowController {
         }
         let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
             return match surface_model {
-                Some(surface_model) => {
+                Some(surface_model)
+                    if src_pane.0.is_nil()
+                        && matches!(surface_model.kind, SurfaceKind::Editor { .. }) =>
+                {
                     self.split_imported_surface_into_pane(surface_model, dst_pane, direction)
                         .await
                 }
-                None => Err("source pane no longer exists".to_string()),
+                _ => Err("source pane is not owned by this Flowmux instance".to_string()),
             };
         };
 
@@ -1179,11 +1227,6 @@ impl WindowController {
             .borrow_mut()
             .detach_surface_for_move(src_pane, surface);
         let Some(moving) = moving else {
-            if let Some(surface_model) = surface_model {
-                return self
-                    .split_imported_surface_into_pane(surface_model, dst_pane, direction)
-                    .await;
-            }
             return Err("source surface is not rendered".to_string());
         };
 
@@ -1292,7 +1335,7 @@ impl WindowController {
 }
 
 #[cfg(all(test, not(target_os = "macos")))]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     async fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
@@ -1305,7 +1348,10 @@ mod tests {
         .unwrap_or_else(|_| panic!("timed out: {description}"));
     }
 
-    async fn setup(name: &str, root: &std::path::Path) -> (WindowController, WorkspaceId, PaneId) {
+    pub(crate) async fn setup(
+        name: &str,
+        root: &std::path::Path,
+    ) -> (WindowController, WorkspaceId, PaneId) {
         adw::init().unwrap();
         let store = StateStore::new_lazy(flowmux_state::State::default());
         let workspace = store

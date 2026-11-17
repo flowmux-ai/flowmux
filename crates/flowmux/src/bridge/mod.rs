@@ -664,6 +664,7 @@ pub enum GtkCommand {
         generation: u64,
     },
     NewWorkspace {
+        window_id: Option<u32>,
         team: bool,
         root: std::path::PathBuf,
     },

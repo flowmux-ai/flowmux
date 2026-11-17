@@ -183,7 +183,7 @@ pub struct Sidebar {
     /// losing its current path/agent details. WindowController updates this via
     /// [`Sidebar::upsert_with_details`] after sync_workspace_label.
     subtitle_cache: Rc<RefCell<HashMap<WorkspaceId, WorkspaceRowDetails>>>,
-    /// Live, ordered (id, name) snapshot mirroring the visible rows. Read
+    /// Live, ordered (id, name) snapshot including workspaces in other windows. Read
     /// synchronously by the pane tab "Move" submenu so it reflects the current
     /// workspace set and names at click time. Kept in sync by `upsert_inner`,
     /// `reorder`, and `remove`.
@@ -270,7 +270,11 @@ impl Sidebar {
                 &widget,
                 x,
                 y,
-                workspace_creation_items(&menu_bridge, new_ssh.clone()),
+                workspace_creation_items(
+                    &menu_bridge,
+                    new_ssh.clone(),
+                    workspace_window_id(&widget),
+                ),
             );
         });
         scroll.add_controller(context_click);
@@ -281,8 +285,8 @@ impl Sidebar {
         new_btn.set_widget_name("flowmux-new-workspace-button");
         new_btn.update_property(&[gtk::accessible::Property::Label("New workspace")]);
         let bridge_for_new = bridge.clone();
-        new_btn.connect_clicked(move |_| {
-            create_local_workspace(&bridge_for_new);
+        new_btn.connect_clicked(move |button| {
+            create_local_workspace(&bridge_for_new, workspace_window_id(button));
         });
         let creation_menu_btn = gtk::Button::from_icon_name("pan-down-symbolic");
         creation_menu_btn.set_widget_name("flowmux-workspace-creation-menu-button");
@@ -297,7 +301,11 @@ impl Sidebar {
                 button,
                 0.0,
                 f64::from(button.height()),
-                workspace_creation_items(&menu_bridge, new_ssh.clone()),
+                workspace_creation_items(
+                    &menu_bridge,
+                    new_ssh.clone(),
+                    workspace_window_id(button),
+                ),
             );
         });
         let creation_buttons = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -670,10 +678,25 @@ impl Sidebar {
         self.upsert_inner(ws, &details);
     }
 
-    /// Live, ordered (id, name) snapshot of the side-panel workspaces. Read by
+    /// Live, ordered (id, name) snapshot of all known workspaces. Read by
     /// the pane tab "Move" submenu so it always reflects the current set.
     pub fn workspace_titles(&self) -> Rc<RefCell<Vec<(WorkspaceId, String)>>> {
         self.titles.clone()
+    }
+
+    pub(crate) fn share_tab_drag_drop_state(&mut self, source: &Sidebar) {
+        (self.tab_drag_drop_seen, self.tab_drag_drop_committed) = source.tab_drag_drop_state();
+    }
+
+    pub(crate) fn set_workspace_visible(&self, id: WorkspaceId, visible: bool) {
+        if let Some((_, row)) = self
+            .rows
+            .borrow()
+            .iter()
+            .find(|(workspace, _)| *workspace == id)
+        {
+            row.set_visible(visible);
+        }
     }
 
     pub(crate) fn tab_drag_drop_state(&self) -> (Rc<Cell<bool>>, Rc<Cell<bool>>) {
@@ -1495,6 +1518,7 @@ fn attach_dnd_handlers(row: &gtk::ListBoxRow, id: WorkspaceId, bridge: Bridge, r
 
     let drop_target =
         gtk::DropTarget::new(gtk::glib::types::Type::STRING, gtk::gdk::DragAction::MOVE);
+    drop_target.connect_accept(|_, drop| drop.formats().contain_mime_type(WORKSPACE_DND_MIME));
     // Use motion y to choose the upper or lower half of the row and place the
     // indicator. Drop logic uses the same y basis for new_index, so the blue
     // line marks the actual drop position. Hovering the upper half of the first
@@ -1636,19 +1660,8 @@ fn attach_tab_drop_to_row(
 ) {
     let drop_target =
         gtk::DropTargetAsync::new(Some(tab_dnd_content_formats()), gtk::gdk::DragAction::MOVE);
-    let bridge_accept = bridge.clone();
     drop_target.connect_accept(move |target, drop| {
         if sidebar_tab_drop_accepts_formats(&drop.formats()) {
-            let bridge = bridge_accept.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                let _ = bridge
-                    .tx
-                    .send(GtkCommand::ActivateWorkspace {
-                        id: ws_id,
-                        ack: None,
-                    })
-                    .await;
-            });
             true
         } else {
             target.reject_drop(drop);
@@ -1658,7 +1671,9 @@ fn attach_tab_drop_to_row(
     let bridge_drop = bridge.clone();
     drop_target.connect_drop(move |_, drop, _x, _y| {
         tab_drag_drop_seen.set(true);
-        tab_drag_drop_committed.set(true);
+        if tab_drag_drop_committed.replace(true) {
+            return false;
+        }
         let drop = drop.clone();
         let bridge = bridge_drop.clone();
         gtk::glib::MainContext::default().spawn_local(async move {
@@ -1789,12 +1804,23 @@ impl WorkspaceRowWidget {
     }
 }
 
-fn create_local_workspace(bridge: &Bridge) {
+fn workspace_window_id(widget: &impl IsA<gtk::Widget>) -> Option<u32> {
+    widget
+        .root()
+        .and_downcast::<gtk::ApplicationWindow>()
+        .map(|window| window.id())
+}
+
+fn create_local_workspace(bridge: &Bridge, window_id: Option<u32>) {
     let bridge = bridge.clone();
     gtk::glib::MainContext::default().spawn_local(async move {
         let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         let _ = bridge
-            .send_priority(GtkCommand::NewWorkspace { root, team: false })
+            .send_priority(GtkCommand::NewWorkspace {
+                root,
+                team: false,
+                window_id,
+            })
             .await;
     });
 }
@@ -1802,6 +1828,7 @@ fn create_local_workspace(bridge: &Bridge) {
 fn workspace_creation_items(
     bridge: &Bridge,
     on_new_ssh: Rc<dyn Fn()>,
+    window_id: Option<u32>,
 ) -> Vec<crate::ui::overlay_menu::MenuItem> {
     use crate::ui::overlay_menu::MenuItem;
     let team_bridge = bridge.clone();
@@ -1809,7 +1836,7 @@ fn workspace_creation_items(
     vec![
         MenuItem::Action {
             label: "New workspace",
-            activate: Box::new(move || create_local_workspace(&bridge)),
+            activate: Box::new(move || create_local_workspace(&bridge, window_id)),
         },
         MenuItem::Action {
             label: "New SSH Workspace",
@@ -1823,7 +1850,11 @@ fn workspace_creation_items(
                     let root =
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                     let _ = bridge
-                        .send_priority(GtkCommand::NewWorkspace { root, team: true })
+                        .send_priority(GtkCommand::NewWorkspace {
+                            root,
+                            team: true,
+                            window_id,
+                        })
                         .await;
                 });
             }),
@@ -2054,7 +2085,11 @@ fn row_widget(
             }),
         };
 
-        let mut items = workspace_creation_items(&bridge, on_new_ssh_workspace.clone());
+        let mut items = workspace_creation_items(
+            &bridge,
+            on_new_ssh_workspace.clone(),
+            workspace_window_id(&row),
+        );
         items.push(MenuItem::Separator);
         items.extend([
             rename,
@@ -2551,7 +2586,8 @@ mod tests {
         let (bridge, rx) = Bridge::new();
         let ssh_calls = Rc::new(Cell::new(0));
         let calls = ssh_calls.clone();
-        let items = workspace_creation_items(&bridge, Rc::new(move || calls.set(calls.get() + 1)));
+        let items =
+            workspace_creation_items(&bridge, Rc::new(move || calls.set(calls.get() + 1)), None);
         assert_eq!(items.len(), 3);
         let MenuItem::Action { label, activate } = &items[0] else {
             panic!("missing local action")

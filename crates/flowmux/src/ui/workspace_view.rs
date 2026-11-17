@@ -2154,7 +2154,8 @@ pub(crate) fn editor_surface_for_file_drop(path: &Path) -> Result<PaneSurface, S
 
 fn file_drop_parts(path: &Path) -> Result<(PaneId, SurfaceId, PaneSurface), String> {
     let surface = editor_surface_for_file_drop(path)?;
-    Ok((PaneId::new(), surface.id, surface))
+    // Nil is reserved for an explicit file import; an unknown real tab is never imported.
+    Ok((PaneId(uuid::Uuid::nil()), surface.id, surface))
 }
 
 #[cfg(test)]
@@ -2922,6 +2923,10 @@ fn attach_tab_dnd_handlers(
             saw_tab_drop_target = saw_target_for_cancel.get(),
             "tab drag cancel"
         );
+        // A cancelled or failed accepted drop must never become a tear-off in drag_end.
+        if reason != gtk::gdk::DragCancelReason::NoTarget {
+            opened_for_cancel.set(true);
+        }
         if pointer_inside_origin && !committed_for_cancel.get() && !opened_for_cancel.get() {
             if let Some((target_pane, direction)) = split_candidate_for_cancel.borrow_mut().take() {
                 saw_target_for_cancel.set(true);
@@ -2943,16 +2948,15 @@ fn attach_tab_dnd_handlers(
                 );
             }
         }
-        if matches!(
-            reason,
-            gtk::gdk::DragCancelReason::NoTarget | gtk::gdk::DragCancelReason::Error
-        ) && should_tear_off_unhandled_drag(
-            selected_action.is_empty(),
-            false,
-            saw_target_for_cancel.get(),
-            opened_for_cancel.get(),
-            pointer_inside_origin,
-        ) {
+        if matches!(reason, gtk::gdk::DragCancelReason::NoTarget)
+            && should_tear_off_unhandled_drag(
+                selected_action.is_empty(),
+                false,
+                saw_target_for_cancel.get(),
+                opened_for_cancel.get(),
+                pointer_inside_origin,
+            )
+        {
             opened_for_cancel.set(true);
             tracing::info!(
                 %pane_id,

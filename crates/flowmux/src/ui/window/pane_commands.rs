@@ -365,30 +365,10 @@ impl WindowController {
                 target_index,
                 ack,
             } => {
-                tracing::info!(%pane, %surface, target_index, "ReorderSurface dispatch start");
-                // If store-side reorder returns no change (None), leave GTK
-                // widgets unchanged. Widget reorder must update both the tab-bar
-                // gtk::Box and surface_tabs indexes held by main-thread PaneRegistry.
-                let store_result = self
-                    .store
-                    .reorder_surface_in_pane(pane, surface, target_index)
+                let result = self
+                    .move_surface(pane, surface, None, pane, target_index)
                     .await;
-                if store_result.is_some() {
-                    self.pane_registry.borrow_mut().reorder_surface_widget(
-                        pane,
-                        surface,
-                        target_index,
-                    );
-                    tracing::info!(%pane, %surface, target_index, "ReorderSurface applied");
-                } else {
-                    tracing::warn!(
-                        %pane,
-                        %surface,
-                        target_index,
-                        "ReorderSurface store update returned None (no-op or unknown surface)"
-                    );
-                }
-                let _ = ack.send(Ok(()));
+                let _ = ack.send(result);
             }
             GtkCommand::ReturnSurfaceToMainWindow { pane, surface } => {
                 if let Err(error) = self.return_surface_to_main_window(pane, surface).await {

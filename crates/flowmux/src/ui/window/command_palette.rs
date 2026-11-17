@@ -785,6 +785,11 @@ impl WindowController {
         match command {
             CommandPaletteCommand::NewTeamWorkspace => {
                 self.dispatch_workspace_command(GtkCommand::NewWorkspace {
+                    window_id: self
+                        .focused_pane
+                        .get()
+                        .and_then(|pane| self.pane_registry.borrow().workspace_of_pane(pane))
+                        .map(|ws| self.workspace_window(ws).id()),
                     root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
                     team: true,
                 })

@@ -28,30 +28,38 @@ impl WindowController {
                 };
                 let _ = ack.send(result);
             }
-            GtkCommand::NewWorkspace { root, team } => {
+            GtkCommand::NewWorkspace {
+                root,
+                team,
+                window_id,
+            } => {
+                let host = self
+                    .detached_workspaces
+                    .borrow()
+                    .values()
+                    .find(|host| Some(host.window.id()) == window_id)
+                    .cloned();
+                if window_id.is_some_and(|id| id != self.window.id()) && host.is_none() {
+                    tracing::warn!(?window_id, "workspace creation window no longer exists");
+                    return;
+                }
                 // Prefer the focused pane's cwd so a new tab opens
                 // where the user was working, falling back to the
                 // root the caller suggested (typically the daemon's
                 // own current_dir) and finally to "/".
+                let requesting_window = host
+                    .as_ref()
+                    .map(|host| &host.window)
+                    .unwrap_or(&self.window);
                 let resolved = self
-                    .focused_pane
-                    .get()
+                    .visible_workspace_in_window(requesting_window)
+                    .and_then(|id| self.remembered_pane(id))
                     .and_then(|id| {
                         let r = self.pane_registry.borrow();
                         r.active_terminal(id).cloned()
                     })
                     .and_then(|p| p.current_dir())
                     .unwrap_or(root);
-                let active = self
-                    .window
-                    .application()
-                    .and_then(|app| app.active_window());
-                let host = self
-                    .detached_workspaces
-                    .borrow()
-                    .values()
-                    .find(|host| active.as_ref() == Some(host.window.upcast_ref()))
-                    .cloned();
                 let id = self.store.create_workspace_kind(None, resolved, team).await;
                 if let Some(host) = host {
                     self.detached_workspaces.borrow_mut().insert(id, host);

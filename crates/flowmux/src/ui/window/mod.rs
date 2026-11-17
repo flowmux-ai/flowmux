@@ -1306,6 +1306,8 @@ mod session_flow;
 mod sessions;
 pub(crate) mod ssh;
 mod surface_ops;
+#[cfg(all(test, not(target_os = "macos")))]
+mod tab_move_tests;
 mod terminal_output_search;
 mod termination_dialog;
 #[cfg(target_os = "linux")]
@@ -2170,7 +2172,9 @@ impl WindowController {
                         return false;
                     };
                     seen.set(true);
-                    committed.set(true);
+                    if committed.replace(true) {
+                        return false;
+                    }
                     bridge.send_from_ui(GtkCommand::ReturnSurfaceToMainWindow {
                         pane: payload.src_pane,
                         surface: payload.src_surface,
@@ -2212,7 +2216,7 @@ impl WindowController {
         drop(surfaces);
         self.refresh_workspace_solo(ws);
         if activate {
-            self.sidebar.select_workspace(ws.id);
+            self.workspace_sidebar(ws.id).select_workspace(ws.id);
             self.focus_first_leaf_of(ws);
         }
     }
@@ -2262,7 +2266,7 @@ impl WindowController {
         self.refresh_workspace_solo(ws);
         if activate {
             self.workspace_stack(ws.id).set_visible_child_name(&name);
-            self.sidebar.select_workspace(ws.id);
+            self.workspace_sidebar(ws.id).select_workspace(ws.id);
             self.focus_first_leaf_of(ws);
         }
     }
@@ -2652,6 +2656,10 @@ impl WindowController {
             host.sidebar.upsert_with_details(&ws, details.clone());
         }
         self.sidebar.upsert_with_details(&ws, details);
+        self.sidebar.set_workspace_visible(
+            ws.id,
+            !self.detached_workspaces.borrow().contains_key(&ws.id),
+        );
         self.refresh_agent_displays().await;
     }
 
@@ -3415,10 +3423,7 @@ impl WindowController {
         if let Some(host) = self.detached_workspaces.borrow().get(&id) {
             host.window.present();
         }
-        self.sidebar.select_workspace(id);
-        if let Some(host) = self.detached_workspaces.borrow().get(&id) {
-            host.sidebar.select_workspace(id);
-        }
+        self.workspace_sidebar(id).select_workspace(id);
         self.store.set_active_workspace(Some(id)).await;
         self.sync_workspace_agent_status_from_store(id).await;
         let pane = match target.map(|(pane, _)| pane).or(remembered_pane) {
@@ -13461,7 +13466,7 @@ mod tests {
         let (ack_tx, ack_rx) = oneshot::channel();
         controller
             .dispatch(GtkCommand::MoveSurfaceToPane {
-                src_pane: PaneId::new(),
+                src_pane: PaneId(uuid::Uuid::nil()),
                 surface: model.id,
                 surface_model: Some(model),
                 dst_pane: src,
@@ -13508,7 +13513,7 @@ mod tests {
         let (ack_tx, ack_rx) = oneshot::channel();
         controller
             .dispatch(GtkCommand::SplitSurfaceIntoPane {
-                src_pane: PaneId::new(),
+                src_pane: PaneId(uuid::Uuid::nil()),
                 surface: model.id,
                 surface_model: Some(model),
                 dst_pane: dst,

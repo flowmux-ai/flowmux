@@ -1396,6 +1396,7 @@ pub(super) async fn check_native(
         } else {
             controller
                 .dispatch(GtkCommand::NewWorkspace {
+                    window_id: None,
                     root: root.into(),
                     team: false,
                 })

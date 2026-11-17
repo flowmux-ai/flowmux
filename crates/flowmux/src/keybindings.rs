@@ -251,6 +251,7 @@ pub(crate) fn install_actions_for_window(
 
     let new_workspace = {
         let bridge = bridge.clone();
+        let window_id = Some(window.id());
         gtk::gio::ActionEntry::builder("new-workspace")
             .activate(move |_, _, _| {
                 tracing::debug!(action = "new-workspace", "key action fired");
@@ -259,7 +260,11 @@ pub(crate) fn install_actions_for_window(
                     let root =
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                     let _ = bridge
-                        .send_priority(GtkCommand::NewWorkspace { root, team: false })
+                        .send_priority(GtkCommand::NewWorkspace {
+                            root,
+                            team: false,
+                            window_id,
+                        })
                         .await;
                 });
             })
@@ -272,8 +277,12 @@ pub(crate) fn install_actions_for_window(
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     key.connect_key_pressed({
         let new_window_timestamp = new_window_timestamp.clone();
-        move |key, _, _, _| {
+        let controller = controller.clone();
+        move |key, keyval, _, _| {
             new_window_timestamp.set(key.current_event_time());
+            if keyval == gtk::gdk::Key::Escape && controller.cancel_tab_drag() {
+                return glib::Propagation::Stop;
+            }
             glib::Propagation::Proceed
         }
     });
