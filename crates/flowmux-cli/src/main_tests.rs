@@ -2899,6 +2899,66 @@ async fn codex_root_tool_progress_keeps_root_turn_identity() {
     server.await.unwrap();
 }
 
+#[tokio::test]
+async fn gemini_running_hook_with_before_agent_event_starts_turn() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("flowmux.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read, mut write) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(read);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+        assert!(matches!(
+            envelope.payload,
+            Payload::Request(Request::AgentLifecycleUpdate {
+                surface: got_surface,
+                agent,
+                session_id,
+                lifecycle: AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text,
+                },
+                ..
+            }) if got_surface == surface
+                && agent == "gemini"
+                && session_id == "session-gemini"
+                && status_text == "Working"
+        ));
+        let response = Envelope {
+            id: envelope.id,
+            payload: Payload::Response(Response::Ok),
+        };
+        let mut encoded = serde_json::to_string(&response).unwrap();
+        encoded.push('\n');
+        write.write_all(encoded.as_bytes()).await.unwrap();
+    });
+
+    run_generic_agent_hook_event(
+        "gemini",
+        &AgentHookEvent::Running {
+            pane: Some(pane),
+            surface: Some(surface),
+            args: vec![
+                r#"{"session_id":"session-gemini","hook_event_name":"BeforeAgent"}"#.into(),
+            ],
+        },
+        Some(socket),
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
 #[test]
 fn codex_and_opencode_resume_return_only_forget_their_binding() {
     use crate::cmd_hooks::generic_resume_return_forget_request;

@@ -1256,8 +1256,9 @@ pub(crate) async fn run_generic_agent_hook_event(
     };
     // Gemini and native Codex hooks deliver JSON on stdin. Codex retains a
     // positional legacy-notify fallback; OpenCode passes its payload as an arg.
-    let input = if reported_agent.eq_ignore_ascii_case("gemini")
-        || reported_agent.eq_ignore_ascii_case("antigravity")
+    let input = if (reported_agent.eq_ignore_ascii_case("gemini")
+        || reported_agent.eq_ignore_ascii_case("antigravity"))
+        && args.is_empty()
     {
         read_claude_hook_input()
     } else {
@@ -1476,15 +1477,25 @@ pub(crate) async fn run_generic_agent_hook_event(
                 }
             } else if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref())
             {
+                let is_turn_start = reported_agent.eq_ignore_ascii_case("gemini")
+                    && input.event_type.as_deref() == Some("BeforeAgent");
+                let lifecycle = if is_turn_start {
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Working".into(),
+                    }
+                } else {
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Working".into(),
+                    }
+                };
                 reqs.push(build_agent_lifecycle_update(
                     &agent,
                     pid,
                     pane,
                     surface,
                     session_id,
-                    AgentLifecycleEvent::ProgressObserved {
-                        status_text: "Working".into(),
-                    },
+                    lifecycle,
                 ));
             } else {
                 reqs.push(build_activity_update_with_metadata(

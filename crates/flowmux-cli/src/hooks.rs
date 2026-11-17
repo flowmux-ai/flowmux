@@ -509,6 +509,73 @@ pub fn claude_notification_needs_input(notification_type: Option<&str>) -> bool 
     )
 }
 
+/// Build a backward-compatible legacy request for older running Flowmux daemons
+/// that predate newer lifecycle events or request variants.
+pub(crate) fn legacy_request_fallback(request: &Request) -> Option<Request> {
+    match request {
+        Request::AgentLifecycleUpdate {
+            notification,
+            pane,
+            surface,
+            agent,
+            pid,
+            seq,
+            session_id,
+            lifecycle,
+        } => match lifecycle {
+            AgentLifecycleEvent::TurnStopRequested {
+                message,
+                status_text,
+            }
+            | AgentLifecycleEvent::TurnFinished {
+                message,
+                status_text,
+                ..
+            } => Some(Request::AgentLifecycleUpdate {
+                notification: notification.clone(),
+                pane: *pane,
+                surface: *surface,
+                agent: agent.clone(),
+                pid: *pid,
+                seq: *seq,
+                session_id: session_id.clone(),
+                lifecycle: AgentLifecycleEvent::TurnStopped {
+                    message: message.clone(),
+                    status_text: status_text.clone(),
+                },
+            }),
+            AgentLifecycleEvent::TurnStopped {
+                message,
+                status_text,
+            } => Some(build_activity_update_with_metadata(
+                agent,
+                Some(flowmux_core::AgentActivity::Idle),
+                *pid,
+                *pane,
+                Some(*surface),
+                message.as_deref(),
+                Some(status_text.as_str()),
+                Some(session_id.as_str()),
+            )),
+            AgentLifecycleEvent::TurnStarted { status_text, .. }
+            | AgentLifecycleEvent::ProgressObserved { status_text } => {
+                Some(build_activity_update_with_metadata(
+                    agent,
+                    Some(flowmux_core::AgentActivity::Running),
+                    *pid,
+                    *pane,
+                    Some(*surface),
+                    None,
+                    Some(status_text.as_str()),
+                    Some(session_id.as_str()),
+                ))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Send a request and ignore non-fatal errors. Hooks must not fail
 /// loudly — Claude/OpenCode/Codex propagate non-zero exits to the
 /// agent and surface them to the user as a hook error.
@@ -550,7 +617,8 @@ async fn send_best_effort_with_timeout(
         instance = std::process::id(), version = env!("CARGO_PKG_VERSION"),
         operation, surface = ?surface, seq = ?seq,
         session_key = ?flowmux_config::diagnostics::agent_trace_key(session));
-    async {
+    let fallback = legacy_request_fallback(&req);
+    let outcome = async {
         let started = std::time::Instant::now();
         tracing::debug!(target: "flowmux_hook", phase = "send", "hook delivery");
         let result = tokio::time::timeout(timeout, client.call(req)).await;
@@ -566,23 +634,41 @@ async fn send_best_effort_with_timeout(
         tracing::debug!(target: "flowmux_hook", phase = "response", outcome,
         elapsed_ms = started.elapsed().as_millis() as u64, "hook delivery");
         match result {
+            Ok(Ok(Response::Error(flowmux_ipc::protocol::RpcError::InvalidArgument(ref msg))))
+                if msg.contains("request not recognized") =>
+            {
+                tracing::debug!(?msg, "hook notify rejected as unrecognized by daemon");
+                Err(())
+            }
             Ok(Ok(Response::Error(e))) => {
                 tracing::debug!(?e, "hook notify rejected by daemon");
-                None
+                Ok(None)
             }
-            Ok(Ok(response)) => Some(response),
+            Ok(Ok(response)) => Ok(Some(response)),
             Ok(Err(e)) => {
                 tracing::debug!(error = %e, "hook notify failed");
-                None
+                Ok(None)
             }
             Err(_) => {
                 tracing::debug!(?timeout, "hook notify timed out");
-                None
+                Ok(None)
             }
         }
     }
     .instrument(span)
-    .await
+    .await;
+
+    match outcome {
+        Ok(response) => response,
+        Err(()) => {
+            if let Some(fallback_req) = fallback {
+                tracing::debug!(?fallback_req, "retrying hook with legacy request fallback");
+                Box::pin(send_best_effort_with_timeout(client, fallback_req, timeout)).await
+            } else {
+                None
+            }
+        }
+    }
 }
 
 pub async fn send_hook_requests(client: &Client, requests: Vec<Request>) {
@@ -1877,6 +1963,145 @@ mod tests {
             "hook notify should return promptly when the daemon does not answer"
         );
         server.abort();
+    }
+
+    #[test]
+    fn legacy_request_fallback_maps_turn_stop_requested_and_turn_finished() {
+        let pane = PaneId::new();
+        let surface = SurfaceId::new();
+        let stop_req = build_agent_lifecycle_update(
+            "gemini",
+            Some(1234),
+            Some(pane),
+            surface,
+            "session-abc",
+            AgentLifecycleEvent::TurnStopRequested {
+                message: Some("done".into()),
+                status_text: "Completed".into(),
+            },
+        );
+        let fallback_stopped = legacy_request_fallback(&stop_req).expect("fallback request");
+        assert!(matches!(
+            &fallback_stopped,
+            Request::AgentLifecycleUpdate {
+                agent,
+                session_id,
+                lifecycle: AgentLifecycleEvent::TurnStopped { message, status_text },
+                ..
+            } if agent == "gemini"
+                && session_id == "session-abc"
+                && message.as_deref() == Some("done")
+                && status_text == "Completed"
+        ));
+
+        let fallback_activity =
+            legacy_request_fallback(&fallback_stopped).expect("activity fallback");
+        assert!(matches!(
+            &fallback_activity,
+            Request::AgentActivityUpdate {
+                agent,
+                activity: Some(flowmux_core::AgentActivity::Idle),
+                session_id: Some(session_id),
+                custom_status: Some(status),
+                ..
+            } if agent == "gemini" && session_id == "session-abc" && status == "Completed"
+        ));
+
+        let finished_req = build_agent_lifecycle_update(
+            "gemini",
+            None,
+            Some(pane),
+            surface,
+            "session-abc",
+            AgentLifecycleEvent::TurnFinished {
+                outcome: flowmux_core::AgentTurnOutcome::Completed,
+                message: Some("all done".into()),
+                status_text: "Completed".into(),
+            },
+        );
+        let fallback_finished = legacy_request_fallback(&finished_req).expect("fallback request");
+        assert!(matches!(
+            &fallback_finished,
+            Request::AgentLifecycleUpdate {
+                lifecycle: AgentLifecycleEvent::TurnStopped { message, .. },
+                ..
+            } if message.as_deref() == Some("all done")
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_best_effort_retries_with_legacy_request_when_daemon_rejects_unrecognized() {
+        use flowmux_ipc::protocol::{Envelope, Payload};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("flowmux.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let pane = PaneId::new();
+        let surface = SurfaceId::new();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut reader = tokio::io::BufReader::new(read);
+            let mut received = Vec::new();
+            for i in 0..2 {
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+                let Payload::Request(req) = envelope.payload else {
+                    panic!("expected request");
+                };
+                received.push(req);
+                let response = Envelope {
+                    id: envelope.id,
+                    payload: Payload::Response(if i == 0 {
+                        Response::Error(flowmux_ipc::protocol::RpcError::InvalidArgument(
+                            "request not recognized; not started. If flowmux was just updated, restart it".into(),
+                        ))
+                    } else {
+                        Response::Ok
+                    }),
+                };
+                let mut wire = serde_json::to_string(&response).unwrap();
+                wire.push('\n');
+                write.write_all(wire.as_bytes()).await.unwrap();
+            }
+            received
+        });
+
+        let client = Client::connect(&socket).await.unwrap();
+        let initial_req = build_agent_lifecycle_update(
+            "gemini",
+            Some(123),
+            Some(pane),
+            surface,
+            "session-legacy",
+            AgentLifecycleEvent::TurnStopRequested {
+                message: None,
+                status_text: "Completed".into(),
+            },
+        );
+        let response =
+            send_best_effort_with_timeout(&client, initial_req, Duration::from_millis(500)).await;
+        assert!(matches!(response, Some(Response::Ok)));
+
+        let received = server.await.unwrap();
+        assert_eq!(received.len(), 2);
+        assert!(matches!(
+            &received[0],
+            Request::AgentLifecycleUpdate {
+                lifecycle: AgentLifecycleEvent::TurnStopRequested { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &received[1],
+            Request::AgentLifecycleUpdate {
+                lifecycle: AgentLifecycleEvent::TurnStopped { .. },
+                ..
+            }
+        ));
     }
 
     fn hook_env_lock() -> std::sync::MutexGuard<'static, ()> {
