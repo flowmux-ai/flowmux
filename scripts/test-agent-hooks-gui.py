@@ -57,6 +57,7 @@ def main():
                    "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents\n")
     source = root / "agent.c"
     source.write_text("""#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
@@ -64,8 +65,12 @@ int main(int argc, char **argv) {
     FILE *f = fopen(argv[1], "w");
     if (!f) return 2;
     fprintf(f, "%d", getpid()); fclose(f);
-    char line[64];
+    char line[4096];
     while (fgets(line, sizeof(line), stdin)) {
+        if (!strncmp(line, "hook ", 5)) {
+            system(line + 5);
+            continue;
+        }
         if (!strncmp(line, "claude-idle", 11)) {
             printf("\\033]2;✳ Task\\007\\033[2J\\033[H"); fputs(CLAUDE_IDLE_FRAME, stdout);
         }
@@ -180,9 +185,31 @@ int main(int argc, char **argv) {
                 if other_surface:
                     command = ["/bin/sh", "-c", '"$@"; result=$?; exit $result',
                                "--managed-daemon", *command]
-                subprocess.run(command,
-                               input=json.dumps(payload), text=True, env=hook_env,
-                               capture_output=True, check=True, timeout=10)
+                if name == "claude":
+                    # Native Claude hooks are children of the agent, not this replay controller.
+                    prefix = root / f"hook-{time.time_ns()}"
+                    script = prefix.with_suffix(".sh")
+                    stdin = prefix.with_suffix(".json")
+                    stdout = prefix.with_suffix(".out")
+                    stderr = prefix.with_suffix(".err")
+                    done = prefix.with_suffix(".exit")
+                    stdin.write_text(json.dumps(payload))
+                    script.write_text(shlex.join([
+                        "env", *(f"{k}={v}" for k, v in hook_env.items() if k.startswith("FLOWMUX_")),
+                        *command]) + f" <{shlex.quote(str(stdin))} >{shlex.quote(str(stdout))}"
+                        + f" 2>{shlex.quote(str(stderr))}\n"
+                        + f"result=$?; printf '%s' \"$result\" >{shlex.quote(str(done))}\n")
+                    rpc("pane_send_keys", pane=pane,
+                        keys="hook " + shlex.join(["/bin/sh", str(script)]) + "\r")
+                    deadline = time.monotonic() + 10
+                    while not done.exists() or not done.read_text():
+                        assert time.monotonic() < deadline, ("Native hook did not finish", script)
+                        time.sleep(.05)
+                    assert done.read_text() == "0", (script, stdout.read_text(), stderr.read_text())
+                else:
+                    subprocess.run(command,
+                                   input=json.dumps(payload), text=True, env=hook_env,
+                                   capture_output=True, check=True, timeout=10)
                 if event in ("stop", "subagent-stop") and activity == "running":
                     # Outlast the 250ms completion grace; do not accept a
                     # transient running state just before a false completion.
@@ -314,6 +341,12 @@ int main(int argc, char **argv) {
                     print(f"PASS: {name} visible/hidden progress, completion, deduplication and next turn", flush=True)
                     continue
                 if name == "claude":
+                    subprocess.run([args.cli, "--socket", args.socket, "hooks", name, "session-start"],
+                                   input=json.dumps(dict(session_id="unrelated-controller", cwd=str(root))),
+                                   text=True, env=hook_env, capture_output=True, check=True, timeout=10)
+                    assert observed().get("session_id") is None, observed()
+                    assert observed()["status_evidence"]["source"] == "process", observed()
+                    print("PASS: unrelated Claude hook caller cannot claim the fixture pane", flush=True)
                     hook("session-start", "idle")
                     hook("prompt-submit", "running")
                     for level in ("needs_input", "error"):
