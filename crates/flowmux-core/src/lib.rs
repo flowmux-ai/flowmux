@@ -3420,7 +3420,7 @@ pub fn detect_agent_status_from_signals(
         return Some(AgentStatus::Blocked);
     }
     if title.chars().any(is_braille_spinner)
-        || title.starts_with(['✦', '⏲'])
+        || title.starts_with(['✦', '⏲', '◐', '◑'])
         || (title_names_agent
             && ["working", "thinking", "running"]
                 .into_iter()
@@ -3971,6 +3971,30 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
     Some(agent)
 }
 
+/// Claude's delegated response can return to the composer without a timed footer.
+pub fn detect_claude_idle_prompt(screen_text: Option<&str>, osc_title: Option<&str>) -> bool {
+    if !osc_title.is_some_and(|title| title.trim_start().starts_with("✳ "))
+        || detect_agent_status_from_signals(screen_text, osc_title) != Some(AgentStatus::Idle)
+    {
+        return false;
+    }
+    let mut has_controls = false;
+    for line in screen_text
+        .unwrap_or_default()
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+    {
+        let line = line.trim();
+        if line.starts_with('❯') {
+            return has_controls && is_agent_idle_prompt_line(line);
+        }
+        has_controls |= line.contains("shift+tab to cycle") || line == "? for shortcuts";
+    }
+    false
+}
+
 fn is_agent_completion_clock(clock: &str) -> bool {
     let Some((time, period)) = clock.split_once(' ') else {
         return false;
@@ -3997,10 +4021,10 @@ fn is_agent_idle_prompt_line(line: &str) -> bool {
         || starts_with_ascii_case_insensitive(line, "clear;")
         || contains_ascii_case_insensitive(line, "; echo ");
     !is_shell_command
-        && (line == "›"
-            || line == "❯"
-            || line.starts_with("› ")
-            || line.starts_with("❯ ")
+        && (line
+            .strip_prefix('›')
+            .or_else(|| line.strip_prefix('❯'))
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
             || contains_ascii_case_insensitive(line, "press / for commands")
             || contains_ascii_case_insensitive(line, "press / to")
             || contains_ascii_case_insensitive(line, "type /")

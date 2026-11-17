@@ -10,10 +10,10 @@ use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_completion, detect_agent_idle_name_from_signals,
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_retry_screen, detect_agent_status_from_signals, detect_agent_usage_limit_text,
-    select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport,
-    AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope, AgentWaitSummary,
-    NotificationId, Pane, PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace,
-    WorkspaceId,
+    detect_claude_idle_prompt, select_process_agent_candidate, AgentPresence, AgentStatus,
+    AgentStatusReport, AgentTurnOutcome, AgentWaitContext, AgentWaitReason, AgentWaitScope,
+    AgentWaitSummary, NotificationId, Pane, PaneContent, PaneId, PaneSurface, SurfaceId,
+    SurfaceKind, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
@@ -2856,9 +2856,23 @@ impl StateStore {
             return None;
         }
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
+        let idle_claude = if detect_claude_idle_prompt(screen_text, osc_title) {
+            self.located_agent_presence(surface_id)
+                .await
+                .is_some_and(|located| {
+                    let agent = located.presence;
+                    agent.name == "claude"
+                    && agent.status == AgentStatus::Working
+                    // The old idle title/composer can survive a newly submitted prompt.
+                    && agent.custom_status.as_deref() != Some("Starting turn")
+                })
+        } else {
+            false
+        };
         let completed_agent = (detected_status == Some(AgentStatus::Idle))
             .then(|| detect_agent_completion(screen_text))
-            .flatten();
+            .flatten()
+            .or(idle_claude.then_some("claude"));
         let fingerprint =
             agent_screen_fingerprint(screen_text, osc_title, completed_agent.is_some());
         let previous_fingerprint = self

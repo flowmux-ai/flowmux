@@ -52,6 +52,9 @@ def main():
     # A real executable basename is needed for process identity on both OSes.
     frames = json.loads((Path(__file__).parent / "fixtures/agent-status/codex-goal.json").read_text())
     retry_frames = json.loads((Path(__file__).parent / "fixtures/agent-status/retry-context.json").read_text())
+    claude_idle = ("● Response text\n──── Task ─\n❯\u00a0next draft\n────\n"
+                   "Fable 5.2 | flowmux\n"
+                   "⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents\n")
     source = root / "agent.c"
     source.write_text("""#include <stdio.h>
 #include <string.h>
@@ -63,6 +66,12 @@ int main(int argc, char **argv) {
     fprintf(f, "%d", getpid()); fclose(f);
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
+        if (!strncmp(line, "claude-idle", 11)) {
+            printf("\\033]2;✳ Task\\007\\033[2J\\033[H"); fputs(CLAUDE_IDLE_FRAME, stdout);
+        }
+        if (!strncmp(line, "claude-working", 14)) {
+            printf("\\033]2;◐ Task\\007\\033[2J\\033[H"); fputs(CLAUDE_WORKING_FRAME, stdout);
+        }
         if (!strncmp(line, "screen-working", 14)) {
             printf("\\033[2J\\033[H"); fputs(WORKING_FRAME, stdout);
         }
@@ -101,7 +110,9 @@ int main(int argc, char **argv) {
         fflush(stdout);
     }
 }
-""".replace("WORKING_FRAME", json.dumps(frames["working"], ensure_ascii=False))
+""".replace("CLAUDE_IDLE_FRAME", json.dumps(claude_idle, ensure_ascii=False))
+       .replace("CLAUDE_WORKING_FRAME", json.dumps(claude_idle.replace("● Response text", "✻ Forming… (7m 42s · ↓ 33.3k tokens)"), ensure_ascii=False))
+       .replace("WORKING_FRAME", json.dumps(frames["working"], ensure_ascii=False))
        .replace("COMPLETED_FRAME", json.dumps(frames["completed"], ensure_ascii=False))
        .replace("APPROVED_FRAME", json.dumps(frames["approved"], ensure_ascii=False))
        .replace("DRAFT_FRAME", json.dumps(frames["draft"], ensure_ascii=False))
@@ -386,6 +397,35 @@ int main(int argc, char **argv) {
                     expect_waits([])
                     print("PASS: typed wait reasons, partial resolution, and scope counts", flush=True)
                     hook("stop", "idle")
+                    for visible in (False, True):
+                        if visible:
+                            rpc("workspace_focus", workspace=workspace)
+                        else:
+                            away = rpc("workspace_create", name="Other workspace", root=str(root))
+                            rpc("workspace_focus", workspace=away["workspace_created"]["id"])
+                        hook("prompt-submit", "running")
+                        rpc("pane_send_keys", pane=pane, keys="claude-working\r")
+                        deadline = time.monotonic() + 5
+                        while "Forming" not in (observed().get("status_text") or ""):
+                            assert time.monotonic() < deadline, observed()
+                            time.sleep(.05)
+                        hook("post-tool-use", "running", tool_name="Bash", tool_use_id="delegated")
+                        rpc("pane_send_keys", pane=pane, keys="claude-idle\r")
+                        deadline = time.monotonic() + 5
+                        while observed().get("turn_outcome") != "unknown":
+                            assert time.monotonic() < deadline, (observed(), rpc("pane_read_screen", pane=pane))
+                            time.sleep(.05)
+                        value = observed()
+                        assert value["status"] == ("idle" if visible else "done"), value
+                        assert value["status_evidence"]["source"] == "screen", value
+                        assert value["session_id"] == "fixture-claude", value
+                        evidence.write(json.dumps(dict(agent=name, event="claude-delegated-idle", visible=visible, observed=value))+"\n")
+                        # The previous idle frame cannot complete a new prompt.
+                        hook("prompt-submit", "running")
+                        time.sleep(.5)
+                        assert observed()["status"] == "working", observed()
+                        hook("stop", "idle")
+                    print("PASS: Claude delegated completion recovers without Stop, visible and hidden", flush=True)
                 else:
                     hook("session-start", "idle")
                     rpc("pane_send_keys", pane=pane, keys="screen-draft\r")

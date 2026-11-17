@@ -3667,6 +3667,44 @@ fn agent_status_rollup_uses_blocked_done_working_idle_unknown_order() {
 }
 
 #[test]
+fn claude_idle_title_requires_a_live_composer_and_no_work_or_wait() {
+    let screen = "● Response text\n──── Task ─\n❯\u{a0}next draft\n────\nFable 5.2 | flowmux\n⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents\n\n\n";
+    assert!(detect_claude_idle_prompt(Some(screen), Some("✳ Task")));
+    assert_eq!(
+        detect_agent_status_from_signals(Some(screen), Some("✳ Task")),
+        Some(AgentStatus::Idle)
+    );
+    for title in ["◐ Task", "◑ Task", "⠋ Task", "Task", "Claude", ""] {
+        assert!(
+            !detect_claude_idle_prompt(Some(screen), Some(title)),
+            "{title}"
+        );
+    }
+    for line in [
+        "✻ Forming… (7m 42s · ↓ 33.3k tokens)",
+        "Do you want to approve this command?",
+    ] {
+        let active = screen.replace("● Response text", line);
+        assert!(
+            !detect_claude_idle_prompt(Some(&active), Some("✳ Task")),
+            "{line}"
+        );
+    }
+    for screen in [
+        "❯ draft",
+        "? for shortcuts\n❯ draft",
+        "❯ echo done\n$",
+        "› draft\n? for shortcuts",
+    ] {
+        assert!(
+            !detect_claude_idle_prompt(Some(screen), Some("✳ Task")),
+            "{screen}"
+        );
+    }
+    assert!(!detect_claude_idle_prompt(None, Some("✳ Task")));
+}
+
+#[test]
 fn completion_footer_requires_the_matching_live_composer() {
     for (screen, expected) in [
         (

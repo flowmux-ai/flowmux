@@ -7746,6 +7746,214 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn claude_delegated_response_recovers_from_idle_title_and_composer() {
+        let idle = "● Response text\n──── Task ─\n❯\u{a0}next draft\n────\nFable 5.2 | flowmux\n⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents\n";
+        let working = idle.replace("● Response text", "✻ Forming… (7m 42s · ↓ 33.3k tokens)");
+        for visible in [false, true] {
+            let store = StateStore::new_lazy(State::default());
+            let ws = store.create_workspace(None, "/tmp/demo".into()).await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws).await.unwrap());
+            store
+                .report_agent_status_with_visibility(
+                    surface,
+                    AgentStatusReport {
+                        name: "claude".into(),
+                        status: Some(AgentStatus::Idle),
+                        activity: None,
+                        pid: None,
+                        source: Some("flowmux:hook".into()),
+                        seq: Some(1),
+                        message: None,
+                        custom_status: Some("Ready".into()),
+                        session_id: Some("original".into()),
+                        session_name: None,
+                        messaging_socket: None,
+                        turn_outcome: None,
+                        pending_waits: None,
+                    },
+                    visible,
+                )
+                .await;
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some(idle),
+                    Some("✳ Task"),
+                    visible,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .turn_outcome,
+                None
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(2),
+                    "original",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Starting turn".into(),
+                    },
+                    visible,
+                )
+                .await;
+            // Submitting a draft does not immediately replace the old idle frame.
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some(idle),
+                    Some("✳ Task"),
+                    visible,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                AgentStatus::Working
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(3),
+                    "original",
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Working".into(),
+                    },
+                    visible,
+                )
+                .await;
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some(&working),
+                    Some("✳ Task"),
+                    visible,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                AgentStatus::Working
+            );
+            // Streaming can hide the progress row while the native title stays busy.
+            for title in ["◐ Task", "◑ Task", "Task"] {
+                store
+                    .report_agent_screen_signals_with_visibility(
+                        surface,
+                        Some(idle),
+                        Some(title),
+                        visible,
+                    )
+                    .await;
+                assert_eq!(
+                    store
+                        .located_agent_presence(surface)
+                        .await
+                        .unwrap()
+                        .presence
+                        .status,
+                    AgentStatus::Working
+                );
+            }
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(4),
+                    "original",
+                    AgentLifecycleEvent::PermissionWaitStarted {
+                        reason: flowmux_core::AgentWaitReason::Approval,
+                        message: None,
+                        scope: None,
+                        status_text: "Waiting for approval".into(),
+                    },
+                    visible,
+                )
+                .await;
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some(idle),
+                    Some("✳ Task"),
+                    visible,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                AgentStatus::Blocked
+            );
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    Some(5),
+                    "original",
+                    AgentLifecycleEvent::ToolBatchFinished {
+                        status_text: "Working".into(),
+                    },
+                    visible,
+                )
+                .await;
+            // The continuation's Stop belongs to another surface, so this pane gets none.
+            for _ in 0..2 {
+                store
+                    .report_agent_screen_signals_with_visibility(
+                        surface,
+                        Some(idle),
+                        Some("✳ Task"),
+                        visible,
+                    )
+                    .await;
+                let presence = store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence;
+                assert_eq!(presence.status, AgentStatus::Idle);
+                assert_eq!(
+                    presence.public_status(),
+                    if visible {
+                        AgentStatus::Idle
+                    } else {
+                        AgentStatus::Done
+                    }
+                );
+                assert_eq!(
+                    presence.turn_outcome,
+                    Some(flowmux_core::AgentTurnOutcome::Unknown)
+                );
+                assert_eq!(presence.session_id.as_deref(), Some("original"));
+                assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn claude_completion_recovers_without_a_stop_hook() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
