@@ -160,8 +160,8 @@ impl SessionAgent {
                 value("CLINE_DATA_DIR")
                     .or_else(|| {
                         value("CLINE_DIR")
-                            .or_else(|| home().map(|p| p.join(".cline")))
                             .map(|p| p.join("data"))
+                            .or_else(|| cline_default_data_dir(home()))
                     })
                     .map(|p| p.join("db"))
             }),
@@ -169,6 +169,30 @@ impl SessionAgent {
                 .or_else(home)
                 .map(|p| p.join(".gemini")),
         }
+    }
+}
+
+/// Cline CLI builds differ in their default data root: upstream uses
+/// `~/.cline` while the SR build uses `~/.cline-sr`. Prefer the root whose
+/// `sessions.db` exists, breaking ties by the newest store modification time.
+/// When neither store exists, keep the upstream default.
+fn cline_default_data_dir(home: Option<PathBuf>) -> Option<PathBuf> {
+    let home = home?;
+    let data_dir = |root: &str| home.join(root).join("data");
+    let store_time = |root: &str| {
+        fs::metadata(data_dir(root).join("db").join("sessions.db"))
+            .and_then(|m| m.modified())
+            .ok()
+    };
+    let (upstream, sr) = (".cline", ".cline-sr");
+    match (store_time(upstream), store_time(sr)) {
+        (None, None) | (Some(_), None) => Some(data_dir(upstream)),
+        (None, Some(_)) => Some(data_dir(sr)),
+        (Some(upstream_time), Some(sr_time)) => Some(data_dir(if upstream_time >= sr_time {
+            upstream
+        } else {
+            sr
+        })),
     }
 }
 
@@ -199,15 +223,30 @@ impl HistorySession {
             }
             return Ok(format!("opencode --session {}", self.id));
         }
+        if self.agent == SessionAgent::Cline {
+            // Cline CLI session IDs are `<millis>_<suffix>` (and `conv_…`
+            // aliases), not UUIDs. Keep the identifier conservative so it can
+            // never inject shell input through the resumed terminal.
+            let valid = !self.id.is_empty()
+                && self.id.len() <= 128
+                && !self.id.starts_with('-')
+                && self
+                    .id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-');
+            if !valid {
+                return Err(invalid("Invalid Cline session ID"));
+            }
+            return Ok(format!("cline --id {} --tui", self.id));
+        }
         let id = uuid::Uuid::parse_str(&self.id)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid session ID"))?;
         Ok(match self.agent {
             SessionAgent::Claude => format!("claude --resume {id}"),
             SessionAgent::Codex => format!("codex resume {id}"),
             SessionAgent::Antigravity => format!("agy --conversation {id}"),
-            SessionAgent::Cline => format!("cline --id {id} --tui"),
             SessionAgent::Gemini => format!("gemini --resume {id}"),
-            SessionAgent::OpenCode => unreachable!(),
+            SessionAgent::Cline | SessionAgent::OpenCode => unreachable!(),
         })
     }
 
@@ -781,6 +820,72 @@ mod tests {
             assert_eq!(
                 SessionAgent::Cline.history_home(|key| env.get(key).cloned()),
                 Some(expected.into())
+            );
+        }
+    }
+
+    #[test]
+    fn cline_history_picks_the_newest_existing_default_store() {
+        let home = tempfile::tempdir().unwrap();
+        let no_overrides = |key: &str| (key == "HOME").then(|| home.path().to_path_buf());
+        let default = |root: &str| {
+            let dir = home.path().join(root).join("data").join("db");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("sessions.db"), b"x").unwrap();
+        };
+        // Neither store exists: keep the upstream default.
+        assert_eq!(
+            SessionAgent::Cline.history_home(no_overrides),
+            Some(home.path().join(".cline").join("data").join("db"))
+        );
+        default(".cline-sr");
+        assert_eq!(
+            SessionAgent::Cline.history_home(no_overrides),
+            Some(home.path().join(".cline-sr").join("data").join("db"))
+        );
+        // A newer upstream store wins the default back.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        default(".cline");
+        assert_eq!(
+            SessionAgent::Cline.history_home(no_overrides),
+            Some(home.path().join(".cline").join("data").join("db"))
+        );
+    }
+
+    #[test]
+    fn cline_resume_accepts_native_ids_and_rejects_unsafe_text() {
+        let base = || HistorySession {
+            agent: SessionAgent::Cline,
+            id: String::new(),
+            title: String::new(),
+            summary: String::new(),
+            cwd: PathBuf::from("/repo"),
+            modified: SystemTime::now(),
+            path: "/unused".into(),
+        };
+        let mut session = base();
+        session.id = "1794909262241_3rtal".into();
+        assert_eq!(
+            session.resume_command().unwrap(),
+            "cline --id 1794909262241_3rtal --tui"
+        );
+        session.id = "conv_1794890971292_cdmi3t2".into();
+        assert!(session.resume_command().is_ok());
+        let long = "x".repeat(129);
+        for id in [
+            "",
+            "-flag",
+            "a;id",
+            "a b",
+            "a\nb",
+            "a$(b)",
+            "a..b",
+            long.as_str(),
+        ] {
+            session.id = id.to_string();
+            assert!(
+                session.resume_command().is_err(),
+                "id {id:?} must be invalid"
             );
         }
     }

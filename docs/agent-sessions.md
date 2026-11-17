@@ -34,7 +34,7 @@ To resume a session, select it and click **Resume in new tab**:
   default home. The current tab and its draft remain intact.
 - **OpenCode:** `opencode --session <ses_ID>`.
 - **Antigravity:** `agy --conversation <UUID>`.
-- **Cline CLI:** `cline --id <UUID> --tui`.
+- **Cline CLI:** `cline --id <session ID> --tui`.
 - **Gemini CLI:** `gemini --resume <UUID>`. Gemini resolves sessions per project,
   so the saved project directory is required. Gemini CLI 0.62.0 was observed to
   delete a resumed session's transcript at its next launch in that project when
@@ -113,7 +113,7 @@ The additional native stores are:
 |---|---|---|
 | OpenCode | `~/.local/share/opencode/opencode.db` | Current SQLite `session`, `message`, and `part` tables |
 | Antigravity | `~/.gemini/antigravity-cli/conversation_summaries.db` | Local workspace summaries |
-| Cline CLI | `~/.cline/data/db/sessions.db` | CLI 3 sessions and their saved messages JSON |
+| Cline CLI | `~/.cline/data/db/sessions.db`, or the SR build's `~/.cline-sr/data/db/sessions.db` when it is the newer store | CLI 3 sessions and their saved messages JSON |
 | Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` | JSONL transcripts with the project's `.project_root` |
 
 OpenCode's older JSON store, Cline's legacy VS Code task history, and Gemini CLI's

@@ -308,13 +308,13 @@ mod tests {
         db.execute_batch("CREATE TABLE sessions(session_id TEXT, metadata_json TEXT, cwd TEXT, updated_at TEXT, prompt TEXT, parent_session_id TEXT, is_subagent INTEGER, messages_path TEXT);").unwrap();
         let path = home.path().join("messages.json");
         fs::write(&path, json!({"messages":[{"role":"system","content":"private"},{"role":"user","content":"질문"},{"role":"assistant","content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"answer"}]}]}).to_string()).unwrap();
-        db.execute(r#"INSERT INTO sessions VALUES (?1, '{"title":"Cline title"}', '/repo', '2026-09-16T01:00:00Z', 'question', NULL, 0, ?2)"#, rusqlite::params![ID,path.to_str().unwrap()]).unwrap();
+        db.execute(r#"INSERT INTO sessions VALUES (?1, '{"title":"Cline title"}', '/repo', '2026-09-16T01:00:00Z', 'question', NULL, 0, ?2)"#, rusqlite::params!["1794909262241_3rtal", path.to_str().unwrap()]).unwrap();
         let items = list_sessions(SessionAgent::Cline, home.path()).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Cline title");
         assert_eq!(
             items[0].resume_command().unwrap(),
-            format!("cline --id {ID} --tui")
+            "cline --id 1794909262241_3rtal --tui"
         );
         assert_eq!(
             items[0].preview().unwrap(),
