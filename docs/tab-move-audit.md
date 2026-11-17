@@ -2,7 +2,12 @@
 
 # Tab movement audit
 
-Baseline: `d4e5e56a`. Findings and execution results are updated with the fixes.
+Baseline: `d4e5e56a`.
+
+Latest follow-up: **the complete Linux regression gate passed on `3c1938fd`**
+(28 phases, exit 0), including the tab-window GUI suite and GTK icon-preload
+regression. See the follow-up evidence below; the earlier incomplete runs are
+retained as historical evidence.
 
 ## Acceptance rules
 
@@ -64,7 +69,7 @@ The matrix runs mapped GTK windows with isolated state and real terminal/WebKit 
 
 The native script runs all ordering scenarios in one session. Fixtures wait for newly created tabs before sending title commands and wait for a loaded browser document before storing a JS marker. No failing user event sequence is replaced with a right-click or bypassed by rearranging its steps.
 
-## Validation evidence
+## Initial audit evidence
 
 - Baseline ownership failure: `/tmp/fm-windows-u12763jp/test.log` (main requester, different focused window before dispatch).
 - Final 240-case matrix and creation/rejection checks: `/tmp/fm-windows-nwal06rm/test.log`.
@@ -73,15 +78,90 @@ The native script runs all ordering scenarios in one session. Fixtures wait for 
 - Workspace-wide clippy: passed with `-D warnings`; format and whitespace checks passed.
 - Related final regressions passed: surface lifecycle 5, sidebar 29, keybindings 39, DnD/renderer 21, explicit file import 1, reorder dispatch 1, deferred web moves 1 and render recovery 1. The 4 audit tests include the 240-case matrix, 8 creation/focus cases, 9 move rejections and a queued request whose detached window has already closed.
 - `cargo build --workspace --locked` passed. The CI runner fixture now includes the tab-window GUI suite in its expected suite list and phase counts; its regression/extended routing check passed.
-- Final Linux gate's GUI binary: **946 passed, 0 failed, 4 ignored**. The subsequently added closed-window-request test passed separately. Gate prep, GUI harness and SSH fixture checks passed.
-- Final gate finished with exit 101 after terminating the owned stalled CLI fixture. Its 57 completed test targets reported **2,121 passed, 0 failed, 13 ignored**; the CLI binary target did not complete and is excluded from those counts.
-- Full gate is **not green**: unchanged CLI tests `codex_child_prompt_reactivates_the_observed_child_turn`, `codex_child_tool_progress_keeps_child_identity` and `codex_root_tool_progress_keeps_root_turn_identity` waited beyond 60 seconds for mock lifecycle traffic. They also stalled in a separate clean invocation. Only the owned stalled CLI test fixtures were terminated; the full-gate failure and logs are retained under `target/ci/linux/`.
+- Initial Linux gate's GUI binary: **946 passed, 0 failed, 4 ignored**. The subsequently added closed-window-request test passed separately. Gate prep, GUI harness and SSH fixture checks passed.
+- Initial gate finished with exit 101 after terminating the owned stalled CLI fixture. Its 57 completed test targets reported **2,121 passed, 0 failed, 13 ignored**; the CLI binary target did not complete and is excluded from those counts.
+- The initial full gate was **not green**: unchanged CLI tests `codex_child_prompt_reactivates_the_observed_child_turn`, `codex_child_tool_progress_keeps_child_identity` and `codex_root_tool_progress_keeps_root_turn_identity` waited beyond 60 seconds for mock lifecycle traffic. They also stalled in a separate clean invocation. Only the owned stalled CLI test fixtures were terminated; the full-gate failure and logs are retained under `target/ci/linux/`.
 - A clean CLI rerun excluding only those 3 stalled tests passed: 177 binary tests, 135 library tests (1 ignored), plus CLI integration tests. This filtered invocation is not a substitute for a successful complete gate; log: `/tmp/fm-windows-jum2h80o/test.log`.
 - An earlier serial workspace run completed the other targets with 2,120 passing tests and 13 ignored tests; the GUI review handoff test timed out there. That review timeout was previously reproduced on an unchanged baseline; the final parallel gate's GUI binary passed it. Do not describe either complete invocation as all-green. The CLI/IPC/core/daemon sources are unchanged from `d4e5e56a`.
 
+## Follow-up Linux CI verification (2026-11-17)
+
+The complete push-time Linux regression gate passed against frozen commit
+`3c1938fd`, using the same entry point and AppArmor profile as
+`.github/workflows/test.yml`:
+
+```sh
+aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux regression
+```
+
+The run used an isolated Git worktree and a separate `CARGO_TARGET_DIR` at
+`/tmp/flowmux-ci-target`. Every one of the **28 Linux phases passed**, with
+`CI_GATE_EXIT=0`. This includes workspace tests/build, GTK icon preload,
+browser controls/source/bookmarks/feedback/cookie import, skills, notifications,
+Team ping-pong/recovery/reuse/usage, session save/flow, PTY failure handling,
+tab windows, terminal screen/file links, IPC recovery, polling delay, editor
+I/O/renderer recovery, lazy restore and the complete SSH GUI fixture. Cookie
+approval and usage-refresh deadlines were exercised at their normal durations.
+No test exclusion filters or reduced deadlines were used.
+
+- GUI binary: **951 passed, 0 failed, 4 ignored** (the repository's declared
+  ignores); CLI binary: **180 passed, 0 failed**. The previously stalled Codex
+  tests ran successfully as part of the unfiltered workspace suite.
+- Tab windows: the combined native scenario passed in 32 seconds, including
+  18 drags and 14 assertion groups. The 240 backend/route matrix also passed.
+- GTK 4.14.5 mitigation: 10,000 cold icon preloads, workspace creation, split,
+  terminal input and clean shutdown passed against the stock GTK runtime.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed on the frozen
+  candidate. Editor web tests (41), asset build and verification also passed;
+  rebuilding left committed editor assets unchanged.
+- Evidence: `/tmp/flowmux-ci-target/ci/linux/run.log`, `tests.jsonl`, phase JSON
+  receipts and `regression.json`. The regression phase exited 0 after 1814.315
+  seconds.
+
+This verification exposed and fixed two additional bugs:
+
+- `824f556d`: a queued `PaneFocused` from the source could replace the synchronous
+  destination focus after a live move. The existing synchronous-focus guard
+  now applies on Linux too. A deterministic stale-source regression failed
+  before the fix (`/tmp/fm-windows-6z19o3cx/test.log`) and passed afterward.
+  The browser preservation fixture now waits for its initial document to finish
+  loading before storing the JS marker.
+- `3cdd9c50`: review scrolling could stop on one transient visible frame before
+  GTK completed TextView line-height validation. It now waits for stable visible
+  geometry; the native review regression passed both alone and in the full gate.
+
+The initial CLI hangs were an execution-context problem: the hook implementation
+inspects process ancestry and detected the Codex managed daemon hosting the test
+command, so synthetic session IDs were routed away from the mock socket. Clearing
+pane/session environment variables alone cannot remove an ancestor. Running the
+standard gate as a transient user systemd service gave it the same independent
+process ancestry as CI. No production hook-routing checks were bypassed.
+
+Local CI-only dependencies missing from the host (FFmpeg/libx264, GStreamer libav,
+OpenSSH server and tmux) were supplied from Ubuntu packages extracted under
+`/tmp/flowmux-ci-media`; no system packages or running user sessions were replaced.
+The private tmux executable has a RUNPATH to its extracted libraries because SSH
+sessions intentionally discard `LD_LIBRARY_PATH`. A headless SSH preflight passed
+without inheriting that variable. The gate then exercised the full SSH GUI suite.
+
+An earlier run was interrupted when another task edited `scripts/test-linux.sh`
+while Bash was reading it. Its current syntax was valid, but changing the file
+shifted the live reader's offset and produced an unexpected-EOF error. The frozen
+worktree and independent build outputs prevented this interference in the final
+run. The concurrently completed GTK mitigation commit was included in the frozen
+candidate.
+
+While the full gate was running, origin/main gained `0a32e60d` (Cline session-store
+support). Its changes are limited to session-history storage and its documentation.
+A separate complete `flowmux-state` crate test run and workspace-wide Clippy passed
+on that commit; the storage-test log
+is `remote-cline-state.log` beside the gate evidence. The 28-phase gate result
+above applies specifically to `3c1938fd`, rather than claiming a rerun of every GUI
+phase for the later unrelated session-history change.
+
 ## Boundaries and remaining verification
 
-- Executed platform: Linux/X11 under isolated Xvfb and D-Bus, separate runtime/config/state/data directories. The user's GUI and active agent session were protected throughout.
+- Executed platform: Linux/X11 under isolated Xvfb and D-Bus, separate runtime/config/state/data directories. Fixtures own only their isolated test processes; validation does not close or restart the user's GUI or agent session.
 - Native Wayland was not executed: Xvfb does not provide a Wayland compositor or a consented input portal.
 - macOS was not executed: there is no AppKit/main-thread native test host here. Its GestureDrag resolver is separate; sidebar/cancel parity needs native macOS verification and must not be inferred from the X11 result.
 - Cross-process live session migration is unsupported. Safe rejection does not transfer a PTY, browser process or unsaved editor to another process.
