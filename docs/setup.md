@@ -132,6 +132,31 @@ lookup. The result is `object_ref: assertion '!object_already_finalized'
 failed` followed by a segmentation fault in `libgtk-4`. This is independent
 of the Wayland surface workaround and does not require memory exhaustion.
 
+Linux Flowmux now includes a process-local mitigation in the executable:
+on GTK **4.14.5 only**, `GtkIconPaintable` preload tasks finish on the calling
+thread instead of a worker. This covers GTK's internal `GtkImage` lookups as
+well as application calls. Other GIO tasks still use workers, and other GTK
+versions and macOS are unchanged. Cold icon decoding can briefly delay the UI;
+the dependency patch below preserves asynchronous loading without that tradeoff.
+The mitigation uses the public GTask ABI and exports `g_task_run_in_thread` from
+the Linux executable so calls from GTK reach it. It needs no `LD_PRELOAD`, extra
+runtime library, or system GTK replacement in installed/release binaries.
+
+Rebuild/install Flowmux and reopen it after saving work to use the mitigation.
+It cannot change an already running process. Verify an executable against stock
+GTK 4.14.5 without touching active sessions:
+
+```bash
+python3 scripts/test-gtk-icon-preload-gui.py \
+  --gui target/fast/flowmux --cli target/fast/flowmuxctl
+```
+
+The probe checks 10,000 cold preloads for worker-thread releases, then checks
+workspace creation, pane splitting, terminal input and clean shutdown in a
+private Xvfb with separate state/runtime directories. It fails against an
+executable without the mitigation. This covers Flowmux's preload path; it does
+not repair arbitrary cross-thread icon ownership in the GTK library itself.
+
 [`gtk4-4.14.5-icon-cache-lifetime.patch`](../scripts/patches/gtk4-4.14.5-icon-cache-lifetime.patch)
 fixes the GTK dependency: cache lookups acquire a strong reference through
 `GWeakRef`, and remove expired entries before creating replacements. This
@@ -139,9 +164,9 @@ preserves asynchronous loading and the bounded recent-icon cache. It applies
 to GTK 4.14.5, including Ubuntu's `4.14.5+ds-0ubuntu0.10` source package;
 other versions need their own applicability and regression checks.
 
-**Rebuilding Flowmux or running `install.sh` does not apply this dependency
-patch.** Deploy it through a rebuilt GTK distribution package, retaining the
-distribution's existing patches and build options. An already running
+Rebuilding Flowmux or running `install.sh` includes the mitigation above, but
+does not apply the dependency patch. Deploy that patch through a rebuilt GTK
+distribution package, retaining its existing patches and build options. An already running
 Flowmux keeps using its loaded GTK; save work and reopen it after installing
 the fixed runtime. Do not replace a live process's library in place.
 

@@ -34,6 +34,11 @@ run_test ssh-fixture-unit python3 scripts/test-ssh-workspace-fixture.py
 # Keep workspace tests, examples and doctests; no coverage instrumentation.
 run_test workspace cargo test --workspace --locked --no-fail-fast "$@"
 run_test build cargo build --workspace --locked
+if [[ $(pkg-config --modversion gtk4) == 4.14.5 ]]; then
+    run_test gtk-icon-preload python3 scripts/test-gtk-icon-preload-gui.py \
+      --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+      --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+fi
 run_test browser-control python3 scripts/test-browser-control.py "$CARGO_TARGET_DIR/debug/flowmux"
 run_test browser-source python3 scripts/test-browser-source-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \

@@ -12,6 +12,8 @@ mod activity;
 mod bridge;
 mod browser_automation;
 mod builtin_icons;
+#[cfg(target_os = "linux")]
+mod gtk_icon_preload;
 mod ipc_handler;
 mod keybindings;
 mod notifications;
