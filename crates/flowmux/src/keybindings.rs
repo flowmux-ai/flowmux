@@ -501,13 +501,17 @@ pub(crate) fn install_actions_for_window(
     // and registering a second action under it would replace the first.
     let rename_active_workspace = {
         let bridge = bridge.clone();
+        let controller = controller.clone();
         gtk::gio::ActionEntry::builder("rename-active-workspace")
-            .activate(move |_, _, _| {
+            .activate(move |window, _, _| {
+                let Some(id) = controller.visible_workspace_in_window(window) else {
+                    return;
+                };
                 let bridge = bridge.clone();
                 glib::MainContext::default().spawn_local(async move {
                     let _ = bridge
                         .tx
-                        .send(GtkCommand::ShowRenameDialog { id: None })
+                        .send(GtkCommand::ShowRenameDialog { id: Some(id) })
                         .await;
                 });
             })

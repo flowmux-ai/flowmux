@@ -1349,6 +1349,21 @@ impl WindowController {
             .and_then(|name| name.as_str().parse::<WorkspaceId>().ok())
     }
 
+    pub(crate) fn visible_workspace_in_window(
+        &self,
+        window: &adw::ApplicationWindow,
+    ) -> Option<WorkspaceId> {
+        if window == &self.window {
+            return self.visible_workspace();
+        }
+        self.detached_workspaces
+            .borrow()
+            .values()
+            .find(|host| &host.window == window)
+            .and_then(|host| host.stack.visible_child_name())
+            .and_then(|name| name.parse().ok())
+    }
+
     /// True when `pane` is rendered inside the visible workspace. Commands
     /// aimed at a pane in another workspace must leave the user's view and
     /// keyboard focus alone: GTK moves focus into an unmapped widget without

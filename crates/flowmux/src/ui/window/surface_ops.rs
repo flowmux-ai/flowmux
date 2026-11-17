@@ -1555,17 +1555,38 @@ mod tests {
         .await
         .unwrap();
         // The side-panel workspace's double-click uses a separate rename command.
-        c.dispatch(GtkCommand::ShowRenameDialog {
-            id: Some(detached_ws),
+        c.store.set_active_workspace(Some(workspace)).await;
+        let expected_name = c
+            .store
+            .get_workspace(detached_ws)
+            .await
+            .unwrap()
+            .display_title()
+            .to_string();
+        window
+            .lookup_action("rename-active-workspace")
+            .unwrap()
+            .activate(None);
+        wait_for("workspace rename shortcut", || {
+            window.visible_dialog().is_some() || c.window.visible_dialog().is_some()
         })
         .await;
-        assert!(c.window.visible_dialog().is_none());
+        assert!(c.window.visible_dialog().is_none(), "the shortcut must use its own window, even when another workspace is active in the store");
         let dialog = window
             .visible_dialog()
             .unwrap()
             .downcast::<adw::AlertDialog>()
             .unwrap();
         assert_eq!(dialog.heading().as_deref(), Some("Rename Tab"));
+        assert_eq!(
+            dialog
+                .extra_child()
+                .unwrap()
+                .downcast::<gtk::Entry>()
+                .unwrap()
+                .text(),
+            expected_name
+        );
         glib::timeout_future(Duration::from_millis(300)).await;
         dialog.close();
         wait_for("workspace rename cancelled", || {

@@ -212,15 +212,50 @@ def exercise(h):
         while (parent := owner.get_parent()) and parent.get_role() != Atspi.Role.APPLICATION:
             owner = parent
         assert "DRAG_ME" in owner.get_name(), "rename dialog must belong to the detached window"
-        cancel = fixture.wait_for(lambda: named("Cancel"), "rename cancel button")
-        assert cancel.get_action_iface().do_action(0)
+        entry = next(node for node in walk(owner) if node.get_role() == Atspi.Role.TEXT
+                     and node.get_state_set().contains(Atspi.StateType.SHOWING)
+                     and node.get_state_set().contains(Atspi.StateType.EDITABLE))
+        assert entry.get_editable_text_iface().set_text_contents("RENAMED_TAB")
+        click(detached, "OK")
         fixture.wait_for(lambda: rename_heading() is None, "rename dialog closed")
-        h.pass_check("tear-off has no phantom tab and double-click rename stays in its own window")
+        fixture.wait_for(lambda: any(tab["id"] == surface and tab["title"] == "RENAMED_TAB" for tab in location()[1]["tabs"]), "tab renamed")
+        time.sleep(.3)
+        # No right-click or context-menu detour may be needed to restore dragging.
+        renamed_workspace = detached_ws["id"]
+        drag(detached, "RENAMED_TAB", 360, 350)
+        fixture.wait_for(lambda: location()[0]["id"] != renamed_workspace and len(windows()) == 2,
+                         "renamed tab drags immediately without a right-click")
+        h.pass_check("double-click rename is followed immediately by a successful native drag")
+        prior_windows = {window.id for window in windows()}
+        drag(main, "RENAMED_TAB", 1550, 10)
+        fixture.wait_for(lambda: len(windows()) == 3, "renamed tab detached again")
+        detached = next(window for window in windows() if window.id not in prior_windows)
+        detached.configure(x=800, y=0, width=750, height=800)
+        connection.sync()
+        detached_ws, detached_pane = location()
+        other_names = {ws["id"]: ws["name"] for ws in h.tree(socket) if ws["id"] != detached_ws["id"]}
+        keys("Control_L", "Alt_L", "r")
+        heading = fixture.wait_for(lambda: next((node for node in walk(application()) if node.get_name() == "Rename Tab"
+                                                and node.get_state_set().contains(Atspi.StateType.SHOWING)), None), "workspace rename shortcut")
+        owner = heading
+        while (parent := owner.get_parent()) and parent.get_role() != Atspi.Role.APPLICATION:
+            owner = parent
+        assert "RENAMED_TAB" in owner.get_name(), "Ctrl+Alt+R must target the invoking window's workspace"
+        entry = next(node for node in walk(owner) if node.get_role() == Atspi.Role.TEXT
+                     and node.get_state_set().contains(Atspi.StateType.SHOWING)
+                     and node.get_state_set().contains(Atspi.StateType.EDITABLE))
+        assert entry.get_editable_text_iface().set_text_contents("RENAMED_WORKSPACE")
+        click(detached, "OK")
+        fixture.wait_for(lambda: h.workspace(socket, detached_ws["id"])["name"] == "RENAMED_WORKSPACE",
+                         "shortcut renames the visible workspace")
+        assert all(ws["name"] == other_names[ws["id"]] for ws in h.tree(socket) if ws["id"] in other_names)
+        time.sleep(.3)
+        h.pass_check("Ctrl+Alt+R renames the visible workspace in the invoking detached window")
         keys("Control_L", "Shift_L", "t")
         added = fixture.wait_for(lambda: next((tab for tab in location()[1]["tabs"] if tab["id"] != surface), None), "second detached tab")
         h.send(socket, detached_pane["id"], "printf '\033]2;ADDED_TAB\007'")
         fixture.wait_for(lambda: named("ADDED_TAB"), "second detached tab visible")
-        click(detached, "DRAG_ME")
+        click(detached, "RENAMED_TAB")
         fixture.wait_for(lambda: any(tab["id"] == surface and tab["active"] for tab in location()[1]["tabs"]), "moved tab selectable")
         click(detached, "ADDED_TAB")
         fixture.wait_for(lambda: any(tab["id"] == added["id"] and tab["active"] for tab in location()[1]["tabs"]), "new tab selectable")

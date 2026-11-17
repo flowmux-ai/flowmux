@@ -2799,7 +2799,7 @@ fn attach_tab_dnd_handlers(
 
     let drag_source = gtk::DragSource::new();
     drag_source.set_actions(gtk::gdk::DragAction::MOVE);
-    #[cfg(target_os = "macos")]
+    // Observe the press before GtkButton's click gesture can claim a rename sequence.
     drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
     let surface_for_payload = surface.clone();
     drag_source.connect_prepare(move |_, _, _| {
