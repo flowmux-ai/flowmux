@@ -2693,8 +2693,7 @@ impl WindowController {
         let Some(ws_id) = self.store.workspace_for_pane(pane).await else {
             return;
         };
-        // macOS already updates focus synchronously; queued notifications can be stale.
-        #[cfg(target_os = "macos")]
+        // Callbacks update focus synchronously; older queued notifications must not replace it.
         if self.focused_pane.get() != Some(pane) {
             return;
         }
@@ -8869,6 +8868,7 @@ mod tests {
         controller.render_workspace(&ws);
 
         // 1. Single-pane focus: ws.name = root folder name, subtitles = root cwd.
+        controller.focused_pane.set(Some(pane_a));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_a })
             .await;
@@ -8974,6 +8974,7 @@ mod tests {
             .update_surface_cwd(pane_b, surface_b, project_c.clone())
             .await;
 
+        controller.focused_pane.set(Some(pane_b));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_b })
             .await;
@@ -9005,6 +9006,7 @@ mod tests {
         );
 
         // 5. Focus pane_a again -> subtitles reorder to [A, B].
+        controller.focused_pane.set(Some(pane_a));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_a })
             .await;
@@ -9029,6 +9031,7 @@ mod tests {
         store
             .update_surface_cwd(pane_c, surface_c, project_d.clone())
             .await;
+        controller.focused_pane.set(Some(pane_c));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_c })
             .await;
@@ -9047,6 +9050,7 @@ mod tests {
         assert_eq!(subs[2], ".../flowmux-scn/dev/projectC", "MRU[2]=B");
 
         // 7. Refocus a pane already in MRU -> update only the head, keep length 3.
+        controller.focused_pane.set(Some(pane_a));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_a })
             .await;
@@ -9076,6 +9080,7 @@ mod tests {
         // which is browser_surface. The ActivateSurface dispatch path tries to
         // update PaneRegistry GTK widgets, so this test triggers
         // sync_workspace_label through PaneFocused only.
+        controller.focused_pane.set(Some(pane_a));
         controller
             .dispatch(GtkCommand::PaneFocused { pane: pane_a })
             .await;

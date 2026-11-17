@@ -1693,6 +1693,11 @@ pub(super) mod tests {
             });
             rx.await.unwrap().unwrap()
         }
+        browser.load_uri("data:text/html,<title>Detached state</title><body>loaded</body>");
+        wait_for("browser document loaded", || {
+            browser.current_url().starts_with("data:") && !browser.web_view.is_loading()
+        })
+        .await;
         eval(&browser, "window.unsavedTabState = 'still here'").await;
         c.tear_off_surface(pane, browser_id).await;
         let source = c

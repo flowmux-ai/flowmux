@@ -488,3 +488,26 @@ async fn queued_workspace_creation_does_not_fall_back_after_its_window_closes() 
     assert!(c.detached_workspaces.borrow().is_empty());
     close_fixture(&c).await;
 }
+
+#[gtk::test]
+async fn delayed_source_focus_does_not_replace_the_detached_destination() {
+    let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+    let root = tempfile::tempdir().unwrap();
+    let (c, workspace, pane) =
+        surface_ops::tests::setup("com.flowmux.App.UiTest.DelayedTabFocus", root.path()).await;
+    let (_, surface) = c
+        .store
+        .add_terminal_surface_to_pane(pane, None)
+        .await
+        .unwrap();
+    c.attach_or_rerender_surface(workspace, pane, surface, None)
+        .await
+        .unwrap();
+    c.tear_off_surface(pane, surface).await;
+    let destination = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+    assert_eq!(c.focused_pane.get(), Some(destination));
+    // The source's earlier notification can be dispatched after the live move.
+    c.dispatch(GtkCommand::PaneFocused { pane }).await;
+    assert_eq!(c.focused_pane.get(), Some(destination));
+    close_fixture(&c).await;
+}
