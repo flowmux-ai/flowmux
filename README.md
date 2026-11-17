@@ -69,6 +69,8 @@ browser pages, and unsaved editor buffers stay live. Separated windows support
 split panes and new workspaces. Right-click a separated tab and choose
 **Move to main window** to return it even when the main window is empty.
 Live moves apply to windows separated from the same Flowmux instance.
+Drop onto a workspace in the side panel to move directly into it. Drops between
+independently launched instances are rejected without copying or closing the tab.
 
 <img src="resources/screenshot/view_split.gif" alt="split panes and overview mode" width="100%" />
 

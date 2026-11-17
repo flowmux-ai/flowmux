@@ -35,13 +35,14 @@ def exercise(h):
     process, socket = h.window("tab-windows")
     connection = display.Display(h.env["DISPLAY"])
     try:
-        def windows():
+        def windows(pid=None):
+            wanted_pid = process.pid if pid is None else pid
             result = []
             for window in connection.screen().root.query_tree().children:
                 try:
                     pid = window.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
                     kind = window.get_full_property(connection.intern_atom("_NET_WM_WINDOW_TYPE"), X.AnyPropertyType)
-                    if (pid is not None and int(pid.value[0]) == process.pid
+                    if (pid is not None and int(pid.value[0]) == wanted_pid
                             and window.get_attributes().map_state == X.IsViewable
                             and kind is not None and connection.intern_atom("_NET_WM_WINDOW_TYPE_NORMAL") in kind.value):
                         result.append(window)
@@ -67,11 +68,11 @@ def exercise(h):
                 if child:
                     yield from walk(child)
 
-        def application():
+        def application(pid=None):
             desktop = Atspi.get_desktop(0)
             desktop.clear_cache()
             return next((desktop.get_child_at_index(i) for i in range(desktop.get_child_count())
-                         if desktop.get_child_at_index(i).get_process_id() == process.pid), None)
+                         if desktop.get_child_at_index(i).get_process_id() == (process.pid if pid is None else pid)), None)
 
         def named(name):
             app = application()
@@ -94,7 +95,7 @@ def exercise(h):
                 connection.sync()
                 time.sleep(.08)
 
-        def drag(window, name, x, y):
+        def drag(window, name, x, y, cancel=False):
             window.set_input_focus(X.RevertToParent, X.CurrentTime)
             origin = point(window, name)
             h.log("drag", origin=[origin.x, origin.y], target=[x, y], title=window.get_wm_name())
@@ -110,6 +111,12 @@ def exercise(h):
                                  y=round(origin.y + (y-origin.y)*step/20))
                 connection.sync()
                 time.sleep(.03)
+            if cancel:
+                code = connection.keysym_to_keycode(XK.string_to_keysym("Escape"))
+                xtest.fake_input(connection, X.KeyPress, code)
+                xtest.fake_input(connection, X.KeyRelease, code)
+                connection.sync()
+                time.sleep(.2)
             xtest.fake_input(connection, X.ButtonRelease, 1)
             connection.sync()
 
@@ -264,6 +271,142 @@ def exercise(h):
         h.pass_check("both the moved tab and a newly added tab can be selected")
 
 
+        # Both detached hosts remain alive while the tab crosses in each direction.
+        keys("Control_L", "Shift_L", "t")
+        fixture.wait_for(lambda: any(tab["id"] != surface and tab["active"] for tab in location()[1]["tabs"]), "source anchor created and active")
+        h.send(socket, detached_pane["id"], "printf '\\033]2;SOURCE_ANCHOR\\007'")
+        fixture.wait_for(lambda: named("SOURCE_ANCHOR"), "source anchor tab")
+        peer = next(window for window in windows() if window.id not in (main.id, detached.id))
+        main.configure(x=2000)
+        detached.configure(x=0, y=0, width=750, height=800)
+        peer.configure(x=800, y=0, width=750, height=800)
+        h.rpc(socket, "workspace_focus", workspace=created["id"])
+        connection.sync()
+        time.sleep(.4)
+        drag(detached, "RENAMED_TAB", 1160, 150)
+        fixture.wait_for(lambda: location()[0]["id"] == created["id"], "detached to detached")
+        drag(peer, "RENAMED_TAB", 360, 150)
+        fixture.wait_for(lambda: location()[0]["id"] == detached_ws["id"], "detached to detached return")
+        assert len(windows()) == 3
+        # Native split targets in another window, then the reverse direction.
+        drag(detached, "RENAMED_TAB", 1500, 200)
+        fixture.wait_for(lambda: location()[0]["id"] == created["id"] and len(h.workspace(socket, created["id"])["panes"]) == 2,
+                         "cross-window right split")
+        drag(peer, "RENAMED_TAB", 360, 730)
+        fixture.wait_for(lambda: location()[0]["id"] == detached_ws["id"] and len(h.workspace(socket, detached_ws["id"])["panes"]) == 2,
+                         "cross-window bottom split")
+        h.pass_check("detached windows exchange the live tab through body and both split targets")
+        # Escape outside any target must not detach or commit a split preview.
+        before = (location()[0]["id"], location()[1]["id"], {w.id for w in windows()})
+        drag(detached, "RENAMED_TAB", 1550, 950, cancel=True)
+        time.sleep(.5)
+        assert (location()[0]["id"], location()[1]["id"], {w.id for w in windows()}) == before
+        h.pass_check("Escape cancels an outside drag without opening a window")
+        main.configure(x=0, y=0)
+        detached.configure(x=800, y=0, width=1100)
+        peer.configure(x=2000)
+        connection.sync()
+        time.sleep(.4)
+        # Reproduce: a detached tab, a new workspace requested in the main window,
+        # then a native drop directly on that new workspace's side-panel row.
+        prior = {ws["id"] for ws in h.tree(socket)}
+        click(main, "New workspace")
+        target = fixture.wait_for(lambda: next((ws for ws in h.tree(socket) if ws["id"] not in prior), None), "main workspace created")
+        h.send(socket, target["panes"][0]["id"], "printf '\\033]2;ROW_TARGET\\007'")
+        row = fixture.wait_for(lambda: next((node for node in walk(application()) if node.get_name() == "ROW_TARGET"
+                                            and node.get_role() == Atspi.Role.LABEL
+                                            and node.get_state_set().contains(Atspi.StateType.SHOWING)), None), "new workspace row")
+        bounds = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        destination = connection.screen().root.translate_coords(main, bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
+        h.rpc(socket, "workspace_focus", workspace=detached_ws["id"])
+        detached.configure(width=1100)
+        connection.sync()
+        time.sleep(.4)
+        count_before = len(windows())
+        # Hover a non-active workspace row and cancel: no switch or tear-off.
+        prior = {ws["id"] for ws in h.tree(socket)}
+        click(main, "New workspace")
+        visible = fixture.wait_for(lambda: next((ws for ws in h.tree(socket) if ws["id"] not in prior), None), "other main workspace")
+        h.send(socket, visible["panes"][0]["id"], "printf '\\033]2;KEEP_VISIBLE\\007'")
+        fixture.wait_for(lambda: "KEEP_VISIBLE" in (main.get_wm_name() or ""), "main workspace visible")
+        h.rpc(socket, "workspace_focus", workspace=detached_ws["id"])
+        drag(detached, "RENAMED_TAB", destination.x, destination.y, cancel=True)
+        time.sleep(.5)
+        assert location()[0]["id"] == detached_ws["id"]
+        assert "KEEP_VISIBLE" in (main.get_wm_name() or ""), "hover must not change the visible workspace"
+        assert len(windows()) == count_before
+        h.pass_check("workspace-row hover followed by Escape preserves focus and source")
+        drag(detached, "RENAMED_TAB", destination.x, destination.y)
+        fixture.wait_for(lambda: location()[0]["id"] == target["id"], "drop reaches explicitly named new workspace")
+        assert len(windows()) == count_before, "workspace-row drop must not open another window"
+        h.pass_check("detached tab drops into a newly created workspace in the other window")
+        # Native tab-bar insertion on both halves, including an in-pane reorder.
+        anchor_point = point(detached, "SOURCE_ANCHOR")
+        drag(main, "RENAMED_TAB", anchor_point.x - 25, anchor_point.y)
+        fixture.wait_for(lambda: location()[0]["id"] == detached_ws["id"], "main to detached tab bar")
+        fixture.wait_for(lambda: location()[1]["tabs"][0]["id"] == surface, "insert before target tab")
+        anchor_point = point(detached, "SOURCE_ANCHOR")
+        drag(detached, "RENAMED_TAB", anchor_point.x + 25, anchor_point.y)
+        fixture.wait_for(lambda: location()[1]["tabs"][-1]["id"] == surface, "insert after target tab")
+        # Exercise the actual context-menu action after these drags.
+        origin = point(detached, "RENAMED_TAB")
+        xtest.fake_input(connection, X.MotionNotify, x=origin.x, y=origin.y)
+        xtest.fake_input(connection, X.ButtonPress, 3)
+        xtest.fake_input(connection, X.ButtonRelease, 3)
+        connection.sync()
+        item = fixture.wait_for(lambda: named("Move to main window"), "return menu item")
+        assert item.get_action_iface().do_action(0)
+        fixture.wait_for(lambda: location()[0]["id"] == target["id"], "context menu returns tab to main window")
+        h.pass_check("tab-bar before/after insertion and Move to main window preserve the live tab")
+        # The numbered Move submenu must retain workspaces hidden from the main side panel.
+        detached.configure(x=2000)
+        peer.configure(x=800, y=0, width=750, height=800)
+        connection.sync()
+        origin = point(main, "RENAMED_TAB")
+        xtest.fake_input(connection, X.MotionNotify, x=origin.x, y=origin.y)
+        xtest.fake_input(connection, X.ButtonPress, 3)
+        xtest.fake_input(connection, X.ButtonRelease, 3)
+        connection.sync()
+        move = fixture.wait_for(lambda: next((node for node in walk(application()) if node.get_name() == "Move"
+                                              and node.get_action_iface() is not None
+                                              and node.get_action_iface().get_n_actions() > 0
+                                              and node.get_state_set().contains(Atspi.StateType.SHOWING)), None), "Move submenu")
+        assert move.get_action_iface().do_action(0)
+        current_tree = h.tree(socket)
+        number = next(i + 1 for i, ws in enumerate(current_tree) if ws["id"] == created["id"])
+        title = next(ws["name"] for ws in current_tree if ws["id"] == created["id"])
+        item = fixture.wait_for(lambda: named(f"{number}. {title}"), "other window workspace in Move menu")
+        assert item.get_action_iface().do_action(0)
+        fixture.wait_for(lambda: location()[0]["id"] == created["id"], "Move submenu reaches detached workspace")
+        origin = point(peer, "RENAMED_TAB")
+        xtest.fake_input(connection, X.MotionNotify, x=origin.x, y=origin.y)
+        xtest.fake_input(connection, X.ButtonPress, 3)
+        xtest.fake_input(connection, X.ButtonRelease, 3)
+        connection.sync()
+        item = fixture.wait_for(lambda: named("Move to main window"), "return from Move submenu")
+        assert item.get_action_iface().do_action(0)
+        fixture.wait_for(lambda: location()[0]["id"] == target["id"], "menu round trip reaches main workspace")
+        h.pass_check("Move submenu lists and reaches a workspace owned by another window")
+        peer.configure(x=2000)
+        connection.sync()
+        # Separately launched processes cannot reparent a live GTK/backend object.
+        # They must reject the drop without copying, deleting or detaching the source.
+        foreign, foreign_socket = h.window("foreign-tabs")
+        foreign_window = fixture.wait_for(lambda: next(iter(windows(foreign.pid)), None), "foreign window")
+        foreign_window.configure(x=800, y=0, width=750, height=800)
+        connection.sync()
+        foreign_ws = h.rpc(foreign_socket, "workspace_create", name="Foreign", root=str(h.root))["workspace_created"]["id"]
+        foreign_before = h.tree(foreign_socket)
+        source_before = (location()[0]["id"], location()[1]["id"], {w.id for w in windows()})
+        for destination in [(1160, 150), (850, 100)]:
+            drag(main, "RENAMED_TAB", *destination)
+            time.sleep(.7)
+            assert h.tree(foreign_socket) == foreign_before, "foreign drop must not clone a surface"
+            assert (location()[0]["id"], location()[1]["id"], {w.id for w in windows()}) == source_before
+        h.send(socket, location()[1]["id"], "printf 'AUDIT_PID:%s\\n' \"$$\"")
+        fixture.wait_for(lambda: "AUDIT_PID:" + original_pid in h.screen(socket, location()[1]["id"]), "original PID after all drag routes")
+        h.pass_check("foreign-process body/sidebar drops preserve both models and the original shell")
+        h.close_window(foreign)
         h.close_window(process)
         print("TAB_WINDOWS_GUI_OK", flush=True)
     finally:
