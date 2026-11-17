@@ -6,9 +6,12 @@ use super::*;
 pub(crate) async fn run_identify(
     json: bool,
     session: Option<&str>,
+    agent: Option<&str>,
     socket: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let id = if let Some(session) = session {
+    let source = if let Some(agent) = agent {
+        Some(hooks::resolve_direct_agent_source(agent, socket).await?)
+    } else if let Some(session) = session {
         let hint = socket.or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from));
         let (client, pane, surface, _) = hooks::resolve_codex_source(session, hint.clone())
             .await?
@@ -31,6 +34,11 @@ pub(crate) async fn run_identify(
                      with `codex --no-daemon` in the intended pane; keep active sessions open."
                 )
             })?;
+        Some((client, pane, surface))
+    } else {
+        None
+    };
+    let id = if let Some((client, pane, surface)) = source {
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(3),
             client.call(Request::WorkspaceTree),

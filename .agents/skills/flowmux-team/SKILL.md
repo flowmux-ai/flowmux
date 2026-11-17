@@ -43,6 +43,11 @@ native Agent/subagents. Workers cannot delegate again. An assigned
 ## Resolve context safely
 
 Use the exact session binding; never infer a pane from cwd, focus or title.
+Claude uses `flowmux identify --agent claude` to verify the calling process's
+direct pane. Shared/background Claude sessions without that binding cannot
+delegate, even when their inherited environment names a Team workspace. Keep
+working inline; do not override the pane or restart an active session to bypass
+the rejection. An older CLI/server may need an update before verification works.
 For `No unique live Flowmux pane`, retry `context` once in a separate tool call
 so its lifecycle hook can run. If unresolved, retain both diagnostics and report
 it. Do not retry permission/authentication errors or guess another pane.

@@ -260,6 +260,12 @@ def source_context(args, cli):
         origin = flowmux(cli, args.socket or os.environ.get("FLOWMUX_SOCKET_PATH"),
                          "identify", "--session", session)
         socket, pane = origin["socket"], origin["pane"]
+    elif (os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT")
+          or os.environ.get("FLOWMUX_AGENT_NAME") == "claude"):
+        # Claude background sessions inherit the shared daemon's unrelated pane variables.
+        origin = flowmux(cli, args.socket or os.environ.get("FLOWMUX_SOCKET_PATH"),
+                         "identify", "--agent", "claude")
+        socket, pane = origin["socket"], origin["pane"]
     else:
         socket, pane = os.environ.get("FLOWMUX_SOCKET_PATH"), os.environ.get("FLOWMUX_PANE_ID")
     if socket and args.socket and Path(socket).resolve() != Path(args.socket).resolve():

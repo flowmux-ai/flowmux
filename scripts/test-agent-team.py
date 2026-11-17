@@ -35,7 +35,8 @@ class TeamTests(unittest.TestCase):
 
     def setUp(self):
         clean = patch.dict(os.environ, {k: v for k, v in os.environ.items()
-                           if not k.startswith(('FLOWMUX_', 'CODEX_'))}, clear=True)
+                           if not k.startswith(('FLOWMUX_', 'CODEX_'))
+                           and k not in ('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')}, clear=True)
         clean.start()
         self.addCleanup(clean.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="fm-team-test-")
@@ -379,6 +380,56 @@ class TeamTests(unittest.TestCase):
     def test_local_origin_cannot_be_replaced_by_another_pane(self):
         args = type('Args', (), dict(socket=None, pane='replacement'))()
         with patch.dict(os.environ, FLOWMUX_SOCKET_PATH=str(self.socket), FLOWMUX_PANE_ID='source'):
+            with self.assertRaisesRegex(ValueError, 'originating pane'):
+                team.source_context(args, 'flowmux')
+
+    def test_claude_verifies_origin_before_start_or_followup(self):
+        self.fixture('pass')
+        args = type('Args', (), dict(cli='flowmux', socket=None, pane=None, job=self.job,
+                                    task_file=self.job / 'task.txt'))()
+        manifest = json.loads((self.job / 'job.json').read_text())
+        team.write_json(self.job / 'job.json', {**manifest, 'workspace': 'team', 'source_pane': 'stale'})
+        actual = {'socket': str(self.socket), 'pane': 'local'}
+        tree = {'tree': {'workspaces': [
+            {'id': 'ordinary', 'location': {'type': 'local'}, 'panes': [{'id': 'local'}]},
+            {'id': 'team', 'location': {'type': 'team'}, 'panes': [{'id': 'stale'}]},
+        ]}}
+        for marker in ({'CLAUDECODE': '1'}, {'CLAUDE_CODE_ENTRYPOINT': 'cli'},
+                       {'FLOWMUX_AGENT_NAME': 'claude'}):
+            with self.subTest(marker=marker), \
+                    patch.dict(os.environ, {**marker, 'FLOWMUX_PANE_ID': 'stale',
+                                           'FLOWMUX_SOCKET_PATH': str(self.socket)}), \
+                    patch.object(team.shutil, 'which', return_value='flowmux'), \
+                    patch.object(team, 'start_locked') as launch, \
+                    patch.object(team, 'require_supervisor') as dispatch:
+                for operation in (team.start, team.followup):
+                    with patch.object(team, 'flowmux', side_effect=lambda _cli, _socket, *cmd:
+                                      actual if cmd[0] == 'identify' else tree) as rpc:
+                        with self.assertRaisesRegex(ValueError, 'Team workspace'):
+                            operation(args)
+                        self.assertEqual(rpc.call_args_list[0].args,
+                                         ('flowmux', str(self.socket), 'identify', '--agent', 'claude'))
+                    with patch.object(team, 'flowmux', side_effect=RuntimeError('No verified direct Flowmux pane')) as rpc:
+                        with self.assertRaisesRegex(RuntimeError, 'No verified direct'):
+                            operation(args)
+                        self.assertEqual(rpc.call_count, 1, 'Unbound Claude must never fall back to env/tree')
+                launch.assert_not_called()
+                dispatch.assert_not_called()
+                self.assertFalse((self.job / 'state/flowmux/team-jobs').exists())
+                self.assertFalse((self.job / 'turns').exists())
+
+    def test_direct_claude_team_origin_and_explicit_redirection(self):
+        args = type('Args', (), dict(cli='flowmux', socket=None, pane=None))()
+        origin = {'socket': str(self.socket), 'pane': 'source'}
+        tree = {'tree': {'workspaces': [{'id': 'team', 'location': {'type': 'team'},
+                                        'panes': [{'id': 'source'}]}]}}
+        with patch.dict(os.environ, CLAUDECODE='1', FLOWMUX_PANE_ID='stale',
+                        FLOWMUX_SOCKET_PATH=str(self.socket)), \
+                patch.object(team.shutil, 'which', return_value='flowmux'), \
+                patch.object(team, 'flowmux', side_effect=[origin, tree]):
+            self.assertEqual(team.context(args)['mode'], 'team')
+        args.pane = 'stale'
+        with patch.dict(os.environ, CLAUDECODE='1'), patch.object(team, 'flowmux', return_value=origin):
             with self.assertRaisesRegex(ValueError, 'originating pane'):
                 team.source_context(args, 'flowmux')
 

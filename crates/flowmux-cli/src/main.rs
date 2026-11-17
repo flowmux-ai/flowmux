@@ -104,8 +104,11 @@ enum Cmd {
     /// discover where it is running.
     Identify {
         /// Resolve the exact live Codex session instead of inherited pane variables.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "agent")]
         session: Option<String>,
+        /// Verify a direct agent pane using socket credentials and process ancestry.
+        #[arg(long)]
+        agent: Option<String>,
     },
 
     /// Print what this flowmux build supports: the `browser` verb set
@@ -1354,8 +1357,8 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         Cmd::Agent { op } => return run_agent_op(op, cli.json),
         // Plain identity/capability probes work offline. Session identity
         // resolves a live binding instead of the shared server environment.
-        Cmd::Identify { session } => {
-            return run_identify(cli.json, session.as_deref(), cli.socket).await
+        Cmd::Identify { session, agent } => {
+            return run_identify(cli.json, session.as_deref(), agent.as_deref(), cli.socket).await
         }
         Cmd::Capabilities => return run_capabilities(cli.json),
         // Hook runtime handlers connect to the daemon themselves. Setup and

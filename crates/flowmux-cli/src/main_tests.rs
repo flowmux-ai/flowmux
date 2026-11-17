@@ -1016,12 +1016,28 @@ fn render_tree_marks_active_tab_and_indents() {
 fn identify_and_capabilities_parse_as_local_commands() {
     assert!(matches!(
         Cli::try_parse_from(["flowmuxctl", "identify", "--session", "current-session"]).unwrap().cmd,
-        Cmd::Identify { session: Some(id) } if id == "current-session"
+        Cmd::Identify { session: Some(id), agent: None } if id == "current-session"
     ));
     assert!(matches!(
         Cli::try_parse_from(["flowmuxctl", "identify"]).unwrap().cmd,
-        Cmd::Identify { session: None }
+        Cmd::Identify {
+            session: None,
+            agent: None
+        }
     ));
+    assert!(matches!(
+        Cli::try_parse_from(["flowmuxctl", "identify", "--agent", "claude"]).unwrap().cmd,
+        Cmd::Identify { session: None, agent: Some(agent) } if agent == "claude"
+    ));
+    assert!(Cli::try_parse_from([
+        "flowmuxctl",
+        "identify",
+        "--agent",
+        "claude",
+        "--session",
+        "session"
+    ])
+    .is_err());
     assert!(matches!(
         Cli::try_parse_from(["flowmuxctl", "capabilities"])
             .unwrap()

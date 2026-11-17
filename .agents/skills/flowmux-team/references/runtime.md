@@ -104,6 +104,15 @@ session binding. Do not clear a lead's session ID, replace its pane/socket or
 fall back to inherited shared-daemon variables when resolution fails. Outside
 Flowmux, use only the user's intended `--socket PATH --pane UUID`.
 
+Claude uses `identify --agent claude`, which verifies the IPC caller's process
+ancestry against the live terminal. Its shared background daemon can inherit
+another workspace's pane, surface and wrapper PID. Those variables and hook
+session records do not establish ownership. Unbound background sessions cannot
+start or continue workers; their hooks do not update an unrelated pane. Continue
+without delegation and keep active sessions open. Normal Claude processes in
+Team panes retain delegation. Update the CLI, running app and installed Team
+skill together; older versions cannot supply the required verification.
+
 The lead must have permission to connect to the originating window's Unix socket
 and its `.ctl` companion. A socket permission error is not a missing session or
 an old CLI. Use the provider's normal permission approval flow for authorized

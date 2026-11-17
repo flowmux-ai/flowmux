@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import subprocess
 import sys
@@ -163,6 +164,83 @@ while True:
 '''
 
 
+def verify_claude_origin(h, socket, team_workspace, team_pane, local_pane):
+    """A Claude-shaped process must prove its pane, even with another lead's environment."""
+    directory = h.root / 'origin'
+    directory.mkdir()
+    old_job = directory / 'old-job'
+    old_job.mkdir()
+    (old_job / 'job.json').write_text(json.dumps(dict(
+        socket=str(socket), workspace=team_workspace, source_pane=team_pane)))
+    (h.root / 'behavior.json').write_text('{}')
+    team_surface = h.workspace(socket, team_workspace)['panes'][0]['tabs'][0]['id']
+    script = directory / 'claude'
+    script.write_text('''import json, os, subprocess, sys
+from pathlib import Path
+root, cli, helper, team_pane, team_surface, socket, case = sys.argv[1:8]
+root = Path(root)
+os.environ.update(CLAUDECODE='1', FLOWMUX_PANE_ID=team_pane,
+                  FLOWMUX_SURFACE_ID=team_surface, FLOWMUX_SOCKET_PATH=socket,
+                  PATH=str(root / 'providers') + os.pathsep + str(Path(cli).parent) + os.pathsep + os.defpath)
+def run(argv, **kwargs):
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=15, **kwargs)
+    return dict(code=result.returncode, out=result.stdout, err=result.stderr)
+report = dict(context=run([sys.executable, helper, 'context', '--cli', cli]))
+report['hook'] = run([cli, 'hooks', 'claude', 'session-start'],
+                     input=json.dumps(dict(session_id='origin-' + case, source='startup')))
+report['explicit_hook'] = run([cli, 'hooks', 'claude', 'session-start', '--pane', team_pane,
+                              '--surface', team_surface],
+                             input=json.dumps(dict(session_id='origin-' + case, source='startup')))
+report['start'] = run([sys.executable, helper, 'start', '--cli', cli, '--agent', 'codex',
+                      '--role', 'origin-check', '--fresh-session', '--no-fallback', '--max-attempts', '1',
+                      '--cwd', str(root), '--task-file', str(root / 'task.txt')])
+if case == 'team' and report['start']['code'] == 0:
+    job = json.loads(report['start']['out'])['job']
+    report['wait'] = run([sys.executable, helper, 'wait', job, '--timeout', '10'])
+else:
+    report['followup'] = run([sys.executable, helper, 'followup', str(root / 'origin/old-job'),
+                             '--cli', cli, '--task-file', str(root / 'task.txt')])
+(root / ('origin-' + case + '.json')).write_text(json.dumps(report))
+''')
+    before = {ws['id']: len(ws['panes']) for ws in h.tree(socket)}
+    for case, pane in [('local', local_pane), ('background', None), ('host', team_pane), ('team', team_pane)]:
+        command = [sys.executable, str(script), str(h.root), h.args.cli, str(HELPER),
+                   team_pane, team_surface, str(socket), case]
+        if case == 'host':
+            command.append('--bg-pty-host')
+        if pane:
+            h.send(socket, pane, shlex.join(command))
+        else:
+            process = h.spawn(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            assert process.wait(timeout=30) == 0
+        path = h.root / ('origin-' + case + '.json')
+        report = fixture.wait_for(lambda: json.loads(path.read_text()) if path.exists() else None,
+                                  case + ' origin verification')
+        assert report['hook']['code'] == report['explicit_hook']['code'] == 0, report
+        if case in ('background', 'host'):
+            assert report['context']['code'] != 0 and 'No verified direct' in report['context']['err'], report
+            assert not report['hook']['out'], report
+        else:
+            assert report['context']['code'] == 0, report
+            context = json.loads(report['context']['out'])
+            assert context['pane'] == pane and context['mode'] == ('team' if case == 'team' else 'inline'), report
+        if case != 'team':
+            assert report['start']['code'] != 0 and report['followup']['code'] != 0, report
+            assert not list((h.root / 'state/flowmux/team-jobs').glob('job-*'))
+            assert not (old_job / 'turns').exists()
+            agent = h.workspace(socket, team_workspace)['panes'][0]['tabs'][0].get('agent') or {}
+            assert agent.get('session_id') != 'origin-' + case, agent
+            assert {ws['id']: len(ws['panes']) for ws in h.tree(socket)} == before
+        else:
+            assert report['start']['code'] == report['wait']['code'] == 0, report
+            job = json.loads(report['start']['out'])
+            assert job['workspace'] == team_workspace and job['source_pane'] == team_pane, job
+            assert job['executable'] == str(h.root / 'providers/codex'), job
+            assert json.loads(report['wait']['out'])['task_status'] == 'completed', report
+            assert {ws['id']: len(ws['panes']) for ws in h.tree(socket)} == {**before, team_workspace: before[team_workspace] + 1}
+    h.pass_check('Claude rejects local/stale/background delegation and hook redirection; direct Team work still completes')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gui', default=str(REPO / 'target/debug/flowmux'))
@@ -192,6 +270,7 @@ def main():
         foreground = h.rpc(socket, 'workspace_create', name='Foreground', root=str(h.root))['workspace_created']['id']
         h.rpc(socket, 'workspace_focus', workspace=foreground)
         foreground_pane = h.workspace(socket, foreground)['panes'][0]['id']
+        verify_claude_origin(h, socket, workspace, source, foreground_pane)
         h.rpc(socket, 'pane_focus', pane=foreground_pane)
         with closing(display.Display(h.env['DISPLAY'])) as connection:
             atom = connection.intern_atom('_NET_WM_PID')

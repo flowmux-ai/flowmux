@@ -3166,6 +3166,54 @@ async fn current_agent_source_rejects_recycled_terminal_pid_inside_another_termi
 }
 
 #[tokio::test]
+async fn current_agent_source_rejects_claude_background_hosts_with_poisoned_presence() {
+    for flag in ["--bg-pty-host", "--bg-spare"] {
+        let (handler, rx, _, surface) = single_pane_handler().await;
+        let child = AgentFixture::spawn(std::process::Command::new("python3").args([
+            "-c",
+            "import time; time.sleep(10)",
+            flag,
+        ]));
+        let pid = child.0.id();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !flowmux_procmon::cmdline_of(pid)
+                .iter()
+                .any(|arg| arg == flag)
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        handler
+            .inner
+            .store()
+            .set_agent_activity(
+                surface,
+                Some(flowmux_core::AgentPresence::new(
+                    "claude",
+                    AgentActivity::Running,
+                    Some(pid),
+                )),
+            )
+            .await;
+        let response = handler
+            .handle_from(
+                Request::AgentSurfaceCurrent {
+                    agent: "claude".into(),
+                },
+                Some(pid),
+            )
+            .await;
+        assert!(matches!(response, Response::Error(_)));
+        assert!(
+            rx.try_recv().is_err(),
+            "background identity must not reach the GUI"
+        );
+    }
+}
+
+#[tokio::test]
 async fn current_agent_source_uses_host_peer_ancestry_and_rejects_unrelated_callers() {
     let (handler, _rx, pane, surface) = single_pane_handler().await;
     let child = AgentFixture::spawn(std::process::Command::new("sleep").arg("10"));

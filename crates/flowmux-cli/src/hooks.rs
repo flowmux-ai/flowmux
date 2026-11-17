@@ -748,6 +748,32 @@ pub async fn resolve_codex_tab(
     resolve_codex_tab_at(sockets, session_id, cwd, false, session_start).await
 }
 
+/// Verify the caller's direct terminal ancestry without trusting inherited pane or hook identity.
+pub async fn resolve_direct_agent_source(
+    agent: &str,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<(Client, PaneId, SurfaceId)> {
+    let socket = socket
+        .or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from))
+        .ok_or_else(|| anyhow::anyhow!("No originating Flowmux socket for {agent}"))?;
+    let client = tokio::time::timeout(HOOK_CONNECT_TIMEOUT, Client::connect(&socket)).await??;
+    let response = tokio::time::timeout(
+        HOOK_NOTIFY_TIMEOUT,
+        client.call(Request::AgentSurfaceCurrent {
+            agent: agent.into(),
+        }),
+    )
+    .await??;
+    match response {
+        Response::AgentSurface { pane, surface, .. } => Ok((client, pane, surface)),
+        _ => anyhow::bail!(
+            "No verified direct Flowmux pane for {agent}; shared/background daemon environment \
+             is not an origin binding. No worker or pane was created. Continue in the current \
+             agent without delegation; do not select another Team workspace."
+        ),
+    }
+}
+
 /// Resolve an exact session binding for commands that create panes. Directory
 /// and title matches are insufficient evidence for choosing another window.
 pub async fn resolve_codex_source(

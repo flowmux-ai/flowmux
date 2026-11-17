@@ -186,6 +186,12 @@ fn spawn_fake_daemon(socket: PathBuf) -> mpsc::Receiver<String> {
                             Response::Notified {
                                 desktop_id: Some("desktop-1".into()),
                             }
+                        } else if request["verb"] == "agent_surface_current" {
+                            Response::AgentSurface {
+                                pane: "11111111-1111-1111-1111-111111111111".parse().unwrap(),
+                                surface: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
+                                session_id: None,
+                            }
                         } else {
                             Response::Ok
                         };
@@ -257,6 +263,10 @@ fn claude_stop_completes_with_background_shells_or_scheduled_jobs() {
             assert!(wait_for_child(&mut child, Duration::from_secs(10))
                 .unwrap()
                 .success());
+            let lookup: serde_json::Value =
+                serde_json::from_str(&rx.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+            assert_eq!(lookup["verb"], "agent_surface_current");
+            assert_eq!(lookup["agent"], "claude");
             let request: serde_json::Value =
                 serde_json::from_str(&rx.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
             assert_eq!(request["agent"], "claude");

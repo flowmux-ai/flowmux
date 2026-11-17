@@ -497,18 +497,35 @@ pub(crate) async fn run_claude_hook_event(
     use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
     use hooks::*;
     let input = read_claude_hook_input();
-    let pane = cli_pane.or_else(pane_from_env);
-    let surface = cli_surface.or_else(surface_from_env);
     let context_event = match event {
         ClaudeHookEvent::SessionStart => Some("SessionStart"),
         ClaudeHookEvent::PromptSubmit => Some("UserPromptSubmit"),
         _ => None,
     };
-    if let Some((event, context)) = context_event
-        .and_then(|event| team_lead_context("claude", pane, &input).map(|context| (event, context)))
-    {
+    if let Some((event, context)) = context_event.and_then(|event| {
+        team_lead_context("claude", cli_pane.or_else(pane_from_env), &input)
+            .map(|context| (event, context))
+    }) {
+        // Keep the instruction to verify context even when lifecycle routing is unavailable.
         println!("{}", team_hook_response("claude", event, &context));
     }
+    // Claude's shared background daemon can inherit another workspace's entire environment.
+    let (client, pane, surface) = match resolve_direct_agent_source("claude", socket).await {
+        Ok((client, pane, surface))
+            if cli_pane.is_none_or(|expected| expected == pane)
+                && cli_surface.is_none_or(|expected| expected == surface) =>
+        {
+            (client, Some(pane), Some(surface))
+        }
+        Ok(_) => {
+            tracing::debug!(target: "flowmux_agent", "Claude hook rejected: explicit context differs from caller");
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::debug!(target: "flowmux_agent", %error, "Claude hook origin rejected");
+            return Ok(());
+        }
+    };
     let pid = if inherited_wrapper_conflicts_with("claude") {
         None
     } else {
@@ -996,9 +1013,7 @@ pub(crate) async fn run_claude_hook_event(
             }
         }
     };
-    if let Some(client) = hooks::connect_daemon(socket).await {
-        hooks::send_hook_requests(&client, reqs).await;
-    }
+    hooks::send_hook_requests(&client, reqs).await;
     Ok(())
 }
 pub(crate) async fn run_antigravity_hook_event(

@@ -351,10 +351,12 @@ fn direct_window_ancestors(mut pid: u32, window: u32) -> Vec<u32> {
         if pid == window {
             return ancestors;
         }
-        if flowmux_procmon::cmdline_of(pid)
-            .iter()
-            .any(|arg| arg == "--managed-daemon")
-        {
+        if flowmux_procmon::cmdline_of(pid).iter().any(|arg| {
+            matches!(
+                arg.as_str(),
+                "--managed-daemon" | "--bg-pty-host" | "--bg-spare"
+            )
+        }) {
             return Vec::new();
         }
         ancestors.push(pid);
