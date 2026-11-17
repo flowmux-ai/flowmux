@@ -828,14 +828,15 @@ impl WindowController {
                     .into(),
             );
         }
-        let line = sessions::session_shell_line(&session, &home, false, fork_source.is_some())?;
+        let fork = fork_source.is_some();
+        let line = sessions::session_shell_line(&session, &home, fork, fork)?;
         let surface = SurfaceId::new();
         let operation = Operation {
             request: uuid::Uuid::new_v4(),
             owner: self.flow.owner,
             owner_pid: std::process::id(),
             source: key.clone(),
-            kind: if fork_source.is_some() {
+            kind: if fork {
                 OperationKind::Fork
             } else {
                 OperationKind::Resume

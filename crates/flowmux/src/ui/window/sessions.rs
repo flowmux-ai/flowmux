@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn native_resume_uses_selected_project_and_config_without_shell_expansion() {
+    fn native_resume_and_fork_use_selected_project_and_config_without_shell_expansion() {
         for (agent, binary, variable, flag, directory, yolo_arguments) in [
             (
                 SessionAgent::Claude,
@@ -604,6 +604,32 @@ mod tests {
                         if yolo { yolo_arguments } else { "" }
                     )
                 );
+            }
+            let fork_arguments = match agent {
+                SessionAgent::Claude => Some(format!("--resume\n{}\n--fork-session\n", session.id)),
+                SessionAgent::Codex => Some(format!("fork\n{}\n", session.id)),
+                SessionAgent::OpenCode => Some(format!("--session\n{}\n--fork\n", session.id)),
+                _ => None,
+            };
+            if let Some(fork_arguments) = fork_arguments {
+                let output = std::process::Command::new("/bin/sh")
+                    .arg("-c")
+                    .arg(session_shell_line(&session, &home, true, true).unwrap())
+                    .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                    .env("FLOWMUX_AGENT_SHIM_DIR", &bin)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert_eq!(
+                    String::from_utf8(output.stdout).unwrap(),
+                    format!(
+                        "{}\n{}\n{fork_arguments}{yolo_arguments}",
+                        cwd.display(),
+                        home.path.display()
+                    )
+                );
+            } else {
+                assert!(session_shell_line(&session, &home, true, true).is_err());
             }
             let default_home = SessionHome {
                 path: root.path().join(directory),

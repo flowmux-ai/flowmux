@@ -58,6 +58,8 @@ be opened again from that tab. The session ID remains visible for manual use.
 Right-click an identified, idle Claude Code, Codex, or OpenCode terminal and
 choose **Fork session** to split that pane into left and right halves. The
 original session stays on the left; the new native session opens on the right.
+Forked sessions start in YOLO mode, using the provider's automatic approval
+option (and disabling Codex's sandbox).
 The action is disabled when the installed tool or current session cannot safely
 fork. A conversation fork shares the project directory; it does not create a Git
 branch or worktree.

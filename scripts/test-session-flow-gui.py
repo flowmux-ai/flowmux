@@ -56,7 +56,9 @@ int main(int argc, char **argv) {
         puts("--resume --fork-session");
         return 0;
     }
-    printf("fixture-pid:%d\n❯ \n", getpid());
+    printf("fixture-pid:%d\n", getpid());
+    for (int i = 1; i < argc; i++) printf("fixture-arg:%s\n", argv[i]);
+    puts("❯ ");
     fflush(stdout);
     while (getchar() != EOF) {}
     return 0;
@@ -111,7 +113,7 @@ int main(int argc, char **argv) {
                     return node
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
 
-        def menu_enabled():
+        def menu_enabled(activate=False):
             # Native input needs a mapped X window, not a particular accessibility role.
             bounds = window.get_geometry()
             point = connection.screen().root.translate_coords(
@@ -123,9 +125,12 @@ int main(int argc, char **argv) {
             connection.sync()
             button = gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fork session"), "Fork menu")
             enabled = button.get_state_set().contains(Atspi.StateType.SENSITIVE)
-            code = connection.keysym_to_keycode(XK.string_to_keysym("Escape"))
-            xtest.fake_input(connection, X.KeyPress, code)
-            xtest.fake_input(connection, X.KeyRelease, code)
+            if activate and enabled:
+                assert button.get_action_iface().do_action(0)
+            else:
+                code = connection.keysym_to_keycode(XK.string_to_keysym("Escape"))
+                xtest.fake_input(connection, X.KeyPress, code)
+                xtest.fake_input(connection, X.KeyRelease, code)
             connection.sync()
             gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fork session") is None, "closed menu")
             return enabled
@@ -176,6 +181,19 @@ int main(int argc, char **argv) {
         gui.wait_for(menu_enabled, "changed session fork enabled", timeout=8)
         h.pass_check("same-pane session replacement and delayed history recover automatically")
         assert find(Atspi.Role.PUSH_BUTTON, "Fit") is None, "Session Flow was opened by the test"
+        assert menu_enabled(activate=True)
+        child = gui.wait_for(lambda: next((p for p in h.workspace(socket, workspace)["panes"]
+                                          if p["id"] != pane), None), "fork pane")
+        child_pid = gui.wait_for(lambda: re.search(r"fixture-pid:(\d+)",
+                                                  h.screen(socket, child["id"])), "fork agent")
+        assert int(child_pid.group(1)) != pid
+        arguments = re.findall(r"fixture-arg:([^\r\n]+)", h.screen(socket, child["id"]))
+        assert arguments == ["--resume", second, "--fork-session",
+                             "--allow-dangerously-skip-permissions",
+                             "--permission-mode", "bypassPermissions"], arguments
+        assert gui.alive(pid), "fork stopped the source agent"
+        assert f"fixture-pid:{pid}" in h.screen(socket, pane)
+        h.pass_check("Fork launches a new YOLO agent in a split pane and preserves the source")
         button = gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Session Flow"), "Flow button")
         assert button.get_action_iface().do_action(0)
         gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "opened Session Flow")
