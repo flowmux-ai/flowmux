@@ -2948,9 +2948,7 @@ async fn gemini_running_hook_with_before_agent_event_starts_turn() {
         &AgentHookEvent::Running {
             pane: Some(pane),
             surface: Some(surface),
-            args: vec![
-                r#"{"session_id":"session-gemini","hook_event_name":"BeforeAgent"}"#.into(),
-            ],
+            args: vec![r#"{"session_id":"session-gemini","hook_event_name":"BeforeAgent"}"#.into()],
         },
         Some(socket),
     )

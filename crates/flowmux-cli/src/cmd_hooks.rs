@@ -1490,12 +1490,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                     }
                 };
                 reqs.push(build_agent_lifecycle_update(
-                    &agent,
-                    pid,
-                    pane,
-                    surface,
-                    session_id,
-                    lifecycle,
+                    &agent, pid, pane, surface, session_id, lifecycle,
                 ));
             } else {
                 reqs.push(build_activity_update_with_metadata(
