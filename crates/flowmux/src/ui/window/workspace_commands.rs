@@ -156,7 +156,12 @@ impl WindowController {
                     // present so the user can edit it, otherwise show the current
                     // automatic name (`name`).
                     let prefill = ws.custom_title.as_deref().unwrap_or(&ws.name).to_string();
-                    show_rename_dialog(&self.window, id, &prefill, self.bridge.clone());
+                    show_rename_dialog(
+                        &self.workspace_window(id),
+                        id,
+                        &prefill,
+                        self.bridge.clone(),
+                    );
                 }
             }
             GtkCommand::ShowColorDialog { id } => {

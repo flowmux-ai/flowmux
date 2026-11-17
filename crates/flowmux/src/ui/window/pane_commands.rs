@@ -352,13 +352,11 @@ impl WindowController {
             },
             GtkCommand::ShowRenameSurfaceDialog { pane, surface } => {
                 if let Some(title) = self.store.surface_title(pane, surface).await {
-                    show_rename_surface_dialog(
-                        &self.window,
-                        pane,
-                        surface,
-                        &title,
-                        self.bridge.clone(),
-                    );
+                    let workspace = self.store.workspace_of_pane(pane).await;
+                    let window = workspace
+                        .map(|id| self.workspace_window(id))
+                        .unwrap_or_else(|| self.window.clone());
+                    show_rename_surface_dialog(&window, pane, surface, &title, self.bridge.clone());
                 }
             }
             GtkCommand::ReorderSurface {

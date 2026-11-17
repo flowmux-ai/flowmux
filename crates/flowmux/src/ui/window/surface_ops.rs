@@ -441,6 +441,14 @@ impl WindowController {
             .unwrap_or_else(|| self.stack.clone())
     }
 
+    pub(super) fn workspace_window(&self, workspace: WorkspaceId) -> adw::ApplicationWindow {
+        self.detached_workspaces
+            .borrow()
+            .get(&workspace)
+            .map(|host| host.window.clone())
+            .unwrap_or_else(|| self.window.clone())
+    }
+
     pub(super) fn upsert_workspace_sidebar(&self, workspace: &Workspace) {
         self.sidebar.upsert(workspace);
         if let Some(host) = self.detached_workspaces.borrow().get(&workspace.id) {
@@ -1344,6 +1352,24 @@ mod tests {
         let dst = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
         let detached_ws = c.pane_registry.borrow().workspace_of_pane(dst).unwrap();
         let window = c.detached_workspaces.borrow()[&detached_ws].window.clone();
+        assert_eq!(
+            c.pane_registry.borrow().surface_tabs[&dst]
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![surface],
+            "tear-off must not create a tab outside the model"
+        );
+        assert_eq!(
+            c.pane_registry
+                .borrow()
+                .stack_for_pane(dst)
+                .unwrap()
+                .pages()
+                .n_items(),
+            1
+        );
+        assert_eq!(c.pane_registry.borrow().terminals.len(), 2);
         wait_for("detached terminal mapped", || terminal.widget.is_mapped()).await;
         assert_eq!(terminal.pid.get(), Some(pid));
         assert_eq!(
@@ -1448,6 +1474,130 @@ mod tests {
         .await;
         assert!(flowmux_procmon::pid_alive(pid as u32));
         assert_eq!(terminal.pid.get(), Some(pid));
+        c.window.destroy();
+    }
+
+    #[gtk::test]
+    async fn detached_tab_rename_dialog_belongs_to_its_window() {
+        let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let (c, workspace, pane) =
+            setup("com.flowmux.App.UiTest.DetachedRename", root.path()).await;
+        let (_, surface) = c
+            .store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(workspace, pane, surface, None)
+            .await
+            .unwrap();
+        c.tear_off_surface(pane, surface).await;
+        let dst = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+        let detached_ws = c.pane_registry.borrow().workspace_of_pane(dst).unwrap();
+        let window = c.detached_workspaces.borrow()[&detached_ws].window.clone();
+        let button = c.pane_registry.borrow().surface_tabs[&dst]
+            .iter()
+            .find(|(id, _)| *id == surface)
+            .unwrap()
+            .1
+            .first_child()
+            .and_downcast::<gtk::Button>()
+            .unwrap();
+        button.emit_clicked();
+        button.emit_clicked();
+        wait_for("tab rename dialog", || {
+            window.visible_dialog().is_some() || c.window.visible_dialog().is_some()
+        })
+        .await;
+        assert!(
+            c.window.visible_dialog().is_none(),
+            "double-clicking a detached tab must not open a dialog in the source window"
+        );
+        let dialog = window
+            .visible_dialog()
+            .unwrap()
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        assert_eq!(dialog.heading().as_deref(), Some("Rename Pane Tab"));
+        dialog
+            .extra_child()
+            .unwrap()
+            .downcast::<gtk::Entry>()
+            .unwrap()
+            .set_text("Detached tab");
+        glib::timeout_future(Duration::from_millis(300)).await;
+        let mut pending = vec![dialog.clone().upcast::<gtk::Widget>()];
+        let mut accepted = false;
+        while let Some(widget) = pending.pop() {
+            if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+                if button.label().as_deref() == Some("OK") {
+                    button.emit_clicked();
+                    accepted = true;
+                    break;
+                }
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                pending.push(widget);
+            }
+        }
+        assert!(accepted, "rename confirmation button must exist");
+        wait_for("tab rename dialog closed", || {
+            window.visible_dialog().is_none()
+        })
+        .await;
+        glib::future_with_timeout(Duration::from_secs(5), async {
+            while c.store.surface_title(dst, surface).await.as_deref() != Some("Detached tab") {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // The side-panel workspace's double-click uses a separate rename command.
+        c.dispatch(GtkCommand::ShowRenameDialog {
+            id: Some(detached_ws),
+        })
+        .await;
+        assert!(c.window.visible_dialog().is_none());
+        let dialog = window
+            .visible_dialog()
+            .unwrap()
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        assert_eq!(dialog.heading().as_deref(), Some("Rename Tab"));
+        glib::timeout_future(Duration::from_millis(300)).await;
+        dialog.close();
+        wait_for("workspace rename cancelled", || {
+            window.visible_dialog().is_none()
+        })
+        .await;
+        c.return_surface_to_main_window(dst, surface).await.unwrap();
+        assert!(c.detached_workspaces.borrow().is_empty());
+        let pane = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+        c.dispatch(GtkCommand::ShowRenameSurfaceDialog { pane, surface })
+            .await;
+        let dialog = c
+            .window
+            .visible_dialog()
+            .unwrap()
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        assert_eq!(
+            dialog
+                .extra_child()
+                .unwrap()
+                .downcast::<gtk::Entry>()
+                .unwrap()
+                .text(),
+            "Detached tab"
+        );
+        glib::timeout_future(Duration::from_millis(300)).await;
+        dialog.close();
+        wait_for("main window rename cancelled", || {
+            c.window.visible_dialog().is_none()
+        })
+        .await;
         c.window.destroy();
     }
 

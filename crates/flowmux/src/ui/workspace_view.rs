@@ -1767,7 +1767,7 @@ fn build_leaf_pane(
     // The File browser toggle lives in the side-panel footer (next to the
     // Options button), not in the per-pane tool row.
 
-    if !empty {
+    if !surfaces.is_empty() {
         stack.set_visible_child_name(&active.to_string());
     }
     tabbar.append(&tab_scroll);
@@ -1836,7 +1836,7 @@ fn build_leaf_pane(
             add_browser,
         );
         r.pane_workspace.insert(pane_id, workspace);
-        if !empty {
+        if !surfaces.is_empty() {
             r.activate_surface(pane_id, active);
         }
         r.refresh_tab_multi_class(pane_id);
@@ -1850,16 +1850,12 @@ fn materialize_surfaces(
     fallback_cwd: Option<std::path::PathBuf>,
 ) -> Vec<PaneSurface> {
     match content {
-        PaneContent::Tabs { surfaces, .. } if !surfaces.is_empty() => surfaces.clone(),
+        PaneContent::Tabs { surfaces, .. } => surfaces.clone(),
         PaneContent::Terminal { .. } => vec![PaneSurface::terminal(
             terminal_tab_title_for_cwd(fallback_cwd.as_deref()),
             fallback_cwd,
         )],
         PaneContent::Browser { url } => vec![PaneSurface::browser("Browser", url.clone())],
-        PaneContent::Tabs { .. } => vec![PaneSurface::terminal(
-            terminal_tab_title_for_cwd(fallback_cwd.as_deref()),
-            fallback_cwd,
-        )],
     }
 }
 
