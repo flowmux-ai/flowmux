@@ -345,8 +345,8 @@ impl WindowController {
             .get_workspace(ws_id)
             .await
             .ok_or_else(|| format!("workspace no longer exists: {ws_id}"))?;
-        let workspace_visible =
-            self.stack.visible_child_name().as_deref() == Some(ws.id.to_string().as_str());
+        let workspace_visible = self.workspace_stack(ws_id).visible_child_name().as_deref()
+            == Some(ws.id.to_string().as_str());
         let surface = ws
             .surfaces
             .iter()
@@ -433,295 +433,47 @@ impl WindowController {
             ))
         }
     }
-    pub(super) fn build_torn_off_pane(
-        torn: TornOffSurface,
-        title: &str,
-        window_ref: Rc<RefCell<Option<glib::WeakRef<adw::ApplicationWindow>>>>,
-    ) -> gtk::Widget {
-        let frame = gtk::Frame::new(None);
-        frame.add_css_class("flowmux-pane");
-        frame.set_hexpand(true);
-        frame.set_vexpand(true);
-
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.set_hexpand(true);
-        root.set_vexpand(true);
-
-        let tabbar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        tabbar.add_css_class("flowmux-pane-tabbar");
-
-        let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        tabs.add_css_class("flowmux-pane-tabs");
-        tabs.set_hexpand(false);
-
-        let tab = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        tab.add_css_class("flowmux-pane-tab");
-        tab.add_css_class("active");
-
-        let button = gtk::Button::new();
-        button.add_css_class("flat");
-        button.add_css_class("flowmux-pane-tab-main");
-        button.set_tooltip_text(Some(title));
-        button.set_focus_on_click(false);
-
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let icon_name = match torn.kind {
-            SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. } => {
-                "utilities-terminal-symbolic"
-            }
-            SurfaceKind::Browser { .. } => "web-browser-symbolic",
-            SurfaceKind::Editor { .. } => "text-x-generic-symbolic",
-        };
-        row.append(&gtk::Image::from_icon_name(icon_name));
-        let label = gtk::Label::new(Some(title));
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(18);
-        label.set_tooltip_text(Some(title));
-        row.append(&label);
-        button.set_child(Some(&row));
-
-        let focus_for_tab = torn.focus.clone();
-        let editor_for_tab = torn.editor.clone();
-        button.connect_clicked(move |_| {
-            if let Some(editor) = &editor_for_tab {
-                editor.grab_focus();
-            } else {
-                focus_for_tab.grab_focus();
-            }
-        });
-        tab.append(&button);
-
-        let close = gtk::Button::from_icon_name("window-close-symbolic");
-        close.add_css_class("flat");
-        close.add_css_class("flowmux-pane-tab-close");
-        close.set_tooltip_text(Some("Close tab"));
-        close.set_focus_on_click(false);
-        let window_ref_for_close = window_ref.clone();
-        close.connect_clicked(move |_| {
-            if let Some(window) = window_ref_for_close
-                .borrow()
-                .as_ref()
-                .and_then(|window| window.upgrade())
-            {
-                window.close();
-            }
-        });
-        tab.append(&close);
-        tabs.append(&tab);
-
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_hexpand(true);
-
-        let tools = gtk::Box::new(gtk::Orientation::Horizontal, 1);
-        tools.add_css_class("flowmux-pane-tools");
-        for (icon, tooltip) in [
-            ("view-fullscreen-symbolic", "Maximize or restore pane"),
-            ("flowmux-split-right-symbolic", "Split right"),
-            ("flowmux-split-down-symbolic", "Split down"),
-            ("tab-new-symbolic", "Add tab"),
-            ("web-browser-symbolic", "Add browser tab"),
-        ] {
-            let button = gtk::Button::from_icon_name(icon);
-            button.add_css_class("flat");
-            button.add_css_class("flowmux-pane-tool");
-            button.set_tooltip_text(Some(tooltip));
-            button.set_focus_on_click(false);
-            button.set_sensitive(false);
-            tools.append(&button);
-        }
-
-        let stack = gtk::Stack::new();
-        stack.set_hexpand(true);
-        stack.set_vexpand(true);
-        stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-        stack.add_named(&torn.content, Some(&torn.surface.to_string()));
-        stack.set_visible_child_name(&torn.surface.to_string());
-
-        tabbar.append(&tabs);
-        tabbar.append(&spacer);
-        tabbar.append(&tools);
-        root.append(&tabbar);
-        root.append(&stack);
-        frame.set_child(Some(&root));
-        frame.upcast()
+    pub(super) fn workspace_stack(&self, workspace: WorkspaceId) -> gtk::Stack {
+        self.detached_workspaces
+            .borrow()
+            .get(&workspace)
+            .map(|host| host.stack.clone())
+            .unwrap_or_else(|| self.stack.clone())
     }
-    pub(super) fn present_torn_off_surface(&self, app: &gtk::Application, torn: TornOffSurface) {
-        let title = match torn.title.trim() {
-            "" => "flowmux".to_string(),
-            title => title.to_string(),
-        };
-        let window_title = format!("flowmux - {title}");
 
-        let workspace_id = WorkspaceId::new();
-        let pane_surface = PaneSurface {
-            id: torn.surface,
-            title: title.clone(),
-            title_locked: false,
-            kind: torn.kind.clone(),
-            scrollback: None,
-            agent: None,
-        };
-        let workspace = Workspace {
-            id: workspace_id,
-            name: title.clone(),
-            custom_title: None,
-            location: flowmux_core::WorkspaceLocation::Local {
-                root_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
-            },
-            git: None,
-            listening_ports: Vec::new(),
-            surfaces: vec![Surface {
-                id: torn.surface,
-                kind: torn.kind.clone(),
-                title: title.clone(),
-                root_pane: Pane::Leaf {
-                    id: torn.pane,
-                    content: PaneContent::Tabs {
-                        active: torn.surface,
-                        surfaces: vec![pane_surface],
-                    },
-                },
-            }],
-            color: None,
-        };
+    pub(super) fn upsert_workspace_sidebar(&self, workspace: &Workspace) {
+        self.sidebar.upsert(workspace);
+        if let Some(host) = self.detached_workspaces.borrow().get(&workspace.id) {
+            host.sidebar.upsert(workspace);
+        }
+    }
 
-        let (sidebar_bridge, _sidebar_rx) = Bridge::new();
-        let window_ref: Rc<RefCell<Option<glib::WeakRef<adw::ApplicationWindow>>>> =
-            Rc::new(RefCell::new(None));
-        let window_ref_for_sidebar = window_ref.clone();
-        let sidebar = Sidebar::new(
-            |_| {},
-            move |_| {
-                if let Some(window) = window_ref_for_sidebar
-                    .borrow()
-                    .as_ref()
-                    .and_then(|window| window.upgrade())
-                {
-                    window.close();
-                }
-            },
-            {
-                let bridge = sidebar_bridge.clone();
-                move || {
-                    bridge.send_from_ui(GtkCommand::ShowSshDialog);
-                }
-            },
-            sidebar_bridge,
-            NotificationStore::new(),
-            ActivityStore::new(),
-            self.notifications.tokio_handle(),
-            self.options.borrow().agent_bar_mode,
-        );
-        sidebar.upsert(&workspace);
-        sidebar.select_workspace(workspace_id);
-
-        let stack = gtk::Stack::new();
-        stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-        stack.set_hexpand(true);
-        stack.set_vexpand(true);
-
-        let focus = torn.focus.clone();
-        let pane_id = torn.pane;
-        let surface_id = torn.surface;
-        let editor = torn.editor.clone();
-        let terminal = torn.terminal.clone();
-        let editor_for_focus = editor.clone();
-        let pane = Self::build_torn_off_pane(torn, &title, window_ref.clone());
-        stack.add_named(&pane, Some(&workspace_id.to_string()));
-        stack.set_visible_child_name(&workspace_id.to_string());
-
-        let sidebar_pos = match self.sidebar_split.position() {
-            pos if pos > 0 => pos,
-            _ => 260,
-        };
-        let split = build_split_window_shell(&sidebar, &stack, sidebar_pos);
-
-        let content_overlay = gtk::Overlay::new();
-        content_overlay.set_child(Some(&split));
-
-        let window = adw::ApplicationWindow::builder()
-            .application(app)
-            .default_width(1280)
-            .default_height(800)
-            .icon_name(crate::APP_ID)
-            .title(&window_title)
-            .build();
-        set_window_content(&window, &content_overlay);
-        *window_ref.borrow_mut() = Some(window.downgrade());
-        if let Some(terminal) = terminal {
-            self.torn_off_terminals.borrow_mut().insert(
-                surface_id,
+    pub(super) fn refresh_detached_terminals(&self) {
+        let registry = self.pane_registry.borrow();
+        let windows = self.detached_workspaces.borrow();
+        let mut terminals = self.torn_off_terminals.borrow_mut();
+        terminals.clear();
+        if windows.is_empty() {
+            return;
+        }
+        for (surface, terminal) in &registry.terminals {
+            let Some(workspace) = registry.surface_workspace.get(surface) else {
+                continue;
+            };
+            let Some(host) = windows.get(workspace) else {
+                continue;
+            };
+            terminals.insert(
+                *surface,
                 termination_dialog::TornOffTerminal {
-                    window: window.downgrade(),
-                    title: title.clone(),
+                    window: host.window.downgrade(),
+                    title: registry.surface_title_text(*surface).unwrap_or_default(),
                     pid: terminal.pid.clone(),
                 },
             );
-            // The widget alone does not own the PTY; release it on either close path.
-            let terminal = Rc::new(RefCell::new(Some(terminal)));
-            let terminal_for_close = terminal.clone();
-            let torn_off = self.torn_off_terminals.clone();
-            window.connect_close_request(move |_| {
-                torn_off.borrow_mut().remove(&surface_id);
-                if let Some(terminal) = terminal_for_close.borrow_mut().take() {
-                    terminal.close_pty();
-                }
-                glib::Propagation::Proceed
-            });
-            let torn_off = self.torn_off_terminals.clone();
-            window.connect_destroy(move |_| {
-                torn_off.borrow_mut().remove(&surface_id);
-                if let Some(terminal) = terminal.borrow_mut().take() {
-                    terminal.close_pty();
-                }
-            });
         }
-        if let Some(editor) = editor {
-            let approved = Rc::new(Cell::new(false));
-            let prompting = Rc::new(Cell::new(false));
-            let editor_for_close = editor.clone();
-            let approved_for_close = approved.clone();
-            let prompting_for_close = prompting.clone();
-            window.connect_close_request(move |window| {
-                if approved_for_close.get() {
-                    editor_for_close.prepare_for_close();
-                    return glib::Propagation::Proceed;
-                }
-                if prompting_for_close.get() {
-                    return glib::Propagation::Stop;
-                }
-                prompting_for_close.set(true);
-                let window = window.clone();
-                let editor = editor_for_close.clone();
-                let approved = approved_for_close.clone();
-                let prompting = prompting_for_close.clone();
-                glib::spawn_future_local(async move {
-                    let should_close = confirm_dirty_editor_close(&window, vec![editor]).await;
-                    prompting.set(false);
-                    if should_close {
-                        approved.set(true);
-                        window.close();
-                    }
-                });
-                glib::Propagation::Stop
-            });
-        }
-        window.present();
-
-        glib::idle_add_local_once(move || {
-            if let Some(editor) = editor_for_focus {
-                editor.grab_focus();
-            } else {
-                focus.grab_focus();
-            }
-        });
-        tracing::info!(
-            pane = %pane_id,
-            surface = %surface_id,
-            title = %title,
-            "tore tab off into flowmux window"
-        );
     }
+
     /// Run on the native GTK main thread with an isolated controller and state.
     #[cfg(all(test, feature = "native-smoke"))]
     pub(crate) async fn check_terminal_tearoff(&self, root: &std::path::Path) {
@@ -812,7 +564,7 @@ impl WindowController {
                 .find(|window| !previous_windows.contains(window))
                 .expect("tear-off must present a new window");
             wait_for("torn terminal mapped", || widget.is_mapped()).await;
-            assert!(!self.pane_registry.borrow().terminals.contains_key(&surface));
+            assert!(self.pane_registry.borrow().terminals.contains_key(&surface));
             // Exceed the PTY reaper grace period; stale screen text is not liveness.
             glib::timeout_future(Duration::from_secs(6)).await;
             assert_eq!(pid_cell.get(), Some(pid), "tear-off killed the terminal");
@@ -839,66 +591,194 @@ impl WindowController {
         println!("MACOS_NATIVE_TERMINAL_TEAROFF_OK");
     }
 
+    async fn move_surface_to_new_workspace(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Result<(WorkspaceId, PaneId), String> {
+        let source = self
+            .store
+            .workspace_of_pane(pane)
+            .await
+            .ok_or("source pane no longer exists")?;
+        let ws = self
+            .store
+            .get_workspace(source)
+            .await
+            .ok_or("source workspace no longer exists")?;
+        if ws.location.ssh().is_some() {
+            return Err("Moving SSH tabs to another window is not supported".into());
+        }
+        let title = self
+            .store
+            .surface_title(pane, surface)
+            .await
+            .ok_or("source tab no longer exists")?;
+        // Render an empty destination so the move adopts the live backend without spawning a shell.
+        let workspace = self
+            .store
+            .create_workspace(
+                Some(title),
+                ws.local_root()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("/")),
+            )
+            .await;
+        let mut destination = self.store.get_workspace(workspace).await.unwrap();
+        let dst_pane = destination.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let placeholder = destination.surfaces[0]
+            .root_pane
+            .active_surface_id(dst_pane)
+            .unwrap();
+        destination.surfaces[0].root_pane = Pane::Leaf {
+            id: dst_pane,
+            content: PaneContent::Tabs {
+                active: surface,
+                surfaces: Vec::new(),
+            },
+        };
+        self.render_workspace_with_activation(&destination, false);
+        if let Err(error) = self.move_surface(pane, surface, None, dst_pane, 0).await {
+            if self.store.surface_title(dst_pane, surface).await.is_none() {
+                self.store.remove_workspace(workspace).await;
+                self.drop_workspace(workspace);
+                return Err(error);
+            }
+            // A committed move must survive a rendering failure, including its live backend.
+            tracing::warn!(%error, "tab moved but destination rendering needs recovery");
+        }
+        self.store.close_surface(dst_pane, placeholder).await;
+        Ok((workspace, dst_pane))
+    }
+
+    pub(super) async fn return_surface_to_main_window(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Result<(), String> {
+        if self.window_close.approved.get() {
+            return Err("The main window has closed".into());
+        }
+        let visible = self
+            .stack
+            .visible_child_name()
+            .and_then(|name| name.parse::<WorkspaceId>().ok());
+        let target = visible
+            .filter(|id| self.surfaces.borrow().contains_key(id))
+            .or_else(|| {
+                self.surfaces
+                    .borrow()
+                    .keys()
+                    .find(|id| !self.detached_workspaces.borrow().contains_key(id))
+                    .copied()
+            });
+        let workspace = if let Some(workspace) = target {
+            self.move_surface_to_workspace(pane, surface, workspace)
+                .await?;
+            workspace
+        } else {
+            self.move_surface_to_new_workspace(pane, surface).await?.0
+        };
+        self.activate_workspace(workspace).await;
+        self.window.present();
+        Ok(())
+    }
+
     pub(super) async fn tear_off_surface(&self, pane: PaneId, surface: SurfaceId) {
         let Some(app) = self.window.application() else {
-            tracing::warn!(%pane, %surface, "tab tear-off skipped: window has no application");
             return;
         };
         let Some(title) = self.store.surface_title(pane, surface).await else {
-            tracing::warn!(%pane, %surface, "tab tear-off skipped: surface not found in store");
             return;
         };
-        if let Err(error) =
-            crate::ui::workspace_view::materialize_surface(&self.pane_registry, surface)
-        {
-            tracing::warn!(%error, "cannot materialize tab for tear-off");
-            return;
-        }
-        let Some(torn) = self
-            .pane_registry
-            .borrow_mut()
-            .take_surface_for_tearoff(pane, surface, &title)
-        else {
-            tracing::warn!(%pane, %surface, "tab tear-off skipped: surface widget not found");
-            return;
+        let (workspace, dst_pane) = match self.move_surface_to_new_workspace(pane, surface).await {
+            Ok(destination) => destination,
+            Err(error) => {
+                tracing::warn!(%error, "tab tear-off rejected");
+                return;
+            }
         };
-
-        self.present_torn_off_surface(&app, torn);
-        match self.store.close_surface(pane, surface).await {
-            None => {
-                tracing::warn!(
-                    %pane,
-                    %surface,
-                    "tab tear-off moved widget but store no longer had the surface"
-                );
+        let widget = self.surfaces.borrow()[&workspace].clone();
+        self.stack.remove(&widget);
+        let stack = gtk::Stack::new();
+        stack.set_hexpand(true);
+        stack.set_vexpand(true);
+        stack.add_named(&widget, Some(&workspace.to_string()));
+        let window = adw::ApplicationWindow::builder()
+            .application(&app)
+            .default_width(1280)
+            .default_height(800)
+            .icon_name(crate::APP_ID)
+            .title(format!("Flowmux - {title}"))
+            .build();
+        window.set_widget_name("flowmux-detached-window");
+        let select_bridge = self.bridge.clone();
+        let close_bridge = self.bridge.clone();
+        let ssh_bridge = self.bridge.clone();
+        let sidebar = Sidebar::new(
+            move |id| select_bridge.send_from_ui(GtkCommand::ActivateWorkspace { id, ack: None }),
+            move |id| {
+                let (ack, _) = oneshot::channel();
+                close_bridge.send_from_ui(GtkCommand::RemoveWorkspace {
+                    id,
+                    confirm: true,
+                    ack,
+                });
+            },
+            move || ssh_bridge.send_from_ui(GtkCommand::ShowSshDialog),
+            self.bridge.clone(),
+            std::ops::Deref::deref(&self.notifications).clone(),
+            self.activities.clone(),
+            self.notifications.tokio_handle(),
+            self.options.borrow().agent_bar_mode,
+        );
+        sidebar.upsert(&self.store.get_workspace(workspace).await.unwrap());
+        sidebar.select_workspace(workspace);
+        let split =
+            build_split_window_shell(&sidebar, &stack, self.sidebar_split.position().max(260));
+        set_window_content(&window, &split);
+        self.detached_workspaces.borrow_mut().insert(
+            workspace,
+            DetachedWorkspace {
+                window: window.clone(),
+                stack,
+                sidebar,
+            },
+        );
+        self.refresh_detached_terminals();
+        crate::keybindings::install_actions_for_window(self, self.bridge.clone(), &window);
+        let windows = Rc::downgrade(&self.detached_workspaces);
+        let bridge = self.bridge.clone();
+        window.connect_close_request(move |window| {
+            if let Some(windows) = windows.upgrade() {
+                let workspaces = windows
+                    .borrow()
+                    .iter()
+                    .filter(|(_, host)| host.window == *window)
+                    .map(|(id, _)| *id)
+                    .collect();
+                bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
             }
-            Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { workspace }) => {
-                self.drop_workspace(workspace);
-                self.activate_active_or_show_empty().await;
-            }
-            Some(flowmux_daemon::CloseOutcome::SurfaceRemoved { workspace }) => {
-                if let Some(ws) = self.store.get_workspace(workspace).await {
-                    if let Some(active) = ws
-                        .surfaces
-                        .iter()
-                        .find_map(|s| s.root_pane.active_surface_id(pane))
-                    {
-                        self.pane_registry
-                            .borrow_mut()
-                            .activate_surface(pane, active);
-                    }
-                    self.refresh_workspace_solo(&ws);
+            glib::Propagation::Stop
+        });
+        let windows = Rc::downgrade(&self.detached_workspaces);
+        let bridge = self.bridge.clone();
+        window.connect_destroy(move |window| {
+            if let Some(windows) = windows.upgrade() {
+                let workspaces = windows
+                    .borrow()
+                    .iter()
+                    .filter(|(_, host)| host.window == *window)
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>();
+                if !workspaces.is_empty() {
+                    bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
                 }
-                self.refresh_window_title().await;
-                self.sync_workspace_agent_status_from_store(workspace).await;
             }
-            Some(flowmux_daemon::CloseOutcome::PaneRemoved { workspace }) => {
-                self.apply_close_pane_incremental_or_rerender(workspace, pane)
-                    .await;
-                self.focus_after_close(workspace, pane).await;
-                self.sync_workspace_agent_status_from_store(workspace).await;
-            }
-        }
+        });
+        self.show_status_when_empty();
+        window.present();
+        self.focus_pane(dst_pane);
     }
     /// Move a live surface tab into another pane (`dst_pane`), preserving its
     /// terminal/browser state by re-parenting the existing widget rather than
@@ -999,6 +879,7 @@ impl WindowController {
                 .await;
         }
 
+        self.refresh_detached_terminals();
         if outcome.src_workspace_removed {
             self.drop_workspace(outcome.src_workspace);
             self.activate_active_or_show_empty().await;
@@ -1373,6 +1254,7 @@ impl WindowController {
             }
         }
 
+        self.refresh_detached_terminals();
         if outcome.src_workspace_removed {
             self.drop_workspace(outcome.src_workspace);
             self.activate_active_or_show_empty().await;
@@ -1404,6 +1286,304 @@ impl WindowController {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    async fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while !ready() {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out: {description}"));
+    }
+
+    async fn setup(name: &str, root: &std::path::Path) -> (WindowController, WorkspaceId, PaneId) {
+        adw::init().unwrap();
+        let store = StateStore::new_lazy(flowmux_state::State::default());
+        let workspace = store
+            .create_workspace(Some("Main".into()), root.into())
+            .await;
+        let ws = store.get_workspace(workspace).await.unwrap();
+        let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, rx) = Bridge::new();
+        let app = adw::Application::builder().application_id(name).build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store,
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        crate::keybindings::install_actions(&controller, controller.bridge.clone());
+        controller.render_workspace(&ws);
+        controller.window.present();
+        spawn_dispatch_loop(rx, controller.clone());
+        (controller, workspace, pane)
+    }
+
+    #[gtk::test]
+    async fn detached_window_moves_live_tabs_splits_and_creates_workspaces() {
+        use vte::prelude::*;
+        let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let (c, workspace, pane) =
+            setup("com.flowmux.App.UiTest.DetachedWindows", root.path()).await;
+        let (_, surface) = c
+            .store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(workspace, pane, surface, None)
+            .await
+            .unwrap();
+        let terminal = c.pane_registry.borrow().terminals[&surface].clone();
+        let pid = terminal.pid.get().unwrap();
+        c.tear_off_surface(pane, surface).await;
+        let dst = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+        let detached_ws = c.pane_registry.borrow().workspace_of_pane(dst).unwrap();
+        let window = c.detached_workspaces.borrow()[&detached_ws].window.clone();
+        wait_for("detached terminal mapped", || terminal.widget.is_mapped()).await;
+        assert_eq!(terminal.pid.get(), Some(pid));
+        assert_eq!(
+            terminal
+                .widget
+                .root()
+                .and_downcast::<adw::ApplicationWindow>(),
+            Some(window.clone())
+        );
+        terminal.widget.feed_child(b"printf 'WINDOW_%s\\n' LIVE\n");
+        wait_for("live output after tear-off", || {
+            terminal
+                .widget
+                .text_format(vte::Format::Text)
+                .is_some_and(|text| text.contains("WINDOW_LIVE"))
+        })
+        .await;
+        assert!(c.pane_in_visible_workspace(dst));
+        assert_eq!(
+            c.focused_pane.get(),
+            Some(dst),
+            "detached tab must own focus before its split action"
+        );
+        window.lookup_action("split-right").unwrap().activate(None);
+        wait_for("split action in detached window", || {
+            c.pane_registry
+                .borrow()
+                .pane_ids_in_workspace(detached_ws)
+                .count()
+                == 2
+        })
+        .await;
+        assert_eq!(
+            c.pane_registry.borrow().terminals[&surface].pid.get(),
+            Some(pid)
+        );
+        window
+            .lookup_action("new-workspace")
+            .unwrap()
+            .activate(None);
+        wait_for("new workspace in detached window", || {
+            c.detached_workspaces.borrow().len() == 2
+        })
+        .await;
+        assert!(c
+            .detached_workspaces
+            .borrow()
+            .values()
+            .all(|host| host.window == window));
+        c.return_surface_to_main_window(dst, surface).await.unwrap();
+        assert_eq!(
+            c.pane_registry.borrow().pane_for_surface(surface),
+            Some(pane)
+        );
+        assert_eq!(terminal.pid.get(), Some(pid));
+        assert!(
+            window.is_visible(),
+            "other workspaces must keep the detached window open"
+        );
+        let original = c.pane_registry.borrow().surface_tabs[&pane]
+            .iter()
+            .find(|(id, _)| *id != surface)
+            .unwrap()
+            .0;
+        let (ack, rx) = oneshot::channel();
+        c.dispatch(GtkCommand::CloseSurface {
+            pane,
+            surface: original,
+            ack,
+        })
+        .await;
+        rx.await.unwrap().unwrap();
+        let target = c.store.get_workspace(detached_ws).await.unwrap().surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        c.split_surface_into_pane(pane, surface, None, target, SplitDirection::Horizontal)
+            .await
+            .unwrap();
+        assert_eq!(c.stack.visible_child_name().as_deref(), Some("__empty"));
+        let moved_pane = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+        assert_eq!(
+            c.pane_registry.borrow().workspace_of_pane(moved_pane),
+            Some(detached_ws)
+        );
+        c.return_surface_to_main_window(moved_pane, surface)
+            .await
+            .unwrap();
+        // Rebuild the detached layout through its own stack, retaining its terminal.
+        let ws = c.store.get_workspace(detached_ws).await.unwrap();
+        c.rerender_workspace(&ws);
+        assert_eq!(
+            c.surfaces.borrow()[&detached_ws]
+                .root()
+                .and_downcast::<adw::ApplicationWindow>(),
+            Some(window.clone())
+        );
+        window.close();
+        wait_for("detached window closed", || {
+            c.detached_workspaces.borrow().is_empty()
+        })
+        .await;
+        assert!(flowmux_procmon::pid_alive(pid as u32));
+        assert_eq!(terminal.pid.get(), Some(pid));
+        c.window.destroy();
+    }
+
+    #[gtk::test]
+    async fn detached_browser_and_dirty_editor_keep_their_live_state() {
+        use webkit6::prelude::*;
+        let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("unsaved.txt");
+        std::fs::write(&file, "original").unwrap();
+        let (c, workspace, pane) =
+            setup("com.flowmux.App.UiTest.DetachedWebViews", root.path()).await;
+        let (_, browser_id) = c
+            .store
+            .add_browser_surface_to_pane(pane, "about:blank".into())
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(workspace, pane, browser_id, None)
+            .await
+            .unwrap();
+        let browser = c.pane_registry.borrow().browsers[&browser_id].clone();
+        async fn eval(browser: &crate::ui::browser_pane::BrowserPane, source: &str) -> String {
+            let (tx, rx) = oneshot::channel();
+            browser.evaluate_js(source, move |value| {
+                let _ = tx.send(value);
+            });
+            rx.await.unwrap().unwrap()
+        }
+        eval(&browser, "window.unsavedTabState = 'still here'").await;
+        c.tear_off_surface(pane, browser_id).await;
+        let source = c
+            .pane_registry
+            .borrow()
+            .pane_for_surface(browser_id)
+            .unwrap();
+        c.return_surface_to_main_window(source, browser_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            c.pane_registry.borrow().browsers[&browser_id].root,
+            browser.root
+        );
+        assert_eq!(eval(&browser, "window.unsavedTabState").await, "still here");
+        let (_, editor_id) = c
+            .store
+            .add_editor_surface_to_pane(pane, root.path().into())
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(workspace, pane, editor_id, None)
+            .await
+            .unwrap();
+        let editor = c.pane_registry.borrow().editors[&editor_id].clone();
+        editor.open_file(&file).await.unwrap();
+        editor.flush_pending_changes().await.unwrap();
+        editor.grab_focus();
+        let view = editor
+            .focus_widget()
+            .downcast::<webkit6::WebView>()
+            .unwrap();
+        view.execute_editing_command_with_argument("InsertText", "unsaved");
+        wait_for("dirty editor", || !editor.dirty_document_paths().is_empty()).await;
+        c.tear_off_surface(pane, editor_id).await;
+        let source = c
+            .pane_registry
+            .borrow()
+            .pane_for_surface(editor_id)
+            .unwrap();
+        let window = c
+            .detached_workspaces
+            .borrow()
+            .values()
+            .next()
+            .unwrap()
+            .window
+            .clone();
+        window.close();
+        wait_for("dirty close prompt in the detached window", || {
+            window.visible_dialog().is_some()
+        })
+        .await;
+        glib::timeout_future(Duration::from_millis(300)).await;
+        window.visible_dialog().unwrap().close();
+        wait_for("dirty close cancelled", || {
+            window.visible_dialog().is_none()
+        })
+        .await;
+        assert!(window.is_visible());
+        c.return_surface_to_main_window(source, editor_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            c.pane_registry.borrow().editors[&editor_id].root,
+            editor.root
+        );
+        assert_eq!(editor.dirty_document_paths(), vec![file.clone()]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "original");
+        editor.flush_pending_changes().await.unwrap();
+        editor.save_all_dirty().await.unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().contains("unsaved"));
+        c.window.destroy();
+    }
+
+    #[gtk::test]
+    async fn last_detached_tab_returns_to_an_empty_main_window() {
+        let _direct_pty = crate::ui::ghostty_pane::bypass_pty_tee_for_test();
+        let root = tempfile::tempdir().unwrap();
+        let (c, workspace, pane) = setup("com.flowmux.App.UiTest.DetachedEmpty", root.path()).await;
+        let surface = c.pane_registry.borrow().active_surface(pane).unwrap();
+        let terminal = c.pane_registry.borrow().terminals[&surface].clone();
+        let pid = terminal.pid.get().unwrap();
+        c.tear_off_surface(pane, surface).await;
+        assert!(c.store.get_workspace(workspace).await.is_none());
+        assert_eq!(c.stack.visible_child_name().as_deref(), Some("__empty"));
+        let dst = c.pane_registry.borrow().pane_for_surface(surface).unwrap();
+        let detached = c
+            .detached_workspaces
+            .borrow()
+            .values()
+            .next()
+            .unwrap()
+            .window
+            .clone();
+        c.return_surface_to_main_window(dst, surface).await.unwrap();
+        wait_for("restored tab mapped", || terminal.widget.is_mapped()).await;
+        assert!(c.detached_workspaces.borrow().is_empty());
+        assert!(!detached.is_visible());
+        assert_eq!(terminal.pid.get(), Some(pid));
+        assert_eq!(
+            terminal
+                .widget
+                .root()
+                .and_downcast::<adw::ApplicationWindow>(),
+            Some(c.window.clone())
+        );
+        c.window.destroy();
+    }
 
     #[gtk::test]
     async fn ssh_wrapper_split_and_close_preserve_toolbar_and_terminal_pid() {

@@ -549,6 +549,11 @@ pub enum GtkCommand {
         pane: PaneId,
         surface: SurfaceId,
     },
+    /// Return a detached tab to the source window, including an empty window.
+    ReturnSurfaceToMainWindow {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Move a pane-local surface tab into another pane (possibly in another
     /// workspace) by drag and drop. The existing GTK widget is moved, so the
     /// running terminal/browser state is preserved. `target_index` is the final
@@ -661,6 +666,10 @@ pub enum GtkCommand {
     NewWorkspace {
         team: bool,
         root: std::path::PathBuf,
+    },
+    /// Close all workspaces hosted by one detached window after checking dirty editors.
+    CloseDetachedWindow {
+        workspaces: Vec<WorkspaceId>,
     },
     /// Remove a workspace entirely (sidebar row + stack page + state).
     /// Triggered by the hover X button on a sidebar row, and by

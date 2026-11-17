@@ -20,15 +20,17 @@ use crate::ui::sidebar::{Sidebar, WorkspaceRowAgentBlock, WorkspaceRowDetails};
 use crate::ui::workspace_view::{
     attach_surface_to_pane, build_surface, build_surface_tab_widget, can_split_pane_incrementally,
     handoff_paned_focus_before_detach, restrict_paned_drag_to_handle, solo_workspace_pane,
-    split_pane_incremental, IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
+    split_pane_incremental, IncrementalSplitOutcome, MovingSurface, PaneRegistry,
 };
 use crate::ui::worktree_panel::WorktreePanel;
 use adw::prelude::*;
 use flowmux_config::cmux_json::{CmuxJson, CommandTarget, CustomCommand};
 use flowmux_core::{
-    AgentNotificationVisualFlags, Pane, PaneContent, PaneId, PaneSurface, PlacementStrategy,
-    SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    AgentNotificationVisualFlags, Pane, PaneContent, PaneId, PlacementStrategy, SplitDirection,
+    SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
+#[cfg(test)]
+use flowmux_core::{PaneSurface, Surface};
 use flowmux_daemon::StateStore;
 use flowmux_ipc::protocol::{BrowserWaitCondition, NotificationSummary};
 use gtk::glib;
@@ -71,6 +73,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
         GtkCommand::WorkspaceCreated { .. }
             | GtkCommand::NewWorkspace { .. }
             | GtkCommand::RemoveWorkspace { .. }
+            | GtkCommand::CloseDetachedWindow { .. }
             | GtkCommand::RemoveAllWorkspaces { .. }
             | GtkCommand::RenameWorkspace { .. }
             | GtkCommand::SetWorkspaceColor { .. }
@@ -96,6 +99,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ShowRenameSurfaceDialog { .. }
             | GtkCommand::ReorderSurface { .. }
             | GtkCommand::TearOffSurface { .. }
+            | GtkCommand::ReturnSurfaceToMainWindow { .. }
             | GtkCommand::MoveSurfaceToPane { .. }
             | GtkCommand::MoveSurfaceToWorkspace { .. }
             | GtkCommand::SplitSurfaceIntoPane { .. }
@@ -590,6 +594,13 @@ async fn confirm_dirty_editor_close(
 }
 
 #[derive(Clone)]
+struct DetachedWorkspace {
+    window: adw::ApplicationWindow,
+    stack: gtk::Stack,
+    sidebar: Sidebar,
+}
+
+#[derive(Clone)]
 pub struct WindowController {
     pub window: adw::ApplicationWindow,
     pub focused_pane: FocusedPane,
@@ -618,6 +629,7 @@ pub struct WindowController {
         Rc<RefCell<std::collections::VecDeque<crate::termination::TerminationReport>>>,
     termination_dialog: Rc<RefCell<Option<(SurfaceId, adw::AlertDialog)>>>,
     termination_presenting: Rc<Cell<bool>>,
+    detached_workspaces: Rc<RefCell<HashMap<WorkspaceId, DetachedWorkspace>>>,
     torn_off_terminals: Rc<RefCell<HashMap<SurfaceId, termination_dialog::TornOffTerminal>>>,
     callbacks: PaneCallbacks,
     bridge: Bridge,
@@ -1343,7 +1355,14 @@ impl WindowController {
     /// switching the stack page, which silently takes typing away.
     pub(super) fn pane_in_visible_workspace(&self, pane: PaneId) -> bool {
         let workspace = self.pane_registry.borrow().workspace_of_pane(pane);
-        workspace.is_some() && workspace == self.visible_workspace()
+        workspace.is_some_and(|id| {
+            if self.detached_workspaces.borrow().contains_key(&id) {
+                self.workspace_stack(id).visible_child_name().as_deref()
+                    == Some(id.to_string().as_str())
+            } else {
+                Some(id) == self.visible_workspace()
+            }
+        })
     }
 
     fn cancel_pane_zoom_transition(&self) {
@@ -2022,6 +2041,7 @@ impl WindowController {
             termination_reports: Rc::new(RefCell::new(std::collections::VecDeque::new())),
             termination_dialog: Rc::new(RefCell::new(None)),
             termination_presenting: Rc::new(Cell::new(false)),
+            detached_workspaces: Rc::new(RefCell::new(HashMap::new())),
             torn_off_terminals: Rc::new(RefCell::new(HashMap::new())),
             callbacks,
             bridge,
@@ -2112,13 +2132,37 @@ impl WindowController {
     }
 
     pub fn show_status_when_empty(&self) {
-        if self.surfaces.borrow().is_empty() {
+        if self
+            .surfaces
+            .borrow()
+            .keys()
+            .all(|id| self.detached_workspaces.borrow().contains_key(id))
+        {
             if self.stack.child_by_name("__empty").is_none() {
                 let status = adw::StatusPage::builder()
                     .icon_name("utilities-terminal-symbolic")
                     .title("flowmux")
                     .description("No workspaces yet")
                     .build();
+                let drop = gtk::DropTarget::new(glib::Type::STRING, gtk::gdk::DragAction::MOVE);
+                let bridge = self.bridge.clone();
+                let committed = self.callbacks.tab_drag_drop_committed.clone();
+                let seen = self.callbacks.tab_drag_drop_seen.clone();
+                drop.connect_drop(move |_, value, _, _| {
+                    let Some(payload) = value.get::<String>().ok().and_then(|value| {
+                        crate::ui::workspace_view::parse_tab_dnd_payload(&value).ok()
+                    }) else {
+                        return false;
+                    };
+                    seen.set(true);
+                    committed.set(true);
+                    bridge.send_from_ui(GtkCommand::ReturnSurfaceToMainWindow {
+                        pane: payload.src_pane,
+                        surface: payload.src_surface,
+                    });
+                    true
+                });
+                status.add_controller(drop);
                 self.stack.add_named(&status, Some("__empty"));
             }
             self.stack.set_visible_child_name("__empty");
@@ -2138,17 +2182,17 @@ impl WindowController {
         if activate {
             self.clear_pane_zoom();
         }
-        self.sidebar.upsert(ws);
+        self.upsert_workspace_sidebar(ws);
         let mut surfaces = self.surfaces.borrow_mut();
         if surfaces.contains_key(&ws.id) {
             return;
         }
         let widget = self.build_workspace_widget(ws);
         let name = ws.id.to_string();
-        self.stack.add_named(&widget, Some(&name));
+        self.workspace_stack(ws.id).add_named(&widget, Some(&name));
         surfaces.insert(ws.id, widget);
         if activate {
-            self.stack.set_visible_child_name(&name);
+            self.workspace_stack(ws.id).set_visible_child_name(&name);
         }
         drop(surfaces);
         self.refresh_workspace_solo(ws);
@@ -2165,11 +2209,12 @@ impl WindowController {
         );
         self.preserve_ssh_channels(ws.id);
         let name = ws.id.to_string();
-        let activate = self.stack.visible_child_name().as_deref() == Some(name.as_str());
+        let activate =
+            self.workspace_stack(ws.id).visible_child_name().as_deref() == Some(name.as_str());
         if activate {
             self.clear_pane_zoom();
         }
-        self.sidebar.upsert(ws);
+        self.upsert_workspace_sidebar(ws);
         {
             // Rebuild the layout around live sessions, without restarting them.
             let mut registry = self.pane_registry.borrow_mut();
@@ -2193,14 +2238,15 @@ impl WindowController {
             .discard_unused_detached_surfaces();
         let mut surfaces = self.surfaces.borrow_mut();
         if let Some(old) = surfaces.remove(&ws.id) {
-            self.stack.remove(&old);
+            self.workspace_stack(ws.id).remove(&old);
         }
-        self.stack.add_named(&new_widget, Some(&name));
+        self.workspace_stack(ws.id)
+            .add_named(&new_widget, Some(&name));
         surfaces.insert(ws.id, new_widget);
         drop(surfaces);
         self.refresh_workspace_solo(ws);
         if activate {
-            self.stack.set_visible_child_name(&name);
+            self.workspace_stack(ws.id).set_visible_child_name(&name);
             self.sidebar.select_workspace(ws.id);
             self.focus_first_leaf_of(ws);
         }
@@ -2262,7 +2308,19 @@ impl WindowController {
             review.delivery_message("Save or cancel your comment before closing this pane.");
             return false;
         }
-        confirm_dirty_editor_close(&self.window, self.editors_for_surfaces(surfaces)).await
+        let parent = {
+            let registry = self.pane_registry.borrow();
+            let windows = self.detached_workspaces.borrow();
+            surfaces
+                .iter()
+                .find_map(|surface| {
+                    windows
+                        .get(registry.surface_workspace.get(surface)?)
+                        .map(|host| host.window.clone())
+                })
+                .unwrap_or_else(|| self.window.clone())
+        };
+        confirm_dirty_editor_close(&parent, self.editors_for_surfaces(surfaces)).await
     }
 
     /// Failed startup must not look like an ordinary, persisted session.
@@ -2356,13 +2414,18 @@ impl WindowController {
             self.window_close.prompting.set(false);
             return;
         }
-        let editors = self
-            .pane_registry
+        let closing_workspaces: Vec<_> = self
+            .surfaces
             .borrow()
-            .editors
-            .values()
-            .cloned()
+            .keys()
+            .copied()
+            .filter(|id| !self.detached_workspaces.borrow().contains_key(id))
             .collect();
+        let closing_surfaces: Vec<_> = closing_workspaces
+            .iter()
+            .flat_map(|id| self.pane_registry.borrow().surface_ids_in_workspace(*id))
+            .collect();
+        let editors = self.editors_for_surfaces(&closing_surfaces);
         if !confirm_dirty_editor_close(&self.window, editors).await {
             self.window_close.prompting.set(false);
             return;
@@ -2396,18 +2459,23 @@ impl WindowController {
         self.pane_registry.borrow_mut().ssh.clear();
         // Stop loads before destruction; navigating to about:blank would start
         // another load that immediately gets cancelled during teardown.
-        for browser in self.pane_registry.borrow().browsers.values() {
-            browser.stop_loading();
+        for surface in &closing_surfaces {
+            if let Some(browser) = self.pane_registry.borrow().browsers.get(surface) {
+                browser.stop_loading();
+            }
         }
-        let editors: Vec<_> = self
-            .pane_registry
-            .borrow()
-            .editors
-            .values()
-            .cloned()
-            .collect();
+        let editors = self.editors_for_surfaces(&closing_surfaces);
         for editor in editors {
             editor.prepare_for_close();
+        }
+        if !self.detached_workspaces.borrow().is_empty() {
+            for id in closing_workspaces {
+                self.pane_registry.borrow_mut().clear_workspace(id);
+                if let Some(widget) = self.surfaces.borrow_mut().remove(&id) {
+                    self.stack.remove(&widget);
+                }
+                self.sidebar.remove(id);
+            }
         }
         let window = self.window.clone();
         // Let native WebViews unrealize before the window is destroyed.
@@ -2449,7 +2517,16 @@ impl WindowController {
             next = %next,
             "refresh_window_title"
         );
-        self.window.set_title(Some(&next));
+        let host = focused
+            .and_then(|pane| self.pane_registry.borrow().workspace_of_pane(pane))
+            .and_then(|workspace| {
+                self.detached_workspaces
+                    .borrow()
+                    .get(&workspace)
+                    .map(|host| host.window.clone())
+            })
+            .unwrap_or_else(|| self.window.clone());
+        host.set_title(Some(&next));
     }
 
     fn live_surface_copy_text(&self, surface: SurfaceId) -> Option<CopyableText> {
@@ -2556,6 +2633,9 @@ impl WindowController {
         }
 
         let details = workspace_row_details(&ws, &mru);
+        if let Some(host) = self.detached_workspaces.borrow().get(&ws.id) {
+            host.sidebar.upsert_with_details(&ws, details.clone());
+        }
         self.sidebar.upsert_with_details(&ws, details);
         self.refresh_agent_displays().await;
     }
@@ -2661,7 +2741,21 @@ impl WindowController {
         self.pane_registry.borrow_mut().clear_workspace(id);
         let mut surfaces = self.surfaces.borrow_mut();
         if let Some(old) = surfaces.remove(&id) {
-            self.stack.remove(&old);
+            self.workspace_stack(id).remove(&old);
+        }
+        drop(surfaces);
+        let detached = self.detached_workspaces.borrow_mut().remove(&id);
+        self.refresh_detached_terminals();
+        if let Some(host) = detached {
+            host.sidebar.remove(id);
+            if !self
+                .detached_workspaces
+                .borrow()
+                .values()
+                .any(|other| other.window == host.window)
+            {
+                host.window.destroy();
+            }
         }
     }
 
@@ -2790,6 +2884,7 @@ impl WindowController {
     }
 
     async fn activate_active_or_show_empty(&self) {
+        self.show_status_when_empty();
         if let Some(id) = self.store.active_or_first().await {
             if self.surfaces.borrow().contains_key(&id) {
                 self.activate_workspace(id).await;
@@ -2998,6 +3093,7 @@ impl WindowController {
             GtkCommand::WorkspaceCreated { .. }
                 | GtkCommand::NewWorkspace { .. }
                 | GtkCommand::RemoveWorkspace { .. }
+                | GtkCommand::CloseDetachedWindow { .. }
                 | GtkCommand::RemoveAllWorkspaces { .. }
                 | GtkCommand::RenameWorkspace { .. }
                 | GtkCommand::SetWorkspaceColor { .. }
@@ -3095,6 +3191,7 @@ impl WindowController {
             command @ (GtkCommand::WorkspaceCreated { .. }
             | GtkCommand::NewWorkspace { .. }
             | GtkCommand::RemoveWorkspace { .. }
+            | GtkCommand::CloseDetachedWindow { .. }
             | GtkCommand::RemoveAllWorkspaces { .. }
             | GtkCommand::RenameWorkspace { .. }
             | GtkCommand::SetWorkspaceColor { .. }
@@ -3123,6 +3220,7 @@ impl WindowController {
             | GtkCommand::ShowRenameSurfaceDialog { .. }
             | GtkCommand::ReorderSurface { .. }
             | GtkCommand::TearOffSurface { .. }
+            | GtkCommand::ReturnSurfaceToMainWindow { .. }
             | GtkCommand::MoveSurfaceToPane { .. }
             | GtkCommand::MoveSurfaceToWorkspace { .. }
             | GtkCommand::SplitSurfaceIntoPane { .. }
@@ -3183,6 +3281,7 @@ impl WindowController {
                 self.dispatch_window_chrome_command(command).await;
             }
         }
+        self.refresh_detached_terminals();
         if office_data_change && self.agent_office.borrow().is_some() {
             self.refresh_agent_displays().await;
             if let Some(office) = self.agent_office.borrow().as_ref() {
@@ -3208,7 +3307,8 @@ impl WindowController {
         // compute_bounds may return non-zero values; without the workspace
         // filter, focus could leak into another workspace.
         let workspace = registry.workspace_of_pane(from)?;
-        let stack = &self.stack;
+        let stack = self.workspace_stack(workspace);
+        let stack = &stack;
         let from_bbox = from_widget.compute_bounds(stack)?;
         let from_center = (
             from_bbox.x() + from_bbox.width() / 2.0,
@@ -3294,9 +3394,16 @@ impl WindowController {
         let remembered_pane = self.remembered_pane(id);
         self.clear_pane_zoom();
         if self.surfaces.borrow().contains_key(&id) {
-            self.stack.set_visible_child_name(&id.to_string());
+            self.workspace_stack(id)
+                .set_visible_child_name(&id.to_string());
+        }
+        if let Some(host) = self.detached_workspaces.borrow().get(&id) {
+            host.window.present();
         }
         self.sidebar.select_workspace(id);
+        if let Some(host) = self.detached_workspaces.borrow().get(&id) {
+            host.sidebar.select_workspace(id);
+        }
         self.store.set_active_workspace(Some(id)).await;
         self.sync_workspace_agent_status_from_store(id).await;
         let pane = match target.map(|(pane, _)| pane).or(remembered_pane) {
@@ -4444,7 +4551,7 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
                     },
                 }
             }
-            if controller.window_close.approved.get() {
+            if controller.window_close.approved.get() && controller.detached_workspaces.borrow().is_empty() {
                 rx.close();
                 break;
             }

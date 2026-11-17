@@ -42,11 +42,39 @@ impl WindowController {
                     })
                     .and_then(|p| p.current_dir())
                     .unwrap_or(root);
+                let active = self
+                    .window
+                    .application()
+                    .and_then(|app| app.active_window());
+                let host = self
+                    .detached_workspaces
+                    .borrow()
+                    .values()
+                    .find(|host| active.as_ref() == Some(host.window.upcast_ref()))
+                    .cloned();
                 let id = self.store.create_workspace_kind(None, resolved, team).await;
+                if let Some(host) = host {
+                    self.detached_workspaces.borrow_mut().insert(id, host);
+                }
                 if let Some(ws) = self.store.get_workspace(id).await {
                     self.render_workspace(&ws);
                     self.activate_workspace(id).await;
                 }
+            }
+            GtkCommand::CloseDetachedWindow { workspaces } => {
+                let surfaces = workspaces
+                    .iter()
+                    .flat_map(|id| self.pane_registry.borrow().surface_ids_in_workspace(*id))
+                    .collect::<Vec<_>>();
+                if !self.confirm_dirty_surfaces(&surfaces).await {
+                    return;
+                }
+                for id in workspaces {
+                    if self.store.remove_workspace(id).await {
+                        self.drop_workspace(id);
+                    }
+                }
+                self.activate_active_or_show_empty().await;
             }
             GtkCommand::RemoveWorkspace { id, confirm, ack } => {
                 if confirm && !self.confirm_close_workspace(id).await {
@@ -89,14 +117,14 @@ impl WindowController {
             GtkCommand::RenameWorkspace { id, name, ack } => {
                 self.store.rename_workspace(id, name).await;
                 if let Some(ws) = self.store.get_workspace(id).await {
-                    self.sidebar.upsert(&ws);
+                    self.upsert_workspace_sidebar(&ws);
                 }
                 let _ = ack.send(());
             }
             GtkCommand::SetWorkspaceColor { id, color, ack } => {
                 self.store.set_workspace_color(id, color).await;
                 if let Some(ws) = self.store.get_workspace(id).await {
-                    self.sidebar.upsert(&ws);
+                    self.upsert_workspace_sidebar(&ws);
                 }
                 self.refresh_agent_displays().await;
                 let _ = ack.send(());

@@ -75,6 +75,9 @@ TMPDIR=/tmp run_test session-flow python3 scripts/test-session-flow-gui.py \
 run_test pty-spawn-failure python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+run_test tab-windows python3 scripts/test-tab-windows-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 run_test terminal-read-screen python3 scripts/test-terminal-read-screen-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"

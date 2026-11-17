@@ -267,6 +267,15 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::TearOffSurface { pane, surface });
                 }))
             },
+            on_return_surface_to_main_window: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane, surface| {
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::ReturnSurfaceToMainWindow { pane, surface },
+                    );
+                }))
+            },
             on_move_surface_to_workspace: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |src_pane, surface, dst_workspace| {

@@ -24,6 +24,7 @@ impl WindowController {
             GtkCommand::SplitFocused { .. }
             | GtkCommand::FocusDirection { .. }
             | GtkCommand::TearOffSurface { .. }
+            | GtkCommand::ReturnSurfaceToMainWindow { .. }
             | GtkCommand::MoveSurfaceToPane { .. }
             | GtkCommand::MoveSurfaceToWorkspace { .. }
             | GtkCommand::SplitSurfaceIntoPane { .. } => zoomed.is_some(),
@@ -390,6 +391,11 @@ impl WindowController {
                     );
                 }
                 let _ = ack.send(Ok(()));
+            }
+            GtkCommand::ReturnSurfaceToMainWindow { pane, surface } => {
+                if let Err(error) = self.return_surface_to_main_window(pane, surface).await {
+                    tracing::warn!(%error, "tab return rejected");
+                }
             }
             GtkCommand::TearOffSurface { pane, surface } => {
                 self.tear_off_surface(pane, surface).await;

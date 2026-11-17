@@ -220,17 +220,6 @@ pub struct PaneRegistry {
     surface_focus_controllers: HashMap<SurfaceId, gtk::EventControllerFocus>,
 }
 
-pub struct TornOffSurface {
-    pub pane: PaneId,
-    pub surface: SurfaceId,
-    pub title: String,
-    pub kind: SurfaceKind,
-    pub content: gtk::Widget,
-    pub focus: gtk::Widget,
-    pub editor: Option<EditorPane>,
-    pub terminal: Option<PaneTerminal>,
-}
-
 impl PaneRegistry {
     pub fn update_deferred_theme(&mut self, theme: &Arc<ResolvedTheme>) {
         for panel in self.deferred.values_mut() {
@@ -931,11 +920,8 @@ impl PaneRegistry {
             tab.remove_css_class("flowmux-pane-tab-drop-after");
         }
         let Some((root, x, y)) = point else { return };
-        let Some(workspace) = self.pane_workspace.get(&source) else {
-            return;
-        };
         if let Some((pane, _, index, after)) = self.tab_at_root_point(root, x, y) {
-            if self.pane_workspace.get(&pane) == Some(workspace) {
+            if !self.is_ssh_pane(source) && !self.is_ssh_pane(pane) {
                 self.surface_tabs[&pane][index].1.add_css_class(if after {
                     "flowmux-pane-tab-drop-after"
                 } else {
@@ -943,7 +929,7 @@ impl PaneRegistry {
                 });
             }
         } else if let Some((pane, fx, fy)) = self.pane_at_root_point(root, x, y) {
-            if self.pane_workspace.get(&pane) == Some(workspace) {
+            if !self.is_ssh_pane(source) && !self.is_ssh_pane(pane) {
                 if let Some((preview, zone)) = self.pane_drop_previews.get(&pane) {
                     zone.set(drop_zone(fx, fy));
                     preview.queue_draw();
@@ -1096,105 +1082,6 @@ impl PaneRegistry {
             self.active_editor_by_pane.remove(&pane);
         }
         self.refresh_tab_multi_class(pane);
-    }
-
-    /// Remove one surface from its pane and return the live widget so it can be
-    /// re-parented into a standalone window. Unlike detach_surface_widget, this
-    /// preserves the surface panel instead of dropping it.
-    pub fn take_surface_for_tearoff(
-        &mut self,
-        pane: PaneId,
-        surface: SurfaceId,
-        fallback_title: &str,
-    ) -> Option<TornOffSurface> {
-        if self.is_ssh_pane(pane) {
-            return None;
-        }
-        let stack = self.surface_stacks.get(&pane)?.clone();
-        let content = stack.child_by_name(&surface.to_string())?;
-        let title = self
-            .surface_tab_labels
-            .get(&surface)
-            .map(|label| label.text().to_string())
-            .filter(|title| !title.trim().is_empty())
-            .unwrap_or_else(|| fallback_title.to_string());
-
-        if let Some(tabs) = self.surface_tabs.get_mut(&pane) {
-            if let Some(idx) = tabs.iter().position(|(id, _)| *id == surface) {
-                let (_, tab_widget) = tabs.remove(idx);
-                if let Some(parent) = tab_widget.parent() {
-                    if let Some(b) = parent.downcast_ref::<gtk::Box>() {
-                        b.remove(&tab_widget);
-                    } else {
-                        tab_widget.unparent();
-                    }
-                }
-            }
-        }
-        stack.remove(&content);
-
-        let terminal = self.terminals.remove(&surface);
-        let (focus, kind, editor) = if let Some(terminal) = &terminal {
-            (
-                terminal.root_widget(),
-                SurfaceKind::Terminal {
-                    shell: None,
-                    cwd: terminal.current_dir(),
-                },
-                None,
-            )
-        } else if let Some(browser) = self.browsers.remove(&surface) {
-            (
-                browser.focus_widget(),
-                SurfaceKind::Browser { initial_url: None },
-                None,
-            )
-        } else if let Some(editor) = self.editors.remove(&surface) {
-            self.remove_surface_focus_controller(surface);
-            let session = editor.session_state();
-            (
-                editor.focus_widget(),
-                SurfaceKind::Editor {
-                    workspace_root: editor.workspace_root().to_path_buf(),
-                    session,
-                },
-                Some(editor),
-            )
-        } else {
-            (
-                content.clone(),
-                SurfaceKind::Terminal {
-                    shell: None,
-                    cwd: None,
-                },
-                None,
-            )
-        };
-        self.surface_tab_labels.remove(&surface);
-        self.surface_workspace.remove(&surface);
-        self.deferred.remove(&surface);
-        self.surface_errors.remove(&surface);
-        if self.active_terminal_by_pane.get(&pane) == Some(&surface) {
-            self.active_terminal_by_pane.remove(&pane);
-        }
-        if self.active_browser_by_pane.get(&pane) == Some(&surface) {
-            self.active_browser_by_pane.remove(&pane);
-        }
-        if self.active_editor_by_pane.get(&pane) == Some(&surface) {
-            self.active_editor_by_pane.remove(&pane);
-        }
-        self.refresh_tab_multi_class(pane);
-
-        Some(TornOffSurface {
-            pane,
-            surface,
-            title,
-            kind,
-            content,
-            focus,
-            editor,
-            terminal,
-        })
     }
 
     /// Detach a surface from `pane` for an **in-app move**, keeping the live
@@ -2044,6 +1931,7 @@ fn attach_tab_context_menu(
     let list_workspaces = callbacks.list_workspaces.clone();
     let workspace_of_pane = callbacks.workspace_of_pane.clone();
     let on_move_to_workspace = callbacks.on_move_surface_to_workspace.clone();
+    let on_return = callbacks.on_return_surface_to_main_window.clone();
     let surface_id = surface.id;
     let is_terminal = matches!(surface.kind, SurfaceKind::Terminal { .. });
     click.connect_pressed(move |gesture, _n_press, x, y| {
@@ -2110,6 +1998,23 @@ fn attach_tab_context_menu(
                 (cb.borrow_mut())(pane_id, surface_id);
             });
             v.append(&copy_btn);
+        }
+
+        if tab_for_click
+            .root()
+            .and_downcast::<gtk::Window>()
+            .is_some_and(|window| window.widget_name() == "flowmux-detached-window")
+        {
+            let return_btn = mk("Move to main window");
+            let pop = popover.downgrade();
+            let cb = on_return.clone();
+            return_btn.connect_clicked(move |_| {
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
+                (cb.borrow_mut())(pane_id, surface_id);
+            });
+            v.append(&return_btn);
         }
 
         // "Move" item: target workspaces queried live (so names/order reflect
@@ -2673,48 +2578,6 @@ mod tab_dnd_tests {
         assert!(!(0..controllers.n_items()).any(|index| controllers
             .item(index)
             .is_some_and(|controller| controller.is::<gtk::DropTargetAsync>())));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn take_surface_for_tearoff_moves_widget_out_of_source_pane() {
-        let pane = PaneId::new();
-        let surface = SurfaceId::new();
-        let workspace = WorkspaceId::new();
-        let stack = gtk::Stack::new();
-        let content = gtk::Label::new(Some("live content")).upcast::<gtk::Widget>();
-        stack.add_named(&content, Some(&surface.to_string()));
-
-        let tab_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        let tab_widget = gtk::Button::new().upcast::<gtk::Widget>();
-        tab_bar.append(&tab_widget);
-        let label = gtk::Label::new(Some("dragged tab"));
-
-        let mut registry = PaneRegistry::default();
-        registry.surface_stacks.insert(pane, stack.clone());
-        registry
-            .surface_tabs
-            .insert(pane, vec![(surface, tab_widget.clone())]);
-        registry.pane_tab_containers.insert(pane, tab_bar);
-        registry.surface_tab_labels.insert(surface, label);
-        registry.surface_workspace.insert(surface, workspace);
-        registry.active_terminal_by_pane.insert(pane, surface);
-
-        let torn = registry
-            .take_surface_for_tearoff(pane, surface, "fallback")
-            .expect("surface widget should be detached for tear-off");
-
-        assert_eq!(torn.pane, pane);
-        assert_eq!(torn.surface, surface);
-        assert_eq!(torn.title, "dragged tab");
-        assert!(torn.content.parent().is_none());
-        assert!(torn.focus.parent().is_none());
-        assert!(stack.child_by_name(&surface.to_string()).is_none());
-        assert!(tab_widget.parent().is_none());
-        assert!(registry.surface_tabs.get(&pane).unwrap().is_empty());
-        assert!(!registry.surface_tab_labels.contains_key(&surface));
-        assert!(!registry.surface_workspace.contains_key(&surface));
-        assert!(registry.active_surface(pane).is_none());
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -3323,6 +3186,60 @@ fn should_tear_off_unhandled_drag(
         && !pointer_inside_origin
 }
 
+/// Resolve the topmost native window before hit-testing GTK widgets in its coordinates.
+#[cfg(target_os = "macos")]
+fn macos_tab_drag_point(root: &gtk::Widget, x: f64, y: f64) -> Option<(gtk::Widget, f64, f64)> {
+    use gtk::glib::translate::ToGlibPtr;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSWindow;
+    use objc2_foundation::NSPoint;
+    unsafe extern "C" {
+        fn gdk_macos_surface_get_native_window(
+            surface: *mut gtk::gdk::ffi::GdkSurface,
+        ) -> *mut std::ffi::c_void;
+    }
+    let window = root.downcast_ref::<gtk::Window>()?;
+    let surface = window.surface()?;
+    let marker = MainThreadMarker::new()?;
+    // SAFETY: mapped GDK macOS surfaces expose their live NSWindow on the GTK main thread.
+    unsafe {
+        let native =
+            gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>();
+        let native = native.as_ref()?;
+        let point = native.convertPointToScreen(NSPoint::new(
+            x,
+            native.contentView()?.frame().size.height - y,
+        ));
+        let number = NSWindow::windowNumberAtPoint_belowWindowWithWindowNumber(point, 0, marker);
+        for widget in gtk::Window::list_toplevels() {
+            let Some(window) = widget.downcast_ref::<gtk::Window>() else {
+                continue;
+            };
+            if !window.is_mapped() {
+                continue;
+            }
+            let Some(surface) = window.surface() else {
+                continue;
+            };
+            let target =
+                gdk_macos_surface_get_native_window(surface.to_glib_none().0).cast::<NSWindow>();
+            let Some(target) = target.as_ref() else {
+                continue;
+            };
+            if target.windowNumber() != number {
+                continue;
+            }
+            let point = target.convertPointFromScreen(point);
+            return Some((
+                widget,
+                point.x,
+                target.contentView()?.frame().size.height - point.y,
+            ));
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "macos")]
 fn install_macos_tab_drag_fallback(
     drag_widget: &gtk::Widget,
@@ -3382,17 +3299,17 @@ fn install_macos_tab_drag_fallback(
         let point = gtk::graphene::Point::new((x + dx) as f32, (y + dy) as f32);
         let point = tab
             .compute_point(&root, &point)
-            .map(|p| (&root, f64::from(p.x()), f64::from(p.y())));
-        preview_for_update(pane_id, point);
+            .and_then(|p| macos_tab_drag_point(&root, f64::from(p.x()), f64::from(p.y())));
+        preview_for_update(pane_id, point.as_ref().map(|(root, x, y)| (root, *x, *y)));
     });
 
     let tab_for_end = tab.downgrade();
     let resolve_pane = callbacks.pane_at_root_point.clone();
     let resolve_tab = callbacks.tab_at_root_point.clone();
-    let workspace_of_pane = callbacks.workspace_of_pane.clone();
     let position_of_surface = callbacks.position_of_surface_in_pane.clone();
     let dispatch_tab_drop = callbacks.dispatch_tab_drop.clone();
     let open_new_window = callbacks.on_tab_drag_to_new_window.clone();
+    let return_to_main = callbacks.on_return_surface_to_main_window.clone();
     let surface_model = surface.clone();
     let surface_id = surface.id;
     let origin_for_end = drag_origin.clone();
@@ -3428,15 +3345,12 @@ fn install_macos_tab_drag_fallback(
         let Some(point) = tab_for_end.compute_point(&root, &point) else {
             return;
         };
-        let root_x = f64::from(point.x());
-        let root_y = f64::from(point.y());
-        let source_workspace = (workspace_of_pane)(pane_id);
-        let target_tab = resolve_tab(&root, root_x, root_y).filter(|(target_pane, ..)| {
-            source_workspace.is_some() && (workspace_of_pane)(*target_pane) == source_workspace
-        });
-        let target_pane = resolve_pane(&root, root_x, root_y).filter(|(target_pane, ..)| {
-            source_workspace.is_some() && (workspace_of_pane)(*target_pane) == source_workspace
-        });
+        let origin_x = f64::from(point.x());
+        let origin_y = f64::from(point.y());
+        let (root, root_x, root_y) =
+            macos_tab_drag_point(&root, origin_x, origin_y).unwrap_or((root, origin_x, origin_y));
+        let target_tab = resolve_tab(&root, root_x, root_y);
+        let target_pane = resolve_pane(&root, root_x, root_y);
         let command = if let Some((target_pane, target_surface, target_index, after)) = target_tab {
             if pane_id == target_pane && surface_id == target_surface {
                 return;
@@ -3468,6 +3382,23 @@ fn install_macos_tab_drag_fallback(
                 zone,
             )
         } else {
+            if root
+                .pick(root_x, root_y, gtk::PickFlags::DEFAULT)
+                .is_some_and(|widget| {
+                    let mut current = Some(widget);
+                    while let Some(widget) = current {
+                        if widget.is::<adw::StatusPage>() {
+                            return true;
+                        }
+                        current = widget.parent();
+                    }
+                    false
+                })
+            {
+                committed_for_end.set(true);
+                (return_to_main.borrow_mut())(pane_id, surface_id);
+                return;
+            }
             if root_x < 0.0
                 || root_y < 0.0
                 || root_x >= f64::from(root.width())

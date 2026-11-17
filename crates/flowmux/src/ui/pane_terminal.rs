@@ -118,6 +118,7 @@ pub struct PaneCallbacks {
     /// bottom region of a pane body.
     pub on_split_surface_into_pane:
         Rc<RefCell<dyn FnMut(PaneId, SurfaceId, Option<PaneSurface>, PaneId, SplitDirection)>>,
+    pub on_return_surface_to_main_window: Rc<RefCell<dyn FnMut(PaneId, SurfaceId)>>,
     /// Dispatch a DnD mutation and return its controller acknowledgement.
     pub dispatch_tab_drop:
         Rc<dyn Fn(TabDropCommand) -> Option<oneshot::Receiver<Result<(), String>>>>,
@@ -221,6 +222,7 @@ impl PaneCallbacks {
             on_tab_drag_to_new_window: Rc::new(RefCell::new(|_, _| {})),
             on_move_surface_to_workspace: Rc::new(RefCell::new(|_, _, _| {})),
             on_split_surface_into_pane: Rc::new(RefCell::new(|_, _, _, _, _| {})),
+            on_return_surface_to_main_window: Rc::new(RefCell::new(|_, _| {})),
             dispatch_tab_drop: Rc::new(|_| None),
             list_workspaces: Rc::new(Vec::new),
             workspace_of_pane: Rc::new(|_| None),

@@ -194,7 +194,14 @@ pub type TerminalRegistry = Rc<std::cell::RefCell<crate::ui::workspace_view::Pan
 
 /// Register the action handlers on a window.
 pub fn install_actions(controller: &crate::ui::window::WindowController, bridge: Bridge) {
-    let window = &controller.window;
+    install_actions_for_window(controller, bridge, &controller.window);
+}
+
+pub(crate) fn install_actions_for_window(
+    controller: &crate::ui::window::WindowController,
+    bridge: Bridge,
+    window: &adw::ApplicationWindow,
+) {
     let focused = controller.focused_pane.clone();
     let registry = controller.pane_registry();
     let clipboard_toast = controller.clipboard_toast();

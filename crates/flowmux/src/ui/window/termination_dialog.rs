@@ -241,9 +241,7 @@ impl TerminationPresenter {
                     continue;
                 };
                 report.pane = pane;
-                let last = if torn_window.is_some() {
-                    Some(report.context.workspace_name.clone())
-                } else if presenter.store.tab_count_in_pane(pane).await == Some(1) {
+                let last = if presenter.store.tab_count_in_pane(pane).await == Some(1) {
                     if let Some((workspace, 1)) =
                         presenter.store.workspace_pane_count_for(pane).await
                     {
@@ -275,20 +273,6 @@ impl TerminationPresenter {
                 };
                 presenter.termination_dialog.borrow_mut().take();
                 if matches!(choice, Ok(TerminationChoice::Close)) {
-                    if let Some(window) = torn_window {
-                        let dead = presenter
-                            .torn_off_terminals
-                            .borrow()
-                            .get(&report.surface)
-                            .is_some_and(|t| {
-                                t.pid.get().is_none()
-                                    && t.window.upgrade().as_ref() == Some(&window)
-                            });
-                        if dead {
-                            window.close();
-                        }
-                        continue;
-                    }
                     let (ack, rx) = oneshot::channel();
                     if presenter
                         .bridge
@@ -658,7 +642,13 @@ mod tests {
             original_pid
         );
         torn.close();
-        assert!(!c.torn_off_terminals.borrow().contains_key(&surface));
+        glib::future_with_timeout(Duration::from_secs(10), async {
+            while c.torn_off_terminals.borrow().contains_key(&surface) {
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
 
         let surface = add_tab(&c, ws, pane).await;
         let terminal = c.pane_registry.borrow().terminals[&surface].clone();
@@ -669,12 +659,16 @@ mod tests {
             .unwrap();
         c.bridge.tx.send(GtkCommand::CloseWindow).await.unwrap();
         glib::future_with_timeout(Duration::from_secs(10), async {
-            while !c.window_close.approved.get() || !c.bridge.tx.is_closed() {
+            while !c.window_close.approved.get() || c.window.is_visible() {
                 glib::timeout_future(Duration::from_millis(20)).await;
             }
         })
         .await
-        .expect("source window dispatcher did not close");
+        .expect("source window did not close");
+        assert!(
+            !c.bridge.tx.is_closed(),
+            "detached windows still need their dispatcher"
+        );
         terminal.widget.feed_child(b"kill -KILL $$\n");
         let d = dialog(&c).await;
         assert_eq!(

@@ -63,6 +63,13 @@ Split right or down, zoom into one pane when you need focus, and start
 another agent in a new tab. Overview mode (**Ctrl+Alt+K**) shows every
 workspace at once so you can jump between tasks.
 
+Drag a tab outside the window to open it in a separate window, then drag it
+back onto a tab bar or pane to move it between those windows. Terminal sessions,
+browser pages, and unsaved editor buffers stay live. Separated windows support
+split panes and new workspaces. Right-click a separated tab and choose
+**Move to main window** to return it even when the main window is empty.
+Live moves apply to windows separated from the same Flowmux instance.
+
 <img src="resources/screenshot/view_split.gif" alt="split panes and overview mode" width="100%" />
 
 ### Files, worktrees, and AI usage
