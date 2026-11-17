@@ -722,7 +722,8 @@ impl ReviewWindow {
         let generation = self.scroll_generation.get().wrapping_add(1);
         self.scroll_generation.set(generation);
         let weak = Rc::downgrade(self);
-        let requested = Cell::new(false);
+        let previous_geometry = Cell::new(None);
+        let stable_frames = Cell::new(0);
         self.diff.add_tick_callback(move |diff, _| {
             let Some(this) = weak.upgrade() else {
                 return glib::ControlFlow::Break;
@@ -763,7 +764,7 @@ impl ReviewWindow {
                     yalign
                 },
             );
-            if requested.replace(true) && card.is_mapped() && card.height() > 0 {
+            if card.is_mapped() && card.height() > 0 {
                 if let Some(bounds) = card.compute_bounds(diff) {
                     let visible = bounds.y() >= 0.0
                         && if oversized {
@@ -771,7 +772,22 @@ impl ReviewWindow {
                         } else {
                             bounds.y() + bounds.height() <= diff.height() as f32
                         };
-                    if visible {
+                    let adjustment = diff.vadjustment().unwrap();
+                    let geometry = (
+                        bounds.y(),
+                        bounds.height(),
+                        adjustment.value(),
+                        adjustment.upper(),
+                        diff.height(),
+                    );
+                    // A visible frame can precede TextView's final line-height validation.
+                    if visible && previous_geometry.replace(Some(geometry)) == Some(geometry) {
+                        stable_frames.set(stable_frames.get() + 1);
+                    } else {
+                        previous_geometry.set(Some(geometry));
+                        stable_frames.set(0);
+                    }
+                    if stable_frames.get() >= 3 {
                         return glib::ControlFlow::Break;
                     }
                 }
