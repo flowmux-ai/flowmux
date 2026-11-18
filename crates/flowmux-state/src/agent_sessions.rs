@@ -95,12 +95,20 @@ impl SavedAgentSession {
                 self.session_id.clone(),
             ],
             "gemini" => vec!["gemini".into(), "--resume".into(), self.session_id.clone()],
-            "cline" => vec![
-                "cline".into(),
-                "--id".into(),
-                self.session_id.clone(),
-                "--tui".into(),
-            ],
+            "cline" => {
+                // `conv_…` ids are client conversation ids; `cline --id` only
+                // resolves `sessions.db` session ids. An unresumable binding
+                // must not be consumed into a command that cannot work.
+                if !crate::session_history::valid_cline_resume_id(&self.session_id) {
+                    return Vec::new();
+                }
+                vec![
+                    "cline".into(),
+                    "--id".into(),
+                    self.session_id.clone(),
+                    "--tui".into(),
+                ]
+            }
             _ => Vec::new(),
         }
     }
@@ -506,6 +514,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = AgentSessionStore::new(dir.path().to_path_buf());
         (s, dir)
+    }
+
+    #[test]
+    fn cline_resume_argv_rejects_client_conversation_ids() {
+        // Bindings recorded before hook normalization may hold `conv_…`
+        // client conversation ids; `cline --id` cannot resolve them, so
+        // restoration must not build a resume command from them.
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        s.record("cline", surface, "conv_1794912309668_7tbgrdd")
+            .unwrap();
+        let saved = s.take_surface(surface).unwrap().unwrap();
+        assert_eq!(saved.agent, "cline");
+        assert!(saved.resume_argv().is_empty());
+        assert!(saved.shell_command().is_none());
     }
 
     #[test]

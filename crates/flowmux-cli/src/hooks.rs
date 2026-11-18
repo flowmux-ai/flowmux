@@ -164,7 +164,7 @@ fn read_hook_input<R: Read>(reader: R) -> ClaudeHookInput {
     parse_agent_hook_reader(reader).unwrap_or_default()
 }
 
-fn parse_agent_hook_payload(payload: &str) -> Option<ClaudeHookInput> {
+pub(crate) fn parse_agent_hook_payload(payload: &str) -> Option<ClaudeHookInput> {
     if payload.trim().is_empty() {
         return None;
     }

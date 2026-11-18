@@ -1183,6 +1183,27 @@ pub(crate) fn build_generic_stop_requests(
     ]
 }
 
+/// Cline reports the resumable `sessions.db` identity as
+/// `sessionContext.rootSessionId`, while `taskId` (and `conversationId`) carry
+/// the client conversation id (`conv_…`) that `cline --id` cannot resolve —
+/// resuming such an id fails with "Session not found". Rewrite the parsed
+/// session id in place so every persisted binding uses the resumable identity.
+fn normalize_cline_resume_identity(input: &mut hooks::ClaudeHookInput) {
+    let Some(root) = input
+        .cline_session_context
+        .as_ref()
+        .and_then(|context| context.root_session_id.as_deref())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    if input.session_id.as_deref() != Some(root.as_str()) {
+        input.session_id = Some(root);
+    }
+}
+
 pub(crate) async fn run_generic_agent_hook_event(
     reported_agent: &str,
     event: &AgentHookEvent,
@@ -1264,6 +1285,7 @@ pub(crate) async fn run_generic_agent_hook_event(
     } else {
         read_codex_hook_input(args)
     };
+    let mut input = input;
     let context_event = match (reported_agent.to_ascii_lowercase().as_str(), event) {
         ("codex" | "gemini" | "antigravity", AgentHookEvent::SessionStart { .. }) => {
             Some("SessionStart")
@@ -1292,6 +1314,13 @@ pub(crate) async fn run_generic_agent_hook_event(
     // Cline children inherit the root tab's routing but own a different session.
     if reported_agent.eq_ignore_ascii_case("cline") && input.is_cline_child() {
         return Ok(());
+    }
+    // Cline reports the resumable `sessions.db` identity as
+    // `sessionContext.rootSessionId`; `taskId` is the client conversation id
+    // (`conv_…`) that `cline --id` cannot resolve. Normalize once so every
+    // persisted binding resumes the session the CLI can actually find.
+    if reported_agent.eq_ignore_ascii_case("cline") {
+        normalize_cline_resume_identity(&mut input);
     }
     // Legacy notify also fires for ephemeral title jobs in dedicated TUIs.
     if reported_agent.eq_ignore_ascii_case("codex")
@@ -1700,5 +1729,46 @@ pub(crate) fn build_generic_session_start_request(
             surface,
             input.session_id.as_deref(),
         )
+    }
+}
+
+#[cfg(test)]
+mod cline_resume_identity_tests {
+    use super::normalize_cline_resume_identity;
+    use crate::hooks::parse_agent_hook_payload;
+
+    #[test]
+    fn cline_root_payload_resumes_the_root_session_id() {
+        // Real Cline root payload: `taskId` is the client conversation id
+        // (`conv_…`) and the resumable identity arrives via sessionContext.
+        let mut input = parse_agent_hook_payload(
+            r#"{"taskId":"conv_123_abc","sessionContext":{"rootSessionId":"1794912309524_y9mqw"}}"#,
+        )
+        .unwrap();
+        normalize_cline_resume_identity(&mut input);
+        assert_eq!(input.session_id.as_deref(), Some("1794912309524_y9mqw"));
+    }
+
+    #[test]
+    fn cline_payload_without_session_context_keeps_the_task_id() {
+        let mut input = parse_agent_hook_payload(r#"{"taskId":"conv_123_abc"}"#).unwrap();
+        normalize_cline_resume_identity(&mut input);
+        assert_eq!(input.session_id.as_deref(), Some("conv_123_abc"));
+        let mut empty = parse_agent_hook_payload(
+            r#"{"taskId":"task-1","sessionContext":{"rootSessionId":"  "}}"#,
+        )
+        .unwrap();
+        normalize_cline_resume_identity(&mut empty);
+        assert_eq!(empty.session_id.as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn cline_matching_identity_is_left_untouched() {
+        let mut input = parse_agent_hook_payload(
+            r#"{"taskId":"1794912309524_y9mqw","sessionContext":{"rootSessionId":"1794912309524_y9mqw"}}"#,
+        )
+        .unwrap();
+        normalize_cline_resume_identity(&mut input);
+        assert_eq!(input.session_id.as_deref(), Some("1794912309524_y9mqw"));
     }
 }

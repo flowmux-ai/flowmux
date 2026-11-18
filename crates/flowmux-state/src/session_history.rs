@@ -195,6 +195,19 @@ fn cline_default_data_dir(home: Option<PathBuf>) -> Option<PathBuf> {
         })),
     }
 }
+/// Whether `id` is a Cline identity `cline --id` can actually resume.
+/// Cline CLI session ids are `<millis>_<suffix>` rows in `sessions.db`;
+/// `conv_…` values are client conversation ids that the CLI rejects with
+/// "Session not found", so they must never become resume commands.
+pub fn valid_cline_resume_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('-')
+        && !id.starts_with("conv_")
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
 
 #[derive(Clone, Debug)]
 pub struct HistorySession {
@@ -224,17 +237,10 @@ impl HistorySession {
             return Ok(format!("opencode --session {}", self.id));
         }
         if self.agent == SessionAgent::Cline {
-            // Cline CLI session IDs are `<millis>_<suffix>` (and `conv_…`
-            // aliases), not UUIDs. Keep the identifier conservative so it can
-            // never inject shell input through the resumed terminal.
-            let valid = !self.id.is_empty()
-                && self.id.len() <= 128
-                && !self.id.starts_with('-')
-                && self
-                    .id
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-');
-            if !valid {
+            // Cline CLI session IDs are `<millis>_<suffix>`, not UUIDs and not
+            // `conv_…` conversation ids. Keep the identifier conservative so it
+            // can never inject shell input through the resumed terminal.
+            if !valid_cline_resume_id(&self.id) {
                 return Err(invalid("Invalid Cline session ID"));
             }
             return Ok(format!("cline --id {} --tui", self.id));
@@ -869,8 +875,10 @@ mod tests {
             session.resume_command().unwrap(),
             "cline --id 1794909262241_3rtal --tui"
         );
+        // `conv_…` ids are client conversation ids; `cline --id` cannot
+        // resolve them, so they must never become resume commands.
         session.id = "conv_1794890971292_cdmi3t2".into();
-        assert!(session.resume_command().is_ok());
+        assert!(session.resume_command().is_err());
         let long = "x".repeat(129);
         for id in [
             "",
