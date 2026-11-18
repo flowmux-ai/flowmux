@@ -176,11 +176,14 @@ int main(int argc, char **argv) {
                 payload = dict(session_id=f"fixture-{name}", hook_event_name=event,
                                cwd=str(root), future_extension={"ignored": True})
                 payload.update(fields)
+                expected_session_id = payload["session_id"]
                 if name == "cline":
-                    payload["taskId"] = payload.pop("session_id")
+                    # Cline resumes the root session, not the client conversation.
+                    expected_session_id = "1700000000000_root"
+                    del payload["session_id"]
+                    payload["taskId"] = "conv_1700000000001_task"
                     payload.update(agent_id="agent-root", parent_agent_id=None,
-                                   sessionContext={"rootSessionId": "ui-session"})
-                session_id = payload.get("session_id", payload.get("taskId"))
+                                   sessionContext={"rootSessionId": expected_session_id})
                 command = [args.cli, "--socket", args.socket, "hooks", name, event]
                 if other_surface:
                     command = ["/bin/sh", "-c", '"$@"; result=$?; exit $result',
@@ -219,13 +222,13 @@ int main(int argc, char **argv) {
                 while True:
                     value = observed()
                     if (value and value["activity"] == activity
-                            and value.get("session_id") == session_id):
+                            and value.get("session_id") == expected_session_id):
                         break
                     assert time.monotonic() < deadline, (
                         name, event, payload, activity, value,
                         rpc("pane_read_screen", pane=pane))
                     time.sleep(.05)
-                assert value["name"] == name and value["session_id"] == session_id, value
+                assert value["name"] == name and value["session_id"] == expected_session_id, value
                 assert value["source"] == "flowmux:hook", value
                 assert value["status_evidence"]["source"] == "hook", value
                 statuses = {"running": ("working",), "needs_input": ("blocked",),
