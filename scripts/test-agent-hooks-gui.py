@@ -520,8 +520,12 @@ int main(int argc, char **argv) {
                     finally:
                         alias.unlink()
                     print("PASS: socket alias does not suppress completion", flush=True)
-                    hook("running", "running", turn_id="root-3")
+                    # A delayed hook cannot reopen a settled turn; explicit Stop retry can.
+                    hook("running", "idle", turn_id="root-3")
+                    time.sleep(.5)
+                    assert observed()["status"] == "done", observed()
                     hook("stop", "idle", turn_id="root-3", stop_hook_active=True)
+                    print("PASS: settled root ignores delayed progress and accepts explicit Stop retry", flush=True)
                     hook("turn-start", "running", turn_id="root-4")
                     hook("interrupt", "idle", turn_id="root-4")
                     rpc("pane_send_keys", pane=pane, keys="screen-interrupted\r")

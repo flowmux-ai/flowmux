@@ -66,7 +66,8 @@ def main():
         h.rpc(socket, 'workspace_focus', workspace=terminal_ws)
         pane = h.workspace(socket, terminal_ws)['panes'][0]['id']
         h.send(socket, pane, "printf 'SCROLLBACK_RESTORE_MARKER\\n'")
-        gui.wait_for(lambda: 'SCROLLBACK_RESTORE_MARKER' in h.screen(socket, pane), 'terminal output')
+        # The typed command already shows the marker once; wait for what it printed.
+        gui.wait_for(lambda: h.screen(socket, pane).count('SCROLLBACK_RESTORE_MARKER') >= 2, 'terminal output')
         h.close_window(process)
         saved = json.loads(h.state_path.read_text())
         hidden = next(w for w in saved['workspaces'] if w['id'] == hidden_ws)

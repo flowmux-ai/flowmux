@@ -6,17 +6,24 @@ cd "$(dirname "$0")/.."
 suite=${1:-regression}
 case "$suite" in
     regression|extended) ;;
-    *) echo "Usage: $0 [regression|extended] [cargo test arguments...]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [regression|extended] [group] [cargo test arguments...]" >&2; exit 2 ;;
 esac
 if (( $# )); then shift; fi
+# CI runs each group on its own instance; the default runs them all in order.
+group=all
+case "${1:-}" in
+    all|build|workspace|team-usage|team|agent-host|agent-session|browser|terminal) group=$1; shift ;;
+esac
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 test_log="$CARGO_TARGET_DIR/ci/linux/tests.jsonl"
 mkdir -p "$(dirname "$test_log")"
+rm -f -- "$(dirname "$test_log")/tests/"*.json
 : > "$test_log"
 
 # Each suite owns and reaps its detached GUI/PTY children before the next starts.
 run_test() {
+    [[ $group == all || $group == "$section" ]] || return 0
     local name=$1 started=$SECONDS status=0
     shift
     printf 'CI_TEST_START=%s\n' "$name"
@@ -29,16 +36,30 @@ run_test() {
     return "$status"
 }
 
+section=workspace
+run_test ssh-prerequisites python3 scripts/ssh-workspace-fixture.py --check
 run_test gui-harness python3 scripts/test-gui-harness.py
 run_test ssh-fixture-unit python3 scripts/test-ssh-workspace-fixture.py
+# Managed-view GTK tests need the real CLI even on a clean checkout.
+# Every group needs the binaries; a CI group may receive the build group's.
+section=$group
+if [[ ${CI_TEST_PREBUILT:-} == 1 ]]; then
+    run_test prebuilt test -x "$CARGO_TARGET_DIR/debug/flowmux" \
+      -a -x "$CARGO_TARGET_DIR/debug/flowmuxctl" -a -x "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+else
+    run_test build cargo build --workspace --locked
+fi
+export PATH="$CARGO_TARGET_DIR/debug:$PATH"
+section=workspace
 # Keep workspace tests, examples and doctests; no coverage instrumentation.
 run_test workspace cargo test --workspace --locked --no-fail-fast "$@"
-run_test build cargo build --workspace --locked
 if [[ $(pkg-config --modversion gtk4) == 4.14.5 ]]; then
+    section=terminal
     run_test gtk-icon-preload python3 scripts/test-gtk-icon-preload-gui.py \
       --gui "$CARGO_TARGET_DIR/debug/flowmux" \
       --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 fi
+section=browser
 run_test browser-control python3 scripts/test-browser-control.py "$CARGO_TARGET_DIR/debug/flowmux"
 run_test browser-source python3 scripts/test-browser-source-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
@@ -52,12 +73,15 @@ run_test browser-feedback python3 scripts/test-browser-feedback-gui.py \
 run_test browser-import python3 scripts/test-browser-import-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=team
 run_test skills python3 scripts/test-skills-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=browser
 run_test notifications python3 scripts/test-notifications-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=team
 run_test team-pingpong python3 scripts/test-team-pingpong-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
@@ -67,23 +91,120 @@ run_test team-recovery python3 scripts/test-team-recovery-gui.py \
 run_test team-reuse python3 scripts/test-team-reuse-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=team-usage
 run_test team-usage python3 scripts/test-team-usage-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=terminal
 run_test session-save python3 scripts/test-session-save-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 # Keep failure logs outside the CI temporary tree, which is deleted on exit.
+section=agent-session
 TMPDIR=/tmp run_test session-flow python3 scripts/test-session-flow-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
-  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test session-flow-tab-fallback python3 scripts/test-session-flow-gui.py --tab-fallback \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test managed-session-flow python3 scripts/test-agent-session-resume-gui.py --session-flow \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=terminal
 run_test pty-spawn-failure python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
-run_test tab-windows python3 scripts/test-tab-windows-gui.py \
+section=agent-session
+TMPDIR=/tmp run_test tab-windows python3 scripts/test-tab-windows-gui.py --managed \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=agent-host
+TMPDIR=/tmp run_test agent-host python3 scripts/test-agent-host-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-terminal-budget python3 scripts/test-agent-terminal-budget.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-gui-response-limit python3 scripts/test-agent-gui-response-limit.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+run_test agent-containment python3 scripts/test-agent-containment.py \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test hosted-terminal python3 scripts/test-hosted-terminal-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-root-exit python3 scripts/test-agent-root-exit-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-ready python3 scripts/test-agent-ready-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-relay-replacement python3 scripts/test-agent-ready-gui.py --replacement \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-gui-replacement python3 scripts/test-agent-ready-gui.py --gui-replacement \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-binding-restore python3 scripts/test-agent-binding-restore-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-background-binding-restore python3 scripts/test-agent-binding-restore-gui.py --background \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=agent-session
+TMPDIR=/tmp run_test agent-drag python3 scripts/test-agent-drag-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp run_test managed-agent-drag python3 scripts/test-agent-drag-gui.py --managed \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test managed-agent-tearoff python3 scripts/test-agent-drag-gui.py --managed --tearoff \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=agent-host
+TMPDIR=/tmp run_test agent-native-hooks python3 scripts/test-agent-native-hooks-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=agent-session
+TMPDIR=/tmp run_test agent-session-resume python3 scripts/test-agent-session-resume-gui.py --context \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-session-tab-fallback python3 scripts/test-agent-session-resume-gui.py --tab-fallback \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+# One launch covers the New Agent entry and the termination UI; both share the lifecycle.
+TMPDIR=/tmp run_test new-agent-termination python3 scripts/test-agent-session-resume-gui.py --new-agent --termination \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test agent-cli-controls python3 scripts/test-agent-session-resume-gui.py --cli-controls \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+section=terminal
 run_test terminal-read-screen python3 scripts/test-terminal-read-screen-gui.py \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+TMPDIR=/tmp run_test terminal-load python3 scripts/test-terminal-load-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 TMPDIR=/tmp run_test terminal-image-links python3 scripts/test-terminal-image-links-gui.py \
@@ -97,11 +218,18 @@ TMPDIR=/tmp run_test polling-delay python3 scripts/test-polling-delay-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 if [[ $suite == extended ]]; then
+    section=agent-host
+    TMPDIR=/tmp run_test agent-host-budget python3 scripts/test-agent-host-budget-gui.py \
+      --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+      --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+      --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+    section=terminal
     run_test idle-stability-unit python3 scripts/test-idle-stability-gui.py --self-check
     TMPDIR=/tmp run_test idle-stability python3 scripts/test-idle-stability-gui.py \
       --gui "$CARGO_TARGET_DIR/debug/flowmux" \
       --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
 fi
+section=browser
 TMPDIR=/tmp run_test editor-io python3 scripts/test-editor-io-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
@@ -111,6 +239,7 @@ TMPDIR=/tmp run_test editor-renderer python3 scripts/test-editor-renderer-gui.py
 run_test lazy-restore python3 scripts/test-lazy-restore-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+section=terminal
 run_test ssh-workspace python3 scripts/ssh-workspace-fixture.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"

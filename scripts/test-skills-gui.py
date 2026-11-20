@@ -72,8 +72,7 @@ if agent == 'codex':
     if (root / 'provider-error.json').exists():
         native_error = json.loads((root / 'provider-error.json').read_text())
         error = native_error['error']
-        final['payload'] = ({'type': 'error', **error} if native_error['standalone'] else
-                            {'type': 'task_complete', 'last_agent_message': None, 'error': error})
+        final['payload'] = {'type': 'task_complete', 'last_agent_message': None, 'error': error}
         print('PROVIDER ERROR ' + error['codex_error_info'], flush=True)
 else:
     path = profile / 'projects/fixture' / (token + '.jsonl')
@@ -121,14 +120,14 @@ time.sleep(120)
         fixture.wait_for(lambda: 'PROFILE VERIFIED' in h.screen(socket, job['pane']), 'visible profile completion')
     h.pass_check('Both providers launch in YOLO mode through PATH-dispatching wrappers with lead-only binaries and profiles')
 
-    for standalone, code in [(True, 'usage_limit_exceeded'), (False, 'usage_limit_exceeded'),
-                             (False, 'server_overloaded')]:
+    # test-team-recovery-gui.py covers the standalone error event.
+    for code in ('usage_limit_exceeded', 'server_overloaded'):
         # Each protocol error is independent; cross-job quota holds are tested separately.
         for cached in (h.root / 'state/flowmux/team-quota').glob('*.json'):
             cached.unlink()
         quota = code == 'usage_limit_exceeded'
         error = {'codex_error_info': code, 'message': 'You’ve hit your usage limit.' if quota else 'Selected model is at capacity.'}
-        (h.root / 'provider-error.json').write_text(json.dumps({'standalone': standalone, 'error': error}))
+        (h.root / 'provider-error.json').write_text(json.dumps({'error': error}))
         before_error = h.workspace(socket, workspace)
         job = start('codex')
         status_path = Path(job['job']) / 'status.json'

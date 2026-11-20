@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: macOS test dependencies
+description: Native libraries, the pinned GLib/GTK/libadwaita stack and ThorVG shared by the macOS test jobs.
+
+runs:
+  using: composite
+  steps:
+    - name: Install native dependencies
+      shell: bash
+      run: brew install pkg-config gtk4 libadwaita appstream vte3 meson ninja ffmpeg
+    # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
+    # GLib 2.90.1 also deadlocks in source_destroy_lock during native worker wakeups.
+    # Keep fatal-critical checks enabled with a compatible runtime stack.
+    - name: Install compatible GLib, GTK and libadwaita for native checks
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+      shell: bash
+      run: |
+        brew tap-new --no-git flowmux/ci
+        for spec in \
+          c84201a409ee9fd5588cad21e51a5e4ca3379271/Formula/g/gtk4.rb \
+          10672485509320336f1d885f842b6b938aecfb0a/Formula/lib/libadwaita.rb; do
+          formula="$(brew --repository flowmux/ci)/Formula/${spec##*/}"
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/Homebrew/homebrew-core/$spec" \
+            --output "$formula"
+          # Fetch checksummed bottles from the original tap.
+          sed -i '' '/  bottle do/a\
+              root_url "https://ghcr.io/v2/homebrew/core"
+          ' "$formula"
+        done
+        cp .github/homebrew/glib.rb "$(brew --repository flowmux/ci)/Formula/glib.rb"
+        brew uninstall --ignore-dependencies libadwaita gtk4 glib
+        brew install --build-from-source flowmux/ci/glib
+        brew install --force-bottle --ignore-dependencies flowmux/ci/gtk4
+        # Dependencies were installed above; do not upgrade the pinned GTK.
+        brew install --force-bottle --ignore-dependencies flowmux/ci/libadwaita
+        test "$(pkg-config --modversion glib-2.0)" = 2.88.4
+        test "$(pkg-config --modversion gtk4)" = 4.22.3
+        test "$(pkg-config --modversion libadwaita-1)" = 1.9.3
+        pkg-config --print-errors --exists gtk4 libadwaita-1 vte-2.91-gtk4
+    - name: Install compatible ThorVG for native image and Lottie checks
+      shell: bash
+      run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh

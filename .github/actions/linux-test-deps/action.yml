@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Linux test dependencies
+description: System packages, ThorVG and the WebKit AppArmor profile shared by the Linux test jobs.
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        # Prefer the runner's Ubuntu HTTPS fallback when Azure downloads trickle.
+        sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|s/priority:1/priority:4/' /etc/apt/apt-mirrors.txt
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential pkg-config \
+          libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
+          libwebkitgtk-6.0-dev libssl-dev \
+          gstreamer1.0-plugins-good gstreamer1.0-libav ffmpeg \
+          libssh2-1-dev libdbus-1-dev \
+          meson ninja-build \
+          dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \
+          python3-gi gir1.2-atspi-2.0 at-spi2-core python3-pil gnome-keyring gcr python3-cryptography
+
+    - name: Install ThorVG (image viewer backend, all loaders + C API)
+      shell: bash
+      run: sudo ./scripts/install-thorvg.sh
+
+    - name: Allow WebKit namespaces for the test process
+      shell: bash
+      run: |
+        sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
+        sudo sh packaging/debian/postinst configure

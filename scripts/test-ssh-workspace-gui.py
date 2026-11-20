@@ -22,6 +22,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -84,6 +85,12 @@ class Harness:
                         LIBGL_ALWAYS_SOFTWARE="1", HISTFILE="/dev/null",
                         PATH=str(Path(args.cli).parent) + os.pathsep + self.env.get("PATH", ""))
         assert self.env.get("HOME") == os.environ.get("HOME")
+        # These suites start, count and retire the Agent Host around agents alone; a
+        # window's own terminals stay out of it unless a suite is about them.
+        if not getattr(args, "hosted_terminals", False):
+            self.env["FLOWMUX_LOCAL_TERMINALS"] = "1"
+        # A closing window would ask what to do with running agents; these suites keep them.
+        self.env["FLOWMUX_CLOSE_AGENTS"] = "keep"
         self.state_path = self.root / "state/flowmux/state.json"
         # HOME stays user-owned; an isolated GUI must not refresh installed skills.
         marker = self.state_path.parent / "installed-skill-version"
@@ -122,16 +129,43 @@ class Harness:
         # Ask only this process's windows on our private Xvfb to close.
         # Normal GTK shutdown flushes state and LLVM coverage profiles;
         # SIGTERM skips both.
+        targets = []
         with closing(display.Display(self.env["DISPLAY"])) as connection:
             pid_atom = connection.intern_atom("_NET_WM_PID")
             for window in connection.screen().root.query_tree().children:
                 pid = window.get_full_property(pid_atom, X.AnyPropertyType)
                 if pid is not None and int(pid.value[0]) == process.pid:
+                    targets.append(window.id)
                     window.send_event(protocol.event.ClientMessage(
                         window=window, client_type=connection.intern_atom("WM_PROTOCOLS"),
                         data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
             connection.sync()
-        process.wait(timeout=20)
+        self.log("close_request", pid=process.pid, windows=targets)
+        assert targets, f"No X11 window for GUI {process.pid}; no close request was sent"
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            # Capture before cleanup signals the isolated process or stops Xvfb.
+            observation = {"pid": process.pid, "requested_windows": targets,
+                           "windows": [], "threads": {}}
+            try:
+                with closing(display.Display(self.env["DISPLAY"])) as connection:
+                    for window in connection.screen().root.query_tree().children:
+                        observation["windows"].append({
+                            "id": window.id, "name": str(window.get_wm_name()),
+                            "mapped": window.get_attributes().map_state,
+                        })
+                for task in Path(f"/proc/{process.pid}/task").glob("*"):
+                    observation["threads"][task.name] = (task / "wchan").read_text()
+            except Exception as error:
+                observation["capture_error"] = str(error)
+            try:
+                (self.root / f"close-timeout-{process.pid}.json").write_text(
+                    json.dumps(observation, indent=2))
+            except OSError as error:
+                print(f"Could not save close-timeout diagnostics: {error}", file=sys.stderr,
+                      flush=True)
+            raise
         assert process.returncode == 0, f"GUI exited with {process.returncode}"
         self.assert_protected()
 
@@ -157,6 +191,13 @@ class Harness:
             bus = self.spawn(["dbus-daemon", "--session", "--nofork", "--print-address=1"], stdout=subprocess.PIPE, stderr=log)
         assert select.select([bus.stdout], [], [], 10)[0], "D-Bus failed to report address"
         self.env["DBUS_SESSION_BUS_ADDRESS"] = bus.stdout.readline().decode().strip()
+        if self.env["GTK_A11Y"] == "atspi":
+            # AT-SPI reads the X root's bus before D-Bus; bind the driver to this display too.
+            os.environ.update(DISPLAY=self.env["DISPLAY"],
+                              DBUS_SESSION_BUS_ADDRESS=self.env["DBUS_SESSION_BUS_ADDRESS"])
+            for variable in ("AT_SPI_BUS_ADDRESS", "AT_SPI_DISPLAY", "WAYLAND_DISPLAY"):
+                os.environ.pop(variable, None)
+                self.env.pop(variable, None)
 
     def window(self, name):
         # These fixtures exercise the workspace UI, after onboarding.
@@ -171,13 +212,24 @@ class Harness:
             assert result is None, f"{name} GUI exited with {result}; see {self.root / (name + '.log')}"
             return path.exists() and self.rpc(path, "ping")
         wait_for(ready, f"{name} GUI socket")
+        def window_ready():
+            with closing(display.Display(self.env["DISPLAY"])) as connection:
+                pid_atom = connection.intern_atom("_NET_WM_PID")
+                for window in connection.screen().root.query_tree().children:
+                    pid = window.get_full_property(pid_atom, X.AnyPropertyType)
+                    if (pid is not None and int(pid.value[0]) == process.pid
+                            and window.get_attributes().map_state == X.IsViewable):
+                        return True
+            return False
+        wait_for(window_ready, f"{name} visible X11 window")
         return process, path
 
     def rpc(self, path, verb, **fields):
         assert path.parent == self.root / "run"
         request = {"id": 1, "kind": "request", "verb": verb, **fields}
         self.log("request", socket=str(path), request=request)
-        deadline = min(time.monotonic() + 20, WAIT_DEADLINE.get() or float('inf'))
+        timeout = 45 if verb == 'agent_view_open' else 20
+        deadline = min(time.monotonic() + timeout, WAIT_DEADLINE.get() or float('inf'))
         def remaining():
             seconds = deadline - time.monotonic()
             if seconds <= 0:

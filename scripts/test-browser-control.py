@@ -379,7 +379,10 @@ def exercise_dense_snapshot(cli, url, root):
         "options": ["Small", "Medium", "Large"], "selected": "Medium"}, by_name["Size"]
     assert by_name["Volume"]["control"] == {"type": "range", "value": "3", "min": "0", "max": "10"}, by_name["Volume"]
     assert by_name["Password"]["control"] == {"type": "password"} and "secret" not in dense_text
-    assert by_name["Card"]["control"] == {"redacted": True} and "4111" not in dense_text, by_name["Card"]
+    # Every ref token ends in this snapshot's random characters, which can spell the digits.
+    nonce = next(iter(dense["refs"])).split("-", 1)[1]
+    assert by_name["Card"]["control"] == {"redacted": True}, by_name["Card"]
+    assert "4111" not in dense_text.replace(nonce, ""), dense_text
     assert any("checked" in meta.get("states", []) for meta in dense["refs"].values())
     assert len(dense_text) < len(value("snapshot", "--compact")) * .7, "dense output is not smaller"
     # --max-chars counts printed data, so the same budget fits more refs than --compact.
