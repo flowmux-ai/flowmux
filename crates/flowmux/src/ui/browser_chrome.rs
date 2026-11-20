@@ -75,7 +75,7 @@ pub(super) fn toolbar_container(bar: &gtk::Box) -> gtk::ScrolledWindow {
 
 impl BrowserChrome {
     pub fn new(bookmarks: &gtk::MenuButton, downloads: &gtk::MenuButton, profile: &str) -> Self {
-        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         bar.add_css_class("browser-toolbar");
         let back = icon_button("go-previous-symbolic", "Back");
         let forward = icon_button("go-next-symbolic", "Forward");
