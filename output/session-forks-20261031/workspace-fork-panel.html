@@ -1,0 +1,115 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<div id="workspace-fork-proposal">
+<style>
+#workspace-fork-proposal { --f-bg:light-dark(#f6f8fb,#191e27); --f-surface:light-dark(#ffffff,#222a36); --f-rail:light-dark(#edf1f7,#202734); --f-text:light-dark(#263247,#e2e9f5); --f-dim:light-dark(#607087,#a6b4c9); --f-line:light-dark(#d2dbe8,#42516a); --f-accent:light-dark(#3865c5,#a2bfff); --f-selected:light-dark(#e8efff,#2b3e60); --f-dot:light-dark(#b7c5d9,#3c4a61); font:13px/1.55 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif; color:var(--f-text); }
+#workspace-fork-proposal * { box-sizing:border-box; }
+#workspace-fork-proposal [hidden] { display:none !important; }
+#workspace-fork-proposal button { font:inherit; color:inherit; border:0; background:transparent; border-radius:5px; padding:6px 9px; }
+#workspace-fork-proposal button:hover { background:var(--f-rail); }
+#workspace-fork-proposal button:focus-visible { outline:2px solid var(--f-accent); outline-offset:2px; }
+#workspace-fork-proposal .f-app { border:1px solid var(--f-line); border-radius:10px; background:var(--f-surface); overflow:hidden; position:relative; }
+#workspace-fork-proposal .f-chrome { display:flex; gap:18px; align-items:center; flex-wrap:wrap; padding:14px 105px 14px 18px; background:var(--f-bg); border-bottom:1px solid var(--f-line); }
+#workspace-fork-proposal .f-brand { font-weight:650; font-size:16px; letter-spacing:-.5px; }
+#workspace-fork-proposal .f-dim { color:var(--f-dim); font-size:12px; }
+#workspace-fork-proposal .f-pill { background:var(--f-rail); border-radius:4px; padding:2px 7px; font-size:11px; }
+#workspace-fork-proposal .f-body { display:grid; grid-template-columns:170px minmax(0,1fr); }
+#workspace-fork-proposal .f-sidebar { background:var(--f-bg); border-right:1px solid var(--f-line); padding:20px 9px; }
+#workspace-fork-proposal .f-label { font-size:11px; letter-spacing:.6px; color:var(--f-dim); margin:0 10px 12px; }
+#workspace-fork-proposal .f-workspace { display:flex; align-items:center; border-radius:6px; margin-bottom:6px; padding:3px; gap:2px; }
+#workspace-fork-proposal .f-workspace.active { background:var(--f-selected); }
+#workspace-fork-proposal .f-workspace.active .f-ws-name { color:var(--f-accent); }
+#workspace-fork-proposal .f-ws-name { min-width:0; text-align:left; flex:1; }
+#workspace-fork-proposal .f-flow-toggle { flex-shrink:0; display:grid; place-items:center; padding:6px; width:28px; height:28px; }
+#workspace-fork-proposal .f-flow-toggle[aria-expanded="true"] { color:var(--f-accent); background:var(--f-surface); box-shadow:0 0 0 1px var(--f-line); }
+#workspace-fork-proposal .f-flow-toggle svg { width:15px; height:15px; }
+#workspace-fork-proposal .f-side-item { margin:18px 12px; color:var(--f-dim); }
+#workspace-fork-proposal .f-main { min-width:0; }
+#workspace-fork-proposal .f-pathbar { padding:10px 16px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--f-line); font-size:12px; }
+#workspace-fork-proposal .f-stage { display:flex; flex-direction:column; min-height:720px; }
+#workspace-fork-proposal .f-flow { background:var(--f-bg); flex:0 0 240px; border-bottom:1px solid var(--f-line); }
+#workspace-fork-proposal .f-flow-head { display:flex; align-items:center; justify-content:space-between; padding:10px 15px; gap:10px; }
+#workspace-fork-proposal .f-flow-head strong { font-weight:600; }
+#workspace-fork-proposal .f-graph { position:relative; margin:0 12px; height:170px; background-image:radial-gradient(var(--f-dot) .7px,transparent .7px); background-size:16px 16px; }
+#workspace-fork-proposal .f-graph svg { display:block; width:100%; height:100%; overflow:visible; }
+#workspace-fork-proposal .f-graph .f-edge { fill:none; stroke:var(--f-line); stroke-width:1.5; }
+#workspace-fork-proposal .f-graph rect { fill:var(--f-surface); stroke:var(--f-line); }
+#workspace-fork-proposal .f-graph .selected rect { fill:var(--f-selected); stroke:var(--f-accent); stroke-width:1.7; }
+#workspace-fork-proposal .f-graph text { fill:var(--f-text); font-family:inherit; font-size:12px; }
+#workspace-fork-proposal .f-graph .f-svg-meta { fill:var(--f-dim); font-size:11px; }
+#workspace-fork-proposal .f-node-hit { position:absolute; border-radius:6px; background:transparent !important; }
+#workspace-fork-proposal .f-node-hit:focus-visible { background:transparent; }
+#workspace-fork-proposal .f-flow-foot { padding:1px 16px 9px; color:var(--f-dim); font-size:11px; }
+#workspace-fork-proposal .f-terminals { flex:1; display:flex; min-height:470px; min-width:0; }
+#workspace-fork-proposal .f-split { display:flex; min-width:0; flex:1; }
+#workspace-fork-proposal .f-split > :last-child { border-left:3px solid var(--f-line); }
+#workspace-fork-proposal .f-pane { flex:1; min-width:0; background:var(--f-surface); display:flex; flex-direction:column; }
+#workspace-fork-proposal .f-pane-head { display:flex; justify-content:space-between; gap:3px; align-items:center; padding:8px 10px; border-bottom:1px solid var(--f-line); background:var(--f-bg); }
+#workspace-fork-proposal .f-pane[data-focused="true"] .f-pane-head { background:var(--f-selected); box-shadow:inset 0 2px var(--f-accent); }
+#workspace-fork-proposal .f-pane-title { min-width:0; overflow-wrap:anywhere; font-weight:500; font-size:12px; }
+#workspace-fork-proposal .f-menu-trigger { flex-shrink:0; }
+#workspace-fork-proposal .f-terminal { padding:18px 16px; flex:1; overflow-wrap:anywhere; }
+#workspace-fork-proposal .f-agent { display:flex; align-items:center; gap:8px; margin-bottom:23px; }
+#workspace-fork-proposal .f-agent strong { font-size:16px; font-weight:600; letter-spacing:-.4px; }
+#workspace-fork-proposal .f-log { font:12px/1.9 "SFMono-Regular",Consolas,monospace; white-space:pre-wrap; margin:18px 0; color:var(--f-text); }
+#workspace-fork-proposal .f-prompt { border-top:1px solid var(--f-line); padding-top:12px; color:var(--f-dim); font:12px/1.7 "SFMono-Regular",Consolas,monospace; }
+#workspace-fork-proposal .f-pane-foot { color:var(--f-dim); font-size:11px; padding:8px 12px; border-top:1px solid var(--f-line); overflow-wrap:anywhere; }
+#workspace-fork-proposal .f-status { padding:9px 14px; font-size:11px; color:var(--f-dim); border-top:1px solid var(--f-line); background:var(--f-bg); }
+#workspace-fork-proposal .f-menu { position:absolute; z-index:5; width:216px; max-width:calc(100% - 16px); padding:5px; background:var(--f-surface); border:1px solid var(--f-line); border-radius:8px; box-shadow:0 8px 28px light-dark(#23334a26,#0006); }
+#workspace-fork-proposal .f-menu button { display:block; text-align:left; width:100%; }
+#workspace-fork-proposal .f-menu .f-fork { color:var(--f-accent); background:var(--f-selected); margin:4px 0; font-weight:500; }
+#workspace-fork-proposal .f-menu-note { font-size:11px; color:var(--f-dim); padding:6px 10px; border-top:1px solid var(--f-line); }
+#workspace-fork-proposal .f-menu-label { padding:6px 9px; color:var(--f-dim); font-size:11px; }
+@media(max-width:760px) { #workspace-fork-proposal .f-body { grid-template-columns:140px minmax(0,1fr); } #workspace-fork-proposal .f-terminal { padding:14px 10px; } }
+@media(max-width:560px) { #workspace-fork-proposal .f-body { grid-template-columns:1fr; } #workspace-fork-proposal .f-sidebar { border-right:0; border-bottom:1px solid var(--f-line); padding:8px; display:flex; flex-wrap:wrap; gap:8px; } #workspace-fork-proposal .f-label,#workspace-fork-proposal .f-side-item { display:none; } #workspace-fork-proposal .f-workspace { flex:1; margin:0; min-width:120px; } #workspace-fork-proposal .f-chrome { gap:8px; } #workspace-fork-proposal .f-stage { min-height:720px; } #workspace-fork-proposal .f-pane-head { padding:7px; } }
+</style>
+<div class="f-app" aria-label="Flowmux workspace fork 흐름 목업">
+ <header class="f-chrome"><span class="f-brand">Flowmux</span><span class="f-dim">workspace / agent sessions</span><span class="f-pill">인터랙션 목업</span></header>
+ <div class="f-body">
+  <aside class="f-sidebar"><div class="f-label">WORKSPACES</div><div class="f-workspaces"></div><div class="f-side-item">Files</div><div class="f-side-item">Worktrees</div></aside>
+  <main class="f-main">
+   <div class="f-pathbar"><span class="f-path"></span><span class="f-dim">main</span></div>
+   <div class="f-stage">
+    <section class="f-flow" aria-label="이 workspace의 세션 흐름">
+     <div class="f-flow-head"><div><strong>세션 흐름</strong> <span class="f-flow-count f-dim"></span></div><button type="button" class="f-close cursor-interaction" aria-label="세션 흐름 닫기">닫기</button></div>
+     <div class="f-graph"></div><div class="f-flow-foot">노드를 선택하면 해당 세션으로 이동합니다.</div>
+    </section>
+    <div class="f-terminals"></div>
+   </div>
+   <div class="f-status" role="status" aria-live="polite">예시 데이터 · 에이전트 화면 우클릭 또는 ⋯ → Fork session</div>
+  </main>
+ </div>
+ <div class="f-menu" role="dialog" aria-label="에이전트 화면 메뉴" hidden>
+  <div class="f-menu-label"></div>
+  <button type="button" class="f-fork cursor-interaction">Fork session <span style="float:right">→</span></button>
+  <button type="button" class="f-dismiss cursor-interaction">닫기</button>
+  <div class="f-menu-note">이 pane의 오른쪽에 분기 세션 열기</div>
+ </div>
+</div>
+<script>
+(()=>{
+const root=document.getElementById('workspace-fork-proposal'),app=root.querySelector('.f-app'),menu=root.querySelector('.f-menu'),flow=root.querySelector('.f-flow'),graph=root.querySelector('.f-graph'),terminals=root.querySelector('.f-terminals');
+const initial={active:'dev',workspaces:{dev:{name:'로그인 개선',agent:'Claude',path:'~/Projects/flowmux',open:true,focused:'s2',sessions:[{id:'s1',name:'로그인 흐름 개선',parent:null},{id:'s2',name:'로그인 흐름 개선 · fork',parent:'s1'}],tree:['s1','s2']},docs:{name:'문서 작업',agent:'Codex',path:'~/Projects/docs',open:false,focused:'s3',sessions:[{id:'s3',name:'사용 가이드 작성',parent:null}],tree:'s3'}},next:4};
+let state=structuredClone(initial),source=null,lastTrigger=null;
+function restore(saved){const p=saved?.privateContent;if(p?.version===2&&p.state?.workspaces?.dev&&p.state?.workspaces?.docs&&['dev','docs'].includes(p.state.active)){state=structuredClone(p.state);return true;}return false;}
+restore(window.openai?.widgetState);
+const ws=()=>state.workspaces[state.active];
+function save(){window.openai?.setWidgetState?.({modelContent:{design:'workspace 상단 세션 흐름',workspace:ws().name,flowOpen:ws().open,forks:ws().sessions.length-1},privateContent:{version:2,state}})?.catch(()=>{});}
+function say(s){root.querySelector('.f-status').textContent=s;}
+function closeMenu(focus=true){menu.hidden=true;if(focus&&lastTrigger?.isConnected)lastTrigger.focus();}
+function sidebar(){const host=root.querySelector('.f-workspaces');host.replaceChildren();Object.entries(state.workspaces).forEach(([key,w])=>{const row=document.createElement('div');row.className='f-workspace'+(key===state.active?' active':'');const name=document.createElement('button');name.type='button';name.className='f-ws-name cursor-interaction';name.textContent=w.name;name.onclick=()=>{closeMenu(false);state.active=key;render();save();say(w.sessions.length>1?'workspace의 fork 흐름을 확인할 수 있습니다.':'예시: fork 기록이 없어 흐름 버튼이 없습니다. 화면 우클릭으로 첫 fork를 만들 수 있습니다.');};row.append(name);if(w.sessions.some(n=>n.parent)){const b=document.createElement('button');b.type='button';b.className='f-flow-toggle cursor-interaction';b.setAttribute('aria-label',w.name+' 세션 흐름');b.setAttribute('aria-expanded',String(w.open));b.innerHTML='<i data-lucide="git-fork" aria-hidden="true"></i>';b.onclick=()=>{closeMenu(false);state.active=key;w.open=!w.open;render();save();say(w.open?'세션 흐름을 위에 열었습니다. 기존 pane은 아래에 유지됩니다.':'세션 흐름을 접었습니다. 실행 중인 세션과 분할은 유지됩니다.');};row.append(b);}host.append(row);});globalThis.lucide?.createIcons({attrs:{width:15,height:15}});}
+function focusSession(id){ws().focused=id;terminals.querySelectorAll('.f-pane').forEach(p=>p.dataset.focused=String(p.dataset.session===id));drawGraph();say('예시: '+ws().sessions.find(n=>n.id===id).name+' 세션으로 이동했습니다.');save();}
+function showMenu(id,trigger,x,y){source=id;lastTrigger=trigger;const n=ws().sessions.find(s=>s.id===id);root.querySelector('.f-menu-label').textContent=ws().agent+' · '+n.name;menu.hidden=false;const r=app.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(x-r.left,r.width-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(y-r.top,r.height-menu.offsetHeight-8))+'px';root.querySelector('.f-fork').focus();}
+function buildPane(tree){if(Array.isArray(tree)){const split=document.createElement('div');split.className='f-split';split.append(buildPane(tree[0]),buildPane(tree[1]));return split;}const n=ws().sessions.find(s=>s.id===tree),pane=document.createElement('section');pane.className='f-pane';pane.dataset.session=n.id;pane.dataset.focused=String(n.id===ws().focused);pane.setAttribute('aria-label',n.name+' 에이전트 화면');pane.innerHTML='<div class="f-pane-head"><span class="f-pane-title"></span><button type="button" class="f-menu-trigger cursor-interaction" aria-label="에이전트 메뉴">⋯</button></div><div class="f-terminal"><div class="f-agent"><strong></strong><span class="f-pill"></span></div><div class="f-dim f-session-info"></div><pre class="f-log"></pre><div class="f-prompt">❯ 다음 작업을 입력하세요</div></div><div class="f-pane-foot"></div>';pane.querySelector('.f-pane-title').textContent=n.name;pane.querySelector('.f-agent strong').textContent=ws().agent;pane.querySelector('.f-pill').textContent=n.parent?'Fork':'원본';pane.querySelector('.f-session-info').textContent=n.parent?'원본 대화를 이어받은 새 세션':'현재 세션 · 응답 대기';pane.querySelector('.f-log').textContent=n.parent?'원본의 마지막 완료 지점까지\n대화 맥락을 이어받았습니다.\n\n이 세션에서 다른 접근을\n시도할 수 있습니다.':state.active==='dev'?'› 로그인 실패 원인을 정리해줘\n\n원인 분석을 마쳤습니다.\n세션 복구와 만료 처리 두 곳을\n확인하면 됩니다.':'› 사용 가이드 구성을 정리해줘\n\n설치, 첫 실행, 기본 조작 순서로\n구성을 정리했습니다.';pane.querySelector('.f-pane-foot').textContent=ws().path+' · '+n.id;const trigger=pane.querySelector('.f-menu-trigger');trigger.onclick=e=>{e.stopPropagation();const r=trigger.getBoundingClientRect();showMenu(n.id,trigger,r.right-205,r.bottom+5);};pane.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(n.id,trigger,e.clientX,e.clientY);};pane.onclick=()=>{closeMenu(false);focusSession(n.id);};return pane;}
+function drawGraph(){if(!ws().open)return;const w=graph.clientWidth;if(!w)return;const nodes=ws().sessions,positions=new Map(),levels=new Map();function depth(n){return n.parent?1+depth(nodes.find(p=>p.id===n.parent)):0;}nodes.forEach(n=>{const d=depth(n);if(!levels.has(d))levels.set(d,[]);levels.get(d).push(n);});const maxDepth=Math.max(...levels.keys()),narrow=w<480,boxW=Math.min(170,narrow?150:Math.max(110,(w-32)/(maxDepth+1)-28)),boxH=64;let height=170;if(narrow){height=Math.max(170,(maxDepth+1)*96);levels.forEach((items,d)=>items.forEach((n,i)=>positions.set(n.id,{x:Math.max(0,(w/items.length)*(i+.5)-Math.min(boxW,w/items.length-10)/2),y:10+d*96,width:Math.min(boxW,w/items.length-10)})));}else{height=Math.max(170,...[...levels.values()].map(a=>a.length*86+10));levels.forEach((items,d)=>items.forEach((n,i)=>positions.set(n.id,{x:16+d*(w-boxW-32)/Math.max(1,maxDepth),y:(height/items.length)*(i+.5)-boxH/2,width:boxW})));}graph.style.height=height+'px';flow.style.flexBasis=Math.max(240,height+70)+'px';graph.replaceChildren();const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${w} ${height}`);svg.setAttribute('role','img');svg.setAttribute('aria-label',ws().agent+' 세션 fork 관계. '+nodes.length+'개 세션.');function el(tag,attrs){const e=document.createElementNS(svg.namespaceURI,tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));return e;}nodes.filter(n=>n.parent).forEach(n=>{const a=positions.get(n.parent),b=positions.get(n.id);const x=narrow?a.x+a.width/2:a.x+a.width,y=narrow?a.y+boxH:a.y+boxH/2,tx=narrow?b.x+b.width/2:b.x,ty=narrow?b.y:b.y+boxH/2;const path=el('path',{class:'f-edge',d:narrow?`M${x},${y} C${x},${y+18} ${tx},${ty-18} ${tx},${ty}`:`M${x},${y} C${x+20},${y} ${tx-20},${ty} ${tx},${ty}`});svg.append(path);});nodes.forEach(n=>{const p=positions.get(n.id),g=el('g',{class:n.id===ws().focused?'selected':''});g.append(el('rect',{x:p.x,y:p.y,width:p.width,height:boxH,rx:6}));const title=el('text',{x:p.x+12,y:p.y+24}),meta=el('text',{x:p.x+12,y:p.y+46,class:'f-svg-meta'});title.textContent=ws().agent+' · '+(n.parent?'fork '+n.id.slice(1):'원본');meta.textContent=n.id===ws().focused?'현재 선택 · 열림':n.parent?'분기됨 · 열림':'응답 대기 · 열림';g.append(title,meta);svg.append(g);});graph.append(svg);nodes.forEach(n=>{const p=positions.get(n.id),b=document.createElement('button');b.type='button';b.className='f-node-hit cursor-interaction';b.style.cssText=`left:${p.x}px;top:${p.y}px;width:${p.width}px;height:${boxH}px;`;b.setAttribute('aria-label',n.name+' 세션 열기');b.setAttribute('aria-pressed',String(n.id===ws().focused));b.onclick=()=>focusSession(n.id);graph.append(b);});root.querySelector('.f-flow-count').textContent='· '+(nodes.length-1)+' fork';}
+function renderPanel(){flow.hidden=!ws().open||ws().sessions.length<2;requestAnimationFrame(drawGraph);}
+function render(){sidebar();root.querySelector('.f-path').textContent=ws().path;terminals.replaceChildren(buildPane(ws().tree));renderPanel();}
+function replaceLeaf(tree,id,newId){if(Array.isArray(tree))return tree.map(t=>replaceLeaf(t,id,newId));return tree===id?[id,newId]:tree;}
+root.querySelector('.f-fork').onclick=()=>{const w=ws(),parent=w.sessions.find(n=>n.id===source);if(!parent)return;const id='s'+state.next++;w.sessions.push({id,name:parent.name.replace(/ · fork.*/,'')+' · fork '+id.slice(1),parent:parent.id});w.tree=replaceLeaf(w.tree,parent.id,id);w.focused=id;closeMenu(false);render();save();say('예시: 선택한 pane의 오른쪽에 fork 세션을 열고 관계를 기록했습니다. 흐름 패널은 workspace 버튼으로 엽니다.');};
+root.querySelector('.f-dismiss').onclick=()=>closeMenu();root.querySelector('.f-close').onclick=()=>{ws().open=false;renderPanel();sidebar();save();say('세션 흐름을 접었습니다. 기존 pane 배치를 유지합니다.');};
+root.addEventListener('keydown',e=>{if(menu.hidden)return;const buttons=[...menu.querySelectorAll('button')];if(e.key==='Escape'){e.preventDefault();closeMenu();}if(e.key==='Tab'){e.preventDefault();const index=buttons.indexOf(document.activeElement);buttons[(index+(e.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}});
+app.addEventListener('click',e=>{if(!menu.hidden&&!menu.contains(e.target)&&!e.target.closest('.f-menu-trigger'))closeMenu(false);});
+window.addEventListener('openai:set_globals',e=>{if(restore(e.detail?.globals?.widgetState)){closeMenu(false);render();}});
+render();new ResizeObserver(()=>drawGraph()).observe(graph);
+})();
+</script>
+</div>

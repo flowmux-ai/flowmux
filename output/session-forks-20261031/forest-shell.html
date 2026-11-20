@@ -1,0 +1,19 @@
+<div class="f-app" aria-label="Flowmux 다중 세션 계보 목업">
+ <header class="f-chrome"><span class="f-brand">Flowmux</span><span class="f-dim">workspace / agent sessions</span><span class="f-pill">예시 데이터 · 인터랙션 목업</span></header>
+ <div class="f-body">
+  <aside class="f-sidebar"><div class="f-label">WORKSPACES</div><div class="f-workspace active"><span class="f-ws-name">개발 작업</span><button type="button" class="f-flow-toggle cursor-interaction" aria-label="개발 작업 세션 흐름" aria-expanded="true"><i data-lucide="git-fork" aria-hidden="true"></i></button></div><div class="f-side-item">Files</div><div class="f-side-item">Worktrees</div></aside>
+  <main class="f-main">
+   <div class="f-pathbar"><span class="f-path"></span><button type="button" class="f-resume-extra cursor-interaction">저장된 Gemini 세션 재개 예시</button></div>
+   <div class="f-stage">
+    <section class="f-flow" aria-label="workspace에 열린 세션들의 전체 fork 계보">
+     <div class="f-flow-head"><div><strong>세션 흐름</strong> <span class="f-flow-count f-dim"></span></div><div class="f-flow-tools"><button type="button" class="f-zoom-out cursor-interaction" aria-label="축소">−</button><span class="f-zoom-value">85%</span><button type="button" class="f-zoom-in cursor-interaction" aria-label="확대">+</button><button type="button" class="f-fit cursor-interaction">전체 맞춤</button><button type="button" class="f-pan cursor-interaction" aria-pressed="false">이동</button><button type="button" class="f-close cursor-interaction">닫기</button></div></div>
+     <div class="f-graph" role="group" aria-label="휠로 확대 축소하고 드래그로 이동하는 다중 그래프"></div>
+     <div class="f-flow-foot">휠: 확대·축소 · 드래그: 이동 · 노드 클릭: 열기 · 점선 노드: 재개 불가</div>
+    </section>
+    <div class="f-terminals"></div>
+   </div>
+   <div class="f-status" role="status" aria-live="polite">예시: 서로 다른 원본에서 fork된 Claude와 Codex 세션을 resume한 workspace</div>
+  </main>
+ </div>
+ <div class="f-menu" role="dialog" aria-label="에이전트 화면 메뉴" hidden><div class="f-menu-label"></div><button type="button" class="f-fork cursor-interaction">Fork session →</button><button type="button" class="f-dismiss cursor-interaction">닫기</button><div class="f-menu-note">이 pane의 오른쪽에 분기 세션 열기</div></div>
+</div>
