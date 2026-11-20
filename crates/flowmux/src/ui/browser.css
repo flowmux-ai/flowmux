@@ -25,6 +25,12 @@ menubutton.browser-icon > button,
     text-shadow: none;
     font-weight: 500;
 }
+/* Toolbar icons take their icon's width, leaving the rest to the address. */
+.browser-toolbar button.browser-icon,
+.browser-toolbar menubutton.browser-icon > button {
+    min-width: 0;
+    padding: 0 2px;
+}
 button.browser-icon:hover,
 menubutton.browser-icon > button:hover,
 .browser-task-bar button:hover,
