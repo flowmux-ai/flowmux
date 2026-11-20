@@ -157,10 +157,6 @@ def main():
             h.rpc(gui_socket, 'workspace_create', root=str(h.root), name='host budget')
             pane = h.tree(gui_socket)[0]['panes'][0]['id']
 
-            def tabs():
-                return next(item for workspace in h.tree(gui_socket) for item in workspace['panes']
-                            if item['id'] == pane)['tabs']
-
             for root, _, agent, _ in executions:
                 started = time.monotonic()
                 view = h.rpc(gui_socket, 'agent_view_open', pane=pane,
@@ -168,9 +164,7 @@ def main():
                 connections.append({'instance': agent['instance'],
                                     'elapsed_seconds': time.monotonic() - started})
                 print('HOST_BUDGET_RECONNECT=' + json.dumps(connections[-1]), flush=True)
-                # Keys and the screen read below go to the pane's active tab.
-                fixture.wait_for(lambda: any(tab['id'] == view and tab['active'] for tab in tabs()),
-                                 'reopened view is the active tab')
+                h.wait_active(gui_socket, pane, view)
                 token = '한글 ' + uuid.uuid4().hex[:6]
                 h.send(gui_socket, pane, token)
                 fixture.wait_for(lambda: 'ACK:<' + token + '>' in h.screen(gui_socket, pane), 'fresh input')

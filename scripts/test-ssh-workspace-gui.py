@@ -308,10 +308,21 @@ class Harness:
     def terminals(workspace):
         return [(pane["id"], tab) for pane in workspace["panes"] for tab in pane["tabs"] if tab["kind"] == "ssh_terminal"]
 
-    def screen(self, path, pane):
+    def wait_active(self, path, pane, tab):
+        """Keys and screen reads go to a pane's active tab; wait until that is `tab`."""
+        def active():
+            return any(item["id"] == pane and any(t["id"] == tab and t["active"] for t in item["tabs"])
+                       for workspace in self.tree(path) for item in workspace["panes"])
+        wait_for(active, f"tab {tab} is the active tab of pane {pane}")
+
+    def screen(self, path, pane, tab=None):
+        if tab is not None:
+            self.wait_active(path, pane, tab)
         return self.rpc(path, "pane_read_screen", pane=pane)["screen_contents"]["text"]
 
-    def send(self, path, pane, command):
+    def send(self, path, pane, command, tab=None):
+        if tab is not None:
+            self.wait_active(path, pane, tab)
         return self.rpc(path, "pane_send_keys", pane=pane, keys=command + "\n")
 
     def marker(self, path, pane, tab, cwd):
