@@ -1048,6 +1048,214 @@ Apache License
 
 ### Apache License 2.0
 
+Used by: alacritty_terminal 0.26.0
+
+~~~~text
+Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright 2020 The Alacritty Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+~~~~
+
+### Apache License 2.0
+
 Used by: dunce 1.0.5, ring 0.17.14, ryu 1.0.23, sync_wrapper 1.0.2
 
 ~~~~text
@@ -2385,7 +2593,7 @@ Used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
 Copyright (c) 2013-2025 The rust-url developers
 ~~~~
 
-Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, openssl-probe 0.2.1, pkg-config 0.3.33, scoped-tls 1.0.1, socket2 0.6.5, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
+Used by: cc 1.2.62, cfg-if 1.0.4, find-msvc-tools 0.1.9, js-sys 0.3.98, miow 0.6.1, openssl-probe 0.2.1, pkg-config 0.3.33, scoped-tls 1.0.1, socket2 0.6.5, wasm-bindgen 0.2.121, wasm-bindgen-futures 0.4.71, wasm-bindgen-macro 0.2.121, wasm-bindgen-macro-support 0.2.121, wasm-bindgen-shared 0.2.121, web-sys 0.3.98
 
 ~~~~text
 Copyright (c) 2014 Alex Crichton
@@ -2470,7 +2678,7 @@ Used by: tempfile 3.27.0
 Copyright (c) 2015 Steven Allen
 ~~~~
 
-Used by: fs2 0.4.3, heck 0.5.0, unicode-normalization 0.1.25
+Used by: fs2 0.4.3, heck 0.5.0, unicode-normalization 0.1.25, unicode-width 0.2.3
 
 ~~~~text
 Copyright (c) 2015 The Rust Project Developers
@@ -2544,7 +2752,7 @@ Used by: serde_urlencoded 0.7.1
 Copyright (c) 2016 Anthony Ramine
 ~~~~
 
-Used by: utf8parse 0.2.2
+Used by: utf8parse 0.2.2, vte 0.15.0
 
 ~~~~text
 Copyright (c) 2016 Joe Wilm
@@ -2724,7 +2932,7 @@ Used by: tokio-rustls 0.26.4
 Copyright (c) 2017 quininer kel
 ~~~~
 
-Used by: signal-hook-registry 1.4.8
+Used by: signal-hook 0.4.6, signal-hook-registry 1.4.8
 
 ~~~~text
 Copyright (c) 2017 tokio-jsonrpc developers
@@ -2926,6 +3134,12 @@ Used by: powerfmt 0.2.0
 
 ~~~~text
 Copyright (c) 2023 Jacob Pratt et al.
+~~~~
+
+Used by: cursor-icon 1.2.0
+
+~~~~text
+Copyright (c) 2023 Kirill Chibisov
 ~~~~
 
 Used by: hyper-util 0.1.20
@@ -3142,7 +3356,7 @@ Used by: fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
 MIT License
 ~~~~
 
-Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.89, atomic-waker 1.1.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project 1.1.13, pin-project-internal 1.1.13, pin-project-lite 0.2.17, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, syn 3.0.9, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, zmij 1.0.21
+Used by: allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-trait 0.1.89, atomic-waker 1.1.2, cairo-rs 0.20.12, cairo-sys-rs 0.20.10, concurrent-queue 2.5.0, displaydoc 0.2.5, emojis 0.8.2, endi 1.1.1, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, finl_unicode 1.4.0, gdk-pixbuf 0.20.10, gdk-pixbuf-sys 0.20.10, gdk4 0.9.6, gdk4-sys 0.9.6, gio 0.20.12, gio-sys 0.20.10, gix 0.77.0, gix-actor 0.37.1, gix-chunk 0.4.12, gix-command 0.6.5, gix-commitgraph 0.31.0, gix-config 0.50.0, gix-config-value 0.16.0, gix-date 0.12.1, gix-diff 0.57.1, gix-discover 0.45.0, gix-features 0.45.2, gix-fs 0.18.2, gix-glob 0.23.0, gix-hash 0.21.2, gix-hashtable 0.11.0, gix-lock 20.0.1, gix-object 0.54.1, gix-odb 0.74.0, gix-pack 0.64.1, gix-packetline 0.20.0, gix-path 0.10.22, gix-protocol 0.55.0, gix-quote 0.6.2, gix-ref 0.57.0, gix-refspec 0.35.0, gix-revision 0.39.0, gix-revwalk 0.25.0, gix-sec 0.12.2, gix-shallow 0.7.0, gix-tempfile 20.0.1, gix-trace 0.1.19, gix-transport 0.52.1, gix-traverse 0.51.1, gix-url 0.34.0, gix-utils 0.3.6, gix-validate 0.10.1, glib 0.20.12, glib-macros 0.20.12, glib-sys 0.20.10, gobject-sys 0.20.10, graphene-rs 0.20.10, graphene-sys 0.20.10, gsk4 0.9.6, gsk4-sys 0.9.6, gtk4 0.9.7, gtk4-macros 0.9.5, gtk4-sys 0.9.6, hermit-abi 0.5.2, home 0.5.12, io-lifetimes 2.0.4, itoa 1.0.18, libadwaita 0.7.2, libadwaita-sys 0.7.2, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, pango 0.20.12, pango-sys 0.20.10, parking 2.2.1, pin-project 1.1.13, pin-project-internal 1.1.13, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, portable-atomic 1.13.1, portable-atomic-util 0.2.7, proc-macro-crate 3.5.0, proc-macro2 1.0.106, quote 1.0.45, rustc-hash 2.1.2, rustix 1.1.4, rustix-openpty 0.2.0, rustversion 1.0.22, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_json 1.0.150, serde_repr 0.1.20, syn 2.0.117, syn 3.0.9, system-deps 7.0.8, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, tinyvec 1.11.0, typed-path 0.12.3, unicode-ident 1.0.24, vte4 0.8.0, vte4-sys 0.8.0, wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.3+wasi-0.2.9, winnow 0.7.15, winnow 1.0.3, wit-bindgen 0.51.0, wit-bindgen 0.57.1, zmij 1.0.21
 
 Used by: android_system_properties 0.1.5
 
