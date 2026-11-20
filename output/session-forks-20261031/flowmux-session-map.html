@@ -1,0 +1,102 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<div id="fm-fork-concept">
+<style>
+#fm-fork-concept { --fm-bg:light-dark(#f7f8fa,#181c24); --fm-panel:light-dark(#fff,#222833); --fm-soft:light-dark(#edf0f5,#2a3240); --fm-ink:light-dark(#202a3b,#e1e7f1); --fm-muted:light-dark(#596779,#a9b6c8); --fm-line:light-dark(#d4dbe5,#404c60); --fm-blue:light-dark(#355fc2,#99b6ff); --fm-blue-bg:light-dark(#eaf0ff,#293a5a); --fm-amber:light-dark(#8b5909,#edc47e); --fm-amber-bg:light-dark(#fff2d9,#443724); font:13px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif; color:var(--fm-ink); }
+#fm-fork-concept * { box-sizing:border-box; }
+#fm-fork-concept .fm-app { background:var(--fm-bg); border:1px solid var(--fm-line); border-radius:12px; overflow:hidden; min-height:770px; position:relative; }
+#fm-fork-concept button,#fm-fork-concept select { font:inherit; color:inherit; }
+#fm-fork-concept button { background:var(--fm-panel); border:1px solid var(--fm-line); border-radius:6px; padding:7px 11px; }
+#fm-fork-concept button:hover { background:var(--fm-soft); }
+#fm-fork-concept button:focus-visible,#fm-fork-concept select:focus-visible { outline:2px solid var(--fm-blue); outline-offset:3px; }
+#fm-fork-concept button:disabled { opacity:.5; }
+#fm-fork-concept .fm-titlebar { display:flex; align-items:center; gap:14px; padding:14px 110px 14px 18px; border-bottom:1px solid var(--fm-line); background:var(--fm-panel); flex-wrap:wrap; }
+#fm-fork-concept .fm-brand { font-size:16px; font-weight:650; letter-spacing:-.5px; }
+#fm-fork-concept .fm-subtle { color:var(--fm-muted); font-size:12px; }
+#fm-fork-concept .fm-tag { padding:3px 8px; background:var(--fm-soft); border-radius:5px; font-size:11px; }
+#fm-fork-concept .fm-body { display:grid; grid-template-columns:125px minmax(0,1fr); }
+#fm-fork-concept .fm-rail { padding:21px 12px; border-right:1px solid var(--fm-line); }
+#fm-fork-concept .fm-rail p { margin:0 0 14px; }
+#fm-fork-concept .fm-rail .fm-current { background:var(--fm-blue-bg); color:var(--fm-blue); padding:8px; border-radius:5px; }
+#fm-fork-concept .fm-work { min-width:0; }
+#fm-fork-concept .fm-toolbar { padding:17px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--fm-line); }
+#fm-fork-concept h2 { font-size:18px; margin:0; letter-spacing:-.5px; font-weight:600; }
+#fm-fork-concept h3 { font-size:15px; margin:7px 0 12px; font-weight:600; }
+#fm-fork-concept .fm-layout { display:grid; grid-template-columns:minmax(0,1fr) 235px; }
+#fm-fork-concept .fm-canvas { padding:16px; min-width:0; }
+#fm-fork-concept .fm-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--fm-muted); margin-bottom:16px; }
+#fm-fork-concept .fm-map { display:grid; grid-template-columns:1fr 1fr; column-gap:18px; row-gap:39px; position:relative; padding:5px 0; }
+#fm-fork-concept .fm-lines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; color:var(--fm-line); }
+#fm-fork-concept .fm-node { position:relative; text-align:left; padding:12px; min-width:0; min-height:94px; display:flex; flex-direction:column; gap:5px; z-index:1; }
+#fm-fork-concept .fm-node[data-id="root"] { grid-column:1 / 3; width:calc(50% - 9px); justify-self:center; }
+#fm-fork-concept .fm-node[aria-pressed="true"] { border-color:var(--fm-blue); background:var(--fm-blue-bg); box-shadow:0 0 0 1px var(--fm-blue); }
+#fm-fork-concept .fm-node strong { font-weight:600; overflow-wrap:anywhere; }
+#fm-fork-concept .fm-node small { color:var(--fm-muted); font-size:11px; }
+#fm-fork-concept .fm-status { font-size:11px; color:var(--fm-muted); }
+#fm-fork-concept .fm-wait { color:var(--fm-amber); }
+#fm-fork-concept .fm-inspector { border-left:1px solid var(--fm-line); background:var(--fm-panel); padding:20px 16px; min-width:0; }
+#fm-fork-concept .fm-inspector dl { margin:20px 0; }
+#fm-fork-concept dt { font-size:11px; color:var(--fm-muted); margin-top:15px; }
+#fm-fork-concept dd { margin:3px 0; overflow-wrap:anywhere; }
+#fm-fork-concept .fm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+#fm-fork-concept .fm-primary { background:var(--fm-ink); color:var(--fm-panel); border-color:var(--fm-ink); }
+#fm-fork-concept .fm-primary:hover { background:var(--fm-blue); color:var(--fm-panel); }
+#fm-fork-concept .fm-terminal { margin:0 16px 16px; border:1px solid var(--fm-line); border-radius:7px; background:var(--fm-panel); overflow:hidden; }
+#fm-fork-concept .fm-terminal-head { padding:9px 13px; background:var(--fm-soft); display:flex; justify-content:space-between; gap:10px; }
+#fm-fork-concept .fm-terminal-content { padding:16px; min-height:138px; }
+#fm-fork-concept .fm-terminal pre { margin:10px 0 0; font:12px/1.8 "SFMono-Regular",Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+#fm-fork-concept .fm-bottom { padding:9px 16px; border-top:1px solid var(--fm-line); color:var(--fm-muted); font-size:11px; }
+#fm-fork-concept .fm-overlay { position:absolute; inset:0; z-index:10; background:light-dark(#e8edf4ed,#171d27ed); display:flex; align-items:flex-start; justify-content:center; padding:75px 18px 18px; }
+#fm-fork-concept [hidden] { display:none !important; }
+#fm-fork-concept .fm-dialog { width:410px; max-width:100%; background:var(--fm-panel); border:1px solid var(--fm-line); border-radius:10px; padding:25px; box-shadow:0 12px 40px light-dark(#24344a22,#0005); }
+#fm-fork-concept label { display:block; margin:15px 0; }
+#fm-fork-concept select { display:block; width:100%; padding:8px; margin-top:7px; border:1px solid var(--fm-line); border-radius:6px; background:var(--fm-bg); }
+#fm-fork-concept .fm-callout { background:var(--fm-soft); padding:12px; border-radius:6px; margin:16px 0; font-size:12px; }
+#fm-fork-concept .fm-compact .fm-layout { grid-template-columns:230px minmax(0,1fr); }
+#fm-fork-concept .fm-compact .fm-map { display:flex; flex-direction:column; gap:10px; border-left:1px solid var(--fm-line); padding-left:12px; }
+#fm-fork-concept .fm-compact .fm-node[data-id="root"] { width:auto; }
+#fm-fork-concept .fm-compact .fm-node { min-height:70px; }
+#fm-fork-concept .fm-compact .fm-node:not([data-id="root"]) { margin-left:12px; }
+#fm-fork-concept .fm-compact .fm-lines { display:none; }
+#fm-fork-concept .fm-compact .fm-inspector { border-left:1px solid var(--fm-line); }
+#fm-fork-concept .fm-compact .fm-terminal { margin:24px 0 0; }
+#fm-fork-concept .fm-compact .fm-terminal-content { min-height:235px; }
+@media(max-width:760px) { #fm-fork-concept .fm-body { grid-template-columns:1fr; } #fm-fork-concept .fm-rail { display:none; } #fm-fork-concept .fm-layout { grid-template-columns:minmax(0,1fr) 215px; } }
+@media(max-width:560px) { #fm-fork-concept .fm-layout,#fm-fork-concept .fm-compact .fm-layout { grid-template-columns:1fr; } #fm-fork-concept .fm-inspector { border-left:0; border-top:1px solid var(--fm-line); } #fm-fork-concept .fm-titlebar { padding-right:100px; } #fm-fork-concept .fm-app { min-height:1250px; } #fm-fork-concept .fm-node { padding:9px; } }
+</style>
+<div class="viz-carousel" aria-label="Flowmux 세션 탐색 디자인" data-previous-label="이전 디자인" data-next-label="다음 디자인">
+<section data-variant="그래프 중심" aria-label="그래프 중심 세션 탐색"><div class="fm-app" data-layout="map"></div></section>
+<section data-variant="터미널 중심" aria-label="터미널 중심 세션 탐색" hidden><div class="fm-app fm-compact" data-layout="compact"></div></section>
+</div>
+<script>
+(()=>{
+const root=document.getElementById('fm-fork-concept');
+const base=[
+ {id:'root',name:'로그인 흐름 개선',agent:'Claude',status:'응답 완료',runtime:'live',place:'현재 workspace · tab 1',relation:'시작 세션',context:'요구사항과 실패 재현을 정리한 공통 출발점',branch:'main',turn:'턴 12 · 설계 확정',log:'요구사항 정리가 끝났습니다.\n두 가지 접근을 분기해 비교할 수 있습니다.'},
+ {id:'a',name:'A · 최소 수정',agent:'Claude',status:'실행 중 · 백그라운드',runtime:'live',place:'구현 workspace · tab 3',relation:'Native fork · 턴 12',context:'턴 12까지의 대화 · 독립 세션',branch:'fork/minimal',turn:'턴 12 · 설계 확정',log:'세션의 기존 탭을 표시합니다.\n› 최소 수정안의 회귀 테스트를 실행하고 있습니다.'},
+ {id:'b',name:'B · 구조 변경',agent:'Claude',status:'종료됨 · 재개 가능',runtime:'saved',place:'저장된 세션 · 열린 탭 없음',relation:'Native fork · 턴 12',context:'턴 12까지의 대화 · 이후 대화는 별도 저장',branch:'fork/refactor',turn:'턴 16 · 변경안 정리',log:'저장 기록에서 재개한 세션입니다.\n› 구조 변경안과 미해결 항목을 불러왔습니다.'},
+ {id:'c',name:'독립 코드 리뷰',agent:'Codex',status:'승인 필요 · 백그라운드',runtime:'live',place:'검토 workspace · tab 2',relation:'맥락 전달 · 최소 수정안',context:'선택한 요약과 diff · 전체 대화 복제 아님',branch:'review/minimal',turn:'턴 4 · 리뷰 범위 확인',log:'승인 요청이 남아 있습니다.\n› 테스트 명령 실행을 허용할까요?\n\n요청은 해당 에이전트에서 처리합니다.'},
+ {id:'d',name:'회귀 항목 조사',agent:'Claude',status:'하위 작업 · 직접 열기 미지원',runtime:'child',place:'최소 수정 세션 내부',relation:'하위 에이전트 · fork와 구분',context:'부모가 전달한 작업 맥락',branch:'fork/minimal',turn:'분기 지점 제공 안 됨',log:'부모 세션으로 이동합니다.\n› 회귀 항목 조사 하위 작업의 상태를 확인합니다.'}
+];
+const providers=['Claude','Codex','Gemini','agy','Cline','OpenCode'];
+let saved=window.openai?.widgetState;
+root.querySelectorAll('.fm-app').forEach((app,index)=>{
+ const data=base.map(n=>({...n})); let selected=data.some(n=>n.id===saved?.privateContent?.selected)?saved.privateContent.selected:'a'; let opened='root';
+ app.innerHTML=`<div class="fm-titlebar"><span class="fm-brand">Flowmux</span><span class="fm-subtle">flowmux / 로그인 개선</span><span class="fm-tag">기획 목업 · 예시 데이터</span></div><div class="fm-body"><aside class="fm-rail"><p class="fm-subtle">WORKSPACE</p><p>개요</p><p class="fm-current">세션 흐름</p><p>파일</p><p>Worktrees</p><p class="fm-subtle" style="margin-top:30px">에이전트</p><p>Claude</p><p>Codex</p><p>Gemini</p><p>agy</p><p>Cline</p><p>OpenCode</p></aside><main class="fm-work"><div class="fm-toolbar"><div><h2>세션 흐름</h2><span class="fm-subtle">로그인 개선 · 분기와 작업 위치</span></div><span class="fm-tag">로컬</span></div><div class="fm-layout"><div class="fm-canvas"><div class="fm-legend"><span>─ fork</span><span>┄ 맥락 전달</span><span>·· 하위 작업</span></div><div class="fm-map" aria-label="예시 세션 관계 그래프"><svg class="fm-lines" aria-hidden="true"></svg></div></div><aside class="fm-inspector"></aside></div><div class="fm-terminal"><div class="fm-terminal-head"><span class="fm-terminal-label"></span><span class="fm-tag">터미널 예시</span></div><div class="fm-terminal-content"><span class="fm-subtle fm-location"></span><pre class="fm-output"></pre></div></div><div class="fm-bottom" role="status" aria-live="polite">노드 선택으로 상세 확인 · 열기로 세션 이동</div></main></div><div class="fm-overlay" hidden><div class="fm-dialog" role="dialog" aria-modal="true" aria-label="새 분기 만들기"><h2>이 지점에서 이어가기</h2><label>이어갈 도구<select class="fm-provider">${providers.map(p=>`<option>${p}</option>`).join('')}</select></label><label>대화 시작점<select class="fm-point"><option>마지막 완료 턴</option></select></label><label>코드 작업 공간<select class="fm-code"><option>새 worktree · 현재 커밋 기준</option><option>현재 폴더 공유 · 코드가 함께 바뀜</option></select></label><div class="fm-callout fm-mode"></div><div class="fm-actions"><button class="fm-primary fm-create cursor-interaction">분기 생성 예시</button><button class="fm-cancel cursor-interaction">취소</button></div></div></div>`;
+ const map=app.querySelector('.fm-map'), inspector=app.querySelector('.fm-inspector'), terminal=app.querySelector('.fm-terminal'), overlay=app.querySelector('.fm-overlay'), provider=app.querySelector('.fm-provider');
+ const byId=id=>data.find(n=>n.id===id);
+ const status=msg=>app.querySelector('.fm-bottom').textContent=msg;
+ const persist=()=>window.openai?.setWidgetState?.({modelContent:{design:index===0?'그래프 중심':'터미널 중심',selectedSession:byId(selected).name},privateContent:{selected}})?.catch(()=>{});
+ function drawLines(){const svg=map.querySelector('svg'); if(!map.offsetWidth||index===1)return; svg.replaceChildren(); const bounds=map.getBoundingClientRect(); [['root','a',''],['root','b',''],['a','c','6 4'],['a','d','2 4']].forEach(([from,to,dash])=>{const a=map.querySelector(`[data-id="${from}"]`),b=map.querySelector(`[data-id="${to}"]`);if(!a||!b)return;const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),x=ar.x-bounds.x+ar.width/2,y=ar.bottom-bounds.y,tx=br.x-bounds.x+br.width/2,ty=br.y-bounds.y; const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',`M ${x} ${y} C ${x} ${y+20}, ${tx} ${ty-20}, ${tx} ${ty}`);path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','1.5');if(dash)path.setAttribute('stroke-dasharray',dash);svg.append(path);});}
+ function renderTerminal(){const n=byId(opened);app.querySelector('.fm-terminal-label').textContent=`${n.agent} / ${n.name}`;app.querySelector('.fm-location').textContent=`${n.place} · ${n.branch}`;app.querySelector('.fm-output').textContent=n.log;}
+ function render(){map.querySelectorAll('button').forEach(b=>b.remove());data.forEach(n=>{const b=document.createElement('button');b.className='fm-node cursor-interaction';b.dataset.id=n.id;b.setAttribute('aria-pressed',String(n.id===selected));b.innerHTML=`<small>${n.agent} · ${n.id==='root'?'시작':n.relation.split(' · ')[0]}</small><strong></strong><span class="fm-status ${n.id==='c'?'fm-wait':''}"></span>`;b.querySelector('strong').textContent=n.name;b.querySelector('.fm-status').textContent=n.status;b.onclick=()=>{selected=n.id;render();persist();};map.append(b);}); const n=byId(selected);inspector.innerHTML=`<span class="fm-subtle">선택한 세션</span><h3></h3><span class="fm-tag fm-selected-status"></span><dl><dt>분기 관계</dt><dd class="fm-relation"></dd><dt>이어받은 맥락</dt><dd class="fm-context"></dd><dt>작업 위치</dt><dd class="fm-place"></dd><dt>코드</dt><dd class="fm-branch"></dd></dl><div class="fm-actions"><button class="fm-primary fm-open cursor-interaction"></button><button class="fm-fork cursor-interaction">새 분기</button></div>`;inspector.querySelector('h3').textContent=n.name;[['.fm-selected-status','status'],['.fm-relation','relation'],['.fm-context','context'],['.fm-place','place'],['.fm-branch','branch']].forEach(([sel,key])=>inspector.querySelector(sel).textContent=n[key]);inspector.querySelector('.fm-open').textContent=n.runtime==='saved'?'새 탭에서 재개':n.runtime==='child'?'부모 세션 열기':'실행 중인 탭 열기';inspector.querySelector('.fm-fork').disabled=n.runtime==='child';inspector.querySelector('.fm-open').onclick=()=>{opened=n.runtime==='child'?'a':n.id;if(n.runtime==='saved'){n.runtime='live';n.status='응답 대기 · 재개됨';n.place='구현 workspace · 새 tab';render();}renderTerminal();status(n.runtime==='child'?'예시: 부모 세션으로 이동했습니다.':`예시: ${n.name} 세션을 열었습니다. 승인·답변 상태는 그대로 유지됩니다.`);persist();};inspector.querySelector('.fm-fork').onclick=()=>{provider.value=n.agent;updateMode();overlay.hidden=false;provider.focus();};if(index===1)inspector.append(terminal);requestAnimationFrame(drawLines);}
+ function updateMode(){const n=byId(selected),native=provider.value===n.agent&&['Claude','Codex','OpenCode'].includes(provider.value);app.querySelector('.fm-mode').textContent=native?'Native fork · 선택한 세션의 마지막 완료 지점까지 대화를 이어받습니다. 새 worktree에는 미커밋 변경이 자동 복사되지 않습니다.':'맥락 전달 · 요약과 선택한 코드 변경으로 새 세션을 시작합니다. 원본 도구의 대화 상태 전체가 복제되지는 않습니다.';app.querySelector('.fm-point').disabled=!native;app.querySelector('.fm-create').textContent=native?'Native fork 생성 예시':'맥락 전달 생성 예시';}
+ function close(){overlay.hidden=true;inspector.querySelector('.fm-fork').focus();}
+ provider.onchange=updateMode;app.querySelector('.fm-cancel').onclick=close;
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const controls=[...overlay.querySelectorAll('button,select')].filter(el=>!el.disabled);const first=controls[0],last=controls.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
+ app.querySelector('.fm-create').onclick=()=>{const source=byId(selected),same=provider.value===source.agent&&['Claude','Codex','OpenCode'].includes(provider.value);status(`예시: ${source.name}에서 ${provider.value} ${same?'fork':'맥락 전달'} 요청을 준비했습니다. 실제 에이전트는 실행하지 않습니다.`);close();};
+ render();renderTerminal();new ResizeObserver(drawLines).observe(map);
+ if(globalThis.Tweak){const settings={spacing:16};new Tweak({container:app,onChange:()=>{app.querySelector('.fm-canvas').style.padding=settings.spacing+'px';drawLines();}}).addSlider(settings,'spacing',{label:'그래프 여백',min:10,max:24,unit:'px'});}
+});
+})();
+</script>
+</div>
