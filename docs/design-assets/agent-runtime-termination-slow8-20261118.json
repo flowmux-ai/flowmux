@@ -1,0 +1,66 @@
+{
+  "action_item": "AR-073",
+  "status": "open: original CI Stopping failure not reproduced",
+  "source": "16ed57d35f4c17728be55dabd43c484889480897",
+  "command": [
+    "env",
+    "GTK_SLOWDOWN=8",
+    "python3",
+    "-u",
+    "/tmp/fm-termination-observe-20261118.py",
+    "--termination",
+    "--protected-pid",
+    "1663486"
+  ],
+  "exit_code": 0,
+  "assertions_passed": 14,
+  "artifacts": "/tmp/fm-gui-lglq13t0",
+  "purpose": "Probe native confirmation-button delivery during slower GTK transitions without modifying product code or test timing.",
+  "checks": [
+    "Sessions resume uses Host, configured shell startup, literal project/config and native argv",
+    "Focused managed tab browses the provider root's history rather than the relay's descendants",
+    "Closing the resumed tab preserves the same PID/birth and Background execution",
+    "Resume of an already running history session reconnects without a second spawn",
+    "GUI exit and saved-view restoration preserve the same resumed process and accept new input",
+    "Cancelling named termination preserves the exact running execution",
+    "Explicit Ctrl+C interrupts without declaring the execution ended",
+    "Normal termination stops and reaps the execution and updates Agents",
+    "Recently ended retains the execution after process exit; dismiss synchronizes the Host and hides the empty section",
+    "Normal timeout preserves Stopping and offers explicit force without automatic killing",
+    "Cancelling force termination keeps the stopping execution and its child alive",
+    "Confirmed force reaps root and owned child while preserving the original shell",
+    "Ended executions are reaped and the empty Host retires",
+    "Ended metadata remains dismissible in this window after Host shutdown without starting a Host"
+  ],
+  "files": [
+    {
+      "path": "/tmp/fm-termination-slow8-20261118.log",
+      "sha256": "7ad9073fb49d8a199e6d643a67be1f975f6d6f62991d2a1edce0ce4bafb79a46"
+    },
+    {
+      "path": "/tmp/fm-termination-observe-20261118.py",
+      "sha256": "7c49a745449a682f36ca8606ec9027d1e50e5e54d8b99707fe3df4ae2b212aeb"
+    },
+    {
+      "path": "scripts/test-agent-session-resume-gui.py",
+      "sha256": "6d7032f7f3df4f2b78ed3d64ddafbc562428f40099964a704bc5eb2793343043"
+    },
+    {
+      "path": "target/debug/flowmux",
+      "sha256": "1e6c7db31d79b5b689591315f4504c0064ed15f781d4b92881d04775bdd66bb7"
+    },
+    {
+      "path": "target/debug/flowmuxctl",
+      "sha256": "56e2041ec07cba8a7b39e616ac013abd369d50bf57fa73b6371b4b914204284e"
+    },
+    {
+      "path": "target/debug/flowmux-daemon",
+      "sha256": "89bb5f477e95d6e8ea5b5e04b57ea828e6b641899c9887ba2d2057eabcc69127"
+    }
+  ],
+  "limits": [
+    "One isolated X11 run with GTK_SLOWDOWN=8 passed; this is not a root-cause fix or proof of all event schedules.",
+    "Failure-only collector was not invoked, so its failure path is unverified.",
+    "AR-073 stays medium and open. No CI retry or product change was made."
+  ]
+}

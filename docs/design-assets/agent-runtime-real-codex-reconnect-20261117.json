@@ -1,0 +1,27 @@
+{
+  "source_commit": "9994da97f1412a03d43c2e1656e8c87b01b992e6",
+  "main_base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "script": "scripts/test-agent-codex-live.py",
+  "invocation": "runpy entry point with an error-only screen logger; no manual input or retry on the passing path",
+  "codex_version": "codex-cli 0.169.0",
+  "log": "/tmp/fm-runtime-rebase-connect-repro.log",
+  "artifacts": "/tmp/fm-gui-ibh56g2b",
+  "passed_checks": [
+    "real Codex model replies through the managed VTE",
+    "tab and last isolated GUI close preserve the actual Codex process",
+    "reconnected same Codex renders previous TUI and answers fresh Hangul round trip",
+    "explicit termination reaps this provider and empty Host without affecting user GUI"
+  ],
+  "result": "passed",
+  "protected_user_gui_pid": 1663486,
+  "binary_sha256": {
+    "flowmux": "272fe36f2681c65af8f8a19f7a235c526a6eb488e1715a8c7c9cf80aa78a41d1",
+    "flowmuxctl": "3026ad0c6dd2e8fce7fcccd1a9ba97ee98a875109c772bf6691728dc16468ba5",
+    "flowmux-daemon": "bf71947f903864541933fda0c041f3d6f2e009da1b2b2309429783ef42f2b9ee"
+  },
+  "limits": [
+    "Short actual provider/model check, not a 31-minute workload",
+    "No automatic retirement or macOS verification",
+    "Earlier connection failures remain recorded separately; no passing claim for those attempts"
+  ]
+}

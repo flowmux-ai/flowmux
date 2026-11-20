@@ -1,0 +1,26 @@
+{
+  "scenario": "production GUI SIGKILL, same Host connection and Agent identity, restored VTE Hangul input, natural exit and empty Host cleanup",
+  "platform": "Linux",
+  "source_base": "70eff8d4af3b2f503cbb493bd284b446555a576e",
+  "artifacts": "/tmp/fm-crash-tfr53m3k",
+  "log": "/tmp/fm-runtime-portable-gui-crash-final.log",
+  "log_sha256": "ef0cafd2fcc2e6032b68ef64f84d1b521c0739e043888b98a218a30b5c1ebeb9",
+  "script_sha256": "166f988a5770286b5020d82e427e2ffab0dbe4dba2135335b29a3658bf566b5a",
+  "binaries": {
+    "target/debug/flowmux": "721526795a19e39b5f24c298988e3827bef098761c513e16b4da5ff1dec1baeb",
+    "target/debug/flowmuxctl": "b24d802f88d5699aaa5bb7a6303b8bfaee50f96b0976c1ab6b02cbec71f3e279",
+    "target/debug/flowmux-daemon": "9c4117ad856e6b2cdc18576c8cb36ae73b6d90c8351a7c347b07b1cae7452f73"
+  },
+  "markers": [
+    "AGENT_GUI_CRASH_RECONNECT_OK",
+    "AGENT_GUI_CRASH_OK"
+  ],
+  "fixture_runtime_processes_remaining": [],
+  "protected_gui_pid": 1663486,
+  "limitations": [
+    "macOS execution pending",
+    "provider fixture, not actual model workload",
+    "SIGKILL survival does not prove normal GUI closure or macOS descendant containment",
+    "auto retirement remains disabled"
+  ]
+}

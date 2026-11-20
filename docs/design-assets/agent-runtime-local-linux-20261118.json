@@ -1,0 +1,1394 @@
+{
+  "date_kst": "2026-11-18",
+  "product_source": "d5facd978db18bd6eec96e821729eaf32b4003df",
+  "harness_source": "7d778c74eab443b20fac3a1aad7ca440c04be007",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "strategy": "Split coverage: initial extended gate passed 50/51 regression phases; missing SSH prerequisites failed the last phase before GUI startup. The complete SSH GUI phase then passed with the same product source and corrected fixture configuration. No single full-gate exit 0 is claimed. Later code changes only affect test prerequisites; repeat product suites were not needed.",
+  "initial_gate": {
+    "exit_code": 2,
+    "preflight_passed": 8,
+    "regression": {
+      "phase": "regression",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "bash",
+        "scripts/test-linux.sh",
+        "extended",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 4200.0,
+      "status": "failed",
+      "pid": 642330,
+      "exit_code": 2,
+      "elapsed_seconds": 3378.726
+    },
+    "log": {
+      "path": "/tmp/fm-linux-incomplete-20261118/gate.log",
+      "sha256": "d8d071f05464e6f8215ba50e807d0ec5c7e71c6f66afb04abb0590f20a33b739"
+    },
+    "preserved_manifest": {
+      "path": "/tmp/fm-linux-incomplete-20261118/sha256.json",
+      "sha256": "efdc8483d31ca101a10475188c9bceae77d1e2c68375311d88d86a05dbd1db32"
+    },
+    "workspace": {
+      "passed": 2456,
+      "ignored": 13,
+      "summaries": 61
+    },
+    "phases": [
+      {
+        "test": "gui-harness",
+        "initial": {
+          "phase": "gui-harness",
+          "command": [
+            "python3",
+            "scripts/test-gui-harness.py"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 642356,
+          "exit_code": 0,
+          "elapsed_seconds": 0.41
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/gui-harness.json",
+          "sha256": "dbb1ef1e3aa048526647136af9afb2651107cacb4252ac9fb21fdfa55b28ba6f"
+        }
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "initial": {
+          "phase": "ssh-fixture-unit",
+          "command": [
+            "python3",
+            "scripts/test-ssh-workspace-fixture.py"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 642371,
+          "exit_code": 0,
+          "elapsed_seconds": 0.614
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/ssh-fixture-unit.json",
+          "sha256": "c93dc5e15401394879b9821e6ccc8c45df5dbf7c49889fc9bb8dc41a84260b49"
+        }
+      },
+      {
+        "test": "build",
+        "initial": {
+          "phase": "build",
+          "command": [
+            "cargo",
+            "build",
+            "--workspace",
+            "--locked"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 642401,
+          "exit_code": 0,
+          "elapsed_seconds": 54.866
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/build.json",
+          "sha256": "9004ae48466f7709909873721e1ff893df9f143b34820a15e3a03b7e0621b6b5"
+        }
+      },
+      {
+        "test": "workspace",
+        "initial": {
+          "phase": "workspace",
+          "command": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--locked",
+            "--no-fail-fast",
+            "--",
+            "--nocapture"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 643875,
+          "exit_code": 0,
+          "elapsed_seconds": 507.829
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/workspace.json",
+          "sha256": "9488772fa3cd366f7b4058fa1b70e6bf3fb78a596015e78a3d3a30589c91ad7b"
+        }
+      },
+      {
+        "test": "gtk-icon-preload",
+        "initial": {
+          "phase": "gtk-icon-preload",
+          "command": [
+            "python3",
+            "scripts/test-gtk-icon-preload-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 697769,
+          "exit_code": 0,
+          "elapsed_seconds": 9.221
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/gtk-icon-preload.json",
+          "sha256": "fe93308d3f71d34ed59561730e9b197879a175df4e4c29523c87ab294aef889d"
+        }
+      },
+      {
+        "test": "browser-control",
+        "initial": {
+          "phase": "browser-control",
+          "command": [
+            "python3",
+            "scripts/test-browser-control.py",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 698243,
+          "exit_code": 0,
+          "elapsed_seconds": 189.238
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/browser-control.json",
+          "sha256": "c6208f0f12911a16ef6289f1535bd8cc6fc0a35f755146c46d543547c01b114a"
+        }
+      },
+      {
+        "test": "browser-source",
+        "initial": {
+          "phase": "browser-source",
+          "command": [
+            "python3",
+            "scripts/test-browser-source-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 707629,
+          "exit_code": 0,
+          "elapsed_seconds": 4.641
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/browser-source.json",
+          "sha256": "c76fe09435d65b19598a1056c54b467f36c811c75b13d62ea38cc511793e1529"
+        }
+      },
+      {
+        "test": "browser-bookmarks",
+        "initial": {
+          "phase": "browser-bookmarks",
+          "command": [
+            "python3",
+            "scripts/test-browser-bookmarks-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 708410,
+          "exit_code": 0,
+          "elapsed_seconds": 45.906
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/browser-bookmarks.json",
+          "sha256": "11e5eafdac3146dc5a1dcb4b9ac1f2da0e3d1d6d40c07e6e5475b6d2fe73d90f"
+        }
+      },
+      {
+        "test": "browser-feedback",
+        "initial": {
+          "phase": "browser-feedback",
+          "command": [
+            "python3",
+            "scripts/test-browser-feedback-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 710202,
+          "exit_code": 0,
+          "elapsed_seconds": 73.143
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/browser-feedback.json",
+          "sha256": "84306afe5ada314da65eea815b601929029a065d51df9c67d10a977b471e81c6"
+        }
+      },
+      {
+        "test": "browser-import",
+        "initial": {
+          "phase": "browser-import",
+          "command": [
+            "python3",
+            "scripts/test-browser-import-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 712655,
+          "exit_code": 0,
+          "elapsed_seconds": 361.288
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/browser-import.json",
+          "sha256": "7b8445b590868dc86cc7acabdeb86fce96003edbe50faafe6e439f6a912336cf"
+        }
+      },
+      {
+        "test": "skills",
+        "initial": {
+          "phase": "skills",
+          "command": [
+            "python3",
+            "scripts/test-skills-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 720179,
+          "exit_code": 0,
+          "elapsed_seconds": 46.235
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/skills.json",
+          "sha256": "bd9896b8bbdbbdcdefd6208a305bc405106efa497895b1b7b437174905a4360e"
+        }
+      },
+      {
+        "test": "notifications",
+        "initial": {
+          "phase": "notifications",
+          "command": [
+            "python3",
+            "scripts/test-notifications-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 722858,
+          "exit_code": 0,
+          "elapsed_seconds": 45.143
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/notifications.json",
+          "sha256": "3c1e6ec5bf97a20a7e62340ab35e27bc7e528cc117c71e4e5d06b3c66c4c52f1"
+        }
+      },
+      {
+        "test": "team-pingpong",
+        "initial": {
+          "phase": "team-pingpong",
+          "command": [
+            "python3",
+            "scripts/test-team-pingpong-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 723513,
+          "exit_code": 0,
+          "elapsed_seconds": 43.877
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/team-pingpong.json",
+          "sha256": "10a3463bc8b104930612645b43c99bd8358ed39e0f6e8c9e1cdb33ac68810b34"
+        }
+      },
+      {
+        "test": "team-recovery",
+        "initial": {
+          "phase": "team-recovery",
+          "command": [
+            "python3",
+            "scripts/test-team-recovery-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 725413,
+          "exit_code": 0,
+          "elapsed_seconds": 219.388
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/team-recovery.json",
+          "sha256": "ace04c66ad851a2a05dda49eb4fd7965858ff29dc3d6e5665e3af4e6b9ed1df5"
+        }
+      },
+      {
+        "test": "team-reuse",
+        "initial": {
+          "phase": "team-reuse",
+          "command": [
+            "python3",
+            "scripts/test-team-reuse-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 730451,
+          "exit_code": 0,
+          "elapsed_seconds": 50.414
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/team-reuse.json",
+          "sha256": "1a13cfacb8bc75b6842de19a13ff139d1a3bbf9ef41d0efe9e88258e72c4b6ba"
+        }
+      },
+      {
+        "test": "team-usage",
+        "initial": {
+          "phase": "team-usage",
+          "command": [
+            "python3",
+            "scripts/test-team-usage-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 732526,
+          "exit_code": 0,
+          "elapsed_seconds": 463.835
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/team-usage.json",
+          "sha256": "beeada3f924e143adb43273277e8c91b2b095afe27803e8e96922305ff8f39f3"
+        }
+      },
+      {
+        "test": "session-save",
+        "initial": {
+          "phase": "session-save",
+          "command": [
+            "python3",
+            "scripts/test-session-save-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 737419,
+          "exit_code": 0,
+          "elapsed_seconds": 9.383
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/session-save.json",
+          "sha256": "f4927efc0bfa759c88c4202e31bf46c39117fb822fb2bcdb630b40c35cbdc8c8"
+        }
+      },
+      {
+        "test": "session-flow",
+        "initial": {
+          "phase": "session-flow",
+          "command": [
+            "python3",
+            "scripts/test-session-flow-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 738539,
+          "exit_code": 0,
+          "elapsed_seconds": 70.206
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/session-flow.json",
+          "sha256": "2c45a40c79b9b228a66579b5dbdc3834102e68935049633c7f2b6fb8e7e6827d"
+        }
+      },
+      {
+        "test": "managed-session-flow",
+        "initial": {
+          "phase": "managed-session-flow",
+          "command": [
+            "python3",
+            "scripts/test-agent-session-resume-gui.py",
+            "--session-flow",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 739748,
+          "exit_code": 0,
+          "elapsed_seconds": 33.793
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/managed-session-flow.json",
+          "sha256": "2c4d4843afdf298e3d94066d102400cccd70d19be801f07c5164ccde26a41c57"
+        }
+      },
+      {
+        "test": "pty-spawn-failure",
+        "initial": {
+          "phase": "pty-spawn-failure",
+          "command": [
+            "python3",
+            "scripts/test-pty-spawn-failure-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 740832,
+          "exit_code": 0,
+          "elapsed_seconds": 2.808
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/pty-spawn-failure.json",
+          "sha256": "de7b3c15b0b70087c94b8fa0fc658f515f581807af915a5880b39ea9ba03a67a"
+        }
+      },
+      {
+        "test": "tab-windows",
+        "initial": {
+          "phase": "tab-windows",
+          "command": [
+            "python3",
+            "scripts/test-tab-windows-gui.py",
+            "--managed",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 741100,
+          "exit_code": 0,
+          "elapsed_seconds": 114.744
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/tab-windows.json",
+          "sha256": "4dd22789b9ad522338547da72145ed9037319533cde643dbbfcaffe1530bb004"
+        }
+      },
+      {
+        "test": "agent-host",
+        "initial": {
+          "phase": "agent-host",
+          "command": [
+            "python3",
+            "scripts/test-agent-host-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 744124,
+          "exit_code": 0,
+          "elapsed_seconds": 105.294
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-host.json",
+          "sha256": "c15865519785150f2d54acaafe6d74b7ef1c8faa936379f1dabeed9c1f093f9f"
+        }
+      },
+      {
+        "test": "agent-terminal-budget",
+        "initial": {
+          "phase": "agent-terminal-budget",
+          "command": [
+            "python3",
+            "scripts/test-agent-terminal-budget.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 746632,
+          "exit_code": 0,
+          "elapsed_seconds": 45.715
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-terminal-budget.json",
+          "sha256": "f481792dfc3954f17ab151563ad218488a78bd65a3599d8f9268e06f8510f716"
+        }
+      },
+      {
+        "test": "agent-gui-response-limit",
+        "initial": {
+          "phase": "agent-gui-response-limit",
+          "command": [
+            "python3",
+            "scripts/test-agent-gui-response-limit.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 747609,
+          "exit_code": 0,
+          "elapsed_seconds": 5.547
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-gui-response-limit.json",
+          "sha256": "88b8f2c655a2d477ba2bbfc3a64857b9ad3a0c606b23663e0a3c62c5b18a7bc9"
+        }
+      },
+      {
+        "test": "agent-containment",
+        "initial": {
+          "phase": "agent-containment",
+          "command": [
+            "python3",
+            "scripts/test-agent-containment.py",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 748189,
+          "exit_code": 0,
+          "elapsed_seconds": 7.096
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-containment.json",
+          "sha256": "9631379941e3d31f82c520bdeb16fa15928dce6b31a2e020b771de00982974ae"
+        }
+      },
+      {
+        "test": "agent-root-exit",
+        "initial": {
+          "phase": "agent-root-exit",
+          "command": [
+            "python3",
+            "scripts/test-agent-root-exit-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 748287,
+          "exit_code": 0,
+          "elapsed_seconds": 4.123
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-root-exit.json",
+          "sha256": "f52f77c0058ac11b61e1be8144767be77b26fa89dd4118686d7582f57ffc9f83"
+        }
+      },
+      {
+        "test": "agent-ready",
+        "initial": {
+          "phase": "agent-ready",
+          "command": [
+            "python3",
+            "scripts/test-agent-ready-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 748725,
+          "exit_code": 0,
+          "elapsed_seconds": 16.496
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-ready.json",
+          "sha256": "591f8cc21f52a914e2e0f55e2b6ba5d6b94d3875567b59172b6524190189f580"
+        }
+      },
+      {
+        "test": "agent-relay-replacement",
+        "initial": {
+          "phase": "agent-relay-replacement",
+          "command": [
+            "python3",
+            "scripts/test-agent-ready-gui.py",
+            "--replacement",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 749238,
+          "exit_code": 0,
+          "elapsed_seconds": 21.17
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-relay-replacement.json",
+          "sha256": "7c538e3e2b7a200853f077aef73bee96dc8dc27a49cd4ba5e3c16391b36507ac"
+        }
+      },
+      {
+        "test": "agent-gui-replacement",
+        "initial": {
+          "phase": "agent-gui-replacement",
+          "command": [
+            "python3",
+            "scripts/test-agent-ready-gui.py",
+            "--gui-replacement",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 750137,
+          "exit_code": 0,
+          "elapsed_seconds": 49.904
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-gui-replacement.json",
+          "sha256": "75605678728ce402e2df5e9cc8e37a756f07cb99360abf1b092437399d80357f"
+        }
+      },
+      {
+        "test": "agent-binding-restore",
+        "initial": {
+          "phase": "agent-binding-restore",
+          "command": [
+            "python3",
+            "scripts/test-agent-binding-restore-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 751768,
+          "exit_code": 0,
+          "elapsed_seconds": 7.681
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-binding-restore.json",
+          "sha256": "51a8839d7e8cc07f5293261cd89724951aa197fcb4f00997b2790592122a5105"
+        }
+      },
+      {
+        "test": "agent-background-binding-restore",
+        "initial": {
+          "phase": "agent-background-binding-restore",
+          "command": [
+            "python3",
+            "scripts/test-agent-binding-restore-gui.py",
+            "--background",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 752631,
+          "exit_code": 0,
+          "elapsed_seconds": 7.934
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-background-binding-restore.json",
+          "sha256": "a575afbd868b00b337a7a4c4619270c785e1fa9d65c5c4044567966e38eae635"
+        }
+      },
+      {
+        "test": "agent-drag",
+        "initial": {
+          "phase": "agent-drag",
+          "command": [
+            "python3",
+            "scripts/test-agent-drag-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 753413,
+          "exit_code": 0,
+          "elapsed_seconds": 14.364
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-drag.json",
+          "sha256": "e231be33100e68e77a8537542e65a0e862cf7dcca3934ca378cea7befd888331"
+        }
+      },
+      {
+        "test": "managed-agent-drag",
+        "initial": {
+          "phase": "managed-agent-drag",
+          "command": [
+            "python3",
+            "scripts/test-agent-drag-gui.py",
+            "--managed",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 753868,
+          "exit_code": 0,
+          "elapsed_seconds": 141.334
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/managed-agent-drag.json",
+          "sha256": "7a41dc806e24e8928e4bd1e746dfcc912f519107683fe99cf88c72c2c5fe4976"
+        }
+      },
+      {
+        "test": "managed-agent-click-load",
+        "initial": {
+          "phase": "managed-agent-click-load",
+          "command": [
+            "python3",
+            "scripts/test-agent-drag-gui.py",
+            "--managed",
+            "--click-load",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 756087,
+          "exit_code": 0,
+          "elapsed_seconds": 22.177
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/managed-agent-click-load.json",
+          "sha256": "1e421fd9b66bb64b5655be0d9fa604ed75243b1fbc3edb93a0fb0bc42a32ecbc"
+        }
+      },
+      {
+        "test": "managed-agent-tearoff",
+        "initial": {
+          "phase": "managed-agent-tearoff",
+          "command": [
+            "python3",
+            "scripts/test-agent-drag-gui.py",
+            "--managed",
+            "--tearoff",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 756657,
+          "exit_code": 0,
+          "elapsed_seconds": 10.976
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/managed-agent-tearoff.json",
+          "sha256": "e40b5e5edac11fbffca764f4a136bbbac8197a6867398f13eb90362322537905"
+        }
+      },
+      {
+        "test": "agent-native-hooks",
+        "initial": {
+          "phase": "agent-native-hooks",
+          "command": [
+            "python3",
+            "scripts/test-agent-native-hooks-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 757462,
+          "exit_code": 0,
+          "elapsed_seconds": 115.393
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-native-hooks.json",
+          "sha256": "1db766e5868ee1a068812ee175056ccff2db523a72cc71bf9e57365b76721e97"
+        }
+      },
+      {
+        "test": "agent-session-resume",
+        "initial": {
+          "phase": "agent-session-resume",
+          "command": [
+            "python3",
+            "scripts/test-agent-session-resume-gui.py",
+            "--context",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 761444,
+          "exit_code": 0,
+          "elapsed_seconds": 29.481
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-session-resume.json",
+          "sha256": "fc3359dae75e6417657af9d8c3ece616ad92ad3b4448d1ad9fd38a459e55b3e3"
+        }
+      },
+      {
+        "test": "new-agent",
+        "initial": {
+          "phase": "new-agent",
+          "command": [
+            "python3",
+            "scripts/test-agent-session-resume-gui.py",
+            "--new-agent",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 762685,
+          "exit_code": 0,
+          "elapsed_seconds": 23.55
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/new-agent.json",
+          "sha256": "a14cffb66faaa2f8ece00afb67085588fb7c4b3767b82b4e077482ebae6e5041"
+        }
+      },
+      {
+        "test": "agent-termination",
+        "initial": {
+          "phase": "agent-termination",
+          "command": [
+            "python3",
+            "scripts/test-agent-session-resume-gui.py",
+            "--termination",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 763448,
+          "exit_code": 0,
+          "elapsed_seconds": 54.039
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-termination.json",
+          "sha256": "d08952750d0f7d4510c6ceb601250bfb538c140e01a47d14023fe64f58575628"
+        }
+      },
+      {
+        "test": "agent-cli-controls",
+        "initial": {
+          "phase": "agent-cli-controls",
+          "command": [
+            "python3",
+            "scripts/test-agent-session-resume-gui.py",
+            "--cli-controls",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+            "--host",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 764717,
+          "exit_code": 0,
+          "elapsed_seconds": 27.092
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/agent-cli-controls.json",
+          "sha256": "857cd620219f4302742bdb071635d0cc04d12832d469f51d0345770a809b0445"
+        }
+      },
+      {
+        "test": "terminal-read-screen",
+        "initial": {
+          "phase": "terminal-read-screen",
+          "command": [
+            "python3",
+            "scripts/test-terminal-read-screen-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 765595,
+          "exit_code": 0,
+          "elapsed_seconds": 9.761
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/terminal-read-screen.json",
+          "sha256": "00a01141cf5d67f96ee9557e9e4de4302ac02c2ed87281c83a1476248e3aff55"
+        }
+      },
+      {
+        "test": "terminal-load",
+        "initial": {
+          "phase": "terminal-load",
+          "command": [
+            "python3",
+            "scripts/test-terminal-load-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 765928,
+          "exit_code": 0,
+          "elapsed_seconds": 22.726
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/terminal-load.json",
+          "sha256": "10e00d96793cee49d3472a03293572cfaba8ac672d422afc1ecd0565c93b133e"
+        }
+      },
+      {
+        "test": "terminal-image-links",
+        "initial": {
+          "phase": "terminal-image-links",
+          "command": [
+            "python3",
+            "scripts/test-terminal-image-links-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 766349,
+          "exit_code": 0,
+          "elapsed_seconds": 85.586
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/terminal-image-links.json",
+          "sha256": "d603a8bf2e4b50658b8ee0ec957ae8af6eaf4345c117d8262dcd45157d5b28cf"
+        }
+      },
+      {
+        "test": "ipc-recovery",
+        "initial": {
+          "phase": "ipc-recovery",
+          "command": [
+            "python3",
+            "scripts/test-ipc-recovery-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 770048,
+          "exit_code": 0,
+          "elapsed_seconds": 5.697
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/ipc-recovery.json",
+          "sha256": "4bcd59dd8cf4b8588b2861f73748a5802cb957e1ab2bef2d252e3f057a1355c1"
+        }
+      },
+      {
+        "test": "polling-delay",
+        "initial": {
+          "phase": "polling-delay",
+          "command": [
+            "python3",
+            "scripts/test-polling-delay-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 770314,
+          "exit_code": 0,
+          "elapsed_seconds": 15.735
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/polling-delay.json",
+          "sha256": "59a92bf59a630adee059fe80c9b1b69fc249eb1cc9cf2735aa831b29812904c8"
+        }
+      },
+      {
+        "test": "idle-stability-unit",
+        "initial": {
+          "phase": "idle-stability-unit",
+          "command": [
+            "python3",
+            "scripts/test-idle-stability-gui.py",
+            "--self-check"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 770761,
+          "exit_code": 0,
+          "elapsed_seconds": 0.158
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/idle-stability-unit.json",
+          "sha256": "89c6c90b9f9d5f48d895327d7019d8c56d11e4ef822040b9b4c3429c7161686e"
+        }
+      },
+      {
+        "test": "idle-stability",
+        "initial": {
+          "phase": "idle-stability",
+          "command": [
+            "python3",
+            "scripts/test-idle-stability-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 770763,
+          "exit_code": 0,
+          "elapsed_seconds": 118.479
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/idle-stability.json",
+          "sha256": "f0a32cc8c542b17e81e7641c5448036cc21fb2ce84817d3e1a64221e677296ad"
+        }
+      },
+      {
+        "test": "editor-io",
+        "initial": {
+          "phase": "editor-io",
+          "command": [
+            "python3",
+            "scripts/test-editor-io-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 773322,
+          "exit_code": 0,
+          "elapsed_seconds": 27.542
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/editor-io.json",
+          "sha256": "5f352023e742dfd2066ed31fe8f931d1ef125fdad31b760502b3005c4448cd80"
+        }
+      },
+      {
+        "test": "editor-renderer",
+        "initial": {
+          "phase": "editor-renderer",
+          "command": [
+            "python3",
+            "scripts/test-editor-renderer-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 774291,
+          "exit_code": 0,
+          "elapsed_seconds": 24.569
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/editor-renderer.json",
+          "sha256": "28b152a6c89709d07a657228b5b8a00aa84f1294df7656be89d220f2b0b22d1e"
+        }
+      },
+      {
+        "test": "lazy-restore",
+        "initial": {
+          "phase": "lazy-restore",
+          "command": [
+            "python3",
+            "scripts/test-lazy-restore-gui.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "passed",
+          "pid": 775597,
+          "exit_code": 0,
+          "elapsed_seconds": 9.095
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/lazy-restore.json",
+          "sha256": "cd15d9a499054b307122755e87026585e568210d7cbc8b62b2ab8d5efb468b40"
+        }
+      },
+      {
+        "test": "ssh-workspace",
+        "initial": {
+          "phase": "ssh-workspace",
+          "command": [
+            "python3",
+            "scripts/ssh-workspace-fixture.py",
+            "--gui",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+            "--cli",
+            "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+          ],
+          "timeout_seconds": 2400.0,
+          "status": "failed",
+          "pid": 776381,
+          "exit_code": 2,
+          "elapsed_seconds": 0.107
+        },
+        "receipt": {
+          "path": "/tmp/fm-linux-incomplete-20261118/reports/tests/ssh-workspace.json",
+          "sha256": "1839b09f5eb95f36ff6ce3bd5eefe5d00c5d1aefc714ddf7332188bce3544c28"
+        }
+      }
+    ]
+  },
+  "ssh_followup": {
+    "result": {
+      "phase": "ssh-workspace",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "python3",
+        "scripts/ssh-workspace-fixture.py",
+        "--gui",
+        "target/debug/flowmux",
+        "--cli",
+        "target/debug/flowmuxctl"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 779881,
+      "exit_code": 0,
+      "elapsed_seconds": 258.549
+    },
+    "receipt": {
+      "path": "/tmp/fm-ssh-preflight-checks-20261118/ssh-workspace.json",
+      "sha256": "1374eb3422c525534f0ee29f93d9d0558ff18007022fdc0ecf693da2c59c2885"
+    },
+    "log": {
+      "path": "/tmp/fm-ssh-preflight-live-20261118.log",
+      "sha256": "ba4e81ccb04817e67e29d15903516ece112a62e14f31dc475683c7d64b08f32b"
+    },
+    "pass_markers": 63,
+    "configuration": {
+      "SSH_FIXTURE_SSHD": "/tmp/fm-ssh-test-tools/root/usr/sbin/sshd",
+      "SSH_FIXTURE_TMUX": "/tmp/fm-ssh-test-tools/root/usr/bin/tmux",
+      "SSH_FIXTURE_LIBRARY_PATH": "/tmp/fm-ssh-test-tools/root/usr/lib/x86_64-linux-gnu"
+    }
+  },
+  "harness_checks": {
+    "runner": {
+      "log": {
+        "path": "/tmp/fm-ssh-preflight-runner-final-20261118.log",
+        "sha256": "b83a5d68e2fe1b5f7c79d3a010cef9a742068573ec7f577012f3e9ff1225a17a"
+      },
+      "tests": 29,
+      "passed": 28,
+      "skipped": 1,
+      "exit_code": 0
+    },
+    "fixture_unit": {
+      "tests": 4,
+      "exit_code": 0
+    },
+    "missing_tools": {
+      "log": {
+        "path": "/tmp/fm-missing-ssh-preflight-20261118.log",
+        "sha256": "bafbe7c85ac5671babac12219c88e7bda3722f2b0b232f25130cd14c09975f2f"
+      },
+      "result": {
+        "phase": "ssh-prerequisites",
+        "command": [
+          "python3",
+          "scripts/ssh-workspace-fixture.py",
+          "--check"
+        ],
+        "timeout_seconds": 30.0,
+        "status": "failed",
+        "pid": 791572,
+        "exit_code": 2,
+        "elapsed_seconds": 0.158
+      }
+    },
+    "real_flowmux_shim_rejected": {
+      "log": {
+        "path": "/tmp/fm-ssh-shim-rejected-20261118.log",
+        "sha256": "cc647fc99eabf901558eb9a852a201f055fe98a98d83790a2234d7050c0b5fc8"
+      },
+      "exit_code": 2
+    }
+  },
+  "additional_checks": {
+    "source": "d5facd978db18bd6eec96e821729eaf32b4003df",
+    "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+    "checks": {
+      "focus_before": {
+        "path": "/tmp/fm-focus-before.log",
+        "sha256": "f8e0072d7757a91c911f7ff8787af63914844278e570b892eff0080c964b6d78"
+      },
+      "focus_after": {
+        "path": "/tmp/fm-focus-after.log",
+        "sha256": "7d949077733c9cf548c8af4e2cd58cdb3aa48b3642dbcf6e3f34f6e04123655d"
+      },
+      "notice_slow": {
+        "path": "/tmp/fm-native-notice-slow-after.log",
+        "sha256": "1a38a50d3fb06623007f0004dc1dfbf7d8c31a6cd79fdcf060e9317b3b6c49f3"
+      },
+      "termination_slow": {
+        "path": "/tmp/fm-termination-slow-before.log",
+        "sha256": "7dbcee97a38b54803af81faa0f0c5d8c5a1d558169182af5df7908247e435360"
+      },
+      "notice_cpu_pressure": {
+        "path": "/tmp/fm-runtime-native-notice-pressure-before-20261118.log",
+        "sha256": "024d8f3ebe1c4791089d52ac53434518b95e6960e88ffa84132e2bb4fb4ec592"
+      },
+      "clippy": {
+        "path": "/tmp/fm-local-clippy-20261118.log",
+        "sha256": "d4ab9a6a3719a3b65c8481c9c846c612a7c8f30cb30ee69e5340c26b9b716608"
+      },
+      "headless_stress": {
+        "path": "/tmp/fm-headless-stress-20261118.log",
+        "sha256": "b96b275de1f3825138f32f411867a13379d713e283f16af62cc3043f5d67bfd0"
+      },
+      "editor_web": {
+        "path": "/tmp/fm-editor-web-20261118.log",
+        "sha256": "d0e0320f0d6a738dac53bc7d1cadf5c9964244c34bda060d6f54d234e1be5f64"
+      }
+    }
+  },
+  "wayland_evidence": "agent-runtime-wayland-local-20261118.json",
+  "environment": {
+    "gtk": "4.14.5",
+    "libadwaita": "1.5.0",
+    "protected_gui_pid": 1663486,
+    "installed_app_replaced": false
+  },
+  "limits": [
+    "Initial full gate exit 2 is preserved; combined coverage is not a single successful gate invocation.",
+    "Six medium issues remain open: AR-006, AR-008 macOS, AR-010, AR-071, AR-073, AR-088.",
+    "Wayland AT-SPI menu reopening fails in both the product test and a Flowmux-free GTK reproducer; native managed flow passes 24 assertions.",
+    "Automatic idle termination remains disabled without provider whole-work completion and atomic shutdown support.",
+    "Tab-bound terminal Agents retain their original GUI lifetime; Host-managed Agents survive tab/GUI closure.",
+    "Existing macOS CI success predates AR-087; no current macOS or Flatpak local verification is claimed."
+  ]
+}

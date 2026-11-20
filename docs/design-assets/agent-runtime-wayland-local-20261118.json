@@ -1,0 +1,75 @@
+{
+  "source": "d5facd978db18bd6eec96e821729eaf32b4003df",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "date_utc": "2026-11-17",
+  "environment": {
+    "gtk": "4.14.5",
+    "libadwaita": "1.5.0",
+    "compositor": "private GNOME Shell / Mutter 46.2, headless Wayland, 1600x1000",
+    "user_gui_protected_pid": 1663486,
+    "installed_app_replaced": false
+  },
+  "native_managed_flow": {
+    "command": "python3 -u /tmp/fm-wayland-drag-native-menu.py --managed --protected-pid 1663486",
+    "adapter": {
+      "path": "/tmp/fm-wayland-drag-native-menu.py",
+      "sha256": "a7d38079e0a95e93779cf8148de6c435bcfe34205cdbcfbf85eb1d3e24856166"
+    },
+    "assertion_source": {
+      "path": "/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py",
+      "sha256": "34d667ff3b7f067cc90c82502a575475144a6204375d856cfacf1ca088a3af4d"
+    },
+    "menu_input": "native pointer click followed by Return; no retry",
+    "result": {
+      "path": "/tmp/fm-wayland-managed-native-20261118.log",
+      "sha256": "2930de698442563f0364509e6b55a5546f1fa8c5219f5a7233f3f90743d841d2",
+      "exit_code": 0,
+      "passed_assertions": 24,
+      "output": "ARTIFACTS: /tmp/fm-gui-mq1kyqs0\nPASS: Agents visibly distinguishes tab-bound execution from Host-owned execution\nPASS: Host verifies the live relay and reports the visible tab location\nPASS: a foreign management connection cannot overwrite the owning GUI's location\nPASS: paused GUI reports expire without losing the relay; fresh GTK observations restore Visible\nPASS: Agents handle moves the existing tab into a pane body without splitting or restarting\nPASS: GTK rejects a browser effect with a source location from before the drag\nPASS: After native drag, the actual managed descendant identifies its current pane and surface\nPASS: drag updates Host location; hidden tabs and workspaces stay Open and return to Visible\nPASS: clicking an open registry row focuses its current pane after a drag\nPASS: repeated drag reads the current pane location and preserves the same PID and input\nPASS: Agents strip drops reorder the same tab before and after targets in both directions, preserving input and one process\nPASS: cross-pane Agents strip drops honor before and after positions without replacing the relay\nPASS: dropping an Agent onto either half of its own tab preserves its position without duplication\nPASS: strip drop reconnects a disconnected relay at the current tab position and preserves the process\nPASS: Escape cancels an Agents drag and leaves layout and terminal input working\nPASS: tab closure keeps the registry row and same PID; Background strip drag inserts before its target without spawning\nPASS: Background click requires a destination confirmation; cancel changes neither layout nor execution\nPASS: Background click defaults to the recent terminal pane despite browser focus, with fresh input and one process start\nPASS: cancelling Move to a new workspace creates no workspace and preserves the open view\nPASS: Move to another workspace preserves the same Agent tab, process and destination shell\nPASS: a destination closed during selection is rejected without moving the view or choosing another pane\nPASS: confirmed New workspace moves the same execution and accepts fresh input without provider resume\nPASS: Agents bar also exposes the registry and moves the same running process\nPASS: closing the isolated GUI immediately clears its location and retains the same running Agent\n"
+    }
+  },
+  "accessibility_menu_failure": {
+    "command": "python3 -u /tmp/fm-wayland-drag-adapter.py --managed --protected-pid 1663486",
+    "adapter": {
+      "path": "/tmp/fm-wayland-drag-adapter.py",
+      "sha256": "2155e0b8a2d034759c0ced96cd386fb36060ac76c0d2db948851ab0877ae2686"
+    },
+    "result": {
+      "path": "/tmp/fm-wayland-managed-20261118.log",
+      "sha256": "4af12f037f31d6dffaca47664d68a70f22d41ca22505ce25d813e12210e487b4",
+      "exit_code": 1,
+      "passed_assertions": 19,
+      "output": "ARTIFACTS: /tmp/fm-gui-vsujb1qn\nPASS: Agents visibly distinguishes tab-bound execution from Host-owned execution\nPASS: Host verifies the live relay and reports the visible tab location\nPASS: a foreign management connection cannot overwrite the owning GUI's location\nPASS: paused GUI reports expire without losing the relay; fresh GTK observations restore Visible\nPASS: Agents handle moves the existing tab into a pane body without splitting or restarting\nPASS: GTK rejects a browser effect with a source location from before the drag\nPASS: After native drag, the actual managed descendant identifies its current pane and surface\nPASS: drag updates Host location; hidden tabs and workspaces stay Open and return to Visible\nPASS: clicking an open registry row focuses its current pane after a drag\nPASS: repeated drag reads the current pane location and preserves the same PID and input\nPASS: Agents strip drops reorder the same tab before and after targets in both directions, preserving input and one process\nPASS: cross-pane Agents strip drops honor before and after positions without replacing the relay\nPASS: dropping an Agent onto either half of its own tab preserves its position without duplication\nPASS: strip drop reconnects a disconnected relay at the current tab position and preserves the process\nPASS: Escape cancels an Agents drag and leaves layout and terminal input working\nPASS: tab closure keeps the registry row and same PID; Background strip drag inserts before its target without spawning\nPASS: Background click requires a destination confirmation; cancel changes neither layout nor execution\nPASS: Background click defaults to the recent terminal pane despite browser focus, with fresh input and one process start\nPASS: cancelling Move to a new workspace creates no workspace and preserves the open view\nTraceback (most recent call last):\n  File \"/tmp/fm-wayland-drag-adapter.py\", line 72, in <module>\n    exec(compile(source, str(root / 'scripts/test-agent-drag-gui.py'), 'exec'))\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 848, in <module>\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 762, in main\n    assert (h.root / \"starts\").read_text().splitlines() == [str(pid)]\n    ^^^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 321, in move_menu\n    pixels = connection.screen().root.get_image(x, y, bounds.width, bounds.height,\n^^^^^^^^^^^^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 294, in action\n    if args.click_load:\n               ^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-ssh-workspace-gui.py\", line 54, in wait_for\n    raise AssertionError(f\"Timed out: {description}; last error: {last}\")\nAssertionError: Timed out: Move to…; last error: None\n"
+    },
+    "delayed_probe": {
+      "path": "/tmp/fm-wayland-menu-delayed-probe.log",
+      "sha256": "656c993457a4ef381f55e93165df47172d970ac5d47eba85cf8d2366d1fece90",
+      "exit_code": 1,
+      "passed_assertions": 1,
+      "output": "ARTIFACTS: /tmp/fm-gui-zym2p_fk\nROUND 0\nBEFORE_MENU ['<enum ATSPI_STATE_FOCUSABLE of type Atspi.StateType>', '<enum ATSPI_STATE_SENSITIVE of type Atspi.StateType>', '<enum ATSPI_STATE_SHOWING of type Atspi.StateType>', '<enum ATSPI_STATE_VISIBLE of type Atspi.StateType>']\nPASS: cancelled destination reopens on Wayland, round 0\nROUND 1\nBEFORE_MENU ['<enum ATSPI_STATE_FOCUSABLE of type Atspi.StateType>', '<enum ATSPI_STATE_FOCUSED of type Atspi.StateType>', '<enum ATSPI_STATE_SENSITIVE of type Atspi.StateType>', '<enum ATSPI_STATE_SHOWING of type Atspi.StateType>', '<enum ATSPI_STATE_VISIBLE of type Atspi.StateType>']\nAFTER_MENU ['<enum ATSPI_STATE_FOCUSABLE of type Atspi.StateType>', '<enum ATSPI_STATE_FOCUSED of type Atspi.StateType>', '<enum ATSPI_STATE_PRESSED of type Atspi.StateType>', '<enum ATSPI_STATE_SENSITIVE of type Atspi.StateType>', '<enum ATSPI_STATE_SHOWING of type Atspi.StateType>', '<enum ATSPI_STATE_VISIBLE of type Atspi.StateType>']\nNATIVE_MENU [('push button', 'Agent actions'), ('toggle button', 'Agent actions'), ('label', 'Agent actions')]\nTraceback (most recent call last):\n  File \"/tmp/fm-wayland-menu-delayed-probe.py\", line 76, in <module>\n    exec(compile(source, str(root / 'scripts/test-agent-drag-gui.py'), 'exec'))\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 590, in <module>\n    # Target the actual shell tabs' leading/trailing quarters, away from close buttons.\n^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 545, in main\n    h.rpc(sock, \"surface_focus\", pane=right, surface=other)\n        ^^^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 321, in move_menu\n    pixels = connection.screen().root.get_image(x, y, bounds.width, bounds.height,\n^^^^^^^^^^^^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-agent-drag-gui.py\", line 294, in action\n    if args.click_load:\n               ^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-ssh-workspace-gui.py\", line 54, in wait_for\n    raise AssertionError(f\"Timed out: {description}; last error: {last}\")\nAssertionError: Timed out: Move to…; last error: None\n"
+    },
+    "minimal_gtk_app_source": "import gi\ngi.require_version('Gtk', '4.0')\ngi.require_version('Adw', '1')\nfrom gi.repository import Gtk, Adw\napp = Adw.Application(application_id='com.flowmux.Test.PlainMenu')\ndef activate(app):\n    window = Adw.ApplicationWindow(application=app, default_width=800, default_height=600)\n    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)\n    menu = Gtk.MenuButton(label='Plain actions')\n    popover = Gtk.Popover()\n    button = Gtk.Button(label='Destination')\n    def choose(button):\n        popover.popdown()\n        dialog = Adw.AlertDialog(heading='Destination picker')\n        dialog.set_extra_child(Gtk.DropDown.new_from_strings(['Pane', 'New workspace']))\n        dialog.add_response('cancel', 'Cancel')\n        dialog.present(window)\n    button.connect('clicked', choose)\n    popover.set_child(button)\n    menu.set_popover(popover)\n    box.append(menu)\n    window.set_content(box)\n    window.maximize()\n    window.present()\napp.connect('activate', activate)\napp.run(None)\n",
+    "minimal_app": {
+      "path": "/tmp/fm-gui-a1e0gfeu/gtk.py",
+      "sha256": "88d89056ac44f172270c1a10b23fedc55dea7a981364a9a1f878fd26f40c8620"
+    },
+    "minimal_driver": {
+      "path": "/tmp/fm-wayland-gtk-alert-dropdown-minimal.py",
+      "sha256": "209f064474ccd0e7af8378bb341fa7514ede495d3f987b5ada1b808c55c05800"
+    },
+    "minimal_result": {
+      "path": "/tmp/fm-wayland-gtk-alert-dropdown-minimal5.log",
+      "sha256": "67869bf81b725341e64ba24ab9a78cbe7f2277f69d9df3e7acc22b18b871a593",
+      "exit_code": 1,
+      "passed_assertions": 0,
+      "output": "ARTIFACTS: /tmp/fm-gui-a1e0gfeu\nDROPDOWN 0 833.0 519.0 FRAME 1534 968\nPASS plain Gtk.MenuButton/Popover/Dialog round 0\nDROPDOWN 1 833.0 519.0 FRAME 1534 968\nPASS plain Gtk.MenuButton/Popover/Dialog round 1\nTraceback (most recent call last):\n  File \"/tmp/fm-wayland-gtk-alert-dropdown-minimal.py\", line 86, in <module>\n    destination = fixture.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, 'Destination'), f'destination round {index}')\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/junsu/dev/os/flowmux/scripts/test-ssh-workspace-gui.py\", line 54, in wait_for\n    raise AssertionError(f\"Timed out: {description}; last error: {last}\")\nAssertionError: Timed out: destination round 2; last error: None\n"
+    },
+    "finding": "A plain Gtk.MenuButton + Popover + Adw.AlertDialog + DropDown without Flowmux also loses the next accessible popup after cancel. Underlying GTK/GDK cause is not established. Native pass does not prove accessibility correctness."
+  },
+  "limits": [
+    "No claim that the complete Wayland accessibility flow passed.",
+    "No replacement or restart of the active user GUI.",
+    "No claim that AR-088 or the six existing medium items are resolved.",
+    "This is additional live verification, not the Linux extended gate result."
+  ]
+}

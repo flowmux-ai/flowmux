@@ -1,0 +1,133 @@
+{
+  "date_kst": "2026-11-18",
+  "item": "AR-098",
+  "status": "unresolved-medium",
+  "original_gate_exit": 1,
+  "original_failed_phase": "ssh-workspace",
+  "original_error": "GUI process did not exit within 20 seconds after WM_DELETE_WINDOW; detailed GUI logs were deleted by the old outer gate cleanup.",
+  "followup_ssh_fixture_exit": 0,
+  "followup_scope": "Full isolated SSH fixture including workspace GUI/hooks/program status, remote code review/history/form and remote feedback Send. The originally failing close passed. This preceded the final diagnostic-only changes and is not an uninterrupted full gate pass or a root-cause fix.",
+  "new_diagnostics": "On a future close timeout, preserve requested X11 window IDs, remaining window names/mapping and process thread wait channels before fixture cleanup; never retry close or change the 20-second timeout.",
+  "final_harness_unit": {
+    "passed": 9,
+    "failed": 0
+  },
+  "live_close_after_program_status_exit": 0,
+  "live_scope": "Isolated GUI with original product binaries; real program-status fixture followed by graceful close. This ran before the final close-request event logging addition.",
+  "product_source_unchanged_since_ci": "0e17ae6517e735d7a14e6c3c808fc1eb65812300",
+  "evidence": [
+    {
+      "path": "/tmp/fm-ar098-ssh-repro.log",
+      "bytes": 5414,
+      "sha256": "8941c4dfe79490067c089529b07037ac41e74622ef85f4d268166c71c70e95bb"
+    },
+    {
+      "path": "/tmp/fm-ar098-harness-final.log",
+      "bytes": 299,
+      "sha256": "70353ba6ec967c03ca2436ca6d7c1586e0a5030fbc3b38a4b2aaa758070533cf"
+    },
+    {
+      "path": "/tmp/fm-ar098-live-close.log",
+      "bytes": 146,
+      "sha256": "7a7114229974a12739ff116462601a66608f5a97fd666b70ee1b6e94d6c080e4"
+    },
+    {
+      "path": "/tmp/fm-gui-2v_mysa1/window-a-restored.log",
+      "bytes": 518183,
+      "sha256": "a38674a8ea3a996ad98f116c8c8e1cb8c44e5f2a6981c2ed3666cdfc30d143ab"
+    },
+    {
+      "path": "/tmp/fm-gui-2v_mysa1/events.jsonl",
+      "bytes": 760592,
+      "sha256": "0bcbcf558821a5455dddf58ad201c2c1dd702f9f66ec5daef03af95754eea890"
+    },
+    {
+      "path": "/tmp/fm-gui-rxh31k2w/close-protocol.log",
+      "bytes": 29880,
+      "sha256": "ed3c8582013df4a03265e43ee39d6fc300f149b9aac0254aa7cbb797b38fc084"
+    },
+    {
+      "path": "/tmp/fm-ar098-exact/run.log",
+      "bytes": 6130,
+      "sha256": "75a8763ebf93b15518511f788c0da2e0277c017f526c2dee42b75d6c8ed61ccf"
+    },
+    {
+      "path": "/tmp/fm-ar098-exact/ssh-workspace.json",
+      "bytes": 503,
+      "sha256": "89f29fe29e848f0376d7e8e4a861693d56196935711892a0a0e4eb1db39b2953"
+    },
+    {
+      "path": "/tmp/fm-ar098-exact/tmp/fm-gui-eztli89n/window-a-restored.log",
+      "bytes": 522156,
+      "sha256": "8763c6849588d02c69243478e55a62ceb8aef0d6382f04caf3e25f6585c63501"
+    },
+    {
+      "path": "/tmp/fm-ar098-exact/tmp/fm-gui-eztli89n/events.jsonl",
+      "bytes": 801894,
+      "sha256": "af5b1131f68a733c8fdcbaf261ee81b1bb79d9ce2d508a2f1d934287b69cc08d"
+    },
+    {
+      "path": "/tmp/fm-ar098-busy-close.py",
+      "bytes": 1079,
+      "sha256": "74b841c8c2748291424aa9b6607d2a42940faaa8e3701a87da0fe0c0e1ef9371"
+    },
+    {
+      "path": "/tmp/fm-ar098-busy-close.log",
+      "bytes": 71,
+      "sha256": "6cbbfc6b89e5d6fd8c75403d15c758f5a5a1cb091218988d939fa694e801bdbc"
+    },
+    {
+      "path": "/tmp/fm-gui-mtjc57sp/busy-close.log",
+      "bytes": 8645,
+      "sha256": "6fc67b65c3d40b973df5a226a9529931bc32b2959bd45f610eb532337c6ddf35"
+    },
+    {
+      "path": "/tmp/fm-gui-mtjc57sp/events.jsonl",
+      "bytes": 3600,
+      "sha256": "f0ae0a0ccd8be3f45de5221362eba73425fd459fcff455cbd95fb6cfa7f2f0fb"
+    }
+  ],
+  "limits": "Original close-timeout cause remains unknown; follow-up success does not close AR-098. No push or new CI dispatch after the failed local full gate. Protected user GUI PID 1663486 was not restarted or replaced.",
+  "matching_runner_environment_followup": {
+    "receipt": {
+      "phase": "ssh-workspace",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "python3",
+        "scripts/ssh-workspace-fixture.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+      ],
+      "timeout_seconds": 600.0,
+      "status": "passed",
+      "pid": 1429928,
+      "exit_code": 0,
+      "elapsed_seconds": 251.614
+    },
+    "environment": {
+      "TMPDIR": "/tmp/fm-ar098-exact/tmp",
+      "G_DEBUG": "fatal-criticals",
+      "RUST_BACKTRACE": "1",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "XDG_CURRENT_DESKTOP": "",
+      "XDG_SESSION_DESKTOP": "",
+      "FLOWMUX_TEST_X11_LOCKS": "1"
+    },
+    "scope": "Only the originally failing SSH phase, using the final diagnostic harness and the same runner environment. No retry within this invocation. Full gate was not repeated; the original failure remains unresolved."
+  },
+  "busy_close_followup": {
+    "exit_code": 0,
+    "close_seconds": 0.445503,
+    "scope": "Two isolated GUIs share private state; one local terminal writes continuously during WM_DELETE_WINDOW. Both close normally. This does not reproduce the original SSH topology or prove the root cause."
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "AR-059 Linux cgroup membership and streamed explicit termination",
+  "source_parent_commit": "2afa06d51185071d7e4dfd8481cf060eb4317f1d",
+  "checks": {
+    "daemon_library_passed": 289,
+    "daemon_library_ignored": 1,
+    "nested_containment_live_passed": 3,
+    "root_exit_gui_live_passed": 5,
+    "daemon_all_targets_clippy": "passed",
+    "build": "passed"
+  },
+  "artifacts": [
+    "/tmp/fm-containment-xothuohq",
+    "/tmp/fm-gui-qiejd9w8"
+  ],
+  "tracked_gui_fixture_pids": [
+    114538,
+    114561,
+    114595
+  ],
+  "tracked_gui_fixture_pids_gone": true,
+  "containment_remaining_owned_processes": [],
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "/tmp/fm-runtime-scope-stream-final-containment.log": "b5f58d69112466b4dda700de2717150a191f58c2b01ca8dca0bc2da00cb99f97",
+    "/tmp/fm-runtime-scope-stream-final-root-exit.log": "969766c0536be3600d510e6270264ec0e1f6c82ba204384d79aeb9689ebe86c1",
+    "/tmp/fm-runtime-scope-stream-tests.log": "723bd8533e9b4aae4aa227f9db876396c3863f0a23b984962095bd9d15eeb970",
+    "/tmp/fm-runtime-scope-stream-clippy.log": "7c1895a609a25179b2476cefb21ef8dfcd1fb78bb95878e27e199876ab33def0",
+    "/tmp/fm-runtime-scope-stream-build.log": "10f789bcbe523d3b44af9668b30235336a199c2fc2277c241dfd1144b22e5c2b",
+    "target/debug/flowmux": "721526795a19e39b5f24c298988e3827bef098761c513e16b4da5ff1dec1baeb",
+    "target/debug/flowmux-daemon": "9c4117ad856e6b2cdc18576c8cb36ae73b6d90c8351a7c347b07b1cae7452f73"
+  },
+  "limits": [
+    "daemon library run precedes equivalent Clippy conditional collapse; final binaries used for both live scenarios",
+    "not macOS containment, provider retirement or a proof of every Host allocation",
+    "current user app and installation were not replaced"
+  ]
+}

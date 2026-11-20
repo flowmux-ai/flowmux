@@ -1,0 +1,160 @@
+{
+  "date_kst": "2026-11-18",
+  "source_head": "6cebcc9d2757e2dba2b784b01efbb5fb519405ce",
+  "scope": "Explicit InstanceLock unlock regression. Twenty runs used the combined working tree with pending nonblocking Agent-view changes; no isolated AR-092-only full gate is claimed.",
+  "before": "Retained dup descriptor causes WouldBlock after guard drop; deterministic regression exits 101.",
+  "after": "Twenty default-parallel flowmux-state library runs pass with explicit unlock.",
+  "checks": [
+    {
+      "path": "/tmp/fm-state-inherited-before-20261118.log",
+      "sha256": "22d602204efc1d27ff3bad40c8aba867b26de646e8e990ff7d1f5fd729039d7d",
+      "results": [
+        "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 101 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/1.log",
+      "sha256": "768c15186c99764c0ce40391c881c1040b773ed56a327fb8a833d25815812d2d",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/10.log",
+      "sha256": "468c22e371ee54320e7262da1b48f956e38e55ecee1bff7aa5579bd8fd4b1423",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/11.log",
+      "sha256": "43450bef1d0c86fbab62ef83bc2df60fd4fe639da3c0cdcbbbdda3bcf3f9ce16",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/12.log",
+      "sha256": "2351512f3db59767094dc19e3a1d776e418c5d373cb2253b811d19ef04923a0b",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/13.log",
+      "sha256": "edb0dc6e6569b79c9d87783e2df007116fb749b29842262c4ec5edf83471e867",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/14.log",
+      "sha256": "8478660da20736de6a8d419a48fd04437575ff1a85802bf625324e3114f4b4df",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/15.log",
+      "sha256": "9fcc707a24bd2a3bbccbb67ed22030d5873749490e85a60b0416744278331e41",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/16.log",
+      "sha256": "ebad77fa89f976e5dbfae653263ddb94b6f9a2480d3d75ea9014767f9932aa7e",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/17.log",
+      "sha256": "1ffb7188148d3249b866c02f4a6c97d1842baee48c41f5a5dd7abcf93b22141f",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/18.log",
+      "sha256": "78421a576d0ee535a8b71a017a9184f2e8b6979072710c31ac8dcdcd538638bc",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/19.log",
+      "sha256": "dc2d5dc91a33513eaf36fab804951c438533590b14913ddc7b87cfc59c89a511",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/2.log",
+      "sha256": "65ecc2d01efb955b469ef529b2feb40e01ddc8c44cbd7b7cfa0550bb0be653b1",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/20.log",
+      "sha256": "d4b0c7341cb0e1a6cd9049d12531de11336c297da48faa8a7ce3cdf792028bdc",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/3.log",
+      "sha256": "92a1ab226379fbbd2eb82d9fda3f57c3ade7140c1bd487a243e0c0b4a7c48602",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/4.log",
+      "sha256": "bb60d17a3059ddf5d00005c0af3c08ed2228c8cb9d035f4f6c4779cdefb22231",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/5.log",
+      "sha256": "17b0735757e38f200ea60a65bd20f7b5053c73c19f373b3ec314e6bd05101e2e",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/6.log",
+      "sha256": "8a092e4e7e3f90187b6c3e06acb9315a1e3ac820170eaf63453e67802a1b104a",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/7.log",
+      "sha256": "bec1829e735984910287513035c8e2a6100580c55f1b17ae8da1372917a82ef8",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/8.log",
+      "sha256": "24b4d18e9ee8077462ed089a40987e8ef59175997cf8bb070abc320e880af87d",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s"
+      ]
+    },
+    {
+      "path": "/tmp/fm-state-unlock-parallel-20261118/9.log",
+      "sha256": "b0f58425c3094f98950c7efe635cd25c11b1a39b7162d4a85c96eddbc74d4e94",
+      "results": [
+        "test result: ok. 102 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s"
+      ]
+    }
+  ],
+  "limits": [
+    "dup reproduces shared flock open-description lifetime; no assertion that every historical parallel failure had this cause.",
+    "Complete final-source Linux gate is recorded separately."
+  ]
+}

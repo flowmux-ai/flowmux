@@ -1,0 +1,74 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-069",
+  "status": "open: remote revalidation pending",
+  "source_base": "e9c8dd137abe8c0eda40e4fdc909364415db02de",
+  "failed_native_run": {
+    "id": 44066722901,
+    "job": 133982184828,
+    "phase": "managed-session-flow",
+    "assertion": "Cannot select child in Session Flow"
+  },
+  "fix": [
+    "Expose the canvas with Group role, initial name and stable keyboard description.",
+    "Use native Tab focus receipts and canvas label transitions instead of guessed canvas coordinates and fixed selection sleeps.",
+    "Save AT-SPI tree and screenshot on assertion failure."
+  ],
+  "before": {
+    "gui": "/tmp/fm-flow-before-ar069-bin/flowmux",
+    "artifacts": "/tmp/fm-gui-2oow3apu",
+    "exit_code": 1,
+    "failure": "Timed out: accessible Flow canvas"
+  },
+  "after": {
+    "artifacts": "/tmp/fm-gui-w7v_920o",
+    "exit_code": 0,
+    "checks_passed": 9,
+    "selected_nodes": [
+      "Managed flow child",
+      "Managed resume fixture",
+      "Managed flow child"
+    ],
+    "native_focus_and_selection": true
+  },
+  "checks": {
+    "locked_gui_build": "passed",
+    "gui_all_target_clippy": "passed",
+    "format": "passed",
+    "python_ast": "passed",
+    "isolated_gtk_canvas_test": {
+      "passed": 1,
+      "exit_code": 0
+    }
+  },
+  "source_sha256": {
+    "crates/flowmux/src/ui/session_flow.rs": "59c668ba585e829f79273b3ce57ea46b18fffb09dea6dbf82d7b0dff9d252110",
+    "crates/flowmux/src/ui/session_flow/canvas.rs": "fb9f49432c7e710012fd96b70af2c5a381b0fd56b60b51afa4702a74c4104ea1",
+    "scripts/test-agent-session-resume-gui.py": "2061f0248b5009abb80e49970be8af468ce7df6a8610e4f9d5b7d620c592b60b"
+  },
+  "evidence_sha256": {
+    "/tmp/fm-runtime-ci-44066722901-linux.log": "59c297ed09c789abf974ce2a738ccc08bacd4237993bebcf4e4fef933be0cce5",
+    "/tmp/fm-flow-accessibility-before-corrected.log": "9f4907e01a16a99fc10b6e694b2a759cb32b0a0bb9df5c092d07096b2b8f1135",
+    "/tmp/fm-flow-accessibility-after.log": "5173fbee9fa8dee59c49191a436e9bcfa6bfd7246f4d722fec40ab6854857928",
+    "/tmp/fm-flow-accessibility-build.log": "4306c7464d1ef815020891cbef3ea23075418748369ab3036d9802289c0da93b",
+    "/tmp/fm-flow-accessibility-clippy.log": "ee8764e82da9819100e8a31b1714e8989f3e277d5171dd6c107ddcb1721da0db",
+    "/tmp/fm-gui-w7v_920o/events.jsonl": "bf49881258e30237b8bf108da6c1738179867b915747e58f328e3d9cebbcd52f",
+    "/tmp/fm-gui-2oow3apu/session-flow-selection.json": "ad30cf4bc207868f5b1464b636db28e33f0e7cc06ce12607103da78e11c47620",
+    "/tmp/fm-flow-accessibility-unit-corrected.log": "b6b9c5c2327e102c421b799cebc96f83cc48b67e8794a1fe9c9b6ad5f68b4ddc"
+  },
+  "limitations": [
+    "The original CI failure did not record the focus target; its exact cause remains unconfirmed.",
+    "macOS accessibility and this updated driver have not been remotely revalidated.",
+    "User GUI PID 1663486 and installed binaries are unchanged."
+  ],
+  "remote_revalidation": {
+    "run_id": 44073400067,
+    "revision": "f8f149d1f55e90643a772ae1dc5fc1ae02cbd8f1",
+    "status": "in_progress",
+    "linux_job": 134006618943,
+    "macos_job": 134006619280,
+    "superseded_run": 44071483159,
+    "superseded_native_conclusion": "cancelled",
+    "reason": "Consolidate validation on the latest source and release its workflow concurrency wait."
+  }
+}

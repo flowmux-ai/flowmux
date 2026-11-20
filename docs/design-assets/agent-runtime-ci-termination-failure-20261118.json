@@ -1,0 +1,156 @@
+{
+  "action_item": "AR-073",
+  "status": "open: Linux CI normal termination failed; cause not established",
+  "run": 44131022038,
+  "job": 134207802535,
+  "source": "428e3b81",
+  "artifact": 14352024327,
+  "failed_wait": "normal termination and reap",
+  "script_line": 800,
+  "last_pass": "Explicit Ctrl+C interrupts without declaring the execution ended",
+  "last_click": {
+    "time": 1794936769.6735034,
+    "event": "click",
+    "name": "Terminate agent",
+    "x": 926,
+    "y": 656
+  },
+  "events": [
+    {
+      "time": 1794936761.6439524,
+      "event": "click",
+      "name": "Claude sessions",
+      "x": 1232,
+      "y": 110
+    },
+    {
+      "time": 1794936761.7632272,
+      "event": "click",
+      "name": "YOLO",
+      "x": 1553,
+      "y": 969
+    },
+    {
+      "time": 1794936761.8963335,
+      "event": "click",
+      "name": "Managed resume fixture",
+      "x": 1410,
+      "y": 215
+    },
+    {
+      "time": 1794936762.050263,
+      "event": "click",
+      "name": "Resume in new tab",
+      "x": 1372,
+      "y": 970
+    },
+    {
+      "time": 1794936762.2351909,
+      "event": "pass",
+      "check": "Sessions resume uses Host, configured shell startup, literal project/config and native argv"
+    },
+    {
+      "time": 1794936763.077225,
+      "event": "click",
+      "name": "Claude sessions",
+      "x": 1232,
+      "y": 110
+    },
+    {
+      "time": 1794936763.2140746,
+      "event": "pass",
+      "check": "Focused managed tab browses the provider root's history rather than the relay's descendants"
+    },
+    {
+      "time": 1794936763.4588277,
+      "event": "pass",
+      "check": "Closing the resumed tab preserves the same PID/birth and Background execution"
+    },
+    {
+      "time": 1794936763.522707,
+      "event": "click",
+      "name": "Claude sessions",
+      "x": 1232,
+      "y": 110
+    },
+    {
+      "time": 1794936763.6594605,
+      "event": "click",
+      "name": "Managed resume fixture",
+      "x": 1410,
+      "y": 215
+    },
+    {
+      "time": 1794936763.8217676,
+      "event": "click",
+      "name": "Resume in new tab",
+      "x": 1372,
+      "y": 970
+    },
+    {
+      "time": 1794936765.0649111,
+      "event": "pass",
+      "check": "Resume of an already running history session reconnects without a second spawn"
+    },
+    {
+      "time": 1794936765.846929,
+      "event": "pass",
+      "check": "GUI exit and saved-view restoration preserve the same resumed process and accept new input"
+    },
+    {
+      "time": 1794936767.4417531,
+      "event": "click",
+      "name": "Cancel",
+      "x": 720,
+      "y": 633
+    },
+    {
+      "time": 1794936767.5227852,
+      "event": "pass",
+      "check": "Cancelling named termination preserves the exact running execution"
+    },
+    {
+      "time": 1794936768.7478387,
+      "event": "pass",
+      "check": "Explicit Ctrl+C interrupts without declaring the execution ended"
+    },
+    {
+      "time": 1794936769.6735034,
+      "event": "click",
+      "name": "Terminate agent",
+      "x": 926,
+      "y": 656
+    }
+  ],
+  "host_log": "\u001b[2m2026-11-17T17:32:40.517723Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mflowmux_daemon\u001b[0m\u001b[2m:\u001b[0m flowmux-daemon starting \u001b[3msocket\u001b[0m\u001b[2m=\u001b[0m\"/tmp/fm-gui-408nydyr/run/flowmux-agent-host.sock\"\n\u001b[2m2026-11-17T17:32:40.518045Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mflowmux_ipc::server\u001b[0m\u001b[2m:\u001b[0m flowmux daemon listening \u001b[3mpath\u001b[0m\u001b[2m=\u001b[0m/tmp/fm-gui-408nydyr/run/flowmux-agent-host.sock\n\u001b[2m2026-11-17T17:33:18.750247Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mflowmux_ipc::server\u001b[0m\u001b[2m:\u001b[0m client disconnected with error \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mdeadline has elapsed\n",
+  "gui_control_and_contact_logs": [
+    "2026-11-17T17:32:45.429181Z  INFO flowmux: terminal process isolation unavailable reason=org.freedesktop.DBus.Error.Spawn.ChildExited: Process org.freedesktop.systemd1 exited with status 1",
+    "2026-11-17T17:32:45.683731Z  WARN flowmux::update::install: release check failed error=latest GitHub Release request failed",
+    "2026-11-17T17:33:19.938000Z  INFO flowmux::ui::window::termination_dialog: child exited pane=2155c906-1b5a-419c-baf2-157b10180f5c status=0",
+    "2026-11-17T17:33:20.688345Z  WARN flowmux::agent_host: Agent Host management connection lost; reconnecting"
+  ],
+  "files": [
+    {
+      "path": "events.jsonl",
+      "sha256": "53d71ef1eb968ce8398f8e894aa40925e5f9e8df051e28ca0e3b84b36f6c1c59"
+    },
+    {
+      "path": "host.log",
+      "sha256": "ac6b47f6eeb3e7a6fcb8e916c016fa93727e95680bdb5f3c9537d917d7872c9b"
+    },
+    {
+      "path": "session-resume-reopened.log",
+      "sha256": "123cb39f38d1dcd05ac3a90f336c6993e16d93e159f0322d2747845d3b46e3a2"
+    },
+    {
+      "path": "session-resume.log",
+      "sha256": "21212697187c8a421a51df343e346e27ba15c620bbd72e2e1c493098945dbe53"
+    }
+  ],
+  "limits": [
+    "No post-failure registry snapshot or accessible dialog state was retained by this fixture.",
+    "A native click log does not establish that the confirmation callback ran or the Host received termination.",
+    "This differs from run 44073400067, which failed at the second execution Stopping wait.",
+    "Successful macOS and native-hook phases in this run do not close AR-071 or AR-088. No retry dispatched."
+  ]
+}

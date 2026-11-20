@@ -1,0 +1,272 @@
+{
+  "recorded_at_utc": "2026-11-17T15:35:54.302259+00:00",
+  "action_item": "AR-085",
+  "source_anchor": "ef4c6f0d5ee7ad7b579b6677c615ca8c81b3f337",
+  "script": {
+    "path": "scripts/test-agent-codex-live.py",
+    "sha256": "0487919e3e56b692e213a3360a7d869f8cbb195510c7f32916f5f8041e485067"
+  },
+  "provider_version": "codex-cli 0.169.0",
+  "protected_user_gui_pid": 1663486,
+  "product_binary_sha256": {
+    "target/debug/flowmux": "1cd3a858dec350dd4e3c29a01c3454cef2300cbdda1ae380a2e1d7d026d0b8af",
+    "target/debug/flowmuxctl": "a1598580c977e2903fe7df572c80944c5b11d3efcdfc1fe79fa7de9a4f75d418",
+    "target/debug/flowmux-daemon": "3c2358e4e65ffe662ef56c0b2882e8317af98f9759b6f7dd51405ba3976a646d"
+  },
+  "command": [
+    "python3",
+    "-u",
+    "scripts/test-agent-codex-live.py",
+    "--work-seconds",
+    "1",
+    "--protected-pid",
+    "1663486"
+  ],
+  "initial_start_marker_failure": {
+    "description": "Provider buffers tool output until completion; replaced screen marker startup wait with exact owned argv detection",
+    "exit_code": 1,
+    "log": {
+      "path": "/tmp/fm-runtime-codex-work-short-20261117.log",
+      "sha256": "a6d04ac43385fa42caf6b63cc145b6920d4d8ae3263cb44dd72e80d3601fb5df"
+    },
+    "artifacts": "/tmp/fm-gui-ak9_lh_c",
+    "passed_checks": [
+      "real Codex model replies through the managed VTE",
+      "tab and last isolated GUI close preserve the actual Codex process"
+    ]
+  },
+  "earlier_short_pass": {
+    "description": "Startup fix before narrowing the process scan to cgroup.procs",
+    "exit_code": 0,
+    "log": {
+      "path": "/tmp/fm-runtime-codex-work-short-fixed-20261117.log",
+      "sha256": "84408c40e622942ff8bd3669dd8dbd08ff9b30d6234179be7254786016bb64ed"
+    },
+    "artifacts": "/tmp/fm-gui-49uu1pk7",
+    "passed_checks": [
+      "real Codex model replies through the managed VTE",
+      "tab and last isolated GUI close preserve the actual Codex process",
+      "real Codex and its exact tool command survive 1.002s without any GUI",
+      "reconnected same Codex renders previous TUI and answers fresh Hangul round trip",
+      "explicit termination reaps this provider and empty Host without affecting user GUI"
+    ]
+  },
+  "long_attempt": {
+    "description": "Real owned tool survives 31 minutes; whole script fails after reconnect while looking for initial FMRT response outside viewport",
+    "exit_code": 1,
+    "log": {
+      "path": "/tmp/fm-runtime-codex-work-31min-20261117.log",
+      "sha256": "bbb23b987b2bd4a0468bf3f10ae074c63496940cd98efc315dc36206df576b9c"
+    },
+    "artifacts": "/tmp/fm-gui-sih07hzg",
+    "passed_checks": [
+      "real Codex model replies through the managed VTE",
+      "tab and last isolated GUI close preserve the actual Codex process",
+      "real Codex and its exact tool command survive 1860.003s without any GUI"
+    ],
+    "pre_run_provenance": {
+      "path": "/tmp/fm-runtime-codex-work-31min-provenance-20261117.json",
+      "sha256": "5d49e98ba45c11325c460e10ed808fb01ba5c8d60263b8e0ee0364e7fd310244"
+    },
+    "script_archive": {
+      "path": "/tmp/fm-runtime-codex-work-31min-v1-20261117.py",
+      "sha256": "87217eed0779855497cf9a43676d62c8ec075c5ca370cd4b73f5e52140395afe"
+    },
+    "observations": {
+      "path": "/tmp/fm-gui-sih07hzg/work-observations.jsonl",
+      "sha256": "c843e862b6f62b64dfd8c9b644607b6b5d16e13047f0fdac89adcac57df8c4fc"
+    },
+    "latest_screen": {
+      "path": "/tmp/fm-gui-sih07hzg/latest-screen.txt",
+      "sha256": "ff5800a4da2f0f951ece12b2a22647280f21001b3dcb23ef6b73060adeb0a901"
+    },
+    "headless_survival_passed": true,
+    "whole_scenario_passed": false,
+    "fresh_round_trip_reached": false,
+    "sample_count": 94,
+    "elapsed_seconds": 1860.0031385890034,
+    "unique_identity_count": 1,
+    "identity": {
+      "host_pid": 555751,
+      "host_birth": 17119398,
+      "agent_pid": 555791,
+      "agent_process_start": 17119409,
+      "tool_pid": 556375,
+      "tool_birth": 17120548
+    },
+    "sample_elapsed_seconds": [
+      0.0023869169817771763,
+      20.00649136400898,
+      40.009132387000136,
+      60.01237055499223,
+      80.01638346500113,
+      100.01875151798595,
+      120.02149677998386,
+      140.0242331409827,
+      160.026891135989,
+      180.03004372498253,
+      200.03250550699886,
+      220.03467408698634,
+      240.03721713798586,
+      260.03994622599566,
+      280.04257249998045,
+      300.0450412379869,
+      320.04910719400505,
+      340.05143140698783,
+      360.0538597139821,
+      380.0561315070081,
+      400.0588711379969,
+      420.0617278239806,
+      440.06423430898576,
+      460.06756455398863,
+      480.0702472839912,
+      500.07349382698885,
+      520.0759956479887,
+      540.0786515020009,
+      560.081566651992,
+      580.0842053820088,
+      600.0870157849859,
+      620.0896065059933,
+      640.0923543499957,
+      660.094706422009,
+      680.0973117539834,
+      700.0998217839806,
+      720.1024323040037,
+      740.1047938560077,
+      760.1072806330048,
+      780.1107361440081,
+      800.1141465379915,
+      820.1171528209816,
+      840.1205591839971,
+      860.1230893030006,
+      880.1257183990092,
+      900.1288320639869,
+      920.1319407279952,
+      940.1341031439952,
+      960.1366537569847,
+      980.1397172180004,
+      1000.142688004009,
+      1020.1457496729854,
+      1040.1485089010093,
+      1060.1522851379996,
+      1080.155812491983,
+      1100.1582748149813,
+      1120.1610764199868,
+      1140.1642194390006,
+      1160.166851113987,
+      1180.1697383529972,
+      1200.173691022006,
+      1220.1763719049923,
+      1240.1788240899914,
+      1260.181873855996,
+      1280.184413135983,
+      1300.1877455989888,
+      1320.1907055240008,
+      1340.1935154350067,
+      1360.1962925099942,
+      1380.1992903880018,
+      1400.201854990999,
+      1420.2046217939933,
+      1440.2073055359942,
+      1460.2100892580056,
+      1480.212394786009,
+      1500.2147840030084,
+      1520.2176259819826,
+      1540.2200327150058,
+      1560.2225328589848,
+      1580.2252572680009,
+      1600.227628722001,
+      1620.2301708199957,
+      1640.2331342760008,
+      1660.2356730689935,
+      1680.238342394994,
+      1700.2411392570066,
+      1720.243746253982,
+      1740.2463617470057,
+      1760.249150655989,
+      1780.2521960840095,
+      1800.2548352529993,
+      1820.257326299994,
+      1840.2601102209883,
+      1860.0031385890034
+    ],
+    "all_observed_agents_running_unattached_working": true,
+    "latest_screen_has_completed_model_reply": true
+  },
+  "corrected_short_full_scenario": {
+    "description": "Current script, direct --work-seconds 1 invocation with protected user GUI",
+    "exit_code": 0,
+    "log": {
+      "path": "/tmp/fm-runtime-codex-work-final-short-20261117.log",
+      "sha256": "8d860482e68fd878b22c8aa0d6e877cb562c33e981b7ad9589f577e30a8f1ff1"
+    },
+    "artifacts": "/tmp/fm-gui-lia1cwew",
+    "passed_checks": [
+      "real Codex model replies through the managed VTE",
+      "tab and last isolated GUI close preserve the actual Codex process",
+      "real Codex and its exact tool command survive 1.003s without any GUI",
+      "reconnected same Codex renders previous TUI and answers fresh Hangul round trip",
+      "explicit termination reaps this provider and empty Host without affecting user GUI"
+    ]
+  },
+  "limitations": [
+    "Long attempt is an actual provider executing a synthetic read-only timed tool, not useful development or proof of whole-work completion.",
+    "No automatic retirement or idle-only shutdown contract was implemented or verified; AR-010 remains unresolved.",
+    "Six preexisting medium items remain open."
+  ],
+  "corrected_long_full_scenario": {
+    "description": "Current script, protected real Codex, 31-minute headless tool followed by reconnect, fresh Hangul reply and explicit cleanup",
+    "source_anchor": "1ffd7c2665e6c5256f59d7ce8b7850ef9633a3f3",
+    "exit_code": 0,
+    "command": [
+      "python3",
+      "-u",
+      "scripts/test-agent-codex-live.py",
+      "--work-seconds",
+      "1860",
+      "--protected-pid",
+      "1663486"
+    ],
+    "log": {
+      "path": "/tmp/fm-runtime-codex-work-final-31min-20261118.log",
+      "sha256": "fa1b11ab87ab68aa6e844a68388168b4ca2787c5d7f06dcc47f228358f484621"
+    },
+    "artifacts": "/tmp/fm-gui-3d4o_3pt",
+    "passed_checks": [
+      "real Codex model replies through the managed VTE",
+      "tab and last isolated GUI close preserve the actual Codex process",
+      "real Codex and its exact tool command survive 1860.003s without any GUI",
+      "reconnected same Codex renders previous TUI and answers fresh Hangul round trip",
+      "explicit termination reaps this provider and empty Host without affecting user GUI"
+    ],
+    "pre_run_provenance": {
+      "path": "/tmp/fm-runtime-codex-work-final-31min-provenance-20261118.json",
+      "sha256": "e611aedfaca728da5b1b3ffec132ac76d8e45b2112b0374572189737d04ae7cb"
+    },
+    "observations": {
+      "path": "/tmp/fm-gui-3d4o_3pt/work-observations.jsonl",
+      "sha256": "b70fb37e474faafbaa90757cdbf6c286d4117e8f2c68501334b37ce4a6991318"
+    },
+    "latest_screen": {
+      "path": "/tmp/fm-gui-3d4o_3pt/latest-screen.txt",
+      "sha256": "c87801f74fbdebe858d5631d10dfd5c699125b3ef40f99e51860e80a5c90c8ac"
+    },
+    "headless_survival_passed": true,
+    "whole_scenario_passed": true,
+    "fresh_round_trip_reached": true,
+    "sample_count": 94,
+    "elapsed_seconds": 1860.002675257012,
+    "unique_identity_count": 1,
+    "identity": {
+      "host_pid": 591333,
+      "host_birth": 17397329,
+      "agent_pid": 591408,
+      "agent_process_start": 17397340,
+      "tool_pid": 592013,
+      "tool_birth": 17398578
+    },
+    "all_observed_agents_running_unattached_working": true,
+    "latest_screen_has_completed_model_reply": true,
+    "note": "During this run only an IPC regression test source was added; script and product binaries were unchanged."
+  }
+}

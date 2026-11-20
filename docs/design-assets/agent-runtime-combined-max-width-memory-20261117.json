@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-006 partial verification",
+  "source_base": "0d6ee75d491db328f6428c3e4829991a4322a492",
+  "product_change": false,
+  "test": "agent_host::terminal::tests::maximum_width_and_overlapping_frames_bound_peak_memory",
+  "command": "cargo test -p flowmux-daemon --lib maximum_width_and_overlapping_frames_bound_peak_memory --locked -- --nocapture",
+  "exit_code": 0,
+  "passed": 1,
+  "duration_seconds": 18.6,
+  "geometry": {
+    "rows": 80,
+    "cols": 500,
+    "cells": 40000
+  },
+  "load": {
+    "primary_rows": 1500,
+    "alternate_rows": 80,
+    "combining_marks_per_cell": 32,
+    "saved_titles": 4096,
+    "title_bytes": 4096,
+    "valid_long_link_updates": 500,
+    "overlapping_snapshot_arcs": 4
+  },
+  "primary_snapshot_bytes": 16761452,
+  "alternate_snapshot_bytes": 7252152,
+  "process_vm_hwm_kib": 245508,
+  "execution_reservation_kib": 393216,
+  "log": "/tmp/fm-runtime-combined-max-width.log",
+  "log_sha256": "c1bc09a5ae62152fbd3a5d7dc90124e1d0c77a68e9afef4bab3913e468f30846",
+  "test_source_sha256": "6b2380d0cdd3ee9fbc42256ca530c64c43c0650153b7bdf0cc9830e3fce3dc1d",
+  "checks": {
+    "daemon_all_targets_clippy": "passed (-D warnings)",
+    "diff_whitespace": "passed"
+  },
+  "limitations": [
+    "Terminal-only isolated load, not full Host admission/accounting proof.",
+    "No new product code or GUI behavior; no macOS memory measurement.",
+    "Link admission remains bounded; 500 updates do not assert all links were retained."
+  ],
+  "resized_grid_follow_up": {
+    "source_base": "4eb9caaa",
+    "initial_geometry": {
+      "rows": 1,
+      "cols": 500
+    },
+    "resized_geometry": {
+      "rows": 80,
+      "cols": 500
+    },
+    "primary_rows": 1500,
+    "alternate_rows": 1500,
+    "purpose": "Populate cached rows on both grids after legal height-only growth.",
+    "passed": 1,
+    "exit_code": 0,
+    "duration_seconds": 30.47,
+    "process_vm_hwm_kib": 329588,
+    "primary_snapshot_bytes": 16761452,
+    "alternate_snapshot_bytes": 7252152,
+    "log": "/tmp/fm-runtime-both-caches-max-width.log",
+    "log_sha256": "d5c876824b64c70696e283dc9c50971219ccd1dae270464858eaf147b5eedfde",
+    "test_source_sha256": "a004e2119ec293a645ef2ea89282213d53d9edf358caa48c5d01dbacda02bd6a"
+  }
+}

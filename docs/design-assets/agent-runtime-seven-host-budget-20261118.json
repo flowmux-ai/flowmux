@@ -1,0 +1,114 @@
+{
+  "date_kst": "2026-11-18",
+  "source_head": "53f36ee8e9a56dd5177355e9485a89bdf3e671ff",
+  "tested_diff": "New all-seven pressure fixture; unchanged product binaries from AR-091.",
+  "command": [
+    "python3",
+    "scripts/ci-phase.py",
+    "/tmp/fm-seven-budget-20261118",
+    "host-budget",
+    "420",
+    "python3",
+    "scripts/test-agent-host-budget-gui.py",
+    "--protected-pid",
+    "1663486"
+  ],
+  "receipt": {
+    "phase": "host-budget",
+    "command": [
+      "python3",
+      "scripts/test-agent-host-budget-gui.py",
+      "--protected-pid",
+      "1663486"
+    ],
+    "timeout_seconds": 420.0,
+    "status": "passed",
+    "pid": 974096,
+    "exit_code": 0,
+    "elapsed_seconds": 128.399
+  },
+  "artifacts": "/tmp/fm-gui-tylw1jyx",
+  "peak_host_rss_kib": 1983304,
+  "budget_kib": 3145728,
+  "pressure": {
+    "executions": 7,
+    "rows": 80,
+    "columns": 500,
+    "pending_frames": 7,
+    "admitted_additional_regular_connections": 49,
+    "admitted_control_connections": 16,
+    "request_bytes": 1048576,
+    "rich_rows_per_grid": 1500,
+    "combining_marks_per_cell": 32
+  },
+  "checks": [
+    "All seven resized primary/alternate grids retain overlapping active/pending frames.",
+    "Both IPC pools reject further admission while complete and partial maximum-size requests overlap.",
+    "Pending frame continuations retain their original sequence.",
+    "All seven accept fresh Hangul input through the real GUI with unchanged PID and birth and one spawn.",
+    "All providers exit naturally and the empty Host retires; protected user process remains alive."
+  ],
+  "limits": [
+    "This measured workload is not a proof of all allocator, lifecycle-ledger, metadata, GUI-response and IPC peaks overlapping.",
+    "Kernel socket buffers and provider/GUI RSS are outside the measured Host VmHWM.",
+    "AR-006 remains medium and open; no OS-enforced Host RSS ceiling is claimed.",
+    "The fixture passed independently; the new extended-gate routing is checked by the runner tests, not a new full-gate execution."
+  ],
+  "files": [
+    {
+      "path": "scripts/test-agent-host-budget-gui.py",
+      "sha256": "ef9307d1395b176e6694549bbc5e29c4c019e77594bfd2793ea085d101187eb0"
+    },
+    {
+      "path": "scripts/test-agent-terminal-budget.py",
+      "sha256": "a132f19dce2beab6ffd739a2fa87183d799d61694b6068bc213c4a5fbf52b87e"
+    },
+    {
+      "path": "scripts/test-linux.sh",
+      "sha256": "fb9650a8d15301218bbc9f324f3902d68dd6a7e0870ec1cd0ecdbdbda5c7d569"
+    },
+    {
+      "path": "scripts/test-ci-runner.py",
+      "sha256": "00d737e0eda14dd5603ca050e92f922ab72ffad0de4b9223db658fc153f7d8be"
+    },
+    {
+      "path": "target/debug/flowmux",
+      "sha256": "53e0e4bd2df741693c25ba6f5bc8942d589bd9a0ca2c6cdfc6d8ff275b052064"
+    },
+    {
+      "path": "target/debug/flowmuxctl",
+      "sha256": "74e9748b9b8d03d5ed268ccd82de3fad815e56da1577732cc9635f5e99becac2"
+    },
+    {
+      "path": "target/debug/flowmux-daemon",
+      "sha256": "e0a8318e83a44ba91beebbfe1681d6ad96e89933712aef6c1e1dc8dbf1d7872f"
+    },
+    {
+      "path": "/tmp/fm-seven-budget-20261118.log",
+      "sha256": "774c38b2a7bfbdbb1bb70612042ffc3c0d56f345b6e884a8dc4577f305807b57"
+    },
+    {
+      "path": "/tmp/fm-seven-budget-20261118/host-budget.json",
+      "sha256": "8e7cefb7445a6b2e3a6dffaa6e1746c7b87664a0f878f7d3a68e979fd0c21635"
+    },
+    {
+      "path": "/tmp/fm-gui-tylw1jyx/events.jsonl",
+      "sha256": "d68922a9206005c6bf3cbdb59b0b34ee78031a496f207252d9093d9ec2494682"
+    },
+    {
+      "path": "/tmp/fm-gui-tylw1jyx/host.log",
+      "sha256": "bd196a653b7d4fdee65be40b8e3344f947e59ae2253f66d3da7a3ecae7ba1834"
+    },
+    {
+      "path": "/tmp/fm-host-budget-runner-20261118.log",
+      "sha256": "54834184cab5730becf7190479906479a1bc6d230ca8ef3dd2c06318ab08f393"
+    }
+  ],
+  "gate_runner_self_check": {
+    "tests": 29,
+    "passed": 28,
+    "skipped": 1,
+    "elapsed_seconds": 121.086,
+    "exit_code": 0
+  }
+}

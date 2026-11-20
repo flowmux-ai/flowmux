@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "AR-060 retained row capacity during narrowing reflow",
+  "source_parent_commit": "aa1a26d6d9763e8523e435463e56b06875b2d3cf",
+  "memory_regression_peak_growth_kib": {
+    "before": 331976,
+    "after": 19668
+  },
+  "checks": {
+    "daemon_library_passed": 290,
+    "daemon_library_ignored": 1,
+    "upstream_library_passed": 132,
+    "daemon_all_targets_clippy": "passed",
+    "build": "passed",
+    "live_gui_host_passed": 34,
+    "license_notice_tests_passed": 4,
+    "license_assets": "passed"
+  },
+  "live_resize_peak_kib": [
+    {
+      "initial_columns": 2,
+      "before": 21396,
+      "after": 33356
+    },
+    {
+      "initial_columns": 500,
+      "before": 33356,
+      "after": 48760
+    }
+  ],
+  "artifacts": "/tmp/fm-gui-q8ajfk2f",
+  "fixture_host_socket_removed": true,
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "/tmp/fm-runtime-narrow-memory-before.log": "1376cc3aca7038b4a78fd2a7739bd15ab3ed5d49b566fe0301da918acc6e4a74",
+    "/tmp/fm-runtime-narrow-memory-after.log": "c9a34d9ed7fba8b975ec6a271722b35151a774dc357d57602aaca80e560ecf82",
+    "/tmp/fm-runtime-narrow-daemon-tests.log": "9b029f94b3058363c397c10e14f772779d1ae2ef10a84f3f2c6f12982639e05f",
+    "/tmp/fm-runtime-narrow-upstream-tests.log": "4f4f4dedc9868a9b0ae755f2b7750a7f57bf3c0192cf69292e82b7ea9b77d924",
+    "/tmp/fm-runtime-narrow-clippy.log": "f62b1957a89d7fb7e1d7f7dc0c1825dc9b52821c416010bfee217ea7f76a4739",
+    "/tmp/fm-runtime-narrow-build.log": "cffe7dcd3665f4dca791e9822d0228a857c780ebae315e31b6f42e61080d081e",
+    "/tmp/fm-runtime-narrow-live-verified.log": "c6edbb06a18b6c85391f18e46dbc083794eff791238d678b0de523d8656d1891",
+    "/tmp/fm-runtime-narrow-license-tests.log": "feabb4add9e2ca3374e538560634d1ec97dc4f4ce89aab12f3d726e36ea9b2f6",
+    "target/debug/flowmux": "9800411cf78eb2991e4af5b0f16d7a96f9e84d7152b9e6e9d546d3fa8c0cdf9b",
+    "target/debug/flowmux-daemon": "192ddfeeff7465540974e949846ef35fbfb07685c5619c833cf6587059e802b2",
+    "target/debug/flowmuxctl": "f566644d609a6b5db6f289b61cba95a5a3ba7b69d73b112cc03ef19d741d9a63",
+    "scripts/test-agent-host-gui.py": "520a13007c1aecf0d495886a09046d72d24a2b346eacc84b0ff8db03bca26659",
+    "vendor/alacritty_terminal/src/grid/row.rs": "ebef2337088bd7baa8db0956b39108c76bf1e0bce2953fa7f49ec6becde18762"
+  },
+  "limits": [
+    "Linux measurement; current macOS CI predates this patch",
+    "not a proof of all Host allocations or provider retirement",
+    "user app and installation unchanged"
+  ]
+}

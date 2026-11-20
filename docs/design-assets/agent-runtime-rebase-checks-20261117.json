@@ -1,0 +1,59 @@
+{
+  "source": "1cb45eb0600a34984766ece6a6b3bd40fa38624f",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "production_build_source": "9994da97",
+  "note": "Later Rust changes affect test-only failed-launch diagnostics and formatting. GUI checks run serially after initial concurrent failures; first failures remain open in AR-073. Local Linux only.",
+  "checks": [
+    {
+      "check": "session-flow-aligned",
+      "log": "/tmp/fm-runtime-rebase-session-flow-aligned.log",
+      "sha256": "8e3f63fc1e4b293299e5eb0bc4b1aca6a90471667871dd72b284a61d2d2d38b8",
+      "pass_count": 9
+    },
+    {
+      "check": "tabs-row",
+      "log": "/tmp/fm-runtime-rebase-tabs-row.log",
+      "sha256": "7053c045c66bf3941aa941b060b0b59562515ac9e7da9ade9f3a04e8a69c5683",
+      "pass_count": 14
+    },
+    {
+      "check": "termination",
+      "log": "/tmp/fm-runtime-rebase-termination.log",
+      "sha256": "315677fea9f0fa9ea0e948d8065c800c532af2579a4b6364a9584f566721a37b",
+      "pass_count": 14
+    },
+    {
+      "check": "tearoff-postbuild",
+      "log": "/tmp/fm-runtime-rebase-tearoff-postbuild.log",
+      "sha256": "7af790d58750f6c6b6193ab363a9f930c195bceb00e762246f519c72beb1ff8b",
+      "pass_count": 9
+    },
+    {
+      "check": "connect-repro",
+      "log": "/tmp/fm-runtime-rebase-connect-repro.log",
+      "sha256": "5ea7aff09ccb83cda64b12f7d1ca38e4fa07d10ecd0fea28061cc38882f95e91",
+      "pass_count": 4
+    },
+    {
+      "check": "managed-drag-final",
+      "log": "/tmp/fm-runtime-rebase-managed-drag-final.log",
+      "sha256": "73252db8201276fd3b348d9e6b291477788f87223e60a4947bd65db56101cc4e",
+      "pass_count": 24
+    }
+  ],
+  "binaries": {
+    "target/debug/flowmux": "272fe36f2681c65af8f8a19f7a235c526a6eb488e1715a8c7c9cf80aa78a41d1",
+    "target/debug/flowmuxctl": "3026ad0c6dd2e8fce7fcccd1a9ba97ee98a875109c772bf6691728dc16468ba5",
+    "target/debug/flowmux-daemon": "bf71947f903864541933fda0c041f3d6f2e009da1b2b2309429783ef42f2b9ee"
+  },
+  "user_gui_pid": 1663486,
+  "unresolved": [
+    "AR-006",
+    "AR-008",
+    "AR-010",
+    "AR-068",
+    "AR-071",
+    "AR-073"
+  ],
+  "complete": false
+}

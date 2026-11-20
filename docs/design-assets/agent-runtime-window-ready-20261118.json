@@ -1,0 +1,140 @@
+{
+  "date_kst": "2026-11-18",
+  "item": "AR-099",
+  "status": "fixed-test-harness-readiness",
+  "product_source_unchanged_since_ci": "0e17ae6517e735d7a14e6c3c808fc1eb65812300",
+  "base_commit": "e1d500cb189b90d0d8ff1a643e0c3edb19686368",
+  "origin_main": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "before": {
+    "new_unit_regressions_failed": 2,
+    "live_scope": "IPC ping returned before any process-owned X11 windows existed. close_request recorded windows=[]; no WM_DELETE_WINDOW was sent. The deliberate diagnostic-write test preserved the timeout but its expected natural exit failed because no close request was sent. Cleanup terminated only the isolated GUI. This is not evidence of the original SSH failure cause."
+  },
+  "after": {
+    "harness_unit_passed": 12,
+    "harness_unit_failed": 0,
+    "live_diagnostic_failure_exit": 0,
+    "live_diagnostic_failure_scope": "After waiting for the real visible X11 window, WM_DELETE_WINDOW targeted this GUI. A held private state.lock delayed final save for 20 seconds; an intentionally invalid diagnostic file destination generated EISDIR. The original TimeoutExpired propagated. Releasing state.lock allowed normal save and process exit.",
+    "busy_close_exit": 0,
+    "busy_close_seconds": 0.628117,
+    "busy_close_scope": "Two isolated GUIs share state; one terminal writes continuously. Both close normally.",
+    "ssh_phase": {
+      "phase": "ssh-workspace",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "python3",
+        "scripts/ssh-workspace-fixture.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+      ],
+      "timeout_seconds": 600.0,
+      "status": "passed",
+      "pid": 1451893,
+      "exit_code": 0,
+      "elapsed_seconds": 251.359
+    },
+    "ssh_scope": "Full isolated SSH phase after the final readiness change: workspace lifecycle, native hooks, program status, remote review, encrypted keyring restart/form restoration and feedback Send. No retries inside this invocation. It does not replace the failed full gate.",
+    "ssh_main_gui_close_requests_with_targets": 3
+  },
+  "limits": [
+    "The original full Linux gate remains failed (52/53 phases), with AR-098 unresolved.",
+    "The final SSH follow-up is recorded separately; it is not a full gate pass.",
+    "Product Rust source and active user GUI PID 1663486 were not replaced or restarted.",
+    "No push or new CI dispatch after the failed local full gate."
+  ],
+  "evidence": [
+    {
+      "path": "/tmp/fm-ar099-before.log",
+      "bytes": 1303,
+      "sha256": "770ef07b85d2f7fe50085e34cc315cc515a739da6ebc24a33c426957cf13e9b7"
+    },
+    {
+      "path": "/tmp/fm-ar099-after.log",
+      "bytes": 399,
+      "sha256": "b1bcf34aea8061c3f325981c694ec89a3da36f68a569175db2591bc6c078a4a0"
+    },
+    {
+      "path": "/tmp/fm-ar098-diagnostic-write-live.log",
+      "bytes": 746,
+      "sha256": "878f40126cab0e16e233f889548409b0788b555ad59791338a769923ca39a810"
+    },
+    {
+      "path": "/tmp/fm-gui-ljrz_0my/events.jsonl",
+      "bytes": 879,
+      "sha256": "b7de5eebc2d6802880f245f827497c3dade3e9ae8ffa368fdba52c62e0669780"
+    },
+    {
+      "path": "/tmp/fm-ar099-ready-close-write-live.log",
+      "bytes": 246,
+      "sha256": "b453e9e14a1de9f88493650e18cf00663ad3f7f677452e6f3789f27a66bd7e4d"
+    },
+    {
+      "path": "/tmp/fm-gui-dj4rz0s5/events.jsonl",
+      "bytes": 891,
+      "sha256": "84be284aac0521b8b1131994e10b7cb56218bc4be5506743dda2b54ac2545cd9"
+    },
+    {
+      "path": "/tmp/fm-gui-dj4rz0s5/diagnostic-write-failure.log",
+      "bytes": 1510,
+      "sha256": "fa49783c9b5369c359faf5e03193571b57fa9a56e76f422835e68f227de142b2"
+    },
+    {
+      "path": "/tmp/fm-ar099-ready-busy-close.log",
+      "bytes": 71,
+      "sha256": "ec96d93fa59f9e9cd5f2e462804cfd4ec0dcb070a2bddcfb4c3cbd2d75e4f232"
+    },
+    {
+      "path": "/tmp/fm-gui-s5hj3msk/events.jsonl",
+      "bytes": 3598,
+      "sha256": "4a967e4cdb7c33611706986f8a59649b223f600e28785bdb8a7318fceecde0dd"
+    },
+    {
+      "path": "/tmp/fm-ar098-diagnostic-write-live.py",
+      "bytes": 1446,
+      "sha256": "583bd87ebf9ff5521986a7e860530c4630851c605548f50fcd16c36490db3745"
+    },
+    {
+      "path": "/tmp/fm-ar098-busy-close.py",
+      "bytes": 1079,
+      "sha256": "74b841c8c2748291424aa9b6607d2a42940faaa8e3701a87da0fe0c0e1ef9371"
+    },
+    {
+      "path": "scripts/test-gui-harness.py",
+      "bytes": 12498,
+      "sha256": "37064c597878e82431575850047e46977a9c9d77c56e5cd75497923d78bf3f5c"
+    },
+    {
+      "path": "scripts/test-ssh-workspace-gui.py",
+      "bytes": 35314,
+      "sha256": "a5c3da3648dc3dea98b3c2162371c064579bf08c83d5c76e588013b6ed8a63fd"
+    },
+    {
+      "path": "/tmp/fm-ar099-ssh/run.log",
+      "bytes": 6276,
+      "sha256": "ec48ae287e3a815491a52ecf4f74c7280f70b9647076355e93a88eaab602cbda"
+    },
+    {
+      "path": "/tmp/fm-ar099-ssh/ssh-workspace.json",
+      "bytes": 503,
+      "sha256": "72b438e1b839d700fa0f4ec9bd317e5f22be91fb28c1538c655b4b5624d34ffb"
+    },
+    {
+      "path": "/tmp/fm-ar099-ssh/tmp/fm-gui-w31ldm1t/events.jsonl",
+      "bytes": 797683,
+      "sha256": "a17b8abcb8ce2ef82ae0eb3775f6e0928074e9680c54289e402b2390e844b805"
+    },
+    {
+      "path": "/tmp/fm-ar099-ssh/tmp/fm-gui-w31ldm1t/window-a-restored.log",
+      "bytes": 522696,
+      "sha256": "977dbc451e749391b08caac1357d8d635269501eee6d114d3314ed2b08ace609"
+    }
+  ]
+}

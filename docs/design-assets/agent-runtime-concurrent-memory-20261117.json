@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "Linux isolated systemd Agent Host and GTK/VTE; PTY fixtures",
+  "source_parent_commit": "ca21b0972ad79eeff723fd989fda08776a363105",
+  "command": [
+    "python3",
+    "scripts/test-agent-host-gui.py",
+    "--service-start",
+    "--protected-pid",
+    "1663486"
+  ],
+  "exit_code": 0,
+  "checks_passed": 33,
+  "artifacts": "/tmp/fm-gui-o8fgkouw",
+  "host_memory_kib": {
+    "before_rss": 30520,
+    "retained_rss": 815296,
+    "peak_rss": 815296,
+    "budget": 3145728
+  },
+  "pressure": {
+    "executions": 7,
+    "concurrent_heavy_executions": 6,
+    "terminal_rows": 100,
+    "terminal_cols": 400,
+    "combining_marks_per_cell": 32,
+    "alternate_rows_written": 100,
+    "primary_rows_written": 400,
+    "saved_titles_per_heavy_execution": 4096,
+    "retained_snapshot_transfers": 6,
+    "output_drained_barrier": "Host DSR reply read by each provider before ready marker"
+  },
+  "assertions": [
+    "eighth execution refused before provider startup",
+    "same original execution accepts fresh GUI input",
+    "all six slow transfers can continue from their first chunk",
+    "natural pressure exits release reservations",
+    "released reservation admits another launch",
+    "GUI disconnect and crash retain same execution",
+    "natural exit retires empty Host"
+  ],
+  "tracked_fixture_pids": [
+    94930,
+    94934,
+    94935,
+    95229,
+    95230,
+    95235,
+    95236,
+    95237,
+    95238,
+    95902,
+    96091,
+    96259,
+    96442,
+    96625,
+    96822
+  ],
+  "all_tracked_pids_gone": true,
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "/tmp/fm-runtime-concurrent-memory-live.log": "fcaa806bef1ba5704f87ff81f67b53c56d098c609bb501fab9962fa01a5bc3fd",
+    "/tmp/fm-gui-o8fgkouw/events.jsonl": "3aa50c733071c74905367b5d2d49d57ca9382610c0869153e0ce8cff90ad4532",
+    "target/debug/flowmux": "2b1cab625cfaa6cf3c83851d2a1bd6fe942a08faca272097487f56c980385a50",
+    "target/debug/flowmux-daemon": "50a43f3a8626f1b9654bcf995049affff697efabe9e57d1777924f7f7fc1e816",
+    "target/debug/flowmuxctl": "b24d802f88d5699aaa5bb7a6303b8bfaee50f96b0976c1ab6b02cbec71f3e279"
+  },
+  "limits": [
+    "not a proof of every allocation or maximum IPC/process-metadata overlap",
+    "not actual provider/model work, macOS or Flatpak verification",
+    "not an OS-enforced RSS cap",
+    "running fixture read source before cleanup-only release/abort ordering adjustment; final source parsed and reviewed"
+  ]
+}

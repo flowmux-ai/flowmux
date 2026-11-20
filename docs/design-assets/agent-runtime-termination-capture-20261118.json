@@ -1,0 +1,62 @@
+{
+  "action_item": "AR-073",
+  "status": "diagnostics validated; original failure remains open",
+  "product_binary_baseline": {
+    "head": "8645f7ef64f1f41f6dc40e688563a21a2a66eb53",
+    "binaries": {
+      "flowmux": "1e6c7db31d79b5b689591315f4504c0064ed15f781d4b92881d04775bdd66bb7",
+      "flowmuxctl": "56e2041ec07cba8a7b39e616ac013abd369d50bf57fa73b6371b4b914204284e",
+      "flowmux-daemon": "7bdd1dc5e3fc0853cc8a420db7ab15ba1f0e895b087e94134cab8a160f4177a7"
+    }
+  },
+  "command": [
+    "python3",
+    "-u",
+    "/tmp/fm-termination-capture-check-20261118.py",
+    "--termination",
+    "--protected-pid",
+    "1663486"
+  ],
+  "exit_code": 1,
+  "expected_error": "injected confirmation capture check",
+  "capture_errors": [],
+  "captured_nodes": 180,
+  "captured_host_states": [
+    "running"
+  ],
+  "visible_confirmation": true,
+  "checks": [
+    "Injected failure only after confirmation button became visible; original error propagated with exit 1.",
+    "Fresh read-only Host connection captured running execution before cleanup.",
+    "Captured accessible confirmation controls, geometry, focus, pressed keys, workspace tree and 1600x1000 screenshot.",
+    "Screenshot visually inspected; fixture cleanup completed without a cleanup error.",
+    "Managed Session Flow success path passed in the ongoing full Linux gate with this diagnostics-only harness change."
+  ],
+  "files": [
+    {
+      "path": "scripts/test-agent-session-resume-gui.py",
+      "sha256": "b8a90a96e2fc5c8a32f83d90c089861582217c91f30984423603209b0c633ff6"
+    },
+    {
+      "path": "/tmp/fm-termination-capture-check-20261118.py",
+      "sha256": "80dfba89ee9512981cf5d218bda1c1989570c4d1740e3c7be70d5a864bc549ab"
+    },
+    {
+      "path": "/tmp/fm-termination-capture-check2-20261118.log",
+      "sha256": "030c596aa268395cf330e5590ea0267b67580c00cf29a42e66b2b261b68fedbb"
+    },
+    {
+      "path": "/tmp/fm-gui-foawjh2g/session-resume-failure.json",
+      "sha256": "a249513ccea1c48f89f11d074e4aca7807344599faf05793670a502b4ba79449"
+    },
+    {
+      "path": "/tmp/fm-gui-foawjh2g/session-resume-failure.png",
+      "sha256": "6c389135d1ed899815d8e7325c900ce9ae527eac5c03f105ba3aa31d0945a1d1"
+    }
+  ],
+  "limits": [
+    "This is a deliberate diagnostic-path test, not reproduction or correction of the original CI failure.",
+    "Full gate product binaries remain frozen at the recorded baseline. This exception-only diagnostic was added before managed-session-flow and termination phases began.",
+    "AR-073 stays medium and open."
+  ]
+}

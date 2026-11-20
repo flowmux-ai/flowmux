@@ -1,0 +1,36 @@
+{
+  "date_kst": "2026-11-18",
+  "source_head": "5430836a9b9a88d5e24b2a3f7804ce8389317817",
+  "scope": "Nonblocking Agent-view state admission, commit and cancellation. Final-source full Linux gate will be recorded separately.",
+  "before": {
+    "unit": "prepare blocks behind a held state lock, failing the bounded regression",
+    "live": "abort_attach times out with an externally held state.lock; original lease GUI is isolated"
+  },
+  "after": {
+    "unit": "102 library tests and cross-process/integration/doc tests pass; failed try acquisition preserves original owner exclusivity",
+    "live": "34 checks pass in 123.272 seconds, including abort_attach and fresh Hangul GUI input while state.lock remains held; this live run predates AR-092 explicit unlock"
+  },
+  "logs": [
+    {
+      "path": "/tmp/fm-state-contention-before-20261118.log",
+      "sha256": "81d16104f47fb175548f4c1a62400d521b6ef77a495f7b83b886fab1746810f7"
+    },
+    {
+      "path": "/tmp/fm-host-lock-before-20261118.log",
+      "sha256": "aa6e0c8d6774f1bf1784e8b430ca5663c5fa155bcaaaa03cb08a91785e07a589"
+    },
+    {
+      "path": "/tmp/fm-host-lock-after-20261118.log",
+      "sha256": "1dfc2fbe778f42092c4316e85ef51d0ca7472a36e8af4ccac8a355cfd624249a"
+    },
+    {
+      "path": "/tmp/fm-state-final-20261118.log",
+      "sha256": "f1ee4fb723447e135509ec631f1d1697842bd66d366507a700919309e2e145da"
+    }
+  ],
+  "limits": [
+    "Contention rejects admission immediately; ordinary state-save blocking behavior is unchanged.",
+    "Cancellation cleanup may leave a generation-fenced checkpoint; a later prepare replaces it.",
+    "AR-073 and AR-088 historical CI causes remain unconfirmed."
+  ]
+}
