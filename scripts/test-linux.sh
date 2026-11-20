@@ -22,6 +22,8 @@ rm -f -- "$(dirname "$test_log")/tests/"*.json
 : > "$test_log"
 
 # Each suite owns and reaps its detached GUI/PTY children before the next starts.
+# A failed suite does not stop the ones after it: one run reports every failure.
+failed="" first_failure=0
 run_test() {
     [[ $group == all || $group == "$section" ]] || return 0
     local name=$1 started=$SECONDS status=0
@@ -33,7 +35,12 @@ run_test() {
         "$name" "$elapsed" "$status"
     printf '{"test":"%s","elapsed_seconds":%d,"exit_code":%d}\n' \
         "$name" "$elapsed" "$status" >> "$test_log"
-    return "$status"
+    if (( status )); then
+        failed+=" $name"
+        (( first_failure )) || first_failure=$status
+        # Nothing after a failed build or prerequisite can be judged.
+        case $name in build|prebuilt|ssh-prerequisites) exit "$status" ;; esac
+    fi
 }
 
 section=workspace
@@ -243,3 +250,7 @@ section=terminal
 run_test ssh-workspace python3 scripts/ssh-workspace-fixture.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl"
+if [[ -n $failed ]]; then
+    echo "CI_TESTS_FAILED=${failed# }"
+    exit "$first_failure"
+fi

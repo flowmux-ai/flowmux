@@ -654,11 +654,12 @@ time.sleep(60)
         self.assertIn('"test":"build"', result.stdout)
         self.assertIn('"exit_code":29}', result.stdout)
 
-    def test_linux_workspace_failure_stops_before_gui(self):
+    def test_linux_workspace_failure_does_not_hide_gui_suites(self):
         result, calls = self.run_script('test-linux.sh', WORKSPACE_TEST_EXIT='23')
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(sum(c['name'] == 'cargo' and c['args'][0] == 'build' for c in calls), 1)
-        self.assertFalse(any('scripts/test-browser-control.py' in c['args'] for c in calls))
+        self.assertTrue(any('scripts/test-browser-control.py' in c['args'] for c in calls))
+        self.assertIn('CI_TESTS_FAILED=workspace\n', result.stdout)
         self.assertIn('"test":"workspace"', result.stdout)
         self.assertIn('"exit_code":23}', result.stdout)
 
@@ -792,12 +793,14 @@ time.sleep(60)
                                      for c in calls), group == 'app')
         self.assertEqual(split, everything, 'each macOS phase belongs to exactly one group')
 
-    def test_linux_gui_failure_stops_the_suite(self):
+    def test_linux_gui_failure_does_not_hide_later_suites(self):
         result, calls = self.run_script('test-linux.sh',
                                        LINUX_GUI_FAIL='scripts/test-session-flow-gui.py')
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertFalse(any('scripts/ssh-workspace-fixture.py' in c['args'] and
-                             '--check' not in c['args'] for c in calls))
+        self.assertTrue(any('scripts/ssh-workspace-fixture.py' in c['args'] and
+                            '--check' not in c['args'] for c in calls))
+        # Both suites that run this script fail, and both are named.
+        self.assertIn('CI_TESTS_FAILED=session-flow session-flow-tab-fallback\n', result.stdout)
         self.assertIn('"test":"session-flow"', result.stdout)
         self.assertIn('"exit_code":23}', result.stdout)
 
