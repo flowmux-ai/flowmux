@@ -66,22 +66,29 @@ def main():
 
         h.rpc(socket, "surface_create", workspace=workspace, cwd=str(h.root))
         gui.wait_for(lambda: len(hosted()) == 2, "second hosted terminal")
+        # The new tab stays a plain terminal and reports its shell.
+        second = next(tab["id"] for tab in h.workspace(socket, workspace)["panes"][0]["tabs"] if tab["id"] != first)
+        h.send(socket, pane, "echo $$ > plain.pid", tab=second)
+        plain = h.root / "plain.pid"
+        gui.wait_for(lambda: plain.exists() and plain.read_text().strip(), "plain terminal's shell")
+        plain_pid = int(plain.read_text())
         fake = h.root / "claude"
         fake.write_text("import os, time\nprint('FAKE_AGENT', os.getpid(), flush=True)\nn = 0\n"
                         "while True:\n    n += 1\n    open('ticks', 'w').write(str(n))\n    time.sleep(.2)\n")
         h.rpc(socket, "surface_focus", pane=pane, surface=first)
-        h.send(socket, pane, f"cd {h.root} && python3 ./claude")
+        h.send(socket, pane, f"cd {h.root} && python3 ./claude", tab=first)
         ticks = h.root / "ticks"
         gui.wait_for(ticks.exists, "agent started in the terminal")
         kept = gui.wait_for(lambda: next((a for a in agents() if a.get("presence")), None),
                             "the Host finds the agent by its process")
         h.close_window(process)
-        time.sleep(14)
+        # The Host ends a shell nobody views ten seconds after its window, unless an agent runs in it.
+        gui.wait_for(lambda: not Path(f"/proc/{plain_pid}").exists(),
+                     "the plain terminal ends with its window", timeout=40)
         listed = agents()
         assert [a["instance"] for a in listed] == [kept["instance"]] and listed[0]["state"] == "running", listed
         before = int(ticks.read_text() or 0)
-        time.sleep(1)
-        assert int(ticks.read_text() or 0) > before, "the agent keeps working without a window"
+        gui.wait_for(lambda: int(ticks.read_text() or 0) > before, "the agent keeps working without a window")
         h.pass_check("closing the window ends the plain terminal and leaves the agent's terminal working")
 
         process, socket = h.window("reopened")
