@@ -7,6 +7,7 @@ import json
 import os
 import re
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -135,6 +136,98 @@ def exercise(h):
         h.send(socket, detached_pane["id"], "printf 'AFTER_%s\\n' TEAROFF")
         fixture.wait_for(lambda: "AFTER_TEAROFF" in h.screen(socket, detached_pane["id"]), "same shell after tear-off")
         h.pass_check("native tear-off retains the surface ID and running shell")
+        if h.args.managed:
+            host_spec = importlib.util.spec_from_file_location(
+                "host_fixture", Path(__file__).with_name("test-agent-host-gui.py"))
+            host_fixture = importlib.util.module_from_spec(host_spec)
+            host_spec.loader.exec_module(host_fixture)
+            host_socket = h.root / "run/flowmux-agent-host.sock"
+            with (h.root / "host.log").open("w") as log:
+                h.spawn([h.args.host, "--agent-host", "--socket", str(host_socket)], stdout=log, stderr=log)
+            fixture.wait_for(host_socket.exists, "private Host")
+            control = host_fixture.HostClient(host_socket, "relay")
+            try:
+                launched = subprocess.run(
+                    [h.args.cli, "--socket", str(socket), "--json", "agent", "run",
+                     "--pane", detached_pane["id"], "--cwd", str(h.root), "--", "/bin/sh", "-c",
+                     "printf 'MANAGED_DETACHED_READY\\n'; read answer"],
+                    env=h.env, text=True, capture_output=True, timeout=30)
+                assert launched.returncode == 0, (launched.stdout, launched.stderr)
+                result = json.loads(launched.stdout)
+                agent = result["agent"]
+                managed_surface = result["view"]["surface_created"]["id"]
+
+                def host_agent():
+                    return next(item for item in control.call("list")["agents"]
+                                if item["instance"] == agent["instance"])
+
+                def agent_rows():
+                    app = application()
+                    return [node for node in walk(app)
+                            if node.get_role() == Atspi.Role.PUSH_BUTTON
+                            and "Open the same running agent" in (node.get_description() or "")
+                            and node.get_state_set().contains(Atspi.StateType.SHOWING)] if app else []
+
+                fixture.wait_for(lambda: len(agent_rows()) == 2, "managed row in both window sidebars")
+                fixture.wait_for(lambda: (host_agent().get("view") or {}).get("visible"),
+                                 "managed tab in detached window is Visible")
+                h.rpc(socket, "surface_focus", pane=detached_pane["id"], surface=surface)
+                fixture.wait_for(lambda: (view := host_agent().get("view")) and not view["visible"],
+                                 "inactive detached tab is Open")
+                h.rpc(socket, "surface_focus", pane=detached_pane["id"], surface=managed_surface)
+                fixture.wait_for(lambda: (host_agent().get("view") or {}).get("visible"),
+                                 "reactivated detached tab is Visible")
+                assert host_agent()["pid"] == agent["pid"], "tab selection must keep the execution"
+                h.log("managed-detached-view", agent=host_agent(), rows=len(agent_rows()))
+                h.pass_check("both window sidebars list the same Agent and detached tab visibility follows selection")
+
+                def frame(node):
+                    while (parent := node.get_parent()) and parent.get_role() != Atspi.Role.APPLICATION:
+                        node = parent
+                    return node
+
+                def shown(root, role, name):
+                    return next((node for node in walk(root) if node.get_role() == role
+                                 and node.get_name() == name
+                                 and node.get_state_set().contains(Atspi.StateType.SHOWING)), None)
+
+                owner = next(frame(node) for node in agent_rows()
+                             if frame(node).get_name() == detached.get_wm_name())
+                stop = fixture.wait_for(lambda: shown(owner, Atspi.Role.PUSH_BUTTON, "Terminate agent"),
+                                        "detached Agent stop button")
+                assert stop.get_state_set().contains(Atspi.StateType.SENSITIVE)
+                assert host_agent()["state"] == "running" and host_agent()["pid"] == agent["pid"]
+                h.pass_check("the detached window's Agents row offers the stop button for the same running execution")
+                h.rpc(socket, "surface_focus", pane=detached_pane["id"], surface=surface)
+                main.set_input_focus(X.RevertToParent, X.CurrentTime)
+                connection.sync()
+                handle = next(node for node in agent_rows()
+                              if frame(node).get_name() == main.get_wm_name())
+                button = next(node for node in walk(handle.get_parent())
+                              if node.get_role() == Atspi.Role.PUSH_BUTTON)
+                assert button.get_action_iface().do_action(0)
+                # Bare Xvfb has no window manager to accept activation/focus requests.
+                fixture.wait_for(lambda: (host_agent().get("view") or {}).get("visible")
+                                 and windows()[-1].id == detached.id,
+                                 "Agent row raises the detached window and its live tab")
+                assert host_agent()["pid"] == agent["pid"]
+                h.log("managed-detached-presentation", expected=detached.id,
+                      topmost=windows()[-1].id, input_focus=connection.get_input_focus().focus.id)
+                h.pass_check("Agent row opens the existing detached tab and raises its window above the main window")
+            finally:
+                control.close()
+                control = host_fixture.HostClient(host_socket, "relay")
+                try:
+                    remaining = control.call("list")["agents"]
+                    for item in remaining:
+                        assert item["cwd"] == str(h.root), item
+                        control.call("terminate", instance=item["instance"], epoch=item["epoch"], mode="terminate")
+                    if remaining:
+                        fixture.wait_for(lambda: not host_socket.exists(), "private Host reaps its execution", timeout=10)
+                finally:
+                    control.close()
+            h.rpc(socket, "surface_close", pane=detached_pane["id"], surface=managed_surface)
+            h.rpc(socket, "surface_focus", pane=detached_pane["id"], surface=surface)
         buttons = [node for node in walk(application()) if node.get_role() == Atspi.Role.PUSH_BUTTON
                    and node.get_state_set().contains(Atspi.StateType.SHOWING)
                    and node.get_name() in ("DRAG_ME", h.root.name)]
@@ -313,11 +406,22 @@ def exercise(h):
         click(main, "New workspace")
         target = fixture.wait_for(lambda: next((ws for ws in h.tree(socket) if ws["id"] not in prior), None), "main workspace created")
         h.send(socket, target["panes"][0]["id"], "printf '\\033]2;ROW_TARGET\\007'")
-        row = fixture.wait_for(lambda: next((node for node in walk(application()) if node.get_name() == "ROW_TARGET"
-                                            and node.get_role() == Atspi.Role.LABEL
-                                            and node.get_state_set().contains(Atspi.StateType.SHOWING)), None), "new workspace row")
-        bounds = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        destination = connection.screen().root.translate_coords(main, bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
+        def row_point():
+            # A workspace and its active pane tab can have the same label.
+            for node in walk(application()):
+                if (node.get_name() != "ROW_TARGET" or node.get_role() != Atspi.Role.LABEL
+                        or not node.get_state_set().contains(Atspi.StateType.SHOWING)):
+                    continue
+                parent = node.get_parent()
+                while parent and parent.get_role() not in (Atspi.Role.LIST_ITEM, Atspi.Role.APPLICATION):
+                    parent = parent.get_parent()
+                if parent and parent.get_role() == Atspi.Role.LIST_ITEM:
+                    bounds = parent.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                    return connection.screen().root.translate_coords(
+                        main, bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
+            return None
+
+        destination = fixture.wait_for(row_point, "new workspace row")
         h.rpc(socket, "workspace_focus", workspace=detached_ws["id"])
         detached.configure(width=1100)
         connection.sync()
@@ -330,12 +434,15 @@ def exercise(h):
         h.send(socket, visible["panes"][0]["id"], "printf '\\033]2;KEEP_VISIBLE\\007'")
         fixture.wait_for(lambda: "KEEP_VISIBLE" in (main.get_wm_name() or ""), "main workspace visible")
         h.rpc(socket, "workspace_focus", workspace=detached_ws["id"])
+        destination = fixture.wait_for(row_point, "workspace row after creation")
+        h.log("workspace-row-target", x=destination.x, y=destination.y)
         drag(detached, "RENAMED_TAB", destination.x, destination.y, cancel=True)
         time.sleep(.5)
         assert location()[0]["id"] == detached_ws["id"]
         assert "KEEP_VISIBLE" in (main.get_wm_name() or ""), "hover must not change the visible workspace"
         assert len(windows()) == count_before
         h.pass_check("workspace-row hover followed by Escape preserves focus and source")
+        destination = fixture.wait_for(row_point, "workspace row after cancel")
         drag(detached, "RENAMED_TAB", destination.x, destination.y)
         fixture.wait_for(lambda: location()[0]["id"] == target["id"], "drop reaches explicitly named new workspace")
         assert len(windows()) == count_before, "workspace-row drop must not open another window"
@@ -417,9 +524,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gui", default="target/debug/flowmux")
     parser.add_argument("--cli", default="target/debug/flowmuxctl")
+    parser.add_argument("--host", default="target/debug/flowmux-daemon")
+    parser.add_argument("--managed", action="store_true", help="also verify Agents in detached windows")
     parser.add_argument("--protected-pid", type=int, action="append", default=[])
     args = parser.parse_args()
-    for name in ("gui", "cli"):
+    for name in ["gui", "cli"] + (["host"] if args.managed else []):
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     h = fixture.Harness(args)
     try:
