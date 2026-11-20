@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use flowmux_cli::{agent, doctor, hook_install};
+mod agent_relay;
+mod agent_run;
 mod batch;
 mod cmd_hooks;
 mod cmd_ops;
@@ -95,13 +97,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Internal: attach a terminal view to the same live Host process.
+    #[command(hide = true)]
+    AgentRelay(agent_relay::AgentRelayArgs),
     /// Daemon health probe.
     Ping,
 
     /// Print the calling agent's flowmux context (pane, surface,
-    /// workspace, socket) resolved from the `FLOWMUX_*` env vars that
-    /// flowmux injects into every PTY. One command for an agent to
-    /// discover where it is running.
+    /// workspace, socket). Managed executions query the Host for their current
+    /// verified view; ordinary terminals use the injected `FLOWMUX_*` variables.
     Identify {
         /// Resolve the exact live Codex session instead of inherited pane variables.
         #[arg(long, conflicts_with = "agent")]
@@ -150,6 +154,8 @@ enum Cmd {
     ///
     /// When `--pane` is omitted, the CLI reads `FLOWMUX_PANE_ID` from the
     /// calling PTY so notification clicks can return to that pane.
+    /// Managed Agents send to their execution instead, including without a
+    /// tab or GUI; omit `--pane` in that case.
     Notify {
         #[arg(long)]
         pane: Option<PaneId>,
@@ -166,6 +172,7 @@ enum Cmd {
     /// "Claude is ready" without the caller having to spell every flag.
     /// Like `Notify`, falls back to `FLOWMUX_PANE_ID` when `--pane` is
     /// omitted, so it works as a one-liner from a hook script.
+    /// Managed Agents target their execution; this does not change turn state.
     NotifyComplete {
         /// Agent name. Used as the title prefix and exposed to the
         /// router as a category, e.g. "Claude", "Codex", "OpenCode".
@@ -449,9 +456,7 @@ enum Cmd {
         op: ThemeOp,
     },
 
-    /// Make the flowmux-browser SKILL discoverable to local agents
-    /// (Claude Code, OpenCode, Codex CLI, Cline, Antigravity). Run after every `flowmux`
-    /// install / upgrade to re-sync the on-disk skill files.
+    /// Open managed Agent executions or install and inspect local agent skills.
     Agent {
         #[command(subcommand)]
         op: AgentOp,
@@ -945,6 +950,34 @@ enum MediaAction {
 
 #[derive(Subcommand)]
 enum AgentOp {
+    /// Start an agent in the background Host and open its live view.
+    Run(agent_run::AgentRunArgs),
+    /// List Host executions, including agents without an open tab.
+    Ls,
+    /// Send Ctrl+C to an existing execution; the provider may interrupt work or exit.
+    Interrupt {
+        instance: flowmux_core::AgentInstanceId,
+    },
+    /// Stop an existing execution and its owned children. Work in progress may be lost.
+    Terminate {
+        instance: flowmux_core::AgentInstanceId,
+        /// Force only after a normal termination request has timed out (5 seconds).
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop every execution of the running Agent Host, including a Host started by
+    /// another Flowmux version that this version cannot manage. Work in progress may be lost.
+    StopHost {
+        /// Force only after a normal stop request has timed out (5 seconds).
+        #[arg(long)]
+        force: bool,
+    },
+    /// Open an existing Host execution in a pane, preserving its process.
+    Open {
+        instance: flowmux_core::AgentInstanceId,
+        #[arg(long)]
+        pane: Option<PaneId>,
+    },
     /// Mirror the embedded SKILL.md into each supported agent's
     /// user-level location. Idempotent: a no-op when the file is
     /// already up to date. Fails on existing-but-different files
@@ -1346,6 +1379,50 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     // Local-only commands — handled before the daemon connect so they
     // work without a running flowmux GUI.
     match &cmd {
+        Cmd::AgentRelay(agent_relay::AgentRelayArgs {
+            instance,
+            epoch,
+            shell,
+            argv,
+            require_gui,
+            replace_lease,
+            replace_generation,
+            ready_token,
+            colors,
+        }) => {
+            let socket = cli.socket.clone().unwrap_or_else(paths::agent_host_socket);
+            let binding = (*instance).zip(*epoch);
+            if *shell {
+                return agent_relay::run_shell(
+                    &socket,
+                    binding,
+                    *ready_token,
+                    colors.as_deref(),
+                    argv.clone(),
+                )
+                .await;
+            }
+            let (instance, epoch) = binding.context("agent instance and epoch are required")?;
+            return agent_relay::run(
+                &socket,
+                instance,
+                epoch,
+                *require_gui,
+                (*replace_lease)
+                    .zip(*replace_generation)
+                    .map(
+                        |(lease, generation)| flowmux_ipc::agent_host::AttachmentKey {
+                            instance,
+                            epoch,
+                            lease,
+                            generation,
+                        },
+                    ),
+                *ready_token,
+                colors.as_deref(),
+            )
+            .await;
+        }
         Cmd::Theme { op } => return run_theme_op(op),
         Cmd::ListBrowsers => {
             for s in flowmux_cookies::discover_sources() {
@@ -1354,6 +1431,40 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             }
             return Ok(());
         }
+        Cmd::Agent {
+            op: AgentOp::Run(args),
+        } => return agent_run::run(args, cli.socket.clone(), cli.json).await,
+        Cmd::Agent { op: AgentOp::Ls } => return agent_run::list(cli.json).await,
+        Cmd::Agent {
+            op: AgentOp::Interrupt { instance },
+        } => {
+            return agent_run::control(
+                *instance,
+                flowmux_ipc::agent_host::TerminateMode::Interrupt,
+                cli.json,
+            )
+            .await;
+        }
+        Cmd::Agent {
+            op: AgentOp::StopHost { force },
+        } => return agent_run::stop_host(*force).await,
+        Cmd::Agent {
+            op: AgentOp::Terminate { instance, force },
+        } => {
+            return agent_run::control(
+                *instance,
+                if *force {
+                    flowmux_ipc::agent_host::TerminateMode::Force
+                } else {
+                    flowmux_ipc::agent_host::TerminateMode::Terminate
+                },
+                cli.json,
+            )
+            .await;
+        }
+        Cmd::Agent {
+            op: AgentOp::Open { .. },
+        } => {}
         Cmd::Agent { op } => return run_agent_op(op, cli.json),
         // Plain identity/capability probes work offline. Session identity
         // resolves a live binding instead of the shared server environment.
@@ -1381,6 +1492,17 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     }
 
     let json_mode = cli.json;
+    // Managed process ancestry is authoritative; inherited native session variables can be stale.
+    let notification_client =
+        cmd_ops::managed_notification_client(&cmd, cli.socket.clone()).await?;
+    let managed = if notification_client.is_none() {
+        cmd_ops::managed_context(None, cli.socket.clone()).await?
+    } else {
+        None
+    };
+    let managed_location = managed
+        .as_ref()
+        .map(|context| context.report.location.clone());
     let socket = cli
         .socket
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
@@ -1394,7 +1516,11 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             .ok(),
         _ => None,
     };
-    let client = if let Some(session) = session {
+    let client = if let Some(client) = notification_client {
+        client
+    } else if let Some(managed) = managed {
+        managed.client
+    } else if let Some(session) = session {
         // Shared Codex daemons can retain a different pane's environment.
         let (client, source, _, _) = hooks::resolve_codex_source(&session, Some(socket))
             .await?
@@ -1424,7 +1550,7 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     }
 
     if matches!(cmd, Cmd::SessionName) {
-        return run_session_name(&client).await;
+        return run_session_name(&client, managed_location.as_ref()).await;
     }
 
     if let Cmd::Agents { explain, surface } = cmd {
@@ -1505,7 +1631,11 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
             std::io::stdin().read_to_string(script)?;
         }
     }
-    let mut req = build_request(cmd)?;
+    let mut req = if let Some(location) = &managed_location {
+        request::build_request_with_context(cmd, Some(location))?
+    } else {
+        build_request(cmd)?
+    };
     if let Request::SurfaceCreate {
         workspace,
         cwd: Some(cwd),

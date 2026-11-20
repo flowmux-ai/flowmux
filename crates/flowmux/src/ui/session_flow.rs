@@ -183,6 +183,12 @@ impl FlowPanel {
         area.set_hexpand(true);
         area.set_vexpand(true);
         area.set_focusable(true);
+        area.update_property(&[
+            gtk::accessible::Property::Label("Session Flow graph"),
+            gtk::accessible::Property::Description(
+                "Session Flow graph. Arrow keys select a session; Enter opens it.",
+            ),
+        ]);
         area.set_content_height(140);
         area.set_tooltip_text(Some("Scroll to zoom · drag a node to move it · drag space to pan · Space or middle-drag to pan over nodes · arrows to select · Enter to open"));
         let canvas = gtk::Overlay::new();

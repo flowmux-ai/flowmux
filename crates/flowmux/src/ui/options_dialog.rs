@@ -115,6 +115,7 @@ fn build_dialog(
     let persist_check = build_persist_check(current.persist_browser_session);
     persist_check.set_tooltip_text(Some("Persist cookies, sign-ins, and site data"));
     let auto_resume_check = build_persist_check(current.auto_resume_agent_sessions);
+    let agent_idle_timeout = build_agent_idle_timeout_spin(current.agent_idle_timeout_minutes);
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
     let wheel_scroll_spin = build_wheel_scroll_spin(current.terminal_wheel_scroll_multiplier);
@@ -160,6 +161,10 @@ fn build_dialog(
         &[
             row("Keep browser session data", &persist_check),
             row("Resume agent sessions on reopen", &auto_resume_check),
+            row(
+                "Background agent idle timeout (not active)",
+                &agent_idle_timeout,
+            ),
             row("Restore terminal scrollback", &scrollback_check),
         ],
     ));
@@ -221,6 +226,7 @@ fn build_dialog(
         let opacity_spin = opacity_widgets.spin.clone();
         let persist_check = persist_check.clone();
         let auto_resume_check = auto_resume_check.clone();
+        let agent_idle_timeout = agent_idle_timeout.clone();
         let scrollback_check = scrollback_check.clone();
         let scrollback_lines_spin = scrollback_lines_spin.clone();
         let wheel_scroll_spin = wheel_scroll_spin.clone();
@@ -262,6 +268,7 @@ fn build_dialog(
                 &opacity_spin,
                 &persist_check,
                 &auto_resume_check,
+                &agent_idle_timeout,
                 &scrollback_check,
                 &scrollback_lines_spin,
                 &wheel_scroll_spin,
@@ -344,6 +351,7 @@ fn build_dialog(
     connect_value_changed(&opacity_widgets.spin, apply_current.clone());
     connect_toggled(&persist_check, apply_current.clone());
     connect_toggled(&auto_resume_check, apply_current.clone());
+    connect_value_changed(&agent_idle_timeout, apply_current.clone());
     connect_toggled(&scrollback_check, apply_current.clone());
     connect_value_changed(&scrollback_lines_spin, apply_current.clone());
     connect_value_changed(&wheel_scroll_spin, apply_current.clone());
@@ -1053,6 +1061,7 @@ fn collect_options(
     opacity_spin: &gtk::SpinButton,
     persist_check: &gtk::CheckButton,
     auto_resume_check: &gtk::CheckButton,
+    agent_idle_timeout: &gtk::SpinButton,
     scrollback_check: &gtk::CheckButton,
     scrollback_lines_spin: &gtk::SpinButton,
     wheel_scroll_spin: &gtk::SpinButton,
@@ -1102,6 +1111,9 @@ fn collect_options(
         focus_border_opacity: opacity,
         persist_browser_session: persist_check.is_active(),
         auto_resume_agent_sessions: auto_resume_check.is_active(),
+        agent_idle_timeout_minutes: Options::clamp_agent_idle_timeout_minutes(
+            agent_idle_timeout.value_as_int().max(0) as u32,
+        ),
         restore_terminal_scrollback: scrollback_check.is_active(),
         scrollback_lines: Some(Options::clamp_scrollback_lines(
             scrollback_lines_spin.value_as_int().max(0) as u32,
@@ -1352,6 +1364,28 @@ fn build_persist_check(initial: bool) -> gtk::CheckButton {
     check
 }
 
+fn build_agent_idle_timeout_spin(initial: u32) -> gtk::SpinButton {
+    use flowmux_config::options::{AGENT_IDLE_TIMEOUT_MINUTES_MAX, AGENT_IDLE_TIMEOUT_MINUTES_MIN};
+    let spin = gtk::SpinButton::with_range(
+        f64::from(AGENT_IDLE_TIMEOUT_MINUTES_MIN),
+        f64::from(AGENT_IDLE_TIMEOUT_MINUTES_MAX),
+        1.0,
+    );
+    spin.set_numeric(true);
+    spin.set_snap_to_ticks(true);
+    spin.set_value(f64::from(Options::clamp_agent_idle_timeout_minutes(
+        initial,
+    )));
+    spin.set_halign(gtk::Align::End);
+    spin.set_widget_name("flowmux-agent-idle-timeout");
+    // Providers do not yet support verified cooperative idle shutdown.
+    spin.set_sensitive(false);
+    spin.set_tooltip_text(Some(
+        "Automatic cleanup is not available for current agents. Background agents keep running until you end them from Agents.",
+    ));
+    spin
+}
+
 /// Scrollback capacity for terminal tabs created after the option is saved.
 fn build_scrollback_lines_spin(initial: u32) -> gtk::SpinButton {
     let initial = Options::clamp_scrollback_lines(initial);
@@ -1573,11 +1607,32 @@ mod tests {
         minimap.set_active(false);
         assert_eq!(applied.borrow().len(), calls_before + 1);
         assert!(!applied.borrow().last().unwrap().editor_minimap_enabled);
+
+        let timeout = widgets
+            .iter()
+            .find(|widget| widget.widget_name() == "flowmux-agent-idle-timeout")
+            .unwrap()
+            .clone()
+            .downcast::<gtk::SpinButton>()
+            .unwrap();
+        assert_eq!(timeout.value_as_int(), 30);
+        assert!(!timeout.is_sensitive());
+        assert!(widgets.iter().any(|widget| widget
+            .clone()
+            .downcast::<gtk::Label>()
+            .is_ok_and(|label| label.text() == "Background agent idle timeout (not active)")));
+        let calls_before = applied.borrow().len();
+        timeout.set_value(45.0);
+        assert_eq!(applied.borrow().len(), calls_before + 1);
+        assert_eq!(
+            applied.borrow().last().unwrap().agent_idle_timeout_minutes,
+            45
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn closing_dialog_releases_widget_graph() {
+    async fn closing_dialog_releases_widget_graph() {
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.OptionsRelease")
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
@@ -1601,17 +1656,25 @@ mod tests {
             .collect();
 
         dialog.present();
-        let context = gtk::glib::MainContext::default();
-        while context.pending() {
-            context.iteration(false);
-        }
+        gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
         dialog.close();
         drop(dialog);
-        while context.pending() {
-            context.iteration(false);
+        for _ in 0..40 {
+            if widgets.iter().all(|widget| widget.upgrade().is_none()) {
+                break;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
         }
 
-        assert!(widgets.iter().all(|widget| widget.upgrade().is_none()));
+        assert!(
+            widgets.iter().all(|widget| widget.upgrade().is_none()),
+            "closed Options retained widgets: {:?}",
+            widgets
+                .iter()
+                .filter_map(|widget| widget.upgrade())
+                .map(|widget| (widget.type_().name(), widget.widget_name()))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1797,6 +1860,7 @@ mod tests {
             &opacity.spin,
             &persist_off,
             &auto_resume_off,
+            &build_agent_idle_timeout_spin(45),
             &scrollback_on,
             &scrollback_lines,
             &build_wheel_scroll_spin(2.5),
@@ -1838,6 +1902,7 @@ mod tests {
         assert_eq!(opts.focus_border_opacity, 40);
         assert!(!opts.persist_browser_session);
         assert!(!opts.auto_resume_agent_sessions);
+        assert_eq!(opts.agent_idle_timeout_minutes, 45);
         assert!(opts.restore_terminal_scrollback);
         assert_eq!(opts.scrollback_lines, Some(42_000));
         assert!(opts.terminal_minimap_enabled);
@@ -1880,6 +1945,7 @@ mod tests {
             &opacity.spin,
             &persist_on,
             &auto_resume_on,
+            &build_agent_idle_timeout_spin(10),
             &scrollback_off,
             &scrollback_lines,
             &build_wheel_scroll_spin(2.5),
@@ -1911,6 +1977,7 @@ mod tests {
         );
         assert!(opts.persist_browser_session);
         assert!(opts.auto_resume_agent_sessions);
+        assert_eq!(opts.agent_idle_timeout_minutes, 10);
         assert!(!opts.restore_terminal_scrollback);
         assert!(!opts.terminal_minimap_enabled);
         assert_eq!(opts.terminal_minimap_width, 48);

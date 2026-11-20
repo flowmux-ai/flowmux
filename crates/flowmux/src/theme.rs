@@ -198,6 +198,25 @@ impl ResolvedTheme {
         );
     }
 
+    /// Default colors the Agent Host answers to provider color queries for this theme.
+    pub fn terminal_colors(&self) -> flowmux_ipc::agent_host::TerminalColors {
+        let rgb = |color: &gdk::RGBA| {
+            [color.red(), color.green(), color.blue()]
+                .map(|channel| (channel * 255.0).round().clamp(0.0, 255.0) as u8)
+        };
+        flowmux_ipc::agent_host::TerminalColors {
+            foreground: rgb(&self.fg),
+            background: rgb(&self.bg),
+            palette: self
+                .palette
+                .iter()
+                .map(rgb)
+                .collect::<Vec<_>>()
+                .try_into()
+                .ok(),
+        }
+    }
+
     pub fn is_dark(&self) -> bool {
         relative_luminance(&self.bg) < 0.5
     }

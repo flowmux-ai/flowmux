@@ -489,6 +489,14 @@ pub struct AgentLifecycleNotification {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Request {
+    /// Host-verified source, rechecked on the GTK thread before applying an operation.
+    InAgentView {
+        context: crate::agent_host::AgentViewReport,
+        request: Box<Request>,
+    },
+    AgentHost {
+        request: crate::agent_host::HostRequest,
+    },
     Ssh {
         request: SshRequest,
     },
@@ -537,6 +545,31 @@ pub enum Request {
         cwd: Option<PathBuf>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shell: Option<String>,
+    },
+
+    /// Connect an existing managed execution in the selected GUI pane.
+    AgentViewOpen {
+        pane: PaneId,
+        instance: flowmux_core::AgentInstanceId,
+        /// Explicit moves must not take over a view that changed during window startup.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_attachment: Option<crate::agent_host::AttachmentKey>,
+    },
+    /// A terminal's relay started its shell in the Agent Host; the tab now shows that execution.
+    ShellBind {
+        surface: SurfaceId,
+        instance: flowmux_core::AgentInstanceId,
+        epoch: uuid::Uuid,
+        /// The shell's process, so its programs' hooks are attributed to the tab at once.
+        #[serde(default)]
+        pid: Option<u32>,
+    },
+    /// A relay requests final admission of an explicit move in its owning GUI.
+    AgentViewReady {
+        surface: SurfaceId,
+        token: uuid::Uuid,
+        key: crate::agent_host::AttachmentKey,
+        sequence: u64,
     },
 
     /// `flowmux split <pane> --right|--down`
@@ -1250,6 +1283,78 @@ pub enum BrowserFileChooserAction {
 }
 
 impl Request {
+    /// Only these operations are guarded at GTK admission; never forward nested Host calls.
+    pub fn supports_agent_context(&self) -> bool {
+        match self {
+            Self::BrowserOnSurface { request, .. }
+            | Self::BrowserWithTask { request, .. }
+            | Self::BrowserReceipt { request, .. } => request.supports_agent_context(),
+            Self::Ping
+            | Self::WorkspaceTree
+            | Self::WorkspaceList
+            | Self::WorkspaceCurrent
+            | Self::WorkspaceCreate { .. }
+            | Self::WorkspaceFocus { .. }
+            | Self::AgentViewOpen { .. }
+            | Self::AgentExplain { .. }
+            | Self::PaneSplit { .. }
+            | Self::TeamSpawn { .. }
+            | Self::PaneSendKeys { .. }
+            | Self::PaneReadScreen { .. }
+            | Self::PaneFocus { .. }
+            | Self::PaneResize { .. }
+            | Self::PaneClose { .. }
+            | Self::SurfaceCreate { .. }
+            | Self::SurfaceFocus { .. }
+            | Self::SurfaceClose { .. }
+            | Self::BrowserOpen { .. } => true,
+            Self::BrowserNavigate { .. }
+            | Self::BrowserBack { .. }
+            | Self::BrowserForward { .. }
+            | Self::BrowserReload { .. }
+            | Self::BrowserLoad { .. }
+            | Self::BrowserUrl { .. }
+            | Self::BrowserTitle { .. }
+            | Self::BrowserClick { .. }
+            | Self::BrowserFill { .. }
+            | Self::BrowserSelect { .. }
+            | Self::BrowserScroll { .. }
+            | Self::BrowserScrollPages { .. }
+            | Self::BrowserType { .. }
+            | Self::BrowserPress { .. }
+            | Self::BrowserText { .. }
+            | Self::BrowserValue { .. }
+            | Self::BrowserAttr { .. }
+            | Self::BrowserWait { .. }
+            | Self::BrowserScreenshot { .. }
+            | Self::BrowserDblClick { .. }
+            | Self::BrowserHover { .. }
+            | Self::BrowserFocus { .. }
+            | Self::BrowserBlur { .. }
+            | Self::BrowserCheck { .. }
+            | Self::BrowserUncheck { .. }
+            | Self::BrowserIsVisible { .. }
+            | Self::BrowserIsEnabled { .. }
+            | Self::BrowserIsChecked { .. }
+            | Self::BrowserCount { .. }
+            | Self::BrowserRead { .. }
+            | Self::BrowserTask { .. }
+            | Self::BrowserForm { .. }
+            | Self::BrowserControl { .. }
+            | Self::BrowserSnapshot { .. }
+            | Self::BrowserInspect { .. }
+            | Self::BrowserDiagnose { .. }
+            | Self::BrowserEval { .. }
+            | Self::BrowserEvalAsync { .. }
+            | Self::BrowserDrag { .. }
+            | Self::BrowserPointer { .. }
+            | Self::BrowserFileChooser { .. }
+            | Self::BrowserDialog { .. }
+            | Self::BrowserDownload { .. }
+            | Self::BrowserMedia { .. } => true,
+            _ => false,
+        }
+    }
     /// Small state reads and native hook reports have independent admission.
     /// Browser operations (especially waits/eval) and layout changes stay on
     /// the regular endpoint; they cannot consume this reserved capacity.
@@ -1282,6 +1387,9 @@ impl Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    AgentHost {
+        response: crate::agent_host::HostResponse,
+    },
     TerminalProgramStatus {
         snapshot: Option<TerminalProgramSnapshot>,
     },
@@ -1389,6 +1497,8 @@ pub enum Response {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<flowmux_core::AgentViewBinding>,
     pub id: NotificationId,
     pub title: String,
     pub body: String,
@@ -1471,6 +1581,32 @@ mod tests {
         assert!(
             matches!(restored, Response::TerminalProgramStatus { snapshot: Some(actual) } if actual == snapshot)
         );
+    }
+
+    #[test]
+    fn agent_view_open_keeps_legacy_requests_and_guards_explicit_moves() {
+        let pane = PaneId::new();
+        let instance = flowmux_core::AgentInstanceId::new();
+        let legacy: Request = serde_json::from_value(serde_json::json!({
+            "verb": "agent_view_open", "pane": pane, "instance": instance,
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy,
+            Request::AgentViewOpen {
+                expected_attachment: None,
+                ..
+            }
+        ));
+        let expected = crate::agent_host::AttachmentKey {
+            instance,
+            epoch: uuid::Uuid::new_v4(),
+            lease: uuid::Uuid::new_v4(),
+            generation: 7,
+        };
+        assert!(matches!(roundtrip_request(Request::AgentViewOpen {
+            pane, instance, expected_attachment: Some(expected),
+        }), Request::AgentViewOpen { expected_attachment: Some(actual), .. } if actual == expected));
     }
 
     #[test]
@@ -1576,6 +1712,8 @@ mod tests {
             title_locked: false,
             kind: term(),
             scrollback: None,
+            agent_binding: None,
+            shell_binding: None,
             agent: None,
         };
         shell.agent = Some(AgentPresence::new(
@@ -1595,6 +1733,8 @@ mod tests {
                         title_locked: false,
                         kind: SurfaceKind::Browser { initial_url: None },
                         scrollback: None,
+                        agent_binding: None,
+                        shell_binding: None,
                         agent: None,
                     },
                 ],

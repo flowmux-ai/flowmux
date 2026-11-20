@@ -10,12 +10,12 @@
 //! `read = true`, which the popover renders with reduced opacity.
 
 use flowmux_core::{NotificationId, NotificationLevel, PaneId, SurfaceId, WorkspaceId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-/// Cap on retained entries. A chatty agent (Claude Code's per-step OSC
-/// 9 stream) can otherwise grow this unbounded over a long session.
+/// Cap on local entries. Managed history has its own Host cap so a local
+/// eviction cannot reimport the same managed record as a new desktop effect.
 const MAX_RETAINED: usize = 50;
 
 /// Deduplicate only exact anonymous repeats on the same pane and surface
@@ -26,6 +26,7 @@ const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 pub struct NotificationEntry {
     causal: bool,
     pub id: NotificationId,
+    pub managed: Option<flowmux_core::AgentViewBinding>,
     pub title: String,
     pub agent: Option<String>,
     pub workspace_label: Option<String>,
@@ -68,7 +69,12 @@ pub struct NotificationEntry {
 #[derive(Clone, Default)]
 pub struct NotificationStore {
     inner: Rc<RefCell<VecDeque<NotificationEntry>>>,
+    managed_updates: Rc<RefCell<Option<ManagedUpdate>>>,
+    managed_delivery_ready: Rc<Cell<bool>>,
 }
+
+type ManagedUpdate =
+    Rc<dyn Fn(uuid::Uuid, Vec<NotificationId>, flowmux_ipc::agent_host::NotificationAction)>;
 
 impl NotificationStore {
     pub fn new() -> Self {
@@ -130,8 +136,17 @@ impl NotificationStore {
         }
         let causal = id.is_some();
         let id = id.unwrap_or_default();
-        let evicted_desktop_id = if entries.len() >= MAX_RETAINED {
-            let index = entries.iter().position(|entry| entry.read).unwrap_or(0);
+        let evicted_desktop_id = if entries
+            .iter()
+            .filter(|entry| entry.managed.is_none())
+            .count()
+            >= MAX_RETAINED
+        {
+            let index = entries
+                .iter()
+                .position(|entry| entry.managed.is_none() && entry.read)
+                .or_else(|| entries.iter().position(|entry| entry.managed.is_none()))
+                .unwrap();
             entries
                 .remove(index)
                 .filter(|entry| !entry.read)
@@ -142,6 +157,7 @@ impl NotificationStore {
         entries.push_back(NotificationEntry {
             causal,
             id,
+            managed: None,
             title,
             agent: None,
             workspace_label: None,
@@ -182,13 +198,20 @@ impl NotificationStore {
     /// found and changed (so callers can avoid redundant re-renders).
     pub fn mark_read(&self, id: NotificationId) -> bool {
         let mut entries = self.inner.borrow_mut();
-        if let Some(e) = entries.iter_mut().find(|e| e.id == id) {
-            if !e.read {
-                e.read = true;
-                return true;
-            }
+        let changed = entries
+            .iter_mut()
+            .find(|entry| entry.id == id && !entry.read)
+            .map(|entry| {
+                entry.read = true;
+                entry.clone()
+            });
+        drop(entries);
+        if let Some(entry) = changed {
+            self.notify_managed(&[entry], flowmux_ipc::agent_host::NotificationAction::Read);
+            true
+        } else {
+            false
         }
-        false
     }
 
     /// Record the desktop notification id assigned to `id`. The IPC
@@ -228,14 +251,18 @@ impl NotificationStore {
     pub fn mark_all_unread_read(&self) -> Vec<String> {
         let mut entries = self.inner.borrow_mut();
         let mut closed = Vec::new();
+        let mut changed = Vec::new();
         for e in entries.iter_mut() {
             if !e.read {
+                changed.push(e.clone());
                 e.read = true;
                 if let Some(did) = e.desktop_id.take() {
                     closed.push(did);
                 }
             }
         }
+        drop(entries);
+        self.notify_managed(&changed, flowmux_ipc::agent_host::NotificationAction::Read);
         closed
     }
 
@@ -249,6 +276,7 @@ impl NotificationStore {
     ) -> Vec<String> {
         let mut entries = self.inner.borrow_mut();
         let mut closed = Vec::new();
+        let mut changed = Vec::new();
         for e in entries.iter_mut() {
             if e.read {
                 continue;
@@ -267,12 +295,15 @@ impl NotificationStore {
                 false
             };
             if matches {
+                changed.push(e.clone());
                 e.read = true;
                 if let Some(did) = e.desktop_id.take() {
                     closed.push(did);
                 }
             }
         }
+        drop(entries);
+        self.notify_managed(&changed, flowmux_ipc::agent_host::NotificationAction::Read);
         closed
     }
 
@@ -309,6 +340,11 @@ impl NotificationStore {
         let entry = entries
             .remove(idx)
             .expect("position just confirmed it exists");
+        drop(entries);
+        self.notify_managed(
+            std::slice::from_ref(&entry),
+            flowmux_ipc::agent_host::NotificationAction::Dismiss,
+        );
         if entry.read {
             // Read entries don't move the unread count and never had a
             // pending desktop toast — pure transcript-only delete.
@@ -336,8 +372,116 @@ impl NotificationStore {
                 }
             }
         }
-        entries.clear();
+        let changed = entries.drain(..).collect::<Vec<_>>();
+        drop(entries);
+        self.notify_managed(
+            &changed,
+            flowmux_ipc::agent_host::NotificationAction::Dismiss,
+        );
         desktop_ids
+    }
+
+    pub fn set_managed_update_handler(&self, handler: ManagedUpdate) {
+        *self.managed_updates.borrow_mut() = Some(handler);
+    }
+
+    pub fn reset_managed_delivery(&self) {
+        self.managed_delivery_ready.set(false);
+    }
+
+    fn notify_managed(
+        &self,
+        entries: &[NotificationEntry],
+        action: flowmux_ipc::agent_host::NotificationAction,
+    ) {
+        let mut groups = std::collections::HashMap::<_, Vec<_>>::new();
+        for entry in entries {
+            if let Some(binding) = entry.managed {
+                groups.entry(binding.epoch).or_default().push(entry.id);
+            }
+        }
+        if let Some(handler) = self.managed_updates.borrow().as_ref() {
+            for (epoch, ids) in groups {
+                handler(epoch, ids, action);
+            }
+        }
+    }
+
+    /// Reconnection imports history into the bell without replaying desktop effects.
+    pub fn sync_managed(
+        &self,
+        snapshot: &crate::agent_host::RegistrySnapshot,
+        window: uuid::Uuid,
+    ) -> (Vec<NotificationId>, Vec<String>) {
+        if !snapshot.available {
+            self.managed_delivery_ready.set(false);
+            return (Vec::new(), Vec::new());
+        }
+        let deliver_new = self.managed_delivery_ready.replace(true);
+        let mut entries = self.inner.borrow_mut();
+        let mut close = Vec::new();
+        entries.retain(|entry| {
+            let keep = entry.managed.is_none()
+                || snapshot
+                    .notifications
+                    .iter()
+                    .any(|n| n.notification.id == entry.id);
+            if !keep {
+                if let Some(id) = entry.desktop_id.clone() {
+                    close.push(id);
+                }
+            }
+            keep
+        });
+        let mut fresh = Vec::new();
+        for managed in &snapshot.notifications {
+            let n = &managed.notification;
+            if !entries.iter().any(|entry| entry.id == n.id) {
+                entries.push_back(NotificationEntry {
+                    causal: true,
+                    id: n.id,
+                    managed: Some(flowmux_core::AgentViewBinding {
+                        instance: managed.instance,
+                        epoch: managed.epoch,
+                    }),
+                    title: n.title.clone(),
+                    body: n.body.clone(),
+                    level: n.level,
+                    agent: Some(managed.provider.clone()),
+                    workspace_label: None,
+                    surface_label: Some(managed.label.clone()),
+                    created_at: n.created_at,
+                    read: n.read,
+                    pane: None,
+                    surface: None,
+                    workspace: None,
+                    desktop_id: None,
+                });
+                if deliver_new && !n.read {
+                    fresh.push(n.id);
+                }
+            }
+            let entry = entries.iter_mut().find(|entry| entry.id == n.id).unwrap();
+            entry.read = n.read;
+            if n.read {
+                if let Some(id) = entry.desktop_id.take() {
+                    close.push(id);
+                }
+            }
+            let location = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.instance == managed.instance && agent.epoch == managed.epoch)
+                .and_then(|agent| agent.view.as_ref())
+                .filter(|view| view.window == window);
+            entry.pane = location.map(|view| view.pane);
+            entry.surface = location.map(|view| view.surface);
+            entry.workspace = location.map(|view| view.workspace);
+        }
+        entries
+            .make_contiguous()
+            .sort_by_key(|entry| entry.created_at);
+        (fresh, close)
     }
 
     /// Return a fresh `Vec` snapshot in insertion order. The caller owns
@@ -393,6 +537,99 @@ pub enum SetDesktopIdResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_snapshots_keep_history_without_replaying_effects_and_forward_all_user_actions() {
+        use flowmux_ipc::agent_host::{ManagedNotification, NotificationAction};
+        let store = NotificationStore::new();
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let captured = changes.clone();
+        store.set_managed_update_handler(Rc::new(move |epoch, ids, action| {
+            captured.borrow_mut().push((epoch, ids, action))
+        }));
+        let window = uuid::Uuid::new_v4();
+        let epoch = uuid::Uuid::new_v4();
+        let make = || ManagedNotification {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch,
+            provider: "codex".into(),
+            label: "test".into(),
+            notification: flowmux_core::Notification {
+                id: NotificationId::new(),
+                level: NotificationLevel::NeedsInput,
+                title: "question".into(),
+                body: "pick a branch".into(),
+                source_pane: None,
+                created_at: chrono::Utc::now(),
+                read: false,
+            },
+        };
+        let mut snapshot = crate::agent_host::RegistrySnapshot {
+            notifications: vec![make()],
+            available: true,
+            ..Default::default()
+        };
+        assert!(
+            store.sync_managed(&snapshot, window).0.is_empty(),
+            "initial history must not toast"
+        );
+        let first = snapshot.notifications[0].notification.id;
+        let fresh = make();
+        let second = fresh.notification.id;
+        snapshot.notifications.push(fresh);
+        assert_eq!(store.sync_managed(&snapshot, window).0, vec![second]);
+        assert!(store.sync_managed(&snapshot, window).0.is_empty());
+        assert_eq!(
+            store.set_desktop_id(second, "desktop".into()),
+            SetDesktopIdResult::Stored
+        );
+        snapshot.notifications[1].notification.read = true;
+        assert_eq!(store.sync_managed(&snapshot, window).1, vec!["desktop"]);
+        store.mark_all_unread_read();
+        assert!(matches!(changes.borrow()[0].2, NotificationAction::Read));
+        assert_eq!(changes.borrow()[0].1, vec![first]);
+        let _ = store.remove(first);
+        assert!(matches!(changes.borrow()[1].2, NotificationAction::Dismiss));
+        store.clear_all();
+        assert_eq!(changes.borrow()[2].1, vec![second]);
+        snapshot.available = false;
+        store.sync_managed(&snapshot, window);
+        snapshot.notifications.push(make());
+        snapshot.available = true;
+        assert!(
+            store.sync_managed(&snapshot, window).0.is_empty(),
+            "a reconnect must not replay history"
+        );
+        for index in 0..MAX_RETAINED + 1 {
+            store.push(
+                format!("legacy {index}"),
+                "message".into(),
+                NotificationLevel::Info,
+                None,
+                None,
+                None,
+            );
+        }
+        assert_eq!(
+            store
+                .entries()
+                .iter()
+                .filter(|n| n.managed.is_some())
+                .count(),
+            snapshot.notifications.len()
+        );
+        assert_eq!(
+            store
+                .entries()
+                .iter()
+                .filter(|n| n.managed.is_none())
+                .count(),
+            MAX_RETAINED
+        );
+        snapshot.notifications.clear();
+        store.sync_managed(&snapshot, window);
+        assert!(store.entries().iter().all(|n| n.managed.is_none()));
+    }
 
     fn store() -> NotificationStore {
         NotificationStore::new()

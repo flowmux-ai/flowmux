@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub mod json;
 pub mod session_flow;
 
 const TERMINAL_TAB_TITLE_MAX_CHARS: usize = 17;
@@ -146,6 +147,9 @@ fn truncate_tab_title(title: &str) -> String {
 /// Restore a local terminal's cwd title after its program has ended.
 /// User-renamed titles and non-local terminal surfaces are preserved.
 pub fn normalize_unlocked_terminal_title(surface: &mut PaneSurface) -> bool {
+    if surface.agent_binding.is_some() {
+        return false;
+    }
     if surface.title_locked {
         return false;
     }
@@ -208,9 +212,10 @@ pub mod id {
     id_newtype!(SurfaceId);
     id_newtype!(PaneId);
     id_newtype!(NotificationId);
+    id_newtype!(AgentInstanceId);
 }
 
-pub use id::{NotificationId, PaneId, SurfaceId, WorkspaceId};
+pub use id::{AgentInstanceId, NotificationId, PaneId, SurfaceId, WorkspaceId};
 
 pub mod ssh;
 pub use ssh::{SshForwardSpec, SshTarget, SshWorkspaceConfig, WorkspaceLocation};
@@ -501,6 +506,13 @@ pub struct PaneSurface {
     #[serde(default)]
     pub title_locked: bool,
     pub kind: SurfaceKind,
+    /// Reconnect to this Host execution; never recreate it from saved state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_binding: Option<AgentViewBinding>,
+    /// The Host execution running this ordinary terminal's shell. Unlike
+    /// `agent_binding`, a missing execution is replaced by a new shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_binding: Option<AgentViewBinding>,
     /// Best-effort terminal history replayed on the next launch. Legacy state
     /// is plain text; new VTE snapshots preserve display attributes as HTML.
     /// Bounded by [`TERMINAL_SCROLLBACK_MAX_BYTES`] before it reaches state.
@@ -510,6 +522,13 @@ pub struct PaneSurface {
     /// Never persisted; a restored tab starts without agent presence.
     #[serde(skip)]
     pub agent: Option<AgentPresence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentViewBinding {
+    pub instance: AgentInstanceId,
+    pub epoch: Uuid,
 }
 
 /// A pane is either a leaf (rendered content) or a binary split. This
@@ -699,6 +718,39 @@ impl Pane {
         surface.title = title;
         surface.title_locked = true;
         true
+    }
+
+    /// Record which Host execution runs this terminal's shell. Returns true on a change.
+    pub fn set_surface_shell_binding(
+        &mut self,
+        surface_id: SurfaceId,
+        binding: Option<AgentViewBinding>,
+    ) -> bool {
+        match self {
+            Pane::Leaf {
+                content: PaneContent::Tabs { surfaces, .. },
+                ..
+            } => surfaces
+                .iter_mut()
+                .find(|surface| {
+                    surface.id == surface_id && matches!(surface.kind, SurfaceKind::Terminal { .. })
+                })
+                .is_some_and(|surface| {
+                    std::mem::replace(&mut surface.shell_binding, binding) != binding
+                }),
+            Pane::Leaf { .. } => false,
+            Pane::Split { first, second, .. } => {
+                first.set_surface_shell_binding(surface_id, binding)
+                    || second.set_surface_shell_binding(surface_id, binding)
+            }
+        }
+    }
+
+    /// Turn a managed Agent tab into an ordinary terminal tab. Returns true
+    /// when the tab was bound.
+    pub fn clear_surface_agent_binding(&mut self, target: PaneId, surface_id: SurfaceId) -> bool {
+        self.find_surface_mut(target, surface_id)
+            .is_some_and(|surface| surface.agent_binding.take().is_some())
     }
 
     /// Set (or clear, with `None`) the live AI-agent presence on the tab
@@ -1376,7 +1428,7 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
-        if surface.title_locked {
+        if surface.title_locked || surface.agent_binding.is_some() {
             return false;
         }
         // The `$HOME` lookup runs only after the surface is found and only for a
@@ -1403,6 +1455,9 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
+        if surface.agent_binding.is_some() {
+            return false;
+        }
         let SurfaceKind::Terminal { cwd, .. } = &mut surface.kind else {
             return false;
         };
@@ -1441,6 +1496,9 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
+        if surface.agent_binding.is_some() {
+            return false;
+        }
         if !matches!(
             surface.kind,
             SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. }
@@ -1994,6 +2052,8 @@ impl PaneSurface {
             title: title.into(),
             title_locked: false,
             kind: SurfaceKind::Terminal { shell: None, cwd },
+            agent_binding: None,
+            shell_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2007,6 +2067,8 @@ impl PaneSurface {
             kind: SurfaceKind::Browser {
                 initial_url: Some(url),
             },
+            agent_binding: None,
+            shell_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2021,6 +2083,8 @@ impl PaneSurface {
                 workspace_root,
                 session: EditorSessionState::default(),
             },
+            agent_binding: None,
+            shell_binding: None,
             scrollback: None,
             agent: None,
         }
@@ -2039,6 +2103,8 @@ impl PaneContent {
                         title: surface.title.clone(),
                         title_locked: surface.title_locked,
                         kind: surface.kind.clone(),
+                        agent_binding: surface.agent_binding,
+                        shell_binding: surface.shell_binding,
                         scrollback: None,
                         agent: surface.agent.clone(),
                     })

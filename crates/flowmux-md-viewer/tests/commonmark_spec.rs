@@ -19,6 +19,14 @@ fn renders_commonmark_0_31_2_spec_examples_to_html() {
             .expect("parse CommonMark spec fixture");
     assert_eq!(examples.len(), 652);
 
+    // gfm_spec.rs renders the examples that the GFM specification repeats verbatim.
+    let gfm = include_str!("fixtures/gfm-spec.txt").replace('→', "\t");
+    let examples: Vec<_> = examples
+        .into_iter()
+        .filter(|e| !gfm.contains(&format!(" example\n{}.\n{}````", e.markdown, e.html)))
+        .collect();
+    assert_eq!(examples.len(), 31);
+
     let differences = support::expected_differences();
     for example in examples {
         let html = render_markdown_body(&example.markdown);

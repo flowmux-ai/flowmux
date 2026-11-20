@@ -532,7 +532,7 @@ pub(crate) fn shim_script(agent: &str) -> String {
     let canonical_agent = if agent == "agy" { "antigravity" } else { agent };
     let codex_local = if agent == "codex" {
         r#"
-if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
+if [ -n "${FLOWMUX_SURFACE_ID:-}${FLOWMUX_AGENT_INSTANCE_ID:-}" ]; then
   local_codex=1
   for arg in "$@"; do
     case "$arg" in
@@ -600,13 +600,14 @@ fi
 # flowmux agent wrapper shim (managed by `flowmux fix`).
 # Records the real {agent} PID and transparently exec's the real binary.
 # Native hooks report lifecycle state; process scanning is the fallback.
-if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
+if [ -n "${{FLOWMUX_SURFACE_ID:-}}${{FLOWMUX_AGENT_INSTANCE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
   export FLOWMUX_AGENT_NAME={canonical_agent}
 fi
 self_dir=$(cd "$(dirname "$0")" && pwd)
 is_flowmux_shim() {{
-  grep -q "flowmux agent wrapper shim" "$1" 2>/dev/null
+  # The marker is on the second line; never scan a whole provider binary.
+  head -c 512 "$1" 2>/dev/null | grep -q "flowmux agent wrapper shim"
 }}
 real=""
 saved_ifs=$IFS
@@ -838,13 +839,19 @@ fn agent_has_real_binary_on_path(agent: &str, path: &std::ffi::OsStr) -> bool {
         let candidate = dir.join(agent);
         std::fs::metadata(&candidate)
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-            && !fs::read_to_string(candidate)
-                .is_ok_and(|source| source.contains("flowmux agent wrapper shim"))
+            && !is_legacy_local_agent_shim(&candidate)
     })
 }
 
+/// A shim names itself on its second line. Read only that much: a provider
+/// binary at the same path can be hundreds of megabytes.
 fn is_legacy_local_agent_shim(path: &Path) -> bool {
-    fs::read_to_string(path).is_ok_and(|source| source.contains("flowmux agent wrapper shim"))
+    use std::io::Read;
+
+    let mut head = Vec::new();
+    fs::File::open(path)
+        .and_then(|file| file.take(512).read_to_end(&mut head))
+        .is_ok_and(|_| String::from_utf8_lossy(&head).contains("flowmux agent wrapper shim"))
 }
 
 fn remove_legacy_local_agent_shims() -> Result<Vec<PathBuf>> {
@@ -3709,16 +3716,18 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&real, fs::Permissions::from_mode(0o755)).unwrap();
-        let run = |args: &[&str], inside: bool, supported: bool| {
-            let output = Command::new("/bin/bash")
+        let run = |args: &[&str], context: Option<&str>, supported: bool| {
+            let mut command = Command::new("/bin/bash");
+            command
                 .arg(&shim)
                 .args(args)
                 .env_clear()
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-                .env("FLOWMUX_SURFACE_ID", if inside { "surface" } else { "" })
-                .env("FAKE_HELP", if supported { "  --no-daemon" } else { "" })
-                .output()
-                .unwrap();
+                .env("FAKE_HELP", if supported { "  --no-daemon" } else { "" });
+            if let Some(context) = context {
+                command.env(context, "identity");
+            }
+            let output = command.output().unwrap();
             assert!(output.status.success(), "{:?}", output);
             String::from_utf8(output.stdout)
                 .unwrap()
@@ -3745,18 +3754,23 @@ mod tests {
         ] {
             let mut expected = vec!["--no-daemon"];
             expected.extend(&args);
-            assert_eq!(run(&args, true, true), expected);
+            for context in ["FLOWMUX_SURFACE_ID", "FLOWMUX_AGENT_INSTANCE_ID"] {
+                assert_eq!(run(&args, Some(context), true), expected);
+            }
         }
         for args in [
             vec!["--no-daemon", "resume", "session-id"],
             vec!["--remote", "unix:///tmp/provider.sock"],
             vec!["--remote=wss://example.test"],
         ] {
-            assert_eq!(run(&args, true, true), args);
+            for context in ["FLOWMUX_SURFACE_ID", "FLOWMUX_AGENT_INSTANCE_ID"] {
+                assert_eq!(run(&args, Some(context), true), args);
+            }
         }
         let args = ["resume", "session-id"];
-        assert_eq!(run(&args, false, true), args);
-        assert_eq!(run(&args, true, false), args);
+        assert_eq!(run(&args, None, true), args);
+        assert_eq!(run(&args, Some("FLOWMUX_SURFACE_ID"), false), args);
+        assert_eq!(run(&args, Some("FLOWMUX_AGENT_INSTANCE_ID"), false), args);
     }
 
     #[test]

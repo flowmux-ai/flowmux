@@ -23,6 +23,11 @@ pub const PERSIST_BROWSER_SESSION_DEFAULT: bool = true;
 /// persisted terminal tab is rebuilt after relaunch.
 pub const AUTO_RESUME_AGENT_SESSIONS_DEFAULT: bool = true;
 
+/// Time to retain verified-idle managed agents after the last GUI disconnects.
+pub const AGENT_IDLE_TIMEOUT_MINUTES_DEFAULT: u32 = 30;
+pub const AGENT_IDLE_TIMEOUT_MINUTES_MIN: u32 = 1;
+pub const AGENT_IDLE_TIMEOUT_MINUTES_MAX: u32 = 10_080;
+
 /// Persist and replay bounded terminal scrollback on relaunch.
 pub const RESTORE_TERMINAL_SCROLLBACK_DEFAULT: bool = true;
 
@@ -208,6 +213,8 @@ pub struct Options {
     pub persist_browser_session: bool,
     #[serde(default = "default_auto_resume_agent_sessions")]
     pub auto_resume_agent_sessions: bool,
+    #[serde(default = "default_agent_idle_timeout_minutes")]
+    pub agent_idle_timeout_minutes: u32,
     #[serde(default = "default_restore_terminal_scrollback")]
     pub restore_terminal_scrollback: bool,
     /// Scrollback capacity for new terminal tabs. `None` uses
@@ -322,6 +329,10 @@ fn default_restore_terminal_scrollback() -> bool {
     RESTORE_TERMINAL_SCROLLBACK_DEFAULT
 }
 
+fn default_agent_idle_timeout_minutes() -> u32 {
+    AGENT_IDLE_TIMEOUT_MINUTES_DEFAULT
+}
+
 fn default_terminal_minimap_enabled() -> bool {
     TERMINAL_MINIMAP_ENABLED_DEFAULT
 }
@@ -376,6 +387,7 @@ impl Default for Options {
             focus_border_opacity: default_focus_border_opacity(),
             persist_browser_session: default_persist_browser_session(),
             auto_resume_agent_sessions: default_auto_resume_agent_sessions(),
+            agent_idle_timeout_minutes: default_agent_idle_timeout_minutes(),
             restore_terminal_scrollback: default_restore_terminal_scrollback(),
             scrollback_lines: None,
             terminal_wheel_scroll_multiplier: default_terminal_wheel_scroll_multiplier(),
@@ -441,6 +453,21 @@ impl ThemeOverrides {
 }
 
 impl Options {
+    pub fn clamp_agent_idle_timeout_minutes(value: u32) -> u32 {
+        value.clamp(
+            AGENT_IDLE_TIMEOUT_MINUTES_MIN,
+            AGENT_IDLE_TIMEOUT_MINUTES_MAX,
+        )
+    }
+
+    pub fn agent_idle_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(
+            u64::from(Self::clamp_agent_idle_timeout_minutes(
+                self.agent_idle_timeout_minutes,
+            )) * 60,
+        )
+    }
+
     pub fn clamp_child_oom_score_adj(value: i32) -> i32 {
         value.clamp(0, CHILD_OOM_SCORE_ADJ_MAX)
     }
@@ -656,6 +683,9 @@ fn normalize_options(opts: Options) -> Options {
     };
     Options {
         zoom_percent: Options::clamp_zoom(opts.zoom_percent),
+        agent_idle_timeout_minutes: Options::clamp_agent_idle_timeout_minutes(
+            opts.agent_idle_timeout_minutes,
+        ),
         focus_border_color,
         focus_border_opacity: Options::clamp_focus_border_opacity(opts.focus_border_opacity),
         scrollback_lines: opts.scrollback_lines.map(Options::clamp_scrollback_lines),
@@ -819,6 +849,26 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn old_options_default_to_thirty_minutes_and_bounds_are_safe() {
+        let old: Options = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.agent_idle_timeout_minutes, 30);
+        assert_eq!(
+            old.agent_idle_timeout(),
+            std::time::Duration::from_secs(1800)
+        );
+        for (input, expected) in [(0, 1), (1, 1), (45, 45), (u32::MAX, 10_080)] {
+            let options = normalize_options(Options {
+                agent_idle_timeout_minutes: input,
+                ..Options::default()
+            });
+            assert_eq!(options.agent_idle_timeout_minutes, expected);
+            let roundtrip: Options =
+                serde_json::from_slice(&serde_json::to_vec(&options).unwrap()).unwrap();
+            assert_eq!(roundtrip.agent_idle_timeout(), options.agent_idle_timeout());
+        }
+    }
 
     fn with_xdg<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
         let _g = crate::test_env::env_lock().lock().unwrap();

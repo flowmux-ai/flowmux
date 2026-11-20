@@ -15,6 +15,9 @@ use tracing::info;
 #[derive(Parser)]
 #[command(name = "flowmux-daemon", version)]
 struct Cli {
+    /// Own managed agent PTYs independently of GUI windows.
+    #[arg(long)]
+    agent_host: bool,
     /// Override the unix socket path.
     #[arg(long, env = "FLOWMUX_SOCKET")]
     socket: Option<PathBuf>,
@@ -38,8 +41,23 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let socket = cli.socket.unwrap_or_else(paths::runtime_socket);
+    let socket = cli.socket.unwrap_or_else(|| {
+        if cli.agent_host {
+            paths::agent_host_socket()
+        } else {
+            paths::runtime_socket()
+        }
+    });
     info!(?socket, "flowmux-daemon starting");
+
+    if cli.agent_host {
+        #[cfg(target_os = "linux")]
+        if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let options = flowmux_config::options::load();
+        return flowmux_daemon::agent_host::run(&socket, options.agent_idle_timeout()).await;
+    }
 
     let store = load_store();
     let handler = Arc::new(DaemonHandler::new(store));

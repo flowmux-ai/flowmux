@@ -23,6 +23,10 @@ mod imp {
         const NAME: &'static str = "FlowmuxSessionFlowCanvas";
         type Type = super::Canvas;
         type ParentType = gtk::DrawingArea;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_accessible_role(gtk::AccessibleRole::Group);
+        }
     }
 
     impl ObjectImpl for Canvas {}

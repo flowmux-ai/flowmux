@@ -21,6 +21,7 @@ mod tests {
                 pane: PaneId::new(),
                 surface: SurfaceId::new(),
                 root_pid: child.id(),
+                process_start: None,
                 session_id: None,
             }),
         });

@@ -71,6 +71,7 @@ pub struct GhosttyPane {
     /// PID of the spawned shell.
     pub pid: Rc<Cell<Option<i32>>>,
     pub program_status_generation: uuid::Uuid,
+    pub(crate) agent_connection: Rc<RefCell<Option<super::agent_connection::AgentConnection>>>,
     /// Last cwd returned by [`Self::poll_cwd_if_changed`], so the poller only
     /// reports real changes.
     last_polled_cwd: Rc<RefCell<Option<PathBuf>>>,
@@ -548,12 +549,28 @@ impl GhosttyPane {
         if let Some(path) = self.announced_current_dir() {
             return Some(path);
         }
-        if let Some(pid) = self.pid.get() {
-            if let Some(p) = flowmux_procmon::process_cwd(pid as u32) {
-                return Some(p);
+        // A managed Agent tab runs only the relay, whose own directory says nothing.
+        if let Some(connection) = self.agent_connection.borrow().as_ref() {
+            if !connection.shell {
+                return connection.project.clone();
             }
         }
-        None
+        self.process_root().and_then(flowmux_procmon::process_cwd)
+    }
+
+    /// The process whose descendants are this terminal's programs: its own child, or
+    /// its shell in the Agent Host.
+    pub fn process_root(&self) -> Option<u32> {
+        let hosted = self
+            .agent_connection
+            .borrow()
+            .as_ref()
+            .filter(|connection| connection.shell)
+            .map(|connection| connection.host_pid.get());
+        match hosted {
+            Some(pid) => pid,
+            None => self.pid.get().and_then(|pid| u32::try_from(pid).ok()),
+        }
     }
 
     pub fn announced_current_dir(&self) -> Option<PathBuf> {
@@ -573,6 +590,10 @@ impl GhosttyPane {
     }
 
     pub fn grab_focus(&self) {
+        // VTE's IMContext does not exist until realize; hidden tabs must not take focus.
+        if !self.widget.is_mapped() {
+            return;
+        }
         #[cfg(target_os = "macos")]
         focus_native_terminal(&self.widget);
         self.widget.grab_focus();
@@ -1281,6 +1302,7 @@ impl GhosttyPane {
             search_entry,
             pid,
             program_status_generation,
+            agent_connection: Rc::new(RefCell::new(None)),
             last_polled_cwd: Rc::new(RefCell::new(None)),
             scrollback_dirty,
             terminal_scrollbar: scrollbar,
@@ -3075,7 +3097,7 @@ fn install_ibus_nav_workaround(term: &vte::Terminal, smart_page_enabled: bool) {
 /// Requires `--talk-name=org.freedesktop.Flatpak` in the Flatpak
 /// manifest's finish-args so `flatpak-spawn` can reach the session
 /// helper.
-fn default_shell_argv() -> Vec<String> {
+pub(super) fn default_shell_argv() -> Vec<String> {
     if is_flatpak_sandbox() {
         vec![
             "flatpak-spawn".into(),
@@ -3580,6 +3602,58 @@ mod tests {
         })
         .await
         .expect("child-exited never arrived")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn hidden_terminal_defers_focus_until_mapped_before_input_changes() {
+        let slot = Rc::new(RefCell::new(None));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let sink = slot.clone();
+        callbacks.on_child_exited = Rc::new(RefCell::new(move |exit| {
+            *sink.borrow_mut() = Some(exit);
+        }));
+        let direct_pty = bypass_pty_tee_for_test();
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            1000,
+            callbacks,
+        )
+        .unwrap();
+        drop(direct_pty);
+        let stack = gtk::Stack::new();
+        stack.set_transition_type(gtk::StackTransitionType::None);
+        stack.add_named(&gtk::Label::new(Some("foreground")), Some("foreground"));
+        stack.add_named(&pane.container, Some("background"));
+        let window = gtk::Window::builder().child(&stack).build();
+        window.present();
+        glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(!pane.widget.is_realized());
+        pane.grab_focus();
+        let hidden_has_focus = pane.widget.has_focus();
+        // VTE 0.76 dereferences its absent IMContext if a hidden focused widget changes input.
+        if !hidden_has_focus {
+            pane.widget.set_input_enabled(false);
+            pane.widget.set_input_enabled(true);
+        }
+        stack.set_visible_child_name("background");
+        glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(pane.widget.is_mapped());
+        pane.grab_focus();
+        assert!(pane.widget.has_focus());
+        pane.widget.set_input_enabled(false);
+        pane.widget.set_input_enabled(true);
+        window.close();
+        pane.close_pty();
+        wait_for_exit(&slot).await;
+        assert!(
+            !hidden_has_focus,
+            "hidden terminal took focus before VTE realized its IMContext"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

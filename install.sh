@@ -197,7 +197,7 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libthorvg-1\.so' \
 fi
 
 echo "==> building flowmux (fast profile)"
-cargo build --profile fast -p flowmux -p flowmux-cli -p flowmux-md-viewer
+cargo build --profile fast -p flowmux -p flowmux-cli -p flowmux-md-viewer -p flowmux-daemon
 
 # The desktop entry uses the first installation directory.
 install -d "$HOME/.local/bin"
@@ -208,6 +208,7 @@ for dir in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
             target/fast/flowmux \
             target/fast/flowmuxctl \
             target/fast/flowmux-md-viewer \
+            target/fast/flowmux-daemon \
             "$dir/"
         echo "==> installed to $dir"
         [ -n "$PRIMARY_BIN_DIR" ] || PRIMARY_BIN_DIR="$dir"

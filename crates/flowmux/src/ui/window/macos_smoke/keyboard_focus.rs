@@ -106,6 +106,9 @@ pub(super) async fn check(
         Some(editor_a),
         "a queued notification restored the previous pane"
     );
+    // GTK moves the focus itself when the focused widget is hidden. This check is about Flowmux's
+    // deferred request, so hide it unfocused.
+    controller.focus_pane(terminal_b);
     editors[0].focus_widget().set_visible(false);
     controller.focus_pane(editor_a);
     controller.focus_pane(terminal_a);
@@ -113,7 +116,10 @@ pub(super) async fn check(
     glib::timeout_future(Duration::from_millis(100)).await;
     assert!(
         terminals[0].widget.is_focus() && !editors[0].has_native_focus(),
-        "a deferred focus request replaced the newer pane selection"
+        "a deferred focus request replaced the newer pane selection: terminal focus {}, editor native focus {}, editor widget focus {}",
+        terminals[0].widget.is_focus(),
+        editors[0].has_native_focus(),
+        editors[0].focus_widget().is_focus()
     );
 
     for (index, editor) in editors.iter().enumerate() {

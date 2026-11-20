@@ -380,6 +380,8 @@ impl SshWorkspaceConfig {
                 tmux_session: self.tmux.then(|| format!("flowmux-{}", id.0.simple())),
             },
             scrollback: None,
+            agent_binding: None,
+            shell_binding: None,
             agent: None,
         }
     }

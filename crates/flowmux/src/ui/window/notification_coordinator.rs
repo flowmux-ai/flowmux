@@ -45,6 +45,53 @@ impl NotificationCoordinator {
         self.tokio_handle.clone()
     }
 
+    pub(super) fn deliver_managed_notification(&self, entry: NotificationEntry, bridge: Bridge) {
+        let (Some(handle), Some(binding)) = (self.tokio_handle.clone(), entry.managed) else {
+            return;
+        };
+        let notifier = self.notifier.clone();
+        glib::MainContext::default().spawn_local(in_tokio_runtime(handle, async move {
+            let claimed = crate::agent_host::notification_request(
+                flowmux_ipc::agent_host::HostRequest::ClaimNotification {
+                    epoch: binding.epoch,
+                    id: entry.id,
+                },
+            )
+            .await;
+            if !matches!(
+                claimed,
+                Ok(flowmux_ipc::agent_host::HostResponse::NotificationClaimed { claimed: true })
+            ) {
+                return;
+            }
+            let Some(notifier) = ensure_desktop_notifier(&notifier).await else {
+                return;
+            };
+            let notification = flowmux_core::Notification {
+                id: entry.id,
+                title: entry.title,
+                body: entry.body,
+                level: entry.level,
+                source_pane: entry.pane,
+                created_at: entry.created_at,
+                read: false,
+            };
+            match notifier.send(&notification).await {
+                Ok(desktop_id) => {
+                    let _ = bridge
+                        .send(GtkCommand::SetNotificationDesktopId {
+                            id: entry.id,
+                            desktop_id,
+                        })
+                        .await;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Agent desktop notification failed; not retried")
+                }
+            }
+        }));
+    }
+
     pub(super) fn refresh_launcher_badge(&self) {
         // Controllers without a runtime have local notification state only.
         let Some(handle) = self.tokio_handle.clone() else {

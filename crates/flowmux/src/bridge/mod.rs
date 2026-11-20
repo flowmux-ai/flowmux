@@ -302,6 +302,30 @@ pub enum WsNav {
 /// Commands from tokio to the GTK main loop, with optional oneshot replies.
 #[derive(Debug)]
 pub enum GtkCommand {
+    BindShell {
+        surface: SurfaceId,
+        binding: flowmux_core::AgentViewBinding,
+        pid: Option<u32>,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
+    CommitAgentViewReady {
+        surface: SurfaceId,
+        token: uuid::Uuid,
+        key: flowmux_ipc::agent_host::AttachmentKey,
+        sequence: u64,
+        relay_pid: u32,
+        relay_start: u64,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
+    CheckAgentView {
+        context: flowmux_ipc::agent_host::AgentViewReport,
+        ack: oneshot::Sender<bool>,
+    },
+    InAgentView {
+        context: flowmux_ipc::agent_host::AgentViewReport,
+        command: Box<GtkCommand>,
+        rejected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    },
     /// Finish prior mutations, save the final state, then destroy the window.
     CloseWindow,
     /// Show the options dialog from the GTK side. Changes apply immediately;
@@ -311,6 +335,14 @@ pub enum GtkCommand {
     ShowCommandPalette,
     /// Search retained output across all terminal tabs in this window.
     ShowTerminalOutputSearch,
+    /// Create model + widgets in the ordered GTK lane after source admission.
+    CreateWorkspace {
+        name: Option<String>,
+        root: std::path::PathBuf,
+        team: bool,
+        activate: bool,
+        ack: oneshot::Sender<Result<WorkspaceId, String>>,
+    },
     /// Render a freshly-created workspace in the sidebar + open its first pane.
     WorkspaceCreated {
         id: WorkspaceId,
@@ -392,6 +424,26 @@ pub enum GtkCommand {
     NewSurface {
         pane: PaneId,
     },
+    OpenAgentView {
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+        ack: oneshot::Sender<Result<(PaneId, SurfaceId), String>>,
+    },
+    AgentRegistryChanged,
+    ManagedNotificationError {
+        message: String,
+    },
+    ControlManagedAgent {
+        binding: flowmux_core::AgentViewBinding,
+        mode: flowmux_ipc::agent_host::TerminateMode,
+        window: gtk::glib::SendWeakRef<adw::ApplicationWindow>,
+    },
+    OpenManagedAgent {
+        pane: Option<PaneId>,
+        tab_anchor: Option<(SurfaceId, bool)>,
+        payload: crate::ui::workspace_view::ManagedAgentDndPayload,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
     /// Open a new tab in the target pane and run tig in its shell.
     OpenTig {
         pane: PaneId,
@@ -414,6 +466,7 @@ pub enum GtkCommand {
     ToggleFileBrowser {
         pane: Option<PaneId>,
     },
+    NewAgent,
     SessionPanel(crate::ui::session_panel::SessionPanelAction),
     SessionFlow(crate::ui::session_flow::FlowAction),
     OpenDiffReview {
@@ -509,8 +562,21 @@ pub enum GtkCommand {
         surface: SurfaceId,
         ack: oneshot::Sender<Result<(), String>>,
     },
+    /// A committed surface supersedes this live or restored binding.
+    CloseMovedAgentView {
+        pane: PaneId,
+        surface: SurfaceId,
+        owner: flowmux_ipc::agent_host::AgentViewOwner,
+        terminal_generation: uuid::Uuid,
+    },
     /// Close a pane-local surface tab.
     CloseSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+        ack: oneshot::Sender<Result<(), String>>,
+    },
+    /// The tab's close button: a managed agent tab asks whether to keep the agent running.
+    CloseSurfaceButton {
         pane: PaneId,
         surface: SurfaceId,
         ack: oneshot::Sender<Result<(), String>>,
@@ -914,7 +980,15 @@ pub enum GtkCommand {
 
 #[derive(Clone)]
 pub struct Bridge {
+    agent_context: Option<(
+        flowmux_ipc::agent_host::AgentViewReport,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    )>,
     pub tx: async_channel::Sender<GtkCommand>,
+    pub agent_idle_timeout: tokio::sync::watch::Sender<u32>,
+    pub agent_registry: tokio::sync::watch::Sender<crate::agent_host::RegistrySnapshot>,
+    pub agent_view_reports:
+        tokio::sync::watch::Sender<Vec<flowmux_ipc::agent_host::AgentViewReport>>,
     priority_tx: async_channel::Sender<GtkCommand>,
     control_tx: async_channel::Sender<GtkCommand>,
 }
@@ -976,6 +1050,16 @@ impl BridgeReceiver {
 }
 
 impl Bridge {
+    pub fn in_agent_view(
+        &self,
+        context: flowmux_ipc::agent_host::AgentViewReport,
+    ) -> (Self, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        let rejected = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut scoped = self.clone();
+        scoped.agent_context = Some((context, rejected.clone()));
+        (scoped, rejected)
+    }
+
     /// Enqueue a GTK callback's command even when refresh work fills the queue.
     pub fn send_from_ui(&self, command: GtkCommand) {
         if let Err(async_channel::TrySendError::Full(command)) = self.tx.try_send(command) {
@@ -992,7 +1076,11 @@ impl Bridge {
         let (control_tx, control) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
         (
             Self {
+                agent_context: None,
                 tx,
+                agent_idle_timeout: tokio::sync::watch::channel(30).0,
+                agent_registry: tokio::sync::watch::channel(Default::default()).0,
+                agent_view_reports: tokio::sync::watch::channel(Default::default()).0,
                 priority_tx,
                 control_tx,
             },
@@ -1004,8 +1092,8 @@ impl Bridge {
         )
     }
 
-    /// Status reads and hook telemetry can run while a layout mutation waits
-    /// for I/O or confirmation. These commands cannot close or replace widgets.
+    /// Status reads, hook telemetry and relay admission can run while a layout
+    /// mutation waits. These commands cannot close or replace widgets.
     /// Keep other effects on the ordered lane, including raw JS.
     // `SendError` hands the unsent `GtkCommand` back; callers rely on that.
     #[allow(clippy::result_large_err)]
@@ -1014,7 +1102,10 @@ impl Bridge {
         command: GtkCommand,
     ) -> Result<(), async_channel::SendError<GtkCommand>> {
         let control = match &command {
-            GtkCommand::PaneReadScreen { .. }
+            // Launch handlers wait for admission before yielding the ordered lane.
+            GtkCommand::CommitAgentViewReady { .. }
+            | GtkCommand::CheckAgentView { .. }
+            | GtkCommand::PaneReadScreen { .. }
             | GtkCommand::ListNotifications { .. }
             | GtkCommand::QueryAgentSurfaceVisible { .. }
             | GtkCommand::QueryTerminalAgentPids { .. }
@@ -1028,6 +1119,15 @@ impl Bridge {
             } => true,
             GtkCommand::BrowserAction { op, .. } => op.is_query(),
             _ => false,
+        };
+        let command = if let Some((context, rejected)) = &self.agent_context {
+            GtkCommand::InAgentView {
+                context: context.clone(),
+                command: Box::new(command),
+                rejected: rejected.clone(),
+            }
+        } else {
+            command
         };
         if control {
             self.control_tx.send(command).await
@@ -1110,13 +1210,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hook_updates_bypass_a_full_mutation_queue() {
+    async fn hook_updates_and_relay_admission_bypass_a_full_mutation_queue() {
         let (bridge, rx) = Bridge::new();
         for _ in 0..GTK_COMMAND_QUEUE_CAPACITY {
             bridge.tx.try_send(GtkCommand::CloseWindow).unwrap();
         }
         let (ack, _) = oneshot::channel();
+        let (ready_ack, _) = oneshot::channel();
         for command in [
+            GtkCommand::CommitAgentViewReady {
+                surface: SurfaceId::new(),
+                token: uuid::Uuid::new_v4(),
+                key: flowmux_ipc::agent_host::AttachmentKey {
+                    instance: flowmux_core::AgentInstanceId::new(),
+                    epoch: uuid::Uuid::new_v4(),
+                    lease: uuid::Uuid::new_v4(),
+                    generation: 1,
+                },
+                sequence: 0,
+                relay_pid: 42,
+                relay_start: 1,
+                ack: ready_ack,
+            },
             GtkCommand::SetAgentStatus {
                 workspace: WorkspaceId::new(),
             },
@@ -1133,7 +1248,7 @@ mod tests {
         ] {
             tokio::time::timeout(std::time::Duration::from_millis(100), bridge.send(command))
                 .await
-                .expect("hook updates must not wait for mutation capacity")
+                .expect("hook updates and admission must not wait for mutation capacity")
                 .unwrap();
             rx.recv_control().await.unwrap();
         }

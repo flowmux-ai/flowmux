@@ -3,7 +3,10 @@
 //! The GUI wraps the handler and supplies widget effects through its GTK
 //! command bridge.
 
+pub mod agent_host;
 pub mod handler;
+#[cfg(target_os = "linux")]
+pub mod process_scope;
 pub mod state_store;
 pub mod tmux_compat;
 

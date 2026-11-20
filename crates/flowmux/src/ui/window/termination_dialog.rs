@@ -162,6 +162,21 @@ impl TerminationPresenter {
                 tracing::info!(pane = %exit.pane, status = exit.status, "child exited");
                 return;
             }
+            // Detached tabs remain registered; resolve the current pane before classifying relay exit.
+            let current_pane = presenter
+                .pane_registry
+                .upgrade()
+                .and_then(|registry| registry.borrow().pane_for_surface(exit.surface));
+            if let Some(pane) = current_pane {
+                if presenter
+                    .store
+                    .surface_agent_binding(pane, exit.surface)
+                    .await
+                    .is_some()
+                {
+                    return;
+                }
+            }
             // A tab can move or close while evidence is collected.
             let torn_title = presenter
                 .torn_off_terminals
@@ -180,6 +195,14 @@ impl TerminationPresenter {
                 };
                 let pane = registry.borrow().pane_for_surface(exit.surface);
                 let Some(pane) = pane else { return };
+                if presenter
+                    .store
+                    .surface_agent_binding(pane, exit.surface)
+                    .await
+                    .is_some()
+                {
+                    return;
+                }
                 let workspace = registry.borrow().workspace_of_pane(pane);
                 let Some(workspace) = workspace else { return };
                 let Some(ws) = presenter.store.get_workspace(workspace).await else {
@@ -256,6 +279,15 @@ impl TerminationPresenter {
                 } else {
                     None
                 };
+                // The tab can close during the lookups above, when its report was neither queued
+                // nor shown and so was not dismissed.
+                if torn_window.is_none()
+                    && !presenter.pane_registry.upgrade().is_some_and(|registry| {
+                        registry.borrow().pane_for_surface(report.surface).is_some()
+                    })
+                {
+                    continue;
+                }
                 let (dialog, rx) = build_termination_dialog(&report, last.as_deref());
                 let Some(window) = torn_window.clone().or_else(|| presenter.window.upgrade())
                 else {
@@ -424,6 +456,32 @@ mod tests {
         let (dialog, _) = build_termination_dialog(&report, Some("ws"));
         assert_eq!(dialog.response_label("close"), "Close workspace");
         assert!(dialog.body().contains("last tab in workspace ws"));
+    }
+
+    #[gtk::test]
+    async fn managed_relay_signal_preserves_binding_without_termination_dialog() {
+        let (c, ws, pane) = setup("com.flowmux.App.UiTest.ManagedRelayExit").await;
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let (_, _, surface, _) = c
+            .store
+            .ensure_agent_view(pane, binding, "Agent".into(), "/tmp".into())
+            .await
+            .unwrap();
+        c.attach_or_rerender_surface(ws, pane, surface, None)
+            .await
+            .unwrap();
+        signal(&c, pane, surface, libc::SIGTERM, false).await;
+        glib::timeout_future(Duration::from_millis(100)).await;
+        assert!(c.current_termination_dialog().is_none());
+        assert!(!c.termination_presenting.get());
+        assert_eq!(
+            c.store.surface_agent_binding(pane, surface).await,
+            Some(binding)
+        );
+        c.window.destroy();
     }
 
     #[gtk::test]

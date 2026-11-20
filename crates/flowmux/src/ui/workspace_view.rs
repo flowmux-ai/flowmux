@@ -16,6 +16,7 @@ use flowmux_core::{
     SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceId,
 };
 use gtk::prelude::*;
+use vte::prelude::TerminalExt;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "tab_drag_smoke.rs"]
@@ -30,6 +31,54 @@ use std::time::{Duration, Instant};
 pub(crate) const TAB_DND_MIME: &str = "application/x-flowmux-tab";
 pub(crate) const TAB_DND_PAYLOAD_MAX: usize = 64 * 1024;
 const FILE_DND_PREFIX: &str = "flowmux-file|";
+const AGENT_TAB_DND_PREFIX: &str = "flowmux-agent-tab:";
+const MANAGED_AGENT_DND_PREFIX: &str = "flowmux-agent-v1:";
+pub(crate) const MANAGED_AGENT_DND_MIME: &str = "application/x-flowmux-agent-instance";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAgentDndPayload {
+    pub version: u8,
+    pub host: PathBuf,
+    pub instance: flowmux_core::AgentInstanceId,
+    pub epoch: uuid::Uuid,
+    #[serde(skip)]
+    pub(crate) source_tab: Option<(PaneId, SurfaceId)>,
+}
+
+impl ManagedAgentDndPayload {
+    pub fn local(agent: &flowmux_ipc::agent_host::AgentInstance) -> Self {
+        Self {
+            version: 1,
+            host: flowmux_config::paths::agent_host_socket(),
+            instance: agent.instance,
+            epoch: agent.epoch,
+            source_tab: None,
+        }
+    }
+
+    pub fn validate_local(&self) -> Result<(), String> {
+        if self.version != 1 || self.host != flowmux_config::paths::agent_host_socket() {
+            return Err("Agent belongs to a different Host or protocol version".into());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn managed_agent_dnd_content_provider(
+    payload: &ManagedAgentDndPayload,
+) -> gtk::gdk::ContentProvider {
+    let text = format!(
+        "{MANAGED_AGENT_DND_PREFIX}{}",
+        serde_json::to_string(payload).expect("agent identity serializes")
+    );
+    let bytes = gtk::glib::Bytes::from_owned(text.clone().into_bytes());
+    gtk::gdk::ContentProvider::new_union(&[
+        gtk::gdk::ContentProvider::for_bytes(MANAGED_AGENT_DND_MIME, &bytes),
+        gtk::gdk::ContentProvider::for_value(&text.to_value()),
+    ])
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct TabDndPayload {
@@ -40,18 +89,55 @@ pub(crate) struct TabDndPayload {
 
 enum PaneDndPayload {
     Tab(Box<TabDndPayload>),
+    AgentTab(Box<TabDndPayload>),
+    ManagedAgent(ManagedAgentDndPayload),
     File(PathBuf),
+}
+
+impl PaneDndPayload {
+    fn resolve_external_tab(self, external: bool) -> Self {
+        let Self::Tab(tab) = &self else {
+            return self;
+        };
+        let binding = tab
+            .surface
+            .as_ref()
+            .filter(|surface| {
+                external
+                    && surface.id == tab.src_surface
+                    && matches!(surface.kind, SurfaceKind::Terminal { .. })
+            })
+            .and_then(|surface| surface.agent_binding);
+        let Some(binding) = binding else {
+            return self;
+        };
+        Self::ManagedAgent(ManagedAgentDndPayload {
+            version: 1,
+            host: flowmux_config::paths::agent_host_socket(),
+            instance: binding.instance,
+            epoch: binding.epoch,
+            source_tab: Some((tab.src_pane, tab.src_surface)),
+        })
+    }
 }
 
 pub(crate) fn tab_dnd_content_formats() -> gtk::gdk::ContentFormats {
     gtk::gdk::ContentFormats::builder()
         .add_mime_type(TAB_DND_MIME)
+        .add_mime_type(MANAGED_AGENT_DND_MIME)
         .add_type(gtk::glib::types::Type::STRING)
         .build()
 }
 
 pub(crate) fn tab_dnd_formats_accept_payload(formats: &gtk::gdk::ContentFormats) -> bool {
-    formats.contain_mime_type(TAB_DND_MIME) || formats.contains_type(gtk::glib::types::Type::STRING)
+    formats.contain_mime_type(TAB_DND_MIME)
+        || formats.contain_mime_type(MANAGED_AGENT_DND_MIME)
+        || formats.contains_type(gtk::glib::types::Type::STRING)
+}
+
+// Only an in-process source can reset the controller's drag state on begin.
+pub(crate) fn external_tab_drop(drop: Option<gtk::gdk::Drop>) -> bool {
+    drop.is_some_and(|drop| drop.drag().is_none())
 }
 
 fn tab_dnd_content_provider(payload: String) -> gtk::gdk::ContentProvider {
@@ -59,6 +145,85 @@ fn tab_dnd_content_provider(payload: String) -> gtk::gdk::ContentProvider {
     let mime_provider = gtk::gdk::ContentProvider::for_bytes(TAB_DND_MIME, &bytes);
     let value_provider = gtk::gdk::ContentProvider::for_value(&payload.to_value());
     gtk::gdk::ContentProvider::new_union(&[mime_provider, value_provider])
+}
+
+pub(crate) fn agent_tab_dnd_content_provider(
+    pane: PaneId,
+    surface: SurfaceId,
+) -> gtk::gdk::ContentProvider {
+    // Resolve the live tab at drop time; a sidebar row must not copy a PTY.
+    tab_dnd_content_provider(format!("{AGENT_TAB_DND_PREFIX}{pane}|{surface}"))
+}
+
+pub(crate) fn prepare_agent_tab_drag(
+    source: &gtk::DragSource,
+    widget: &impl IsA<gtk::Widget>,
+    drop_state: (Rc<Cell<bool>>, Rc<Cell<bool>>),
+) {
+    let widget = widget.as_ref().downgrade();
+    let suspended = Rc::new(RefCell::new(None));
+    let cancel_keys = Rc::new(RefCell::new(Vec::<gtk::EventControllerLegacy>::new()));
+    let for_begin = suspended.clone();
+    let keys_for_begin = cancel_keys.clone();
+    source.connect_drag_begin(move |source, drag| {
+        drop_state.0.set(false);
+        drop_state.1.set(false);
+        for_begin.borrow_mut().take();
+        if let Some(window) = widget
+            .upgrade()
+            .and_then(|w| w.root())
+            .and_downcast::<gtk::Window>()
+        {
+            // Drag events can cross native surfaces before reaching the window.
+            let icon = gtk::DragIcon::for_drag(drag);
+            for target in [window.clone().upcast::<gtk::Widget>(), icon.upcast()] {
+                let key = gtk::EventControllerLegacy::new();
+                key.set_propagation_phase(gtk::PropagationPhase::Capture);
+                key.set_propagation_limit(gtk::PropagationLimit::None);
+                let source = source.downgrade();
+                key.connect_event(move |_, event| {
+                    if event.event_type() == gtk::gdk::EventType::KeyPress
+                        && event
+                            .downcast_ref::<gtk::gdk::KeyEvent>()
+                            .is_some_and(|key| key.keyval() == gtk::gdk::Key::Escape)
+                    {
+                        if let Some(drag) = source.upgrade().and_then(|source| source.drag()) {
+                            // Cancel the backend grab as well as the GTK source.
+                            drag.emit_by_name::<()>(
+                                "cancel",
+                                &[&gtk::gdk::DragCancelReason::UserCancelled],
+                            );
+                            return gtk::glib::Propagation::Stop;
+                        }
+                    }
+                    gtk::glib::Propagation::Proceed
+                });
+                target.add_controller(key.clone());
+                keys_for_begin.borrow_mut().push(key);
+            }
+            *for_begin.borrow_mut() =
+                Some(crate::ui::browser_pane::suspend_native_browser_views_for_window(&window));
+        }
+    });
+    let for_end = suspended.clone();
+    let keys_for_end = cancel_keys.clone();
+    source.connect_drag_end(move |_, _, _| {
+        for key in keys_for_end.borrow_mut().drain(..) {
+            if let Some(widget) = key.widget() {
+                widget.remove_controller(&key);
+            }
+        }
+        for_end.borrow_mut().take();
+    });
+    source.connect_drag_cancel(move |_, _, _| {
+        for key in cancel_keys.borrow_mut().drain(..) {
+            if let Some(widget) = key.widget() {
+                widget.remove_controller(&key);
+            }
+        }
+        suspended.borrow_mut().take();
+        false
+    });
 }
 
 pub(crate) fn file_dnd_content_provider(path: &Path) -> Option<gtk::gdk::ContentProvider> {
@@ -210,6 +375,8 @@ pub struct PaneRegistry {
     /// re-adopted by the rebuilt tree (see `detach_workspace_editors`).
     pending_editor_reuse: HashMap<SurfaceId, EditorPane>,
     pending_terminal_reuse: HashMap<SurfaceId, PaneTerminal>,
+    pub(crate) pending_agent_takeovers:
+        HashMap<SurfaceId, super::agent_connection::AgentViewTakeover>,
     // macOS canonical PTYs truncate long resume commands typed after spawn.
     #[cfg(target_os = "macos")]
     pub(crate) pending_terminal_commands: HashMap<SurfaceId, String>,
@@ -478,7 +645,12 @@ impl PaneRegistry {
                 .filter(|(_, terminal)| {
                     !terminal.is_ssh && terminal.announced_current_dir().is_none()
                 })
-                .map(|(surface, terminal)| (terminal.id(), *surface, None, terminal.pid.get()))
+                .map(|(surface, terminal)| {
+                    let root = terminal
+                        .process_root()
+                        .and_then(|pid| i32::try_from(pid).ok());
+                    (terminal.id(), *surface, None, root)
+                })
                 .collect()
         }
     }
@@ -509,8 +681,7 @@ impl PaneRegistry {
                 if terminal.is_ssh {
                     return None;
                 }
-                let pid = terminal.pid.get()?;
-                (pid > 0).then_some((*surface, pid as u32))
+                Some((*surface, terminal.process_root()?))
             })
             .collect()
     }
@@ -909,7 +1080,11 @@ impl PaneRegistry {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn update_tab_drag_preview(&self, source: PaneId, point: Option<(&gtk::Widget, f64, f64)>) {
+    pub fn update_tab_drag_preview(
+        &self,
+        source: Option<PaneId>,
+        point: Option<(&gtk::Widget, f64, f64)>,
+    ) {
         for (preview, zone) in self.pane_drop_previews.values() {
             if zone.replace(PaneDropZone::None) != PaneDropZone::None {
                 preview.queue_draw();
@@ -920,8 +1095,9 @@ impl PaneRegistry {
             tab.remove_css_class("flowmux-pane-tab-drop-after");
         }
         let Some((root, x, y)) = point else { return };
+        let source_is_ssh = source.is_some_and(|pane| self.is_ssh_pane(pane));
         if let Some((pane, _, index, after)) = self.tab_at_root_point(root, x, y) {
-            if !self.is_ssh_pane(source) && !self.is_ssh_pane(pane) {
+            if !source_is_ssh && !self.is_ssh_pane(pane) {
                 self.surface_tabs[&pane][index].1.add_css_class(if after {
                     "flowmux-pane-tab-drop-after"
                 } else {
@@ -929,9 +1105,13 @@ impl PaneRegistry {
                 });
             }
         } else if let Some((pane, fx, fy)) = self.pane_at_root_point(root, x, y) {
-            if !self.is_ssh_pane(source) && !self.is_ssh_pane(pane) {
+            if !source_is_ssh && !self.is_ssh_pane(pane) {
                 if let Some((preview, zone)) = self.pane_drop_previews.get(&pane) {
-                    zone.set(drop_zone(fx, fy));
+                    zone.set(if source.is_some() {
+                        drop_zone(fx, fy)
+                    } else {
+                        PaneDropZone::Tab
+                    });
                     preview.queue_draw();
                 }
             }
@@ -2091,6 +2271,10 @@ fn attach_tab_context_menu(
 }
 
 pub(crate) fn parse_tab_dnd_payload(payload: &str) -> Result<TabDndPayload, &'static str> {
+    let agent_tab = payload.starts_with(AGENT_TAB_DND_PREFIX);
+    let payload = payload
+        .strip_prefix(AGENT_TAB_DND_PREFIX)
+        .unwrap_or(payload);
     let mut parts = payload.splitn(3, '|');
     let Some(src_pane_str) = parts.next() else {
         return Err("missing separator");
@@ -2109,6 +2293,9 @@ pub(crate) fn parse_tab_dnd_payload(payload: &str) -> Result<TabDndPayload, &'st
         .map(serde_json::from_str::<PaneSurface>)
         .transpose()
         .map_err(|_| "invalid surface model")?;
+    if agent_tab && surface.is_some() {
+        return Err("agent drag cannot copy a surface");
+    }
     Ok(TabDndPayload {
         src_pane,
         src_surface,
@@ -2117,6 +2304,21 @@ pub(crate) fn parse_tab_dnd_payload(payload: &str) -> Result<TabDndPayload, &'st
 }
 
 fn parse_pane_dnd_payload(payload: &str) -> Result<PaneDndPayload, &'static str> {
+    if payload.len() > TAB_DND_PAYLOAD_MAX {
+        return Err("payload too large");
+    }
+    if let Some(json) = payload.strip_prefix(MANAGED_AGENT_DND_PREFIX) {
+        let identity: ManagedAgentDndPayload =
+            serde_json::from_str(json).map_err(|_| "invalid agent identity")?;
+        identity
+            .validate_local()
+            .map_err(|_| "foreign agent Host or version")?;
+        return Ok(PaneDndPayload::ManagedAgent(identity));
+    }
+    if payload.starts_with(AGENT_TAB_DND_PREFIX) {
+        return parse_tab_dnd_payload(payload)
+            .map(|payload| PaneDndPayload::AgentTab(Box::new(payload)));
+    }
     if let Some(path) = payload.strip_prefix(FILE_DND_PREFIX) {
         return serde_json::from_str(path)
             .map(PaneDndPayload::File)
@@ -2242,6 +2444,16 @@ mod tab_dnd_tests {
 
     #[gtk::test]
     async fn surface_tab_releases_widget_and_callbacks() {
+        async fn ready(mut predicate: impl FnMut() -> bool) {
+            gtk::glib::future_with_timeout(Duration::from_secs(5), async {
+                while !predicate() {
+                    gtk::glib::timeout_future(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("tab menu did not settle");
+        }
+
         let sentinel = Rc::new(());
         let weak_sentinel = Rc::downgrade(&sentinel);
         let mut callbacks = PaneCallbacks::noop_for_test();
@@ -2264,13 +2476,7 @@ mod tab_dnd_tests {
         window.set_default_size(640, 480);
         window.set_child(Some(&tab));
         window.present();
-        // A synthetic click can run before the first allocation on a slow runner.
-        for _ in 0..100 {
-            if tab.is_mapped() && tab.width() > 0 && tab.height() > 0 {
-                break;
-            }
-            gtk::glib::timeout_future(Duration::from_millis(10)).await;
-        }
+        ready(|| tab.is_mapped() && tab.width() > 0 && tab.height() > 0).await;
         assert!(tab.is_mapped() && tab.width() > 0 && tab.height() > 0);
         let controllers = tab.observe_controllers();
         let click = (0..controllers.n_items())
@@ -2288,18 +2494,22 @@ mod tab_dnd_tests {
         let submenu = move_button.popover().unwrap();
         assert_eq!(submenu.position(), gtk::PositionType::Right);
         let weak_submenu = submenu.downgrade();
-        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        // Synthetic clicks must wait for the parent popup's native allocation.
+        ready(|| move_button.is_mapped() && move_button.width() > 0 && move_button.height() > 0)
+            .await;
         let toggle = move_button
             .first_child()
             .and_downcast::<gtk::ToggleButton>()
             .unwrap();
         toggle.emit_clicked();
-        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        ready(|| submenu.is_mapped() && submenu.width() > 0 && submenu.height() > 0).await;
         assert!(submenu.is_mapped());
         toggle.emit_clicked();
         assert!(!move_button.is_active());
+        ready(|| !submenu.is_mapped()).await;
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
         toggle.emit_clicked();
-        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        ready(|| submenu.is_mapped() && submenu.width() > 0 && submenu.height() > 0).await;
         assert!(submenu.is_mapped());
         drop(toggle);
         let destination_button = submenu
@@ -2343,6 +2553,41 @@ mod tab_dnd_tests {
     }
 
     #[test]
+    fn managed_agent_payload_is_scoped_versioned_and_cannot_copy_a_tab() {
+        let identity = ManagedAgentDndPayload {
+            version: 1,
+            host: flowmux_config::paths::agent_host_socket(),
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+            source_tab: None,
+        };
+        let encode = |value: &ManagedAgentDndPayload| {
+            format!(
+                "{MANAGED_AGENT_DND_PREFIX}{}",
+                serde_json::to_string(value).unwrap()
+            )
+        };
+        let text = encode(&identity);
+        let PaneDndPayload::ManagedAgent(parsed) = parse_pane_dnd_payload(&text).unwrap() else {
+            panic!("expected managed identity")
+        };
+        assert_eq!(parsed.instance, identity.instance);
+        assert_eq!(parsed.epoch, identity.epoch);
+        assert!(parse_tab_dnd_payload(&text).is_err());
+        let mut foreign = identity.clone();
+        foreign.version = 2;
+        assert!(parse_pane_dnd_payload(&encode(&foreign)).is_err());
+        foreign = identity.clone();
+        foreign.host = "/foreign/host.sock".into();
+        assert!(parse_pane_dnd_payload(&encode(&foreign)).is_err());
+        let mut json = serde_json::to_value(&identity).unwrap();
+        json["surface"] = serde_json::json!(SurfaceId::new());
+        assert!(parse_pane_dnd_payload(&format!("{MANAGED_AGENT_DND_PREFIX}{json}")).is_err());
+        assert!(parse_pane_dnd_payload(&format!("{MANAGED_AGENT_DND_PREFIX}{{}}")).is_err());
+        assert!(parse_pane_dnd_payload(&"x".repeat(TAB_DND_PAYLOAD_MAX + 1)).is_err());
+    }
+
+    #[test]
     fn parse_tab_dnd_payload_round_trips() {
         let pane = PaneId::new();
         let surface = SurfaceId::new();
@@ -2352,6 +2597,20 @@ mod tab_dnd_tests {
         assert_eq!(parsed.src_pane, pane);
         assert_eq!(parsed.src_surface, surface);
         assert!(parsed.surface.is_none());
+    }
+
+    #[test]
+    fn agent_tab_drag_has_a_distinct_payload_without_a_surface_copy() {
+        let pane = PaneId::new();
+        let surface = SurfaceId::new();
+        let text = format!("flowmux-agent-tab:{pane}|{surface}");
+        let PaneDndPayload::AgentTab(parsed) = parse_pane_dnd_payload(&text).unwrap() else {
+            panic!("agent rows must retain their pane-body drop semantics");
+        };
+        assert_eq!((parsed.src_pane, parsed.src_surface), (pane, surface));
+        assert!(parsed.surface.is_none());
+        assert!(parse_pane_dnd_payload("flowmux-agent-tab:not-an-id").is_err());
+        assert!(parse_pane_dnd_payload("flowmux-agent-tab:").is_err());
     }
 
     #[test]
@@ -2369,6 +2628,7 @@ mod tab_dnd_tests {
         assert_eq!(parsed.src_surface, surface.id);
         let parsed_surface = parsed.surface.expect("surface model");
         assert_eq!(parsed_surface.title, "Docs");
+        assert!(parse_tab_dnd_payload(&format!("{AGENT_TAB_DND_PREFIX}{payload}")).is_err());
     }
 
     #[test]
@@ -3038,7 +3298,8 @@ fn attach_tab_dnd_handlers(
     let committed_for_drop = committed_tab_drop.clone();
     let split_candidate_for_drop = split_candidate.clone();
     let is_ssh_pane = callbacks.is_ssh_pane.clone();
-    drop_target.connect_drop(move |_, value, x, _y| {
+    drop_target.connect_drop(move |target, value, x, _y| {
+        let external = external_tab_drop(target.current_drop());
         let Some(tab_for_drop) = tab_for_drop.upgrade() else {
             return false;
         };
@@ -3047,7 +3308,7 @@ fn attach_tab_dnd_handlers(
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-after");
         let payload = match value.get::<String>() {
             Ok(payload) => match parse_pane_dnd_payload(&payload) {
-                Ok(payload) => payload,
+                Ok(payload) => payload.resolve_external_tab(external),
                 Err(error) => {
                     tracing::warn!(error, "tab drop: payload invalid");
                     return false;
@@ -3059,9 +3320,25 @@ fn attach_tab_dnd_handlers(
             }
         };
         let (src_pane, src_surface, src_surface_model) = match payload {
-            PaneDndPayload::Tab(payload) => {
+            PaneDndPayload::ManagedAgent(payload) => {
+                if is_ssh_pane(target_pane) {
+                    return false;
+                }
                 saw_target_for_drop.set(true);
-                if committed_for_drop.replace(true) {
+                if !external && committed_for_drop.replace(true) {
+                    return false;
+                }
+                split_candidate_for_drop.borrow_mut().take();
+                return dispatch_tab_drop(TabDropCommand::OpenManagedAgent {
+                    payload,
+                    dst_pane: target_pane,
+                    tab_anchor: Some((target_surface, x > f64::from(tab_for_drop.width()) / 2.0)),
+                })
+                .is_some();
+            }
+            PaneDndPayload::Tab(payload) | PaneDndPayload::AgentTab(payload) => {
+                saw_target_for_drop.set(true);
+                if !external && committed_for_drop.replace(true) {
                     return false;
                 }
                 (payload.src_pane, payload.src_surface, payload.surface)
@@ -3186,18 +3463,24 @@ fn should_tear_off_unhandled_drag(
         && !pointer_inside_origin
 }
 
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn gdk_macos_surface_get_native_window(
+        surface: *mut gtk::gdk::ffi::GdkSurface,
+    ) -> *mut std::ffi::c_void;
+}
+
 /// Resolve the topmost native window before hit-testing GTK widgets in its coordinates.
 #[cfg(target_os = "macos")]
-fn macos_tab_drag_point(root: &gtk::Widget, x: f64, y: f64) -> Option<(gtk::Widget, f64, f64)> {
+pub(super) fn macos_tab_drag_point(
+    root: &gtk::Widget,
+    x: f64,
+    y: f64,
+) -> Option<(gtk::Widget, f64, f64)> {
     use gtk::glib::translate::ToGlibPtr;
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSWindow;
     use objc2_foundation::NSPoint;
-    unsafe extern "C" {
-        fn gdk_macos_surface_get_native_window(
-            surface: *mut gtk::gdk::ffi::GdkSurface,
-        ) -> *mut std::ffi::c_void;
-    }
     let window = root.downcast_ref::<gtk::Window>()?;
     let surface = window.surface()?;
     let marker = MainThreadMarker::new()?;
@@ -3528,7 +3811,11 @@ fn tab_drop_command_for_pane_zone(
     }
 }
 
-fn tab_drop_final_index(target_index: usize, after: bool, src_index: Option<usize>) -> usize {
+pub(super) fn tab_drop_final_index(
+    target_index: usize,
+    after: bool,
+    src_index: Option<usize>,
+) -> usize {
     match (after, src_index) {
         (false, Some(source)) if source < target_index => target_index.saturating_sub(1),
         (false, _) => target_index,
@@ -3566,7 +3853,22 @@ fn attach_pane_body_dnd(
                 saw_drop_target.set(true);
             }
             let (w, h) = (frame.width() as f64, frame.height() as f64);
-            let new = if w > 0.0 && h > 0.0 {
+            let agent_tab = motion
+                .drop()
+                .and_then(|drop| drop.drag())
+                .is_some_and(|drag| {
+                    drag.content()
+                        .value(gtk::glib::types::Type::STRING)
+                        .ok()
+                        .and_then(|value| value.get::<String>().ok())
+                        .is_some_and(|text| {
+                            text.starts_with(AGENT_TAB_DND_PREFIX)
+                                || text.starts_with(MANAGED_AGENT_DND_PREFIX)
+                        })
+                });
+            let new = if agent_tab {
+                PaneDropZone::Tab
+            } else if w > 0.0 && h > 0.0 {
                 drop_zone(x / w, y / h)
             } else {
                 PaneDropZone::None
@@ -3622,11 +3924,12 @@ fn attach_pane_body_dnd(
     let split_candidate = callbacks.tab_drag_split_candidate.clone();
     let is_ssh_pane = callbacks.is_ssh_pane.clone();
     drop_target.connect_drop(move |target, value, x, y| {
+        let external = external_tab_drop(target.current_drop());
         let Some(frame) = target.widget() else {
             return false;
         };
         let (w, h) = (frame.width() as f64, frame.height() as f64);
-        let landed = landed_drop_zone(
+        let mut landed = landed_drop_zone(
             zone.get(),
             (w > 0.0).then_some(x / w),
             (h > 0.0).then_some(y / h),
@@ -3642,16 +3945,35 @@ fn attach_pane_body_dnd(
                 parse_pane_dnd_payload(&payload)
                     .map_err(|error| format!("payload invalid: {error}"))
             }) {
-            Ok(payload) => payload,
+            Ok(payload) => payload.resolve_external_tab(external),
             Err(error) => {
                 tracing::warn!(%error, "pane-body tab drop: failed to read payload");
                 return false;
             }
         };
+        if matches!(&payload, PaneDndPayload::AgentTab(_)) {
+            landed = PaneDropZone::Tab;
+        }
         let (src_pane, src_surface, src_surface_model) = match payload {
-            PaneDndPayload::Tab(payload) => {
+            PaneDndPayload::ManagedAgent(payload) => {
+                if is_ssh_pane(target_pane) {
+                    return false;
+                }
                 saw_drop_target.set(true);
-                if committed_drop.replace(true) {
+                if !external && committed_drop.replace(true) {
+                    return false;
+                }
+                split_candidate.borrow_mut().take();
+                return dispatch_tab_drop(TabDropCommand::OpenManagedAgent {
+                    payload,
+                    dst_pane: target_pane,
+                    tab_anchor: None,
+                })
+                .is_some();
+            }
+            PaneDndPayload::Tab(payload) | PaneDndPayload::AgentTab(payload) => {
+                saw_drop_target.set(true);
+                if !external && committed_drop.replace(true) {
                     return false;
                 }
                 (payload.src_pane, payload.src_surface, payload.surface)
@@ -4084,13 +4406,29 @@ fn build_panel(
                 terminal
             } else {
                 let opts = (callbacks.read_options)();
+                let takeover = registry
+                    .borrow_mut()
+                    .pending_agent_takeovers
+                    .remove(&surface.id);
+                let managed = surface.agent_binding.is_some();
+                // The shell an agent kept alive in the Host is shown again as it is.
+                let kept_shell = surface
+                    .shell_binding
+                    .filter(|binding| !managed && (callbacks.host_execution_alive)(*binding));
                 let inherited_shell = argv.first().map(String::as_str);
-                let requested_shell = preferred_shell(
-                    shell.as_deref().or(inherited_shell),
-                    opts.default_shell.as_deref(),
-                )
-                .map(str::to_string);
-                let mut argv = argv;
+                let requested_shell = (!managed)
+                    .then(|| {
+                        preferred_shell(
+                            shell.as_deref().or(inherited_shell),
+                            opts.default_shell.as_deref(),
+                        )
+                    })
+                    .flatten()
+                    .map(str::to_string);
+                let mut argv = match surface.agent_binding {
+                    Some(binding) => agent_relay_argv(binding, takeover, &theme)?,
+                    None => argv,
+                };
                 let mut resolved_shell = None;
                 let mut shell_warning = None;
                 if let Some(requested_shell) = requested_shell.as_deref() {
@@ -4130,15 +4468,19 @@ fn build_panel(
                 let font = theme.terminal_font(&opts);
                 let resume_command = take_restored_agent_shell_command(
                     surface.id,
-                    opts.auto_resume_agent_sessions,
+                    opts.auto_resume_agent_sessions && !managed && kept_shell.is_none(),
                     flowmux_state::default_agent_session_store(),
                 );
                 #[cfg(target_os = "macos")]
-                let resume_command = registry
-                    .borrow_mut()
-                    .pending_terminal_commands
-                    .remove(&surface.id)
-                    .or(resume_command);
+                let resume_command = if managed {
+                    None
+                } else {
+                    registry
+                        .borrow_mut()
+                        .pending_terminal_commands
+                        .remove(&surface.id)
+                        .or(resume_command)
+                };
                 let is_resuming_agent = resume_command.is_some();
                 let mut resume_input = None;
                 if let Some(command) = resume_command {
@@ -4157,17 +4499,43 @@ fn build_panel(
                     }
                 }
 
+                // Opening a kept shell from Agents is admitted like any explicit open.
+                let shell_takeover = takeover.filter(|_| kept_shell.is_some());
+                if !managed {
+                    argv = hosted_shell_argv(
+                        kept_shell,
+                        shell_takeover.map(|takeover| takeover.token),
+                        &theme,
+                        argv,
+                    );
+                }
                 // VTE is the only terminal backend. GhosttyPane owns the
                 // PTY + render; title/cwd changes are forwarded from inside it.
                 let pane: PaneTerminal = GhosttyPane::spawn(
                     pane_id,
                     surface.id,
                     argv,
-                    cwd.clone(),
+                    if managed { None } else { cwd.clone() },
                     extra_env,
                     opts.scrollback_lines_or_default(),
                     callbacks.clone(),
                 )?;
+                if let Some((binding, takeover)) = kept_shell.zip(shell_takeover) {
+                    let mut connection =
+                        super::agent_connection::AgentConnection::new(binding, &pane.container);
+                    connection.shell = true;
+                    connection.takeover = Some(takeover);
+                    connection.render(true, None);
+                    *pane.agent_connection.borrow_mut() = Some(connection);
+                }
+                if let Some(binding) = surface.agent_binding {
+                    pane.widget.set_input_enabled(false);
+                    let mut connection =
+                        super::agent_connection::AgentConnection::new(binding, &pane.container);
+                    connection.takeover = takeover;
+                    connection.project = cwd.clone();
+                    *pane.agent_connection.borrow_mut() = Some(connection);
+                }
                 theme.apply_to_ghostty(&pane);
                 pane.set_font(&font);
                 pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
@@ -4178,7 +4546,7 @@ fn build_panel(
                     opts.terminal_minimap_opacity,
                 );
                 if let Some(scrollback) = scrollback_to_restore(
-                    opts.restore_terminal_scrollback,
+                    opts.restore_terminal_scrollback && !managed && kept_shell.is_none(),
                     is_resuming_agent,
                     surface.scrollback.as_ref(),
                 ) {
@@ -4401,6 +4769,95 @@ fn preferred_shell<'a>(per_tab: Option<&'a str>, default: Option<&'a str>) -> Op
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| default.map(str::trim).filter(|value| !value.is_empty()))
+}
+
+fn agent_relay_argv(
+    binding: flowmux_core::AgentViewBinding,
+    takeover: Option<super::agent_connection::AgentViewTakeover>,
+    theme: &ResolvedTheme,
+) -> Result<Vec<String>, String> {
+    let cli = flowmux_terminal::find_flowmuxctl()
+        .ok_or("Cannot reconnect Agent: flowmuxctl is unavailable")?;
+    let mut argv = vec![
+        cli.to_string_lossy().into_owned(),
+        "--socket".into(),
+        flowmux_config::paths::agent_host_socket()
+            .to_string_lossy()
+            .into_owned(),
+        "agent-relay".into(),
+        "--require-gui".into(),
+        "--instance".into(),
+        binding.instance.to_string(),
+        "--epoch".into(),
+        binding.epoch.to_string(),
+    ];
+    // The Host answers provider color queries with the colors this tab applies.
+    argv.extend([
+        "--colors".into(),
+        serde_json::to_string(&theme.terminal_colors()).map_err(|error| error.to_string())?,
+    ]);
+    if let Some(takeover) = takeover {
+        if let Some(previous) = takeover.previous {
+            argv.extend([
+                "--replace-lease".into(),
+                previous.lease.to_string(),
+                "--replace-generation".into(),
+                previous.generation.to_string(),
+            ]);
+        }
+        argv.extend(["--ready-token".into(), takeover.token.to_string()]);
+    }
+    Ok(argv)
+}
+
+/// Run a terminal's shell through the Agent Host relay so its agent outlives this window. The
+/// relay falls back to running it directly.
+fn hosted_shell_argv(
+    kept: Option<flowmux_core::AgentViewBinding>,
+    ready_token: Option<uuid::Uuid>,
+    theme: &ResolvedTheme,
+    argv: Vec<String>,
+) -> Vec<String> {
+    // Not in Flatpak, whose host-shell bridge has to own the terminal, nor with
+    // FLOWMUX_LOCAL_TERMINALS. Only this build's helper knows how to run the shell.
+    let cli = flowmux_terminal::find_own_flowmuxctl()
+        .filter(|_| !is_flatpak_sandbox() && std::env::var_os("FLOWMUX_LOCAL_TERMINALS").is_none());
+    let (Some(cli), Ok(colors)) = (cli, serde_json::to_string(&theme.terminal_colors())) else {
+        return argv;
+    };
+    let mut relay = vec![
+        cli.to_string_lossy().into_owned(),
+        "--socket".into(),
+        flowmux_config::paths::agent_host_socket()
+            .to_string_lossy()
+            .into_owned(),
+        "agent-relay".into(),
+        "--shell".into(),
+        "--colors".into(),
+        colors,
+    ];
+    if let Some(binding) = kept {
+        relay.extend([
+            "--instance".into(),
+            binding.instance.to_string(),
+            "--epoch".into(),
+            binding.epoch.to_string(),
+        ]);
+    }
+    if let Some(token) = ready_token {
+        relay.extend([
+            "--require-gui".into(),
+            "--ready-token".into(),
+            token.to_string(),
+        ]);
+    }
+    relay.push("--".into());
+    relay.extend(if argv.is_empty() {
+        super::ghostty_pane::default_shell_argv()
+    } else {
+        argv
+    });
+    relay
 }
 
 fn take_restored_agent_shell_command(

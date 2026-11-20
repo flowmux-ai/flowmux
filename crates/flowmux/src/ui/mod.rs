@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pub mod agent_bar;
+mod agent_connection;
 pub(crate) mod agent_office;
 mod browser_bookmarks;
 mod browser_capture;
@@ -23,6 +24,7 @@ pub mod keybindings_panel;
 pub mod macos_ime;
 #[cfg(target_os = "macos")]
 pub mod macos_layer;
+mod managed_agents;
 mod notification_popover;
 pub mod options_dialog;
 pub mod overlay_menu;
@@ -51,6 +53,97 @@ use flowmux_core::AgentStatus;
 use gtk::prelude::*;
 
 pub use window::{spawn_dispatch_loop, WindowController};
+
+#[cfg(test)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+async fn wait_for_agent_scroll_range(
+    scroll: &gtk::ScrolledWindow,
+    adjustment: &gtk::Adjustment,
+    offset: f64,
+) {
+    use std::time::Duration;
+
+    gtk::glib::future_with_timeout(Duration::from_secs(5), async {
+        while !scroll.is_mapped()
+            || adjustment.page_size() <= 0.0
+            || adjustment.upper() - adjustment.page_size() <= offset
+        {
+            gtk::glib::timeout_future(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "agent scroll range did not reach {offset}: mapped={}, viewport={}x{}, upper={}, page={}",
+            scroll.is_mapped(),
+            scroll.width(),
+            scroll.height(),
+            adjustment.upper(),
+            adjustment.page_size(),
+        )
+    });
+}
+
+pub(crate) const TAB_BOUND_AGENT_TOOLTIP: &str = "This agent is tied to its terminal tab. Closing the tab or Flowmux may stop it. Start a local persistent execution with New Agent or flowmux agent run.";
+
+pub(crate) const HOSTED_AGENT_TOOLTIP: &str =
+    "This agent keeps working in Background when its terminal tab or Flowmux closes.";
+
+thread_local! {
+    /// Terminal tabs whose shell runs in the Agent Host, as last reported by it.
+    static HOSTED_TERMINALS: std::cell::RefCell<std::collections::HashSet<flowmux_core::SurfaceId>> =
+        Default::default();
+}
+
+pub(crate) fn set_hosted_terminals(surfaces: std::collections::HashSet<flowmux_core::SurfaceId>) {
+    HOSTED_TERMINALS.with(|hosted| *hosted.borrow_mut() = surfaces);
+}
+
+thread_local! {
+    /// Agents the Agent Host is running, as last reported by it.
+    static RUNNING_AGENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn set_running_agents(count: usize) {
+    RUNNING_AGENTS.with(|agents| agents.set(count));
+}
+
+thread_local! {
+    /// A termination signal is closing the window; nobody is there to answer a question.
+    static UNATTENDED_CLOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn set_unattended_close() {
+    UNATTENDED_CLOSE.with(|unattended| unattended.set(true));
+}
+
+pub(crate) fn is_unattended_close() -> bool {
+    UNATTENDED_CLOSE.with(std::cell::Cell::get)
+}
+
+/// Whether closing the window will ask about running agents.
+pub(crate) fn has_running_agents() -> bool {
+    RUNNING_AGENTS.with(|agents| agents.get() > 0)
+}
+
+/// What closing its tab means for the agent in this terminal.
+pub(crate) fn agent_lifetime_tooltip(surface: flowmux_core::SurfaceId) -> &'static str {
+    if HOSTED_TERMINALS.with(|hosted| hosted.borrow().contains(&surface)) {
+        HOSTED_AGENT_TOOLTIP
+    } else {
+        TAB_BOUND_AGENT_TOOLTIP
+    }
+}
+
+/// Shown only for an agent whose terminal runs its shell itself.
+pub(crate) fn tab_bound_agent_label(surface: flowmux_core::SurfaceId) -> gtk::Label {
+    let label = gtk::Label::new(Some("Tab-bound"));
+    label.add_css_class("caption");
+    label.add_css_class("dim-label");
+    label.set_tooltip_text(Some(TAB_BOUND_AGENT_TOOLTIP));
+    label.set_visible(agent_lifetime_tooltip(surface) == TAB_BOUND_AGENT_TOOLTIP);
+    label
+}
 
 pub(crate) fn agent_attention_summary_label() -> gtk::Label {
     let label = gtk::Label::new(None);
