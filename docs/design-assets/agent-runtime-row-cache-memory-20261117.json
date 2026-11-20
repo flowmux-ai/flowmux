@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "AR-006 hidden row-cache saturation regression",
+  "source_parent_commit": "92e4e334d6a102e1feba9199e72e1855873b9518",
+  "primary_rows": 1500,
+  "alternate_rows": 100,
+  "columns": 400,
+  "marks_per_cell": 32,
+  "saved_titles": 4096,
+  "live_passed": 34,
+  "result": {
+    "exit_code": 0,
+    "elapsed_seconds": 87.96681070327759
+  },
+  "memory": {
+    "before_kib": 45096,
+    "after_kib": 1424804,
+    "peak_kib": 1424804,
+    "executions": 7,
+    "retained_transfers": 6,
+    "regular_pressure_peers": 60,
+    "control_pressure_peers": 16
+  },
+  "artifacts": "/tmp/fm-gui-2h1peg4i",
+  "fixture_host_socket_removed": true,
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "/tmp/fm-runtime-row-cache-verified.log": "89d82a62c93b2011ab5439990d78ec8a7c9fc39b691ce4c4a4d4c5d0b2deeedd",
+    "/tmp/fm-runtime-row-cache-live.log": "2361aa54f7c76ae9af354265e469a2482f85603364c961dc633124f42453ab2f",
+    "scripts/test-agent-host-gui.py": "03297af527a7a2925e7b805f2ca3def3300d0b38224ab2023260861d05f83cbc",
+    "scripts/test-ssh-workspace-gui.py": "eb38f0a43fae92dd2da8097fcebff7ffe5bc7f30b9cd9736f17422320f12b8a2",
+    "target/debug/flowmux": "9800411cf78eb2991e4af5b0f16d7a96f9e84d7152b9e6e9d546d3fa8c0cdf9b",
+    "target/debug/flowmux-daemon": "192ddfeeff7465540974e949846ef35fbfb07685c5619c833cf6587059e802b2",
+    "target/debug/flowmuxctl": "f566644d609a6b5db6f289b61cba95a5a3ba7b69d73b112cc03ef19d741d9a63"
+  },
+  "limits": [
+    "First foreground attempt received SIGTERM (exit 143) after the pressure assertions; not counted as a full pass. Its private Host was cleaned before rerunning.",
+    "Linux pressure measurement, not proof of all Host allocations or a macOS result.",
+    "User GUI and installation unchanged."
+  ]
+}

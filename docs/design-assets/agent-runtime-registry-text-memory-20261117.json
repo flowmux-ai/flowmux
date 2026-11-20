@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-006 follow-up",
+  "product_revision": "55a7da31a3c869e825d2d5f32e9ffb3b41b01987",
+  "change": "Test only: maximum live lifecycle text, released ended-state previews, and slow concurrent list readers.",
+  "load": {
+    "live_executions": 7,
+    "real_finished_execution_checked": 1,
+    "ended_metadata_entries": 64,
+    "ended_metadata_setup": "63 entries copied from the verified exited entry; presence absent as in TerminalActor::finished",
+    "lifecycle_message_bytes_per_live_execution": 36000,
+    "lifecycle_status_bytes_per_live_execution": 24000,
+    "slow_regular_readers": 60
+  },
+  "result": {
+    "passed": 1,
+    "exit_code": 0,
+    "registry_wire_bytes": 551474,
+    "process_peak_kib": 94024,
+    "live_text_preserved": true,
+    "ended_presence_cleared": true
+  },
+  "checks": {
+    "daemon_all_target_clippy": "passed (-D warnings)",
+    "format": "passed",
+    "product_source": "unchanged before cfg(test) module"
+  },
+  "sha256": {
+    "crates/flowmux-daemon/src/agent_host/host.rs": "b05c6299938b91675c71f9422641f6c4630fcbd474daa52174dd591b1f29f83b",
+    "/tmp/fm-runtime-registry-valid-text.log": "293eae499e7fed33bb65119bf555d3a7321dc2023462def34383aa1a82916558",
+    "/tmp/fm-runtime-registry-clippy.log": "a9bf6acd7f6576f60b796e6c9fa3ec05f86f3a6b977bb0f3d91eebde950ed7aa"
+  },
+  "discarded_hypothesis": "Keeping large presence strings in all ended entries was not reachable: TerminalActor::finished clears presence. The temporary text truncation change was removed and is not part of this change.",
+  "limitations": [
+    "This case is not full Host allocation accounting: maximal PTY grids, in-flight large requests and state reads are not combined here.",
+    "Ended metadata is synthesized from a verified ended entry, not 64 independently terminated providers.",
+    "VmHWM was measured in the standalone exact test process; no OS RSS limit is implemented."
+  ]
+}

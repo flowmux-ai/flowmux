@@ -1,0 +1,40 @@
+{
+  "scenario": "managed Agents explain unavailable automatic cleanup; native cross-window drag, tab close survival, original PID/input and crash restore",
+  "platform": "Linux",
+  "source_base": "a31a2868735c215df9be7ef79815104376b284c3",
+  "artifact_root": "/tmp/fm-gui-4d2h0549",
+  "log": "/tmp/fm-runtime-retention-live.log",
+  "log_sha256": "3b06990ab96398e6c64fd69811a01deea32fded6f967fe3e1ceeb33830d9d2bc",
+  "result": {
+    "exit_code": 0,
+    "elapsed_seconds": 49.635010719299316
+  },
+  "checks": [
+    "Product GUI move close rejects the destination and preserves original VTE input, location and exact PID",
+    "Product GUI move write-failure rejects the destination and preserves original VTE input, location and exact PID",
+    "Product GUI move timeout rejects the destination and preserves original VTE input, location and exact PID",
+    "Product GUI commits a prepared move only after destination admission and removes the old tab",
+    "Autosave completing after checkpoint preparation rejects stale admission while preserving a native-created tab and original input",
+    "Move to selector explicitly transfers the same running execution between GUI windows",
+    "Escape cancels a cross-window Agents drag without changing the original view or input owner",
+    "Native Agents handle drag between GUI windows transfers the view while preserving exact PID and input",
+    "Closing the cross-window moved Agent tab leaves the same execution alive in Background",
+    "New workspace timeout preserves its Agent binding and user-added tab; reopening accepts input with the same PID",
+    "With GUI saves denied, Host admission persists the exact destination and user tab across SIGKILL and restores same-PID input"
+  ],
+  "source_and_binary_sha256": {
+    "crates/flowmux/src/ui/managed_agents.rs": "214edb132b2fdd7a9b8cd17bc598eec291585277098567dc6b6fcaa149aee90c",
+    "scripts/test-agent-ready-gui.py": "4aafb78bdc83c6eca6e1083cbee9c2fca671ec93e8aa825980d39ba04636a029",
+    "target/debug/flowmux": "a9e2c8b76bdf84a89da2ff31b632c194b96490cd4ecdca7831e78342576f5106",
+    "target/debug/flowmuxctl": "f566644d609a6b5db6f289b61cba95a5a3ba7b69d73b112cc03ef19d741d9a63",
+    "target/debug/flowmux-daemon": "192ddfeeff7465540974e949846ef35fbfb07685c5619c833cf6587059e802b2"
+  },
+  "fixture_processes_remaining": [],
+  "protected_gui_pid": 1663486,
+  "limitations": [
+    "fixture cleanup terminates Host; stale private socket path remains and refuses connections",
+    "automatic cleanup remains disabled; no provider completion or idle-only shutdown contract",
+    "macOS runtime not rerun for this UI change",
+    "installed user GUI remains unchanged"
+  ]
+}

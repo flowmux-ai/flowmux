@@ -1,0 +1,2348 @@
+{
+  "schema": 1,
+  "branch": "agent/runtime-audit-20261117",
+  "product_revision": "46b6d541f20b987b853dd2409ada29237ec8b8ac",
+  "scope": "Isolated Linux fixtures; live user GUI and installed executable preserved. Not completion of the whole design.",
+  "failed_gate": {
+    "regression": {
+      "phase": "regression",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "bash",
+        "scripts/test-linux.sh",
+        "regression",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 3600.0,
+      "status": "failed",
+      "pid": 3183481,
+      "exit_code": 1,
+      "elapsed_seconds": 2481.262
+    },
+    "tests": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 412,
+        "exit_code": 0
+      },
+      {
+        "test": "build",
+        "elapsed_seconds": 29,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-control",
+        "elapsed_seconds": 185,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-source",
+        "elapsed_seconds": 5,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-bookmarks",
+        "elapsed_seconds": 45,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-feedback",
+        "elapsed_seconds": 72,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-import",
+        "elapsed_seconds": 359,
+        "exit_code": 0
+      },
+      {
+        "test": "skills",
+        "elapsed_seconds": 46,
+        "exit_code": 0
+      },
+      {
+        "test": "notifications",
+        "elapsed_seconds": 45,
+        "exit_code": 0
+      },
+      {
+        "test": "team-pingpong",
+        "elapsed_seconds": 43,
+        "exit_code": 0
+      },
+      {
+        "test": "team-recovery",
+        "elapsed_seconds": 211,
+        "exit_code": 0
+      },
+      {
+        "test": "team-reuse",
+        "elapsed_seconds": 50,
+        "exit_code": 0
+      },
+      {
+        "test": "team-usage",
+        "elapsed_seconds": 464,
+        "exit_code": 0
+      },
+      {
+        "test": "session-save",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "session-flow",
+        "elapsed_seconds": 68,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-session-flow",
+        "elapsed_seconds": 29,
+        "exit_code": 0
+      },
+      {
+        "test": "pty-spawn-failure",
+        "elapsed_seconds": 2,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-host",
+        "elapsed_seconds": 32,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-ready",
+        "elapsed_seconds": 17,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-relay-replacement",
+        "elapsed_seconds": 18,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-gui-replacement",
+        "elapsed_seconds": 27,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-binding-restore",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-background-binding-restore",
+        "elapsed_seconds": 8,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-drag",
+        "elapsed_seconds": 15,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-drag",
+        "elapsed_seconds": 138,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-tearoff",
+        "elapsed_seconds": 11,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-native-hooks",
+        "elapsed_seconds": 115,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-session-resume",
+        "elapsed_seconds": 16,
+        "exit_code": 1
+      }
+    ],
+    "reason": "agent-session-resume --context: VTE IMContext GTK critical (AR-017); later phases were not run"
+  },
+  "focused_checks": [
+    {
+      "name": "hyperlink_before",
+      "log": "/tmp/fm-runtime-hyperlink-before-live.log",
+      "sha256": "9173a92156f2832d42bdf8b7a6e293ced3cb7c8ac950b8190e51f5ef93786af7",
+      "pass_receipts": 3,
+      "artifact_roots": [
+        "/tmp/fm-gui-sij_v5uz"
+      ],
+      "rss_observations": [
+        "before=21392 after=91116"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "hyperlink_after",
+      "log": "/tmp/fm-runtime-hyperlink-after-live.log",
+      "sha256": "d8069478aaa66d141286b2f04ab606e139db2e9917ba6c322b1af62ea6eae26d",
+      "pass_receipts": 19,
+      "artifact_roots": [
+        "/tmp/fm-gui-bav_nx6n"
+      ],
+      "rss_observations": [
+        "before=19600 after=20196"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "hyperlink_service_after",
+      "log": "/tmp/fm-runtime-hyperlink-service-after-live.log",
+      "sha256": "a8ae07979763e5f207b14eeed82615fa3af741988bb98d09be6472835b36f82d",
+      "pass_receipts": 20,
+      "artifact_roots": [
+        "/tmp/fm-gui-yw2a06mi"
+      ],
+      "rss_observations": [
+        "before=19200 after=19820"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "focus_before",
+      "log": "/tmp/fm-runtime-context-crash-before.log",
+      "sha256": "79742caedc36a53fff689c8a551c593e6a66a86a58fb097553fbaeecba233a21",
+      "pass_receipts": 9,
+      "artifact_roots": [
+        "/tmp/fm-gui-7ajev083"
+      ],
+      "rss_observations": [],
+      "unit_results": []
+    },
+    {
+      "name": "focus_after",
+      "log": "/tmp/fm-runtime-context-focus-after-live.log",
+      "sha256": "7b17c8b68af47c6ecc710c9405080f585fd98ce311f8c2672713e0ac473284e7",
+      "pass_receipts": 18,
+      "artifact_roots": [
+        "/tmp/fm-gui-urko4scl"
+      ],
+      "rss_observations": [],
+      "unit_results": []
+    },
+    {
+      "name": "focus_tearoff_after",
+      "log": "/tmp/fm-runtime-focus-tearoff-after-live.log",
+      "sha256": "1efbd5e6c007546f48d998bafcbb8f562336f1538d2357323fcd087a1cd7a0fe",
+      "pass_receipts": 9,
+      "artifact_roots": [
+        "/tmp/fm-gui-kt_4v741"
+      ],
+      "rss_observations": [],
+      "unit_results": []
+    },
+    {
+      "name": "focus_unit_before",
+      "log": "/tmp/fm-runtime-focus-unit-before.log",
+      "sha256": "55045482e7a8940a062ba74a91e80b3d782977e03b12292393bdb449c9a7f339",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "rss_observations": [],
+      "unit_results": [
+        "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 963 filtered out; finished in 0.57s"
+      ]
+    },
+    {
+      "name": "focus_unit_after",
+      "log": "/tmp/fm-runtime-focus-unit-after.log",
+      "sha256": "547724120c0c62ae8a432afaf8d3bfd18a96a132feae11698186fe56e9281d52",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "rss_observations": [],
+      "unit_results": [
+        "ok. 57 passed; 0 failed; 0 ignored; 0 measured; 907 filtered out; finished in 7.44s"
+      ]
+    },
+    {
+      "name": "nested_focus_before",
+      "log": "/tmp/fm-runtime-nested-focus-before.log",
+      "sha256": "71a53c4f84712372725e52e853c41cd8229ba86c16ce65d5d4793d043ceb1b5d",
+      "pass_receipts": 0,
+      "event_pass_receipts": [],
+      "artifact_roots": [],
+      "unit_results": [
+        "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 963 filtered out; finished in 0.91s"
+      ]
+    },
+    {
+      "name": "nested_focus_after",
+      "log": "/tmp/fm-runtime-nested-focus-after.log",
+      "sha256": "1a2c1c463c643e31e40dbcb51bd5e3f580661d49fe487b5baa2efc2a1d3a8c35",
+      "pass_receipts": 0,
+      "event_pass_receipts": [],
+      "artifact_roots": [],
+      "unit_results": [
+        "ok. 13 passed; 0 failed; 0 ignored; 0 measured; 951 filtered out; finished in 16.00s"
+      ]
+    },
+    {
+      "name": "native_unfocused_before",
+      "log": "/tmp/fm-runtime-nested-focus-live.log",
+      "sha256": "099c5cc9c74ee5275a0ad8fa72beb8a8fcba910c0d04e0cee4d93ae27b4f6aee",
+      "pass_receipts": 5,
+      "event_pass_receipts": [
+        5
+      ],
+      "artifact_roots": [
+        "/tmp/fm-gui-yy76zbe4"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "native_focus_after",
+      "log": "/tmp/fm-runtime-nested-focus-live-final.log",
+      "sha256": "94fb3b0324f177e437ed950e9d164c465f5b49af4053eaabf6dd2ea1706fcb33",
+      "pass_receipts": 7,
+      "event_pass_receipts": [
+        7
+      ],
+      "artifact_roots": [
+        "/tmp/fm-gui-tlzy61l6"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "nested_context_after",
+      "log": "/tmp/fm-runtime-nested-context-after.log",
+      "sha256": "617605ff76351cdfb87720fcb1488a5257a27d5f3835718b2c119ae3eeb89d7d",
+      "pass_receipts": 18,
+      "event_pass_receipts": [
+        18
+      ],
+      "artifact_roots": [
+        "/tmp/fm-gui-ztsne9fm"
+      ],
+      "unit_results": []
+    },
+    {
+      "name": "final_user_service",
+      "revision": "5008353303193b16695f907b3e143b8d4821ed96",
+      "exit_code": 0,
+      "log": "/tmp/fm-runtime-final-service-live.log",
+      "sha256": "03b852f7a22bee2973b590e887ca17af5c7ef8ea1f820b406a1568824c8cfc10",
+      "pass_receipts": 20,
+      "event_pass_receipts": 20,
+      "artifact_roots": [
+        "/tmp/fm-gui-8nlx3f8o"
+      ],
+      "rss_observations": [
+        "before=21336 after=21772"
+      ]
+    },
+    {
+      "name": "containment_before",
+      "log": "/tmp/fm-runtime-containment-before.log",
+      "sha256": "d033e7678c3165475d0356f03d75595e665abcaf9ddbadca3373ab45d46c9ddb",
+      "pass_receipts": 0,
+      "exit_code": 1
+    },
+    {
+      "name": "containment_after",
+      "log": "/tmp/fm-runtime-containment-after.log",
+      "sha256": "f286f10d8459649ff1353f7cb8b27c7ad92af6c0d0fffa6a430ec65c779d4a18",
+      "pass_receipts": 3,
+      "exit_code": 0
+    },
+    {
+      "name": "containment_user_service",
+      "log": "/tmp/fm-runtime-containment-service-live.log",
+      "sha256": "6268463c346688db6412d91cd5764ce1dbb4fe2ec4541396e91be51eee3f6409",
+      "pass_receipts": 20,
+      "exit_code": 0
+    },
+    {
+      "name": "ack_cli_suite",
+      "log": "/tmp/fm-runtime-ack-cli-suite.log",
+      "sha256": "dffb7efca8b47954ec19a67c3ae9534334ed66f94b8e057329c32b1738da7fbc",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "ok. 140 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.50s",
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 185 filtered out; finished in 0.00s",
+        "ok. 186 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.01s",
+        "ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s",
+        "ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s",
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s",
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.78s",
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s",
+        "ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "ack_clippy",
+      "log": "/tmp/fm-runtime-ack-clippy.log",
+      "sha256": "38906e1a8396633c43564bb987ad896665b40c59ca17b7e7d87da65cac977f2f",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "ack_before_live",
+      "log": "/tmp/fm-runtime-ack-before-live.log",
+      "sha256": "890eb66c2c2c1fc64a07efab7b64680a7316f19823c67cf14ab861ccba02591b",
+      "pass_receipts": 8,
+      "artifact_roots": [
+        "/tmp/fm-gui-xky29biq"
+      ],
+      "unit_results": [],
+      "rss_observations": [
+        "before=20948 after=21504"
+      ],
+      "exit_code": 1,
+      "event_pass_receipts": [
+        8
+      ]
+    },
+    {
+      "name": "ack_after_live",
+      "log": "/tmp/fm-runtime-ack-after2-live.log",
+      "sha256": "6660c1c1d1260d3de55ee2543de7bb1a60b45c116a1eb7b1673243f36a04c329",
+      "pass_receipts": 21,
+      "artifact_roots": [
+        "/tmp/fm-gui-gs2oo81x"
+      ],
+      "unit_results": [],
+      "rss_observations": [
+        "before=22568 after=23216"
+      ],
+      "exit_code": 0,
+      "event_pass_receipts": [
+        21
+      ]
+    },
+    {
+      "name": "root_exit_unit_before",
+      "log": "/tmp/fm-runtime-root-unit-before.log",
+      "sha256": "9e5d54a87a5298ce3a3abd3e0b1b3b89c68bf769fd3dc5adc0b79266e665f86c",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 279 filtered out; finished in 0.67s"
+      ],
+      "rss_observations": [],
+      "exit_code": 101,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "root_exit_suite",
+      "log": "/tmp/fm-runtime-root-suite.log",
+      "sha256": "b971b7384794614394ec647b22664c2b7f049c7190e7799530848e4ec921c69a",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 279 filtered out; finished in 0.01s",
+        "ok. 279 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 28.21s"
+      ],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "root_exit_clippy",
+      "log": "/tmp/fm-runtime-root-clippy.log",
+      "sha256": "afc845ca70db78b9972708666d7275308d83428f3340164cdd4af6b5dccc3a6a",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "root_exit_before_live",
+      "log": "/tmp/fm-runtime-root-live-before.log",
+      "sha256": "8b1f5cad436cc6bbc7f3d32c7783fb1a8cca930fb182b5f5d477e33159bb9d0a",
+      "pass_receipts": 0,
+      "artifact_roots": [
+        "/tmp/fm-gui-rmwfggb5"
+      ],
+      "unit_results": [],
+      "rss_observations": [],
+      "exit_code": 1,
+      "event_pass_receipts": [
+        0
+      ]
+    },
+    {
+      "name": "root_exit_after_live",
+      "log": "/tmp/fm-runtime-root-live-after.log",
+      "sha256": "0196d1cd6422adfb67a2ff842738c05e46e986b9987e93880b99163863c0d430",
+      "pass_receipts": 3,
+      "artifact_roots": [
+        "/tmp/fm-gui-r6mlyjd6"
+      ],
+      "unit_results": [],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": [
+        3
+      ]
+    },
+    {
+      "name": "zoom_unit_after",
+      "log": "/tmp/fm-runtime-zoom-after.log",
+      "sha256": "1822864ff805ef04614fc41f0d626ccfdd60c68fa7dde28f63600c27dade7d58",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 958 filtered out; finished in 2.24s"
+      ],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "ci_matrix_with_root_exit",
+      "log": "/tmp/fm-runtime-root-ci-matrix.log",
+      "sha256": "62e00cc51f8f04ad2674bdce2652e8d035bb79435f861f30e1f10f335156ab07",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [],
+      "rss_observations": [],
+      "event_pass_receipts": []
+    },
+    {
+      "name": "title_unit_before",
+      "log": "/tmp/fm-runtime-title-unit-before.log",
+      "sha256": "6217ff364582af25b0d64e092ba5a882d64b5773c18d46beebacb641a21a6497",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 280 filtered out; finished in 1.65s"
+      ],
+      "rss_observations": [],
+      "exit_code": 101,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "title_suite",
+      "log": "/tmp/fm-runtime-title-suite.log",
+      "sha256": "4c62e907e65737d7b7dfbe5f843fb60d75c3e74fa70e3f37a96d8a78aedcb505",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [
+        "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 280 filtered out; finished in 0.00s",
+        "ok. 280 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 28.00s"
+      ],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "title_clippy",
+      "log": "/tmp/fm-runtime-title-clippy.log",
+      "sha256": "16da4991687a1ffb7a599979fb6f541741c9d996947f467c5515d284a3e2df0c",
+      "pass_receipts": 0,
+      "artifact_roots": [],
+      "unit_results": [],
+      "rss_observations": [],
+      "exit_code": 0,
+      "event_pass_receipts": []
+    },
+    {
+      "name": "title_before_live",
+      "log": "/tmp/fm-runtime-title-before-live.log",
+      "sha256": "c98f74ae8ef58fe8ae4423afd363192c71bba5f0ea217e1c7e0ae64e59ff26b8",
+      "pass_receipts": 4,
+      "artifact_roots": [
+        "/tmp/fm-gui-uajg35ha"
+      ],
+      "unit_results": [],
+      "rss_observations": [
+        "before=24536 after=25012",
+        "before=25012 after=95680"
+      ],
+      "exit_code": 1,
+      "event_pass_receipts": [
+        4
+      ]
+    },
+    {
+      "name": "title_after_live",
+      "log": "/tmp/fm-runtime-title-after-live.log",
+      "sha256": "1f0fe35bae064f6037c4861f3875e78321d1029608f8fae8cfd0546614512e98",
+      "pass_receipts": 22,
+      "artifact_roots": [
+        "/tmp/fm-gui-db5ot13n"
+      ],
+      "unit_results": [],
+      "rss_observations": [
+        "before=23256 after=24024",
+        "before=24024 after=29284"
+      ],
+      "exit_code": 0,
+      "event_pass_receipts": [
+        22
+      ]
+    },
+    {
+      "name": "title_final_service_live",
+      "revision": "a8cac0fa",
+      "log": "/tmp/fm-runtime-title-final-service.log",
+      "sha256": "cb061942cb261d86e8fbecc0fecfbcd8dd140912814c402a6d9210ee82468b31",
+      "exit_code": 0,
+      "pass_receipts": 23,
+      "artifact_roots": [
+        "/tmp/fm-gui-m_e573wx"
+      ],
+      "event_pass_receipts": [
+        23
+      ],
+      "rss_observations": [
+        "HYPERLINK_RSS_KIB before=22636 after=23332",
+        "TITLE_RSS_KIB before=23332 after=28564"
+      ],
+      "user_gui_protected_pid": 1663486
+    }
+  ],
+  "remaining_medium": [
+    "AR-006",
+    "AR-008",
+    "AR-009",
+    "AR-010",
+    "AR-037"
+  ],
+  "containment_counterexample": {
+    "instance": "3e2085b8-e093-4326-afc6-9ff6abe57d5c",
+    "host_state": "exited",
+    "unreaped_detached_child_alive": true,
+    "child_pid": 3262027,
+    "child_start": "12294810"
+  },
+  "focused_cleanup": {
+    "checked_at": "2026-11-17T02:40:31.765934+00:00",
+    "checked_roots": [
+      "/tmp/fm-containment-7uzky1zh",
+      "/tmp/fm-containment-k1247kh2",
+      "/tmp/fm-fast-detach-c357on6v",
+      "/tmp/fm-gui-7ajev083",
+      "/tmp/fm-gui-b87nsyi8",
+      "/tmp/fm-gui-bav_nx6n",
+      "/tmp/fm-gui-db5ot13n",
+      "/tmp/fm-gui-gs2oo81x",
+      "/tmp/fm-gui-h2i40iu0",
+      "/tmp/fm-gui-kqlcn1lf",
+      "/tmp/fm-gui-kt_4v741",
+      "/tmp/fm-gui-m_e573wx",
+      "/tmp/fm-gui-r6mlyjd6",
+      "/tmp/fm-gui-rmwfggb5",
+      "/tmp/fm-gui-rwlx6dzc",
+      "/tmp/fm-gui-sij_v5uz",
+      "/tmp/fm-gui-ttlenqof",
+      "/tmp/fm-gui-uajg35ha",
+      "/tmp/fm-gui-urko4scl",
+      "/tmp/fm-gui-vzvc_cao",
+      "/tmp/fm-gui-xky29biq",
+      "/tmp/fm-gui-yw2a06mi"
+    ],
+    "remaining_processes": []
+  },
+  "second_failed_gate": {
+    "regression": {
+      "phase": "regression",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "bash",
+        "scripts/test-linux.sh",
+        "regression",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 3600.0,
+      "status": "failed",
+      "pid": 3300432,
+      "exit_code": 101,
+      "elapsed_seconds": 396.094
+    },
+    "tests": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 395,
+        "exit_code": 101
+      }
+    ],
+    "reason": "workspace: closing_focused_pane_in_nested_split_moves_focus_to_previous_pane (AR-018); no live phases ran",
+    "log": "/tmp/fm-runtime-audit-20261117-final-ci.log"
+  },
+  "inherited_gate_interrupted": {
+    "reason": "CONTRIBUTING requires a unique user service for process ancestry isolation; this invocation inherited Codex ancestors and was deliberately stopped after workspace passed",
+    "workspace": {
+      "phase": "workspace",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 3367400,
+      "exit_code": 0,
+      "elapsed_seconds": 363.111
+    },
+    "manifest": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 363,
+        "exit_code": 0
+      },
+      {
+        "test": "build",
+        "elapsed_seconds": 25,
+        "exit_code": 0
+      }
+    ],
+    "artifacts": "/tmp/fm-runtime-inherited-gate",
+    "log": "/tmp/fm-runtime-audit-20261117-final2-ci.log",
+    "log_sha256": "888c3c08924925f943c11b17fae847f0736751907a1f073775c03cbd05e5130c"
+  },
+  "apparmor_failed_gate": {
+    "status": "failed",
+    "revision": "5008353303193b16695f907b3e143b8d4821ed96",
+    "log": "/tmp/fm-runtime-audit-20261117-service-ci.log",
+    "service": "flowmux-runtime-audit-20261117-final.service",
+    "runtime_max_seconds": 4500,
+    "ancestor_isolation": "unique systemd user service",
+    "exit_code": 101,
+    "reason": "Separate user service was unconfined: WebKit bwrap uid map denied; no later live phases ran",
+    "artifacts": "/tmp/fm-runtime-apparmor-gate-failure",
+    "log_sha256": "97802bfdf8057b42d978073e60380eecc2f64613f05e4d088ced831a239dab18"
+  },
+  "ci_matrix_failed_gate": {
+    "status": "failed",
+    "revision": "55a2764e",
+    "log": "/tmp/fm-runtime-audit-20261117-scoped-ci.log",
+    "service": "flowmux-runtime-audit-20261117-scoped-final.service",
+    "runtime_max_seconds": 4500,
+    "ancestor_isolation": "unique systemd user service",
+    "apparmor": "flowmux-webkit (unconfined)",
+    "exit_code": 1,
+    "reason": "New containment phase missing from CI runner expected list/count; workspace and live phases did not run",
+    "phase": {
+      "phase": "ci-runner-tests",
+      "command": [
+        "python3",
+        "scripts/test-ci-runner.py"
+      ],
+      "timeout_seconds": 300.0,
+      "status": "failed",
+      "pid": 3441102,
+      "exit_code": 1,
+      "elapsed_seconds": 95.461
+    },
+    "log_sha256": "6b9e9257f3ec148b38974ff8fd713b6632ffb30f690577df657cfdf7379835af"
+  },
+  "zoom_failed_gate": {
+    "status": "failed",
+    "revision": "3842d49c40a417a6ac543d5ed1734fcd706150eb",
+    "log": "/tmp/fm-runtime-audit-20261117-scoped-final2-ci.log",
+    "log_sha256": "b1151437b787ece45283e5d8611b87633cfc92a27e74436a8b5d12075d412a52",
+    "service": "flowmux-runtime-audit-20261117-scoped-final2.service",
+    "exit_code": 101,
+    "reason": "workspace: team_spawn_preserves_background_workspace_focus_and_zoom; no live phases ran",
+    "artifacts": "/tmp/fm-runtime-zoom-gate-failure/artifacts",
+    "workspace": {
+      "phase": "workspace",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "failed",
+      "pid": 3454561,
+      "exit_code": 101,
+      "elapsed_seconds": 434.024
+    }
+  },
+  "focused_revision_notes": {
+    "AR-020": "GUI/Host baseline 3842d49c plus fixed CLI from d841262e (main cherry-pick 6cab780d)",
+    "AR-021": "GUI baseline 3842d49c, fixed ACK CLI, fixed Host from 967cc836 (main cb7f8ff7)",
+    "AR-023": "GUI baseline 3842d49c, fixed ACK CLI; Host/tests from bd26dda1; integrated full gate pending"
+  },
+  "superseded_gate": {
+    "revision": "805a3e66",
+    "status": "deliberately interrupted after workspace passed",
+    "reason": "AR-023 title retention fix completed in separate worktree; rerun full integrated source",
+    "log": "/tmp/fm-runtime-audit-20261117-scoped-final3-ci.log",
+    "log_sha256": "37b03076877976fc3eaa794d80bb5ce664ed246541893701b01bdd7ea1ae1840",
+    "artifacts": "/tmp/fm-runtime-superseded-gate/artifacts",
+    "workspace": {
+      "phase": "workspace",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 3547304,
+      "exit_code": 0,
+      "elapsed_seconds": 417.062
+    },
+    "tests": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 417,
+        "exit_code": 0
+      }
+    ]
+  },
+  "final_checks": {
+    "workspace_clippy": {
+      "log": "/tmp/fm-runtime-final6-clippy.log",
+      "sha256": "35b5ee0fdd28d5cdb9e4228c01c34ac30d8f8c7dce3ce4d0f709510096f76607",
+      "exit_code": 0
+    },
+    "dependency_policy": {
+      "tool": "cargo-deny",
+      "version": "0.20.2",
+      "command": "cargo deny --locked --config packaging/licenses/deny.toml check advisories licenses sources",
+      "log": "/tmp/fm-runtime-final-license-policy-pinned.log",
+      "sha256": "724dcfb9b461226778f3f3de713f8340230807b04a9b87905be8cc6df843af3a",
+      "exit_code": 0,
+      "tool_root": "/tmp/fm-runtime-license-tools"
+    },
+    "license_assets": {
+      "command": "bash scripts/check-license-assets.sh",
+      "exit_code": 0
+    },
+    "license_notices": {
+      "command": "python3 scripts/test-license-notices.py",
+      "passed": 4,
+      "exit_code": 0
+    },
+    "dependency_policy_0_19_4": {
+      "log": "/tmp/fm-runtime-final-license-policy.log",
+      "sha256": "264ad6b8e7e781ada0e604454dee095c1006ffa2fe081ee9e61f9b817eeaa58c",
+      "exit_code": 0
+    },
+    "workspace_tests": {
+      "revision": "46b6d541f20b987b853dd2409ada29237ec8b8ac",
+      "log": "/tmp/fm-runtime-audit-20261117-final6-ci.log",
+      "log_sha256": "3648ce654744a6af36c925196e98cfc18cd71d9214afb2d4d115a75ea24b135e",
+      "totals": {
+        "passed": 2405,
+        "failed": 0,
+        "ignored": 13
+      },
+      "scope": "workspace phase passed; subsequent full live gate failed in AR-032"
+    }
+  },
+  "previous_integrated_gate_final4": {
+    "status": "failed",
+    "source_revision": "a8cac0fa",
+    "service": "flowmux-runtime-audit-20261117-scoped-final4.service",
+    "runtime_max_seconds": 4500,
+    "ancestor_isolation": "unique systemd user service",
+    "apparmor_profile": "flowmux-webkit",
+    "regression_budget_seconds": 3600,
+    "expected_regression_tests": 44,
+    "log": "/tmp/fm-runtime-audit-20261117-scoped-final4-ci.log",
+    "gate_exit": 1,
+    "log_sha256": "ada67cea71373797f98ba90161e9bf96f6f3610700915d2371a70311280902cd",
+    "completed_regression_tests": 31,
+    "failed_tests": [
+      {
+        "test": "agent-native-hooks",
+        "elapsed_seconds": 77,
+        "exit_code": 1
+      }
+    ],
+    "regression": {
+      "phase": "regression",
+      "command": [
+        "xvfb-run",
+        "-a",
+        "-s",
+        "-screen 0 1280x1024x24",
+        "dbus-run-session",
+        "--",
+        "env",
+        "FLOWMUX_TEST_X11_LOCKS=1",
+        "bash",
+        "scripts/test-linux.sh",
+        "regression",
+        "--",
+        "--nocapture"
+      ],
+      "timeout_seconds": 3600.0,
+      "status": "failed",
+      "pid": 3615565,
+      "exit_code": 1,
+      "elapsed_seconds": 2409.638
+    },
+    "resolution": "AR-025: stale Starting registry snapshot mistaken for process exit",
+    "binaries": {
+      "flowmux": {
+        "path": "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "sha256": "7b64b32ba1bd56c2f41c021206c82d17f073b363e1c7e097351b6ea746f4c826"
+      },
+      "flowmuxctl": {
+        "path": "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "sha256": "4b19117d00d9acbb57488d638836c4d613a4e724e44d40660b9dda0c37683a78"
+      },
+      "flowmux-daemon": {
+        "path": "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon",
+        "sha256": "40aca0d82d8b3ff7434d5eb379d36309e4147f8e9975340ee2472849a84b4de0"
+      }
+    }
+  },
+  "surviving_child_context_AR024": {
+    "commit": "26665618",
+    "library": {
+      "log": "/tmp/fm-root-context-daemon.log",
+      "log_sha256": "5a6616ce4ca93a40bd93fccf692e021ca32d45b9c6aa67e04bd73a3c9846733f",
+      "passed": 280,
+      "failed": 0,
+      "ignored": 1
+    },
+    "before": {
+      "log": "/tmp/fm-root-context-before.log",
+      "log_sha256": "33527ae8ea958c71f6164bc377a9c44b0b9565587207a8de5c3682efa21fd031",
+      "status": "failed"
+    },
+    "live": {
+      "log": "/tmp/fm-root-context-after.log",
+      "log_sha256": "944cef36c7ced76c6092974c13711bf0389522533068408e74ab450e2a853b40",
+      "status": "passed",
+      "checks": 5
+    },
+    "clippy": {
+      "log": "/tmp/fm-root-context-clippy.log",
+      "log_sha256": "92863eb974e13ac194636baef180a6b93540f5defa8af9aac146b88b1a6bd5aa",
+      "status": "passed"
+    }
+  },
+  "starting_snapshot_AR025": {
+    "commit": "26c018d5",
+    "before": {
+      "log": "/tmp/fm-native-launch-status.log",
+      "log_sha256": "9b742865ae43111c6c241d57fc41ab328e7028336add70d0a9ece007f8963f58",
+      "status": "failed"
+    },
+    "gtk_test": {
+      "log": "/tmp/fm-starting-view-unit-isolated.log",
+      "log_sha256": "a7f957554e7159c1f02cb83f26ce3d8292a8633e31808fd8e1514d2bbb88b07a",
+      "status": "passed",
+      "passed": 1
+    },
+    "live": {
+      "log": "/tmp/fm-starting-view-after.log",
+      "log_sha256": "1fe40c331c281c42d42f91416ebd02f63542c6cf9b81aaa2e882eed5c2098b2f",
+      "status": "passed",
+      "checks": 30
+    }
+  },
+  "previous_integrated_gate_final5": {
+    "status": "invalidated",
+    "source_revision": "26c018d5",
+    "service": "flowmux-runtime-audit-20261117-final5.service",
+    "runtime_max_seconds": 4500,
+    "ancestor_isolation": "unique systemd user service",
+    "apparmor_profile": "flowmux-webkit",
+    "regression_budget_seconds": 3600,
+    "expected_regression_tests": 44,
+    "log": "/tmp/fm-runtime-audit-20261117-final5-ci.log",
+    "gate_exit": 127,
+    "reason": "Running Bash test-linux.sh was edited for AR-026; file offsets changed after team-recovery. No complete-gate pass is claimed.",
+    "log_sha256": "9d1df3371f2912ce370d9a623d0ad084c764c07a6efca09ae4145dc83fc4c13a",
+    "completed_tests": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 398,
+        "exit_code": 0
+      },
+      {
+        "test": "build",
+        "elapsed_seconds": 29,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-control",
+        "elapsed_seconds": 184,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-source",
+        "elapsed_seconds": 4,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-bookmarks",
+        "elapsed_seconds": 42,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-feedback",
+        "elapsed_seconds": 65,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-import",
+        "elapsed_seconds": 350,
+        "exit_code": 0
+      },
+      {
+        "test": "skills",
+        "elapsed_seconds": 45,
+        "exit_code": 0
+      },
+      {
+        "test": "notifications",
+        "elapsed_seconds": 44,
+        "exit_code": 0
+      },
+      {
+        "test": "team-pingpong",
+        "elapsed_seconds": 43,
+        "exit_code": 0
+      },
+      {
+        "test": "team-recovery",
+        "elapsed_seconds": 212,
+        "exit_code": 0
+      }
+    ],
+    "phases": [
+      {
+        "phase": "ci-runner-tests",
+        "command": [
+          "python3",
+          "scripts/test-ci-runner.py"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 3738962,
+        "exit_code": 0,
+        "elapsed_seconds": 97.377
+      },
+      {
+        "phase": "installer-routing",
+        "command": [
+          "python3",
+          "scripts/test-install.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 3744855,
+        "exit_code": 0,
+        "elapsed_seconds": 2.945
+      },
+      {
+        "phase": "thorvg-installer",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-thorvg-macos.py"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 3745026,
+        "exit_code": 0,
+        "elapsed_seconds": 2.035
+      },
+      {
+        "phase": "agent-runner-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-agent-unit-runner.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 3745145,
+        "exit_code": 0,
+        "elapsed_seconds": 0.158
+      },
+      {
+        "phase": "agent-team-tests",
+        "command": [
+          "python3",
+          "scripts/test-agent-team.py"
+        ],
+        "timeout_seconds": 120.0,
+        "status": "passed",
+        "pid": 3745154,
+        "exit_code": 0,
+        "elapsed_seconds": 25.537
+      },
+      {
+        "phase": "benchmark-agent-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/benchmark-browser-agent.py",
+          "self-test"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 3745580,
+        "exit_code": 0,
+        "elapsed_seconds": 0.158
+      },
+      {
+        "phase": "stability-harness-tests",
+        "command": [
+          "python3",
+          "-B",
+          "scripts/test-macos-stability.py",
+          "--self-check"
+        ],
+        "timeout_seconds": 60.0,
+        "status": "passed",
+        "pid": 3745582,
+        "exit_code": 0,
+        "elapsed_seconds": 0.158
+      },
+      {
+        "phase": "format",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "timeout_seconds": 180.0,
+        "status": "passed",
+        "pid": 3745584,
+        "exit_code": 0,
+        "elapsed_seconds": 4.363
+      },
+      {
+        "phase": "gui-harness",
+        "command": [
+          "python3",
+          "scripts/test-gui-harness.py"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3745668,
+        "exit_code": 0,
+        "elapsed_seconds": 0.41
+      },
+      {
+        "phase": "ssh-fixture-unit",
+        "command": [
+          "python3",
+          "scripts/test-ssh-workspace-fixture.py"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3745680,
+        "exit_code": 0,
+        "elapsed_seconds": 0.563
+      },
+      {
+        "phase": "workspace",
+        "command": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--locked",
+          "--no-fail-fast",
+          "--",
+          "--nocapture"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3745694,
+        "exit_code": 0,
+        "elapsed_seconds": 398.076
+      },
+      {
+        "phase": "build",
+        "command": [
+          "cargo",
+          "build",
+          "--workspace",
+          "--locked"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3802188,
+        "exit_code": 0,
+        "elapsed_seconds": 29.147
+      },
+      {
+        "phase": "browser-control",
+        "command": [
+          "python3",
+          "scripts/test-browser-control.py",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3802632,
+        "exit_code": 0,
+        "elapsed_seconds": 183.476
+      },
+      {
+        "phase": "browser-source",
+        "command": [
+          "python3",
+          "scripts/test-browser-source-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3809200,
+        "exit_code": 0,
+        "elapsed_seconds": 4.385
+      },
+      {
+        "phase": "browser-bookmarks",
+        "command": [
+          "python3",
+          "scripts/test-browser-bookmarks-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3810017,
+        "exit_code": 0,
+        "elapsed_seconds": 41.676
+      },
+      {
+        "phase": "browser-feedback",
+        "command": [
+          "python3",
+          "scripts/test-browser-feedback-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3810988,
+        "exit_code": 0,
+        "elapsed_seconds": 65.53
+      },
+      {
+        "phase": "browser-import",
+        "command": [
+          "python3",
+          "scripts/test-browser-import-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3812304,
+        "exit_code": 0,
+        "elapsed_seconds": 350.112
+      },
+      {
+        "phase": "skills",
+        "command": [
+          "python3",
+          "scripts/test-skills-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3817695,
+        "exit_code": 0,
+        "elapsed_seconds": 44.399
+      },
+      {
+        "phase": "notifications",
+        "command": [
+          "python3",
+          "scripts/test-notifications-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3820928,
+        "exit_code": 0,
+        "elapsed_seconds": 44.361
+      },
+      {
+        "phase": "team-pingpong",
+        "command": [
+          "python3",
+          "scripts/test-team-pingpong-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3821785,
+        "exit_code": 0,
+        "elapsed_seconds": 42.909
+      },
+      {
+        "phase": "team-recovery",
+        "command": [
+          "python3",
+          "scripts/test-team-recovery-gui.py",
+          "--gui",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+        ],
+        "timeout_seconds": 2400.0,
+        "status": "passed",
+        "pid": 3823607,
+        "exit_code": 0,
+        "elapsed_seconds": 211.407
+      },
+      {
+        "phase": "regression",
+        "command": [
+          "xvfb-run",
+          "-a",
+          "-s",
+          "-screen 0 1280x1024x24",
+          "dbus-run-session",
+          "--",
+          "env",
+          "FLOWMUX_TEST_X11_LOCKS=1",
+          "bash",
+          "scripts/test-linux.sh",
+          "regression",
+          "--",
+          "--nocapture"
+        ],
+        "timeout_seconds": 3600.0,
+        "status": "failed",
+        "pid": 3745648,
+        "exit_code": 127,
+        "elapsed_seconds": 1417.286
+      }
+    ]
+  },
+  "remote_ci_initial": {
+    "run_id": 44011030787,
+    "revision": "4267c81b34b55a933c965904a6c54a4ea09c4e62",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44011030787",
+    "linux": {
+      "conclusion": "failure",
+      "workspace_passed": 954,
+      "workspace_failed": 2,
+      "workspace_ignored": 4,
+      "error": "Cannot reconnect Agent: flowmuxctl is unavailable",
+      "resolution": "AR-026",
+      "artifact_id": 14297725040
+    },
+    "stress": "success",
+    "editor_web": "success",
+    "macos": {
+      "conclusion": "failure",
+      "phase": "macos-dmg-update",
+      "cause": "native smoke crate root omitted agent_host module",
+      "resolution": "AR-028",
+      "artifact_id": 14296673841,
+      "artifact_zip_sha256": "8f55007d10c04e508d4a939b24d5f8609ece2afaefeb18cdae794c9d60bd3224"
+    }
+  },
+  "integrated_gate": {
+    "status": "failed",
+    "source_revision": "46b6d541f20b987b853dd2409ada29237ec8b8ac",
+    "checkout": "/tmp/fm-runtime-audit-final6",
+    "service": "flowmux-runtime-audit-20261117-final6.service",
+    "runtime_max_seconds": 4500,
+    "ancestor_isolation": "unique systemd user service",
+    "apparmor_profile": "flowmux-webkit",
+    "regression_budget_seconds": 3600,
+    "expected_regression_tests": 44,
+    "log": "/tmp/fm-runtime-audit-20261117-final6-ci.log",
+    "source_immutable": true,
+    "gate_exit": 1,
+    "service_exit": 1,
+    "log_sha256": "3648ce654744a6af36c925196e98cfc18cd71d9214afb2d4d115a75ea24b135e",
+    "completed_regression_tests": 35,
+    "tests": [
+      {
+        "test": "gui-harness",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-fixture-unit",
+        "elapsed_seconds": 1,
+        "exit_code": 0
+      },
+      {
+        "test": "build",
+        "elapsed_seconds": 39,
+        "exit_code": 0
+      },
+      {
+        "test": "workspace",
+        "elapsed_seconds": 431,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-control",
+        "elapsed_seconds": 186,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-source",
+        "elapsed_seconds": 5,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-bookmarks",
+        "elapsed_seconds": 42,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-feedback",
+        "elapsed_seconds": 68,
+        "exit_code": 0
+      },
+      {
+        "test": "browser-import",
+        "elapsed_seconds": 355,
+        "exit_code": 0
+      },
+      {
+        "test": "skills",
+        "elapsed_seconds": 44,
+        "exit_code": 0
+      },
+      {
+        "test": "notifications",
+        "elapsed_seconds": 44,
+        "exit_code": 0
+      },
+      {
+        "test": "team-pingpong",
+        "elapsed_seconds": 43,
+        "exit_code": 0
+      },
+      {
+        "test": "team-recovery",
+        "elapsed_seconds": 214,
+        "exit_code": 0
+      },
+      {
+        "test": "team-reuse",
+        "elapsed_seconds": 49,
+        "exit_code": 0
+      },
+      {
+        "test": "team-usage",
+        "elapsed_seconds": 464,
+        "exit_code": 0
+      },
+      {
+        "test": "session-save",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "session-flow",
+        "elapsed_seconds": 67,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-session-flow",
+        "elapsed_seconds": 33,
+        "exit_code": 0
+      },
+      {
+        "test": "pty-spawn-failure",
+        "elapsed_seconds": 3,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-host",
+        "elapsed_seconds": 45,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-containment",
+        "elapsed_seconds": 8,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-root-exit",
+        "elapsed_seconds": 4,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-ready",
+        "elapsed_seconds": 16,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-relay-replacement",
+        "elapsed_seconds": 21,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-gui-replacement",
+        "elapsed_seconds": 26,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-binding-restore",
+        "elapsed_seconds": 8,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-background-binding-restore",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-drag",
+        "elapsed_seconds": 14,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-drag",
+        "elapsed_seconds": 136,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-tearoff",
+        "elapsed_seconds": 11,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-native-hooks",
+        "elapsed_seconds": 114,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-session-resume",
+        "elapsed_seconds": 28,
+        "exit_code": 0
+      },
+      {
+        "test": "new-agent",
+        "elapsed_seconds": 23,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-termination",
+        "elapsed_seconds": 48,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-cli-controls",
+        "elapsed_seconds": 53,
+        "exit_code": 1
+      }
+    ],
+    "failed_tests": [
+      {
+        "test": "agent-cli-controls",
+        "elapsed_seconds": 53,
+        "exit_code": 1
+      }
+    ],
+    "unrun_tests": [
+      "terminal-read-screen",
+      "terminal-load",
+      "terminal-image-links",
+      "ipc-recovery",
+      "polling-delay",
+      "editor-io",
+      "editor-renderer",
+      "lazy-restore",
+      "ssh-workspace"
+    ],
+    "reason": "AR-032: CLI fixture retains two ended rows but expected a single dismissal to hide the whole section. Product preserved the second row correctly."
+  },
+  "clean_ci_prerequisite_AR026": {
+    "commit": "3d41a736",
+    "before": {
+      "log": "/tmp/fm-runtime-ci-cli-prerequisite-before.log",
+      "sha256": "d000ee3dbe497965224cb66f51faaad8d48497358913e83d9b13c0b454adb1ff"
+    },
+    "runner": {
+      "log": "/tmp/fm-runtime-ci-cli-prerequisite-after2.log",
+      "sha256": "23ff7e5bda9ce5a7023196977e616c9f7a7ed849ce1a7b44da17d0dcf29dcae5",
+      "exit_code": 0,
+      "passed": 25,
+      "skipped": 1
+    }
+  },
+  "partial_reply_AR027": {
+    "commit": "46b6d541",
+    "before_unit": {
+      "log": "/tmp/fm-runtime-partial-ack-before.log",
+      "sha256": "f81de8d6bd397853cfc302234b6fe1b72680d8bbb7f9ea19d92e52cf07b76047",
+      "exit_code": 101
+    },
+    "ipc_after": {
+      "log": "/tmp/fm-runtime-partial-ack-after.log",
+      "sha256": "7add796085fe714e44e8d38dae4b58c2c66f43acf974edf0cb4c04d331354038",
+      "exit_code": 0,
+      "library_passed": 92,
+      "integration_passed": 9
+    },
+    "relay_after": {
+      "log": "/tmp/fm-runtime-partial-ack-relay.log",
+      "sha256": "abf9bccc082fd6c4f43f71eaaa2828c78fa53d217f8f37c41205ff947fcfedf6",
+      "exit_code": 0,
+      "targeted_tests_passed": 1,
+      "outcomes": 5
+    },
+    "live_before": {
+      "log": "/tmp/fm-runtime-partial-ack-before-live2.log",
+      "sha256": "ef73548f95c7cbff5212b4bb6a709e68e3cf87ada31072522118b8bc8ccfee73",
+      "exit_code": 1,
+      "artifacts": "/tmp/fm-gui-btt944kj",
+      "cli_source_revision": "3d41a736",
+      "failure": "new VTE input timed out after relay reported lost readiness ACK"
+    },
+    "live_after": {
+      "log": "/tmp/fm-runtime-partial-ack-after2-live.log",
+      "sha256": "922502b666297e132ff8e10ee5e52ab5549aa50730388d4da5a20726e7478c4d",
+      "exit_code": 0,
+      "checks": 9,
+      "artifacts": "/tmp/fm-gui-ri9dw0_j",
+      "minimum_timeout_elapsed_seconds": 2.8
+    }
+  },
+  "native_module_AR028": {
+    "commit": "d5ff39d1",
+    "linux_compile": {
+      "log": "/tmp/fm-runtime-native-module-check.log",
+      "sha256": "4b25f308a0e37417c03449ad8ae46ecc6ef54e3666aa72e39a14b3331e9f0a1f",
+      "exit_code": 0
+    },
+    "native_macos_execution": {
+      "run_id": 44013562644,
+      "phase": "macos-dmg-update",
+      "status": "passed",
+      "elapsed_seconds": 96.68,
+      "scope": "This custom native target only; later smoke phases did not run."
+    }
+  },
+  "remote_ci_followup": {
+    "run_id": 44013562644,
+    "revision": "1fcf5c9ba642c56e4a19de1df03d591f999384e0",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44013562644",
+    "linux": {
+      "status": "cancelled",
+      "reason": "Superseded by fixture fixes AR-030/031 and budget fix AR-029; cancelled to release workflow concurrency for run 44016375422. No full Linux success is claimed.",
+      "workspace": {
+        "passed": 2405,
+        "failed": 0,
+        "ignored": 13,
+        "status": "passed",
+        "scope": "workspace completed before later Linux job cancellation; AR-026 verified on clean runner"
+      }
+    },
+    "editor_web": {
+      "conclusion": "success",
+      "passed": 41,
+      "failed": 0,
+      "rebuilt_assets_unchanged": true
+    },
+    "stress": {
+      "conclusion": "success",
+      "ignored_stress_tests_exercised": 5
+    },
+    "macos": {
+      "conclusion": "failure",
+      "job_id": 133806002127,
+      "build": "passed",
+      "macos-dmg-update": "passed",
+      "native-state": "passed",
+      "cli": "passed",
+      "failed_phase": "agent-unit",
+      "daemon_passed": 270,
+      "daemon_failed": 2,
+      "daemon_ignored": 1,
+      "failed_tests": {
+        "explicit_stop_checks_epoch_and_waits_for_user_force_after_grace": "AR-030: platform-specific od whitespace",
+        "natural_root_exit_waits_for_owned_background_child_and_reaps_without_idle_timeout": "AR-031: timing-dependent fixture; macOS containment remains AR-008"
+      },
+      "later_native_smoke": "not run",
+      "artifact_id": 14298498405,
+      "artifact_zip_sha256": "b8ec433bcf53192ea0e589e5972206f7b1b70dc088faee5d2277267627172e02"
+    },
+    "conclusion": "cancelled after macOS failed; failed job evidence preserved"
+  },
+  "remote_ci_fixture_rerun": {
+    "run_id": 44016375422,
+    "revision": "b507e247f5a924ef19327cb22833ee9e831026cf",
+    "status": "macos failed in agent-hooks; editor and stress passed; Linux still in progress",
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44016375422",
+    "fixes": [
+      "AR-029",
+      "AR-030",
+      "AR-031"
+    ],
+    "jobs": {
+      "editor_web": "success",
+      "headless_stress": "in_progress",
+      "macos": {
+        "job_id": 133817433138,
+        "status": "completed",
+        "conclusion": "failure",
+        "failed_phase": "agent-hooks",
+        "failure": "AR-033",
+        "passed_phases": [
+          "build",
+          "macos-dmg-update",
+          "native-state",
+          "cli",
+          "agent-unit",
+          "ipc",
+          "bridge",
+          "session-path-unit",
+          "native",
+          "options-zoom",
+          "boot-restore",
+          "ssh-preview",
+          "editor-keyboard",
+          "skills"
+        ],
+        "artifact_id": 14300172065
+      },
+      "linux": "in_progress"
+    }
+  },
+  "portable_host_fixtures_AR030_AR031": {
+    "revision": "b507e247f5a924ef19327cb22833ee9e831026cf",
+    "linux": {
+      "status": "passed",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/fm-runtime-portable-host-tests.log",
+      "sha256": "dfd360ab487581d721885380a6be2174f689b09fc647d391b3ada0687156a665",
+      "process_ancestry": "inherited; isolated runner verification pending"
+    },
+    "macos": "Passed in run 44016375422: daemon 272 passed, 0 failed, 1 ignored; isolated agent-unit exit 0. Full native gate later failed in unrelated AR-033.",
+    "clippy": {
+      "status": "passed",
+      "command": "cargo clippy -p flowmux-daemon --all-targets --locked -- -D warnings",
+      "log": "/tmp/fm-runtime-fixture-clippy.log",
+      "sha256": "8932a27091709015fbd0f1426d2e4482872222381c5da5a62895f5c8ba3d40b1"
+    },
+    "isolated_agent_tests": {
+      "status": "passed",
+      "command": "python3 scripts/test-agent-unit.py",
+      "isolation": "unique systemd user service and private XDG state/runtime",
+      "passed": 808,
+      "failed": 0,
+      "ignored": 2,
+      "exit_code": 0,
+      "log": "/tmp/fm-runtime-portable-agent-isolated.log",
+      "sha256": "5520eb56964cb4992100c7928a5a9c2c1e7275cad6074dbb6746edc6de5bd05f"
+    }
+  },
+  "offline_ended_fixture_AR032": {
+    "before": {
+      "log": "/tmp/fm-runtime-audit-20261117-final6-ci.log",
+      "exit_code": 1,
+      "artifacts": "/tmp/fm-gui-mly8f4kj"
+    },
+    "after": {
+      "log": "/tmp/fm-runtime-ar032-cli.log",
+      "log_sha256": "9906ab7595b8ef4cb1e26e46054b620d7e1f80349bbfcb8155c6c79dcc25cc51",
+      "exit_code": 0,
+      "passed_checks": 13,
+      "artifacts": "/tmp/fm-gui-jsf3d3e9",
+      "protected_user_gui_pid": 1663486
+    },
+    "scope": "Test-only correction; one-row and two-row offline dismissal must retain other rows and never restart the Host.",
+    "single_row_after": {
+      "log": "/tmp/fm-runtime-ar032-single.log",
+      "log_sha256": "999e122b4a5f901802dfddd89fc75fdc706b286697efef868a2d50ebbe5d8538",
+      "exit_code": 0,
+      "passed_checks": 14,
+      "artifacts": "/tmp/fm-gui-yhh1ab5w"
+    }
+  },
+  "settled_hook_fixture_AR033": {
+    "before": {
+      "run_id": 44016375422,
+      "job_id": 133817433138,
+      "phase": "agent-hooks",
+      "exit_code": 101,
+      "artifact_id": 14300172065,
+      "artifact_sha256": "a40a7ed9a03df69ede17c2551351bf753f2fc5d5536b3faf85f9693ea8a565ab"
+    },
+    "after_linux": {
+      "log": "/tmp/fm-runtime-ar033-hooks.log",
+      "log_sha256": "eb5437a45abd51a32890aaee3c05f709aa787f5c5abe4099667a509cc0ed59f1",
+      "exit_code": 0,
+      "success_marker": "LIVE_NATIVE_HOOK_MATRIX_OK",
+      "passed_checks": 20,
+      "artifacts": "/tmp/fm-gui-wqp4vv7b",
+      "hook_artifacts": "/tmp/fm-hooks-6wnt_t4d",
+      "protected_user_gui_pid": 1663486
+    },
+    "after_macos": "not yet verified"
+  },
+  "durable_view_authority_AR009": {
+    "revision": "2899be53",
+    "checks": [
+      {
+        "name": "live",
+        "log": "/tmp/fm-runtime-authority-live.log",
+        "artifacts": "/tmp/fm-gui-yfzrketv",
+        "exit_code": 0,
+        "passes": 5,
+        "log_sha256": "99a8467a00174eb367257e50fe62d19c5661c22c2d8a3a74cbf8e03d9c1cb126",
+        "events_sha256": "8f5bc676988f1efef02126d4c997e3256bd16e380b7d50f0dce50d620e7ca014",
+        "remaining_tracked_processes": []
+      },
+      {
+        "name": "background",
+        "log": "/tmp/fm-runtime-authority-background.log",
+        "artifacts": "/tmp/fm-gui-1f6p077g",
+        "exit_code": 0,
+        "passes": 5,
+        "log_sha256": "981a009b5357525d7d9ca307a02c76a7a13e2f9f910356563d68df2e20466f58",
+        "events_sha256": "e69b57b8702009d516d918af040816d67a4a0c770a48af6e1d833e6db777abb8",
+        "remaining_tracked_processes": []
+      },
+      {
+        "name": "drag",
+        "log": "/tmp/fm-runtime-authority-drag.log",
+        "artifacts": "/tmp/fm-gui-asfun_gx",
+        "exit_code": 0,
+        "passes": 24,
+        "log_sha256": "3c4b1cc416c5dcf744d3c6b643aacf15c9dde78f906464af092fbd91bda37498",
+        "events_sha256": "d3485a8d40cf05100b9bb9089eddbdacecb9ca3952abad948d4a960f54b5fdb4",
+        "remaining_tracked_processes": []
+      }
+    ],
+    "state_library": {
+      "passed": 94,
+      "failed": 0
+    },
+    "daemon_library": {
+      "passed": 280,
+      "failed": 0,
+      "ignored": 1
+    },
+    "procmon_library": {
+      "passed": 17,
+      "failed": 0
+    },
+    "scope": "durable surface fencing and offline stale snapshot cleanup; not complete AR-009 recovery",
+    "remaining": [
+      "admission ACK plus registry observation loss",
+      "destination layout crash before save"
+    ],
+    "user_gui": {
+      "pid": 1663486,
+      "restarted": false,
+      "installed_binary_changed": false
+    },
+    "workspace": {
+      "revision": "2899be53",
+      "command": "cargo test -j 2 --workspace --locked --no-fail-fast",
+      "log": "/tmp/fm-runtime-authority-workspace.log",
+      "exit_code": 0,
+      "passed": 2406,
+      "failed": 0,
+      "ignored": 13,
+      "excluded_nested_subprocess_summaries": 2,
+      "sha256": "64a2b349e6633646920b8f17294043c5ae863138e6180c5f171dee97785685cf"
+    },
+    "final_targeted_clippy": {
+      "targets": [
+        "flowmux-procmon",
+        "flowmux-state"
+      ],
+      "all_targets": true,
+      "warnings_denied": true,
+      "log": "/tmp/fm-runtime-authority-final-clippy.log"
+    }
+  },
+  "session_panel_focus_AR035": {
+    "failed_remote_run": 44016375422,
+    "failed_phase": "managed-session-flow",
+    "failed_at": "initial Claude sessions selection",
+    "scope": "Observe native GTK activation before sending the opening shortcut; remote failure cause remains unconfirmed",
+    "checks": [
+      {
+        "name": "before_focus_receipt",
+        "log": "/tmp/fm-runtime-remote-session-flow-repro.log",
+        "artifacts": "/tmp/fm-gui-j96nblim",
+        "exit_code": 0,
+        "passes": 9,
+        "log_sha256": "e0b73284de3cb91548e2ab7f96b396a0781182ccc423904c1b481fa50afb9204",
+        "events_sha256": "40cae45bc1eff613283409f99521b80600ad79f3cb483a329415c0dbb79c1920",
+        "remaining_tracked_processes": []
+      },
+      {
+        "name": "with_focus_receipt",
+        "log": "/tmp/fm-runtime-session-panel-ready.log",
+        "artifacts": "/tmp/fm-gui-aogb14tw",
+        "exit_code": 0,
+        "passes": 9,
+        "log_sha256": "dba6314e652b9681952f5600efc0b5e214880a36c43ce4fb05082707fdd550b3",
+        "events_sha256": "b3055ca4cf52439a7ac073d0ac51b945b3717de8f9243e71c4ce3495cb7f721c",
+        "remaining_tracked_processes": []
+      }
+    ],
+    "remote_confirmation": "pending",
+    "protected_gui_pid": 1663486
+  },
+  "projection_byte_budget_AR006": {
+    "base_revision": "ce372d25",
+    "projection_bytes": 16777216,
+    "uri_bytes": 262144,
+    "checks": [
+      {
+        "name": "build",
+        "log": "/tmp/fm-runtime-projection-budget-build.log",
+        "sha256": "c02bd98c062adb176942905f6d8c12f2ec4c2f0bfea1fcc8bd251341d6da9769",
+        "exit_code": 0
+      },
+      {
+        "name": "daemon",
+        "log": "/tmp/fm-runtime-projection-budget-daemon.log",
+        "sha256": "8944de026d10742b63c764c9a5d8aaf84f062786aca7a7f44f8cf3f8635a5532",
+        "exit_code": 0,
+        "passed": 282,
+        "failed": 0,
+        "ignored": 1
+      },
+      {
+        "name": "live",
+        "log": "/tmp/fm-runtime-projection-budget-live.log",
+        "sha256": "09a0c382a5597361430f50b7c25eb6a6f1b2074ec1a1dd3bb4341000f3b66083",
+        "exit_code": 0,
+        "passed": 23,
+        "artifacts": "/tmp/fm-gui-xj8zxv_r",
+        "events_sha256": "142cc750e09be0f851f5704a249fc533d9483513923d5f432c7a8195b06369e8",
+        "remaining_tracked_processes": []
+      },
+      {
+        "name": "clippy",
+        "log": "/tmp/fm-runtime-projection-budget-clippy.log",
+        "sha256": "8371499f4f52e3e5050b9d34af356d46f30014cf2100ce4ded67fe386321d286",
+        "exit_code": 0
+      }
+    ],
+    "scope": "Per-projection snapshot/diff bound with live-text preservation and newest-history retention; not the full engine/Host memory budget",
+    "remaining": [
+      "engine hyperlink retention",
+      "aggregate simultaneous projections and transfers",
+      "Host-wide admission and resource budget"
+    ],
+    "protected_gui_pid": 1663486,
+    "installed_binary_changed": false
+  },
+  "retained_link_budget_AR036": {
+    "base_revision": "eb68cbfd",
+    "accounted_bytes_per_terminal": 4194304,
+    "scope": "Conservative URI/ID and CellExtra ownership budget, including history, inactive screen, saved cursors and attribute/combining/wide-spacer copies; not an aggregate Host RSS budget",
+    "checks": [
+      {
+        "name": "tests",
+        "log": "/tmp/fm-runtime-retained-link-tests.log",
+        "sha256": "2396b1dc5b24c8bc6ca839333c38879d2317843ef5bb9415de217473f92843e1",
+        "exit_code": 0,
+        "passed": 20,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "name": "daemon",
+        "log": "/tmp/fm-runtime-retained-link-daemon.log",
+        "sha256": "bfc3c91e5af4712b9cd9ade489352c0d4b2e4288c1e9529e2a3e462027555e96",
+        "exit_code": 0,
+        "passed": 285,
+        "failed": 0,
+        "ignored": 1
+      },
+      {
+        "name": "build",
+        "log": "/tmp/fm-runtime-retained-link-build.log",
+        "sha256": "e270eff24393dfcae6108dd72b1901d101e089aba75895925c5c29fde7048895",
+        "exit_code": 0
+      },
+      {
+        "name": "live",
+        "log": "/tmp/fm-runtime-retained-link-live.log",
+        "sha256": "b3ffdf59f575eff5cce1b715ee8026c8414772b74509999a9ee752e5ab74c84d",
+        "exit_code": 0,
+        "passed": 24,
+        "artifacts": "/tmp/fm-gui-2h8y2wh7",
+        "events_sha256": "ce29f77357e5c39eabd188ea241e9525a59e01d3a1c840e762014bc5b93ef17b",
+        "remaining_tracked_processes": []
+      },
+      {
+        "name": "clippy",
+        "log": "/tmp/fm-runtime-retained-link-clippy.log",
+        "sha256": "605c997bd5a30ba0f7106e96dac04f1b16c463b28624df894127a6db57454223",
+        "exit_code": 0
+      }
+    ],
+    "valid_link_flood": {
+      "links": 10000,
+      "uri_suffix_bytes": 4000,
+      "rss_kib_before": 25228,
+      "rss_kib_after": 31732,
+      "rss_growth_limit_kib": 24576
+    },
+    "protected_gui_pid": 1663486,
+    "installed_binary_changed": false,
+    "remaining": [
+      "aggregate simultaneous projections and transfers",
+      "Host-wide admission and resource budget",
+      "macOS containment",
+      "uncertain admission and destination layout persistence",
+      "provider whole-work completion and atomic idle shutdown"
+    ]
+  },
+  "retained_link_final_workspace": {
+    "revision": "00d37569c37052f0b136909c17020a712a009cfd",
+    "command": "cargo test -j 2 --workspace --locked --no-fail-fast",
+    "environment": "private XDG/runtime, Xvfb, D-Bus; GTK fatal-criticals enabled",
+    "log": "/tmp/fm-runtime-retained-link-workspace.log",
+    "log_sha256": "0f7ba5806388f7b37d2f59be2b1b862c171d5cd75c6be0eec3f1317cd58f5e22",
+    "exit_code": 0,
+    "passed": 2411,
+    "failed": 0,
+    "ignored": 13,
+    "nested_subprocess_summaries_excluded": 2,
+    "gui": {
+      "passed": 956,
+      "failed": 0,
+      "ignored": 4
+    },
+    "protected_gui_pid": 1663486
+  },
+  "remote_run_44022308230_review": {
+    "revision": "ce372d254591b7da692608343216b1ce5ab649c0",
+    "run_url": "https://github.com/flowmux-ai/flowmux/actions/runs/44022308230",
+    "macos": {
+      "status": "failed",
+      "job_id": 133834563929,
+      "log": "/tmp/fm-runtime-run44022308230-macos.log",
+      "log_sha256": "4e67f6a8f3c09f237089cbc6185e4c33246a421b416a5885ed72ba960309f8d8",
+      "last_passed_phase": "agent-hooks",
+      "failed_phase": "session-paths",
+      "exit_code": 101,
+      "error": "custom session resume failed: Agent Host runtime unavailable",
+      "action_item": "AR-037",
+      "native_reverification": "required after managed runtime bootstrap and macOS independent Host startup are implemented"
+    },
+    "linux": "in_progress at review time",
+    "editor_web": "success",
+    "headless_stress": "success",
+    "covers_later_link_budgets": false
+  },
+  "macos_managed_resume_correction": {
+    "action_item": "AR-037",
+    "scope": "launchd job construction and native managed fixture; actual macOS runtime verification pending",
+    "cli_agent_host_tests": {
+      "passed": 6,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-launchd-cli.log"
+    },
+    "cli_all_targets_clippy": "passed -D warnings",
+    "linux_service_start_live": {
+      "passed": 25,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-nowbyhlw",
+      "log": "/tmp/fm-runtime-launchd-linux-live.log",
+      "tracked_processes_remaining": []
+    },
+    "macos_native": "pending remote CI; not verified on Linux",
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false
+  },
+  "host_memory_admission": {
+    "action_item": "AR-006",
+    "status": "admission implemented; aggregate peak accounting remains open",
+    "host_accounting_bytes": 3221225472,
+    "control_headroom_bytes": 402653184,
+    "execution_reservation_bytes": 402653184,
+    "concurrent_reservations": 7,
+    "daemon_library": {
+      "passed": 286,
+      "failed": 0,
+      "ignored": 1,
+      "log": "/tmp/fm-runtime-host-budget-daemon.log"
+    },
+    "clippy": "passed --all-targets -D warnings",
+    "live": {
+      "passed": 26,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-461xzhtg",
+      "log": "/tmp/fm-runtime-host-budget-final-live.log",
+      "host_rss_kib": [
+        22560,
+        120352
+      ],
+      "tracked_processes_remaining": []
+    },
+    "scope": "Fixed execution/transfer reservations, not a kernel RSS or provider-process memory limit. Peak control/metadata accounting remains unverified.",
+    "source_sha256": {
+      "crates/flowmux-daemon/src/agent_host/host.rs": "e8d411faa1a9cb34a3249e412850642b6986ad3b07af3947d9d74b4462d6bab7",
+      "scripts/test-agent-host-gui.py": "5b549b08f506a5aebae53c3199eccd4d7e962e5b94a96eca732c936b66c37ad2"
+    },
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false
+  },
+  "admission_query_recovery": {
+    "action_item": "AR-009",
+    "status": "continuous read-only lease recovery implemented; destination crash persistence remains open",
+    "cli_binary": {
+      "passed": 186,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-admission-recovery-cli-final.log"
+    },
+    "relay_targeted": {
+      "passed": 2,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-admission-recovery-tests-final.log"
+    },
+    "live": {
+      "passed": 27,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-jrk3q670",
+      "log": "/tmp/fm-runtime-admission-recovery-live.log",
+      "host_pause_seconds": 6.8,
+      "tracked_processes_remaining": []
+    },
+    "source_sha256": {
+      "crates/flowmux-cli/src/agent_relay.rs": "0eea02cb3700259868ec44508f1b9f51bf5ec715c6a75c06a045a8b1bf61f3f7",
+      "scripts/test-agent-host-gui.py": "c84d2f62afef4b8d1da931df0f1620b78ce79fb62c4006efc39b285a788951ec"
+    },
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false
+  },
+  "new_workspace_wait_preservation": {
+    "action_item": "AR-009",
+    "status": "timeout workspace/tab preservation verified; destination crash persistence remains open",
+    "live": {
+      "passed": 9,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-89rqepfl",
+      "log": "/tmp/fm-runtime-workspace-retain-live-final.log",
+      "tracked_processes_remaining": []
+    },
+    "build": "passed",
+    "gui_all_targets_clippy": "passed -D warnings",
+    "format": "passed",
+    "python_ast": "passed",
+    "source_sha256": {
+      "crates/flowmux/src/ui/window/managed_agent_destination.rs": "7714a3da70afffc7041150bbc9d0b7cd7728313b3f8d4cee119a02746e276af1",
+      "scripts/test-agent-ready-gui.py": "d376ff27a7bb8c3e1f09099f7e1b4f6955aba6a139f2f91921742e34727de7d6"
+    },
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false
+  },
+  "destination_admission_checkpoint": {
+    "action_item": "AR-009",
+    "status": "Linux destination crash persistence verified; complete boundary review remains open",
+    "protocol_version": 15,
+    "state_library": {
+      "passed": 95,
+      "failed": 0
+    },
+    "daemon_library": {
+      "passed": 286,
+      "failed": 0,
+      "ignored": 1
+    },
+    "unit_log": "/tmp/fm-runtime-destination-checkpoint-tests-final.log",
+    "build": "passed",
+    "all_targets_clippy": "passed -D warnings",
+    "format": "passed",
+    "python_ast": "passed",
+    "live": {
+      "passed": 10,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-30iq6qfk",
+      "log": "/tmp/fm-runtime-destination-checkpoint-live.log",
+      "tracked_processes_remaining": [],
+      "gui_regular_state_writes_denied": true,
+      "destination_sigkill": true,
+      "same_pid_birth_and_fresh_input": true
+    },
+    "source_sha256": {
+      "crates/flowmux-state/src/agent_views.rs": "975c75b22449c170cbbce3d0b822165ec2d4a38e7fcd2a6961920257f034b742",
+      "crates/flowmux-state/src/lib.rs": "dd2678ead4ce72b9620432c7b262eef108cda9b0a694bc4916166defeec2f9ba",
+      "crates/flowmux-daemon/src/agent_host/host.rs": "e5fb08ae817dff73a458c1081e1aabfb5abfe641883ff95135ff5abc8befb859",
+      "crates/flowmux-daemon/src/state_store.rs": "f3a783434de9f008d7f408183beb82522475c3a239af6430b572887cfc3d9802",
+      "crates/flowmux-ipc/src/agent_host.rs": "92696448f2aeb9bf189a66a961e80a29b65ab46a4da8dfc13efe35286f1d1bd7",
+      "crates/flowmux/src/ui/window/managed_agent_destination.rs": "58bc1565cb45a85cc3be0ef52481a2963cde9b30492d0cf8952d3768e6801439",
+      "crates/flowmux/src/ui/window/pane_commands.rs": "d0c322f8ccdc14b2a8a77c75f395835c019a21e56025aa8cdb0ae0201b461616",
+      "scripts/test-agent-ready-gui.py": "2e9428233b9932d1ecac5b864cd7ca0decefd97d78a9beb9aa7a95d862fe5dae",
+      "scripts/test-agent-host-gui.py": "9209d17021f81061ebd0da7a1655c1628fb74e8643c027798ad7af0e62e8d996"
+    },
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false,
+    "remaining": "AR-006 aggregate peak accounting; AR-008 macOS containment; AR-009 concurrent layout boundary review; AR-010 provider completion/shutdown contract; AR-037 native verification.",
+    "gtk_stale_admission": {
+      "passed": 1,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-destination-checkpoint-gtk.log"
+    }
+  },
+  "destination_concurrent_save": {
+    "action_item": "AR-039",
+    "status": "resolved; AR-009 persistence boundaries reconciled",
+    "parent_revision": "17deac70489278eb82d2851c5d99e95d39f2fe1e",
+    "reproduction_log": "/tmp/fm-runtime-window-revision-repro.log",
+    "state_library": {
+      "passed": 95,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-window-revision-state-final.log"
+    },
+    "state_final_targeted": {
+      "passed": 1,
+      "failed": 0,
+      "log": "/tmp/fm-runtime-window-revision-state-targeted-final.log"
+    },
+    "daemon_library": {
+      "passed": 286,
+      "failed": 0,
+      "ignored": 1,
+      "log": "/tmp/fm-runtime-window-revision-tests.log",
+      "scope": "daemon result only; state fixture failed here and was corrected separately"
+    },
+    "build": "passed",
+    "workspace_all_targets_clippy": "passed -D warnings",
+    "final_state_clippy": "passed -D warnings",
+    "format": "passed",
+    "python_ast": "passed",
+    "live": {
+      "passed": 11,
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-cwo8qkyf",
+      "log": "/tmp/fm-runtime-window-revision-live-final.log",
+      "tracked_processes_remaining": [],
+      "native_tab_creation": true,
+      "autosave_after_checkpoint": true,
+      "original_input_preserved": true,
+      "destination_crash_restore": true
+    },
+    "failed_live": {
+      "artifacts": "/tmp/fm-gui-aqyu6a6o",
+      "reason": "new tab mutation is queued during readiness; fixture timed out",
+      "tracked_processes_remaining": []
+    },
+    "source_sha256": {
+      "crates/flowmux-state/src/agent_views.rs": "1157d6f5a187a4b5f83eb1e4955688febbc19a8edbdc3f0ad0a7c14a87986157",
+      "crates/flowmux-state/src/lib.rs": "76922d7f91296dcb5c26d64e25cdf2dfc69890ccc2995df0a07392d2f72ed302",
+      "crates/flowmux-daemon/src/state_store.rs": "4332f22066b248b90ce428487484a6d0cb7e355420d19821564cfe843c49676c",
+      "scripts/test-agent-ready-gui.py": "c4e3b7d4853152798112bbc3cae6f741d0b0bf606392230a8a44536eb11907b2"
+    },
+    "protected_user_gui_pid": 1663486,
+    "installed_executables_modified": false,
+    "remaining_medium": [
+      "AR-006",
+      "AR-008 (macOS)",
+      "AR-010",
+      "AR-037"
+    ]
+  }
+}

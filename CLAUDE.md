@@ -25,6 +25,13 @@ The shared gates isolate runtime state and retain failure logs. macOS GTK
 tests requiring AppKit must use the native main-thread harness; a generic
 `cargo test --workspace` is not a substitute.
 
+On Linux, finish applicable local checks before pushing code. Agent runtime
+changes require coverage of `bash scripts/test-ci.sh linux extended` and the
+isolated live scenarios below. Preserve failures and follow-up evidence, fix
+Linux failures locally, and use CI to confirm the validated revision. Repeat
+checks when changes or new failures invalidate earlier results; distinguish
+follow-up coverage from a single uninterrupted gate pass.
+
 The binaries are `flowmux` (GUI and CLI delegation), `flowmuxctl` (IPC client),
 `flowmux-md-viewer` (Markdown reader), and `flowmux-daemon` (headless handler).
 The GUI embeds its IPC server; normal desktop use needs no separate daemon.

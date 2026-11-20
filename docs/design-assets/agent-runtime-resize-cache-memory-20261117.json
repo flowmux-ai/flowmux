@@ -1,0 +1,127 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-065",
+  "source_base": "681cc17a5d9e4df1e5cf210de5288339ab959acb",
+  "problem": "History-free grid resize retained offscreen cell payloads, exceeding the execution reservation when large primary snapshots overlapped.",
+  "fix": "Truncate invisible storage after resize for grids with max_scroll_limit == 0.",
+  "geometry_sequence": [
+    [
+      79,
+      499
+    ],
+    [
+      79,
+      500
+    ],
+    [
+      80,
+      500
+    ]
+  ],
+  "load": {
+    "warmup_plain_rows": 1500,
+    "primary_rich_rows": 1500,
+    "alternate_rich_rows": 1500,
+    "combining_marks_per_cell": 32,
+    "title_updates": 4096,
+    "title_bytes": 4096,
+    "long_link_updates": 500,
+    "overlapping_primary_snapshots": 3
+  },
+  "execution_reservation_kib": 393216,
+  "isolated_terminal": {
+    "before_vm_hwm_kib": 410768,
+    "before_exit_code": 101,
+    "after_vm_hwm_kib": 301064,
+    "after_exit_code": 0,
+    "passed": 1,
+    "duration_seconds": 28.78,
+    "first_snapshot_bytes": 16761452,
+    "current_snapshot_bytes": 16761315
+  },
+  "checks": {
+    "daemon_library": {
+      "passed": 291,
+      "ignored": 1,
+      "exit_code": 0
+    },
+    "upstream_library": {
+      "passed": 132,
+      "exit_code": 0
+    },
+    "daemon_all_target_clippy": "passed (-D warnings)",
+    "locked_gui_cli_daemon_build": "passed",
+    "rust_format": "passed",
+    "diff_whitespace": "passed"
+  },
+  "source_sha256": {
+    "crates/flowmux-daemon/src/agent_host/terminal.rs": "350f68b17f519248faa684d37f27b9fba5b6891463ca8cbc44b58ce201407b84",
+    "vendor/alacritty_terminal/src/grid/resize.rs": "d0edd30f7f669b7bc7b718f4c1b21fba3393303b0f9ee6bc3579abb3ef08074b",
+    "scripts/test-agent-terminal-budget.py": "ccd0ce588cad0135b1299b680b0baca00a0022c8d7ff1bb02b1b56655c55fc11"
+  },
+  "binary_sha256": {
+    "target/debug/flowmux": "f77efadb56e0344dca2af7bf2483033afe45f7d027cb7d862d2a27a0656e4abc",
+    "target/debug/flowmux-daemon": "24eddad2ba10d0f175280e4f51c91d21c2cbb3cb61ec40c948a536e99948bb8c",
+    "target/debug/flowmuxctl": "06c1a55654f9152c80475162a382e360a0785f76853cca97e314921ab7e1124d"
+  },
+  "logs": {
+    "before": {
+      "path": "/tmp/fm-runtime-three-primary-max-width.log",
+      "sha256": "961093f472c0b7a10552877ffba171a75e912683c9d1ec92112ce49d466e304d"
+    },
+    "after": {
+      "path": "/tmp/fm-runtime-three-primary-max-width-after.log",
+      "sha256": "3ab9f7790d21b1cf1d97dd7fb9c5a0d67e8df26a439fcaa5ff2fe6299c850e9e"
+    },
+    "daemon": {
+      "path": "/tmp/fm-runtime-no-history-cache-daemon.log",
+      "sha256": "9748c17b8e437eed594f5339054619ccd3e1baf0e845909c3bfca6334994bd1e"
+    },
+    "upstream": {
+      "path": "/tmp/fm-runtime-no-history-cache-upstream.log",
+      "sha256": "733b115eaa842cd0c44a5f5484f2c44af9275fac4aff785a91726fbf0e8fa0f3"
+    },
+    "clippy": {
+      "path": "/tmp/fm-runtime-no-history-cache-clippy.log",
+      "sha256": "ae3025c1b67531e08089f73256d554bc19bca3879ad9ff49e1d211808ee94281"
+    },
+    "build": {
+      "path": "/tmp/fm-runtime-no-history-cache-build.log",
+      "sha256": "6a4f7283a61006c764122070144ad6ae6f222434ca9515ba17a8b1591c8269ad"
+    }
+  },
+  "limitations": [
+    "AR-006 full Host accounting remains open; this fixes one demonstrated overflow.",
+    "Linux fixture load is not real provider/model acceptance or macOS memory measurement.",
+    "GUI management reconnect warnings occurred during bulk output; this test does not establish an under-load response-time bound."
+  ],
+  "live": {
+    "command": "python3 scripts/test-agent-terminal-budget.py --protected-pid 1663486",
+    "exit_code": 0,
+    "passed": 3,
+    "host_vm_hwm_kib": 339464,
+    "artifacts": "/tmp/fm-gui-9l1a3buy",
+    "log": "/tmp/fm-runtime-terminal-budget-live-verified.log",
+    "log_sha256": "68304189e95dd152c415f8378d7376074df7fb6583c796a028ed4c8a4bf1419b",
+    "artifact_sha256": {
+      "host.log": "4a8ef5e57185f396578b18f234f119ecc60c9ee98f48ac237b61bad620dc3732",
+      "terminal-budget.log": "f9813305f4e2a813d69cd7345d91948c85d24307cbd85ca0b35ae1ec9f10a95a",
+      "events.jsonl": "0a1a21a53c526e67e1c9b08cc36a24a61a50699195abc03a59768aed2d447637",
+      "budget-provider.py": "eb86827359d344a868cc50903af2e4be5e5d9db1314a656d4eb49abc83fed817",
+      "starts": "cda52ee19dc6ceabceb3f5f4eca8b23024bd97904ecf301f0002946b84a5e9b4"
+    },
+    "verified": [
+      "active/pending large frame overlap within execution reservation",
+      "original PID and process birth after GUI reconnection",
+      "fresh Hangul input ACK through real VTE",
+      "single provider spawn",
+      "natural exit removes empty Host socket",
+      "protected user GUI remains alive"
+    ]
+  },
+  "fixture_failures": [
+    "Initial heartbeat socket timeout poisoned its buffered reader; wait now preserves heartbeat with a longer read timeout and fails immediately on transport errors.",
+    "A first-chunk character assertion wrongly assumed the visible cursor row preceded history; sequence updates and provider DSR ACKs establish ordering instead.",
+    "An empty initial GUI had no workspace; the fixture now creates its own workspace before attachment."
+  ]
+}

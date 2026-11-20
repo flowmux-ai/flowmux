@@ -1,0 +1,204 @@
+{
+  "recorded_at_utc": "2026-11-17T15:45:07.447576+00:00",
+  "action_item": "AR-088",
+  "severity": "medium",
+  "status": "open: native notification keyboard input failure cause not established",
+  "source_anchor": "536552fe542c1bf5e5adc6426ff66dfefdebaaf5",
+  "ci_failure": {
+    "source": "1ffd7c2665e6c5256f59d7ce8b7850ef9633a3f3",
+    "run_id": 44109493204,
+    "job_id": 134130885408,
+    "conclusion": "failure",
+    "gate_exit": 1,
+    "passed_phase_names": [
+      "ci-runner-tests",
+      "installer-routing",
+      "thorvg-installer",
+      "agent-runner-tests",
+      "agent-team-tests",
+      "benchmark-agent-tests",
+      "stability-harness-tests",
+      "format",
+      "gui-harness",
+      "ssh-fixture-unit",
+      "build",
+      "workspace",
+      "gtk-icon-preload",
+      "browser-control",
+      "browser-source",
+      "browser-bookmarks",
+      "browser-feedback",
+      "browser-import",
+      "skills",
+      "notifications",
+      "team-pingpong",
+      "team-recovery",
+      "team-reuse",
+      "team-usage",
+      "session-save",
+      "session-flow",
+      "managed-session-flow",
+      "pty-spawn-failure",
+      "tab-windows",
+      "agent-host",
+      "agent-terminal-budget",
+      "agent-gui-response-limit",
+      "agent-containment",
+      "agent-root-exit",
+      "agent-ready",
+      "agent-relay-replacement",
+      "agent-gui-replacement",
+      "agent-binding-restore",
+      "agent-background-binding-restore",
+      "agent-drag",
+      "managed-agent-drag",
+      "managed-agent-click-load",
+      "managed-agent-tearoff"
+    ],
+    "failed_phase_results": [
+      {
+        "phase": "agent-native-hooks",
+        "command": [
+          "python3",
+          "scripts/test-agent-native-hooks-gui.py",
+          "--gui",
+          "/home/runner/work/flowmux/flowmux/target/debug/flowmux",
+          "--cli",
+          "/home/runner/work/flowmux/flowmux/target/debug/flowmuxctl",
+          "--host",
+          "/home/runner/work/flowmux/flowmux/target/debug/flowmux-daemon"
+        ],
+        "timeout_seconds": 2400,
+        "status": "failed",
+        "pid": 89313,
+        "exit_code": 1,
+        "elapsed_seconds": 45.408
+      },
+      {
+        "phase": "regression",
+        "command": [
+          "xvfb-run",
+          "-a",
+          "-s",
+          "-screen 0 1280x1024x24",
+          "dbus-run-session",
+          "--",
+          "env",
+          "FLOWMUX_TEST_X11_LOCKS=1",
+          "bash",
+          "scripts/test-linux.sh",
+          "extended",
+          "--",
+          "--nocapture"
+        ],
+        "timeout_seconds": 4200,
+        "status": "failed",
+        "pid": 12384,
+        "exit_code": 1,
+        "elapsed_seconds": 2036.131
+      }
+    ],
+    "failure_log_lines": [
+      "2026-11-17T15:38:15.6221779Z   File \"/home/runner/work/flowmux/flowmux/scripts/test-agent-native-hooks-gui.py\", line 294, in main",
+      "2026-11-17T15:38:15.6222445Z     fixture.wait_for(lambda: \"ACK:<notice>\" in h.screen(gui, right), \"notification focuses the moved pane for native input\")",
+      "2026-11-17T15:38:15.6223963Z AssertionError: Timed out: notification focuses the moved pane for native input; last error: None"
+    ],
+    "artifact_id": 14344215537,
+    "artifact_zip_sha256": "1895deb370c8fa7e4b09af2b900d3f45f23d33cbc6654f24242ecc8008dbfe07"
+  },
+  "ci_artifacts": {
+    "zip": {
+      "path": "/tmp/fm-runtime-linux-44109493204.zip",
+      "sha256": "1895deb370c8fa7e4b09af2b900d3f45f23d33cbc6654f24242ecc8008dbfe07"
+    },
+    "events": {
+      "path": "/tmp/fm-runtime-ci-44109493204-linux/tmp/fm-gui-5_v0lii3/events.jsonl",
+      "sha256": "92326af612ad7e6b9a487407e424bc1a98a6b484dec69c2bed6d0bc743384119"
+    },
+    "host_log": {
+      "path": "/tmp/fm-runtime-ci-44109493204-linux/tmp/fm-gui-5_v0lii3/host.log",
+      "sha256": "9d06c9741e4e8b501759d329bf40180e924ff4ab9055c96ac8ed1e0123acba38"
+    },
+    "screen_samples": 297,
+    "unique_screens": 1,
+    "last_screen_prefix": "EXECUTION:claude:89379                               \n                                                     \n            "
+  },
+  "local_native_full": {
+    "command": "python3 -u scripts/test-agent-native-hooks-gui.py --protected-pid 1663486",
+    "exit_code": 0,
+    "passed_checks": 30,
+    "artifacts": "/tmp/fm-gui-mhs29aya",
+    "log": {
+      "path": "/tmp/fm-runtime-native-notice-before-20261118.log",
+      "sha256": "4020f38aea8b1d727a22cd2b09eedb98f8a8ceb93b77abeb62bcfae3b5129d02"
+    },
+    "note": "Normal full scenario used source 536552fe before adding failure-only diagnostics."
+  },
+  "local_notice_repetition": {
+    "attempts": 10,
+    "passed": 10,
+    "failed": 0,
+    "preserved": "Notification input operations and ordering unchanged; stop after first scenario; collect diagnostics only if it fails.",
+    "script": {
+      "path": "/tmp/fm-runtime-native-notice-repro-20261118.py",
+      "sha256": "a7562697546bb605b84f0e612116fabe2bdc2360d9ab0eb7a994288d48d11662"
+    },
+    "log": {
+      "path": "/tmp/fm-runtime-native-notice-repeat-20261118.log",
+      "sha256": "77b7097415f98fc6112585b6f222e0982a790ef4ccb03d5aedf3352aedbb51c5"
+    },
+    "artifacts": [
+      "/tmp/fm-gui-0dwro8oi",
+      "/tmp/fm-gui-2na6u8_c",
+      "/tmp/fm-gui-l8aciaw2",
+      "/tmp/fm-gui-w97hvkb_",
+      "/tmp/fm-gui-st_0s272",
+      "/tmp/fm-gui-ji3afe4i",
+      "/tmp/fm-gui-1q3heb0i",
+      "/tmp/fm-gui-td_ygga8",
+      "/tmp/fm-gui-9l20u5pb",
+      "/tmp/fm-gui-p2zvles6"
+    ]
+  },
+  "collector_selfcheck": {
+    "script": {
+      "path": "/tmp/fm-runtime-native-notice-collector-selfcheck-20261118.py",
+      "sha256": "7047ae7fcad1c67fe2ded33fab625cb6e0c1176f95045be01e37d88a165e22cf"
+    },
+    "log": {
+      "path": "/tmp/fm-runtime-native-notice-collector-selfcheck-20261118.log",
+      "sha256": "c222a763530eb9ea087041213af5fb1b2307cb2909fbe577b6c974375acde53b"
+    },
+    "exit_code": 1,
+    "expected_exit": 1,
+    "injected_error": "AR-088 failure collector self-check",
+    "diagnostics": {
+      "path": "/tmp/fm-gui-qyknkeiq/native-hooks-failure.json",
+      "sha256": "18b52e1e771128346d01659a900475979c4adf40ac4f7b24e499c9d8aff81297"
+    },
+    "captured_fields": [
+      "error",
+      "nodes",
+      "agents",
+      "tree",
+      "screens",
+      "x_focus",
+      "pressed_keys"
+    ],
+    "capture_error": null,
+    "note": "Deliberately raises after the real notification/native input scenario; validates collection and original error propagation, not reproduction of the CI failure."
+  },
+  "change": "Only capture failure state before fixture cleanup and include diagnostic/GUI logs in existing Linux artifact upload. No product or wait/timeout changes.",
+  "checks": [
+    "Python AST parsing",
+    "Workflow YAML parsing and upload path assertions",
+    "git diff --check"
+  ],
+  "protected_user_gui_pid": 1663486,
+  "limitations": [
+    "A passing local full scenario and ten repetitions do not resolve the prior CI failure.",
+    "CI lacked focus state, key state and GUI logs at failure; input destination and mapping readiness remain unproven.",
+    "No new CI dispatch or rerun was made. Subsequent Linux phases after agent-native-hooks were not executed in that CI run.",
+    "Six medium items remain open including AR-088; full implementation is incomplete."
+  ]
+}

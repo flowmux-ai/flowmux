@@ -1,0 +1,160 @@
+{
+  "recorded_at_utc": "2026-11-17T14:58:37.979277+00:00",
+  "action_item": "AR-086",
+  "source_head": "d4135d9445ac89799a6972a3f77212c867dd3c27",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "script": {
+    "path": "scripts/test-agent-host-gui.py",
+    "sha256": "1741b5003acd00a023c856f009fa81589ad0e85c265ff7dc9f350315a2b9cf55"
+  },
+  "product_binaries": {
+    "target/debug/flowmux": "1cd3a858dec350dd4e3c29a01c3454cef2300cbdda1ae380a2e1d7d026d0b8af",
+    "target/debug/flowmuxctl": "a1598580c977e2903fe7df572c80944c5b11d3efcdfc1fe79fa7de9a4f75d418",
+    "target/debug/flowmux-daemon": "3c2358e4e65ffe662ef56c0b2882e8317af98f9759b6f7dd51405ba3976a646d"
+  },
+  "protected_user_gui_pid": 1663486,
+  "ci_failure": {
+    "source": "3fc7f647d7618ed6856004460278068a6ae2ca3c",
+    "run_id": 44099774658,
+    "job_id": 134096354433,
+    "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44099774658",
+    "exit_code": 1,
+    "passed_phases": [
+      "ci-runner-tests",
+      "installer-routing",
+      "thorvg-installer",
+      "agent-runner-tests",
+      "agent-team-tests",
+      "benchmark-agent-tests",
+      "stability-harness-tests",
+      "format",
+      "gui-harness",
+      "ssh-fixture-unit",
+      "build",
+      "workspace",
+      "gtk-icon-preload",
+      "browser-control",
+      "browser-source",
+      "browser-bookmarks",
+      "browser-feedback",
+      "browser-import",
+      "skills",
+      "notifications",
+      "team-pingpong",
+      "team-recovery",
+      "team-reuse",
+      "team-usage",
+      "session-save",
+      "session-flow",
+      "managed-session-flow",
+      "pty-spawn-failure",
+      "tab-windows"
+    ],
+    "failed_phase": {
+      "phase": "agent-host",
+      "command": [
+        "python3",
+        "scripts/test-agent-host-gui.py",
+        "--gui",
+        "/home/runner/work/flowmux/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/runner/work/flowmux/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/runner/work/flowmux/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "failed",
+      "pid": 86892,
+      "exit_code": 1,
+      "elapsed_seconds": 44.063
+    },
+    "excerpt": {
+      "path": "/tmp/fm-runtime-final-linux-ci-excerpt-20261117.log",
+      "sha256": "2530b5af286b1dacfdd7dd7dd86a9f693694fd3c0a0587c0edaae5105adcb0a4"
+    },
+    "artifact": {
+      "id": 14337224437,
+      "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44099774658/artifacts/14337224437",
+      "path": "/tmp/fm-runtime-final-linux-ci-20261117.zip",
+      "sha256": "e8cf36ddeed3b9977096376a4d238cc4816264c1a32a6b3b301923d7f82cd437"
+    },
+    "root_cause": "Fixture reuses a control connection after waiting longer than the product IPC 30-second idle read deadline. Last memory-agent launch 14:42:47.600755 UTC; deadline 14:43:17.604758 UTC; prepare_attach fails at 14:43:27.574733 UTC."
+  },
+  "before": {
+    "description": "HEAD fixture plus wrapper injecting 31 seconds before provider readiness",
+    "exit_code": 1,
+    "log": {
+      "path": "/tmp/fm-runtime-host-idle-before-20261117.log",
+      "sha256": "600f157ad59411a1b3969e26d84dcab17ad58919dec11d2edcf4b7cb9967c6ca"
+    },
+    "artifacts": "/tmp/fm-gui-q3cbq__m",
+    "passed_check_count": 4,
+    "host_log": {
+      "path": "/tmp/fm-gui-q3cbq__m/host.log",
+      "sha256": "2b02985dcd475f986cb58738ba946bc60d982176366f58e920288173d739aa39"
+    },
+    "events": {
+      "path": "/tmp/fm-gui-q3cbq__m/events.jsonl",
+      "sha256": "84fbc7718b9fc7da8d58860f84ee12c3a63e72c5a24e661e5b1f67de3be49de4"
+    }
+  },
+  "after_injected": {
+    "description": "Reconnect fix plus identical injected provider delay",
+    "exit_code": 0,
+    "log": {
+      "path": "/tmp/fm-runtime-host-idle-after-20261117.log",
+      "sha256": "4a87a89e088442f113cc48547ae7ba5f3d9550fedd7245350c50fd4bb5fee82a"
+    },
+    "artifacts": "/tmp/fm-gui-926sv3n0",
+    "passed_check_count": 33,
+    "host_log": {
+      "path": "/tmp/fm-gui-926sv3n0/host.log",
+      "sha256": "b04c16a6d57d1ba7e522123298caa785d30175b3d22148666e5f24932b1c3fb9"
+    },
+    "events": {
+      "path": "/tmp/fm-gui-926sv3n0/events.jsonl",
+      "sha256": "381898262baf770acb1752221ca5e7b7549a1b75537448082230572c24a9a85c"
+    }
+  },
+  "after_direct_provider_delay": {
+    "description": "Direct script execution with embedded provider delay",
+    "exit_code": 0,
+    "log": {
+      "path": "/tmp/fm-runtime-host-idle-final-20261117.log",
+      "sha256": "5fa8d5892fe3e161d735b865fd18a2a4c0659113e8f57a8fb917244177932aca"
+    },
+    "artifacts": "/tmp/fm-gui-s271w5_v",
+    "passed_check_count": 33,
+    "host_log": {
+      "path": "/tmp/fm-gui-s271w5_v/host.log",
+      "sha256": "4b6f34f7283e231a5c194e324a40fd9252c1c346a1bbdbb8f04364167ba61560"
+    },
+    "events": {
+      "path": "/tmp/fm-gui-s271w5_v/events.jsonl",
+      "sha256": "b92ff0b3ee9d28f194c7f25e594693291e2f5caee039841cbd234e41dfd03f5d"
+    }
+  },
+  "final_direct_concurrent_delay": {
+    "description": "Final committed fixture delays the caller for 31 seconds concurrently with output parsing, then waits up to 60 seconds for readiness and reconnects before pool saturation",
+    "exit_code": 0,
+    "log": {
+      "path": "/tmp/fm-runtime-host-idle-final-concurrent-20261117.log",
+      "sha256": "11d75ba07a040b15e4178d6d04836315f127f5872c6c749895e0d4119b3bc215"
+    },
+    "artifacts": "/tmp/fm-gui-s0lj80yc",
+    "passed_check_count": 33,
+    "host_log": {
+      "path": "/tmp/fm-gui-s0lj80yc/host.log",
+      "sha256": "00edccf8d9c89e9e799d787092160b9a5bf0d2317bd059092eb951ac074eaa3c"
+    },
+    "events": {
+      "path": "/tmp/fm-gui-s0lj80yc/events.jsonl",
+      "sha256": "11f46e93a0b7f19a5db9bbddd8ae814a14ea786d071806609caf9ddb342906b1"
+    }
+  },
+  "limitations": [
+    "No product timeout or runtime code changed; no mutation retry.",
+    "Earlier local 51-phase coverage remains split-run coverage, not one passing monolithic gate.",
+    "This local correction does not establish a successful remote Linux full gate or close the six preexisting medium items."
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-066",
+  "source_base": "f38241d826a37bf493316826e414c0c953b2fb49",
+  "fix": "Yield at each terminal actor loop boundary so continuously ready PTY output cannot monopolize execution.",
+  "load": "Same legal geometry, rich grids, titles and link load as AR-065, with control heartbeats during output.",
+  "gui_rpc_deadline_seconds": 1,
+  "before": {
+    "heartbeat_count": 5,
+    "max_rpc_seconds": 20.653886,
+    "gui_management_reconnects": true,
+    "memory_vm_hwm_kib": 347576
+  },
+  "after": {
+    "exit_code": 0,
+    "heartbeat_count": 20,
+    "max_full_call_seconds": 0.127987,
+    "max_internal_rpc_seconds": 0.009467,
+    "memory_vm_hwm_kib": 337616,
+    "gui_checks_passed": 3,
+    "artifacts": "/tmp/fm-gui-aa95s3ya"
+  },
+  "checks": {
+    "daemon_library_passed": 291,
+    "daemon_library_ignored": 1,
+    "daemon_all_target_clippy": "passed (-D warnings)",
+    "locked_gui_cli_daemon_build": "passed",
+    "format": "passed",
+    "diff_whitespace": "passed",
+    "ci_runner": {
+      "run": 27,
+      "skipped": 1,
+      "passed": 26,
+      "exit_code": 0
+    }
+  },
+  "source_sha256": {
+    "crates/flowmux-daemon/src/agent_host/host.rs": "9f27e8351bd0315a53dc0ad179647bffac6b5c78470965f620e54c64c3e822fa",
+    "scripts/test-agent-terminal-budget.py": "f40e949a533c96ef91945dadccb5cc4fde0f56b1e4846419953cc1022ef5fbf2",
+    "scripts/test-linux.sh": "2f51dde3b30f60647ad290e0845f486e39104fc42b70c51fbd3dbbaeec3270d6",
+    "scripts/test-ci-runner.py": "13f26e01b0fa83bd5834130b33232fdacfba88defec3bdb62649447def2af610"
+  },
+  "binary_sha256": {
+    "target/debug/flowmux": "a88ed4a40112dbe385449adf13b51acb97d87223916ce5124234598bb6e90055",
+    "target/debug/flowmux-daemon": "43b0096124b00764a43974445d0d088ba8f8a0d12ab7b99b35041a4b4a9a4f56",
+    "target/debug/flowmuxctl": "06c1a55654f9152c80475162a382e360a0785f76853cca97e314921ab7e1124d"
+  },
+  "logs": {
+    "before": {
+      "path": "/tmp/fm-runtime-fairness-before.log",
+      "sha256": "fdbd846c69e0d47d30942a0b59cb98ded13874d3ff903df2d9c97d5fd6fd5c57"
+    },
+    "after": {
+      "path": "/tmp/fm-runtime-fairness-after.log",
+      "sha256": "99031692f8b5f979b2b8aa1e0e682bb4bbfcfd2ad65a734a2ebcc17a15d3ab80"
+    },
+    "daemon": {
+      "path": "/tmp/fm-runtime-fairness-daemon.log",
+      "sha256": "ede86083e06ddad81be205735b7effa68259f383e393f243305e170b4751b6e3"
+    },
+    "clippy": {
+      "path": "/tmp/fm-runtime-fairness-clippy.log",
+      "sha256": "bc5badab32b83a7cdb1ed58355c0d12e8b20e3a757e0997595bf14f0a0f24b62"
+    },
+    "build": {
+      "path": "/tmp/fm-runtime-fairness-build.log",
+      "sha256": "b3585c62493404fc19e1d17af9ddf7ecc22bd97b0a0054fe177b9efb751b28dc"
+    },
+    "ci_runner": {
+      "path": "/tmp/fm-runtime-fairness-ci-runner.log",
+      "sha256": "4f4a426bb08a2b4efe261c53f5e378713d57d3876ca35e174a0f23c16484027e"
+    }
+  },
+  "measurement_wrapper": {
+    "path": "/tmp/fm-runtime-measure-heartbeat.py",
+    "sha256": "36ac6da1df43a4f70be4b24a571082e4519d5eff415fdfae4d86206b764cc665"
+  },
+  "limitations": [
+    "Does not establish full Host allocation accounting or latency bounds for all agents/platforms.",
+    "Bulk control response is tested with a fixture provider, not a real model workload.",
+    "Earlier Linux/macOS full gate revisions predate this actor change."
+  ],
+  "live_artifact_sha256": {
+    "host.log": "0f8a9251c01dbc4ca3768157178ebf262926da5be01bdedaed23670c50f5cffc",
+    "terminal-budget.log": "f0a24ac60a7c31ab7edd43e8d210a911d44d40748e9a86a87f5689185f859a42",
+    "events.jsonl": "ad920d1cff8060e89714dc8c1becf897ff3b4681528c9d43d24c08c5eae0977c"
+  }
+}

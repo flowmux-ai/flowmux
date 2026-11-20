@@ -1,0 +1,94 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-070",
+  "source_parent": "58ce10e277861b827ced895262ee8b1ac9af13ac",
+  "scope": "Linux isolated Agent Host and GTK/WebKit; same managed fixture provider opens 56 slow response connections",
+  "command": [
+    "python3",
+    "scripts/test-agent-gui-response-limit.py",
+    "--protected-pid",
+    "1663486"
+  ],
+  "before": {
+    "admitted": 56,
+    "rejected_before_effect": 0,
+    "host_peak_kib": 529756,
+    "expected_failure": "assert pressure == {'admitted': 7, 'rejected': 49}"
+  },
+  "after": {
+    "exit_code": 0,
+    "live_checks_passed": 5,
+    "admitted": 7,
+    "rejected_before_effect": 49,
+    "host_peak_kib": 107660,
+    "fresh_forwarding_after_disconnect": true,
+    "gui_effects": 7,
+    "same_pid_birth_and_fresh_hangul": true,
+    "natural_empty_host_cleanup": true
+  },
+  "checks": {
+    "ipc_unit_tests_passed": 96,
+    "ipc_and_daemon_all_target_clippy": "passed (-D warnings)",
+    "locked_gui_daemon_cli_build": "passed",
+    "format": "passed",
+    "python_outer_and_provider_ast": "passed",
+    "diff_whitespace": "passed"
+  },
+  "cleanup": [
+    {
+      "root": "/tmp/fm-gui-e6yxubi4",
+      "tracked_pids": [
+        278338,
+        278348,
+        278349,
+        278361
+      ],
+      "tracked_pids_gone": true,
+      "remaining_runtime_pids": []
+    },
+    {
+      "root": "/tmp/fm-gui-a4ooqm7c",
+      "tracked_pids": [
+        283064,
+        283076,
+        283077,
+        283088
+      ],
+      "tracked_pids_gone": true,
+      "remaining_runtime_pids": []
+    },
+    {
+      "root": "/tmp/fm-gui-1c4e55jv",
+      "tracked_pids": [
+        285958,
+        285972,
+        285973,
+        285984
+      ],
+      "tracked_pids_gone": true,
+      "remaining_runtime_pids": []
+    }
+  ],
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "crates/flowmux-ipc/src/server.rs": "1b246b428ca5df8c96289fdaa8eae7aff5b342b9df4c557ac25ffe876459f7e5",
+    "crates/flowmux-ipc/src/agent_host.rs": "003e624921281841dccde15b8d60e95bc1e0434eeb0a1a0c8e6cb2a00824b6bc",
+    "scripts/test-agent-gui-response-limit.py": "a2eeaa072f550aed4cfea187a4288f12e026ea8115de05257543a44027ed517f",
+    "/tmp/fm-runtime-slow-forward-before.log": "2b2a0a084ec887478278fcb9aab8cb7f994fcb213686e088de375885453f8071",
+    "/tmp/fm-runtime-slow-forward-after-final.log": "4b1d0dfd6f04782f78874ddbc57e94673fe5cb02cf9cb538a15b88b26b8752f9",
+    "/tmp/fm-runtime-slow-forward-ipc.log": "d314a5d929b45977102eae25e171949e758892ee712da9ddf652fbb64f7527ec",
+    "/tmp/fm-runtime-slow-forward-clippy.log": "0e69cde6fcafcdb8a1d1e265187cd9af9a1b6b9ff3f26444471c53e9c63b1b29",
+    "/tmp/fm-runtime-slow-forward-build-final.log": "704eb1cb12ad2783970c68fca9894c84c17f031a384b69612871bf44d0426f04",
+    "/tmp/fm-runtime-slow-forward-cli-build.log": "0fc046df4b5a15856dc0e6c112aeccc6c50de1c084ad2f6802f2e63a13909adc",
+    "target/debug/flowmux": "b7e1fff79b93139eda0561b500e26aa9bacd90ff292b2602b4d6ddceb58841e6",
+    "target/debug/flowmuxctl": "0bffce29457587ba582ba42ae58c426c6436eabd73a81384168d4e4af644c742",
+    "target/debug/flowmux-daemon": "9264567fbf01b40f19daf09e81e151af66891b9deeee00a379084f43b14540c7"
+  },
+  "limitations": [
+    "This fixes slow forwarded-response accumulation, not complete Host accounting (AR-006).",
+    "The first post-change attempt failed at initial Agent view admission before response pressure; its exact relay failure cause was not recorded. All three matching binaries were rebuilt before the final successful run; this does not establish the earlier failure root cause.",
+    "No actual provider/model, macOS or Flatpak verification in this local fixture.",
+    "Remote run 44073400067 tests f8f149d1 and does not include this change."
+  ]
+}

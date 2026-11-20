@@ -1,0 +1,101 @@
+{
+  "date_kst": "2026-11-18",
+  "source_head": "29014656",
+  "product_source": "0e17ae6517e735d7a14e6c3c808fc1eb65812300",
+  "gate_exit": 1,
+  "passed_regression_phases": [
+    "agent-background-binding-restore",
+    "agent-binding-restore",
+    "agent-cli-controls",
+    "agent-containment",
+    "agent-drag",
+    "agent-gui-replacement",
+    "agent-gui-response-limit",
+    "agent-host",
+    "agent-host-budget",
+    "agent-native-hooks",
+    "agent-ready",
+    "agent-relay-replacement",
+    "agent-root-exit",
+    "agent-session-resume",
+    "agent-terminal-budget",
+    "agent-termination",
+    "browser-bookmarks",
+    "browser-control",
+    "browser-feedback",
+    "browser-import",
+    "browser-source",
+    "build",
+    "editor-io",
+    "editor-renderer",
+    "gtk-icon-preload",
+    "gui-harness",
+    "idle-stability",
+    "idle-stability-unit",
+    "ipc-recovery",
+    "lazy-restore",
+    "managed-agent-click-load",
+    "managed-agent-drag",
+    "managed-agent-tearoff",
+    "managed-session-flow",
+    "new-agent",
+    "notifications",
+    "polling-delay",
+    "pty-spawn-failure",
+    "session-flow",
+    "session-save",
+    "skills",
+    "ssh-fixture-unit",
+    "ssh-prerequisites",
+    "tab-windows",
+    "team-pingpong",
+    "team-recovery",
+    "team-reuse",
+    "team-usage",
+    "terminal-image-links",
+    "terminal-load",
+    "terminal-read-screen",
+    "workspace"
+  ],
+  "failed_phase": {
+    "phase": "ssh-workspace",
+    "command": [
+      "python3",
+      "scripts/ssh-workspace-fixture.py",
+      "--gui",
+      "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+      "--cli",
+      "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl"
+    ],
+    "timeout_seconds": 2400.0,
+    "status": "failed",
+    "pid": 1396400,
+    "exit_code": 1,
+    "elapsed_seconds": 138.015
+  },
+  "gui_unit": {
+    "passed": 969,
+    "failed": 0,
+    "ignored": 4
+  },
+  "archive": "/tmp/fm-local-uninterrupted-failure-20261118-evidence",
+  "evidence": [
+    {
+      "path": "/tmp/fm-local-uninterrupted-failure-20261118-evidence/gate.log",
+      "sha256": "650aab1dd0598306b6ebaa5316ba774358c6905ffd109eb19382fdd8272f2d76"
+    },
+    {
+      "path": "/tmp/fm-local-uninterrupted-20261118.log",
+      "sha256": "77c971a1f92b3e23a9e5ccd36f681abb2e71720c2bf57d400f63daa4ab2b1489"
+    },
+    {
+      "path": "/tmp/fm-ar097-runner.log",
+      "sha256": "09389808ed8faead8d97ec9a62128361dedb2392ea5e9f479bfbe9ed98ea34de"
+    },
+    {
+      "path": "/tmp/fm-ar097-retention.log",
+      "sha256": "fe4c490dd59911b50c1fcf776205b3782939a0eaf20cca94327301e1cfd1893d"
+    }
+  ],
+  "limits": "The first SSH preflight omitted private tool paths. The configured full gate passed 52 of 53 phases then GUI close timed out. Original nested SSH GUI files were deleted by gate cleanup; AR-097 retains future failure roots. Follow-up SSH success does not prove the original cause or establish an uninterrupted gate pass."
+}

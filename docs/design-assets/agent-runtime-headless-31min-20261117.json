@@ -1,0 +1,113 @@
+{
+  "action_item": "AR-052",
+  "recorded_at": "2026-11-17T08:04:43.806081+00:00",
+  "status": "passed",
+  "command": "python3 scripts/test-agent-host-gui.py --service-start --protected-pid 1663486 --headless-seconds 1860",
+  "process_exit_code": 0,
+  "environment": "Linux isolated Xvfb, D-Bus, XDG state/runtime; real systemd user service and Flowmux/VTE",
+  "artifacts": "/tmp/fm-gui-4n014rog",
+  "log": {
+    "path": "/tmp/fm-runtime-headless-31min-live.log",
+    "sha256": "4c355eec55ac2228eb48ac89ccb2fede24f702c5f8e0bb55ef8a8fc462fb2b05"
+  },
+  "events": {
+    "path": "/tmp/fm-gui-4n014rog/events.jsonl",
+    "sha256": "e1160182effd7080d75eaf628251c38b1fccdb1453b2cd8ee10c97ba817e7458"
+  },
+  "observation": {
+    "path": "/tmp/fm-gui-4n014rog/headless-duration.jsonl",
+    "sha256": "1e8ab312082e8f118e510bd45f83dc28e9be4c23194597ea94c91e9b5b6956f1",
+    "requested_seconds": 1860,
+    "observed_seconds": 1860.001419547014,
+    "samples": 372,
+    "first": {
+      "elapsed_seconds": 5.001916078006616,
+      "pid": 40325,
+      "birth": "14695775",
+      "host_pid": 40297,
+      "host_birth": "14695769",
+      "progress": 629
+    },
+    "last": {
+      "elapsed_seconds": 1860.001419547014,
+      "pid": 40325,
+      "birth": "14695775",
+      "host_pid": 40297,
+      "host_birth": "14695769",
+      "progress": 18963
+    },
+    "asserted_at_every_sample": [
+      "Host and Agent PID/birth unchanged",
+      "running and working",
+      "no view or attachment",
+      "progress increases",
+      "spawn count one",
+      "protected user GUI alive"
+    ]
+  },
+  "checks_passed": 34,
+  "checks": [
+    "agent run starts an independent user service; list and invalid launches do not start a Host",
+    "real Flowmux/VTE shows Host-owned alternate screen and round-trips Hangul input",
+    "dense sub-MiB JSON requests are rejected before dispatch; the same Agent and live VTE accept fresh Hangul input",
+    "opening narrow Background history bounds resize peak and preserves identity, fresh input and the original agent",
+    "aggregate memory admission refuses new output-heavy agents, preserves live input, and reuses retired reservations",
+    "unterminated synchronized output reaches live VTE without further output or process replacement",
+    "synchronized Unicode flood stays bounded on the hidden screen and live VTE accepts fresh input",
+    "oversized hyperlink URI and ID flood stays below 32 MiB RSS growth and fresh input works",
+    "valid hyperlink projection stays bounded while live VTE and fresh input preserve the same process",
+    "retained valid link flood stays below 24 MiB RSS growth and the same process accepts fresh input",
+    "title stack flood stays below 32 MiB RSS growth and fresh input works",
+    "oversized unterminated OSC is discarded and live VTE resumes output and input",
+    "replacement abort before ready preserves the original GUI location, input and exact execution",
+    "replacement disconnect before ready preserves the original GUI location, input and exact execution",
+    "replacement timeout before ready preserves the original GUI location, input and exact execution",
+    "oversized bytes destination checkpoint preserves saved source, authority, exact execution and fresh VTE input",
+    "oversized structure destination checkpoint preserves saved source, authority, exact execution and fresh VTE input",
+    "post-commit admission ACK disconnect preserves the exact relay, fresh Hangul input and execution without retry",
+    "post-commit admission ACK timeout preserves the exact relay, fresh Hangul input and execution without retry",
+    "post-commit admission ACK query-timeout preserves the exact relay, fresh Hangul input and execution without retry",
+    "closing/reopening and moving an Agent tab with a disconnected relay reconnect the original execution",
+    "input backpressure keeps current screen updates flowing and preserves queued input",
+    "closing the isolated GUI leaves the same agent/PTY running and progressing",
+    "ordinary terminal exits with GUI while managed Agent continues",
+    "Host preserves approval waits after GUI exit and applies lifecycle transitions without a GUI; duplicate Stop is inert",
+    "headless Working execution survives 1860 real seconds with same PID/birth, continuous progress and one spawn",
+    "GUI relay refuses attachment without a registered management connection and preserves execution",
+    "saved workspace/pane/tab automatically reconnects the same instance, PID, screen and input; spawn count remains one",
+    "SIGKILL of the isolated GUI preserves agent progress and same-process reattachment",
+    "stale epoch preserves the binding and reports failure without shell fallback or duplicate launch",
+    "lifecycle memory overflow preserves waits, the same process and fresh input; visible uncertainty blocks false completion",
+    "duplicate native start cannot erase uncertain work; a new native session restores lifecycle observation",
+    "natural agent exit is reaped promptly; empty Host exits and releases its socket",
+    "missing Host leaves saved Agent tab disconnected; no Host restart, shell fallback or native resume"
+  ],
+  "provenance": {
+    "captured_at": "2026-11-17T07:53:35.301651+00:00",
+    "worktree_head": "08b124913bb99b795276115e4920a70811aec2a4",
+    "fixture_revision": "a1ceb5425040ab969ace89308dfeda1dfc6e01bd",
+    "note": "The already running Host predates the AR-053 cgroup inventory change. This records workload survival, not latest-source or real-provider acceptance.",
+    "sha256": {
+      "host_running": "d3931d90876a858c475afd597626a182a70a8b258fd8ada7e43cee7369aa947d",
+      "host_current": "50a43f3a8626f1b9654bcf995049affff697efabe9e57d1777924f7f7fc1e816",
+      "gui": "9feeaba10fd6c56e6f519c8cde34f83f58c91c7427595ded3396326e7e10d5fe",
+      "cli": "f566644d609a6b5db6f289b61cba95a5a3ba7b69d73b112cc03ef19d741d9a63",
+      "fixture": "0a91263bc98e75ddb288f954c04935fb857bd7d3d7d685f7b5b45973a8f5ff64"
+    }
+  },
+  "remaining_tracked_processes": [],
+  "protected_user_gui_pid": 1663486,
+  "installed_executables_modified": false,
+  "limitations": [
+    "Running Host predates AR-053; not acceptance of latest source",
+    "Python PTY workload, not a real provider/model",
+    "Does not verify provider whole-work completion or automatic retirement",
+    "Does not verify macOS or Flatpak"
+  ],
+  "remaining_medium": [
+    "AR-006",
+    "AR-008 (macOS)",
+    "AR-010",
+    "AR-037"
+  ]
+}

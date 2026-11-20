@@ -1,0 +1,28 @@
+{
+  "date_kst": "2026-11-18",
+  "source_base": "eb72277b",
+  "action": "AR-095",
+  "before": {
+    "fixture": "/tmp/fm-gui-rr7u68vb",
+    "error": "BrokenPipeError after invalid New Agent project validation",
+    "cause": "Fixture started an empty Host before GUI setup; production retires an unlaunched Host after 10 seconds."
+  },
+  "change": "Start the isolated Host only immediately before valid admission. Cancel and invalid-project checks assert no Host socket and no provider launch marker.",
+  "after": {
+    "fixture": "/tmp/fm-gui-sgl5dsjo",
+    "exit_code": 0,
+    "checks": 10,
+    "elapsed_seconds": 33.892,
+    "host_started_after_seconds": 13.737,
+    "checks_scope": "New Agent native dialogs, valid launch, tab close, resume without duplicate spawn, GUI exit/restore and fresh input, empty Host retirement"
+  },
+  "log": {
+    "path": "/tmp/fm-new-agent-deferred-host-20261118.log",
+    "sha256": "38a9f4a92cd7f122bdd256faed2754c52c0ef683d95f5a811f2f2ceb0c4f13a9"
+  },
+  "limits": [
+    "Fixture-only change; production retirement policy unchanged.",
+    "Initial full Linux gate failed and is retained separately; remaining phases are being resumed locally.",
+    "Original AR-094 CI geometry failure remains pending final-source CI."
+  ]
+}

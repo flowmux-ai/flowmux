@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-067",
+  "source_base": "c11765d4",
+  "fix": "Cap only Host-to-GUI forwarding response wire at 4MiB, preserve partial reads, poison rejected streams, never replay effects.",
+  "before": {
+    "live_artifacts": "/tmp/fm-gui-e3mrlatq",
+    "large_result_stdout_chars": 5242912,
+    "exit_code": 0,
+    "effect_count": 1
+  },
+  "after": {
+    "live_artifacts": "/tmp/fm-gui-s9b3v63b",
+    "large_result_exit_code": 1,
+    "error_stdout_chars": 141,
+    "limit_wire_bytes": 4194304,
+    "effect_count": 1,
+    "same_provider_pid_and_birth": true,
+    "fresh_hangul_input": true,
+    "natural_exit_and_empty_host_cleanup": true,
+    "live_passed": 3,
+    "live_exit_code": 0
+  },
+  "checks": {
+    "ipc_library_passed": 96,
+    "daemon_library_passed": 292,
+    "daemon_library_ignored": 1,
+    "ipc_daemon_all_target_clippy": "passed (-D warnings)",
+    "locked_gui_cli_daemon_build": "passed",
+    "corrected_ci_runner_phase_test": "passed (regression and extended)"
+  },
+  "source_sha256": {
+    "crates/flowmux-ipc/src/client.rs": "046c62743f1ad6fe2a274eaed90ffb1ec692204dd86f1e4143a6b4a8a58dde53",
+    "crates/flowmux-daemon/src/agent_host/host.rs": "40967367d42f744907809861622902bfb959caa958c060047416f50e1b196023",
+    "scripts/test-agent-gui-response-limit.py": "35952c0eb82b912fa5037292466fa5810c1c33eb2f4580cf0181e42717d00297",
+    "scripts/test-linux.sh": "befaffa993ed33da75e717c49ca99e11260b8b74959aa483acda6c91551cc5ce",
+    "scripts/test-ci-runner.py": "b09b3d9f0b43e2a240d459b2af33b613b2b735c5b6d3b4a0042a2232d6c6c07e"
+  },
+  "log_sha256": {
+    "/tmp/fm-forward-response-before.log": "0cce8afd01a7d5eb5b20154b847b34c3dd36a82bb9b983fcf41281aca2fa89b4",
+    "/tmp/fm-forward-response-after.log": "063ded72cedd7b7d768f091d44bc13639c097030ea907a6670a8e54b2e782ef4",
+    "/tmp/fm-forward-response-suites.log": "2e9be4cc9812173dca58cc29700b05b79a00e21ed24a3a940552ecedeeecc151",
+    "/tmp/fm-forward-response-clippy.log": "0698a1c7a81c5ddc489526879229e4ad8037869cd2b979fe42f70b3b36ad271e",
+    "/tmp/fm-forward-response-build.log": "50d90728b9ae861269807d41613e20726c7c3f8ce78dd758230b3641191c4987",
+    "/tmp/fm-forward-response-runner-corrected.log": "987f15339b6e21e55f804594ae94b811fa6cc3ca0ca6e71b96c689e08c6021d0"
+  },
+  "binary_sha256": {
+    "/home/junsu/dev/os/flowmux/target/debug/flowmux": "7e186cbd0665183aef45a80d18cd6f38a4bbf370b4d331a718585f813ae3e350",
+    "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl": "71fa26f783e651f2a5d60c51f226fd5c8307f8f0e7cd126cab2477a52a730d11",
+    "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon": "01d67dacac1c12b6375124b818a6520462cea19501b6e76ce842644d65f36f21"
+  },
+  "limitations": [
+    "Does not establish full Host allocation accounting, allocator capacity, total RSS or a provider process memory limit.",
+    "4MiB applies to forwarding wire including the envelope; larger legitimate results must be reduced.",
+    "No OOM or total Host 3GiB overflow was measured in this reproduction.",
+    "Latest full remote run 44066722901 is still pending and tests 55a7da31, before this product change.",
+    "Active user GUI and installed binaries were not replaced or restarted."
+  ]
+}

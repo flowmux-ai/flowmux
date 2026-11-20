@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "macOS arm64 native main-thread extended CI; AR-037 managed Sessions start and relaunch",
+  "workflow_run": 44042747337,
+  "job": 133906463716,
+  "artifact": 14312656924,
+  "url": "https://github.com/flowmux-ai/flowmux/actions/runs/44042747337",
+  "source_commit": "e59af70959b5300d57da195452bc899685540a9a",
+  "conclusion": "success",
+  "session_paths": {
+    "phase": "session-paths",
+    "command": [
+      "cargo",
+      "test",
+      "-p",
+      "flowmux",
+      "--test",
+      "macos_native",
+      "--features",
+      "native-smoke",
+      "--locked"
+    ],
+    "timeout_seconds": 180.0,
+    "status": "passed",
+    "pid": 60036,
+    "exit_code": 0,
+    "elapsed_seconds": 5.522
+  },
+  "assertions": [
+    "custom Unicode CODEX_HOME history and explicit YOLO Resume",
+    "quoted project cwd and PATH beyond MAX_CANON",
+    "managed attachment receives input and observes natural process exit",
+    "empty Host socket disappears and remains absent for 500ms",
+    "second managed Resume resolves provider through login .zprofile from Finder-like PATH",
+    "second managed process accepts input, naturally exits and retires empty Host"
+  ],
+  "sha256": {
+    "/tmp/fm-runtime-mac-success-44042747337/run.log": "cc832c485a1f7f10dc3897f5e804844e1f24dd56ba886058cede957d1c6348bd",
+    "/tmp/fm-runtime-mac-success-44042747337/session-paths.log": "8700213a40e5b3358b83f62cb00bb18de395187f76ea0d71d9d03156404c5c36",
+    "/tmp/fm-runtime-mac-success-44042747337/session-paths.json": "261c3e2de3700f7792099d9425306dae656688c4b25798d0b40e5cba5b5b5989",
+    "/tmp/fm-runtime-mac-success-44042747337/session-flow.log": "39ca8dfc7967e8e3537b87e5dacfe36ca32d67afd4cf18c8dfa841853401a7de"
+  },
+  "limits": [
+    "source predates AR-055 spinner and later test-only commits",
+    "not macOS fast-fork containment or GUI-process closure survival verification",
+    "launchd throttle change passes scenario; this does not establish the sole cause of the earlier failure",
+    "not actual provider/model work"
+  ]
+}

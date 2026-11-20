@@ -1,0 +1,74 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-068",
+  "status": "open: macOS native revalidation pending",
+  "source_base": "a5275f8f31ebdb7fb77b61f49e0103798504c482",
+  "failed_native_run": {
+    "id": 44066722901,
+    "revision": "55a7da31a3c869e825d2d5f32e9ffb3b41b01987",
+    "job": 133982184891,
+    "phase": "editor-recovery",
+    "artifact": 14322286958,
+    "gate_exit": 101,
+    "observed_danger_ratio": 4.451547181736075,
+    "background": "oklab(0.358908 -0.001336 -0.013595)"
+  },
+  "fix": {
+    "dark_danger": "#f09999",
+    "native_wait": "Match applied --ink and --text in addition to colorScheme before sampling",
+    "native_themes": [
+      "default",
+      "one-dark",
+      "github-light"
+    ],
+    "minimum_ratio": 4.5
+  },
+  "linux_live_css_fixture": {
+    "artifacts": "/tmp/fm-gui-zmqpa3t9",
+    "exit_code": 0,
+    "before_default_ratio": 4.451547181736075,
+    "after_ratios": {
+      "default": 5.050302031797516,
+      "one-dark": 5.542889725038786,
+      "github-light": 5.655556379758298
+    },
+    "warning_all_above_minimum": true,
+    "description": "Product CSS and host theme variables in a real isolated Flowmux browser WebKit; not the Monaco recovery workflow."
+  },
+  "checks": {
+    "web_tests_passed": 41,
+    "typescript_check": "passed",
+    "asset_build": "passed",
+    "verified_assets": 12,
+    "locked_gui_build": "passed",
+    "format": "passed",
+    "diff_whitespace": "passed"
+  },
+  "source_sha256": {
+    "crates/flowmux/src/ui/editor_pane_macos/recovery_smoke.rs": "0b13f96470e45ea473cbd59d7e01f59a82d28ac8bb7ae31276f856f3a3883cb6",
+    "editor/flowmux-editor-web/src/main.ts": "66eb9368234c1f02bba898bb935dc5e20c9ed7c4b601d8d95166bbb266e6a365",
+    "editor/flowmux-editor-web/src/styles.css": "4b33cbf35bee0aa9be90abf2eb6ada3683a0886346973dead50f411ca64cf0ce",
+    "editor/flowmux-editor-web/dist/main.js": "342792a142f5edbb88381ffa39e3eb0e6d4d9a0e24a8c5fd8a3c0c37eacbf008",
+    "editor/flowmux-editor-web/dist/main.css": "e661e548a5e025e1cb76da5ead9f1005e9228b6eb8a87bec9af9acfe2d2c0b5f"
+  },
+  "evidence_sha256": {
+    "/tmp/fm-runtime-ci-44066722901-macos.log": "0ac3f63789c8ac550a569a4cbb52992d6fd208ce2703c0571c0fd609127a8f92",
+    "/tmp/fm-editor-status-contrast-live.log": "b2cbdc14dee5db7538a80db2462be787ebba30ee976353e6a90ec0fcdde64fe7",
+    "/tmp/fm-editor-status-contrast-build.log": "997153aaeddfde5850ab8581dbdd7f3bda630c7b53b0cc6bb00a1ef999c070b6",
+    "/tmp/fm-editor-status-contrast-gui-build.log": "d7360c113bc1b9035f981a00a49206863384ce2c98b4662e4fffc8ca1fbb194a",
+    "/tmp/fm-editor-contrast-live.py": "77ae309bdaf4a556d04d65ae68bcc7200c31285db52f7ee0d48fb7f5d2875e50"
+  },
+  "limitations": [
+    "Native macOS recovery and full gate still pending; Linux cannot run WKWebView/AppKit harness.",
+    "No claim of all custom themes or all presets meeting the contrast threshold.",
+    "Active user GUI and installed binaries were not replaced or restarted."
+  ],
+  "remote_revalidation": {
+    "run_id": 44073400067,
+    "revision": "f8f149d1f55e90643a772ae1dc5fc1ae02cbd8f1",
+    "status": "in_progress",
+    "macos_job": 134006619280,
+    "superseded_run": 44071483159,
+    "superseded_native_conclusion": "cancelled"
+  }
+}

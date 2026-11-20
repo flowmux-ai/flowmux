@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "scope": "Linux isolated systemd Agent Host and GTK/VTE; PTY fixtures",
+  "source_parent_commit": "9dde4c964571e5f512a1b4a5bc9d698aec16b3a0",
+  "command": [
+    "python3",
+    "scripts/test-agent-host-gui.py",
+    "--service-start",
+    "--protected-pid",
+    "1663486"
+  ],
+  "exit_code": 0,
+  "checks_passed": 33,
+  "artifacts": "/tmp/fm-gui-u8h5f4pa",
+  "host_memory_kib": {
+    "before_rss": 31716,
+    "retained_rss": 993748,
+    "peak_rss": 993748,
+    "budget": 3145728
+  },
+  "pressure": {
+    "executions": 7,
+    "concurrent_heavy_executions": 6,
+    "terminal_rows": 100,
+    "terminal_cols": 400,
+    "combining_marks_per_cell": 32,
+    "alternate_rows_written": 100,
+    "primary_rows_written": 400,
+    "saved_titles_per_heavy_execution": 4096,
+    "retained_snapshot_transfers": 6,
+    "output_drained_barrier": "Host DSR reply read by each provider before ready marker",
+    "regular_pressure_peers": 60,
+    "control_pressure_peers": 16,
+    "request_bytes": 1048576,
+    "request_array_elements": 30000,
+    "incomplete_request_per_peer": true
+  },
+  "assertions": [
+    "eighth execution refused before provider startup",
+    "same original execution accepts fresh GUI input",
+    "all six slow transfers can continue from their first chunk",
+    "natural pressure exits release reservations",
+    "released reservation admits another launch",
+    "GUI disconnect and crash retain same execution",
+    "natural exit retires empty Host",
+    "both socket pools reject further admission",
+    "all retained peers parse dense boundary requests with six transfers retained",
+    "existing GUI accepts fresh input while both socket pools are saturated"
+  ],
+  "tracked_fixture_pids": [
+    100132,
+    100135,
+    100136,
+    101204,
+    101401,
+    101578,
+    101759,
+    101960,
+    102149
+  ],
+  "all_tracked_pids_gone": true,
+  "protected_pid": 1663486,
+  "protected_pid_alive": true,
+  "sha256": {
+    "/tmp/fm-runtime-concurrent-ipc-memory-live.log": "638b9db43d71d2189045620451b84cadc58e87b80932ab28330a903c021b50d0",
+    "/tmp/fm-gui-u8h5f4pa/events.jsonl": "9f83ded4d848c1b048ebaa2a6a728c1939bc0ee253ba8971b4b1e9349059a7bf",
+    "scripts/test-agent-host-gui.py": "04762a176be90e39615818b41a50177358ce9cb2685c8f0a7c6433c894f5d712",
+    "target/debug/flowmux": "2b1cab625cfaa6cf3c83851d2a1bd6fe942a08faca272097487f56c980385a50",
+    "target/debug/flowmux-daemon": "50a43f3a8626f1b9654bcf995049affff697efabe9e57d1777924f7f7fc1e816",
+    "target/debug/flowmuxctl": "b24d802f88d5699aaa5bb7a6303b8bfaee50f96b0976c1ab6b02cbec71f3e279"
+  },
+  "limits": [
+    "not a proof of every allocation or maximum concurrent parsing/process-metadata overlap",
+    "not actual provider/model work, macOS or Flatpak verification",
+    "not an OS-enforced RSS cap"
+  ]
+}

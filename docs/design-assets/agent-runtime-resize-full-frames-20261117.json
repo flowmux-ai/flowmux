@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-006 follow-up",
+  "product_revision": "55a7da31a3c869e825d2d5f32e9ffb3b41b01987",
+  "change": "Keep three large primary snapshots across 80x500 -> 79x500 -> 80x500 resize, exercising full-snapshot diffs and temporary copies.",
+  "unit": {
+    "passed": 1,
+    "exit_code": 0,
+    "peak_kib": 328628,
+    "first_frame_bytes": 16761452,
+    "current_frame_bytes": 16760658,
+    "full_snapshot_diff_assertions": 2
+  },
+  "isolated_host_gui": {
+    "passed": 3,
+    "exit_code": 0,
+    "peak_kib": 392576,
+    "heartbeat_max_seconds": 0.000691,
+    "reservation_kib": 393216,
+    "headroom_kib": 640,
+    "same_pid_birth_and_fresh_hangul": true,
+    "natural_host_cleanup": true,
+    "artifacts": "/tmp/fm-gui-spyt_zk7"
+  },
+  "sha256": {
+    "crates/flowmux-daemon/src/agent_host/terminal.rs": "53a151d0879158b525a01afa7fad8f8abcd0c5af2244e23c0eb4dccbf8f2da82",
+    "scripts/test-agent-terminal-budget.py": "a132f19dce2beab6ffd739a2fa87183d799d61694b6068bc213c4a5fbf52b87e",
+    "/tmp/fm-runtime-resize-full-frames.log": "206d7a2c949cce3854dba8b8964d898b2b3f2b52b034876598201db27ab71f49",
+    "/tmp/fm-runtime-resize-full-frames-live.log": "600f9836a9c6e75c374df6565d6d915a56b9a16e43dfa88962f0389f78ddd27c"
+  },
+  "limitations": [
+    "No product code changed.",
+    "Small observed headroom is not proof of full execution or Host allocation bounds; AR-006 remains open.",
+    "Current remote run 44066722901 validates the product revision, before this stronger test-only load.",
+    "Fixture provider, not a real model workload; macOS not validated by these local runs."
+  ]
+}

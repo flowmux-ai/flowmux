@@ -1,0 +1,124 @@
+{
+  "date_kst": "2026-11-18",
+  "source_head": "428e3b811fe0c21b28f7c812945a135aca580043",
+  "product_source": "d5facd978db18bd6eec96e821729eaf32b4003df",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "scope": "AR-006 follow-up: simultaneous maximum-width terminal caches, rich dual screens, title/link pressure, retained frames and saturated regular/control IPC pools. This live sample does not prove the complete worst-case allocation accounting.",
+  "command": [
+    "python3",
+    "-u",
+    "scripts/test-agent-host-gui.py",
+    "--gui",
+    "target/debug/flowmux",
+    "--cli",
+    "target/debug/flowmuxctl",
+    "--host",
+    "target/debug/flowmux-daemon",
+    "--protected-pid",
+    "1663486"
+  ],
+  "exit_code": 0,
+  "assertions_passed": 33,
+  "artifacts": "/tmp/fm-gui-45zt8g17",
+  "geometry": {
+    "launch": {
+      "rows": 79,
+      "cols": 499
+    },
+    "width_growth": {
+      "rows": 79,
+      "cols": 500
+    },
+    "height_growth": {
+      "rows": 80,
+      "cols": 500
+    }
+  },
+  "per_pressure_execution": {
+    "combining_marks_per_cell": 32,
+    "combining_codepoint": "U+1D185",
+    "columns": 500,
+    "alternate_rows_written": 1500,
+    "primary_rows_written": 1500,
+    "saved_titles": 4096,
+    "hyperlink_cells_written": 500,
+    "hyperlink_uri_tail_bytes": 4000
+  },
+  "rss_kib": {
+    "before": 47240,
+    "after": 1444024,
+    "peak": 1444024
+  },
+  "pressure": {
+    "executions": 7,
+    "rich_pressure_executions": 6,
+    "retained_transfers": 6,
+    "regular_pressure_peers": 60,
+    "control_pressure_peers": 16,
+    "host_budget_kib": 3145728
+  },
+  "checks": [
+    "real Flowmux/VTE shows Host-owned alternate screen and round-trips Hangul input",
+    "dense sub-MiB JSON requests are rejected before dispatch; the same Agent and live VTE accept fresh Hangul input",
+    "narrowing and reopening Background history bounds resize peak and preserves identity, fresh input and the original agent",
+    "narrowing and reopening Background history bounds resize peak and preserves identity, fresh input and the original agent",
+    "concurrent dual-screen, combining, saved-title and retained-transfer pressure stays within the Host budget; admission, live input and reservation reuse work",
+    "unterminated synchronized output reaches live VTE without further output or process replacement",
+    "synchronized Unicode flood stays bounded on the hidden screen and live VTE accepts fresh input",
+    "oversized hyperlink URI and ID flood stays below 32 MiB RSS growth and fresh input works",
+    "valid hyperlink projection stays bounded while live VTE and fresh input preserve the same process",
+    "retained valid link flood stays below 24 MiB RSS growth and the same process accepts fresh input",
+    "title stack flood stays below 32 MiB RSS growth and fresh input works",
+    "oversized unterminated OSC is discarded and live VTE resumes output and input",
+    "replacement abort before ready preserves the original GUI location, input and exact execution",
+    "replacement disconnect before ready preserves the original GUI location, input and exact execution",
+    "replacement timeout before ready preserves the original GUI location, input and exact execution",
+    "oversized bytes destination checkpoint preserves saved source, authority, exact execution and fresh VTE input",
+    "oversized structure destination checkpoint preserves saved source, authority, exact execution and fresh VTE input",
+    "post-commit admission ACK disconnect preserves the exact relay, fresh Hangul input and execution without retry",
+    "post-commit admission ACK timeout preserves the exact relay, fresh Hangul input and execution without retry",
+    "post-commit admission ACK query-timeout preserves the exact relay, fresh Hangul input and execution without retry",
+    "closing/reopening and moving an Agent tab with a disconnected relay reconnect the original execution",
+    "input backpressure keeps current screen updates flowing and preserves queued input",
+    "closing the isolated GUI leaves the same agent/PTY running and progressing",
+    "ordinary terminal exits with GUI while managed Agent continues",
+    "Host preserves approval waits after GUI exit and applies lifecycle transitions without a GUI; duplicate Stop is inert",
+    "GUI relay refuses attachment without a registered management connection and preserves execution",
+    "saved workspace/pane/tab automatically reconnects the same instance, PID, screen and input; spawn count remains one",
+    "SIGKILL of the isolated GUI preserves agent progress and same-process reattachment",
+    "stale epoch preserves the binding and reports failure without shell fallback or duplicate launch",
+    "lifecycle memory overflow preserves waits, the same process and fresh input; visible uncertainty blocks false completion",
+    "duplicate native start cannot erase uncertain work; a new native session restores lifecycle observation",
+    "natural agent exit is reaped promptly; empty Host exits and releases its socket",
+    "missing Host leaves saved Agent tab disconnected; no Host restart, shell fallback or native resume"
+  ],
+  "files": [
+    {
+      "path": "scripts/test-agent-host-gui.py",
+      "sha256": "4dd78d5e0222431a9d750b38ee1bdaa36c428b684210428ae3df64285e081eba"
+    },
+    {
+      "path": "/tmp/fm-host-maximum-budget-20261118.log",
+      "sha256": "fd0ffe983c4b8325ae833c237154134a1bde21a39cbf2a478cc170931051dce4"
+    },
+    {
+      "path": "target/debug/flowmux",
+      "sha256": "1e6c7db31d79b5b689591315f4504c0064ed15f781d4b92881d04775bdd66bb7"
+    },
+    {
+      "path": "target/debug/flowmuxctl",
+      "sha256": "56e2041ec07cba8a7b39e616ac013abd369d50bf57fa73b6371b4b914204284e"
+    },
+    {
+      "path": "target/debug/flowmux-daemon",
+      "sha256": "89bb5f477e95d6e8ea5b5e04b57ea828e6b641899c9887ba2d2057eabcc69127"
+    }
+  ],
+  "limits": [
+    "No product code changed in this follow-up.",
+    "This run is an isolated X11 live scenario, not a fresh full Linux gate or macOS/Wayland acceptance.",
+    "Maximum control/metadata and allocator overhead accounting remains unproven; AR-006 stays open.",
+    "User GUI PID 1663486 and installed binaries were preserved.",
+    "CI run 44131022038 tests the preceding harness source 428e3b81; no CI retry was dispatched for this follow-up."
+  ]
+}

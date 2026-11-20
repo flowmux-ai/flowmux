@@ -48,6 +48,11 @@ Browser recording and its integration check need `ffmpeg` and `ffprobe` with
 the H.264 encoder: `sudo apt install ffmpeg` on Ubuntu or `brew install ffmpeg`
 on macOS. Other browser controls do not require these tools.
 
+The Linux gate checks OpenSSH and tmux before building. For extracted packages,
+set `SSH_FIXTURE_SSHD`, `SSH_FIXTURE_TMUX`, and, when needed,
+`SSH_FIXTURE_LIBRARY_PATH` to absolute paths. Both the gate and standalone SSH
+fixture use these values; the Flowmux tmux shim does not qualify as real tmux.
+
 ```bash
 cargo build --release --workspace   # binaries under target/release/
 cargo run -p flowmux                # debug GUI
@@ -85,8 +90,8 @@ bash scripts/test-ci.sh macos
 ```
 
 On Ubuntu 24.04, install the dependencies
-listed in `.github/workflows/test.yml`, including the ThorVG backend and
-WebKit AppArmor profile, then run:
+listed in `.github/actions/linux-test-deps/action.yml`, including the ThorVG
+backend and WebKit AppArmor profile, then run:
 
 ```sh
 aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux
@@ -103,6 +108,17 @@ or timeout. Per-suite phase receipts are under `target/ci/linux/tests/`.
 `CARGO_TARGET_DIR` can relocate both build output and evidence. The Linux
 gate includes workspace tests, doctests, and the existing functional GUI and
 live SSH suites, without coverage instrumentation or percentage requirements.
+
+CI runs the same gates as independent groups on separate instances, and a
+failed group does not stop the others. On Linux one job builds the binaries for
+the GUI groups `team-usage`, `team`, `agent-host`, `agent-session`, `browser`
+and `terminal`, while `scripts` and `workspace` run beside it. macOS runs
+`scripts`, `headless`, `app` and `native`. `Linux regression tests` and
+`macOS build and native smoke` pass only when every group of their platform
+does. A third argument selects one group locally, for example
+`bash scripts/test-ci.sh linux regression agent-host`; without it every group
+runs in order. macOS dependencies are listed in
+`.github/actions/macos-test-deps/action.yml`.
 
 PRs and main pushes run the regression suite. Weekly and manual Test runs add
 the Linux idle/resource probe, macOS Office stress, and ignored headless stress
