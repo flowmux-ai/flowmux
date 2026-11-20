@@ -123,6 +123,46 @@ pub(super) async fn check(app: &adw::Application) {
     println!("MACOS_OPTIONS_FIELD_MERGE_OK");
 }
 
+async fn check_sidebar_fonts(controller: &WindowController) {
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    content.add_css_class("flowmux-sidebar-shell");
+    let body = gtk::Label::new(Some("Workspaces · 작업 공간"));
+    body.add_css_class("heading");
+    let caption = gtk::Label::new(Some("Agents · 세션 상태"));
+    caption.add_css_class("caption");
+    content.append(&body);
+    content.append(&caption);
+    let window = gtk::Window::builder()
+        .title("Side panel font verification")
+        .default_width(320)
+        .child(&content)
+        .build();
+    window.present();
+    wait_until("side panel font window mapped", || window.is_mapped()).await;
+    let original = controller.options.borrow().clone();
+    for zoom in [100, 50, 200] {
+        let mut options = original.clone();
+        options.zoom_percent = zoom;
+        controller.apply_runtime_theme(&options);
+        wait_for_paint(&window).await;
+        for (label, base_pixels) in [(&body, 16.0), (&caption, 40.0 / 3.0)] {
+            let font = label.pango_context().font_description().unwrap();
+            let pixels = font.size() as f64 / gtk::pango::SCALE as f64;
+            println!(
+                "SIDEBAR_FONT zoom={zoom} label={} font={font} absolute={} size={pixels}",
+                label.text(),
+                font.is_size_absolute()
+            );
+            assert!(font.is_size_absolute());
+            assert!((pixels - base_pixels * zoom as f64 / 100.0).abs() < 0.02);
+        }
+        super::capture_native_window(&window, &format!("sidebar-font-{zoom}")).await;
+    }
+    controller.apply_runtime_theme(&original);
+    window.destroy();
+    println!("MACOS_SIDEBAR_FONT_SIZE_OK");
+}
+
 pub(super) async fn check_zoom(
     controller: &WindowController,
     workspace: WorkspaceId,
@@ -142,6 +182,7 @@ pub(super) async fn check_zoom(
         );
     };
     assert_font(&original, 12.0);
+    check_sidebar_fonts(controller).await;
     let window = dialog(controller).await;
     let zoom = control(&window, "Global zoom (%)")
         .downcast::<gtk::DropDown>()
