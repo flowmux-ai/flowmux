@@ -276,7 +276,7 @@ fn parent_process_pid() -> Option<u32> {
     None
 }
 
-fn hook_seq() -> Option<u64> {
+pub(crate) fn hook_seq() -> Option<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()

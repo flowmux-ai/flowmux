@@ -96,8 +96,9 @@ async fn focus_requests_wait_for_gtk_application() {
 }
 
 #[tokio::test]
-async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
+async fn workspace_create_defers_model_mutation_until_gtk_and_waits_for_ack() {
     let (handler, rx, _pane, _tab) = single_pane_handler().await;
+    let before = handler.inner.store().list_workspaces().await;
     let root = std::path::PathBuf::from("/tmp/flowmux-ipc-create-workspace");
     let response = handler.handle(Request::WorkspaceCreate {
         team: false,
@@ -111,14 +112,26 @@ async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
         response = &mut response => panic!("workspace create completed before bridge ack: {response:?}"),
         command = rx.recv() => command.expect("workspace create should dispatch to GTK"),
     };
-    let GtkCommand::WorkspaceCreated { id, activate, ack } = command else {
-        panic!("expected WorkspaceCreated command");
+    let GtkCommand::CreateWorkspace {
+        name,
+        root: requested_root,
+        team,
+        activate,
+        ack,
+    } = command
+    else {
+        panic!("expected CreateWorkspace command");
     };
+    assert_eq!(name.as_deref(), Some("created"));
+    assert_eq!(requested_root, root);
+    assert!(!team);
+    assert_eq!(handler.inner.store().list_workspaces().await, before);
     assert!(
         activate,
         "a plain `workspace new` switches to the workspace"
     );
-    ack.send(Ok(())).unwrap();
+    let id = WorkspaceId::new();
+    ack.send(Ok(id)).unwrap();
 
     assert!(matches!(
         response.await,
@@ -141,14 +154,15 @@ async fn workspace_create_in_background_requests_no_activation() {
         response = &mut response => panic!("workspace create completed before bridge ack: {response:?}"),
         command = rx.recv() => command.expect("workspace create should dispatch to GTK"),
     };
-    let GtkCommand::WorkspaceCreated { id, activate, ack } = command else {
-        panic!("expected WorkspaceCreated command");
+    let GtkCommand::CreateWorkspace { activate, ack, .. } = command else {
+        panic!("expected CreateWorkspace command");
     };
     assert!(
         !activate,
         "`--background` must leave the visible workspace alone"
     );
-    ack.send(Ok(())).unwrap();
+    let id = WorkspaceId::new();
+    ack.send(Ok(id)).unwrap();
 
     assert!(matches!(
         response.await,
@@ -157,7 +171,7 @@ async fn workspace_create_in_background_requests_no_activation() {
 }
 
 #[tokio::test]
-async fn workspace_creation_failure_rolls_back_the_model() {
+async fn workspace_creation_rejected_before_gtk_leaves_the_model_unchanged() {
     for failure in 0..3 {
         let (handler, rx, _, _) = single_pane_handler().await;
         let before = handler.inner.store().list_workspaces().await;
@@ -173,7 +187,7 @@ async fn workspace_creation_failure_rolls_back_the_model() {
                 result = &mut response => panic!("completed before GUI reply: {result:?}"),
                 command = rx.recv() => command.unwrap(),
             };
-            let GtkCommand::WorkspaceCreated { ack, .. } = command else {
+            let GtkCommand::CreateWorkspace { ack, .. } = command else {
                 panic!("expected creation")
             };
             if failure == 2 {
@@ -3338,5 +3352,83 @@ async fn browser_wrappers_preserve_validation_and_reject_nested_or_mutating_expe
             Response::Error(RpcError::InvalidArgument(_))
         ));
         assert!(rx.try_recv().is_err(), "invalid action reached GTK");
+    }
+}
+
+#[tokio::test]
+async fn managed_context_rechecks_at_effect_admission_without_sending_a_stale_effect() {
+    use flowmux_ipc::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey};
+    for effect in 0..3 {
+        for admitted in [false, true] {
+            let (handler, rx, pane, surface) = single_pane_handler().await;
+            let store = handler.inner.store();
+            let before = store.list_workspaces().await;
+            let active = store.active_workspace().await;
+            let context = AgentViewReport {
+                key: AttachmentKey {
+                    instance: flowmux_core::AgentInstanceId::new(),
+                    epoch: uuid::Uuid::new_v4(),
+                    lease: uuid::Uuid::new_v4(),
+                    generation: 1,
+                },
+                location: AgentViewLocation {
+                    window: uuid::Uuid::new_v4(),
+                    workspace: store.workspace_for_pane(pane).await.unwrap(),
+                    pane,
+                    surface,
+                    visible: true,
+                },
+            };
+            let request = match effect {
+                0 => Request::PaneSendKeys {
+                    pane,
+                    keys: "must not run".into(),
+                },
+                1 => Request::WorkspaceCreate {
+                    name: Some("must not exist".into()),
+                    root: std::env::temp_dir(),
+                    team: true,
+                    background: false,
+                },
+                _ => Request::WorkspaceFocus {
+                    workspace: context.location.workspace,
+                },
+            };
+            let gtk = tokio::spawn(async move {
+                let GtkCommand::CheckAgentView { ack, .. } = rx.recv().await.unwrap() else {
+                    panic!("missing preflight")
+                };
+                ack.send(admitted).unwrap();
+                if !admitted {
+                    return;
+                }
+                let GtkCommand::InAgentView {
+                    command, rejected, ..
+                } = rx.recv().await.unwrap()
+                else {
+                    panic!("effect was not guarded")
+                };
+                assert!(matches!(
+                    (effect, command.as_ref()),
+                    (0, GtkCommand::PaneSendKeys { .. })
+                        | (1, GtkCommand::CreateWorkspace { .. })
+                        | (2, GtkCommand::ActivateWorkspace { .. })
+                ));
+                rejected.store(true, std::sync::atomic::Ordering::Release);
+                drop(command);
+            });
+            let response = handler
+                .handle(Request::InAgentView {
+                    context,
+                    request: Box::new(request),
+                })
+                .await;
+            assert!(
+                matches!(response, Response::Error(RpcError::NotFound(message)) if message.contains("no_attached_view"))
+            );
+            gtk.await.unwrap();
+            assert_eq!(store.list_workspaces().await, before);
+            assert_eq!(store.active_workspace().await, active);
+        }
     }
 }

@@ -50,6 +50,10 @@ impl WindowController {
                         *previous_dialog.borrow_mut() = opts;
                         let opts = saved;
                         *options_cell.borrow_mut() = opts.clone();
+                        controller
+                            .bridge
+                            .agent_idle_timeout
+                            .send_replace(opts.agent_idle_timeout_minutes);
                         controller.sidebar.set_agent_bar_mode(opts.agent_bar_mode);
                         controller.sidebar.set_agent_sort_mode(opts.agent_sort_mode);
                         controller

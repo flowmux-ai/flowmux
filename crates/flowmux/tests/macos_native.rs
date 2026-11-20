@@ -9,6 +9,8 @@
 
 #[path = "../src/activity.rs"]
 mod activity;
+#[path = "../src/agent_host.rs"]
+mod agent_host;
 #[path = "../src/bridge/mod.rs"]
 mod bridge;
 #[path = "../src/builtin_icons.rs"]

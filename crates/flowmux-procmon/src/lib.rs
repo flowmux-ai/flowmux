@@ -6,7 +6,7 @@
 //! Listening-port detection is Linux-only. It matches `/proc/net/tcp[6]`
 //! LISTEN entries against socket inodes owned by the supplied PIDs.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "linux")]
 use std::fs;
 use std::io;
@@ -17,7 +17,7 @@ use std::path::PathBuf;
 mod macos;
 
 #[cfg(target_os = "macos")]
-pub use macos::{boot_session_id, process_cwd, process_environment};
+pub use macos::{boot_session_id, exiting_pty_session_members, process_cwd, process_environment};
 
 #[cfg(target_os = "linux")]
 pub fn process_cwd(pid: u32) -> Option<PathBuf> {
@@ -43,7 +43,7 @@ pub enum ProcError {
 /// daemon's agent-liveness sweep to clear a presence whose agent process
 /// vanished (hard kill / closed terminal) without firing `SessionEnd`.
 pub fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
+    if pid == 0 || pid > i32::MAX as u32 {
         return false;
     }
     #[cfg(target_os = "linux")]
@@ -89,6 +89,118 @@ fn start_time_from_stat(stat: &str) -> Option<u64> {
         .nth(19)?
         .parse()
         .ok()
+}
+
+/// A reusable Linux process inventory. Birth validation happens against the
+/// same observation for every tracked root; detached children need containment.
+pub struct ProcessTree {
+    #[cfg(target_os = "linux")]
+    inventory: HashMap<u32, (u32, u32, u64)>,
+}
+
+impl ProcessTree {
+    pub fn read() -> Result<Self, ProcError> {
+        #[cfg(target_os = "linux")]
+        {
+            let mut inventory = HashMap::new();
+            for entry in fs::read_dir("/proc")? {
+                let entry = entry?;
+                let Some(pid) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.parse().ok())
+                else {
+                    continue;
+                };
+                let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+                    continue;
+                };
+                if let Some(process) = process_tree_stat(&stat) {
+                    inventory.insert(pid, process);
+                }
+            }
+            Ok(Self { inventory })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(Self {})
+        }
+    }
+
+    /// Return birth-validated descendants and the root's still-owned session.
+    pub fn tracked_descendants(
+        &self,
+        owned: &HashMap<u32, u64>,
+        root_session: u32,
+    ) -> Result<HashMap<u32, u64>, ProcError> {
+        #[cfg(target_os = "linux")]
+        {
+            Ok(tracked_from_inventory(owned, root_session, &self.inventory))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = root_session;
+            let mut observed = HashMap::new();
+            for (&pid, &start) in owned {
+                if process_start_time(pid) == Some(start) {
+                    for child in descendants(pid)? {
+                        if let Some(start) = process_start_time(child) {
+                            observed.insert(child, start);
+                        }
+                    }
+                }
+            }
+            Ok(observed)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_tree_stat(stat: &str) -> Option<(u32, u32, u64)> {
+    let mut fields = stat.rsplit_once(") ")?.1.split_whitespace();
+    let parent = fields.nth(1)?.parse().ok()?;
+    let session = fields.nth(1)?.parse().ok()?;
+    let birth = fields.nth(15)?.parse().ok()?;
+    Some((parent, session, birth))
+}
+
+#[cfg(target_os = "linux")]
+fn tracked_from_inventory(
+    owned: &HashMap<u32, u64>,
+    root_session: u32,
+    inventory: &HashMap<u32, (u32, u32, u64)>,
+) -> HashMap<u32, u64> {
+    let mut observed: HashMap<_, _> = owned
+        .iter()
+        .filter(|(pid, birth)| {
+            inventory
+                .get(pid)
+                .is_some_and(|process| process.2 == **birth)
+        })
+        .map(|(&pid, &birth)| (pid, birth))
+        .collect();
+    // Session IDs can be reused too; require a birth-validated member first.
+    let session_owned = observed.keys().any(|pid| inventory[pid].1 == root_session);
+    let mut by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (&pid, &(parent, session, birth)) in inventory {
+        by_parent.entry(parent).or_default().push(pid);
+        if session_owned && session == root_session {
+            observed.insert(pid, birth);
+        }
+    }
+    let mut pending: Vec<_> = observed.keys().copied().collect();
+    while let Some(parent) = pending.pop() {
+        if let Some(children) = by_parent.get(&parent) {
+            for &pid in children {
+                let birth = inventory[&pid].2;
+                if birth >= observed[&parent] && !observed.contains_key(&pid) {
+                    observed.insert(pid, birth);
+                    pending.push(pid);
+                }
+            }
+        }
+    }
+    observed
 }
 
 /// Return all PIDs descended from `root` (inclusive), using `/proc/<pid>/status`
@@ -738,6 +850,69 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn tracked_inventory_validates_births_and_keeps_owned_orphan_sessions() {
+        let inventory = HashMap::from([
+            (10, (1, 10, 100)),
+            (11, (10, 10, 101)),
+            (12, (11, 12, 102)), // already observed before setsid
+            (13, (12, 12, 103)),
+            (14, (1, 10, 104)), // orphan in the owned session
+            (15, (14, 15, 105)),
+            (20, (1, 20, 200)), // reused PID, unrelated execution
+            (21, (20, 20, 201)),
+        ]);
+        let owned = HashMap::from([(10, 100), (12, 102), (20, 99)]);
+        let observed = tracked_from_inventory(&owned, 10, &inventory);
+        assert_eq!(
+            observed,
+            HashMap::from([
+                (10, 100),
+                (11, 101),
+                (12, 102),
+                (13, 103),
+                (14, 104),
+                (15, 105)
+            ])
+        );
+        assert!(tracked_from_inventory(&HashMap::from([(10, 99)]), 10, &inventory).is_empty());
+        let mut orphaned = inventory.clone();
+        orphaned.remove(&10);
+        assert_eq!(
+            tracked_from_inventory(&HashMap::from([(11, 101)]), 10, &orphaned).len(),
+            5
+        );
+    }
+
+    #[test]
+    fn tracked_descendants_observes_a_worker_child_and_rejects_reused_root() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = std::process::id();
+        let birth = process_start_time(pid).unwrap();
+        let tree = ProcessTree::read().unwrap();
+        let result = tree.tracked_descendants(&HashMap::from([(pid, birth)]), pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        let observed = result.unwrap();
+        assert_eq!(observed.get(&pid), Some(&birth));
+        assert!(observed.contains_key(&child.id()));
+        assert!(tree
+            .tracked_descendants(&HashMap::from([(pid, birth + 1)]), pid)
+            .unwrap()
+            .is_empty());
+        #[cfg(target_os = "linux")]
+        {
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+            let (_, session, parsed_birth) = process_tree_stat(&stat).unwrap();
+            assert_eq!(session, unsafe { libc::getsid(pid as i32) } as u32);
+            assert_eq!(parsed_birth, birth);
+        }
+    }
+
+    #[test]
     fn match_agent_comm_maps_known_names_case_insensitively() {
         assert_eq!(match_agent_comm("codex"), Some("codex"));
         assert_eq!(match_agent_comm("Claude"), Some("claude"));
@@ -965,6 +1140,9 @@ mod tests {
         assert!(pid_alive(std::process::id()));
         // PID 0 is the scheduler swapper — never a /proc entry on Linux.
         assert!(!pid_alive(0));
+        // Unix kill() interprets wrapped values as process-group selectors.
+        assert!(!pid_alive(u32::MAX));
+        assert!(!pid_alive(i32::MAX as u32 + 1));
     }
 
     #[test]

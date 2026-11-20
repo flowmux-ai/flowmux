@@ -286,6 +286,10 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M4 3.5h8a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z",
     },
     SymbolicIcon {
+        name: "list-drag-handle-symbolic",
+        path: "M6 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM6 7a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM6 11a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z",
+    },
+    SymbolicIcon {
         name: "process-working-symbolic",
         path: "M8 2a6 6 0 1 0 6 6h-2A4 4 0 1 1 8 4z",
     },
@@ -485,6 +489,10 @@ mod tests {
         assert!(tmp
             .path()
             .join("hicolor/scalable/actions/view-restore-symbolic.svg")
+            .exists());
+        assert!(tmp
+            .path()
+            .join("hicolor/scalable/actions/list-drag-handle-symbolic.svg")
             .exists());
         for name in [
             "view-list-ordered-symbolic",

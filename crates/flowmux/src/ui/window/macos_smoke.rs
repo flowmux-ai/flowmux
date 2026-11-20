@@ -59,10 +59,16 @@ pub(crate) fn run() {
         }
     }
     std::env::set_var("SHELL", "/bin/sh");
+    // These smokes start, count and retire the Agent Host around agents alone.
+    std::env::set_var("FLOWMUX_LOCAL_TERMINALS", "1");
+    // A closing window would ask what to do with running agents; the smokes keep them.
+    std::env::set_var("FLOWMUX_CLOSE_AGENTS", "keep");
     if std::env::var_os("FLOWMUX_AGENT_SMOKE_ONLY").is_some()
         || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_HOME").is_some()
         || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_CLAUDE_ID").is_some()
         || std::env::var_os("FLOWMUX_SESSION_FLOW_REAL_OPENCODE_ID").is_some()
+        || std::env::var_os("FLOWMUX_SESSION_PATHS_SMOKE_ONLY").is_some()
+        || std::env::var_os("FLOWMUX_SESSION_FLOW_SMOKE_ONLY").is_some()
     {
         // The native test executable lives in target/debug/deps, outside the
         // GUI's bundled helper directory. Use the same built CLI for its PTYs
@@ -227,6 +233,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         BrowserPane::check_native_lifetime(app.upcast_ref()).await;
         return;
     }
+    if std::env::var_os("FLOWMUX_MANAGED_AGENT_DRAG_SMOKE_ONLY").is_some() {
+        crate::ui::workspace_view::tab_drag_smoke::check_managed().await;
+        return;
+    }
     if std::env::var_os("FLOWMUX_OPTIONS_ZOOM_SMOKE_ONLY").is_some() {
         flowmux_config::options::save(
             &flowmux_config::options::Options::default()
@@ -243,13 +253,21 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let ws = store.get_workspace(workspace).await.unwrap();
     let terminal_pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
     let (bridge, rx) = Bridge::new();
+    let _agent_host_management = crate::agent_host::start(
+        flowmux_config::paths::agent_host_socket(),
+        bridge.agent_idle_timeout.subscribe(),
+        bridge.agent_view_reports.subscribe(),
+        bridge.agent_registry.clone(),
+        bridge.tx.clone(),
+    )
+    .await;
     let controller = WindowController::new(
         app,
         store.clone(),
         Arc::new(ResolvedTheme::load()),
         bridge.clone(),
         gtk::CssProvider::new(),
-        None,
+        Some(tokio::runtime::Handle::current()),
     );
     gtk::style_context_add_provider_for_display(
         &gtk::prelude::WidgetExt::display(&controller.window),
@@ -661,6 +679,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         )
         .await;
     }
+    crate::ui::workspace_view::tab_drag_smoke::check_managed().await;
     crate::ui::workspace_view::tab_drag_smoke::check(
         controller.window.upcast_ref(),
         &controller.pane_registry,

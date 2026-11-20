@@ -2,26 +2,62 @@
 use crate::protocol::{Envelope, Payload, Request, Response};
 use anyhow::{anyhow, Context};
 use std::path::{Path, PathBuf};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 
 pub struct Client {
     inner: Mutex<Inner>,
     socket: PathBuf,
+    agent_view: Option<(crate::agent_host::AgentViewReport, Option<String>)>,
+    agent_notification: Option<flowmux_core::AgentViewBinding>,
     next_id: std::sync::atomic::AtomicU64,
 }
 
 struct Inner {
     reader: BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: tokio::net::unix::OwnedWriteHalf,
+    response: Vec<u8>,
+    response_limit: Option<usize>,
+    response_rejected: bool,
+    write_interrupted: bool,
 }
 
 impl Client {
     pub async fn connect(socket: &Path) -> anyhow::Result<Self> {
-        let stream = UnixStream::connect(socket)
-            .await
-            .with_context(|| format!("connecting to flowmux socket at {}", socket.display()))?;
+        let successor;
+        let (stream, socket) = match UnixStream::connect(socket).await {
+            Ok(stream) => (stream, socket),
+            // A hosted terminal can outlive the window that opened it; its programs then reach the
+            // window that replaced it.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) && std::env::var_os("FLOWMUX_HOSTED_SHELL").is_some() =>
+            {
+                successor = socket
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(|name| name.strip_prefix("flowmux-")?.strip_suffix(".sock"))
+                    .filter(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|_| Some(socket.parent()?.join("flowmux.sock")));
+                let Some(successor) = successor.as_deref() else {
+                    return Err(error).with_context(|| {
+                        format!("connecting to flowmux socket at {}", socket.display())
+                    });
+                };
+                let stream = UnixStream::connect(successor).await.with_context(|| {
+                    format!("connecting to flowmux socket at {}", successor.display())
+                })?;
+                (stream, successor)
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("connecting to flowmux socket at {}", socket.display())
+                })
+            }
+        };
         let socket = socket.canonicalize().unwrap_or_else(|_| socket.to_owned());
         let credentials = match stream.peer_cred() {
             Ok(credentials) => credentials,
@@ -45,8 +81,14 @@ impl Client {
             inner: Mutex::new(Inner {
                 reader: BufReader::new(r),
                 writer: w,
+                response: Vec::new(),
+                response_limit: None,
+                response_rejected: false,
+                write_interrupted: false,
             }),
             socket,
+            agent_view: None,
+            agent_notification: None,
             next_id: std::sync::atomic::AtomicU64::new(1),
         })
     }
@@ -55,7 +97,99 @@ impl Client {
         &self.socket
     }
 
+    /// Bound reply wire bytes and JSON structure for intermediaries retaining other executions.
+    pub fn with_response_limit(mut self, bytes: usize) -> Self {
+        self.inner.get_mut().response_limit = Some(bytes);
+        self
+    }
+
+    /// Reuse the authenticated Host connection; never send a managed effect directly to a GUI.
+    pub fn in_agent_view(
+        mut self,
+        context: crate::agent_host::AgentViewReport,
+        session_id: Option<String>,
+    ) -> Self {
+        self.agent_view = Some((context, session_id));
+        self
+    }
+
+    /// Notifications belong to the execution and do not require an attached view.
+    pub fn in_agent_notifications(mut self, binding: flowmux_core::AgentViewBinding) -> Self {
+        self.agent_notification = Some(binding);
+        self
+    }
+
     pub async fn call(&self, req: Request) -> anyhow::Result<Response> {
+        if let Some(binding) = self.agent_notification {
+            let Request::Notify {
+                title, body, level, ..
+            } = req
+            else {
+                anyhow::bail!("managed notification connection only supports notifications");
+            };
+            let response = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                // Streams can be silent longer than the server's connection idle timeout.
+                let host = crate::agent_host::HostClient::connect(
+                    &self.socket,
+                    crate::agent_host::ClientRole::Observer,
+                )
+                .await?;
+                host.0
+                    .call_raw(Request::AgentHost {
+                        request: crate::agent_host::HostRequest::Notify {
+                            instance: binding.instance,
+                            epoch: binding.epoch,
+                            notification: crate::protocol::AgentLifecycleNotification {
+                                title,
+                                body,
+                                level,
+                            },
+                        },
+                    })
+                    .await
+            })
+            .await
+            .context("managed notification timed out; outcome unknown; request was not retried")?
+            .context(
+                "managed notification response lost; outcome unknown; request was not retried",
+            )?;
+            return match response {
+                Response::AgentHost {
+                    response: crate::agent_host::HostResponse::Ok,
+                } => Ok(Response::Ok),
+                Response::Error(error) => Ok(Response::Error(error)),
+                other => Err(anyhow!(
+                    "unexpected managed notification response: {other:?}"
+                )),
+            };
+        }
+        let Some((context, session_id)) = &self.agent_view else {
+            return self.call_raw(req).await;
+        };
+        anyhow::ensure!(
+            req.supports_agent_context(),
+            "operation does not support managed context; request not started"
+        );
+        let response = self
+            .call_raw(Request::AgentHost {
+                request: crate::agent_host::HostRequest::DispatchContext {
+                    context: context.clone(),
+                    session_id: session_id.clone(),
+                    request: Box::new(req),
+                },
+            })
+            .await
+            .context("managed command response lost; outcome unknown; request was not retried")?;
+        match response {
+            Response::AgentHost {
+                response: crate::agent_host::HostResponse::Dispatched { response },
+            } => Ok(*response),
+            Response::Error(error) => Ok(Response::Error(error)),
+            other => Err(anyhow!("unexpected managed dispatch response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn call_raw(&self, req: Request) -> anyhow::Result<Response> {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -71,6 +205,10 @@ impl Client {
                     return Inner {
                         reader: BufReader::new(r),
                         writer: w,
+                        response: Vec::new(),
+                        response_limit: inner.response_limit,
+                        response_rejected: false,
+                        write_interrupted: false,
                     }
                     .call(id, req)
                     .await;
@@ -94,23 +232,56 @@ impl Client {
 
 impl Inner {
     async fn call(&mut self, id: u64, req: Request) -> anyhow::Result<Response> {
+        anyhow::ensure!(
+            !self.response_rejected,
+            "previous IPC response exceeded the limit; reconnect without replaying it"
+        );
+        anyhow::ensure!(
+            !self.write_interrupted,
+            "previous IPC request write was interrupted; reconnect without replaying it"
+        );
         let env = Envelope {
             id,
             payload: Payload::Request(req),
         };
         let mut line = serde_json::to_string(&env)?;
         line.push('\n');
+        self.write_interrupted = true;
         self.writer.write_all(line.as_bytes()).await?;
         self.writer.flush().await?;
+        self.write_interrupted = false;
 
-        let mut buf = String::new();
         loop {
-            buf.clear();
-            let n = self.reader.read_line(&mut buf).await?;
+            // read_until preserves partial bytes on cancellation, including split UTF-8.
+            let n = if let Some(limit) = self.response_limit {
+                let remaining = limit.saturating_sub(self.response.len()).saturating_add(1);
+                let n = (&mut self.reader)
+                    .take(remaining as u64)
+                    .read_until(b'\n', &mut self.response)
+                    .await?;
+                if self.response.len() > limit {
+                    self.response_rejected = true;
+                    anyhow::bail!("IPC response exceeded {limit} bytes");
+                }
+                n
+            } else {
+                self.reader.read_until(b'\n', &mut self.response).await?
+            };
             if n == 0 {
                 return Err(anyhow!("daemon closed the connection"));
             }
-            let env: Envelope = serde_json::from_str(buf.trim_end())?;
+            if self.response_limit.is_some()
+                && !flowmux_core::json::JsonStructureBudget::new(
+                    crate::server::MAX_JSON_STRUCTURAL_TOKENS,
+                )
+                .check(&self.response)
+            {
+                self.response_rejected = true;
+                anyhow::bail!("IPC response exceeded JSON structure limit");
+            }
+            let env = serde_json::from_slice::<Envelope>(&self.response);
+            self.response.clear();
+            let env = env?;
             if env.id != id {
                 continue; // out-of-order event; ignore
             }
@@ -128,6 +299,400 @@ mod tests {
     use crate::protocol::{Event, RpcError};
     use flowmux_core::{NotificationLevel, WorkspaceId};
     use tokio::net::UnixListener;
+
+    #[tokio::test]
+    async fn response_limit_stops_unterminated_reply_and_refuses_reuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("flowmux.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .with_response_limit(128);
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut reader = BufReader::new(read);
+            reader.read_line(&mut String::new()).await.unwrap();
+            write.write_all(&[b'x'; 129]).await.unwrap();
+            let mut extra = String::new();
+            assert!(
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    reader.read_line(&mut extra)
+                )
+                .await
+                .is_err(),
+                "rejected connection sent another request"
+            );
+        });
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.call(Request::Ping),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(error.to_string().contains("exceeded 128 bytes"));
+        assert_eq!(client.inner.lock().await.response.len(), 129);
+        assert!(client
+            .call(Request::Ping)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("without replaying"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn response_limit_accepts_exact_boundary_and_default_preserves_large_replies() {
+        let reply = format!(
+            "{}\n",
+            serde_json::to_string(&Envelope {
+                id: 1,
+                payload: Payload::Response(Response::BrowserResult {
+                    value: "x".repeat(5 * 1024 * 1024)
+                }),
+            })
+            .unwrap()
+        );
+        for limit in [None, Some(reply.len()), Some(reply.len() - 1)] {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("flowmux.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let client = Client::connect(&socket).await.unwrap();
+            let client = if let Some(limit) = limit {
+                client.with_response_limit(limit)
+            } else {
+                client
+            };
+            let bytes = reply.clone();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read, mut write) = stream.into_split();
+                BufReader::new(read)
+                    .read_line(&mut String::new())
+                    .await
+                    .unwrap();
+                write.write_all(bytes.as_bytes()).await.unwrap();
+            });
+            let result = client.call(Request::Ping).await;
+            if limit == Some(reply.len() - 1) {
+                assert!(result.unwrap_err().to_string().contains("exceeded"));
+            } else {
+                assert!(
+                    matches!(result.unwrap(), Response::BrowserResult { value } if value.len() == 5 * 1024 * 1024)
+                );
+            }
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn response_limit_bounds_json_structure_before_deserialization_without_replay() {
+        let reply = format!(
+            "{{\"id\":1,\"kind\":\"response\",\"ssh\":{{\"value\":[{}null]}}}}\n",
+            "null,".repeat(40_000)
+        );
+        assert!(reply.len() < 4 * 1024 * 1024);
+        for bounded in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("flowmux.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let client = Client::connect(&socket).await.unwrap();
+            let client = if bounded {
+                client.with_response_limit(4 * 1024 * 1024)
+            } else {
+                client
+            };
+            let bytes = reply.clone();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (read, mut write) = stream.into_split();
+                let mut reader = BufReader::new(read);
+                reader.read_line(&mut String::new()).await.unwrap();
+                write.write_all(bytes.as_bytes()).await.unwrap();
+                if bounded {
+                    assert!(
+                        tokio::time::timeout(
+                            std::time::Duration::from_millis(100),
+                            reader.read_line(&mut String::new())
+                        )
+                        .await
+                        .is_err(),
+                        "rejected connection sent another request"
+                    );
+                }
+            });
+            let result = client.call(Request::Ping).await;
+            if bounded {
+                assert!(
+                    result.is_err(),
+                    "byte-limited client accepted excessive JSON structure"
+                );
+                let error = result.unwrap_err();
+                assert!(error.to_string().contains("JSON structure"), "{error:#}");
+                assert!(client
+                    .call(Request::Ping)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("without replaying"));
+            } else {
+                assert!(
+                    matches!(result.unwrap(), Response::Ssh { value } if value.as_array().unwrap().len() == 40_001)
+                );
+            }
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_write_refuses_stream_reuse_without_replaying() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("flowmux.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let client = Client::connect(&socket).await.unwrap();
+        let (_peer, _) = listener.accept().await.unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            client.call(Request::PaneSendKeys {
+                pane: flowmux_core::PaneId::new(),
+                keys: "x".repeat(8 * 1024 * 1024),
+            }),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(client.inner.lock().await.write_interrupted);
+        assert!(client
+            .call(Request::Ping)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("write was interrupted"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_read_keeps_partial_reply_for_the_next_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("flowmux.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (prefix_sent, prefix_received) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            let first: Envelope =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            let reply = format!(
+                "{}\n",
+                serde_json::to_string(&Envelope {
+                    id: first.id,
+                    payload: Payload::Response(Response::Pong),
+                })
+                .unwrap()
+            );
+            write.write_all(&reply.as_bytes()[..8]).await.unwrap();
+            prefix_sent.send(()).unwrap();
+            let second: Envelope =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_ne!(first.id, second.id);
+            write.write_all(&reply.as_bytes()[8..]).await.unwrap();
+            write
+                .write_all(
+                    format!(
+                        "{}\n",
+                        serde_json::to_string(&Envelope {
+                            id: second.id,
+                            payload: Payload::Response(Response::Pong),
+                        })
+                        .unwrap()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .with_response_limit(128);
+        {
+            let call = client.call(Request::Ping);
+            tokio::pin!(call);
+            tokio::select! {
+                response = &mut call => panic!("reply completed before its suffix: {response:?}"),
+                _ = prefix_received => {}
+            }
+            // Poll the pending read once more after the prefix reaches the socket.
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(20), call)
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(matches!(
+            client.call(Request::Ping).await.unwrap(),
+            Response::Pong
+        ));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_dispatch_wraps_once_and_never_replays_a_lost_effect() {
+        use crate::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey, HostRequest};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("host.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let context = AgentViewReport {
+            key: AttachmentKey {
+                instance: flowmux_core::AgentInstanceId::new(),
+                epoch: uuid::Uuid::new_v4(),
+                lease: uuid::Uuid::new_v4(),
+                generation: 1,
+            },
+            location: AgentViewLocation {
+                window: uuid::Uuid::new_v4(),
+                workspace: WorkspaceId::new(),
+                pane: flowmux_core::PaneId::new(),
+                surface: flowmux_core::SurfaceId::new(),
+                visible: true,
+            },
+        };
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .in_agent_view(context.clone(), Some("native".into()));
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            let Payload::Request(Request::AgentHost {
+                request:
+                    HostRequest::DispatchContext {
+                        context: actual,
+                        session_id,
+                        request,
+                    },
+            }) = envelope.payload
+            else {
+                panic!("missing Host wrapper")
+            };
+            assert_eq!(actual, context);
+            assert_eq!(session_id.as_deref(), Some("native"));
+            assert!(matches!(*request, Request::PaneSendKeys { .. }));
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        assert!(client
+            .call(Request::AgentHost {
+                request: HostRequest::KeepAlive
+            })
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("does not support"));
+        let error = client
+            .call(Request::PaneSendKeys {
+                pane: flowmux_core::PaneId::new(),
+                keys: "once".into(),
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outcome unknown"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_notification_needs_no_view_and_never_replays_a_lost_effect() {
+        use crate::agent_host::HostRequest;
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("host.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let client = Client::connect(&socket)
+            .await
+            .unwrap()
+            .in_agent_notifications(binding);
+        let server = tokio::spawn(async move {
+            let (initial, _) = listener.accept().await.unwrap();
+            drop(initial);
+            let (stream, _) = listener.accept().await.unwrap();
+            let (r, mut w) = stream.into_split();
+            let mut reader = BufReader::new(r);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            assert!(matches!(
+                envelope.payload,
+                Payload::Request(Request::AgentHost {
+                    request: HostRequest::Hello { .. }
+                })
+            ));
+            let response = Envelope {
+                id: envelope.id,
+                payload: Payload::Response(Response::AgentHost {
+                    response: crate::agent_host::HostResponse::Hello {
+                        version: crate::agent_host::PROTOCOL_VERSION,
+                        epoch: binding.epoch,
+                        connection: 1,
+                    },
+                }),
+            };
+            w.write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes())
+                .await
+                .unwrap();
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+            let envelope: Envelope = serde_json::from_str(&line).unwrap();
+            let Payload::Request(Request::AgentHost {
+                request:
+                    HostRequest::Notify {
+                        instance,
+                        epoch,
+                        notification,
+                    },
+            }) = envelope.payload
+            else {
+                panic!("missing execution notification wrapper")
+            };
+            assert_eq!(instance, binding.instance);
+            assert_eq!(epoch, binding.epoch);
+            assert_eq!(notification.title, "build");
+            assert_eq!(notification.body, "done");
+            assert_eq!(notification.level, NotificationLevel::Info);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        assert!(client
+            .call(Request::Ping)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("only supports notifications"));
+        let error = client
+            .call(Request::Notify {
+                pane: Some(flowmux_core::PaneId::new()),
+                surface: Some(flowmux_core::SurfaceId::new()),
+                title: "build".into(),
+                body: "done".into(),
+                level: NotificationLevel::Info,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outcome unknown"));
+        server.await.unwrap();
+    }
 
     #[tokio::test]
     async fn call_uses_matching_response_id_and_ignores_events() {

@@ -200,6 +200,18 @@ impl WindowController {
             controller.refresh_session_flow(false).await;
         });
     }
+    pub(super) fn install_agent_view_polling(&self) {
+        let controller = self.clone();
+        install_poll(&self.window, Duration::from_secs(1), async move || {
+            controller.refresh_agent_connections().await;
+            controller.publish_agent_views().await;
+        });
+        let reports = self.bridge.agent_view_reports.clone();
+        self.window.connect_unrealize(move |_| {
+            reports.send_replace(Vec::new());
+        });
+    }
+
     pub(super) async fn poll_agent_processes(&self) {
         let pids = self.pane_registry.borrow().terminal_agent_pids();
         if pids.is_empty() {
