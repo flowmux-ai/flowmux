@@ -156,6 +156,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="fm-wd-", dir="/tmp") as directory:
         env = {k: v for k, v in os.environ.items() if not k.startswith("FLOWMUX_")}
         env["FLOWMUX_WEBDRIVER_SERVER"] = f"127.0.0.1:{port}"
+        # Not about the Agent Host: a Host kept for this window's terminals outlives it by seconds.
+        env["FLOWMUX_LOCAL_TERMINALS"] = "1"
         for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "FLOWMUX_RUNTIME_DIR"]:
             env[key] = directory + "/" + key
         server = smoke.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
