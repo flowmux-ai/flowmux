@@ -216,6 +216,8 @@ async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
         .env("XDG_CACHE_HOME", dir.path().join("cache"))
         .env("FLOWMUX_RUNTIME_DIR", &runtime)
         .env("SHELL", "/bin/sh")
+        // Not about the Agent Host, which would outlive this window in its directory.
+        .env("FLOWMUX_LOCAL_TERMINALS", "1")
         .env_remove("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS")
         .env_remove("FLATPAK_ID")
         .current_dir(dir.path())

@@ -150,7 +150,8 @@ def isolated_browser(binary, output):
         marker = root / 'state/flowmux/welcome-seen'
         marker.parent.mkdir(parents=True)
         marker.touch()
-        env.update(SHELL='/bin/sh', GSK_RENDERER='cairo', FLOWMUX_BUNDLED_CLI_PATH=str(binary.with_name('flowmuxctl')))
+        env.update(SHELL='/bin/sh', GSK_RENDERER='cairo', FLOWMUX_LOCAL_TERMINALS='1',
+                   FLOWMUX_BUNDLED_CLI_PATH=str(binary.with_name('flowmuxctl')))
         server = suite.ThreadingHTTPServer(('127.0.0.1', 0), suite.Fixture)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
