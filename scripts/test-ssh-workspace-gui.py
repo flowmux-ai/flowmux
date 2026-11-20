@@ -63,6 +63,33 @@ def alive(pid):
         return False
 
 
+# Run in a child process: without an accessibility bus Atspi aborts the interpreter.
+SHOWING_DIALOGS = r"""
+import json, sys
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+desktop = Atspi.get_desktop(0)
+desktop.clear_cache()
+application = next((child for child in map(desktop.get_child_at_index, range(desktop.get_child_count()))
+                    if child and child.get_process_id() == int(sys.argv[1])), None)
+dialogs, pending, seen = [], [(application, None)] if application else [], 0
+while pending and seen < 5000:
+    node, dialog = pending.pop()
+    seen += 1
+    node.clear_cache()
+    if node is not application and not node.get_state_set().contains(Atspi.StateType.SHOWING):
+        continue
+    if dialog is None and node.get_role() in (Atspi.Role.DIALOG, Atspi.Role.ALERT):
+        dialog = []
+        dialogs.append(dialog)
+    if dialog is not None and node.get_name() and len(dialog) < 12:
+        dialog.append(node.get_name()[:200])
+    pending += [(child, dialog) for child in map(node.get_child_at_index, range(node.get_child_count())) if child]
+print(json.dumps(dialogs))
+"""
+
+
 class Harness:
     def __init__(self, args):
         self.args = args
@@ -644,7 +671,54 @@ while time.monotonic() < deadline:
         self.close_window(first)
         self.close_window(second)
 
+    def record_failure(self):
+        """Save what each window showed when a suite failed. Never raises."""
+        record = {"error": repr(sys.exc_info()[1])[:500], "windows": {}, "log": []}
+        for process in self.children:
+            path = self.root / f"run/flowmux-{process.pid}.sock"
+            if process.poll() is not None or not path.exists():
+                continue
+            window = record["windows"][str(process.pid)] = {}
+
+            def ask(verb, **fields):
+                with socket.socket(socket.AF_UNIX) as connection:
+                    connection.settimeout(3)
+                    connection.connect(str(path))
+                    request = {"id": 1, "kind": "request", "verb": verb, **fields}
+                    connection.sendall((json.dumps(request) + "\n").encode())
+                    with connection.makefile("rb") as response:
+                        return json.loads(response.readline())
+
+            try:
+                window["tree"] = ask("workspace_tree")["tree"]["workspaces"]
+                window["screens"] = {
+                    item["id"]: ask("pane_read_screen", pane=item["id"])
+                    .get("screen_contents", {}).get("text", "").rstrip()[-1500:]
+                    for workspace in window["tree"] for item in workspace["panes"]}
+            except Exception as error:
+                window["capture_error"] = repr(error)
+            try:
+                # The text of every dialog the window shows, read through accessibility.
+                result = subprocess.run([sys.executable, "-c", SHOWING_DIALOGS, str(process.pid)],
+                                        env=self.env, capture_output=True, text=True, timeout=15)
+                window["dialogs"] = (json.loads(result.stdout) if result.returncode == 0
+                                     else f"unavailable: {result.stderr.strip()[-200:]}")
+            except Exception as error:
+                window["dialogs"] = f"unavailable: {error!r}"
+        try:
+            for log in sorted(self.root.glob("state/flowmux/logs/*")):
+                lines = [re.sub(r"\x1b\[[0-9;]*m", "", line)[:400]
+                         for line in log.read_text(errors="replace").splitlines()
+                         if " WARN " in line or "ERROR" in line]
+                record["log"] += [f"{log.name}: {line}" for line in lines[-30:]]
+            (self.root / "failure-state.json").write_text(json.dumps(record, indent=2, default=str))
+        except Exception as error:
+            print(f"Could not save failure state: {error}", file=sys.stderr, flush=True)
+
     def cleanup(self):
+        # Suites call this from `finally`: an exception in flight is a failed suite.
+        if sys.exc_info()[0] is not None:
+            self.record_failure()
         for remote_file in self.remote_files:
             try:
                 self.remote("rm -f -- " + shlex.quote(remote_file), check=False)
