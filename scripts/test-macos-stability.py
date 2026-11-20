@@ -254,6 +254,8 @@ def main():
         (ROOT / child).mkdir(mode=0o700, exist_ok=True)
         env[key] = str(ROOT / child)
     env["SHELL"] = "/bin/sh"
+    # Not about the Agent Host: a Host kept for this window's terminals outlives it by seconds.
+    env["FLOWMUX_LOCAL_TERMINALS"] = "1"
     env["HOME"] = str(ROOT / "home"); (ROOT / "home").mkdir(exist_ok=True)
     (ROOT / "state/flowmux").mkdir(parents=True, exist_ok=True)
     (ROOT / "state/flowmux/welcome-seen").touch()
