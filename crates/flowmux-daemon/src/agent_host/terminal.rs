@@ -587,6 +587,10 @@ impl Terminal {
             self.term.resize(Size(size));
             self.size = size;
             self.dirty = true;
+            // A redraw nothing has followed yet was drawn for the old size: draw it again.
+            if self.passthrough && self.snapshot.is_some() {
+                self.unframed = None;
+            }
         }
     }
 
@@ -2019,6 +2023,22 @@ mod tests {
         view.resize(wide);
         assert_eq!(view.status_signals().0, host.status_signals().0);
         assert!(host.status_signals().0.contains(&"w".repeat(30)));
+        // A view that attaches at another size is drawn for that size.
+        let mut host = Terminal::new(size);
+        host.set_passthrough();
+        host.feed_view(b"\r", false);
+        host.frame(0);
+        host.feed_view("w".repeat(30).as_bytes(), false);
+        host.frame(0);
+        host.resize(wide);
+        let (sequence, _, _, data) = host.frame(0);
+        let mut view = Terminal::new(wide);
+        view.set_passthrough();
+        view.feed(data.as_bytes());
+        host.feed_view(b"Z", true);
+        view.feed(host.frame(sequence).3.as_bytes());
+        assert_eq!(view.status_signals().0, host.status_signals().0);
+        assert_eq!(view.term.grid().cursor.point, host.term.grid().cursor.point);
         // Wherever a redraw falls in a stream, the rest of it means the same to the view.
         let stream = "a\x1b[31mb\x1b]0;t\x07c\x1b]2;u\x1b\\d\x1bPq\x1b\\e\x1b(0q\x1b(Bf\u{d55c}g\x1b[0mh\r\n\x1b7\x1b[4hi\x1b8j"
             .as_bytes();
