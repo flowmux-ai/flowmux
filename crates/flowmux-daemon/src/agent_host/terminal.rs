@@ -775,6 +775,22 @@ impl Terminal {
                 let _ = write!(trailer, "\x1b[1;{}H\x1bH", column + 1);
             }
         }
+        if self.passthrough {
+            // Colors the program redefined; the view's theme provides the rest.
+            for index in 0..alacritty_terminal::term::color::COUNT {
+                let Some(Rgb { r, g, b }) = self.term.colors()[index] else {
+                    continue;
+                };
+                let target = match index {
+                    0..=255 => format!("4;{index}"),
+                    index if index == NamedColor::Foreground as usize => "10".into(),
+                    index if index == NamedColor::Background as usize => "11".into(),
+                    index if index == NamedColor::Cursor as usize => "12".into(),
+                    _ => continue,
+                };
+                let _ = write!(trailer, "\x1b]{target};rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\");
+            }
+        }
         let saved = &grid.saved_cursor;
         let saved_cursor = self.passthrough && *saved != Default::default();
         if saved_cursor {
@@ -1942,6 +1958,11 @@ mod tests {
                 b"\x1b[3g\x1b[1;5H\x1bH\x1b[1;1H",
                 b"a\tb\tc",
             ),
+            (
+                "the program's palette is kept",
+                b"\x1b]4;1;rgb:00/ff/00\x07\x1b]10;#112233\x07\x1b]11;#445566\x07",
+                b"\x1b[31mX",
+            ),
             ("a control sequence is split", b"ab\x1b[31", b"mX"),
             ("a title is split", b"ab\x1b]0;ti", b"tle\x07X"),
             (
@@ -1975,6 +1996,13 @@ mod tests {
                 host.term.grid().cursor.point,
                 "{case}"
             );
+            for index in 0..alacritty_terminal::term::color::COUNT {
+                assert_eq!(
+                    view.term.colors()[index],
+                    host.term.colors()[index],
+                    "{case}"
+                );
+            }
         }
         // A line that wrapped stays one line for the view, and a short line ends where it ends.
         let mut host = Terminal::new(size);
