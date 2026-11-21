@@ -23,7 +23,7 @@ pub(crate) struct AgentRelayArgs {
     #[arg(long, required_unless_present = "shell", requires = "instance")]
     pub epoch: Option<Uuid>,
     /// Run this terminal's shell in the Agent Host, reusing `--instance` while it lives.
-    #[arg(long, conflicts_with = "replace_lease")]
+    #[arg(long)]
     pub shell: bool,
     /// The shell command of `--shell`, preserved without shell expansion.
     #[arg(last = true, requires = "shell")]
@@ -287,6 +287,7 @@ async fn acknowledge_snapshot(
 pub async fn run_shell(
     socket: &Path,
     previous: Option<(AgentInstanceId, Uuid)>,
+    replace: Option<AttachmentKey>,
     ready_token: Option<Uuid>,
     colors: Option<&str>,
     argv: Vec<String>,
@@ -382,7 +383,7 @@ pub async fn run_shell(
             instance,
             epoch,
             true,
-            None,
+            replace,
             ready_token,
             colors,
             &end,

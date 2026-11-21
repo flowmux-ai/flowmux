@@ -4512,12 +4512,7 @@ fn build_panel(
                 // Opening a kept shell from Agents is admitted like any explicit open.
                 let shell_takeover = takeover.filter(|_| kept_shell.is_some());
                 if !managed {
-                    argv = hosted_shell_argv(
-                        kept_shell,
-                        shell_takeover.map(|takeover| takeover.token),
-                        &theme,
-                        argv,
-                    );
+                    argv = hosted_shell_argv(kept_shell, shell_takeover, &theme, argv);
                 }
                 // VTE is the only terminal backend. GhosttyPane owns the
                 // PTY + render; title/cwd changes are forwarded from inside it.
@@ -4824,7 +4819,7 @@ fn agent_relay_argv(
 /// relay falls back to running it directly.
 fn hosted_shell_argv(
     kept: Option<flowmux_core::AgentViewBinding>,
-    ready_token: Option<uuid::Uuid>,
+    takeover: Option<super::agent_connection::AgentViewTakeover>,
     theme: &ResolvedTheme,
     argv: Vec<String>,
 ) -> Vec<String> {
@@ -4854,11 +4849,20 @@ fn hosted_shell_argv(
             binding.epoch.to_string(),
         ]);
     }
-    if let Some(token) = ready_token {
+    if let Some(takeover) = takeover {
+        // Shown by another window until now: this view takes that one's place.
+        if let Some(previous) = takeover.previous {
+            relay.extend([
+                "--replace-lease".into(),
+                previous.lease.to_string(),
+                "--replace-generation".into(),
+                previous.generation.to_string(),
+            ]);
+        }
         relay.extend([
             "--require-gui".into(),
             "--ready-token".into(),
-            token.to_string(),
+            takeover.token.to_string(),
         ]);
     }
     relay.push("--".into());

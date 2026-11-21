@@ -219,11 +219,9 @@ impl WindowController {
         } else {
             None
         };
-        // A terminal's shell that nobody shows comes back as the terminal it was.
-        let reopened_shell = agent.shell
-            && takeover
-                .as_ref()
-                .is_some_and(|takeover| takeover.previous.is_none());
+        // A terminal's shell comes back as the terminal it was, whether nobody shows it or
+        // another window does.
+        let reopened_shell = agent.shell && takeover.is_some();
         let (workspace, source, surface, created) =
             if reopened_shell && self.store.agent_view(binding).await.is_none() {
                 let previous = agent.view_owner.map(|owner| owner.surface);
