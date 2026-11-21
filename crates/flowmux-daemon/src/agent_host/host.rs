@@ -527,12 +527,21 @@ impl AgentHost {
             } else {
                 TerminateMode::Terminate
             };
-            let running: Vec<_> = self
-                .registry()
-                .entries
-                .iter()
-                .filter_map(|(instance, entry)| Some((*instance, entry.commands.clone()?)))
-                .collect();
+            let running: Vec<_> = {
+                let mut registry = self.registry();
+                // A launch still starting has nobody to tell; it ends before it runs.
+                for entry in registry.entries.values_mut() {
+                    if entry.commands.is_none() && entry.agent.state == ProcessState::Starting {
+                        entry.agent.state = ProcessState::Stopping;
+                    }
+                }
+                registry.revision += 1;
+                registry
+                    .entries
+                    .iter()
+                    .filter_map(|(instance, entry)| Some((*instance, entry.commands.clone()?)))
+                    .collect()
+            };
             for (instance, sender) in running {
                 // Each execution applies its own stop rules; a full queue is retried by the caller.
                 let (reply, _) = oneshot::channel();
@@ -1238,6 +1247,15 @@ impl AgentHost {
                 }
             }
             _ => Err("unable to spawn agent process".into()),
+        };
+        // Stopped by a Host-wide stop while starting: the child is still parked before exec.
+        let stopped = self.registry().entries[&instance].agent.state == ProcessState::Stopping;
+        let spawned = match spawned {
+            Ok((gate, PreparedProcess { pty, .. })) if stopped => {
+                cancel_spawn(pty, gate).await;
+                Err("stopped before it started".to_string())
+            }
+            spawned => spawned,
         };
         match spawned {
             Ok((gate, process)) => {
@@ -7384,6 +7402,38 @@ for line in sys.stdin:
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_wide_stop_ends_a_launch_that_is_still_starting() {
+        let fixture = Fixture::new().await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let launch = fixture.launch("touch started; sleep 30");
+        let launching = tokio::spawn(async move { gui.call(HostRequest::Launch { launch }).await });
+        // The entry exists while its process is being prepared.
+        let starting = || {
+            let registry = fixture.host.registry();
+            registry
+                .entries
+                .values()
+                .next()
+                .map(|entry| entry.agent.state)
+        };
+        while starting().is_none() {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(starting(), Some(ProcessState::Starting));
+        fixture
+            .host
+            .request(HostRequest::StopAll { force: false }, 0, None)
+            .await
+            .unwrap();
+        let HostResponse::Launched { agent } = launching.await.unwrap().unwrap() else {
+            panic!("expected launch result")
+        };
+        assert_eq!(agent.state, ProcessState::Failed);
+        sleep(Duration::from_millis(300)).await;
+        assert!(!fixture._directory.path().join("started").exists());
     }
 
     #[tokio::test]
