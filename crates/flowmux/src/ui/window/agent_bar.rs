@@ -307,9 +307,22 @@ impl WindowController {
                 .filter(|_| ready)
                 .and_then(|agent| Some((agent, agent.presence.as_ref()?.session_id.clone()?)));
             if ended {
-                if connection.recorded_session.take().is_some() {
-                    if let Some(store) = flowmux_state::default_agent_session_store() {
-                        gtk::gio::spawn_blocking(move || store.forget_surface(surface));
+                connection.recorded_session.take();
+                // Also for a tab restored after its agent ended: what was saved for it
+                // outlives this window's memory of saving it.
+                if connection.session_cleared.get().is_none() {
+                    let cleared = connection.session_cleared.clone();
+                    cleared.set(Some(false));
+                    match flowmux_state::default_agent_session_store() {
+                        Some(store) => {
+                            glib::spawn_future_local(async move {
+                                let _ =
+                                    gtk::gio::spawn_blocking(move || store.forget_surface(surface))
+                                        .await;
+                                cleared.set(Some(true));
+                            });
+                        }
+                        None => cleared.set(Some(true)),
                     }
                 }
             } else if let Some((agent, session)) = session {
@@ -327,8 +340,12 @@ impl WindowController {
                     }
                 }
             }
-            // Once the execution has ended and its relay is gone, the tab goes on as a shell.
-            if terminal.pid.get().is_none() && ended {
+            // Once the execution has ended and its relay is gone, the tab goes on as a shell:
+            // after its saved session is removed, or the new shell would resume it.
+            if terminal.pid.get().is_none()
+                && ended
+                && connection.session_cleared.get() == Some(true)
+            {
                 finished.push((terminal.id(), surface));
             }
             let error = if terminal.pid.get().is_none() {

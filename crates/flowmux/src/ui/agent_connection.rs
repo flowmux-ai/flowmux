@@ -23,6 +23,8 @@ pub(crate) struct AgentConnection {
     pub project: Option<std::path::PathBuf>,
     /// Native session last saved for this tab, so a start without a Host can resume it.
     pub recorded_session: std::cell::RefCell<Option<String>>,
+    /// Removal of that saved session once the execution has ended: `Some(true)` when done.
+    pub session_cleared: std::rc::Rc<Cell<Option<bool>>>,
     /// An ordinary terminal's shell: it types and reads like any terminal, with no
     /// connection notice, while its execution lives in the Host.
     pub shell: bool,
@@ -55,6 +57,7 @@ impl AgentConnection {
             takeover: None,
             project: None,
             recorded_session: Default::default(),
+            session_cleared: Default::default(),
             shell: false,
             host_pid: Cell::new(None),
             root,
