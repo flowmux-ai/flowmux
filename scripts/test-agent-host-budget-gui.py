@@ -113,7 +113,7 @@ def main():
             assert len(wire) == 1024 * 1024
             counts = []
             admitted = []
-            for endpoint, limit in ((host_socket, 64), (Path(str(host_socket) + '.ctl'), 16)):
+            for endpoint, limit in ((host_socket, 256), (Path(str(host_socket) + '.ctl'), 16)):
                 count = 0
                 for _ in range(limit + 1):
                     peer = peers.enter_context(socket.socket(socket.AF_UNIX))

@@ -512,7 +512,7 @@ while not (root / 'memory-release').exists(): time.sleep(0.05)
             assert len(dense_line) == 1024 * 1024
             admitted = []
             pool_counts = []
-            for endpoint, limit in ((host_socket, 64), (Path(str(host_socket) + '.ctl'), 16)):
+            for endpoint, limit in ((host_socket, 256), (Path(str(host_socket) + '.ctl'), 16)):
                 count = 0
                 for _ in range(limit + 1):
                     peer = memory_peers.enter_context(socket.socket(socket.AF_UNIX))
