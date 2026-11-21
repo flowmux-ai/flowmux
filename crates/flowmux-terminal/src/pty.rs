@@ -14,6 +14,31 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+/// This process's open-file limit before `raise_open_file_limit`; zero when it was not raised.
+static INHERITED_OPEN_FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Let this process hold `wanted` open files where its hard limit allows. Programs it starts
+/// in a PTY keep the limit it was started with.
+pub fn raise_open_file_limit(wanted: libc::rlim_t) {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit` is a valid rlimit for both calls.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) != 0 {
+            return;
+        }
+        let inherited = limit.rlim_cur;
+        if inherited >= wanted {
+            return;
+        }
+        limit.rlim_cur = wanted.min(limit.rlim_max);
+        if libc::setrlimit(libc::RLIMIT_NOFILE, &limit) == 0 {
+            INHERITED_OPEN_FILES.store(inherited, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
 
 const CLOSE_GRACE: Duration = Duration::from_secs(5);
 const REAP_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -230,6 +255,17 @@ impl Pty {
             // ---- Child: async-signal-safe only, then exec or _exit. ----
             unsafe {
                 libc::close(gate_write);
+                let inherited = INHERITED_OPEN_FILES.load(std::sync::atomic::Ordering::Relaxed);
+                if inherited != 0 {
+                    let mut limit = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0 {
+                        limit.rlim_cur = inherited;
+                        libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+                    }
+                }
                 #[cfg(target_os = "linux")]
                 if let Some(ref v) = c_oom_value {
                     let fd = libc::open(c_oom_path.as_ptr(), libc::O_WRONLY);
