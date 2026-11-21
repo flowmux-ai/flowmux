@@ -19,9 +19,10 @@ offscreen row caches with their cell payloads on the alternate screen; with
 maximum-width rows on both screens this exceeded Flowmux's per-execution memory
 reservation. Visible rows and the primary screen's scrollback are kept.
 
-`term/mod.rs` adds the read-only accessor `Term::scroll_region`. Flowmux restores
-the region in a view's terminal after redrawing it; upstream keeps the field
-private. Remove it when upstream exposes the region.
+`term/mod.rs` adds the read-only accessors `Term::scroll_region`,
+`Term::active_charset` and `Term::tab_stop`. Flowmux restores this state in a
+view's terminal after redrawing it; upstream keeps the fields private. Remove
+each when upstream exposes it.
 
 All other library source files are unchanged. The normalized Cargo manifest
 omits the reference-test target because its 46MiB recording corpus is not

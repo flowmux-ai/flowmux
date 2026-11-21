@@ -716,6 +716,18 @@ impl<T> Term<T> {
         &self.scroll_region
     }
 
+    /// Flowmux: the character set in use, G0 unless another was shifted in.
+    #[inline]
+    pub fn active_charset(&self) -> CharsetIndex {
+        self.active_charset
+    }
+
+    /// Flowmux: whether a tab stop is set at `column`.
+    #[inline]
+    pub fn tab_stop(&self, column: Column) -> bool {
+        self.tabs[column]
+    }
+
     /// Swap primary and alternate screen buffer.
     pub fn swap_alt(&mut self) {
         if !self.mode.contains(TermMode::ALT_SCREEN) {
