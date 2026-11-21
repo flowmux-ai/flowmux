@@ -443,13 +443,15 @@ impl PaneCallbackRouter {
             host_execution_alive: {
                 let bridge = bridge.clone();
                 Rc::new(move |binding| {
-                    let registry = bridge.agent_registry.borrow();
-                    registry.available
-                        && registry.agents.iter().any(|agent| {
-                            agent.instance == binding.instance
-                                && agent.epoch == binding.epoch
-                                && agent.state == flowmux_ipc::agent_host::ProcessState::Running
-                        })
+                    crate::agent_host::execution_alive(
+                        &bridge.agent_registry.borrow(),
+                        binding,
+                        || {
+                            crate::agent_host::host_absent(
+                                &flowmux_config::paths::agent_host_socket(),
+                            )
+                        },
+                    )
                 })
             },
             position_of_surface_in_pane: {

@@ -165,8 +165,9 @@ pub struct PaneCallbacks {
     pub on_terminal_contents_changed: Rc<RefCell<dyn FnMut(SurfaceId)>>,
     /// Return the current options so new surfaces use the latest settings.
     pub read_options: Rc<dyn Fn() -> flowmux_config::options::Options>,
-    /// Whether the Agent Host still runs this execution, as last reported by it.
-    pub host_execution_alive: Rc<dyn Fn(flowmux_core::AgentViewBinding) -> bool>,
+    /// Whether the Agent Host still runs this execution, as last reported by it. `None` when
+    /// a Host is there but cannot be asked.
+    pub host_execution_alive: Rc<dyn Fn(flowmux_core::AgentViewBinding) -> Option<bool>>,
     /// Return the surface's current 0-based index within the same pane. Tab DnD
     /// uses PaneRegistry::surface_tabs to compute final_index from the source
     /// and target relative positions.
@@ -245,7 +246,7 @@ impl PaneCallbacks {
             on_terminal_title_changed: Rc::new(RefCell::new(|_, _, _| {})),
             on_terminal_contents_changed: Rc::new(RefCell::new(|_| {})),
             read_options: Rc::new(flowmux_config::options::Options::default),
-            host_execution_alive: Rc::new(|_| false),
+            host_execution_alive: Rc::new(|_| Some(false)),
             position_of_surface_in_pane: Rc::new(|_, _| None),
             #[cfg(target_os = "macos")]
             pane_at_root_point: Rc::new(|_, _, _| None),
