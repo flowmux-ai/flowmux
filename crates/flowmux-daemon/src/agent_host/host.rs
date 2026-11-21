@@ -8022,10 +8022,27 @@ for line in sys.stdin:
         // Another window took the shell over under the same tab id: its relay is not this
         // process's. Closing the old window's tab must leave that window's shell running.
         let relay_connection = connection_id(&relay, ClientRole::Relay).await;
+        // A live process that is neither this test nor its ancestors stands in for the
+        // other window; PID 1's birth is unreadable on macOS.
+        let mut foreign = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let foreign_pid = foreign.id();
+        let foreign_birth = timeout(Duration::from_secs(3), async {
+            loop {
+                if let Some(birth) = flowmux_procmon::process_start_time(foreign_pid) {
+                    return birth;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         let saved = {
             let mut registry = fixture.host.registry();
             let peer = registry.peers.get_mut(&relay_connection).unwrap();
-            let other = Some((1, flowmux_procmon::process_start_time(1).unwrap()));
+            let other = Some((foreign_pid, foreign_birth));
             let saved = (peer.identity, peer.parent, peer.grandparent);
             (peer.identity, peer.parent, peer.grandparent) = (other, other, other);
             saved
@@ -8038,6 +8055,8 @@ for line in sys.stdin:
             let peer = registry.peers.get_mut(&relay_connection).unwrap();
             (peer.identity, peer.parent, peer.grandparent) = saved;
         }
+        let _ = foreign.kill();
+        let _ = foreign.wait();
         // Another tab, such as one in a window the shell has left, does not close it.
         gui.call(close(flowmux_core::SurfaceId::new()))
             .await
