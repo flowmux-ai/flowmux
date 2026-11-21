@@ -110,6 +110,9 @@ pub(super) struct Terminal {
     /// A shell's view receives the program's own bytes. The emulated screen only redraws a view
     /// that connects or fell behind.
     passthrough: bool,
+    /// The passthrough view was last drawn on the alternate screen, so its own terminal
+    /// holds no primary screen to return to.
+    view_lacks_primary: bool,
     /// Bytes not yet framed; `None` until the view has been redrawn.
     unframed: Option<Vec<u8>>,
     /// A new shell's output so far. Its first view gets these bytes, not a redraw that would clear
@@ -330,6 +333,7 @@ impl Terminal {
             snapshot: None,
             colors: None,
             passthrough: false,
+            view_lacks_primary: false,
             unframed: None,
             introduction: None,
         }
@@ -358,7 +362,13 @@ impl Terminal {
     /// Feed program output. While a passthrough view follows it, that view's own
     /// terminal answers the queries in it, so no reply is returned here.
     pub fn feed_view(&mut self, data: &[u8], viewed: bool) -> Vec<u8> {
+        let alternate = self.term.mode().contains(TermMode::ALT_SCREEN);
         let replies = self.feed(data);
+        // Leaving the alternate screen shows a primary screen the view never received.
+        if self.view_lacks_primary && alternate && !self.term.mode().contains(TermMode::ALT_SCREEN)
+        {
+            self.unframed = None;
+        }
         if let Some(introduction) = &mut self.introduction {
             if introduction.len() + data.len() <= MAX_INTRODUCTION_BYTES {
                 // The first view's terminal answers these queries when it shows them.
@@ -525,7 +535,9 @@ impl Terminal {
                     }
                 }
                 None => {
-                    let snapshot: Arc<str> = Arc::from(self.project().snapshot());
+                    let projection = self.project();
+                    self.view_lacks_primary = projection.alternate;
+                    let snapshot: Arc<str> = Arc::from(projection.snapshot());
                     self.diff = snapshot.clone();
                     self.snapshot = Some(snapshot);
                     self.unframed = Some(Vec::new());
@@ -557,7 +569,11 @@ impl Terminal {
         if self.snapshot.is_none() {
             let projection = match &self.previous {
                 Some(previous) if !self.passthrough => previous.snapshot(),
-                _ => self.project().snapshot(),
+                _ => {
+                    let projection = self.project();
+                    self.view_lacks_primary = self.passthrough && projection.alternate;
+                    projection.snapshot()
+                }
             };
             self.snapshot = Some(Arc::from(projection));
         }
@@ -701,6 +717,14 @@ impl Terminal {
             "\x1b[{} q",
             shape + u8::from(!cursor_style.blinking)
         );
+        // The program's pen: what it writes next keeps its colors and attributes.
+        let pen = &grid.cursor.template;
+        if pen.fg != Color::Named(NamedColor::Foreground)
+            || pen.bg != Color::Named(NamedColor::Background)
+            || !pen.flags.is_empty()
+        {
+            style(&mut trailer, pen);
+        }
         Projection {
             size: self.size,
             alternate: self.term.mode().contains(TermMode::ALT_SCREEN),
@@ -1649,6 +1673,34 @@ mod tests {
         assert!(
             data.ends_with("\x1b[2;3r\x1b[3;1H") || data.contains("\x1b[2;3r\x1b[3;1H\x1b[?7h")
         );
+    }
+
+    #[test]
+    fn passthrough_redraw_keeps_the_pen_and_the_primary_screen() {
+        let mut terminal = Terminal::new(TerminalSize { rows: 4, cols: 20 });
+        terminal.set_passthrough();
+        terminal.feed_view(b"shell\r\n", false);
+        terminal.frame(0);
+        // Drawn while a program uses the alternate screen, with red text half written.
+        terminal.feed_view(b"\x1b[?1049hALT\x1b[31m", false);
+        let (sequence, snapshot, _, data) = terminal.frame(0);
+        assert!(snapshot && data.contains("ALT") && !data.contains("shell"));
+        assert!(data.ends_with("\x1b[0;38;5;1;49m"), "{data:?}");
+        // Output that stays on the alternate screen is passed through as it is.
+        terminal.feed_view(b"more", true);
+        let (sequence, snapshot, _, data) = terminal.frame(sequence);
+        assert!(!snapshot && &*data == "more");
+        // The view has no primary screen of its own to return to: it is drawn again.
+        terminal.feed_view(b"\x1b[0m\x1b[?1049l", true);
+        let (sequence, _, _, data) = terminal.frame(sequence);
+        assert!(
+            data.starts_with("\x1bc") && data.contains("shell"),
+            "{data:?}"
+        );
+        // From then on its own terminal keeps both screens.
+        terminal.feed_view(b"\x1b[?1049hagain\x1b[?1049l", true);
+        let (_, snapshot, _, data) = terminal.frame(sequence);
+        assert!(!snapshot && data.contains("again") && !data.starts_with("\x1bc"));
     }
 
     #[test]
