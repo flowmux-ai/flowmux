@@ -33,7 +33,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 mkdir "$work/mount"
-hdiutil attach "$image" -readonly -nobrowse -mountpoint "$work/mount" -quiet
+hdiutil attach "$image" -readonly -nobrowse -mountpoint "$work/mount" -quiet || {
+    # A failed attach can leave the image attached without its mount.
+    device=$(hdiutil info | awk -v image="$image" -F' *: ' \
+        '$1 == "image-path" { found = ($2 == image) } found && /^\/dev\/disk/ { sub(/[ \t].*/, ""); print; exit }')
+    [ -z "$device" ] || hdiutil detach -force "$device" -quiet || true
+    exit 1
+}
 mounted=1
 bundle="$work/mount/Flowmux.app"
 [ -d "$bundle" ] && [ ! -L "$bundle" ] || { echo 'DMG is missing Flowmux.app' >&2; exit 1; }
