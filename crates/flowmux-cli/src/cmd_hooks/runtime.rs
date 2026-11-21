@@ -188,21 +188,46 @@ pub(super) async fn send_managed(socket: Option<PathBuf>, requests: Vec<Request>
         let client = HostClient::connect(&socket, ClientRole::Hook).await?;
         let mut requests = requests.into_iter().peekable();
         while let Some(request) = requests.next() {
-            if let Request::AgentHost { mut request } = request {
-                if let HostRequest::Lifecycle { notification, .. } = &mut request {
-                    if let Some(Request::Notify {
-                        title, body, level, ..
-                    }) = requests.peek()
-                    {
-                        *notification = Some(flowmux_ipc::protocol::AgentLifecycleNotification {
-                            title: title.clone(),
-                            body: body.clone(),
-                            level: *level,
-                        });
-                        requests.next();
+            match request {
+                Request::AgentHost { mut request } => {
+                    if let HostRequest::Lifecycle { notification, .. } = &mut request {
+                        if let Some(Request::Notify {
+                            title, body, level, ..
+                        }) = requests.peek()
+                        {
+                            *notification =
+                                Some(flowmux_ipc::protocol::AgentLifecycleNotification {
+                                    title: title.clone(),
+                                    body: body.clone(),
+                                    level: *level,
+                                });
+                            requests.next();
+                        }
+                    }
+                    client.call(request).await?;
+                }
+                // Attention with no lifecycle change of its own, such as a background
+                // agent's. The Host keeps it for the execution, over the connection kind
+                // `flowmux notify` uses: a hook connection reports lifecycle only.
+                Request::Notify {
+                    title, body, level, ..
+                } => {
+                    if let Some((binding, _)) = crate::cmd_ops::managed_execution(Some(&socket))? {
+                        HostClient::connect(&socket, ClientRole::Observer)
+                            .await?
+                            .call(HostRequest::Notify {
+                                instance: binding.instance,
+                                epoch: binding.epoch,
+                                notification: flowmux_ipc::protocol::AgentLifecycleNotification {
+                                    title,
+                                    body,
+                                    level,
+                                },
+                            })
+                            .await?;
                     }
                 }
-                client.call(request).await?;
+                _ => {}
             }
         }
         Ok::<_, anyhow::Error>(())

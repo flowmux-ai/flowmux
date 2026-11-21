@@ -137,7 +137,7 @@ pub(super) struct ManagedContext {
     socket: PathBuf,
 }
 
-fn managed_execution(
+pub(super) fn managed_execution(
     socket: Option<&Path>,
 ) -> anyhow::Result<Option<(flowmux_core::AgentViewBinding, PathBuf)>> {
     if std::env::var_os("FLOWMUX_AGENT_INSTANCE_ID").is_none()
