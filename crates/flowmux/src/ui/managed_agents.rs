@@ -229,8 +229,10 @@ impl ManagedAgents {
             row.root.set_sensitive(snapshot.available);
             let running = agent.state == ProcessState::Running;
             row.button.set_sensitive(running);
-            // One button: stop, then force once the normal stop has timed out.
-            let stopping = agent.state == ProcessState::Stopping;
+            // One button: stop, then force once the normal stop has timed out. An agent in a
+            // terminal stays running while it is asked to stop: its shell is not stopping.
+            let stopping =
+                agent.state == ProcessState::Stopping || (running && agent.force_terminate_allowed);
             let label = if stopping {
                 "Force terminate agent"
             } else {
@@ -566,6 +568,19 @@ mod tests {
         snapshot.available = true;
         list.render(&snapshot, &bridge, Default::default(), |_| None);
         assert!(list.rows.borrow()[&key].root.is_sensitive());
+        // An agent in a terminal that ignored its stop: still running, and force is offered.
+        snapshot.agents[0].force_terminate_allowed = true;
+        list.render(&snapshot, &bridge, Default::default(), |_| None);
+        {
+            let rows = list.rows.borrow();
+            let stop = &rows[&key].stop;
+            assert!(rows[&key].button.is_sensitive() && stop.is_sensitive());
+            assert_eq!(
+                stop.tooltip_text().as_deref(),
+                Some("Force terminate agent")
+            );
+        }
+        snapshot.agents[0].force_terminate_allowed = false;
         snapshot.agents[0].state = ProcessState::Stopping;
         list.render(&snapshot, &bridge, Default::default(), |_| None);
         {
