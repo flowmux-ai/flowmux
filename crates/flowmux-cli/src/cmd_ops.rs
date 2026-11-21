@@ -4,6 +4,47 @@
 use super::*;
 use std::path::Path;
 
+/// A hosted terminal shown again in another pane keeps its tab id and the environment of
+/// the pane it started in. Follow the tab, so a command without a pane goes where it is now.
+pub(crate) async fn follow_hosted_tab(socket: Option<&Path>) {
+    if std::env::var_os("FLOWMUX_HOSTED_SHELL").is_none() {
+        return;
+    }
+    let Some(surface) = hooks::surface_from_env() else {
+        return;
+    };
+    let socket = socket
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
+        .unwrap_or_else(flowmux_config::paths::runtime_socket);
+    let tree = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        Client::connect(&socket)
+            .await?
+            .call(Request::WorkspaceTree)
+            .await
+    });
+    let Ok(Ok(Response::Tree { workspaces })) = tree.await else {
+        return;
+    };
+    if let Some((workspace, pane)) = tab_location(&workspaces, surface) {
+        std::env::set_var("FLOWMUX_PANE_ID", pane.to_string());
+        std::env::set_var("FLOWMUX_WORKSPACE_ID", workspace.to_string());
+    }
+}
+
+fn tab_location(
+    workspaces: &[flowmux_ipc::protocol::TreeWorkspace],
+    surface: flowmux_core::SurfaceId,
+) -> Option<(flowmux_core::WorkspaceId, flowmux_core::PaneId)> {
+    workspaces.iter().find_map(|workspace| {
+        let pane = workspace
+            .panes
+            .iter()
+            .find(|pane| pane.tabs.iter().any(|tab| tab.id == surface))?;
+        Some((workspace.id, pane.id))
+    })
+}
+
 pub(crate) async fn run_identify(
     json: bool,
     session: Option<&str>,
