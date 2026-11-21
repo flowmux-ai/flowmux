@@ -145,6 +145,24 @@ pub fn host_absent(socket: &Path) -> bool {
     )
 }
 
+/// Whether the Host runs `binding`. `None` when a Host is there but cannot be asked: its
+/// executions may be running.
+pub fn execution_alive(
+    registry: &RegistrySnapshot,
+    binding: flowmux_core::AgentViewBinding,
+    absent: impl FnOnce() -> bool,
+) -> Option<bool> {
+    if registry.available {
+        Some(registry.agents.iter().any(|agent| {
+            agent.instance == binding.instance
+                && agent.epoch == binding.epoch
+                && agent.state == flowmux_ipc::agent_host::ProcessState::Running
+        }))
+    } else {
+        absent().then_some(false)
+    }
+}
+
 async fn connect(socket: &Path, minutes: u32) -> (Option<HostClient>, Option<IncompatibleHost>) {
     let result = tokio::time::timeout(RPC_TIMEOUT, async {
         let client = HostClient::connect(socket, ClientRole::Gui).await?;
@@ -533,6 +551,20 @@ mod tests {
         assert!(!host_absent(&socket), "listening Host");
         drop(listener);
         assert!(host_absent(&socket), "stale socket file");
+    }
+
+    #[test]
+    fn a_host_that_cannot_be_asked_leaves_its_executions_unknown() {
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let mut registry = RegistrySnapshot::default();
+        assert_eq!(execution_alive(&registry, binding, || true), Some(false));
+        assert_eq!(execution_alive(&registry, binding, || false), None);
+        registry.available = true;
+        let never = || -> bool { panic!("a Host that answered is not probed") };
+        assert_eq!(execution_alive(&registry, binding, never), Some(false));
     }
 
     #[tokio::test]
