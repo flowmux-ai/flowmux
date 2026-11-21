@@ -57,7 +57,8 @@ running, and closing Flowmux leaves it working in Background. Reopening Flowmux
 connects the tab to the same process; an agent whose tab was closed is listed
 in **Agents** as Background and opens as a terminal tab again. A terminal
 without a running agent ends with its tab or with Flowmux, ten seconds after
-its last view is gone.
+its last view is gone. Programs that left the terminal's session or ignore the
+hangup keep running, as they do when any terminal closes.
 
 Such a tab stays an ordinary terminal: the Host passes the program's output
 through unchanged, and its programs, hooks and `flowmux` commands talk to the
