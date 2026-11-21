@@ -81,13 +81,19 @@ impl WindowController {
                     self.activate_workspace(id).await;
                 }
             }
-            GtkCommand::CloseDetachedWindow { workspaces } => {
+            GtkCommand::CloseDetachedWindow {
+                workspaces,
+                closed_by_user,
+            } => {
                 let surfaces = workspaces
                     .iter()
                     .flat_map(|id| self.pane_registry.borrow().surface_ids_in_workspace(*id))
                     .collect::<Vec<_>>();
                 if !self.confirm_dirty_surfaces(&surfaces).await {
                     return;
+                }
+                if closed_by_user {
+                    self.close_hosted_shells(&surfaces);
                 }
                 for id in workspaces {
                     if self.store.remove_workspace(id).await {
@@ -106,6 +112,7 @@ impl WindowController {
                     let _ = ack.send(Err("Workspace close cancelled".into()));
                     return;
                 }
+                self.close_hosted_shells(&closing_surfaces);
                 if self.store.remove_workspace(id).await {
                     self.drop_workspace(id);
                     self.activate_active_or_show_empty().await;
@@ -128,6 +135,14 @@ impl WindowController {
                     let _ = ack.send(());
                     return;
                 }
+                let terminals = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>();
+                self.close_hosted_shells(&terminals);
                 for id in self.store.remove_all_workspaces().await {
                     self.drop_workspace(id);
                 }

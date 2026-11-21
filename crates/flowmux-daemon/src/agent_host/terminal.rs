@@ -473,6 +473,23 @@ impl Terminal {
         self.colors = Some(colors);
     }
 
+    /// Program output a passthrough view follows but has not taken yet.
+    pub fn view_backlog(&self) -> usize {
+        if self.passthrough {
+            self.unframed.as_ref().map_or(0, Vec::len)
+        } else {
+            0
+        }
+    }
+
+    /// Stop holding output for a view that no longer takes it; it is redrawn from this
+    /// screen when it next does.
+    pub fn drop_view_backlog(&mut self) {
+        if self.passthrough && self.unframed.take().is_some() {
+            self.dirty = true;
+        }
+    }
+
     pub fn feed(&mut self, data: &[u8]) -> Vec<u8> {
         // The upstream std parser grows OSC storage without a limit. Admit a
         // complete bounded payload, or cancel before it enters that parser.
@@ -1332,20 +1349,21 @@ mod tests {
             assert!(result.success(), "isolated maximum width regression failed");
             return;
         }
+        // The widest terminal with the most cells: width costs the most memory.
         let size = TerminalSize {
-            rows: 80,
-            cols: 500,
+            rows: (TerminalSize::MAX_CELLS / usize::from(TerminalSize::MAX_COLS)) as u16,
+            cols: TerminalSize::MAX_COLS,
         }
         .validate()
         .unwrap();
         let mut source = Terminal::new(TerminalSize {
-            rows: 79,
-            cols: 499,
+            rows: size.rows - 1,
+            cols: size.cols - 1,
         });
         source.feed(&b"x\r\n".repeat(1500));
         source.resize(TerminalSize {
-            rows: 79,
-            cols: 500,
+            rows: size.rows - 1,
+            cols: size.cols,
         });
         source.resize(size);
         for index in 0..4096 {
@@ -1384,7 +1402,7 @@ mod tests {
         source.feed(b"\x1b[?1049l");
         let first = source.frame(0).3;
         source.resize(TerminalSize {
-            rows: 79,
+            rows: size.rows - 1,
             cols: size.cols,
         });
         source.feed(b"\x1b[1;1HA");

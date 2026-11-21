@@ -7,6 +7,41 @@
 별도 XDG state/runtime·D-Bus·display에서 검증한다. 액션 아이템마다 수정과 회귀
 검증을 하나의 커밋에 담는다. 최종 심각도 판정은 관측한 결과에만 적용한다.
 
+## Linux 일반 terminal tab 회귀 후속 — 2026-11-21 KST, AR-108–113
+
+- `ae13bd05`과 PR 기준점 `2967a0a8`을 각각 빌드해 격리 Xvfb·D-Bus·XDG·Host
+  socket에서 비교했다. 아래 항목은 Host가 일반 terminal tab의 shell을 소유한 뒤
+  base에는 없던 동작이다. 수정이 서로 같은 protocol과 relay 경로를 바꾸므로 한
+  커밋에 담았다. **protocol 18**: `NextFrame`·`CloseTerminal` 추가.
+- 독립 검토(새 session)의 medium 1건·low 2건(복구 오판, 0 크기 허용, 분리 창
+  destroy 즉시 종료)을 반영했다.
+
+| ID | 변경 | 수정 전 → 수정 후 (격리 live) |
+| --- | --- | --- |
+| AR-108 | 크기 상한 300행·500열·80,000 cells. relay는 상한 안으로 맞추고 0행·1열은 거절 | 125x427 창에서 `terminal size is out of bounds`로 tab·shell·job 종료 → 정상. 최대 폭 검사 peak 255–319MiB(예약 384MiB) |
+| AR-109 | 연결된 passthrough view의 backlog가 512KiB 이상이면 PTY 읽기를 멈춘다. 15초 동안 아무것도 가져가지 않는 view는 풀고 다시 그린다 | 22.8MB 출력 뒤 scrollback 40,000줄 중 4,200줄 → 40,000줄. 단위 검사는 수정 제거 시 실패 |
+| AR-110 | relay가 shell 상태를 분류한다. Host 부재·epoch 변경이면 안내 후 새 shell, 같은 Host의 실행 중 shell은 재연결, 종료면 tab 종료, 무응답이면 기존 오류 | Host SIGKILL 뒤 `Broken pipe`로 입력 불가 → 안내와 새 shell, 입력 가능 |
+| AR-111 | 50ms sleep 폴링을 Host의 `NextFrame` 대기(최대 5초)로 바꿨다. shell은 변경 즉시, agent view는 projection 비용 때문에 50ms 간격을 유지한다 | echo p50 20.4ms → 2.7ms(base 2.5ms). idle tab 8개 context switch 약 940/s → 177/s |
+| AR-112 | 탭·pane·workspace·분리 창을 사용자가 닫으면 `CloseTerminal`로 agent 없는 shell을 바로 끝낸다. 창 종료·GUI 종료는 10초 유예를 유지 | 탭 닫기 후 shell·job 10초 생존 → 즉시 종료 |
+| AR-113 | `agent stop-host`와 비호환 Host 안내에 terminal shell도 끝난다고 적었다 | 문구 |
+
+- 같은 base에서도 `exit` 뒤 tab 유지와 OSC 9 probe 실패가 재현되어 회귀가 아니다.
+  1.1MB paste(한글 포함)·Ctrl-C/Z·resize·alternate screen·환경 변수·cwd는 양쪽 동일.
+- 이 VM은 `kernel.apparmor_restrict_unprivileged_userns=1`이다. 첫 gate는 profile
+  밖에서 실행해 WebKit `bwrap`이 `setting up uid map: Permission denied`로
+  실패했다(workspace·browser-* phase). CI와 같이 설치된 `flowmux-webkit` profile
+  안(`aa-exec -p flowmux-webkit`)에서 다시 실행했다. sandbox opt-out은 쓰지 않았다.
+- 두 번째 gate: **60개 통과·3개 실패, exit 1**. 각 실패를 단독으로 `ae13bd05`
+  빌드와 비교했다.
+  - `agent-host`: 수정 회귀. agent view도 변경마다 projection을 요청해 retained-link
+    flood가 45초 안에 끝나지 않았다(HEAD 통과). agent view에 50ms 간격을 되돌린 뒤
+    단독 33/33 통과(HEAD와 동일).
+  - `agent-gui-response-limit`: fixture provider가 protocol 17을 고정해 Hello가
+    거절됐다. 18로 고친 뒤 단독 5/5 통과.
+  - `ssh-workspace`: 수정본·HEAD 모두 단독 63/63 통과. gate 안의 재접속 검사
+    실패는 재현되지 않았다.
+  - 이 수정 뒤 **전체 gate를 다시 연속 실행하지 않았다**. 위 결과는 보완 실행이다.
+
 ## 독립 검토 후속 — 2026-11-18 KST, AR-100–107
 
 - `c6a513db`를 독립적으로 다시 읽어 확인한 8개 항목이다. 항목마다 별도

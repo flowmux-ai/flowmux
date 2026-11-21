@@ -107,7 +107,7 @@ while not (root / 'release').exists():
 
     def host_call(op):
         stream.sendall((json.dumps({"id": 1, "kind": "request", "verb": "agent_host",
-                                   "request": {"op": op, **({"version": 17, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
+                                   "request": {"op": op, **({"version": 18, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
         response = json.loads(reader.readline())
         assert response["id"] == 1, response
         assert "error" not in response, response

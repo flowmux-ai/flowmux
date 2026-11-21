@@ -31,6 +31,13 @@ const MAX_HOST_CONNECTIONS: usize = 2 * (MAX_INSTANCES + MAX_SHELLS) + 64;
 const MAX_ENDED_INSTANCES: usize = 64;
 const MAX_INPUT_PENDING: usize = 256 * 1024;
 const FRAME_CHUNK: usize = 64 * 1024;
+/// Output a terminal view may lag behind before its program waits; below the redraw limit.
+const VIEW_BACKLOG_LIMIT: usize = 512 * 1024;
+/// How long a terminal's program waits for a view that takes no output.
+#[cfg(not(test))]
+const VIEW_STALL_LIMIT: Duration = Duration::from_secs(15);
+#[cfg(test)]
+const VIEW_STALL_LIMIT: Duration = Duration::from_millis(500);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
 const STOP_ENQUEUE: Duration = Duration::from_secs(2);
@@ -62,6 +69,8 @@ struct Entry {
     attachment_gate: Arc<tokio::sync::RwLock<()>>,
     agent: AgentInstance,
     commands: Option<mpsc::Sender<Command>>,
+    /// Changes whenever the execution's terminal may have a new frame.
+    output: Option<tokio::sync::watch::Receiver<u64>>,
     final_frame: Option<(AttachmentKey, Transfer, Option<Transfer>)>,
     attachment_connection: Option<u64>,
     view_report: Option<(u64, Instant)>,
@@ -815,93 +824,145 @@ impl AgentHost {
                 ));
                 Ok(HostResponse::Ok)
             }
-            request => {
-                let instance = match &request {
-                    HostRequest::PrepareAttach { instance, .. }
-                    | HostRequest::Lifecycle { instance, .. }
-                    | HostRequest::NativeSession { instance, .. }
-                    | HostRequest::Terminate { instance, .. } => *instance,
-                    HostRequest::CommitAttach { key, .. }
-                    | HostRequest::ViewReady { key, .. }
-                    | HostRequest::GuiViewReady { key, .. }
-                    | HostRequest::AbortAttach { key }
-                    | HostRequest::Detach { key }
-                    | HostRequest::Frame { key, .. }
-                    | HostRequest::Input { key, .. }
-                    | HostRequest::Resize { key, .. }
-                    | HostRequest::ViewColors { key, .. } => key.instance,
-                    _ => unreachable!(),
-                };
-                let _gate = if matches!(
-                    &request,
-                    HostRequest::PrepareAttach { .. }
-                        | HostRequest::CommitAttach { .. }
-                        | HostRequest::ViewReady { .. }
-                        | HostRequest::GuiViewReady { .. }
-                        | HostRequest::AbortAttach { .. }
-                        | HostRequest::Detach { .. }
-                ) {
-                    Some(self.attachment_gate(instance)?)
-                } else {
-                    None
-                };
-                if let HostRequest::Detach { key } = &request {
-                    let mut registry = self.registry();
-                    if let Some(entry) = registry.entries.get_mut(&instance) {
-                        if entry
-                            .final_frame
-                            .as_ref()
-                            .is_some_and(|(final_key, _, _)| final_key == key)
-                        {
-                            entry.final_frame = None;
-                            entry.attachment_connection = None;
-                            return Ok(HostResponse::Ok);
-                        }
-                    }
-                }
-                let frame_request = match &request {
-                    HostRequest::Frame { key, after, offset } => Some((*key, *after, *offset)),
-                    _ => None,
-                };
-                if let Some((key, after, offset)) = frame_request {
-                    if let Some(result) = self.final_frame(instance, key, after, offset) {
-                        return result;
-                    }
-                }
-                let sender = self
-                    .registry()
-                    .entries
-                    .get(&instance)
-                    .and_then(|entry| entry.commands.clone())
-                    .ok_or_else(|| RpcError::NotFound("Agent is no longer running".into()))?;
-                let (reply, response) = oneshot::channel();
-                sender
-                    .try_send(Command {
-                        stop_all: false,
-                        connection,
-                        request,
-                        reply,
-                    })
-                    .map_err(|error| match error {
-                        mpsc::error::TrySendError::Full(_) => RpcError::Busy(
-                            "Agent command queue is full; request not started".into(),
-                        ),
-                        mpsc::error::TrySendError::Closed(_) => {
-                            RpcError::NotFound("Agent is no longer running".into())
-                        }
-                    })?;
-                match (response.await, frame_request) {
-                    (Ok(result), _) => result,
-                    // The execution ended while this frame was being fetched; its
-                    // final frame, with its exit status, is ready now.
-                    (Err(_), Some((key, after, offset))) => self
-                        .final_frame(instance, key, after, offset)
-                        .unwrap_or_else(|| {
-                            Err(RpcError::Io("Agent terminal connection ended".into()))
-                        }),
-                    (Err(_), None) => Err(RpcError::Io("Agent terminal connection ended".into())),
+            HostRequest::NextFrame { key, after } => self.next_frame(connection, key, after).await,
+            request => self.instance_request(request, connection).await,
+        }
+    }
+
+    /// Hold an unchanged frame until its terminal changes, so a view needs no polling.
+    async fn next_frame(
+        &self,
+        connection: u64,
+        key: AttachmentKey,
+        after: u64,
+    ) -> Result<HostResponse> {
+        let deadline = tokio::time::Instant::now() + NEXT_FRAME_WAIT;
+        loop {
+            // Mark the current output seen before reading it: a change after the read wakes us.
+            let mut output = self
+                .registry()
+                .entries
+                .get(&key.instance)
+                .and_then(|entry| entry.output.clone());
+            if let Some(output) = output.as_mut() {
+                output.borrow_and_update();
+            }
+            let response = self
+                .instance_request(
+                    HostRequest::Frame {
+                        key,
+                        after,
+                        offset: 0,
+                    },
+                    connection,
+                )
+                .await?;
+            let HostResponse::Frame { frame } = &response else {
+                return Ok(response);
+            };
+            let unchanged = frame.sequence == after
+                && !frame.ended
+                && frame.data.is_empty()
+                && frame.next_offset.is_none();
+            let Some(mut output) = output.filter(|_| unchanged) else {
+                return Ok(response);
+            };
+            match tokio::time::timeout_at(deadline, output.changed()).await {
+                // Changed, or the execution ended and its final frame is ready.
+                Ok(_) => {}
+                Err(_) => return Ok(response),
+            }
+        }
+    }
+
+    async fn instance_request(
+        &self,
+        request: HostRequest,
+        connection: u64,
+    ) -> Result<HostResponse> {
+        let instance = match &request {
+            HostRequest::PrepareAttach { instance, .. }
+            | HostRequest::Lifecycle { instance, .. }
+            | HostRequest::NativeSession { instance, .. }
+            | HostRequest::Terminate { instance, .. }
+            | HostRequest::CloseTerminal { instance, .. } => *instance,
+            HostRequest::CommitAttach { key, .. }
+            | HostRequest::ViewReady { key, .. }
+            | HostRequest::GuiViewReady { key, .. }
+            | HostRequest::AbortAttach { key }
+            | HostRequest::Detach { key }
+            | HostRequest::Frame { key, .. }
+            | HostRequest::Input { key, .. }
+            | HostRequest::Resize { key, .. }
+            | HostRequest::ViewColors { key, .. } => key.instance,
+            _ => unreachable!(),
+        };
+        let _gate = if matches!(
+            &request,
+            HostRequest::PrepareAttach { .. }
+                | HostRequest::CommitAttach { .. }
+                | HostRequest::ViewReady { .. }
+                | HostRequest::GuiViewReady { .. }
+                | HostRequest::AbortAttach { .. }
+                | HostRequest::Detach { .. }
+        ) {
+            Some(self.attachment_gate(instance)?)
+        } else {
+            None
+        };
+        if let HostRequest::Detach { key } = &request {
+            let mut registry = self.registry();
+            if let Some(entry) = registry.entries.get_mut(&instance) {
+                if entry
+                    .final_frame
+                    .as_ref()
+                    .is_some_and(|(final_key, _, _)| final_key == key)
+                {
+                    entry.final_frame = None;
+                    entry.attachment_connection = None;
+                    return Ok(HostResponse::Ok);
                 }
             }
+        }
+        let frame_request = match &request {
+            HostRequest::Frame { key, after, offset } => Some((*key, *after, *offset)),
+            _ => None,
+        };
+        if let Some((key, after, offset)) = frame_request {
+            if let Some(result) = self.final_frame(instance, key, after, offset) {
+                return result;
+            }
+        }
+        let sender = self
+            .registry()
+            .entries
+            .get(&instance)
+            .and_then(|entry| entry.commands.clone())
+            .ok_or_else(|| RpcError::NotFound("Agent is no longer running".into()))?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .try_send(Command {
+                stop_all: false,
+                connection,
+                request,
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => {
+                    RpcError::Busy("Agent command queue is full; request not started".into())
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    RpcError::NotFound("Agent is no longer running".into())
+                }
+            })?;
+        match (response.await, frame_request) {
+            (Ok(result), _) => result,
+            // The execution ended while this frame was being fetched; its
+            // final frame, with its exit status, is ready now.
+            (Err(_), Some((key, after, offset))) => self
+                .final_frame(instance, key, after, offset)
+                .unwrap_or_else(|| Err(RpcError::Io("Agent terminal connection ended".into()))),
+            (Err(_), None) => Err(RpcError::Io("Agent terminal connection ended".into())),
         }
     }
 
@@ -1156,6 +1217,7 @@ impl AgentHost {
                         shell: launch.shell,
                     },
                     commands: None,
+                    output: None,
                     final_frame: None,
                     attachment_connection: None,
                     view_report: None,
@@ -1295,9 +1357,12 @@ impl AgentHost {
                     entry.cgroup_dir = Some(process.scope.scope.cgroup_dir.clone());
                 }
                 entry.commands = Some(sender);
+                let (output, watched) = tokio::sync::watch::channel(0);
+                entry.output = Some(watched);
                 let agent = entry.agent.clone();
                 let mut actor =
                     TerminalActor::new(self.clone(), instance, process, size, receiver, memory);
+                actor.output = output;
                 actor.shell = shell;
                 if shell {
                     actor.terminal.set_passthrough();
@@ -1836,6 +1901,10 @@ struct TerminalActor {
     closed_terminal: bool,
     /// When a stop asked of the agent in a shell, which never stops the shell, may be forced.
     agent_stop: Option<Instant>,
+    /// Wakes the views waiting for this terminal's next frame.
+    output: tokio::sync::watch::Sender<u64>,
+    /// Since when program output waits for a view that has not taken what it was sent.
+    view_stalled: Option<Instant>,
 }
 
 impl TerminalActor {
@@ -1886,6 +1955,8 @@ impl TerminalActor {
             stop_all: false,
             closed_terminal: false,
             agent_stop: None,
+            output: tokio::sync::watch::channel(0).0,
+            view_stalled: None,
         }
     }
 
@@ -1902,22 +1973,31 @@ impl TerminalActor {
                         Some(deadline) => tokio::time::sleep_until(deadline.into()).await,
                         None => std::future::pending().await,
                     }
-                } => self.replies.extend(self.terminal.flush_sync()),
+                } => {
+                    self.replies.extend(self.terminal.flush_sync());
+                    self.output_changed();
+                }
                 command = self.commands.recv() => if let Some(command) = command {
                     self.clear_disconnected();
                     self.stop_all = command.stop_all;
+                    // A frame read changes nothing a waiting view needs to hear about.
+                    let changes = !matches!(command.request, HostRequest::Frame { .. });
                     let result = self.command(command.connection,command.request);
                     let _ = command.reply.send(result);
+                    if changes {
+                        self.output_changed();
+                    }
                 },
-                ready = self.io.readable(), if !self.eof && self.replies.is_empty() => match ready {
+                ready = self.io.readable(), if !self.eof && self.replies.is_empty() && !self.view_behind() => match ready {
                     Ok(mut guard) => {
                         match guard.try_io(|io| read_fd(io.get_ref().as_raw_fd(),&mut buffer)) {
-                            Ok(Ok(0)) => self.eof = true,
+                            Ok(Ok(0)) => { self.eof = true; self.output_changed(); }
                             Ok(Ok(n)) => {
                                 // At most one PTY read of replies waits behind accepted input.
                                 // Pause reads until it drains instead of dropping provider queries.
                                 let viewed = self.active.is_some();
                                 self.replies.extend(self.terminal.feed_view(&buffer[..n], viewed));
+                                self.output_changed();
                             }
                             Ok(Err(_)) => { self.eof = true; self.fail("unable to read agent PTY"); }
                             Err(_) => {}
@@ -1938,6 +2018,7 @@ impl TerminalActor {
                 },
                 _ = tick.tick() => {
                     self.clear_disconnected();
+                    self.release_stalled_view();
                     self.observe_processes();
                     if self.root_status.is_none() {
                         match self.reap_root() {
@@ -2018,6 +2099,35 @@ impl TerminalActor {
         }
     }
 
+    fn output_changed(&self) {
+        self.output
+            .send_modify(|changes| *changes = changes.wrapping_add(1));
+    }
+
+    /// A terminal's program waits for its view, as it waits for any terminal that is slow to
+    /// draw, instead of the view losing the output it fell behind on.
+    fn view_behind(&mut self) -> bool {
+        let behind = self.active.is_some() && self.terminal.view_backlog() >= VIEW_BACKLOG_LIMIT;
+        if !behind {
+            self.view_stalled = None;
+        } else if self.view_stalled.is_none() {
+            self.view_stalled = Some(Instant::now());
+        }
+        behind
+    }
+
+    /// A view that stops taking output no longer holds its program; it is redrawn instead.
+    fn release_stalled_view(&mut self) {
+        if self
+            .view_stalled
+            .is_some_and(|since| since.elapsed() >= VIEW_STALL_LIMIT)
+        {
+            self.view_stalled = None;
+            self.terminal.drop_view_backlog();
+            self.output_changed();
+        }
+    }
+
     /// Close a shell that nobody views and no agent uses. The grace covers a tab being rebuilt or
     /// moved.
     fn follow_shell_view(&mut self) {
@@ -2044,6 +2154,11 @@ impl TerminalActor {
         {
             return;
         }
+        self.close_terminal(now);
+    }
+
+    /// End the shell as closing its terminal does: hang up its session.
+    fn close_terminal(&mut self, now: Instant) {
         self.observe_processes();
         self.closed_terminal = true;
         self.stopping = Some((libc::SIGHUP, now + STOP_GRACE));
@@ -2636,6 +2751,25 @@ impl TerminalActor {
                 }
                 self.input_lease(key, connection)?;
                 self.terminal.set_colors(colors);
+                Ok(HostResponse::Ok)
+            }
+            HostRequest::CloseTerminal { epoch, surface, .. } => {
+                if epoch != self.host.epoch || !self.shell {
+                    return Err(stale_lease());
+                }
+                let elsewhere = |lease: &Lease| lease.surface != Some(surface);
+                // Another tab took the shell, or is taking it; an agent in it was asked about.
+                if self.root_status.is_some()
+                    || self.stopping.is_some()
+                    || self.pending.as_ref().is_some_and(elsewhere)
+                    || self.active.as_ref().is_some_and(elsewhere)
+                    // An unreadable process inventory never closes on uncertainty.
+                    || !self.detect_agent(Instant::now())
+                    || self.presence.is_some()
+                {
+                    return Ok(HostResponse::Ok);
+                }
+                self.close_terminal(Instant::now());
                 Ok(HostResponse::Ok)
             }
             HostRequest::Terminate { epoch, mode, .. } => {
@@ -3663,6 +3797,7 @@ mod tests {
                         attachment_gate: Arc::new(tokio::sync::RwLock::new(())),
                         agent,
                         commands: None,
+                        output: None,
                         final_frame: None,
                         attachment_connection: None,
                         view_report: None,
@@ -7044,6 +7179,7 @@ mod tests {
                         attachment_gate: Arc::new(tokio::sync::RwLock::new(())),
                         agent: starting,
                         commands: None,
+                        output: None,
                         final_frame: None,
                         attachment_connection: None,
                         view_report: None,
@@ -7610,6 +7746,297 @@ for line in sys.stdin:
         assert_eq!(shown().state, ProcessState::Running);
         terminate(TerminateMode::Force).await.unwrap();
         until(|| shown().presence.is_none(), "forced agent ends").await;
+    }
+
+    async fn shell_view(
+        fixture: &Fixture,
+        script: &str,
+        surface: Option<flowmux_core::SurfaceId>,
+    ) -> (HostClient, AgentInstance, AttachmentKey, u64) {
+        let gui = fixture.client(ClientRole::Gui).await;
+        let mut launch = fixture.launch(script);
+        launch.shell = true;
+        let HostResponse::Launched { agent } =
+            gui.call(HostRequest::Launch { launch }).await.unwrap()
+        else {
+            panic!("expected launch")
+        };
+        let relay = fixture.client(ClientRole::Relay).await;
+        let HostResponse::Prepared { key, .. } = relay
+            .call(HostRequest::PrepareAttach {
+                instance: agent.instance,
+                epoch: agent.epoch,
+                request_id: Uuid::new_v4(),
+                view: None,
+                surface,
+                require_gui: surface.is_some(),
+                gui_ready: false,
+                replace: None,
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("expected prepared")
+        };
+        let HostResponse::Attached { frame, .. } = relay
+            .call(HostRequest::CommitAttach {
+                key,
+                size: TerminalSize { rows: 8, cols: 80 },
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("expected attached");
+        };
+        relay
+            .call(HostRequest::ViewReady {
+                key,
+                sequence: frame.sequence,
+            })
+            .await
+            .unwrap();
+        (relay, *agent, key, frame.sequence)
+    }
+
+    #[tokio::test]
+    async fn next_frame_waits_for_output_instead_of_polling() {
+        let fixture = Fixture::new().await;
+        let (relay, agent, key, mut after) =
+            shell_view(&fixture, "read line; echo \"GOT_$line\"; sleep 30", None).await;
+        let observer = fixture.client(ClientRole::Observer).await;
+        // Drain the shell's first output.
+        loop {
+            let started = Instant::now();
+            let HostResponse::Frame { frame } = observer
+                .call(HostRequest::NextFrame { key, after })
+                .await
+                .unwrap()
+            else {
+                panic!("expected frame")
+            };
+            if frame.sequence == after {
+                // Nothing changed: the Host held the request instead of answering at once.
+                assert!(started.elapsed() >= NEXT_FRAME_WAIT - Duration::from_millis(200));
+                break;
+            }
+            after = frame.sequence;
+        }
+        let waiting = tokio::spawn({
+            let observer = fixture.client(ClientRole::Observer).await;
+            async move {
+                let started = Instant::now();
+                let response = observer
+                    .call(HostRequest::NextFrame { key, after })
+                    .await
+                    .unwrap();
+                (started.elapsed(), response)
+            }
+        });
+        sleep(Duration::from_millis(300)).await;
+        relay
+            .call(HostRequest::Input {
+                key,
+                sequence: 1,
+                data: b"hi\n".to_vec(),
+            })
+            .await
+            .unwrap();
+        let (waited, response) = timeout(Duration::from_secs(3), waiting)
+            .await
+            .expect("output wakes a waiting view")
+            .unwrap();
+        let HostResponse::Frame { frame } = response else {
+            panic!("expected frame")
+        };
+        assert!(frame.sequence > after);
+        assert!(waited < NEXT_FRAME_WAIT, "{waited:?}");
+        // An ended execution answers a waiting view with its final frame.
+        let pending = tokio::spawn({
+            let observer = fixture.client(ClientRole::Observer).await;
+            let after = frame.sequence;
+            async move {
+                loop {
+                    let HostResponse::Frame { frame } = observer
+                        .call(HostRequest::NextFrame { key, after })
+                        .await
+                        .unwrap()
+                    else {
+                        panic!("expected frame")
+                    };
+                    if frame.ended || frame.sequence != after {
+                        return frame;
+                    }
+                }
+            }
+        });
+        fixture
+            .client(ClientRole::Gui)
+            .await
+            .call(HostRequest::Terminate {
+                instance: agent.instance,
+                epoch: agent.epoch,
+                mode: TerminateMode::Force,
+            })
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), pending)
+            .await
+            .expect("an ending execution wakes its waiting view")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_slow_shell_view_holds_its_program_until_it_takes_the_output() {
+        let fixture = Fixture::new().await;
+        // Far more output than the redraw limit, then a marker.
+        let (relay, agent, key, after) = shell_view(
+            &fixture,
+            "read go; seq -f 'line %07g padded to make the output larger' 1 120000; echo SEQ_DONE; sleep 30",
+            None,
+        )
+        .await;
+        let observer = fixture.client(ClientRole::Observer).await;
+        // Output starts once the view is attached, as a shell's does after its tab connects.
+        relay
+            .call(HostRequest::Input {
+                key,
+                sequence: 1,
+                data: b"go\n".to_vec(),
+            })
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(400)).await;
+        // The program waits instead of the view falling behind into a redraw.
+        let backlog = fixture.host.registry().entries[&agent.instance].agent.state;
+        assert_eq!(backlog, ProcessState::Running);
+        let mut data = String::new();
+        let mut after = after;
+        let mut redraws = 0;
+        timeout(Duration::from_secs(30), async {
+            while !data.contains("SEQ_DONE") {
+                let mut offset = 0;
+                loop {
+                    let request = if offset == 0 {
+                        HostRequest::NextFrame { key, after }
+                    } else {
+                        HostRequest::Frame { key, after, offset }
+                    };
+                    let HostResponse::Frame { frame } = observer.call(request).await.unwrap()
+                    else {
+                        panic!("expected frame")
+                    };
+                    if frame.offset == 0 && frame.snapshot && frame.sequence != after {
+                        redraws += 1;
+                    }
+                    data.push_str(&frame.data);
+                    after = frame.sequence;
+                    match frame.next_offset {
+                        Some(next) => offset = next,
+                        None => break,
+                    }
+                }
+            }
+        })
+        .await
+        .expect("the view receives all output");
+        assert_eq!(redraws, 0, "a view that keeps up is never redrawn");
+        for line in [1, 60_000, 120_000] {
+            assert!(
+                data.contains(&format!("line {line:07} padded")),
+                "line {line} reached the view"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stalled_shell_view_releases_its_program() {
+        let fixture = Fixture::new().await;
+        let marker = fixture._directory.path().join("finished");
+        let (_relay, _agent, _key, _) = shell_view(
+            &fixture,
+            "seq -f 'line %07g padded to make the output larger' 1 120000; touch finished; sleep 30",
+            None,
+        )
+        .await;
+        // Nobody takes the output; after the stall limit the program runs on.
+        timeout(Duration::from_secs(20), async {
+            while !marker.exists() {
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("a view that takes nothing must not hold its program forever");
+    }
+
+    #[tokio::test]
+    async fn closing_a_terminal_tab_ends_its_shell_now_unless_another_view_or_agent_keeps_it() {
+        let fixture = Fixture::new().await;
+        let state = |instance| fixture.host.registry().entries[&instance].agent.state;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let tab = flowmux_core::SurfaceId::new();
+        let (_relay, agent, _key, _) = shell_view(&fixture, "sleep 60", Some(tab)).await;
+        let close = |surface| HostRequest::CloseTerminal {
+            instance: agent.instance,
+            epoch: agent.epoch,
+            surface,
+        };
+        // Another tab, such as one in a window the shell has left, does not close it.
+        gui.call(close(flowmux_core::SurfaceId::new()))
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(500)).await;
+        assert_eq!(state(agent.instance), ProcessState::Running);
+        // Its own tab closes it at once, well before the unviewed-shell grace.
+        let started = Instant::now();
+        gui.call(close(tab)).await.unwrap();
+        timeout(Duration::from_secs(8), async {
+            while state(agent.instance) != ProcessState::Exited {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("closing the tab ends its shell");
+        assert!(started.elapsed() < STOP_GRACE + Duration::from_secs(1));
+        // A shell running an agent keeps running; its tab asked about the agent.
+        std::fs::write(
+            fixture._directory.path().join("claude"),
+            "import time\ntime.sleep(60)\n",
+        )
+        .unwrap();
+        let busy_tab = flowmux_core::SurfaceId::new();
+        let (_busy_relay, busy, _, _) =
+            shell_view(&fixture, "python3 ./claude; sleep 60", Some(busy_tab)).await;
+        timeout(Duration::from_secs(10), async {
+            while fixture.host.registry().entries[&busy.instance]
+                .agent
+                .presence
+                .is_none()
+            {
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+        gui.call(HostRequest::CloseTerminal {
+            instance: busy.instance,
+            epoch: busy.epoch,
+            surface: busy_tab,
+        })
+        .await
+        .unwrap();
+        sleep(Duration::from_millis(800)).await;
+        assert_eq!(state(busy.instance), ProcessState::Running);
+        // An agent is not a terminal to close this way.
+        let other = fixture.client(ClientRole::Relay).await;
+        let plain = fixture.launch_agent(&other, "sleep 30").await;
+        assert!(gui
+            .call(HostRequest::CloseTerminal {
+                instance: plain.instance,
+                epoch: plain.epoch,
+                surface: tab,
+            })
+            .await
+            .is_err());
     }
 
     #[test]

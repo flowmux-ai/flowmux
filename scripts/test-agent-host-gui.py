@@ -48,7 +48,7 @@ class HostClient:
         self.stream.connect(str(path))
         self.reader = self.stream.makefile("rb")
         self.identifier = 0
-        self.call("hello", version=17, role=role)
+        self.call("hello", version=18, role=role)
 
     def call(self, op, **fields):
         self.identifier += 1

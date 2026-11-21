@@ -830,7 +830,10 @@ impl WindowController {
                     .filter(|(_, host)| host.window == *window)
                     .map(|(id, _)| *id)
                     .collect();
-                bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
+                bridge.send_from_ui(GtkCommand::CloseDetachedWindow {
+                    workspaces,
+                    closed_by_user: true,
+                });
             }
             glib::Propagation::Stop
         });
@@ -845,7 +848,10 @@ impl WindowController {
                     .map(|(id, _)| *id)
                     .collect::<Vec<_>>();
                 if !workspaces.is_empty() {
-                    bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
+                    bridge.send_from_ui(GtkCommand::CloseDetachedWindow {
+                        workspaces,
+                        closed_by_user: false,
+                    });
                 }
             }
         });

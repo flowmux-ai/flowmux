@@ -737,6 +737,9 @@ pub enum GtkCommand {
     /// Close all workspaces hosted by one detached window after checking dirty editors.
     CloseDetachedWindow {
         workspaces: Vec<WorkspaceId>,
+        /// The user closed the window, so its terminals end now; a window destroyed otherwise
+        /// leaves them the grace a closing window gets.
+        closed_by_user: bool,
     },
     /// Remove a workspace entirely (sidebar row + stack page + state).
     /// Triggered by the hover X button on a sidebar row, and by

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 pub const MAX_INPUT_BYTES: usize = 16 * 1024;
 /// A bounded 16 MiB snapshot must reach the terminal before input ownership changes.
 pub const ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -29,18 +29,35 @@ pub struct TerminalSize {
 }
 
 impl TerminalSize {
+    pub const MAX_ROWS: u16 = 300;
+    /// Width drives the Host's worst-case frame memory more than height does.
+    pub const MAX_COLS: u16 = 500;
+    /// A full-screen pane on a 4K display with a small font still fits.
+    pub const MAX_CELLS: usize = 80_000;
+
     pub fn validate(self) -> Result<Self, RpcError> {
         if self.rows == 0
             || self.cols < 2
-            || self.rows > 300
-            || self.cols > 500
-            || usize::from(self.rows) * usize::from(self.cols) > 40_000
+            || self.rows > Self::MAX_ROWS
+            || self.cols > Self::MAX_COLS
+            || usize::from(self.rows) * usize::from(self.cols) > Self::MAX_CELLS
         {
             return Err(RpcError::InvalidArgument(
                 "terminal size is out of bounds".into(),
             ));
         }
         Ok(self)
+    }
+
+    /// The largest valid size within this one. A view larger than the Host keeps for a
+    /// terminal shows its program at this size instead of losing it.
+    pub fn clamped(self) -> Self {
+        let cols = self.cols.clamp(2, Self::MAX_COLS);
+        let rows = self
+            .rows
+            .clamp(1, Self::MAX_ROWS)
+            .min((Self::MAX_CELLS / usize::from(cols)) as u16);
+        Self { rows, cols }
     }
 }
 
@@ -163,8 +180,9 @@ impl std::fmt::Display for IncompatibleHost {
             f,
             " and this Flowmux uses protocol {PROTOCOL_VERSION}. Its agents keep running, \
              but this version cannot open them. Finish them from the Flowmux version that \
-             started them, or stop them all with `flowmux agent stop-host`; the Host exits \
-             after its last agent ends, and this version then starts a new one."
+             started them, or stop them all with `flowmux agent stop-host`, which also ends \
+             the shells of terminal tabs that run in that Host; the Host exits after its last \
+             agent and terminal end, and this version then starts a new one."
         )?;
         #[cfg(target_os = "linux")]
         write!(
@@ -427,6 +445,12 @@ pub enum HostRequest {
         #[serde(default)]
         offset: usize,
     },
+    /// The first chunk of the next frame after `after`. The Host answers when the terminal
+    /// changes, or with an unchanged frame after [`NEXT_FRAME_WAIT`].
+    NextFrame {
+        key: AttachmentKey,
+        after: u64,
+    },
     Input {
         key: AttachmentKey,
         sequence: u64,
@@ -446,6 +470,14 @@ pub enum HostRequest {
         epoch: Uuid,
         mode: TerminateMode,
     },
+    /// The terminal tab `surface` of this shell was closed: end the shell now, as closing a
+    /// terminal does. A shell that runs an agent, or that another tab shows or is taking,
+    /// keeps running.
+    CloseTerminal {
+        instance: AgentInstanceId,
+        epoch: Uuid,
+        surface: SurfaceId,
+    },
     /// Stop every execution of this Host. Accepted without a handshake so a
     /// Flowmux of another protocol version can still stop a Host it cannot manage.
     /// Keep this variant's wire form stable across protocol versions.
@@ -457,11 +489,19 @@ pub enum HostRequest {
     },
 }
 
+/// How long the Host holds a [`HostRequest::NextFrame`] for a terminal that does not change.
+/// Below the IPC server's query budget.
+pub const NEXT_FRAME_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl HostRequest {
     pub fn is_query(&self) -> bool {
         matches!(
             self,
-            Self::List | Self::ResolveContext { .. } | Self::Frame { .. } | Self::KeepAlive
+            Self::List
+                | Self::ResolveContext { .. }
+                | Self::Frame { .. }
+                | Self::NextFrame { .. }
+                | Self::KeepAlive
         )
     }
 }
@@ -829,14 +869,63 @@ mod tests {
             "persistent leases must use the persistent stream"
         );
         assert!(TerminalSize::default().validate().is_ok());
+        // A full-screen pane on a 4K display with a small font.
+        let large = TerminalSize {
+            rows: 135,
+            cols: 480,
+        };
+        assert_eq!(large.validate().unwrap(), large);
+        assert_eq!(large.clamped(), large);
         for size in [
             TerminalSize { rows: 0, cols: 80 },
+            TerminalSize { rows: 24, cols: 1 },
             TerminalSize {
-                rows: 300,
-                cols: 500,
+                rows: TerminalSize::MAX_ROWS + 1,
+                cols: 80,
+            },
+            TerminalSize {
+                rows: 24,
+                cols: TerminalSize::MAX_COLS + 1,
+            },
+            TerminalSize {
+                rows: TerminalSize::MAX_ROWS,
+                cols: TerminalSize::MAX_COLS,
+            },
+            TerminalSize {
+                rows: u16::MAX,
+                cols: u16::MAX,
             },
         ] {
-            assert!(size.validate().is_err());
+            assert!(size.validate().is_err(), "{size:?}");
+            // A view of any size gets the largest terminal within it.
+            let clamped = size.clamped();
+            assert!(clamped.validate().is_ok(), "{size:?} -> {clamped:?}");
+            assert!(clamped.rows <= size.rows.max(1) && clamped.cols <= size.cols.max(2));
         }
+    }
+
+    #[test]
+    fn frame_waits_and_terminal_close_are_queries_only_where_safe() {
+        let key = AttachmentKey {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+            lease: Uuid::new_v4(),
+            generation: 1,
+        };
+        // An observer connection waits for frames; the wait must not hold mutation capacity.
+        assert!(HostRequest::NextFrame { key, after: 3 }.is_query());
+        assert!(NEXT_FRAME_WAIT < std::time::Duration::from_secs(10));
+        let close = HostRequest::CloseTerminal {
+            instance: key.instance,
+            epoch: key.epoch,
+            surface: SurfaceId::new(),
+        };
+        assert!(!close.is_query());
+        let encoded = serde_json::to_string(&close).unwrap();
+        assert!(encoded.contains("\"op\":\"close_terminal\""), "{encoded}");
+        assert!(matches!(
+            serde_json::from_str(&encoded).unwrap(),
+            HostRequest::CloseTerminal { .. }
+        ));
     }
 }

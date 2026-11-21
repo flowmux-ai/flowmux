@@ -56,9 +56,17 @@ like one started with **New Agent**: closing its tab asks whether to keep it
 running, and closing Flowmux leaves it working in Background. Reopening Flowmux
 connects the tab to the same process; an agent whose tab was closed is listed
 in **Agents** as Background and opens as a terminal tab again. A terminal
-without a running agent ends with its tab or with Flowmux, ten seconds after
-its last view is gone. Programs that left the terminal's session or ignore the
-hangup keep running, as they do when any terminal closes.
+without a running agent ends when you close its tab, pane or workspace. When
+its window closes or ends without closing it, the terminal ends ten seconds
+after its last view is gone. Programs that left the terminal's session or ignore
+the hangup keep running, as they do when any terminal closes.
+
+A terminal tab follows its shell's output the way a local terminal does: a
+program that writes faster than the tab draws waits for it instead of the tab
+losing scrollback. A tab larger than 500 columns or 80,000 cells shows its
+programs at the largest size within that limit. If the Agent Host itself ends,
+each open terminal tab says so and starts a new shell in its last directory;
+the programs that ran in the old shell have ended with it.
 
 Such a tab stays an ordinary terminal: the Host passes the program's output
 through unchanged, and its programs, hooks and `flowmux` commands talk to the
@@ -89,8 +97,9 @@ If an Agent Host started by another Flowmux version is still running, the Agents
 area shows a notice. Its agents keep running, but this version cannot open
 them. Finish them from the version that started them, or stop them all with
 `flowmux agent stop-host` (add `--force` only after a normal stop has timed out).
-A Host older than this command rejects it. The Host exits after its last agent
-ends.
+This also ends the shells of terminal tabs running in that Host, as closing their
+tabs would. A Host older than this command rejects it. The Host exits after its
+last agent and terminal end.
 
 Clicking an execution open in this window focuses its existing tab. Clicking a **Background**
 execution first asks where to open it: one of this window's local terminal
