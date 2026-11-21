@@ -152,6 +152,29 @@ class DmgUpdateTests(unittest.TestCase):
                                                      "update_stdout": result.stdout,
                                                      "update_stderr": result.stderr}, indent=2))
 
+    def test_image_is_detached_when_attaching_reports_failure(self):
+        tools = pathlib.Path(self.temp.name) / "tools"
+        tools.mkdir()
+        hdiutil = tools / "hdiutil"
+        hdiutil.write_text('#!/bin/sh\n'
+                           'if [ "$1" = attach ]; then /usr/bin/hdiutil "$@"; exit 1; fi\n'
+                           'exec /usr/bin/hdiutil "$@"\n')
+        hdiutil.chmod(0o755)
+        env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ.get("PATH", ""))
+        result = self.install(env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(version(self.dest), "1.0.0")
+        images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
+        attached = [item for item in images if item.get("image-path") == str(self.image)]
+        try:
+            self.assertFalse(attached, result.stdout + result.stderr)
+        finally:
+            # Clean only this fixture's device if the regression is present.
+            for item in attached:
+                for entity in item.get("system-entities", []):
+                    subprocess.run(["hdiutil", "detach", "-force", entity["dev-entry"]],
+                                   capture_output=True)
+
     def test_busy_readonly_image_is_detached_after_validation_failure(self):
         tools = pathlib.Path(self.temp.name) / "tools"
         tools.mkdir()
