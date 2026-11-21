@@ -304,10 +304,12 @@ impl Session {
             if let Some(message) = window.navigation_error.borrow().clone() {
                 return Err(native_error(message));
             }
-            if (!unsafe { window.web.isLoading() } && ready == "complete")
-                || (self.strategy == "eager"
-                    && window.committed.get()
-                    && (ready == "interactive" || ready == "complete"))
+            // Until the requested document is committed, the state read here is still the
+            // previous document's.
+            if window.committed.get()
+                && ((!unsafe { window.web.isLoading() } && ready == "complete")
+                    || (self.strategy == "eager"
+                        && (ready == "interactive" || ready == "complete")))
             {
                 return Ok(());
             }
