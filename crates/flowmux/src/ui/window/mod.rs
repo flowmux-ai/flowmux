@@ -3221,18 +3221,33 @@ impl WindowController {
                 owner,
                 terminal_generation,
             } => {
-                let owns_old_view =
-                    self.pane_registry
-                        .borrow()
-                        .terminals
-                        .get(&surface)
-                        .is_some_and(|terminal| {
-                            terminal.id() == pane
-                                && terminal.program_status_generation == terminal_generation
-                                && terminal.agent_connection.borrow().as_ref().is_some_and(
-                                    |connection| connection.superseded_by(surface, owner),
-                                )
-                        });
+                let owns_old_view = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .get(&surface)
+                    .is_some_and(|terminal| {
+                        let terminal_pid =
+                            terminal.pid.get().and_then(|pid| u32::try_from(pid).ok());
+                        let elsewhere = self
+                            .bridge
+                            .agent_registry
+                            .borrow()
+                            .agents
+                            .iter()
+                            .find(|agent| {
+                                agent.instance == owner.key.instance
+                                    && agent.epoch == owner.key.epoch
+                            })
+                            .is_some_and(|agent| {
+                                crate::ui::agent_connection::shown_elsewhere(terminal_pid, agent)
+                            });
+                        terminal.id() == pane
+                            && terminal.program_status_generation == terminal_generation
+                            && terminal.agent_connection.borrow().as_ref().is_some_and(
+                                |connection| connection.superseded_by(surface, owner, elsewhere),
+                            )
+                    });
                 let superseded = {
                     let snapshot = self.bridge.agent_registry.borrow();
                     snapshot.available
@@ -3244,7 +3259,7 @@ impl WindowController {
                 };
                 if !owns_old_view
                     || !superseded
-                    || self.store.surface_agent_binding(pane, surface).await
+                    || self.store.surface_host_binding(pane, surface).await
                         != Some(flowmux_core::AgentViewBinding {
                             instance: owner.key.instance,
                             epoch: owner.key.epoch,

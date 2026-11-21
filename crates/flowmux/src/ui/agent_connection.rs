@@ -76,14 +76,17 @@ impl AgentConnection {
         self.label.set_text(error.unwrap_or("Connecting to Agent…"));
     }
 
+    /// `elsewhere`: the owner's relay is not this tab's. A terminal taken by another window
+    /// keeps its tab id there, so the id alone cannot tell the two tabs apart.
     pub fn superseded_by(
         &self,
         surface: flowmux_core::SurfaceId,
         owner: flowmux_ipc::agent_host::AgentViewOwner,
+        elsewhere: bool,
     ) -> bool {
         self.binding.instance == owner.key.instance
             && self.binding.epoch == owner.key.epoch
-            && surface != owner.surface
+            && (surface != owner.surface || elsewhere)
             && match self.last_ready.get() {
                 Some(previous) => {
                     previous.instance == owner.key.instance
@@ -94,6 +97,22 @@ impl AgentConnection {
                 None => self.takeover.is_none(),
             }
     }
+}
+
+/// Whether the execution's ready view belongs to another terminal than the one running
+/// `terminal_pid`: its relay is neither that process nor its child.
+pub(crate) fn shown_elsewhere(
+    terminal_pid: Option<u32>,
+    agent: &flowmux_ipc::agent_host::AgentInstance,
+) -> bool {
+    agent.attachment.as_ref().is_some_and(|attachment| {
+        attachment.ready
+            && terminal_pid != attachment.relay_pid
+            && attachment
+                .relay_pid
+                .and_then(flowmux_procmon::parent_pid)
+                .is_some_and(|parent| Some(parent) != terminal_pid)
+    })
 }
 
 #[cfg(all(test, not(target_os = "macos")))]
@@ -146,17 +165,19 @@ mod tests {
             surface: flowmux_core::SurfaceId::new(),
         };
         // Restores have no observed lease, including after the winner detaches.
-        assert!(connection.superseded_by(surface, owner));
-        assert!(!connection.superseded_by(owner.surface, owner));
+        assert!(connection.superseded_by(surface, owner, false));
+        assert!(!connection.superseded_by(owner.surface, owner, false));
+        // The same tab id in another window is another tab.
+        assert!(connection.superseded_by(owner.surface, owner, true));
         connection.takeover = Some(AgentViewTakeover {
             previous: Some(previous),
             token: uuid::Uuid::new_v4(),
             pane: flowmux_core::PaneId::new(),
             workspace: flowmux_core::WorkspaceId::new(),
         });
-        assert!(!connection.superseded_by(surface, owner));
+        assert!(!connection.superseded_by(surface, owner, false));
         connection.last_ready.set(Some(previous));
-        assert!(connection.superseded_by(surface, owner));
+        assert!(connection.superseded_by(surface, owner, false));
         for key in [
             AttachmentKey {
                 generation: 2,
@@ -175,7 +196,7 @@ mod tests {
                 ..owner.key
             },
         ] {
-            assert!(!connection.superseded_by(surface, AgentViewOwner { key, ..owner }));
+            assert!(!connection.superseded_by(surface, AgentViewOwner { key, ..owner }, false));
         }
     }
 }
