@@ -511,22 +511,19 @@ impl Terminal {
     }
 
     pub fn frame(&mut self, after: u64) -> (u64, bool, TerminalSize, Arc<str>) {
-        if let Some(introduction) = self.introduction.take().filter(|_| self.passthrough) {
+        if let Some(mut introduction) = self.introduction.take().filter(|_| self.passthrough) {
             self.dirty = false;
+            let rest = introduction.split_off(complete_utf8(&introduction));
             let introduction: Arc<str> = Arc::from(String::from_utf8_lossy(&introduction));
             self.diff = introduction.clone();
             self.snapshot = Some(introduction);
-            self.unframed = Some(Vec::new());
+            self.unframed = Some(rest);
             self.sequence += 1;
         } else if self.passthrough && self.dirty {
             self.dirty = false;
             match &mut self.unframed {
                 Some(bytes) => {
-                    // Hold back a character split across two reads.
-                    let complete = match std::str::from_utf8(bytes) {
-                        Err(error) if error.error_len().is_none() => error.valid_up_to(),
-                        _ => bytes.len(),
-                    };
+                    let complete = complete_utf8(bytes);
                     if complete > 0 {
                         self.diff = Arc::from(String::from_utf8_lossy(&bytes[..complete]));
                         bytes.drain(..complete);
@@ -642,16 +639,7 @@ impl Terminal {
                     }
                     link = next_link;
                 }
-                result.push(if cell.c.is_control() { ' ' } else { cell.c });
-                if let Some(marks) = cell.zerowidth() {
-                    result.extend(
-                        marks
-                            .iter()
-                            .copied()
-                            .take(MAX_COMBINING)
-                            .filter(|c| !c.is_control()),
-                    );
-                }
+                glyph(&mut result, cell);
                 previous = Some(cell);
             }
             result.push_str("\x1b]8;;\x1b\\\x1b[0m");
@@ -679,12 +667,14 @@ impl Terminal {
         if region.start.0 != 0 || region.end.0 != i32::from(self.size.rows) {
             let _ = write!(trailer, "\x1b[{};{}r", region.start.0 + 1, region.end.0);
         }
-        let _ = write!(
-            trailer,
-            "\x1b[{};{}H",
-            cursor.line.0 + 1,
-            cursor.column.0 + 1
-        );
+        // In origin mode the program addresses rows from the top of its region, and so
+        // does the cursor placed here.
+        let mut row = cursor.line.0 + 1;
+        if self.term.mode().contains(TermMode::ORIGIN) {
+            trailer.push_str("\x1b[?6h");
+            row -= region.start.0;
+        }
+        let _ = write!(trailer, "\x1b[{row};{}H", cursor.column.0 + 1);
         for (flag, mode) in [
             // Rows are drawn without wrapping; what the program writes next wraps again.
             (TermMode::LINE_WRAP, 7),
@@ -717,6 +707,23 @@ impl Terminal {
             "\x1b[{} q",
             shape + u8::from(!cursor_style.blinking)
         );
+        // Past the last column the cursor waits for the next character before it wraps.
+        // Writing that column again leaves the view's cursor waiting too.
+        // ponytail: the rewritten cell loses its hyperlink; carry it if that is ever seen.
+        if self.passthrough
+            && grid.cursor.input_needs_wrap
+            && self.term.mode().contains(TermMode::LINE_WRAP)
+        {
+            let line = &grid[cursor.line];
+            let mut column = cursor.column.0;
+            if column > 0 && line[Column(column)].flags.contains(Flags::WIDE_CHAR_SPACER) {
+                column -= 1;
+            }
+            let _ = write!(trailer, "\x1b[{row};{}H", column + 1);
+            style(&mut trailer, &line[Column(column)]);
+            glyph(&mut trailer, &line[Column(column)]);
+            trailer.push_str("\x1b[0m");
+        }
         // The program's pen: what it writes next keeps its colors and attributes.
         let pen = &grid.cursor.template;
         if pen.fg != Color::Named(NamedColor::Foreground)
@@ -808,6 +815,27 @@ fn history_overlap(previous: &[String], next: &[String]) -> usize {
 
 fn safe_osc(value: &str) -> bool {
     value.len() <= 4096 && !value.chars().any(char::is_control)
+}
+
+/// The length of `bytes` without a character split across two reads at its end.
+fn complete_utf8(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        _ => bytes.len(),
+    }
+}
+
+fn glyph(data: &mut String, cell: &Cell) {
+    data.push(if cell.c.is_control() { ' ' } else { cell.c });
+    if let Some(marks) = cell.zerowidth() {
+        data.extend(
+            marks
+                .iter()
+                .copied()
+                .take(MAX_COMBINING)
+                .filter(|c| !c.is_control()),
+        );
+    }
 }
 
 fn style(data: &mut String, cell: &Cell) {
@@ -1701,6 +1729,51 @@ mod tests {
         terminal.feed_view(b"\x1b[?1049hagain\x1b[?1049l", true);
         let (_, snapshot, _, data) = terminal.frame(sequence);
         assert!(!snapshot && data.contains("again") && !data.starts_with("\x1bc"));
+    }
+
+    /// A plain terminal fed what a passthrough view receives shows what the Host has.
+    #[test]
+    fn passthrough_view_matches_the_host_after_a_redraw() {
+        let size = TerminalSize { rows: 4, cols: 20 };
+        for (case, before, after) in [
+            (
+                "the cursor waits past the last column for the next character",
+                b"xxxxxxxxxxxxxxxxxxxx".as_slice(),
+                b"Y".as_slice(),
+            ),
+            (
+                "a wide character fills the last two columns",
+                "xxxxxxxxxxxxxxxxxx\u{d55c}".as_bytes(),
+                b"Y",
+            ),
+            (
+                "cursor addresses are relative to the scrolling region",
+                b"\x1b[2;3r\x1b[?6h",
+                b"\x1b[1;1HZ\x1b[2;1HW",
+            ),
+        ] {
+            let mut host = Terminal::new(size);
+            host.set_passthrough();
+            host.feed_view(b"\r", false);
+            host.frame(0);
+            host.feed_view(before, false);
+            let (sequence, snapshot, _, data) = host.frame(0);
+            assert!(snapshot, "{case}");
+            let mut view = Terminal::new(size);
+            view.feed(data.as_bytes());
+            host.feed_view(after, true);
+            view.feed(host.frame(sequence).3.as_bytes());
+            assert_eq!(view.status_signals().0, host.status_signals().0, "{case}");
+        }
+        // A character split across two reads is not lost with the first frame.
+        let mut host = Terminal::new(size);
+        host.set_passthrough();
+        let split = "a\u{d55c}".as_bytes();
+        host.feed_view(&split[..2], false);
+        let (sequence, _, _, data) = host.frame(0);
+        assert_eq!(&*data, "a");
+        host.feed_view(&split[2..], true);
+        assert_eq!(&*host.frame(sequence).3, "\u{d55c}");
     }
 
     #[test]
