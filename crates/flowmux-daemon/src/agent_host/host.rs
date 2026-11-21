@@ -1589,6 +1589,8 @@ struct ExecutionScope {
     scope: crate::process_scope::PaneScope,
     #[cfg(target_os = "linux")]
     populated: bool,
+    /// The processes still inside are left running; systemd collects the scope after them.
+    released: bool,
 }
 
 impl ExecutionScope {
@@ -1622,6 +1624,7 @@ impl ExecutionScope {
         let scope = Self {
             scope,
             populated: true,
+            released: false,
         };
         // Require atomic subtree termination before letting a provider fork.
         std::fs::OpenOptions::new()
@@ -1639,7 +1642,7 @@ impl ExecutionScope {
         _: (Option<u64>, Option<u64>),
     ) -> std::result::Result<Self, String> {
         // shortcut: macOS retains birth-checked polling until native containment exists.
-        Ok(Self {})
+        Ok(Self { released: false })
     }
 
     fn is_empty(&self) -> bool {
@@ -1742,6 +1745,9 @@ impl ExecutionScope {
 
 impl Drop for ExecutionScope {
     fn drop(&mut self) {
+        if self.released {
+            return;
+        }
         // Cancellation owns this scope too; never leave an escaped test/launch child.
         if let Err(error) = self.kill() {
             tracing::error!(%error, "Agent execution scope cleanup failed");
@@ -1944,6 +1950,15 @@ impl TerminalActor {
                         registry.entries.get_mut(&self.instance).unwrap().agent.force_terminate_allowed = true;
                         registry.revision += 1;
                     }
+                    // A closed terminal does not wait for what left its session or ignored the hangup.
+                    if self.closed_terminal
+                        && self.root_status.is_some()
+                        && self.stopping.is_some_and(|(_, deadline)| Instant::now() >= deadline)
+                    {
+                        self.scope.released = true;
+                        self.finished();
+                        break;
+                    }
                     if self.root_status.is_some() && self.owned.is_empty() && self.scope.is_empty() && self.eof {
                         self.finished();
                         break;
@@ -1988,7 +2003,7 @@ impl TerminalActor {
         self.observe_processes();
         self.closed_terminal = true;
         self.stopping = Some((libc::SIGHUP, now + STOP_GRACE));
-        self.signal_owned(libc::SIGHUP);
+        self.hang_up_session();
         let mut registry = self.host.registry();
         registry
             .entries
@@ -2887,6 +2902,25 @@ impl TerminalActor {
         });
     }
 
+    /// What a closed terminal hangs up: its shell's session, as closing a terminal does. A
+    /// process that left the session (a daemon, a detached application) is not ended with it.
+    fn hang_up_session(&self) {
+        let session = self.pty.child_pid();
+        let hang_up = |pid: u32, start: u64| {
+            if unsafe { libc::getsid(pid as i32) } == session {
+                let _ = signal_process(pid, start, libc::SIGHUP);
+            }
+        };
+        #[cfg(target_os = "linux")]
+        let _ = self.scope.for_each_process(|pid, start| {
+            hang_up(pid, start);
+            Ok(())
+        });
+        for (&pid, &start) in &self.owned {
+            hang_up(pid, start);
+        }
+    }
+
     fn signal_owned(&self, signal: i32) {
         if signal == libc::SIGKILL && self.scope.kill().is_err() {
             self.fail("unable to terminate Agent execution scope safely");
@@ -3339,6 +3373,7 @@ mod tests {
                 cgroup_dir: root.path().into(),
             },
             populated: true,
+            released: false,
         };
         scope.observe().unwrap();
         let mut visits = 0;
@@ -7349,6 +7384,39 @@ for line in sys.stdin:
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn closed_terminal_leaves_a_process_that_left_its_session() {
+        let fixture = Fixture::new().await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let pid_file = fixture._directory.path().join("detached");
+        let mut launch = fixture.launch(
+            "python3 -c 'import os, time; os.setsid(); open(\"detached\", \"w\").write(str(os.getpid())); time.sleep(30)' & sleep 30",
+        );
+        launch.shell = true;
+        let HostResponse::Launched { agent } =
+            gui.call(HostRequest::Launch { launch }).await.unwrap()
+        else {
+            panic!("expected launch")
+        };
+        // Nobody views the shell: it is closed, and ends although the daemon still runs.
+        timeout(Duration::from_secs(20), async {
+            while fixture.host.registry().entries[&agent.instance].agent.state
+                != ProcessState::Exited
+            {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a closed terminal must not wait for a detached process");
+        let detached: i32 = std::fs::read_to_string(pid_file).unwrap().parse().unwrap();
+        assert_eq!(
+            unsafe { libc::kill(detached, 0) },
+            0,
+            "detached process survives"
+        );
+        unsafe { libc::kill(detached, libc::SIGKILL) };
     }
 
     #[tokio::test]
