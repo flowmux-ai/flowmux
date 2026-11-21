@@ -33,6 +33,10 @@ const MAX_INPUT_PENDING: usize = 256 * 1024;
 const FRAME_CHUNK: usize = 64 * 1024;
 const STOP_GRACE: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
+const STOP_ENQUEUE: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const STOP_ENQUEUE: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
 const SHELL_VIEW_GRACE: Duration = Duration::from_secs(10);
 #[cfg(test)]
 const SHELL_VIEW_GRACE: Duration = Duration::from_millis(300);
@@ -542,10 +546,12 @@ impl AgentHost {
                     .filter_map(|(instance, entry)| Some((*instance, entry.commands.clone()?)))
                     .collect()
             };
+            let mut refused = 0;
             for (instance, sender) in running {
-                // Each execution applies its own stop rules; a full queue is retried by the caller.
+                // Each execution applies its own stop rules. One busy with other requests
+                // takes the stop when its queue has room; one that has ended needs none.
                 let (reply, _) = oneshot::channel();
-                let _ = sender.try_send(Command {
+                let stop = sender.send(Command {
                     stop_all: true,
                     connection,
                     request: HostRequest::Terminate {
@@ -555,6 +561,14 @@ impl AgentHost {
                     },
                     reply,
                 });
+                if tokio::time::timeout(STOP_ENQUEUE, stop).await.is_err() {
+                    refused += 1;
+                }
+            }
+            if refused > 0 {
+                return Err(RpcError::Busy(format!(
+                    "{refused} executions did not take the stop; retry"
+                )));
             }
             return Ok(HostResponse::Ok);
         }
@@ -7415,6 +7429,45 @@ for line in sys.stdin:
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_wide_stop_reports_an_execution_that_did_not_take_it() {
+        let fixture = Fixture::new().await;
+        let relay = fixture.client(ClientRole::Relay).await;
+        let agent = fixture.launch_agent(&relay, "sleep 30").await;
+        // An execution whose queue stays full.
+        let (full, _kept) = mpsc::channel(1);
+        full.try_send(Command {
+            stop_all: false,
+            connection: 0,
+            request: HostRequest::List,
+            reply: oneshot::channel().0,
+        })
+        .ok()
+        .unwrap();
+        let commands = fixture
+            .host
+            .registry()
+            .entries
+            .get_mut(&agent.instance)
+            .unwrap()
+            .commands
+            .replace(full);
+        let stop = || {
+            fixture
+                .host
+                .request(HostRequest::StopAll { force: false }, 0, None)
+        };
+        assert!(matches!(stop().await, Err(RpcError::Busy(_))));
+        fixture
+            .host
+            .registry()
+            .entries
+            .get_mut(&agent.instance)
+            .unwrap()
+            .commands = commands;
+        stop().await.unwrap();
     }
 
     #[tokio::test]
