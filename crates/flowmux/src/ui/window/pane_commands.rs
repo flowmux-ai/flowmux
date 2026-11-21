@@ -750,7 +750,7 @@ impl WindowController {
             }
             GtkCommand::CloseMovedAgentView { pane, surface, .. } => {
                 let (ack, _) = oneshot::channel();
-                self.close_surface_command(pane, surface, false, ack).await;
+                self.close_surface(pane, surface, false, false, ack).await;
             }
             GtkCommand::ConfirmCloseSurface { pane, surface, ack } => {
                 // An agent tab asks once, about the agent; nothing else follows it.
@@ -1186,6 +1186,19 @@ impl WindowController {
         confirm: bool,
         ack: oneshot::Sender<Result<(), String>>,
     ) {
+        self.close_surface(pane, surface, confirm, true, ack).await;
+    }
+
+    /// `ends_terminal`: closing this tab ends its hosted shell, as closing a terminal does.
+    /// Retiring a view that another window took over must not: the shell now shows there.
+    pub(super) async fn close_surface(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        confirm: bool,
+        ends_terminal: bool,
+        ack: oneshot::Sender<Result<(), String>>,
+    ) {
         // A successful in-process MOVE can rehome the surface before
         // DragSource::drag-end emits its fallback close for the old
         // pane. Reject that stale close before considering whether the
@@ -1210,7 +1223,9 @@ impl WindowController {
             let _ = ack.send(Err("Pane close cancelled".into()));
             return;
         }
-        self.close_hosted_shells(&[surface]);
+        if ends_terminal {
+            self.close_hosted_shells(&[surface]);
+        }
         let outcome = self.store.close_surface(pane, surface).await;
         if outcome.is_some()
             && !matches!(

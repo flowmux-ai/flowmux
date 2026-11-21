@@ -460,6 +460,13 @@ pub enum HostRequest {
         key: AttachmentKey,
         size: TerminalSize,
     },
+    /// Whether the view is larger than the size it gave the Host (see
+    /// [`TerminalSize::clamped`]). Such a view cannot follow a shell's own bytes, which wrap
+    /// at the Host's width; it is drawn from the Host's screen instead.
+    ViewOversized {
+        key: AttachmentKey,
+        oversized: bool,
+    },
     /// Default colors of the attaching view; never forces a snapshot.
     ViewColors {
         key: AttachmentKey,
