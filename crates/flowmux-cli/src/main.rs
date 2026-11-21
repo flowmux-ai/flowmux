@@ -1392,10 +1392,19 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         }) => {
             let socket = cli.socket.clone().unwrap_or_else(paths::agent_host_socket);
             let binding = (*instance).zip(*epoch);
+            let replace = binding.zip((*replace_lease).zip(*replace_generation)).map(
+                |((instance, epoch), (lease, generation))| flowmux_ipc::agent_host::AttachmentKey {
+                    instance,
+                    epoch,
+                    lease,
+                    generation,
+                },
+            );
             if *shell {
                 return agent_relay::run_shell(
                     &socket,
                     binding,
+                    replace,
                     *ready_token,
                     colors.as_deref(),
                     argv.clone(),
@@ -1408,16 +1417,7 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
                 instance,
                 epoch,
                 *require_gui,
-                (*replace_lease)
-                    .zip(*replace_generation)
-                    .map(
-                        |(lease, generation)| flowmux_ipc::agent_host::AttachmentKey {
-                            instance,
-                            epoch,
-                            lease,
-                            generation,
-                        },
-                    ),
+                replace,
                 *ready_token,
                 colors.as_deref(),
             )
