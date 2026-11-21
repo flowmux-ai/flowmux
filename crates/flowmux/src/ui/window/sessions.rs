@@ -15,6 +15,7 @@ pub(super) struct SessionHome {
     pub(super) arguments: Vec<String>,
 }
 
+#[cfg(test)]
 pub(super) fn resume_shell_line(
     session: &HistorySession,
     home: &SessionHome,
@@ -23,17 +24,48 @@ pub(super) fn resume_shell_line(
     session_shell_line(session, home, yolo, false)
 }
 
+#[cfg(test)]
 pub(super) fn session_shell_line(
     session: &HistorySession,
     home: &SessionHome,
     yolo: bool,
     fork: bool,
 ) -> Result<String, String> {
-    let cwd = session
-        .cwd
-        .to_str()
-        .ok_or("Project directory is not UTF-8")?;
-    if !session.cwd.is_absolute()
+    native_session_line(session, home, yolo, fork, false)
+}
+
+pub(super) fn native_session_line(
+    session: &HistorySession,
+    home: &SessionHome,
+    yolo: bool,
+    fork: bool,
+    managed: bool,
+) -> Result<String, String> {
+    provider_shell_line(
+        session.agent,
+        &session.cwd,
+        home,
+        yolo,
+        managed,
+        &if fork {
+            session.fork_command()
+        } else {
+            session.resume_command()
+        }
+        .map_err(|e| e.to_string())?,
+    )
+}
+
+pub(super) fn provider_shell_line(
+    agent: SessionAgent,
+    directory: &std::path::Path,
+    home: &SessionHome,
+    yolo: bool,
+    managed: bool,
+    command: &str,
+) -> Result<String, String> {
+    let cwd = directory.to_str().ok_or("Project directory is not UTF-8")?;
+    if !directory.is_absolute()
         || cwd
             .chars()
             .chain(home.environment.values().flat_map(|v| v.chars()))
@@ -42,8 +74,7 @@ pub(super) fn session_shell_line(
     {
         return Err("Cannot safely open this session's directory in a terminal".into());
     }
-    let unset = session
-        .agent
+    let unset = agent
         .home_variables()
         .iter()
         .filter(|key| **key != "HOME")
@@ -73,7 +104,7 @@ pub(super) fn session_shell_line(
         .collect::<Vec<_>>()
         .join(" ");
     let permissions = if yolo {
-        match session.agent {
+        match agent {
             SessionAgent::Claude => {
                 "--allow-dangerously-skip-permissions --permission-mode bypassPermissions"
             }
@@ -86,15 +117,85 @@ pub(super) fn session_shell_line(
         ""
     };
     Ok(format!(
-        "cd {} && env {unset} {environment} {} {arguments} {permissions}",
+        "cd {} && {}env {unset} {environment} {} {arguments} {permissions}",
         shell_quote(cwd),
-        if fork {
-            session.fork_command()
-        } else {
-            session.resume_command()
-        }
-        .map_err(|e| e.to_string())?
+        if managed { "exec " } else { "" },
+        command
     ))
+}
+
+/// Only a launch the Host definitely never ran may continue in an ordinary tab;
+/// an unknown result could run the same native session twice.
+pub(super) fn tab_fallback_reason(error: &anyhow::Error) -> Option<String> {
+    error
+        .downcast_ref::<flowmux_cli::agent_host::LaunchNotStarted>()
+        .map(|_| format!("{error:#}"))
+}
+
+pub(super) fn prepare_session_launch(
+    session: &HistorySession,
+    home: &SessionHome,
+    yolo: bool,
+    fork: bool,
+    shell: String,
+) -> Result<flowmux_ipc::agent_host::LaunchAgent, String> {
+    let line = native_session_line(session, home, yolo, fork, true)?;
+    prepare_managed_launch(
+        session.agent,
+        &session.cwd,
+        line,
+        format!("{} · {}", session.agent.name(), session.id),
+        shell,
+    )
+}
+
+pub(super) fn prepare_managed_launch(
+    agent: SessionAgent,
+    cwd: &std::path::Path,
+    line: String,
+    label: String,
+    shell: String,
+) -> Result<flowmux_ipc::agent_host::LaunchAgent, String> {
+    let mut environment: std::collections::BTreeMap<_, _> = std::env::vars_os()
+        // Like a regular PTY, advertise color independently of the launching application.
+        .filter(|(key, _)| key != "NO_COLOR")
+        .map(|(key, value)| {
+            Ok((
+                key.into_string()
+                    .map_err(|_| "Launch environment key is not UTF-8")?,
+                value
+                    .into_string()
+                    .map_err(|_| "Launch environment value is not UTF-8")?,
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    environment.extend([
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+        ("CLAUDE_CODE_NATIVE_CURSOR".into(), "1".into()),
+    ]);
+    let prefix = if let Some(shim) = flowmux_config::paths::agent_shim_dir().filter(|p| p.is_dir())
+    {
+        environment.insert(
+            "FLOWMUX_AGENT_SHIM_DIR".into(),
+            shim.to_string_lossy().into(),
+        );
+        "export PATH=\"$FLOWMUX_AGENT_SHIM_DIR:$PATH\"; "
+    } else {
+        ""
+    };
+    // Initialize the user's shell, then replace it so hooks identify the Host root.
+    let mut launch = flowmux_cli::agent_host::prepare_launch(
+        vec![shell, "-lic".into(), format!("{prefix}{line}")],
+        cwd,
+        environment.into_iter().collect(),
+    )
+    .map_err(|e| e.to_string())?;
+    launch.provider = agent.name().to_ascii_lowercase();
+    launch.label = label;
+    // The same resolver as the window's theme, so startup queries match the tab.
+    launch.colors = Some(crate::theme::ResolvedTheme::load().terminal_colors());
+    Ok(launch)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,6 +209,7 @@ pub(super) struct FocusedSession {
     pub(super) pane: PaneId,
     pub(super) surface: SurfaceId,
     pub(super) root_pid: u32,
+    pub(super) process_start: Option<u64>,
     pub(super) session_id: Option<String>,
 }
 
@@ -115,6 +217,7 @@ pub(super) struct FocusedSession {
 pub(super) struct SessionPanelState {
     pub panel: SessionPanel,
     target: Rc<RefCell<Option<SessionTarget>>>,
+    submitted: Rc<RefCell<std::collections::HashSet<(u64, String)>>>,
 }
 
 impl SessionPanelState {
@@ -122,6 +225,7 @@ impl SessionPanelState {
         Self {
             panel,
             target: Rc::new(RefCell::new(None)),
+            submitted: Default::default(),
         }
     }
 }
@@ -150,19 +254,36 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
             arguments: Vec::new(),
         });
     };
-    let pids = flowmux_procmon::descendants(focused.root_pid).map_err(|e| e.to_string())?;
-    let pid = pids
-        .into_iter()
-        .filter(|pid| {
-            flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
-                == Some(target.agent)
+    let valid_process = || {
+        focused.process_start.is_none_or(|start| {
+            flowmux_procmon::process_start_time(focused.root_pid) == Some(start)
         })
-        .min()
-        .ok_or("The agent is no longer running in this tab")?;
+    };
+    if !valid_process() {
+        return Err("The agent process was replaced".into());
+    }
+    let is_agent = |pid: &u32| {
+        flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
+            == Some(target.agent)
+    };
+    // A managed root is the provider, or a launcher with the provider beneath it.
+    let pid = if focused.process_start.is_some() && is_agent(&focused.root_pid) {
+        focused.root_pid
+    } else {
+        flowmux_procmon::descendants(focused.root_pid)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(is_agent)
+            .min()
+            .ok_or("The agent is no longer running in this tab")?
+    };
     let flowmux_state::session_history::SessionLaunchContext {
         environment,
         arguments,
     } = flowmux_state::session_history::SessionLaunchContext::read(target.agent, pid)?;
+    if !valid_process() {
+        return Err("The agent process was replaced".into());
+    }
     let path = target
         .agent
         .history_home(|key| environment.get(key).map(PathBuf::from))
@@ -175,7 +296,7 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
 }
 
 impl WindowController {
-    fn session_resume_pane(&self) -> Option<(PaneId, SurfaceId)> {
+    pub(super) fn session_resume_pane(&self) -> Option<(PaneId, SurfaceId)> {
         let pane = self.focused_pane.get()?;
         let registry = self.pane_registry.borrow();
         if registry.is_ssh_pane(pane) {
@@ -193,12 +314,176 @@ impl WindowController {
             });
         }
         let (pane, surface) = self.session_resume_pane()?;
+        self.terminal_session_target(pane, surface).await
+    }
+
+    pub(super) fn managed_session_agent(
+        &self,
+        binding: flowmux_core::AgentViewBinding,
+    ) -> Option<flowmux_ipc::agent_host::AgentInstance> {
+        let snapshot = self.bridge.agent_registry.borrow();
+        let agent = snapshot.agents.iter().find(|agent| {
+            snapshot.available
+                && agent.instance == binding.instance
+                && agent.epoch == binding.epoch
+                && agent.state == flowmux_ipc::agent_host::ProcessState::Running
+        })?;
+        let (pid, start) = agent.pid.zip(agent.process_start)?;
+        (flowmux_procmon::process_start_time(pid) == Some(start)).then(|| agent.clone())
+    }
+
+    pub(super) async fn terminal_session_presence(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Option<flowmux_core::AgentPresence> {
+        if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
+            self.managed_session_agent(binding)?.presence
+        } else {
+            self.store
+                .located_agent_presence(surface)
+                .await
+                .map(|p| p.presence)
+        }
+    }
+
+    pub(super) async fn running_session(
+        &self,
+        provider: SessionAgent,
+        id: &str,
+        home: &std::path::Path,
+        location: (PaneId, SurfaceId),
+    ) -> Result<Option<flowmux_ipc::agent_host::AgentInstance>, String> {
+        let handle = self
+            .tokio_handle
+            .as_ref()
+            .ok_or("Agent Host runtime unavailable")?;
+        let socket = flowmux_config::paths::agent_host_socket();
+        // Resume must read the Host now; its periodically refreshed GUI snapshot can lag a launch.
+        let agents = handle
+            .spawn(async move {
+                use flowmux_ipc::agent_host::{ClientRole, HostClient, HostRequest, HostResponse};
+                tokio::time::timeout(Duration::from_secs(2), async move {
+                    let client = match HostClient::connect(&socket, ClientRole::Observer).await {
+                        Ok(client) => client,
+                        Err(error)
+                            if error.chain().any(|cause| {
+                                cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                                    matches!(
+                                        io.kind(),
+                                        std::io::ErrorKind::NotFound
+                                            | std::io::ErrorKind::ConnectionRefused
+                                    )
+                                })
+                            }) =>
+                        {
+                            return Ok(Vec::new())
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    let HostResponse::List { agents, .. } = client.call(HostRequest::List).await?
+                    else {
+                        anyhow::bail!("Unexpected Agent Host list response");
+                    };
+                    Ok(agents)
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("Agent Host session lookup timed out"))?
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let matches = |agent: &flowmux_ipc::agent_host::AgentInstance| {
+            agent.state == flowmux_ipc::agent_host::ProcessState::Running
+                && SessionAgent::from_name(&agent.provider) == Some(provider)
+                && agent
+                    .presence
+                    .as_ref()
+                    .and_then(|p| p.session_id.as_deref())
+                    == Some(id)
+        };
+        if agents.is_empty()
+            && self
+                .bridge
+                .agent_registry
+                .borrow()
+                .agents
+                .iter()
+                .any(|agent| {
+                    matches(agent)
+                        && agent
+                            .pid
+                            .zip(agent.process_start)
+                            .is_some_and(|(pid, start)| {
+                                flowmux_procmon::process_start_time(pid) == Some(start)
+                            })
+                })
+        {
+            return Err(
+                "Agent Host unavailable; the previously observed session process is still alive"
+                    .into(),
+            );
+        }
+        let candidates = agents.into_iter().filter(matches);
+        let home = home.canonicalize().map_err(|e| e.to_string())?;
+        let mut found = None;
+        for agent in candidates {
+            let Some((root_pid, process_start)) = agent.pid.zip(agent.process_start) else {
+                return Err("Running session identity is not yet available".into());
+            };
+            let target = SessionTarget {
+                agent: provider,
+                focused: Some(FocusedSession {
+                    pane: location.0,
+                    surface: location.1,
+                    root_pid,
+                    process_start: Some(process_start),
+                    session_id: Some(id.into()),
+                }),
+            };
+            let current = gtk::gio::spawn_blocking(move || {
+                session_home(&target)?
+                    .path
+                    .canonicalize()
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|_| "Running session environment reader failed")??;
+            if current == home && found.replace(agent).is_some() {
+                return Err(
+                    "This session has multiple running executions; select one in Agents".into(),
+                );
+            }
+        }
+        Ok(found)
+    }
+
+    pub(super) async fn terminal_session_target(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Option<SessionTarget> {
+        if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
+            let agent = self.managed_session_agent(binding)?;
+            let root_pid = agent.pid?;
+            let process_start = agent.process_start?;
+            return Some(SessionTarget {
+                agent: SessionAgent::from_name(&agent.provider)?,
+                focused: Some(FocusedSession {
+                    pane,
+                    surface,
+                    root_pid,
+                    process_start: Some(process_start),
+                    session_id: agent.presence.as_ref().and_then(|p| p.session_id.clone()),
+                }),
+            });
+        }
         let root_pid = self
             .pane_registry
             .borrow()
-            .active_terminal(pane)?
-            .pid
-            .get()? as u32;
+            .terminals
+            .get(&surface)?
+            .process_root()?;
         let presence = self.store.located_agent_presence(surface).await?.presence;
         Some(SessionTarget {
             agent: SessionAgent::from_name(&presence.name)?,
@@ -206,6 +491,7 @@ impl WindowController {
                 pane,
                 surface,
                 root_pid,
+                process_start: None,
                 session_id: presence.session_id,
             }),
         })
@@ -364,12 +650,15 @@ impl WindowController {
             return;
         };
         if self
-            .store
-            .located_agent_presence(surface)
+            .terminal_session_target(pane, surface)
             .await
-            .is_some_and(|located| {
-                SessionAgent::from_name(&located.presence.name) == Some(session.agent)
-                    && located.presence.session_id.as_deref() == Some(&session.id)
+            .is_some_and(|target| {
+                target.agent == session.agent
+                    && target
+                        .focused
+                        .as_ref()
+                        .and_then(|f| f.session_id.as_deref())
+                        == Some(&session.id)
             })
         {
             panel
@@ -403,23 +692,134 @@ impl WindowController {
         {
             return;
         }
-        // Start the native CLI in its own tab; never write into the existing agent.
-        let line = match resume_shell_line(&session, &home, yolo) {
-            Ok(line) => line,
+        match self
+            .running_session(session.agent, &session.id, &home.path, (pane, surface))
+            .await
+        {
+            Ok(Some(agent)) => {
+                let binding = flowmux_core::AgentViewBinding {
+                    instance: agent.instance,
+                    epoch: agent.epoch,
+                };
+                let destination = if let Some((workspace, pane, surface)) =
+                    self.store.agent_view(binding).await
+                {
+                    self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+                        .await;
+                    pane
+                } else {
+                    pane
+                };
+                match self.open_agent_view(destination, agent).await {
+                    Ok(_) => panel.status.set_text("Opened the same running session."),
+                    Err(error) => panel.status.set_text(&error),
+                }
+                return;
+            }
+            Ok(None) => {}
             Err(error) => {
                 panel.status.set_text(&error);
+                return;
+            }
+        }
+        if self.session_target().await.as_ref() != Some(&target)
+            || panel.generation.get() != generation
+            || self.session_resume_pane() != Some((pane, surface))
+        {
+            return;
+        }
+        let Some(handle) = self.tokio_handle.as_ref() else {
+            panel.status.set_text("Agent Host runtime unavailable.");
+            return;
+        };
+        let shell = self
+            .options
+            .borrow()
+            .default_shell
+            .clone()
+            .or_else(|| std::env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/bash".into());
+        let launch = match prepare_session_launch(&session, &home, yolo, false, shell) {
+            Ok(launch) => launch,
+            Err(error) => {
+                panel.status.set_text(&error);
+                return;
+            }
+        };
+        let key = (generation, session.id.clone());
+        self.sessions
+            .submitted
+            .borrow_mut()
+            .retain(|(g, _)| *g == generation);
+        if !self.sessions.submitted.borrow_mut().insert(key) {
+            panel.status.set_text("This resume request was already submitted. Check Agents before refreshing and retrying.");
+            return;
+        }
+        panel.resume.set_sensitive(false);
+        panel.status.set_text("Starting session in Agent Host…");
+        let socket = flowmux_config::paths::agent_host_socket();
+        let result = handle
+            .spawn(async move { flowmux_cli::agent_host::launch(&socket, launch).await })
+            .await;
+        match result {
+            Ok(Ok(agent)) => {
+                let instance = agent.instance;
+                // Losing the destination after launch must preserve the background process.
+                let opened = self.open_agent_view(pane, agent).await;
+                if panel.generation.get() == generation {
+                    match opened {
+                        Ok(_) => panel.status.set_text("Session opened. Closing its tab keeps the agent running in Background."),
+                        Err(error) => panel.status.set_text(&format!("Agent {instance} is running in Background; cannot open tab: {error}")),
+                    }
+                }
+                self.refresh_agent_displays().await;
+            }
+            Ok(Err(error)) => match tab_fallback_reason(&error) {
+                Some(reason) => {
+                    self.resume_in_tab(&session, &home, yolo, pane, &reason, generation)
+                        .await
+                }
+                None => panel
+                    .status
+                    .set_text(&format!("Cannot start session: {error:#}")),
+            },
+            Err(error) => panel.status.set_text(&format!(
+                "Launch result unknown: {error}. Check Agents before retrying."
+            )),
+        }
+    }
+
+    /// Start the native CLI in its own ordinary tab; never write into the existing agent.
+    async fn resume_in_tab(
+        &self,
+        session: &HistorySession,
+        home: &SessionHome,
+        yolo: bool,
+        pane: PaneId,
+        reason: &str,
+        generation: u64,
+    ) {
+        let panel = &self.sessions.panel;
+        // Like the managed path, a stale panel keeps its newer status.
+        let status = |text: &str| {
+            if panel.generation.get() == generation {
+                panel.status.set_text(text);
+            }
+        };
+        let line = match native_session_line(session, home, yolo, false, false) {
+            Ok(line) => line,
+            Err(error) => {
+                status(&error);
                 return;
             }
         };
         let Some((workspace, surface)) = self
             .store
             // Keep the normal configured shell and prompt after the agent exits.
-            .add_terminal_surface_to_pane(pane, Some(session.cwd))
+            .add_terminal_surface_to_pane(pane, Some(session.cwd.clone()))
             .await
         else {
-            panel
-                .status
-                .set_text("Cannot create a terminal tab for this session.");
+            status("Cannot create a terminal tab for this session.");
             return;
         };
         #[cfg(target_os = "macos")]
@@ -441,27 +841,26 @@ impl WindowController {
             return;
         }
         let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
-        if let Some(terminal) = terminal {
-            #[cfg(not(target_os = "macos"))]
-            let started = terminal.write_input(format!("{line}\r").as_bytes());
-            #[cfg(target_os = "macos")]
-            let started: std::io::Result<()> = {
-                let _ = terminal;
-                Ok(())
-            };
-            match started {
-                Ok(()) => {
-                    panel.resume.set_sensitive(false);
-                    panel.status.set_text(&format!(
-                        "Opening {} in a new tab in the session's project directory.",
-                        session.agent.name()
-                    ));
-                    self.focus_pane(pane);
-                }
-                Err(error) => panel
-                    .status
-                    .set_text(&format!("Cannot start {}: {error}", session.agent.name())),
+        let Some(terminal) = terminal else {
+            status("Cannot create a terminal tab for this session.");
+            return;
+        };
+        #[cfg(not(target_os = "macos"))]
+        let started = terminal.write_input(format!("{line}\r").as_bytes());
+        #[cfg(target_os = "macos")]
+        let started: std::io::Result<()> = {
+            let _ = terminal;
+            Ok(())
+        };
+        match started {
+            Ok(()) => {
+                status(&format!(
+                    "Opened {} in an ordinary tab of this window; it ends when the tab closes. Managed launch unavailable: {reason}",
+                    session.agent.name()
+                ));
+                self.focus_pane(pane);
             }
+            Err(error) => status(&format!("Cannot start {}: {error}", session.agent.name())),
         }
     }
 }
@@ -604,6 +1003,35 @@ mod tests {
                         if yolo { yolo_arguments } else { "" }
                     )
                 );
+                let launch =
+                    prepare_session_launch(&session, &home, yolo, false, "/bin/sh".into()).unwrap();
+                let output = std::process::Command::new("/bin/sh")
+                    .args(["-c", &launch.argv[2]])
+                    .envs(launch.env)
+                    .env("FLOWMUX_AGENT_SHIM_DIR", &bin)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert_eq!(launch.provider, agent.name().to_ascii_lowercase());
+                assert_eq!(
+                    String::from_utf8(output.stdout).unwrap(),
+                    format!(
+                        "{}\n{}\n{flag}\n{}\n{}{}",
+                        cwd.display(),
+                        home.path.display(),
+                        session.id,
+                        if agent == SessionAgent::Cline {
+                            "--tui\n--data-dir\ndata ' $(exit 7)\n"
+                        } else {
+                            ""
+                        },
+                        if yolo { yolo_arguments } else { "" }
+                    )
+                );
             }
             let fork_arguments = match agent {
                 SessionAgent::Claude => Some(format!("--resume\n{}\n--fork-session\n", session.id)),
@@ -663,6 +1091,143 @@ mod tests {
             session.id = "bad\rcommand".into();
             assert!(resume_shell_line(&session, &home, false).is_err());
         }
+    }
+
+    #[test]
+    fn managed_resume_replaces_the_initialized_shell_with_the_provider() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let provider = root.path().join("codex");
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$STARTUP_VALUE\" \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let shell = root.path().join("configured-shell");
+        std::fs::write(&shell, format!(
+            "#!/bin/sh\n[ \"$1\" = -lic ] || exit 9\nexport STARTUP_VALUE=initialized\nexport PATH={}:$PATH\nexec /bin/sh -c \"$2\"\n", shell_quote(root.path().to_str().unwrap())
+        )).unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let home = SessionHome {
+            path: root.path().into(),
+            environment: Default::default(),
+            arguments: vec![],
+        };
+        let session = HistorySession {
+            agent: SessionAgent::Codex,
+            id: "12345678-1234-4234-8234-123456789abc".into(),
+            title: "test".into(),
+            summary: String::new(),
+            cwd: root.path().into(),
+            path: "/unused".into(),
+            modified: std::time::SystemTime::now(),
+        };
+        for fork in [false, true] {
+            let launch = prepare_session_launch(
+                &session,
+                &home,
+                false,
+                fork,
+                shell.to_str().unwrap().into(),
+            )
+            .unwrap();
+            let child = std::process::Command::new(&launch.argv[0])
+                .args(&launch.argv[1..])
+                .envs(launch.env)
+                .env("FLOWMUX_AGENT_SHIM_DIR", root.path())
+                .current_dir(&launch.cwd)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                format!(
+                    "{pid}\ninitialized\n{}\n{}\n",
+                    if fork { "fork" } else { "resume" },
+                    session.id
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_launch_the_host_never_received_falls_back_to_an_ordinary_tab() {
+        use flowmux_ipc::agent_host::HostResponse;
+        use flowmux_ipc::protocol::{Envelope, Payload, Response};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // An older incompatible Host may run this session; a compatible one loses the response.
+        let [incompatible, unknown] =
+            [u32::MAX, flowmux_ipc::agent_host::PROTOCOL_VERSION].map(|version| {
+                let root = tempfile::tempdir_in("/tmp").unwrap();
+                let socket = root.path().join("host.sock");
+                let launch = flowmux_cli::agent_host::prepare_launch(
+                    vec!["/bin/sh".into()],
+                    root.path(),
+                    vec![],
+                )
+                .unwrap();
+                runtime.block_on(async {
+                    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+                    let server = async {
+                        let (stream, _) = listener.accept().await.unwrap();
+                        let (read, mut write) = stream.into_split();
+                        let mut lines = BufReader::new(read).lines();
+                        let hello: Envelope =
+                            serde_json::from_str(&lines.next_line().await.unwrap().unwrap())
+                                .unwrap();
+                        let reply = Envelope {
+                            id: hello.id,
+                            payload: Payload::Response(Response::AgentHost {
+                                response: HostResponse::Hello {
+                                    version,
+                                    epoch: uuid::Uuid::new_v4(),
+                                    connection: 1,
+                                },
+                            }),
+                        };
+                        let reply = format!("{}\n", serde_json::to_string(&reply).unwrap());
+                        write.write_all(reply.as_bytes()).await.unwrap();
+                        let _launch = lines.next_line().await;
+                    };
+                    tokio::join!(server, flowmux_cli::agent_host::launch(&socket, launch))
+                        .1
+                        .unwrap_err()
+                })
+            });
+        let root = tempfile::tempdir_in("/tmp").unwrap();
+        let launch =
+            flowmux_cli::agent_host::prepare_launch(vec!["/bin/sh".into()], root.path(), vec![])
+                .unwrap();
+        // No Host answers and startup fails before any service is submitted.
+        let definite = runtime
+            .block_on(flowmux_cli::agent_host::launch(
+                std::path::Path::new("relative-missing-host.sock"),
+                launch,
+            ))
+            .unwrap_err();
+        let reason = tab_fallback_reason(&definite).expect("unstarted Host is definite");
+        assert!(tab_fallback_reason(&definite.context("Cannot start session")).is_some());
+        let refused = format!("{incompatible:#}");
+        assert!(
+            incompatible.is::<flowmux_ipc::agent_host::IncompatibleHost>(),
+            "{refused}"
+        );
+        assert!(refused.contains("cannot open them"), "{refused}");
+        assert!(tab_fallback_reason(&incompatible).is_none());
+        let lost = format!("{unknown:#}");
+        assert!(lost.contains("result unknown"), "{lost}");
+        assert!(tab_fallback_reason(&unknown).is_none());
+        // Classification is structural; matching message text never permits a second launch.
+        assert!(tab_fallback_reason(&anyhow::anyhow!("{reason}")).is_none());
     }
 
     #[cfg(not(target_os = "macos"))]

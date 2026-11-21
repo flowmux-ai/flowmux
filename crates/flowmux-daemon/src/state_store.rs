@@ -26,6 +26,7 @@ use tracing::{error, info};
 mod agent_runtime;
 mod program_runtime;
 pub use agent_runtime::{AgentLifecycleResult, CodexGraceSettlement, LocatedAgentPresence};
+pub(crate) use agent_runtime::{AgentLifecycleRuntime, LifecycleTransition};
 
 fn remote_cwd_for_pane(tree: &Pane, pane: PaneId) -> Option<String> {
     let content = tree.find_leaf_content(pane)?;
@@ -44,6 +45,33 @@ fn remote_cwd_for_pane(tree: &Pane, pane: PaneId) -> Option<String> {
             _ => None,
         },
     }
+}
+
+fn agent_view_in_state(
+    state: &State,
+    binding: flowmux_core::AgentViewBinding,
+) -> Option<(WorkspaceId, PaneId, SurfaceId)> {
+    for workspace in &state.workspaces {
+        for root in &workspace.surfaces {
+            let mut found = None;
+            root.root_pane.for_each_leaf(|pane| {
+                if let Some(PaneContent::Tabs { surfaces, .. }) =
+                    root.root_pane.find_leaf_content(pane)
+                {
+                    if let Some(tab) = surfaces
+                        .iter()
+                        .find(|tab| tab.agent_binding.or(tab.shell_binding) == Some(binding))
+                    {
+                        found = Some((workspace.id, pane, tab.id));
+                    }
+                }
+            });
+            if found.is_some() {
+                return found;
+            }
+        }
+    }
+    None
 }
 
 fn can_move_between_panes(state: &State, src: PaneId, dst: PaneId) -> bool {
@@ -759,6 +787,7 @@ impl StateStore {
         expected_session: Option<&str>,
         new_surface: SurfaceId,
         cwd: std::path::PathBuf,
+        binding: Option<flowmux_core::AgentViewBinding>,
     ) -> Result<(WorkspaceId, PaneId), String> {
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err("Session project directory is unavailable".into());
@@ -794,6 +823,7 @@ impl StateStore {
                     Some(cwd),
                 );
                 tab.id = new_surface;
+                tab.agent_binding = binding;
                 let content = PaneContent::Tabs {
                     active: new_surface,
                     surfaces: vec![tab],
@@ -1225,6 +1255,79 @@ impl StateStore {
             for surface in &ws.surfaces {
                 if let Some(title) = surface.root_pane.surface_title(pane, surface_id) {
                     return Some(title.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    pub async fn surface_agent_binding(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Option<flowmux_core::AgentViewBinding> {
+        let state = self.inner.lock().await;
+        state.workspaces.iter().find_map(|workspace| {
+            workspace.surfaces.iter().find_map(|root| {
+                root.root_pane
+                    .find_surface_ref(pane, surface)?
+                    .agent_binding
+            })
+        })
+    }
+
+    /// The Host execution shown by this tab: a managed agent or the terminal's own shell.
+    pub async fn surface_host_binding(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Option<flowmux_core::AgentViewBinding> {
+        let state = self.inner.lock().await;
+        state.workspaces.iter().find_map(|workspace| {
+            workspace.surfaces.iter().find_map(|root| {
+                let tab = root.root_pane.find_surface_ref(pane, surface)?;
+                tab.agent_binding.or(tab.shell_binding)
+            })
+        })
+    }
+
+    /// Record the Host execution that runs an ordinary terminal's shell.
+    pub async fn set_surface_shell_binding(
+        &self,
+        surface: SurfaceId,
+        binding: Option<flowmux_core::AgentViewBinding>,
+    ) -> bool {
+        let mut state = self.inner.lock().await;
+        let changed = state.workspaces.iter_mut().any(|workspace| {
+            workspace
+                .surfaces
+                .iter_mut()
+                .any(|root| root.root_pane.set_surface_shell_binding(surface, binding))
+        });
+        drop(state);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Keep a tab whose execution ended as an ordinary terminal tab.
+    pub async fn clear_surface_agent_binding(
+        &self,
+        pane: PaneId,
+        surface_id: SurfaceId,
+    ) -> Option<WorkspaceId> {
+        let mut s = self.inner.lock().await;
+        for ws in s.workspaces.iter_mut() {
+            for surface in ws.surfaces.iter_mut() {
+                if surface
+                    .root_pane
+                    .clear_surface_agent_binding(pane, surface_id)
+                {
+                    let ws_id = ws.id;
+                    drop(s);
+                    self.mark_dirty();
+                    return Some(ws_id);
                 }
             }
         }
@@ -1729,6 +1832,108 @@ impl StateStore {
             .await
     }
 
+    /// Find this window's tab binding at its current location, without launching.
+    pub async fn agent_view(
+        &self,
+        binding: flowmux_core::AgentViewBinding,
+    ) -> Option<(WorkspaceId, PaneId, SurfaceId)> {
+        agent_view_in_state(&*self.inner.lock().await, binding)
+    }
+
+    /// Reuse this window's saved binding, or add a local view without launching.
+    pub async fn ensure_agent_view(
+        &self,
+        pane: PaneId,
+        binding: flowmux_core::AgentViewBinding,
+        title: String,
+        cwd: std::path::PathBuf,
+    ) -> Result<(WorkspaceId, PaneId, SurfaceId, bool), String> {
+        let mut state = self.inner.lock().await;
+        let existing = agent_view_in_state(&state, binding);
+        let mut local_target = false;
+        for workspace in &state.workspaces {
+            for root in &workspace.surfaces {
+                if root.root_pane.find_leaf_content(pane).is_some() {
+                    local_target = workspace.local_root().is_some();
+                }
+            }
+        }
+        if !local_target {
+            return Err("Agent views require an existing local terminal pane".into());
+        }
+        if let Some(existing) = existing {
+            return Ok((existing.0, existing.1, existing.2, false));
+        }
+        for workspace in &mut state.workspaces {
+            for root in &mut workspace.surfaces {
+                if root.root_pane.find_leaf_content(pane).is_some() {
+                    let mut tab = PaneSurface::terminal(title, Some(cwd));
+                    tab.agent_binding = Some(binding);
+                    let id = root
+                        .root_pane
+                        .add_surface_to_leaf(pane, tab)
+                        .ok_or("pane cannot contain Agent tabs")?;
+                    let workspace = workspace.id;
+                    drop(state);
+                    self.mark_dirty();
+                    return Ok((workspace, pane, id, true));
+                }
+            }
+        }
+        Err("Agent destination pane no longer exists".into())
+    }
+
+    /// Give an unshown shell a tab again, under the id of the tab that showed it before when that
+    /// id is free: its programs still report to that tab.
+    pub async fn reopen_shell_view(
+        &self,
+        pane: PaneId,
+        binding: flowmux_core::AgentViewBinding,
+        title: String,
+        cwd: std::path::PathBuf,
+        previous: Option<SurfaceId>,
+    ) -> Result<(WorkspaceId, PaneId, SurfaceId), String> {
+        let mut state = self.inner.lock().await;
+        if let Some(existing) = agent_view_in_state(&state, binding) {
+            return Ok(existing);
+        }
+        let taken = |id: SurfaceId| {
+            state.workspaces.iter().any(|workspace| {
+                workspace.surfaces.iter().any(|root| {
+                    let mut found = false;
+                    root.root_pane.for_each_leaf(|leaf| {
+                        found |= root.root_pane.find_surface_ref(leaf, id).is_some();
+                    });
+                    found
+                })
+            })
+        };
+        let previous = previous.filter(|id| !taken(*id));
+        for workspace in &mut state.workspaces {
+            if workspace.local_root().is_none() {
+                continue;
+            }
+            for root in &mut workspace.surfaces {
+                if root.root_pane.find_leaf_content(pane).is_some() {
+                    let mut tab = PaneSurface::terminal(title, Some(cwd));
+                    if let Some(previous) = previous {
+                        tab.id = previous;
+                    }
+                    tab.shell_binding = Some(binding);
+                    let id = root
+                        .root_pane
+                        .add_surface_to_leaf(pane, tab)
+                        .ok_or("pane cannot contain terminal tabs")?;
+                    let workspace = workspace.id;
+                    drop(state);
+                    self.mark_dirty();
+                    return Ok((workspace, pane, id));
+                }
+            }
+        }
+        Err("Agent views require an existing local terminal pane".into())
+    }
+
     pub async fn add_terminal_surface_to_pane_with_shell(
         &self,
         pane: PaneId,
@@ -2054,6 +2259,38 @@ impl StateStore {
             return Ok(());
         }
         save_store_blocking(self.clone()).await.map(|_| ())
+    }
+
+    pub async fn prepare_agent_view(
+        &self,
+        key: flowmux_ipc::agent_host::AttachmentKey,
+        surface: SurfaceId,
+    ) -> Result<(), flowmux_state::StateError> {
+        let PersistenceMode::Window(owner) = self.persistence else {
+            return Err(flowmux_state::StateError::Invalid(
+                "Agent admission requires a window owner".into(),
+            ));
+        };
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let _save = store.save_lock.lock().map_err(|_| {
+                flowmux_state::StateError::Io(std::io::Error::other("state save lock poisoned"))
+            })?;
+            let snapshot = store.inner.blocking_lock().clone();
+            flowmux_state::agent_views::prepare(
+                &flowmux_state::default_path()?,
+                flowmux_core::AgentViewBinding {
+                    instance: key.instance,
+                    epoch: key.epoch,
+                },
+                surface,
+                (key.lease, key.generation),
+                owner,
+                snapshot,
+            )
+        })
+        .await
+        .map_err(|error| flowmux_state::StateError::Io(std::io::Error::other(error.to_string())))?
     }
 
     pub fn save_now_blocking(&self) -> Result<(), flowmux_state::StateError> {
@@ -2743,6 +2980,70 @@ mod tests {
             .root_pane
             .active_surface_id(pane)
             .expect("expected active surface")
+    }
+
+    #[tokio::test]
+    async fn managed_agent_view_is_unique_and_binding_survives_move() {
+        let store = StateStore::new_lazy(State::default());
+        let workspace = store.create_workspace(None, "/tmp".into()).await;
+        let initial = store.get_workspace(workspace).await.unwrap();
+        let pane = first_pane(&initial);
+        let shell = first_pane_active_surface(&initial);
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let opened = store
+            .ensure_agent_view(pane, binding, "Agent".into(), "/tmp/agent".into())
+            .await
+            .unwrap();
+        assert!(opened.3);
+        assert_eq!(
+            store.agent_view(binding).await,
+            Some((workspace, pane, opened.2))
+        );
+        let (_, destination) = store
+            .split_pane(pane, flowmux_core::SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let reused = store
+            .ensure_agent_view(destination, binding, "ignored".into(), "/ignored".into())
+            .await
+            .unwrap();
+        assert_eq!(reused, (workspace, pane, opened.2, false));
+        store
+            .move_surface_to_pane(pane, opened.2, destination, usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.surface_agent_binding(destination, opened.2).await,
+            Some(binding)
+        );
+        assert_eq!(store.surface_agent_binding(pane, shell).await, None);
+        assert_eq!(
+            store.agent_view(binding).await,
+            Some((workspace, destination, opened.2))
+        );
+        assert_eq!(
+            store.surface_title(destination, opened.2).await.as_deref(),
+            Some("Agent")
+        );
+        assert!(store
+            .ensure_agent_view(PaneId::new(), binding, "Agent".into(), "/tmp".into())
+            .await
+            .is_err());
+        let config = flowmux_core::SshWorkspaceConfig {
+            target: flowmux_core::SshTarget::parse("devbox").unwrap(),
+            cwd: None,
+            tmux: false,
+            forwards: vec![],
+        };
+        let remote = store.create_ssh_workspace(None, config).await.unwrap();
+        let remote_pane = first_pane(&store.get_workspace(remote).await.unwrap());
+        assert!(store
+            .ensure_agent_view(remote_pane, binding, "Agent".into(), "/tmp".into())
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -10066,7 +10367,8 @@ Do you want to continue?";
                     expected_surface,
                     expected_session,
                     SurfaceId::new(),
-                    root.path().into()
+                    root.path().into(),
+                    None,
                 )
                 .await
                 .is_err());
@@ -10078,6 +10380,10 @@ Do you want to continue?";
             );
         }
         let child_surface = SurfaceId::new();
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
         let (result_workspace, child) = store
             .split_session_pane(
                 pane,
@@ -10085,11 +10391,16 @@ Do you want to continue?";
                 Some("source-id"),
                 child_surface,
                 root.path().into(),
+                Some(binding),
             )
             .await
             .unwrap();
         assert_eq!(workspace, result_workspace);
         let after = store.get_workspace(workspace).await.unwrap();
+        assert_eq!(
+            store.surface_agent_binding(child, child_surface).await,
+            Some(binding)
+        );
         assert_eq!(
             pane_split_direction(&after.surfaces[0].root_pane),
             Some(SplitDirection::Vertical)
@@ -10110,7 +10421,8 @@ Do you want to continue?";
                 source,
                 Some("source-id"),
                 SurfaceId::new(),
-                root.path().into()
+                root.path().into(),
+                None,
             )
             .await
             .is_err());
@@ -10134,7 +10446,14 @@ Do you want to continue?";
             .await
             .unwrap();
         assert!(store
-            .split_session_pane(pane, first, None, SurfaceId::new(), root.path().into())
+            .split_session_pane(
+                pane,
+                first,
+                None,
+                SurfaceId::new(),
+                root.path().into(),
+                None
+            )
             .await
             .is_err());
         assert!(store
@@ -10143,7 +10462,8 @@ Do you want to continue?";
                 active,
                 None,
                 SurfaceId::new(),
-                root.path().join("missing")
+                root.path().join("missing"),
+                None,
             )
             .await
             .is_err());
@@ -10153,7 +10473,8 @@ Do you want to continue?";
                 active,
                 None,
                 SurfaceId::new(),
-                root.path().into()
+                root.path().into(),
+                None,
             )
             .await
             .is_err());
@@ -10162,7 +10483,14 @@ Do you want to continue?";
             [pane]
         );
         let (_, child) = store
-            .split_session_pane(pane, active, None, SurfaceId::new(), root.path().into())
+            .split_session_pane(
+                pane,
+                active,
+                None,
+                SurfaceId::new(),
+                root.path().into(),
+                None,
+            )
             .await
             .unwrap();
         let after = store.get_workspace(workspace).await.unwrap();

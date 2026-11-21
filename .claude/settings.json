@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "flowmux-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "flowmux-ai/flowmux-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "flowmux-dev@flowmux-plugins": true
+  }
+}

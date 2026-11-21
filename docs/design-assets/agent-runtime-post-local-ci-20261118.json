@@ -1,0 +1,248 @@
+{
+  "date_kst": "2026-11-18",
+  "branch": "agent/runtime-audit-20261117",
+  "base_main": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "run": {
+    "conclusion": "success",
+    "created_at": "2026-11-17T20:10:01Z",
+    "event": "workflow_dispatch",
+    "head_branch": "agent/runtime-audit-20261117",
+    "head_sha": "0e17ae6517e735d7a14e6c3c808fc1eb65812300",
+    "html_url": "https://github.com/flowmux-ai/flowmux/actions/runs/44166374894",
+    "id": 44166374894,
+    "run_attempt": 1,
+    "status": "completed",
+    "updated_at": "2026-11-17T21:03:31Z"
+  },
+  "suite": "extended",
+  "run_dispatches_after_local_validation": 1,
+  "ci_reruns": 0,
+  "jobs": [
+    {
+      "id": 134333447774,
+      "name": "macOS build and native smoke",
+      "conclusion": "success"
+    },
+    {
+      "id": 134333448410,
+      "name": "editor web",
+      "conclusion": "success"
+    },
+    {
+      "id": 134333448517,
+      "name": "headless stress probes",
+      "conclusion": "success"
+    },
+    {
+      "id": 134333448605,
+      "name": "Linux regression tests",
+      "conclusion": "success"
+    }
+  ],
+  "pre_push_local_evidence": {
+    "path": "docs/design-assets/agent-runtime-local-linux-coverage-20261118.json",
+    "sha256": "bef8c1a2e079b154159d756a285835ba45ff277dbc00d869d88b000d325516ee",
+    "note": "Local failures and targeted follow-ups remain distinct from a single uninterrupted gate pass. CI subsequently passed the complete gate."
+  },
+  "platforms": {
+    "linux": {
+      "artifact_id": 14370640823,
+      "artifact_name": "linux-test-evidence",
+      "artifact_sha256": "32f6a9ad546c9bba289729a81142c4f5af592504c34b2831755fef29f25ff32a",
+      "local_artifact": "/tmp/fm-ci-44166374894/linux.zip",
+      "run_log_sha256": "d78ecc1609259552466b12624fec7a27c4747ea4e4022d7a928ad845f9c3f32b",
+      "local_run_log": "/tmp/fm-ci-44166374894/linux/home/runner/work/flowmux/flowmux/target/ci/linux/run.log",
+      "gate_exit_code": 0,
+      "phase_count": 53,
+      "all_phase_statuses": "passed",
+      "all_phase_exit_codes": 0,
+      "passed_phases": [
+        "agent-background-binding-restore",
+        "agent-binding-restore",
+        "agent-cli-controls",
+        "agent-containment",
+        "agent-drag",
+        "agent-gui-replacement",
+        "agent-gui-response-limit",
+        "agent-host",
+        "agent-host-budget",
+        "agent-native-hooks",
+        "agent-ready",
+        "agent-relay-replacement",
+        "agent-root-exit",
+        "agent-session-resume",
+        "agent-terminal-budget",
+        "agent-termination",
+        "browser-bookmarks",
+        "browser-control",
+        "browser-feedback",
+        "browser-import",
+        "browser-source",
+        "build",
+        "editor-io",
+        "editor-renderer",
+        "gtk-icon-preload",
+        "gui-harness",
+        "idle-stability",
+        "idle-stability-unit",
+        "ipc-recovery",
+        "lazy-restore",
+        "managed-agent-click-load",
+        "managed-agent-drag",
+        "managed-agent-tearoff",
+        "managed-session-flow",
+        "new-agent",
+        "notifications",
+        "polling-delay",
+        "pty-spawn-failure",
+        "session-flow",
+        "session-save",
+        "skills",
+        "ssh-fixture-unit",
+        "ssh-prerequisites",
+        "ssh-workspace",
+        "tab-windows",
+        "team-pingpong",
+        "team-recovery",
+        "team-reuse",
+        "team-usage",
+        "terminal-image-links",
+        "terminal-load",
+        "terminal-read-screen",
+        "workspace"
+      ],
+      "expected_phase_source": "docs/design-assets/agent-runtime-local-linux-coverage-20261118.json",
+      "missing_phases": [],
+      "outer_gate_receipts_passed": 10,
+      "selected_live_checks": {
+        "agent-host": {
+          "passed_checks": 34,
+          "elapsed_seconds": 155.94
+        },
+        "agent-ready": {
+          "passed_checks": 6,
+          "elapsed_seconds": 44.158
+        },
+        "agent-native-hooks": {
+          "passed_checks": 30,
+          "elapsed_seconds": 87.255
+        },
+        "managed-agent-drag": {
+          "passed_checks": 24,
+          "elapsed_seconds": 56.497
+        },
+        "managed-agent-tearoff": {
+          "passed_checks": 9,
+          "elapsed_seconds": 5.794
+        },
+        "new-agent": {
+          "passed_checks": 10,
+          "elapsed_seconds": 14.436
+        },
+        "agent-termination": {
+          "passed_checks": 14,
+          "elapsed_seconds": 24.694
+        },
+        "agent-host-budget": {
+          "passed_checks": 2,
+          "elapsed_seconds": 155.576
+        }
+      },
+      "host_budget_peak_rss_kib": 1924532,
+      "host_budget_reconnect_seconds": [
+        6.20171445699998,
+        7.351935770999717,
+        7.356602387999828,
+        7.17861600399965,
+        7.272339905000081,
+        7.399906269999974,
+        9.197786345000168
+      ],
+      "gui_unit_result": {
+        "passed": 969,
+        "failed": 0,
+        "ignored": 4
+      }
+    },
+    "macos": {
+      "artifact_id": 14366399144,
+      "artifact_name": "macos-test-evidence",
+      "artifact_sha256": "3ca985009bddab1c5ad72a3650cebaee9453e434b670ebf3e35c36aed5d15f43",
+      "local_artifact": "/tmp/fm-ci-44166374894/macos.zip",
+      "run_log_sha256": "1fcd9baa46f28e73009cf944ad1c950f25100f8e0af9f0d30845eaff49a39dc5",
+      "local_run_log": "/tmp/fm-ci-44166374894/macos/Users/runner/work/flowmux/flowmux/target/ci/macos/run.log",
+      "gate_exit_code": 0,
+      "phase_count": 48,
+      "all_phase_statuses": "passed",
+      "all_phase_exit_codes": 0,
+      "passed_phases": [
+        "agent-gui-crash",
+        "agent-hooks",
+        "agent-runner-tests",
+        "agent-team-tests",
+        "agent-unit",
+        "benchmark-agent-tests",
+        "boot-restore",
+        "bridge",
+        "browser-chrome",
+        "browser-completion-unit",
+        "browser-control",
+        "browser-deadline",
+        "build",
+        "ci-runner-tests",
+        "cli",
+        "editor-keyboard",
+        "editor-recovery",
+        "format",
+        "image-routing",
+        "image-unit",
+        "image-viewer",
+        "installer-routing",
+        "ipc",
+        "macos-dmg-update",
+        "macos-installer",
+        "macos-layer",
+        "macos-update-options",
+        "macos-update-unit",
+        "markdown",
+        "native",
+        "native-state",
+        "notification-cleanup",
+        "notification-routing",
+        "notifications",
+        "office-stability",
+        "options-zoom",
+        "palette-release",
+        "session-flow",
+        "session-path-unit",
+        "session-paths",
+        "skills",
+        "ssh-preview",
+        "stability-harness-tests",
+        "thorvg-installer",
+        "thorvg-runtime",
+        "webdriver",
+        "webdriver-address",
+        "webdriver-native"
+      ]
+    }
+  },
+  "workflow_policy_commit": "a44dd6e5",
+  "post_test_changes": "Development guidance and validation records only; no product or test source changed after the tested commit.",
+  "known_unresolved_medium": [
+    "AR-006",
+    "AR-008",
+    "AR-010",
+    "AR-071",
+    "AR-073",
+    "AR-088",
+    "AR-094"
+  ],
+  "limits": [
+    "A successful follow-up does not establish the causes of the original AR-071/073/088/094 failures; original evidence remains preserved.",
+    "Worst-case Host memory accounting, macOS native containment, provider completion and atomic safe idle retirement remain incomplete.",
+    "This is not completion of every design acceptance check or a claim of zero medium findings.",
+    "No independent worker review was performed in this ordinary workspace.",
+    "The protected user GUI and installed application were not replaced or restarted."
+  ]
+}

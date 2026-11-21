@@ -33,7 +33,7 @@ class DmgUpdateTests(unittest.TestCase):
         fixture = cls.root / "sleep.c"
         fixture.write_text("#include <unistd.h>\nint main(void) { sleep(90); return 0; }\n")
         run("clang", "-arch", "arm64", str(fixture), "-o", str(cls.root / "sleep"))
-        for name in ("flowmux", "flowmuxctl", "flowmux-md-viewer"):
+        for name in ("flowmux", "flowmuxctl", "flowmux-md-viewer", "flowmux-daemon"):
             shutil.copyfile(cls.root / "sleep", macos / name)
             (macos / name).chmod(0o755)
         with (source / "Contents/Info.plist").open("wb") as output:
@@ -70,7 +70,7 @@ class DmgUpdateTests(unittest.TestCase):
             host.wait()
 
     def install(self, image=None, wanted="9.8.7", env=None):
-        return subprocess.run(["/bin/sh", str(REPO / "scripts/update-macos-dmg.sh"),
+        return subprocess.run(["/bin/sh", "-x", str(REPO / "scripts/update-macos-dmg.sh"),
                                str(image or self.image), str(self.dest), wanted],
                               text=True, capture_output=True, env=env)
 
@@ -139,13 +139,41 @@ class DmgUpdateTests(unittest.TestCase):
                     plist.write_bytes(plistlib.dumps(data))
                 image = pathlib.Path(self.temp.name) / (damage + ".dmg")
                 run("hdiutil", "create", "-quiet", "-srcfolder", str(folder), "-format", "UDZO", str(image))
-                self.assertNotEqual(self.install(image=image).returncode, 0)
+                result = self.install(image=image)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(version(self.dest), "1.0.0")
                 self.assertTrue(all(host.poll() is None for host in self.hosts))
                 self.assertFalse(list(self.dest.parent.glob(".Flowmux.app.pending.*")))
                 self.assertFalse(self.retained())
                 images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
-                self.assertFalse(any(item.get("image-path") == str(image) for item in images))
+                attached = [item for item in images if item.get("image-path") == str(image)]
+                self.assertFalse(attached, json.dumps({"image": str(image), "attached": attached,
+                                                     "update_exit_code": result.returncode,
+                                                     "update_stdout": result.stdout,
+                                                     "update_stderr": result.stderr}, indent=2))
+
+    def test_image_is_detached_when_attaching_reports_failure(self):
+        tools = pathlib.Path(self.temp.name) / "tools"
+        tools.mkdir()
+        hdiutil = tools / "hdiutil"
+        hdiutil.write_text('#!/bin/sh\n'
+                           'if [ "$1" = attach ]; then /usr/bin/hdiutil "$@"; exit 1; fi\n'
+                           'exec /usr/bin/hdiutil "$@"\n')
+        hdiutil.chmod(0o755)
+        env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ.get("PATH", ""))
+        result = self.install(env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(version(self.dest), "1.0.0")
+        images = plistlib.loads(subprocess.check_output(["hdiutil", "info", "-plist"]))["images"]
+        attached = [item for item in images if item.get("image-path") == str(self.image)]
+        try:
+            self.assertFalse(attached, result.stdout + result.stderr)
+        finally:
+            # Clean only this fixture's device if the regression is present.
+            for item in attached:
+                for entity in item.get("system-entities", []):
+                    subprocess.run(["hdiutil", "detach", "-force", entity["dev-entry"]],
+                                   capture_output=True)
 
     def test_busy_readonly_image_is_detached_after_validation_failure(self):
         tools = pathlib.Path(self.temp.name) / "tools"

@@ -1,0 +1,173 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<div id="workspace-fork-forest">
+<style>
+#workspace-fork-forest { --f-bg:light-dark(#f6f8fb,#191e27); --f-surface:light-dark(#ffffff,#222a36); --f-rail:light-dark(#edf1f7,#202734); --f-text:light-dark(#263247,#e2e9f5); --f-dim:light-dark(#607087,#a6b4c9); --f-line:light-dark(#d2dbe8,#42516a); --f-accent:light-dark(#3865c5,#a2bfff); --f-selected:light-dark(#e8efff,#2b3e60); --f-dot:light-dark(#b7c5d9,#3c4a61); font:13px/1.55 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif; color:var(--f-text); }
+#workspace-fork-forest * { box-sizing:border-box; }
+#workspace-fork-forest [hidden] { display:none !important; }
+#workspace-fork-forest button { font:inherit; color:inherit; border:0; background:transparent; border-radius:5px; padding:6px 9px; }
+#workspace-fork-forest button:hover { background:var(--f-rail); }
+#workspace-fork-forest button:focus-visible { outline:2px solid var(--f-accent); outline-offset:2px; }
+#workspace-fork-forest .f-app { border:1px solid var(--f-line); border-radius:10px; background:var(--f-surface); overflow:hidden; position:relative; }
+#workspace-fork-forest .f-chrome { display:flex; gap:18px; align-items:center; flex-wrap:wrap; padding:14px 105px 14px 18px; background:var(--f-bg); border-bottom:1px solid var(--f-line); }
+#workspace-fork-forest .f-brand { font-weight:650; font-size:16px; letter-spacing:-.5px; }
+#workspace-fork-forest .f-dim { color:var(--f-dim); font-size:12px; }
+#workspace-fork-forest .f-pill { background:var(--f-rail); border-radius:4px; padding:2px 7px; font-size:11px; }
+#workspace-fork-forest .f-body { display:grid; grid-template-columns:170px minmax(0,1fr); }
+#workspace-fork-forest .f-sidebar { background:var(--f-bg); border-right:1px solid var(--f-line); padding:20px 9px; }
+#workspace-fork-forest .f-label { font-size:11px; letter-spacing:.6px; color:var(--f-dim); margin:0 10px 12px; }
+#workspace-fork-forest .f-workspace { display:flex; align-items:center; border-radius:6px; margin-bottom:6px; padding:3px; gap:2px; }
+#workspace-fork-forest .f-workspace.active { background:var(--f-selected); }
+#workspace-fork-forest .f-workspace.active .f-ws-name { color:var(--f-accent); }
+#workspace-fork-forest .f-ws-name { min-width:0; text-align:left; flex:1; }
+#workspace-fork-forest .f-flow-toggle { flex-shrink:0; display:grid; place-items:center; padding:6px; width:28px; height:28px; }
+#workspace-fork-forest .f-flow-toggle[aria-expanded="true"] { color:var(--f-accent); background:var(--f-surface); box-shadow:0 0 0 1px var(--f-line); }
+#workspace-fork-forest .f-flow-toggle svg { width:15px; height:15px; }
+#workspace-fork-forest .f-side-item { margin:18px 12px; color:var(--f-dim); }
+#workspace-fork-forest .f-main { min-width:0; }
+#workspace-fork-forest .f-pathbar { padding:10px 16px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--f-line); font-size:12px; }
+#workspace-fork-forest .f-stage { display:flex; flex-direction:column; min-height:720px; }
+#workspace-fork-forest .f-flow { background:var(--f-bg); flex:0 0 240px; border-bottom:1px solid var(--f-line); }
+#workspace-fork-forest .f-flow-head { display:flex; align-items:center; justify-content:space-between; padding:10px 15px; gap:10px; }
+#workspace-fork-forest .f-flow-head strong { font-weight:600; }
+#workspace-fork-forest .f-graph { position:relative; margin:0 12px; height:170px; background-image:radial-gradient(var(--f-dot) .7px,transparent .7px); background-size:16px 16px; }
+#workspace-fork-forest .f-graph svg { display:block; width:100%; height:100%; overflow:visible; }
+#workspace-fork-forest .f-graph .f-edge { fill:none; stroke:var(--f-line); stroke-width:1.5; }
+#workspace-fork-forest .f-graph rect { fill:var(--f-surface); stroke:var(--f-line); }
+#workspace-fork-forest .f-graph .selected rect { fill:var(--f-selected); stroke:var(--f-accent); stroke-width:1.7; }
+#workspace-fork-forest .f-graph text { fill:var(--f-text); font-family:inherit; font-size:12px; }
+#workspace-fork-forest .f-graph .f-svg-meta { fill:var(--f-dim); font-size:11px; }
+#workspace-fork-forest .f-node-hit { position:absolute; border-radius:6px; background:transparent !important; }
+#workspace-fork-forest .f-node-hit:focus-visible { background:transparent; }
+#workspace-fork-forest .f-flow-foot { padding:1px 16px 9px; color:var(--f-dim); font-size:11px; }
+#workspace-fork-forest .f-terminals { flex:1; display:flex; min-height:470px; min-width:0; }
+#workspace-fork-forest .f-split { display:flex; min-width:0; flex:1; }
+#workspace-fork-forest .f-split > :last-child { border-left:3px solid var(--f-line); }
+#workspace-fork-forest .f-pane { flex:1; min-width:0; background:var(--f-surface); display:flex; flex-direction:column; }
+#workspace-fork-forest .f-pane-head { display:flex; justify-content:space-between; gap:3px; align-items:center; padding:8px 10px; border-bottom:1px solid var(--f-line); background:var(--f-bg); }
+#workspace-fork-forest .f-pane[data-focused="true"] .f-pane-head { background:var(--f-selected); box-shadow:inset 0 2px var(--f-accent); }
+#workspace-fork-forest .f-pane-title { min-width:0; overflow-wrap:anywhere; font-weight:500; font-size:12px; }
+#workspace-fork-forest .f-menu-trigger { flex-shrink:0; }
+#workspace-fork-forest .f-terminal { padding:18px 16px; flex:1; overflow-wrap:anywhere; }
+#workspace-fork-forest .f-agent { display:flex; align-items:center; gap:8px; margin-bottom:23px; }
+#workspace-fork-forest .f-agent strong { font-size:16px; font-weight:600; letter-spacing:-.4px; }
+#workspace-fork-forest .f-log { font:12px/1.9 "SFMono-Regular",Consolas,monospace; white-space:pre-wrap; margin:18px 0; color:var(--f-text); }
+#workspace-fork-forest .f-prompt { border-top:1px solid var(--f-line); padding-top:12px; color:var(--f-dim); font:12px/1.7 "SFMono-Regular",Consolas,monospace; }
+#workspace-fork-forest .f-pane-foot { color:var(--f-dim); font-size:11px; padding:8px 12px; border-top:1px solid var(--f-line); overflow-wrap:anywhere; }
+#workspace-fork-forest .f-status { padding:9px 14px; font-size:11px; color:var(--f-dim); border-top:1px solid var(--f-line); background:var(--f-bg); }
+#workspace-fork-forest .f-menu { position:absolute; z-index:5; width:216px; max-width:calc(100% - 16px); padding:5px; background:var(--f-surface); border:1px solid var(--f-line); border-radius:8px; box-shadow:0 8px 28px light-dark(#23334a26,#0006); }
+#workspace-fork-forest .f-menu button { display:block; text-align:left; width:100%; }
+#workspace-fork-forest .f-menu .f-fork { color:var(--f-accent); background:var(--f-selected); margin:4px 0; font-weight:500; }
+#workspace-fork-forest .f-menu-note { font-size:11px; color:var(--f-dim); padding:6px 10px; border-top:1px solid var(--f-line); }
+#workspace-fork-forest .f-menu-label { padding:6px 9px; color:var(--f-dim); font-size:11px; }
+@media(max-width:760px) { #workspace-fork-forest .f-body { grid-template-columns:140px minmax(0,1fr); } #workspace-fork-forest .f-terminal { padding:14px 10px; } }
+@media(max-width:560px) { #workspace-fork-forest .f-body { grid-template-columns:1fr; } #workspace-fork-forest .f-sidebar { border-right:0; border-bottom:1px solid var(--f-line); padding:8px; display:flex; flex-wrap:wrap; gap:8px; } #workspace-fork-forest .f-label,#workspace-fork-forest .f-side-item { display:none; } #workspace-fork-forest .f-workspace { flex:1; margin:0; min-width:120px; } #workspace-fork-forest .f-chrome { gap:8px; } #workspace-fork-forest .f-stage { min-height:720px; } #workspace-fork-forest .f-pane-head { padding:7px; } }
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#workspace-fork-forest .f-flow { flex:0 0 310px; }
+#workspace-fork-forest .f-stage { min-height:900px; }
+#workspace-fork-forest .f-flow-head { flex-wrap:wrap; }
+#workspace-fork-forest .f-graph { height:238px; overflow:hidden; touch-action:none; user-select:none; }
+#workspace-fork-forest .f-flow-tools { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
+#workspace-fork-forest .f-flow-tools button { border:1px solid var(--f-line); background:var(--f-surface); padding:3px 8px; font-size:12px; }
+#workspace-fork-forest .f-flow-tools button[aria-pressed="true"] { color:var(--f-accent); background:var(--f-selected); }
+#workspace-fork-forest .f-zoom-value { min-width:40px; text-align:center; font-size:11px; color:var(--f-dim); font-variant-numeric:tabular-nums; }
+#workspace-fork-forest .f-world { position:absolute; left:0; top:0; transform-origin:0 0; }
+#workspace-fork-forest .f-world .f-forest-edges { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+#workspace-fork-forest .f-family-label { position:absolute; font-size:14px; color:var(--f-dim); white-space:nowrap; }
+#workspace-fork-forest .f-forest-node { position:absolute; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding:7px 10px; background:var(--f-surface); border:1px solid var(--f-line); border-radius:6px; white-space:nowrap; text-align:left; }
+#workspace-fork-forest .f-forest-node:hover { background:var(--f-rail); }
+#workspace-fork-forest .f-forest-node.selected { border:2px solid var(--f-accent); background:var(--f-selected); }
+#workspace-fork-forest .f-forest-node:disabled { background:var(--f-rail); color:var(--f-dim); border-style:dashed; }
+#workspace-fork-forest .f-node-name { font-size:14px; }
+#workspace-fork-forest .f-node-meta { color:var(--f-dim); font-size:12px; }
+#workspace-fork-forest .f-node-short { display:none; font-size:var(--node-font); }
+#workspace-fork-forest .f-overview .f-node-name,#workspace-fork-forest .f-overview .f-node-meta { display:none; }
+#workspace-fork-forest .f-overview .f-node-short { display:block; }
+#workspace-fork-forest .f-overview .f-family-label { font-size:var(--node-font); }
+#workspace-fork-forest .f-pan-mode,#workspace-fork-forest .f-pan-mode button { cursor:grab; }
+#workspace-fork-forest .f-dragging,#workspace-fork-forest .f-dragging button { cursor:grabbing; }
+#workspace-fork-forest .f-resume-extra { border:1px solid var(--f-line); background:var(--f-surface); padding:4px 8px; font-size:11px; }
+#workspace-fork-forest .f-terminals { min-height:580px; }
+@media(max-width:560px) { #workspace-fork-forest .f-pathbar { flex-wrap:wrap; } #workspace-fork-forest .f-stage { min-height:900px; } }
+</style>
+<div class="f-app" aria-label="Flowmux 다중 세션 계보 목업">
+ <header class="f-chrome"><span class="f-brand">Flowmux</span><span class="f-dim">workspace / agent sessions</span><span class="f-pill">예시 데이터 · 인터랙션 목업</span></header>
+ <div class="f-body">
+  <aside class="f-sidebar"><div class="f-label">WORKSPACES</div><div class="f-workspace active"><span class="f-ws-name">개발 작업</span><button type="button" class="f-flow-toggle cursor-interaction" aria-label="개발 작업 세션 흐름" aria-expanded="true"><i data-lucide="git-fork" aria-hidden="true"></i></button></div><div class="f-side-item">Files</div><div class="f-side-item">Worktrees</div></aside>
+  <main class="f-main">
+   <div class="f-pathbar"><span class="f-path"></span><button type="button" class="f-resume-extra cursor-interaction">저장된 Gemini 세션 재개 예시</button></div>
+   <div class="f-stage">
+    <section class="f-flow" aria-label="workspace에 열린 세션들의 전체 fork 계보">
+     <div class="f-flow-head"><div><strong>세션 흐름</strong> <span class="f-flow-count f-dim"></span></div><div class="f-flow-tools"><button type="button" class="f-zoom-out cursor-interaction" aria-label="축소">−</button><span class="f-zoom-value">85%</span><button type="button" class="f-zoom-in cursor-interaction" aria-label="확대">+</button><button type="button" class="f-fit cursor-interaction">전체 맞춤</button><button type="button" class="f-pan cursor-interaction" aria-pressed="false">이동</button><button type="button" class="f-close cursor-interaction">닫기</button></div></div>
+     <div class="f-graph" role="group" aria-label="휠로 확대 축소하고 드래그로 이동하는 다중 그래프"></div>
+     <div class="f-flow-foot">휠: 확대·축소 · 드래그: 이동 · 노드 클릭: 열기 · 점선 노드: 재개 불가</div>
+    </section>
+    <div class="f-terminals"></div>
+   </div>
+   <div class="f-status" role="status" aria-live="polite">예시: 서로 다른 원본에서 fork된 Claude와 Codex 세션을 resume한 workspace</div>
+  </main>
+ </div>
+ <div class="f-menu" role="dialog" aria-label="에이전트 화면 메뉴" hidden><div class="f-menu-label"></div><button type="button" class="f-fork cursor-interaction">Fork session →</button><button type="button" class="f-dismiss cursor-interaction">닫기</button><div class="f-menu-note">이 pane의 오른쪽에 분기 세션 열기</div></div>
+</div>
+
+<script>
+// SPDX-License-Identifier: GPL-3.0-or-later
+(()=>{
+const root=document.getElementById('workspace-fork-forest'),app=root.querySelector('.f-app'),graph=root.querySelector('.f-graph'),flow=root.querySelector('.f-flow'),terminals=root.querySelector('.f-terminals'),menu=root.querySelector('.f-menu');
+const nodes=[
+ {id:'a1',parent:null,name:'로그인 문제 분석',agent:'Claude',ready:true},
+ {id:'a2',parent:'a1',name:'최소 수정안',agent:'Claude',ready:true},
+ {id:'a3',parent:'a1',name:'초기 실험',agent:'Claude',ready:false,reason:'기록 삭제 · 재개 불가'},
+ {id:'a4',parent:'a2',name:'회귀 테스트',agent:'Claude',ready:true},
+ {id:'a5',parent:'a4',name:'경계 조건 검토',agent:'Claude',ready:true},
+ {id:'b1',parent:null,name:'캐시 구조 설계',agent:'Codex',ready:true},
+ {id:'b2',parent:'b1',name:'캐시 구현',agent:'Codex',ready:true},
+ {id:'b3',parent:'b2',name:'벤치마크',agent:'Codex',ready:true},
+ {id:'b4',parent:'b3',name:'메모리 개선',agent:'Codex',ready:true},
+ {id:'b5',parent:'b4',name:'취소 처리',agent:'Codex',ready:true},
+ {id:'b6',parent:'b5',name:'원격 환경 검증',agent:'Codex',ready:false,reason:'원격 연결 필요 · 재개 불가'},
+ {id:'c1',parent:null,name:'문서 개편',agent:'Gemini',ready:true},
+ {id:'c2',parent:'c1',name:'설치 가이드',agent:'Gemini',ready:true},
+ {id:'c3',parent:'c2',name:'문제 해결 가이드',agent:'Gemini',ready:true}
+];
+let state={nodes,tree:['a2','b2'],focused:'a2',open:true,camera:{x:16,y:10,z:.85},next:1},source=null,trigger=null,panMode=false,space=false,drag=null,positions=new Map(),bounds={w:0,h:0};
+function get(id){return state.nodes.find(n=>n.id===id);}
+function leaves(tree){return Array.isArray(tree)?tree.flatMap(leaves):[tree];}
+function restore(s){const p=s?.privateContent;if(p?.version===3&&Array.isArray(p.state?.nodes)&&p.state?.camera){state=structuredClone(p.state);return true;}return false;}
+restore(window.openai?.widgetState);
+function save(){window.openai?.setWidgetState?.({modelContent:{design:'workspace 다중 계보 캔버스',openSessions:leaves(state.tree),selectedSession:state.focused,zoom:Math.round(state.camera.z*100)},privateContent:{version:3,state}})?.catch(()=>{});}
+function say(s){root.querySelector('.f-status').textContent=s;}
+function familyRoot(id){let n=get(id),seen=new Set();while(n?.parent&&get(n.parent)&&!seen.has(n.id)){seen.add(n.id);n=get(n.parent);}return n?.id;}
+function families(){return [...new Set(leaves(state.tree).map(familyRoot))].filter(Boolean).map(id=>({id,nodes:state.nodes.filter(n=>familyRoot(n.id)===id)}));}
+function replaceLeaf(tree,id,next){return Array.isArray(tree)?tree.map(t=>replaceLeaf(t,id,next)):tree===id?[id,next]:tree;}
+function closeMenu(focus=true){menu.hidden=true;if(focus&&trigger?.isConnected)trigger.focus();}
+function openSession(id){const n=get(id);if(!n?.ready)return;closeMenu(false);const already=leaves(state.tree).includes(id);if(!already)state.tree=replaceLeaf(state.tree,state.focused,id);state.focused=id;renderPanes();renderGraph();save();say(already?'예시: 이미 열린 '+n.name+' pane으로 이동했습니다.':'예시: '+n.name+' 세션을 선택한 pane 오른쪽에 resume으로 열었습니다.');}
+function showMenu(id,button,x,y){source=id;trigger=button;menu.hidden=false;root.querySelector('.f-menu-label').textContent=get(id).agent+' · '+get(id).name;const rect=app.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(x-rect.left,rect.width-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(y-rect.top,rect.height-menu.offsetHeight-8))+'px';root.querySelector('.f-fork').disabled=get(id).agent==='Gemini';root.querySelector('.f-menu-note').textContent=get(id).agent==='Gemini'?'목업: Gemini fork 생성은 별도 흐름':'이 pane의 오른쪽에 분기 세션 열기';root.querySelector('.f-dismiss').focus();}
+function pane(tree){if(Array.isArray(tree)){const split=document.createElement('div');split.className='f-split';split.append(pane(tree[0]),pane(tree[1]));return split;}const n=get(tree),el=document.createElement('section');el.className='f-pane';el.dataset.session=n.id;el.dataset.focused=String(n.id===state.focused);el.setAttribute('aria-label',n.name+' 에이전트 화면');el.innerHTML='<div class="f-pane-head"><span class="f-pane-title"></span><button type="button" class="f-menu-trigger cursor-interaction" aria-label="에이전트 메뉴">⋯</button></div><div class="f-terminal"><div class="f-agent"><strong></strong><span class="f-pill">Resume</span></div><div class="f-dim f-session-info"></div><pre class="f-log"></pre><div class="f-prompt">❯ 다음 작업을 입력하세요</div></div><div class="f-pane-foot"></div>';el.querySelector('.f-pane-title').textContent=n.name;el.querySelector('.f-agent strong').textContent=n.agent;el.querySelector('.f-session-info').textContent=n.parent?'원본: '+get(n.parent).name:'이 계보의 원본 세션';el.querySelector('.f-log').textContent='저장된 대화를 불러왔습니다.\n\n'+n.name+' 작업을\n이어서 진행할 수 있습니다.\n\n이 세션의 원본과 다른 분기는\n상단 세션 흐름에 표시됩니다.';el.querySelector('.f-pane-foot').textContent=n.agent+' · '+n.id+' · 열림';const b=el.querySelector('.f-menu-trigger');b.onclick=e=>{e.stopPropagation();const r=b.getBoundingClientRect();showMenu(n.id,b,r.right-210,r.bottom);};el.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(n.id,b,e.clientX,e.clientY);};el.onclick=()=>{closeMenu(false);state.focused=n.id;renderPanes();renderGraph();save();};return el;}
+function renderPanes(){terminals.replaceChildren(pane(state.tree));}
+function transform(){const world=graph.querySelector('.f-world');if(!world)return;const c=state.camera;world.style.transform=`translate(${c.x}px,${c.y}px) scale(${c.z})`;world.style.setProperty('--node-font',Math.max(14,11/c.z)+'px');world.classList.toggle('f-overview',c.z<.65);root.querySelector('.f-zoom-value').textContent=Math.round(c.z*100)+'%';graph.dataset.zoom=String(c.z);graph.dataset.panX=String(c.x);graph.dataset.panY=String(c.y);}
+function layout(){positions=new Map();let baseY=24,maxX=0;const groups=[];families().forEach(f=>{let leaf=0;const visit=(n,d)=>{const children=f.nodes.filter(k=>k.parent===n.id);const ys=children.map(k=>visit(k,d+1));const y=ys.length?ys.reduce((a,b)=>a+b,0)/ys.length:baseY+(leaf++)*82;positions.set(n.id,{x:d*204,y,w:174,h:58});maxX=Math.max(maxX,d*204+174);return y;};visit(get(f.id),0);groups.push({id:f.id,y:baseY-8});baseY+=Math.max(1,leaf)*82+34;});bounds={w:maxX,h:baseY-30};return groups;}
+function renderGraph(){flow.hidden=!state.open;root.querySelector('.f-flow-toggle').setAttribute('aria-expanded',String(state.open));if(!state.open)return;const groups=layout();graph.replaceChildren();const world=document.createElement('div');world.className='f-world';world.style.width=bounds.w+'px';world.style.height=bounds.h+'px';const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width',String(bounds.w));svg.setAttribute('height',String(bounds.h));svg.setAttribute('aria-hidden','true');svg.classList.add('f-forest-edges');positions.forEach((p,id)=>{const n=get(id),a=positions.get(n.parent);if(!a)return;const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('class','f-edge');path.setAttribute('d',`M${a.x+a.w} ${a.y+a.h/2} C${a.x+a.w+15} ${a.y+a.h/2} ${p.x-15} ${p.y+p.h/2} ${p.x} ${p.y+p.h/2}`);svg.append(path);});world.append(svg);groups.forEach(g=>{const label=document.createElement('div');label.className='f-family-label';label.style.left='0px';label.style.top=(g.y-16)+'px';label.textContent=get(g.id).agent+' / '+get(g.id).name;world.append(label);});const live=leaves(state.tree);positions.forEach((p,id)=>{const n=get(id),b=document.createElement('button');b.type='button';b.className='f-forest-node cursor-interaction'+(id===state.focused?' selected':'');b.dataset.id=id;b.style.cssText=`left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px;`;b.disabled=!n.ready;b.setAttribute('aria-label',n.name+' · '+(!n.ready?n.reason:live.includes(id)?'열린 pane으로 이동':'resume으로 열기'));b.setAttribute('aria-pressed',String(id===state.focused));b.innerHTML='<span class="f-node-name"></span><span class="f-node-short"></span><span class="f-node-meta"></span>';b.querySelector('.f-node-name').textContent=n.name;b.querySelector('.f-node-short').textContent=n.agent+' '+id.toUpperCase();b.querySelector('.f-node-meta').textContent=!n.ready?n.reason:live.includes(id)?'● 이 workspace에서 열림':'↗ resume 가능';b.onclick=e=>{if(e.detail===0&&!panMode)openSession(id);};world.append(b);});graph.append(world);root.querySelector('.f-flow-count').textContent='· '+groups.length+'개 계보 · '+positions.size+'개 세션';transform();}
+function zoom(z,px=graph.clientWidth/2,py=graph.clientHeight/2){const c=state.camera,next=Math.max(.25,Math.min(2.5,z)),wx=(px-c.x)/c.z,wy=(py-c.y)/c.z;c.x=px-wx*next;c.y=py-wy*next;c.z=next;transform();}
+function fit(){const z=Math.max(.25,Math.min(1,(graph.clientWidth-32)/bounds.w,(graph.clientHeight-38)/bounds.h));state.camera={z,x:(graph.clientWidth-bounds.w*z)/2,y:(graph.clientHeight-bounds.h*z)/2+8};transform();save();}
+let wheelTimer;graph.addEventListener('wheel',e=>{e.preventDefault();const r=graph.getBoundingClientRect(),delta=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?graph.clientHeight:1);zoom(state.camera.z*Math.exp(-delta*.002),e.clientX-r.left,e.clientY-r.top);clearTimeout(wheelTimer);wheelTimer=setTimeout(save,160);},{passive:false});
+graph.addEventListener('pointerdown',e=>{if(e.button!==0&&e.button!==1)return;e.preventDefault();const b=e.target.closest('.f-forest-node');drag={id:e.pointerId,startX:e.clientX,startY:e.clientY,x:state.camera.x,y:state.camera.y,node:b&&!b.disabled?b.dataset.id:null,moved:false,panOnly:panMode||space||e.button===1};graph.setPointerCapture(e.pointerId);graph.classList.add('f-dragging');});
+graph.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;const dx=e.clientX-drag.startX,dy=e.clientY-drag.startY;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){state.camera.x=drag.x+dx;state.camera.y=drag.y+dy;transform();}});
+graph.addEventListener('pointerup',e=>{if(!drag||drag.id!==e.pointerId)return;const d=drag;drag=null;graph.classList.remove('f-dragging');if(graph.hasPointerCapture(e.pointerId))graph.releasePointerCapture(e.pointerId);if(d.node&&!d.moved&&!d.panOnly)openSession(d.node);else save();});
+graph.addEventListener('pointercancel',()=>{drag=null;graph.classList.remove('f-dragging');});graph.addEventListener('lostpointercapture',()=>{drag=null;graph.classList.remove('f-dragging');});
+root.querySelector('.f-zoom-in').onclick=()=>{zoom(state.camera.z*1.2);save();};root.querySelector('.f-zoom-out').onclick=()=>{zoom(state.camera.z/1.2);save();};root.querySelector('.f-fit').onclick=fit;
+root.querySelector('.f-pan').onclick=e=>{panMode=!panMode;e.currentTarget.setAttribute('aria-pressed',String(panMode));graph.classList.toggle('f-pan-mode',panMode);say(panMode?'이동 모드 · 노드 위에서도 드래그로 캔버스를 이동합니다.':'선택 모드 · 클릭은 세션 열기, 드래그는 캔버스 이동입니다.');};
+function toggle(){state.open=!state.open;renderGraph();save();}
+root.querySelector('.f-close').onclick=toggle;root.querySelector('.f-flow-toggle').onclick=toggle;
+root.querySelector('.f-resume-extra').onclick=()=>{openSession('c2');say('예시: Gemini 설치 가이드를 resume했습니다. 원본과 자식을 포함한 세 번째 계보가 추가되었습니다.');};
+root.querySelector('.f-fork').onclick=()=>{const parent=get(source);if(!parent||parent.agent==='Gemini')return;const id='new'+state.next++;state.nodes.push({id,parent:parent.id,agent:parent.agent,name:parent.name+' fork',ready:true});state.tree=replaceLeaf(state.tree,parent.id,id);state.focused=id;closeMenu(false);renderPanes();renderGraph();save();say('예시: 원본 pane 오른쪽에 fork를 열었습니다. 해당 계보에 새 분기를 추가했습니다.');};
+root.querySelector('.f-dismiss').onclick=()=>closeMenu();
+root.addEventListener('keydown',e=>{if(e.code==='Space'&&(e.target===graph||graph.contains(e.target))){space=true;}if(e.key==='Escape'){closeMenu();panMode=false;root.querySelector('.f-pan').setAttribute('aria-pressed','false');graph.classList.remove('f-pan-mode');}if(!menu.hidden&&e.key==='Tab'){e.preventDefault();const bs=[...menu.querySelectorAll('button')].filter(b=>!b.disabled),i=bs.indexOf(document.activeElement);bs[(i+(e.shiftKey?-1:1)+bs.length)%bs.length].focus();}});
+root.addEventListener('keyup',e=>{if(e.code==='Space')space=false;});window.addEventListener('blur',()=>{space=false;drag=null;graph.classList.remove('f-dragging');});
+app.addEventListener('click',e=>{if(!menu.hidden&&!menu.contains(e.target)&&!e.target.closest('.f-menu-trigger'))closeMenu(false);});
+window.addEventListener('openai:set_globals',e=>{if(restore(e.detail?.globals?.widgetState)){closeMenu(false);renderPanes();renderGraph();}});
+root.querySelector('.f-path').textContent='~/Projects/flowmux';renderPanes();renderGraph();globalThis.lucide?.createIcons({attrs:{width:15,height:15}});
+new ResizeObserver(()=>transform()).observe(graph);
+})();
+
+</script>
+</div>

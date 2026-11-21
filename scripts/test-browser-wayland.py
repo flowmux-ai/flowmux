@@ -29,6 +29,7 @@ def run():
             env[key] = str(root / child)
         env.update(XDG_CURRENT_DESKTOP="GNOME", XDG_SESSION_TYPE="wayland",
                    WAYLAND_DISPLAY="wayland-flowmux-test", GTK_A11Y="test", GSK_RENDERER="cairo",
+                   FLOWMUX_LOCAL_TERMINALS="1",
                    MUTTER_DEBUG_DUMMY_MODE_SPECS="800x600:1280x900",
                    MUTTER_DEBUG_NUM_DUMMY_MONITORS="1", MUTTER_DEBUG_DUMMY_MONITOR_SCALES="1")
         return subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1440x1000x24",

@@ -65,20 +65,39 @@ def wait_for_sshd(sshd, port, log_path):
     wait_for(ready, "sshd listener")
 
 
+def check_tools(args, env):
+    for name, program, prefix in (("sshd", args.sshd, "OpenSSH_"),
+                                  ("tmux", args.tmux, "tmux ")):
+        if not program:
+            raise RuntimeError(f"Provide --{name} / SSH_FIXTURE_{name.upper()}, or install {name} in PATH")
+        result = subprocess.run([program, "-V"], env=env, text=True,
+                                capture_output=True, timeout=10)
+        version = result.stdout + result.stderr
+        if result.returncode or not version.startswith(prefix) or "flowmux" in version.lower():
+            raise RuntimeError(f"{name}: {program} is unavailable or is not the real {name}: "
+                               f"{(result.stdout + result.stderr).strip()}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sshd", default=shutil.which("sshd"))
-    parser.add_argument("--tmux", default=shutil.which("tmux"))
-    parser.add_argument("--library-path")
+    parser.add_argument("--sshd", default=os.environ.get("SSH_FIXTURE_SSHD") or shutil.which("sshd"))
+    parser.add_argument("--tmux", default=os.environ.get("SSH_FIXTURE_TMUX") or shutil.which("tmux"))
+    parser.add_argument("--library-path", default=os.environ.get("SSH_FIXTURE_LIBRARY_PATH"))
+    parser.add_argument("--check", action="store_true", help="Check tools without creating a fixture")
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--gui", help="Run the GUI integration suite against this fixture")
     parser.add_argument("--cli", default="target/debug/flowmuxctl")
     args = parser.parse_args()
-    if not args.sshd or not args.tmux:
-        parser.error("Provide --sshd and --tmux, or install both in PATH")
     env = os.environ.copy()
     if args.library_path:
         env["LD_LIBRARY_PATH"] = args.library_path
+    try:
+        check_tools(args, env)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        parser.error(str(error))
+    if args.check:
+        print("PASS: SSH fixture tools are executable OpenSSH and tmux")
+        return
     children = []
     httpd = None
     tmux = None

@@ -10,7 +10,6 @@ use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::str::FromStr;
 
 #[derive(Clone)]
 pub(crate) struct AgentBar {
@@ -20,10 +19,12 @@ pub(crate) struct AgentBar {
     item_buttons: Rc<RefCell<HashMap<SurfaceId, AgentBarItemWidget>>>,
     item_order: Rc<RefCell<Vec<SurfaceId>>>,
     bridge: Bridge,
+    drop_state: (Rc<Cell<bool>>, Rc<Cell<bool>>),
+    managed_agents: super::managed_agents::ManagedAgents,
 }
 
 impl AgentBar {
-    pub(crate) fn new(bridge: Bridge) -> Self {
+    pub(crate) fn new(bridge: Bridge, drop_state: (Rc<Cell<bool>>, Rc<Cell<bool>>)) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         root.add_css_class("flowmux-agent-bar");
         root.set_visible(false);
@@ -37,9 +38,12 @@ impl AgentBar {
         let summary = crate::ui::agent_attention_summary_label();
         heading.append(&summary);
         root.append(&heading);
+        root.append(&super::managed_agents::new_agent_button());
 
         let items = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         items.set_halign(gtk::Align::Start);
+        let managed_agents =
+            super::managed_agents::ManagedAgents::new(gtk::Orientation::Horizontal);
 
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hexpand(true);
@@ -57,7 +61,17 @@ impl AgentBar {
             item_buttons: Rc::new(RefCell::new(HashMap::new())),
             item_order: Rc::new(RefCell::new(Vec::new())),
             bridge,
+            drop_state,
+            managed_agents,
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn set_managed_drag_registry(
+        &mut self,
+        registry: &Rc<RefCell<super::workspace_view::PaneRegistry>>,
+    ) {
+        self.managed_agents.set_drag_registry(registry);
     }
 
     pub(crate) fn render(
@@ -109,6 +123,37 @@ impl AgentBar {
         }
     }
 
+    pub(crate) fn render_managed(
+        &self,
+        model: &AgentBarModel,
+        enabled: bool,
+        workspace_color: impl Fn(flowmux_core::WorkspaceId) -> Option<String>,
+    ) {
+        self.managed_agents.render(
+            &self.bridge.agent_registry.borrow(),
+            &self.bridge,
+            self.drop_state.clone(),
+            workspace_color,
+        );
+        if self.managed_agents.root.get_visible() && self.managed_agents.root.parent().is_none() {
+            self.items.append(&self.managed_agents.root);
+        } else if !self.managed_agents.root.get_visible()
+            && self.managed_agents.root.parent().is_some()
+        {
+            self.items.remove(&self.managed_agents.root);
+        }
+        self.root
+            .set_visible(enabled && (model.visible || self.managed_agents.root.get_visible()));
+        let summary = flowmux_core::AgentAttentionSummary::from_attention(
+            model
+                .items
+                .iter()
+                .map(|item| item.attention())
+                .chain(self.managed_agents.attention()),
+        );
+        crate::ui::update_agent_attention_summary(&self.summary, summary);
+    }
+
     pub(crate) fn mark_attention(&self, surface: SurfaceId) {
         if let Some(button) = self.item_buttons.borrow().get(&surface) {
             button.button.add_css_class("flowmux-attention");
@@ -156,7 +201,7 @@ impl AgentBar {
         });
         button.add_controller(click);
 
-        self.attach_dnd_handlers(&button, item.surface);
+        self.attach_dnd_handlers(&button, item.surface, target.clone());
 
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         button.set_hexpand(true);
@@ -190,14 +235,25 @@ impl AgentBar {
             .collect()
     }
 
-    fn attach_dnd_handlers(&self, button: &gtk::Button, surface: SurfaceId) {
+    fn attach_dnd_handlers(
+        &self,
+        button: &gtk::Button,
+        surface: SurfaceId,
+        target: Rc<Cell<(flowmux_core::WorkspaceId, flowmux_core::PaneId, SurfaceId)>>,
+    ) {
         let drag_source = gtk::DragSource::new();
         drag_source.set_actions(gtk::gdk::DragAction::MOVE);
         drag_source.connect_prepare(move |_, _, _| {
-            Some(gtk::gdk::ContentProvider::for_value(
-                &surface.to_string().to_value(),
+            let (_, pane, surface) = target.get();
+            Some(crate::ui::workspace_view::agent_tab_dnd_content_provider(
+                pane, surface,
             ))
         });
+        crate::ui::workspace_view::prepare_agent_tab_drag(
+            &drag_source,
+            button,
+            self.drop_state.clone(),
+        );
         let button_for_begin = button.downgrade();
         drag_source.connect_drag_begin(move |_, _| {
             if let Some(button) = button_for_begin.upgrade() {
@@ -270,9 +326,10 @@ impl AgentBar {
             let Ok(payload) = value.get::<String>() else {
                 return false;
             };
-            let Ok(source) = SurfaceId::from_str(&payload) else {
+            let Ok(source) = crate::ui::workspace_view::parse_tab_dnd_payload(&payload) else {
                 return false;
             };
+            let source = source.src_surface;
             if source == surface {
                 return false;
             }
@@ -318,13 +375,16 @@ impl AgentBarItemWidget {
         } else {
             self.button.remove_css_class("flowmux-agent-bar-working");
         }
-        self.button
-            .set_tooltip_text(Some(&flowmux_core::agent_status_tooltip(
+        self.button.set_tooltip_text(Some(&format!(
+            "{}\n\n{}",
+            flowmux_core::agent_status_tooltip(
                 &item.agent_name,
                 &item.status_text,
                 item.status_evidence,
                 &item.pending_waits,
-            )));
+            ),
+            super::agent_lifetime_tooltip(item.surface)
+        )));
     }
 }
 
@@ -353,6 +413,7 @@ fn item_content(item: &AgentBarItem) -> gtk::Box {
     name.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 10) as i32);
     name.add_css_class("caption-heading");
     heading.append(&name);
+    heading.append(&super::tab_bound_agent_label(item.surface));
     text.append(&heading);
 
     let status = gtk::Label::new(Some(item.status_text.as_str()));
@@ -461,7 +522,7 @@ fn color_stripe(color: &str) -> gtk::DrawingArea {
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) async fn check_stable_agent_bar_items() {
     let (bridge, rx) = Bridge::new();
-    let bar = AgentBar::new(bridge);
+    let bar = AgentBar::new(bridge, Default::default());
     let mut model = AgentBarModel {
         visible: true,
         items: (0..24)
@@ -490,7 +551,15 @@ pub(crate) async fn check_stable_agent_bar_items() {
         .child(&bar.root)
         .build();
     window.present();
-    gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+    let scroll_offset = 120.0;
+    let scroll = bar
+        .root
+        .last_child()
+        .unwrap()
+        .downcast::<gtk::ScrolledWindow>()
+        .unwrap();
+    let adjustment = scroll.hadjustment();
+    super::wait_for_agent_scroll_range(&scroll, &adjustment, scroll_offset).await;
     let button = bar.item_buttons.borrow()[&surface].button.clone();
     assert_eq!(
         button.parent().unwrap().first_child(),
@@ -504,17 +573,13 @@ pub(crate) async fn check_stable_agent_bar_items() {
     assert!(button.is_focus());
     let content = button.child().unwrap();
     let controller_count = button.observe_controllers().n_items();
-    let scroll = bar
-        .root
-        .last_child()
-        .unwrap()
-        .downcast::<gtk::ScrolledWindow>()
-        .unwrap();
-    let adjustment = scroll.hadjustment();
-    assert!(adjustment.upper() - adjustment.page_size() > 120.0);
-    adjustment.set_value(120.0);
+    adjustment.set_value(scroll_offset);
     gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
     let scroll_before = adjustment.value();
+    assert!(
+        (scroll_before - scroll_offset).abs() < 1.0,
+        "test must start with the Agent Bar scrolled, got {scroll_before}"
+    );
     bar.render(&model, &HashSet::from([surface]), Some(surface));
     assert_eq!(bar.items.first_child(), button.parent());
     assert_eq!(
@@ -567,7 +632,7 @@ pub(crate) async fn check_stable_agent_bar_items() {
     assert!(drop_target.emit_by_name::<bool>(
         "drop",
         &[
-            &gtk::glib::BoxedValue(surface.to_string().to_value()),
+            &gtk::glib::BoxedValue(format!("flowmux-agent-tab:{}|{surface}", target.1).to_value()),
             &(drop_button.width() as f64 - 1.0),
             &0.0f64,
         ]
@@ -695,7 +760,7 @@ mod tests {
     #[gtk::test]
     fn working_item_uses_spinner_and_highlight_class() {
         let (bridge, _rx) = Bridge::new();
-        let bar = AgentBar::new(bridge);
+        let bar = AgentBar::new(bridge, Default::default());
         let item = working_item();
 
         let button = bar.item_button(&item).button;
@@ -726,6 +791,19 @@ mod tests {
             Some("flowmux-agent-codex-symbolic")
         );
         assert_eq!(icon.pixel_size(), 14);
+        let name = icon.next_sibling().unwrap();
+        assert_eq!(
+            name.next_sibling()
+                .unwrap()
+                .downcast::<gtk::Label>()
+                .unwrap()
+                .label(),
+            "Tab-bound"
+        );
+        assert!(button
+            .tooltip_text()
+            .unwrap()
+            .contains(super::super::TAB_BOUND_AGENT_TOOLTIP));
         assert_eq!(
             icon.next_sibling()
                 .unwrap()
@@ -740,7 +818,7 @@ mod tests {
     #[gtk::test]
     fn rerender_releases_buttons_with_dnd_controllers() {
         let (bridge, _rx) = Bridge::new();
-        let bar = AgentBar::new(bridge);
+        let bar = AgentBar::new(bridge, Default::default());
         let item = working_item();
         bar.render(
             &AgentBarModel {
@@ -768,7 +846,7 @@ mod tests {
     #[gtk::test]
     fn dropping_bar_releases_current_dnd_item_graph() {
         let (bridge, _rx) = Bridge::new();
-        let bar = AgentBar::new(bridge);
+        let bar = AgentBar::new(bridge, Default::default());
         let item = working_item();
         bar.render(
             &AgentBarModel {

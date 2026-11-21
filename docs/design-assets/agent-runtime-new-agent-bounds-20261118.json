@@ -1,0 +1,57 @@
+{
+  "source_head": "e06d64a8a3dd958958d5dad6cd886bbcd1773e85",
+  "ci_run": 44145082591,
+  "ci_source": "53f36ee8e9a56dd5177355e9485a89bdf3e671ff",
+  "ci_result": {
+    "linux": "new-agent failed waiting for first Cancel",
+    "macos": "passed"
+  },
+  "clicks": [
+    {
+      "name": "Workspace creation options",
+      "point": [
+        47,
+        26
+      ]
+    },
+    {
+      "name": "New Agent…",
+      "point": [
+        17,
+        5
+      ]
+    }
+  ],
+  "local_unit": {
+    "command": "python3 -B scripts/test-gui-harness.py",
+    "passed": 8,
+    "exit_code": 0
+  },
+  "limits": [
+    "Original raw geometry and screenshot were omitted by the old artifact upload paths.",
+    "Settled-bounds unit regression verifies the guard; historical CI root cause remains subject to live/remote confirmation.",
+    "Final Linux gate was already running in team-recovery; every invocation of the changed session-resume fixture is later than this change."
+  ],
+  "files": [
+    {
+      "path": "/tmp/fm-ci-44145082591-linux/tmp/fm-gui-81qwwne5/events.jsonl",
+      "sha256": "933ede6b0931a336656ddd08977ee42cc902b7839618ed0b1ff3722ba84de38c"
+    },
+    {
+      "path": "/tmp/fm-ci-44145082591-failed.log",
+      "sha256": "ebf831bba94ed67c247e52e45319f9f2d86778ebf242fe088bc2c5802cf80056"
+    },
+    {
+      "path": "/tmp/fm-click-bounds-unit-20261118.log",
+      "sha256": "20b81ac2ba95bf9bc9c2ceb7a03f864a2baf4ae2739e64ce0ec646fef27bd804"
+    },
+    {
+      "path": "scripts/test-agent-session-resume-gui.py",
+      "sha256": "3a6d51635495bd26c5b4abfe220431df7d334ebf3b40879cd7e9a107922002dd"
+    },
+    {
+      "path": "scripts/test-gui-harness.py",
+      "sha256": "a8fad92405903444539033c8d5e126dbae8e0e7de6047431e7be8d94fedbb001"
+    }
+  ]
+}

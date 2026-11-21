@@ -33,7 +33,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 mkdir "$work/mount"
-hdiutil attach "$image" -readonly -nobrowse -mountpoint "$work/mount" -quiet
+hdiutil attach "$image" -readonly -nobrowse -mountpoint "$work/mount" -quiet || {
+    # A failed attach can leave the image attached without its mount.
+    device=$(hdiutil info | awk -v image="$image" -F' *: ' \
+        '$1 == "image-path" { found = ($2 == image) } found && /^\/dev\/disk/ { sub(/[ \t].*/, ""); print; exit }')
+    [ -z "$device" ] || hdiutil detach -force "$device" -quiet || true
+    exit 1
+}
 mounted=1
 bundle="$work/mount/Flowmux.app"
 [ -d "$bundle" ] && [ ! -L "$bundle" ] || { echo 'DMG is missing Flowmux.app' >&2; exit 1; }
@@ -42,7 +48,7 @@ plist="$bundle/Contents/Info.plist"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$version" ] || {
     echo 'DMG version does not match the requested release' >&2; exit 1;
 }
-for binary in flowmux flowmuxctl flowmux-md-viewer; do
+for binary in flowmux flowmuxctl flowmux-md-viewer flowmux-daemon; do
     executable="$bundle/Contents/MacOS/$binary"
     [ -f "$executable" ] && [ -x "$executable" ] && [ ! -L "$executable" ] || exit 1
     lipo "$executable" -verify_arch arm64
@@ -78,7 +84,12 @@ echo "==> previous app retained for running sessions: $retained"
 for previous in "$parent/.$name.previous."*; do
     [ -d "$previous" ] && [ "$previous" != "$retained" ] || continue
     users=$(lsof -t -- "$previous/Contents/MacOS/flowmux" "$previous/Contents/MacOS/flowmuxctl" \
-        "$previous/Contents/MacOS/flowmux-md-viewer" 2>/dev/null || true)
+        "$previous/Contents/MacOS/flowmux-md-viewer" "$previous/Contents/MacOS/flowmux-daemon" \
+        2>/dev/null || true)
     [ -n "$users" ] || rm -rf "$previous"
 done
+# Like install-macos.sh: existing agent wrappers must match the new version.
+# Bounded: an update must never wait on the CLI.
+/usr/bin/perl -e 'alarm 5; exec @ARGV' "$destination/Contents/MacOS/flowmuxctl" \
+    hooks refresh-shims >/dev/null 2>&1 || true
 echo "==> installed Flowmux $version; restart Flowmux to use it."

@@ -9,6 +9,7 @@
 #![cfg_attr(all(test, target_os = "macos"), allow(dead_code, unused_imports))]
 
 mod activity;
+mod agent_host;
 mod bridge;
 mod browser_automation;
 mod builtin_icons;
@@ -264,7 +265,18 @@ fn main() -> anyhow::Result<()> {
     // preserves slices owned by other live windows.
     let owner = flowmux_state::WindowOwner::current();
     let (store, session_save_error) = match flowmux_state::claim_window(owner) {
-        Ok(initial) => {
+        Ok(mut initial) => {
+            // Without any Host the saved executions are gone. Restore their tabs as
+            // ordinary terminals so the usual session resume applies to them.
+            if agent_host::host_absent(&paths::agent_host_socket()) {
+                let cleared = flowmux_state::agent_views::clear_bindings(&mut initial);
+                if cleared > 0 {
+                    info!(
+                        cleared,
+                        "no Agent Host; restoring managed tabs as ordinary tabs"
+                    );
+                }
+            }
             info!(
                 workspaces = initial.workspaces.len(),
                 "claimed persisted workspaces for this window"
@@ -282,6 +294,16 @@ fn main() -> anyhow::Result<()> {
     store.spawn_persist(rt.handle());
 
     let (bridge, rx) = Bridge::new();
+    bridge
+        .agent_idle_timeout
+        .send_replace(flowmux_config::options::load().agent_idle_timeout_minutes);
+    let _agent_host_management = rt.block_on(agent_host::start(
+        paths::agent_host_socket(),
+        bridge.agent_idle_timeout.subscribe(),
+        bridge.agent_view_reports.subscribe(),
+        bridge.agent_registry.clone(),
+        bridge.tx.clone(),
+    ));
     let daemon_handler = DaemonHandler::new(store.clone());
     // Hand the GTK controller the same notifier cell the daemon
     // handler uses to send `AddNotification`. gnome-shell's
@@ -501,6 +523,15 @@ fn main() -> anyhow::Result<()> {
         gtk::glib::unix_signal_add_local(signal, move || {
             if let Some(app) = app.upgrade() {
                 if let Some(window) = app.active_window() {
+                    // A signalled window closes without questions; its agents keep running.
+                    ui::set_unattended_close();
+                    // An open dialog takes a close request for itself and leaves the window open.
+                    if let Some(dialog) =
+                        gtk::prelude::Cast::downcast_ref::<adw::ApplicationWindow>(&window)
+                            .and_then(adw::prelude::AdwApplicationWindowExt::visible_dialog)
+                    {
+                        adw::prelude::AdwDialogExt::force_close(&dialog);
+                    }
                     window.close();
                 }
             }

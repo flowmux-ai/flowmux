@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#workspace-fork-forest .f-flow { flex:0 0 310px; }
+#workspace-fork-forest .f-stage { min-height:900px; }
+#workspace-fork-forest .f-flow-head { flex-wrap:wrap; }
+#workspace-fork-forest .f-graph { height:238px; overflow:hidden; touch-action:none; user-select:none; }
+#workspace-fork-forest .f-flow-tools { display:flex; align-items:center; gap:3px; flex-wrap:wrap; }
+#workspace-fork-forest .f-flow-tools button { border:1px solid var(--f-line); background:var(--f-surface); padding:3px 8px; font-size:12px; }
+#workspace-fork-forest .f-flow-tools button[aria-pressed="true"] { color:var(--f-accent); background:var(--f-selected); }
+#workspace-fork-forest .f-zoom-value { min-width:40px; text-align:center; font-size:11px; color:var(--f-dim); font-variant-numeric:tabular-nums; }
+#workspace-fork-forest .f-world { position:absolute; left:0; top:0; transform-origin:0 0; }
+#workspace-fork-forest .f-world .f-forest-edges { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+#workspace-fork-forest .f-family-label { position:absolute; font-size:14px; color:var(--f-dim); white-space:nowrap; }
+#workspace-fork-forest .f-forest-node { position:absolute; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding:7px 10px; background:var(--f-surface); border:1px solid var(--f-line); border-radius:6px; white-space:nowrap; text-align:left; }
+#workspace-fork-forest .f-forest-node:hover { background:var(--f-rail); }
+#workspace-fork-forest .f-forest-node.selected { border:2px solid var(--f-accent); background:var(--f-selected); }
+#workspace-fork-forest .f-forest-node:disabled { background:var(--f-rail); color:var(--f-dim); border-style:dashed; }
+#workspace-fork-forest .f-node-name { font-size:14px; }
+#workspace-fork-forest .f-node-meta { color:var(--f-dim); font-size:12px; }
+#workspace-fork-forest .f-node-short { display:none; font-size:var(--node-font); }
+#workspace-fork-forest .f-overview .f-node-name,#workspace-fork-forest .f-overview .f-node-meta { display:none; }
+#workspace-fork-forest .f-overview .f-node-short { display:block; }
+#workspace-fork-forest .f-overview .f-family-label { font-size:var(--node-font); }
+#workspace-fork-forest .f-pan-mode,#workspace-fork-forest .f-pan-mode button { cursor:grab; }
+#workspace-fork-forest .f-dragging,#workspace-fork-forest .f-dragging button { cursor:grabbing; }
+#workspace-fork-forest .f-resume-extra { border:1px solid var(--f-line); background:var(--f-surface); padding:4px 8px; font-size:11px; }
+#workspace-fork-forest .f-terminals { min-height:580px; }
+@media(max-width:560px) { #workspace-fork-forest .f-pathbar { flex-wrap:wrap; } #workspace-fork-forest .f-stage { min-height:900px; } }

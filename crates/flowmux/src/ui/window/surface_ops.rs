@@ -86,6 +86,8 @@ impl WindowController {
             }
             return;
         };
+        let surviving_focus = gtk::prelude::GtkWindowExt::focus(&self.window)
+            .filter(|focus| focus == &sibling || focus.is_ancestor(&sibling));
 
         let Some(grand) = paned.parent() else {
             if let Some(ws) = self.store.get_workspace(ws_id).await {
@@ -194,6 +196,16 @@ impl WindowController {
         if let Some(ws) = self.store.get_workspace(ws_id).await {
             self.refresh_workspace_solo(&ws);
         }
+        if let Some(focus) = surviving_focus {
+            // Reparenting can drop native focus even when the closed pane was unfocused.
+            let focused_pane = self.focused_pane.clone();
+            let expected_pane = focused_pane.get();
+            glib::idle_add_local_once(move || {
+                if focus.is_mapped() && focused_pane.get() == expected_pane {
+                    focus.grab_focus();
+                }
+            });
+        }
     }
     /// After a pane has been removed, hand keyboard focus to a sibling so the
     /// user can keep typing without clicking back into a terminal. Only acts
@@ -208,10 +220,8 @@ impl WindowController {
     /// 2. The workspace's first leaf as a defensive fallback when MRU is empty
     ///    (e.g. the user closed a pane before any focus event was recorded).
     ///
-    /// `grab_focus` is deferred to the next idle so the surviving sibling has
-    /// a chance to be reparented and realized first; the existing
-    /// `EventControllerFocus` then fires `on_focus`, which updates
-    /// `focused_pane` and re-pushes the new front of MRU.
+    /// Update logical focus even when the surviving widget is hidden; the
+    /// shared focus path defers native focus until after reparenting.
     pub(super) async fn focus_after_close(&self, ws_id: WorkspaceId, removed: PaneId) {
         let was_focused = self.focused_pane.get() == Some(removed);
 
@@ -250,17 +260,7 @@ impl WindowController {
         };
         let Some(target) = target else { return };
 
-        let registry = self.pane_registry.clone();
-        glib::idle_add_local_once(move || {
-            let r = registry.borrow();
-            if let Some(term) = r.active_terminal(target) {
-                term.grab_focus();
-            } else if let Some(browser) = r.active_browser(target) {
-                browser.grab_focus();
-            } else if let Some(editor) = r.active_editor(target) {
-                editor.grab_focus();
-            }
-        });
+        self.focus_pane(target);
     }
     /// One owner for the state transition, widget update and rollback.
     pub(super) async fn split_pane(
@@ -735,6 +735,23 @@ impl WindowController {
     }
 
     pub(super) async fn tear_off_surface(&self, pane: PaneId, surface: SurfaceId) {
+        if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
+            let controller = self.clone();
+            glib::spawn_future_local(async move {
+                if let Err(error) = controller
+                    .tear_off_managed_agent(pane, surface, binding)
+                    .await
+                {
+                    show_error_dialog(
+                        &controller.window,
+                        "Cannot move agent to a new window",
+                        &error,
+                    )
+                    .await;
+                }
+            });
+            return;
+        }
         let Some(app) = self.window.application() else {
             return;
         };
@@ -783,6 +800,8 @@ impl WindowController {
             self.options.borrow().agent_bar_mode,
         );
         sidebar.share_tab_drag_drop_state(&self.sidebar);
+        #[cfg(target_os = "macos")]
+        sidebar.set_managed_drag_registry(&self.pane_registry);
         sidebar.upsert(&self.store.get_workspace(workspace).await.unwrap());
         sidebar.select_workspace(workspace);
         let split =
@@ -811,7 +830,10 @@ impl WindowController {
                     .filter(|(_, host)| host.window == *window)
                     .map(|(id, _)| *id)
                     .collect();
-                bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
+                bridge.send_from_ui(GtkCommand::CloseDetachedWindow {
+                    workspaces,
+                    closed_by_user: true,
+                });
             }
             glib::Propagation::Stop
         });
@@ -826,7 +848,10 @@ impl WindowController {
                     .map(|(id, _)| *id)
                     .collect::<Vec<_>>();
                 if !workspaces.is_empty() {
-                    bridge.send_from_ui(GtkCommand::CloseDetachedWindow { workspaces });
+                    bridge.send_from_ui(GtkCommand::CloseDetachedWindow {
+                        workspaces,
+                        closed_by_user: false,
+                    });
                 }
             }
         });

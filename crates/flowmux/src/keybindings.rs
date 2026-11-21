@@ -345,6 +345,12 @@ pub(crate) fn install_actions_for_window(
         }),
     );
     let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
+    let new_agent = gtk::gio::ActionEntry::builder("new-agent")
+        .activate({
+            let bridge = bridge.clone();
+            move |_, _, _| bridge.send_from_ui(GtkCommand::NewAgent)
+        })
+        .build();
     let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
     let toggle_session_flow = make_toggle_session_flow_action(bridge.clone());
     let review_bridge = bridge.clone();
@@ -554,6 +560,7 @@ pub(crate) fn install_actions_for_window(
         toggle_pane_zoom,
         toggle_workspace_overview,
         toggle_session_panel,
+        new_agent,
         toggle_session_flow,
         open_diff_review,
         next_workspace,
@@ -1119,7 +1126,10 @@ fn make_close_surface_action(
 /// GDK's launch context carries the compositor activation token, so the new
 /// Wayland window receives keyboard focus instead of leaving input in the old
 /// window. macOS uses a subprocess because GAppInfo cannot launch command lines.
-fn new_window_executable(current_exe: Option<PathBuf>, argv0: Option<PathBuf>) -> Option<PathBuf> {
+pub(crate) fn new_window_executable(
+    current_exe: Option<PathBuf>,
+    argv0: Option<PathBuf>,
+) -> Option<PathBuf> {
     current_exe.filter(|path| path.exists()).or(argv0)
 }
 
@@ -1187,7 +1197,9 @@ fn make_quit_app_action(
             tracing::debug!(action = "quit-app", "key action fired");
             let window = window.clone();
             glib::MainContext::default().spawn_local(async move {
-                if confirm_quit_app(&window).await {
+                // With agents running, closing the window asks its own question, which
+                // can also be cancelled; one question is enough.
+                if crate::ui::has_running_agents() || confirm_quit_app(&window).await {
                     window.close();
                 }
             });
@@ -1216,7 +1228,7 @@ async fn confirm_quit_app(window: &adw::ApplicationWindow) -> bool {
 fn build_quit_dialog() -> (adw::AlertDialog, oneshot::Receiver<bool>) {
     let dialog = adw::AlertDialog::new(
         Some("Quit flowmux?"),
-        Some("This closes the flowmux window and stops every running tab."),
+        Some("This closes the flowmux window and its terminals."),
     );
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("quit", "Quit");

@@ -1,0 +1,91 @@
+{
+  "platform": "macOS",
+  "source_commit": "aa1a26d6d9763e8523e435463e56b06875b2d3cf",
+  "workflow_run": "https://github.com/flowmux-ai/flowmux/actions/runs/44051408083",
+  "job_id": 133929889341,
+  "artifact": {
+    "id": 14315636647,
+    "sha256": "ab78a37fe13db3b0deafe279c3bc311bff62e756ee60959f25f30e162729ea31",
+    "local_root": "/tmp/fm-runtime-ci-44051408083"
+  },
+  "phases": {
+    "agent-gui-crash": {
+      "phase": "agent-gui-crash",
+      "command": [
+        "python3",
+        "scripts/test-agent-gui-crash.py",
+        "--gui",
+        "/Users/runner/work/flowmux/flowmux/target/debug/flowmux"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 61575,
+      "exit_code": 0,
+      "elapsed_seconds": 4.262
+    },
+    "session-flow": {
+      "phase": "session-flow",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "flowmux",
+        "--test",
+        "macos_native",
+        "--features",
+        "native-smoke",
+        "--locked"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "passed",
+      "pid": 61633,
+      "exit_code": 0,
+      "elapsed_seconds": 9.04
+    },
+    "editor-recovery": {
+      "phase": "editor-recovery",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "flowmux",
+        "--test",
+        "macos_native",
+        "--features",
+        "native-smoke",
+        "--locked"
+      ],
+      "timeout_seconds": 180.0,
+      "status": "failed",
+      "pid": 67140,
+      "exit_code": 101,
+      "elapsed_seconds": 5.031
+    }
+  },
+  "evidence_sha256": {
+    "agent-gui-crash.log": "7b2b99c8d57556f3e5ec5c2d3c3a0d4ba74b442f7f03ea857313ff169ee7f0b0",
+    "agent-gui-crash.json": "75f3a206b7f37269111ac59a05531807b7cf6f278cc89207c02dde3287dedb89",
+    "session-flow.log": "334213594a198555d780ebb743dfbe9cc642f5cb1aa115df1b49d5d2d4ee288c",
+    "session-flow.json": "52f837202e681cd6c958275762caf118561ba9f1a72d57a773ea219fb935aef7",
+    "editor-recovery.log": "38607ce597f397b09a343cf1835e603420252b05fc6e6f3975a8e574e6dfc8d8",
+    "editor-recovery.json": "58a210d984192cfe6bc55fd8061eca0993c05f7e0187bfda7c3050e2108eeddd"
+  },
+  "markers": [
+    "AGENT_GUI_CRASH_RECONNECT_OK",
+    "AGENT_GUI_CRASH_OK",
+    "MACOS_SESSION_FLOW_LAYOUT_OK"
+  ],
+  "verified": [
+    "production GUI SIGKILL preserves Host connection and provider progress",
+    "restored pane and managed tab retain instance, epoch, PID and process_start",
+    "fresh Hangul VTE input reaches original provider with exactly one spawn",
+    "natural provider exit removes empty Host socket"
+  ],
+  "limitations": [
+    "run failed later at editor status contrast in github-light; whole gate did not pass",
+    "source predates AR-060 memory fix and AR-063 retention UI",
+    "fixture provider, not actual model workload",
+    "does not verify normal GUI close or escaped macOS descendants",
+    "automatic retirement remains disabled"
+  ]
+}

@@ -25,17 +25,21 @@ pub(super) async fn check(pane: &EditorPane, root: &Path) {
     pane.open_file(&identity).await.unwrap();
     wait_js(pane, "document.getElementById('recovery-dialog').open").await;
     let original = pane.appearance.borrow().clone();
-    for theme in ["one-dark", "github-light"] {
+    for theme in [None, Some("one-dark"), Some("github-light")] {
         let options = flowmux_config::options::Options {
-            theme: Some(theme.into()),
+            theme: theme.map(str::to_owned),
             ..Default::default()
         };
+        let theme = theme.unwrap_or("default");
         let appearance = crate::theme::ResolvedTheme::resolve(&options).editor_appearance(&options);
         let scheme = if appearance.dark { "dark" } else { "light" };
+        let background = serde_json::to_string(&appearance.background).unwrap();
+        let foreground = serde_json::to_string(&appearance.foreground).unwrap();
         pane.apply_appearance(appearance);
         wait_js(
             pane,
-            &format!("document.documentElement.style.colorScheme === '{scheme}'"),
+            // A dark-to-dark switch already matches colorScheme before its queued message arrives.
+            &format!("document.documentElement.style.colorScheme === '{scheme}' && document.documentElement.style.getPropertyValue('--ink') === {background} && document.documentElement.style.getPropertyValue('--text') === {foreground}"),
         )
         .await;
         let contrast = javascript(

@@ -1,0 +1,231 @@
+{
+  "date_kst": "2026-11-18",
+  "issue": "AR-096",
+  "source_parent": "07d1d47b989692fe96c9bb589d1db16913111ab2",
+  "old_attachment_timeout_seconds": 10,
+  "attachment_timeout_seconds": 30,
+  "successful_snapshot_write_delay_seconds": 11,
+  "expired_reservation_delay_seconds": 31,
+  "original_failure": {
+    "path": "/tmp/fm-linux-tail-20261118.log",
+    "sha256": "be69e5648c4ea74dd88bbeeb3ed75b0c7b72d84f7f5f158acd79bf8c3b872aa2",
+    "receipt": {
+      "phase": "agent-host-budget",
+      "command": [
+        "python3",
+        "scripts/test-agent-host-budget-gui.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "failed",
+      "pid": 1129214,
+      "exit_code": 1,
+      "elapsed_seconds": 86.648
+    },
+    "host_peak_kib": 1949780,
+    "third_open_elapsed_seconds": 11.836,
+    "message": "Agent view connection timed out. Close this tab and reopen it from Agents to retry."
+  },
+  "pre_fix_diagnostic_retry": {
+    "path": "/tmp/fm-seven-host-diagnostic-20261118.log",
+    "sha256": "e6ccacaceadb02ff1ba1f7e61835492c280f8d7d0974dcb0de7e1fa3c6a4ed0a",
+    "succeeded_connections": 7,
+    "observed_elapsed_range_seconds": [
+      7.606,
+      10.042
+    ],
+    "note": "A passing retry did not resolve the original failure."
+  },
+  "fixture_adjustments": "31s negative waits initially expired idle control observers at the product IPC 30s deadline. Every long wait now polls the existing execution/ownership, preserving the failure and avoiding request retries.",
+  "preserved_failed_observer_logs": {
+    "/tmp/fm-linux-attach-before-observer-fix-20261118.log": "9ad8937e7bd669ed94f63a0c94315844577325759981ba41e0091bb819aee86a",
+    "/tmp/fm-linux-attach-before-ready-observer-fix-20261118.log": "117e07b2c4b14d21111138d90b714111a8164267a3c340be35202d70c4c3e4e4"
+  },
+  "final_receipts": [
+    {
+      "phase": "agent-host",
+      "command": [
+        "python3",
+        "scripts/test-agent-host-gui.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1190020,
+      "exit_code": 0,
+      "elapsed_seconds": 143.754
+    },
+    {
+      "phase": "agent-ready",
+      "command": [
+        "python3",
+        "scripts/test-agent-ready-gui.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1194100,
+      "exit_code": 0,
+      "elapsed_seconds": 48.712
+    },
+    {
+      "phase": "agent-relay-replacement",
+      "command": [
+        "python3",
+        "scripts/test-agent-ready-gui.py",
+        "--replacement",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1195009,
+      "exit_code": 0,
+      "elapsed_seconds": 55.179
+    },
+    {
+      "phase": "agent-gui-replacement",
+      "command": [
+        "python3",
+        "scripts/test-agent-ready-gui.py",
+        "--gui-replacement",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1196314,
+      "exit_code": 0,
+      "elapsed_seconds": 100.967
+    },
+    {
+      "phase": "managed-agent-drag",
+      "command": [
+        "python3",
+        "scripts/test-agent-drag-gui.py",
+        "--managed",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1198336,
+      "exit_code": 0,
+      "elapsed_seconds": 139.717
+    },
+    {
+      "phase": "managed-agent-tearoff",
+      "command": [
+        "python3",
+        "scripts/test-agent-drag-gui.py",
+        "--managed",
+        "--tearoff",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1200174,
+      "exit_code": 0,
+      "elapsed_seconds": 10.87
+    },
+    {
+      "phase": "agent-host-budget",
+      "command": [
+        "python3",
+        "scripts/test-agent-host-budget-gui.py",
+        "--gui",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux",
+        "--cli",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmuxctl",
+        "--host",
+        "/home/junsu/dev/os/flowmux/target/debug/flowmux-daemon"
+      ],
+      "timeout_seconds": 2400.0,
+      "status": "passed",
+      "pid": 1200990,
+      "exit_code": 0,
+      "elapsed_seconds": 129.175
+    }
+  ],
+  "final_logs": {
+    "/tmp/fm-linux-attach-before-ready-observer-fix-20261118.log": "117e07b2c4b14d21111138d90b714111a8164267a3c340be35202d70c4c3e4e4",
+    "/tmp/fm-linux-attach-20261118.log": "02b077b352c04c6df94b92785f3efcf5020247fe13097e3404dbc443d4b00ea0"
+  },
+  "connections": [
+    {
+      "instance": "ab2d4fe3-beb7-4b19-82c6-80f4c03d496a",
+      "elapsed_seconds": 7.73401525898953
+    },
+    {
+      "instance": "0d44b6b1-535a-48b9-b512-dcf01eab0738",
+      "elapsed_seconds": 10.590607471007388
+    },
+    {
+      "instance": "92a1d40d-1f97-4f08-8079-035ee02dc26d",
+      "elapsed_seconds": 8.869397435017163
+    },
+    {
+      "instance": "606b05d3-484e-48dd-a36c-3e703bca8a75",
+      "elapsed_seconds": 9.132309918990359
+    },
+    {
+      "instance": "a9d727a8-3be3-478b-ba68-f870a4f1f521",
+      "elapsed_seconds": 8.466051827010233
+    },
+    {
+      "instance": "59d00be6-cc64-4bcd-970c-da9da0464e4c",
+      "elapsed_seconds": 7.798883648996707
+    },
+    {
+      "instance": "e648cc53-9766-4fd4-9160-6b45e2c42b7b",
+      "elapsed_seconds": 9.159853135992307
+    }
+  ],
+  "host_budget_measurements": [
+    "HOST_BUDGET_RSS_KIB before=43700 after=1472640 peak=1472640 executions=7 retained_transfers=6 regular_pressure_peers=60 control_pressure_peers=16",
+    "HOST_BUDGET_PEAK_KIB=1975804 executions=7 pending_frames=7 pools=[49, 16]"
+  ],
+  "binaries": {
+    "flowmux": "0a9cd596c8dec923583f6680752167ad501b342a8504809da930b4de7e1c80da",
+    "flowmuxctl": "974a0cf8b2530b0a36c439452d79063c880da81bca226feead9ac77fc7b14455",
+    "flowmux-daemon": "547ff95d0fc79451079bc1d791ec85a4fa41463a78e6a9f2f641e091e7e0d180"
+  },
+  "protected_user_gui_pid": 1663486,
+  "installed_application_replaced": false,
+  "limits": [
+    "Debug Linux isolated fixtures; no universal performance bound is claimed.",
+    "AR-006 total worst-case accounting and the previously documented medium items remain open."
+  ]
+}

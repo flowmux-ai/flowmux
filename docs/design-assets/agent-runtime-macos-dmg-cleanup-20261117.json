@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-071",
+  "status": "open",
+  "revision": "f8f149d1f55e90643a772ae1dc5fc1ae02cbd8f1",
+  "run_id": 44073400067,
+  "run_url": "https://github.com/flowmux-ai/flowmux/actions/runs/44073400067",
+  "job_id": 134006619280,
+  "artifact": {
+    "id": 14324099183,
+    "name": "macos-test-evidence",
+    "size_in_bytes": 16654
+  },
+  "failed_phase": {
+    "phase": "macos-dmg-update",
+    "command": [
+      "python3",
+      "scripts/test-update-macos-dmg.py"
+    ],
+    "timeout_seconds": 300.0,
+    "status": "failed",
+    "pid": 38822,
+    "exit_code": 1,
+    "elapsed_seconds": 88.623
+  },
+  "observed_failure": {
+    "test": "test_incomplete_or_tampered_bundle_is_never_installed",
+    "damage": "missing-cli",
+    "line": 148,
+    "assertion": "hdiutil info still contains the exact fixture image path after rejected update",
+    "prior_assertions_passed": [
+      "update rejected",
+      "existing version unchanged",
+      "running fixture processes preserved",
+      "no pending app",
+      "no retained previous app"
+    ]
+  },
+  "diagnostic_change": "Include installer stdout/stderr and matching hdiutil image metadata in the residual-image assertion; do not retry, skip or weaken the native assertion.",
+  "not_reached": [
+    "agent-unit",
+    "native",
+    "editor-recovery",
+    "session-flow"
+  ],
+  "sha256": {
+    "/tmp/fm-runtime-ci-44073400067/macos/Users/runner/work/flowmux/flowmux/target/ci/macos/macos-dmg-update.json": "b53cffffafe19f9ace88fbc8dbb9aca594e1ed71de0eba7841ea83cb18f300f7",
+    "/tmp/fm-runtime-ci-44073400067-macos-job.log": "7509bc87b3990274470da76cf94e1df890d0bc4ed9936f7e3fbf717c477ba18b",
+    "scripts/test-update-macos-dmg.py": "86972ed32094fbde0517794b0de7d98e9e00ba73808b006b5957b3c822135fe1"
+  },
+  "limitations": [
+    "The failing run did not log the updater output or residual device metadata; exact root cause is unknown.",
+    "Linux AST validation does not verify native macOS cleanup.",
+    "AR-068 and AR-069 remain open; this failure happened before their target phases.",
+    "Queued run 44075770328 uses 2fb45376 and predates these diagnostics and the shared-frame change."
+  ]
+}

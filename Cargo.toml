@@ -2,6 +2,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["vendor/alacritty_terminal"]
 # Default cargo commands select crates that do not require GTK system headers.
 default-members = [
     "crates/flowmux-core",
@@ -34,7 +35,7 @@ thiserror = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.10"
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
 chrono = { version = "0.4", features = ["serde"] }
 # Use system roots for private CAs and bundled roots when the system store
 # lacks a public CA needed by a provider endpoint.
@@ -90,6 +91,9 @@ flowmux-editor = { path = "crates/flowmux-editor" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[patch.crates-io]
+alacritty_terminal = { path = "vendor/alacritty_terminal" }
 
 # Local installs (install.sh / scripts/install-macos.sh): release-grade
 # optimization without the slow thin-LTO + single-codegen-unit passes.

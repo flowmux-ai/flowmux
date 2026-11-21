@@ -22,6 +22,13 @@ pub struct InstanceLock {
     path: PathBuf,
 }
 
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        // fork/dup copies must not keep the lock after this guard's lifetime.
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
 impl InstanceLock {
     /// Path of the lock file. Exposed for diagnostics/logging only.
     pub fn path(&self) -> &std::path::Path {
@@ -39,7 +46,7 @@ fn lock_path_for_state(state_path: &Path) -> PathBuf {
     state_path.with_file_name("state.lock")
 }
 
-pub(crate) fn acquire_for_state(state_path: &Path) -> Result<InstanceLock, StateError> {
+fn open_for_state(state_path: &Path) -> Result<InstanceLock, StateError> {
     let path = lock_path_for_state(state_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -50,8 +57,27 @@ pub(crate) fn acquire_for_state(state_path: &Path) -> Result<InstanceLock, State
         .create(true)
         .truncate(false)
         .open(&path)?;
-    file.lock_exclusive()?;
     Ok(InstanceLock { _file: file, path })
+}
+
+pub(crate) fn acquire_for_state(state_path: &Path) -> Result<InstanceLock, StateError> {
+    let lock = open_for_state(state_path)?;
+    lock._file.lock_exclusive()?;
+    Ok(lock)
+}
+
+// Agent view operations run on GUI/Host event loops; another save must not stall them.
+// A save holds the lock for milliseconds, so wait briefly instead of failing the move.
+pub(crate) fn try_acquire_for_state(state_path: &Path) -> Result<InstanceLock, StateError> {
+    let lock = open_for_state(state_path)?;
+    for _ in 0..5 {
+        if lock._file.try_lock_exclusive().is_ok() {
+            return Ok(lock);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    lock._file.try_lock_exclusive()?;
+    Ok(lock)
 }
 
 /// Try to take the exclusive `state.json` lock.
@@ -126,6 +152,27 @@ mod tests {
                 "second acquirer must observe lock contention"
             );
         });
+    }
+
+    #[test]
+    fn inherited_descriptor_does_not_extend_guard_lifetime() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let lock = acquire_for_state(&path).unwrap();
+        // dup and fork both share the open file description that owns flock.
+        let inherited = lock._file.try_clone().unwrap();
+        drop(lock);
+        let probe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(lock_path_for_state(&path))
+            .unwrap();
+        let result = probe.try_lock_exclusive();
+        drop(inherited);
+        assert!(
+            result.is_ok(),
+            "descriptor retained the expired guard: {result:?}"
+        );
     }
 
     #[test]

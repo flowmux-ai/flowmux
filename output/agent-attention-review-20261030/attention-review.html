@@ -1,0 +1,129 @@
+<div id="fm-attention-review" aria-label="Flowmux 주의 요청 디자인">
+  <style>
+    #fm-attention-review { color-scheme: light dark; --fm-bg:light-dark(#fafafa,#1b1c1e); --fm-panel:light-dark(#f0f1f3,#242629); --fm-text:light-dark(#202329,#eceef2); --fm-muted:light-dark(#626873,#a5acb7); --fm-line:light-dark(#d6d9df,#3c4048); --fm-select:light-dark(#e1e8f2,#354252); --fm-warn:light-dark(#865400,#edbd68); --fm-warn-bg:light-dark(#fff2d6,#433622); --fm-blue:light-dark(#285fac,#92b7ed); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--fm-text); }
+    #fm-attention-review * { box-sizing:border-box; }
+    #fm-attention-review .fm-window { background:var(--fm-bg); border:1px solid var(--fm-line); border-radius:12px; overflow:hidden; }
+    #fm-attention-review .fm-chrome { padding:14px 110px 14px 18px; background:var(--fm-panel); border-bottom:1px solid var(--fm-line); display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+    #fm-attention-review .fm-chrome strong { font-weight:600; }
+    #fm-attention-review .fm-small { font-size:12px; color:var(--fm-muted); }
+    #fm-attention-review .fm-layout { display:grid; grid-template-columns:270px 1fr; min-height:420px; }
+    #fm-attention-review .fm-sidebar { background:var(--fm-panel); padding:18px 12px; border-right:1px solid var(--fm-line); }
+    #fm-attention-review .fm-section { display:flex; justify-content:space-between; align-items:center; padding:0 7px; margin-bottom:12px; font-weight:600; }
+    #fm-attention-review .fm-heading { font-size:12px; color:var(--fm-muted); margin:18px 7px 7px; }
+    #fm-attention-review .fm-row { display:block; width:100%; text-align:left; background:transparent; color:var(--fm-text); border:1px solid transparent; border-radius:7px; padding:10px; margin-bottom:5px; font:inherit; }
+    #fm-attention-review .fm-row[aria-pressed="true"] { background:var(--fm-select); }
+    #fm-attention-review .fm-row-title { display:flex; gap:7px; align-items:center; font-weight:500; }
+    #fm-attention-review .fm-row-detail { display:block; padding-left:21px; font-size:12px; margin-top:3px; color:var(--fm-muted); }
+    #fm-attention-review .fm-warning { color:var(--fm-warn); }
+    #fm-attention-review .fm-unread { width:6px; height:6px; border-radius:50%; background:var(--fm-blue); margin-left:auto; flex:none; }
+    #fm-attention-review .fm-badge { background:var(--fm-warn-bg); color:var(--fm-warn); padding:2px 7px; border-radius:5px; font-size:12px; font-weight:500; }
+    #fm-attention-review .fm-main { padding:24px; min-width:0; }
+    #fm-attention-review .fm-title { font-weight:600; margin-bottom:4px; }
+    #fm-attention-review .fm-terminal { font:13px/1.8 ui-monospace,SFMono-Regular,monospace; white-space:pre-wrap; overflow-wrap:anywhere; margin:22px 0; min-height:116px; }
+    #fm-attention-review .fm-summary { padding:12px; background:var(--fm-panel); border-radius:6px; }
+    #fm-attention-review details { margin-top:16px; font-size:12px; color:var(--fm-muted); }
+    #fm-attention-review summary { color:var(--fm-text); }
+    #fm-attention-review dl { display:grid; grid-template-columns:70px 1fr; gap:5px 12px; }
+    #fm-attention-review dt,#fm-attention-review dd { margin:0; overflow-wrap:anywhere; }
+    #fm-attention-review .fm-footer { padding:10px 18px; border-top:1px solid var(--fm-line); color:var(--fm-muted); font-size:12px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; }
+    #fm-attention-review .fm-popover-area { min-height:420px; padding:22px; display:grid; grid-template-columns:1fr 320px; align-items:start; gap:22px; }
+    #fm-attention-review .fm-popover { border:1px solid var(--fm-line); background:var(--fm-panel); border-radius:10px; padding:15px 10px; }
+    #fm-attention-review .fm-tabs { display:flex; gap:12px; border-bottom:1px solid var(--fm-line); padding:0 6px 10px; margin-bottom:10px; }
+    #fm-attention-review .fm-selected-tab { font-weight:600; }
+    @media(max-width:650px) { #fm-attention-review .fm-layout,#fm-attention-review .fm-popover-area { grid-template-columns:1fr; } #fm-attention-review .fm-sidebar { border-right:0; border-bottom:1px solid var(--fm-line); } #fm-attention-review .fm-main { padding:18px; } #fm-attention-review .fm-popover-area { padding:16px; } #fm-attention-review .fm-chrome { padding-right:100px; } }
+  </style>
+  <div class="viz-carousel" aria-label="주의 요청 배치안" data-previous-label="이전 디자인" data-next-label="다음 디자인">
+    <section data-variant="사이드바 우선" aria-label="사이드바 우선 디자인">
+      <div class="fm-window" data-design="sidebar">
+        <div class="fm-chrome"><strong>Flowmux</strong><span>결제 개선</span><span class="fm-small" data-unread-count>안 읽음 2</span></div>
+        <div class="fm-layout">
+          <aside class="fm-sidebar" aria-label="에이전트 목록">
+            <div class="fm-section">Agents <span class="fm-badge" data-pending-count>조치 1</span></div>
+            <div class="fm-heading" data-request-section>조치 필요</div>
+            <button class="fm-row cursor-interaction" type="button" data-agent="permission" aria-pressed="false"><span class="fm-row-title"><span class="fm-warning" data-request-icon>△</span> Claude · 결제 API <span class="fm-unread" data-dot="permission" aria-label="안 읽음"></span></span><span class="fm-row-detail fm-warning" data-permission-label>승인 필요 · 2분 대기</span></button>
+            <div class="fm-heading">결과 확인</div>
+            <button class="fm-row cursor-interaction" type="button" data-agent="finished" aria-pressed="false"><span class="fm-row-title">◇ Codex · 테스트 정리 <span class="fm-unread" data-dot="finished" aria-label="안 읽음"></span></span><span class="fm-row-detail">응답 완료 · 결과 확인</span></button>
+            <div class="fm-heading">진행 중</div>
+            <div class="fm-row"><span class="fm-row-title">◌ Claude · 문서 갱신</span><span class="fm-row-detail">파일 수정 중 · 43초</span></div>
+          </aside>
+          <main class="fm-main" aria-live="polite"><div class="fm-title" data-title>에이전트를 선택하세요</div><div class="fm-small" data-location>결제 개선 / 터미널</div><div class="fm-terminal" data-terminal>❯ 결제 오류 처리를 개선해줘
+
+에이전트가 작업하고 있습니다.</div><div class="fm-summary" data-summary>조치가 필요한 요청 1개</div><details><summary>상태 근거</summary><dl><dt>판정</dt><dd data-evidence>hook 확인</dd><dt>마지막 수신</dt><dd>2분 전</dd><dt>대기 범위</dt><dd>현재 세션 · 현재 turn · 요청 p17</dd><dt>연결</dt><dd>연결됨</dd></dl></details></main>
+        </div>
+        <div class="fm-footer"><span data-footer>요청을 읽어도 승인 대기는 유지됩니다.</span><span>설계 시안 · 예시 데이터</span></div>
+      </div>
+    </section>
+    <section data-variant="알림 팝오버 중심" aria-label="알림 팝오버 중심 디자인" hidden>
+      <div class="fm-window" data-design="popover">
+        <div class="fm-chrome"><strong>Flowmux</strong><span>결제 개선</span><span class="fm-small" data-unread-count>안 읽음 2</span></div>
+        <div class="fm-popover-area">
+          <main aria-live="polite"><div class="fm-title" data-title>결제 API</div><div class="fm-small" data-location>결제 개선 / 터미널</div><div class="fm-terminal" data-terminal>❯ 결제 오류 처리를 개선해줘
+
+에이전트가 작업하고 있습니다.</div><div class="fm-summary" data-summary>조치가 필요한 요청 1개</div></main>
+          <aside class="fm-popover" aria-label="알림 팝오버"><div class="fm-tabs"><span class="fm-selected-tab" data-pending-count>조치 1</span><span class="fm-small">알림 이력</span></div><button class="fm-row cursor-interaction" type="button" data-agent="permission" aria-pressed="false"><span class="fm-row-title"><span class="fm-warning" data-request-icon>△</span> Claude · 결제 API <span class="fm-unread" data-dot="permission" aria-label="안 읽음"></span></span><span class="fm-row-detail" data-permission-label>승인 필요 · 2분 대기</span></button><button class="fm-row cursor-interaction" type="button" data-agent="finished" aria-pressed="false"><span class="fm-row-title">◇ Codex · 테스트 정리 <span class="fm-unread" data-dot="finished" aria-label="안 읽음"></span></span><span class="fm-row-detail">응답 완료 · 결과 확인</span></button><details><summary>상태 근거</summary><dl><dt>판정</dt><dd data-evidence>hook 확인</dd><dt>대기 범위</dt><dd>현재 세션 · 현재 turn · 요청 p17</dd><dt>연결</dt><dd>연결됨</dd></dl></details></aside>
+        </div>
+        <div class="fm-footer"><span data-footer>요청을 읽어도 승인 대기는 유지됩니다.</span><span>설계 시안 · 예시 데이터</span></div>
+      </div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('fm-attention-review');
+      const saved = window.openai?.widgetState?.privateContent;
+      const states = [];
+      root.querySelectorAll('[data-design]').forEach(panel => {
+        const key = panel.dataset.design;
+        const previous = saved?.[key];
+        const state = { selected: '', permissionRead: false, finishedRead: false, resolved: false, evidence: 'hook', ...(previous || {}) };
+        states.push({ key, state });
+        const setText = (selector, value) => panel.querySelectorAll(selector).forEach(el => el.textContent = value);
+        function render() {
+          const unread = Number(!state.permissionRead) + Number(!state.finishedRead);
+          setText('[data-unread-count]', `안 읽음 ${unread}`);
+          setText('[data-pending-count]', `조치 ${state.resolved ? 0 : 1}`);
+          setText('[data-request-section]', state.resolved ? '최근 처리' : '조치 필요');
+          setText('[data-request-icon]', state.resolved ? '◌' : '△');
+          panel.querySelectorAll('[data-request-icon]').forEach(el => el.classList.toggle('fm-warning', !state.resolved));
+          setText('[data-permission-label]', state.resolved ? '처리됨 · 작업 재개' : '승인 필요 · 2분 대기');
+          setText('[data-evidence]', state.evidence === 'hook' ? 'hook 확인' : '화면 추정');
+          panel.querySelector('[data-dot="permission"]').style.visibility = state.permissionRead ? 'hidden' : 'visible';
+          panel.querySelector('[data-dot="finished"]').style.visibility = state.finishedRead ? 'hidden' : 'visible';
+          panel.querySelectorAll('[data-agent]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.agent === state.selected)));
+          if (state.selected === 'permission') {
+            setText('[data-title]', 'Claude · 결제 API');
+            setText('[data-location]', '결제 개선 / API / Claude');
+            setText('[data-terminal]', state.resolved ? '❯ 결제 오류 처리를 개선해줘\n\n승인된 도구를 실행하고 있습니다…' : '❯ 결제 오류 처리를 개선해줘\n\n요청: src/payment.ts 파일 수정\n에이전트 터미널에서 승인을 기다리고 있습니다.');
+            setText('[data-summary]', state.resolved ? '작업 재개 · 미해결 요청 0개' : `승인 필요 · ${state.permissionRead ? '읽음' : '안 읽음'} · 미해결 요청 1개`);
+          } else if (state.selected === 'finished') {
+            setText('[data-title]', 'Codex · 테스트 정리');
+            setText('[data-location]', '결제 개선 / Tests / Codex');
+            setText('[data-terminal]', '테스트 변경안을 정리했습니다.\n\n› 다음 요청을 입력하세요');
+            setText('[data-summary]', '응답 완료 · 결과 읽음');
+          }
+          setText('[data-footer]', state.resolved ? '일치하는 요청의 처리 신호를 받은 상태입니다.' : '요청을 읽어도 승인 대기는 유지됩니다.');
+        }
+        function persist() {
+          const privateContent = Object.fromEntries(states.map(item => [item.key, item.state]));
+          window.openai?.setWidgetState?.({ modelContent: { designPreview: key, selected: state.selected, requestResolved: state.resolved }, privateContent })?.catch(() => {});
+        }
+        panel.querySelectorAll('[data-agent]').forEach(button => button.addEventListener('click', () => {
+          state.selected = button.dataset.agent;
+          if (state.selected === 'permission') state.permissionRead = true;
+          if (state.selected === 'finished') state.finishedRead = true;
+          render(); persist();
+        }));
+        render();
+        if (globalThis.Tweak) {
+          const tweak = new Tweak({ container: panel, onChange: render });
+          tweak.addToggle(state, 'permissionRead', { label: '요청을 읽은 상태' });
+          tweak.addToggle(state, 'resolved', { label: '요청 처리 신호 수신' });
+          tweak.addSelect(state, 'evidence', { label: '판정 근거', options: [{ label: 'hook 확인', value: 'hook' }, { label: '화면 추정', value: 'screen' }] });
+        }
+        window.addEventListener('openai:set_globals', event => {
+          const next = event.detail?.globals?.widgetState?.privateContent?.[key];
+          if (next) { Object.assign(state, next); render(); }
+        });
+      });
+    })();
+  </script>
+</div>

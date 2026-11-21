@@ -127,6 +127,15 @@ pub fn runtime_socket_for_pid(pid: u32) -> PathBuf {
     }
 }
 
+/// Stable managed-agent endpoint, independent of the current GUI pointer.
+pub fn agent_host_socket() -> PathBuf {
+    runtime_socket().with_file_name(if base_runtime_dir().is_some() || is_flatpak_sandbox() {
+        "flowmux-agent-host.sock".to_owned()
+    } else {
+        format!("flowmux-agent-host-{}.sock", whoami())
+    })
+}
+
 /// `$HOME/.config/opencode/` (or analogous) bypassing the
 /// flatpak-private `XDG_CONFIG_HOME` so the hook installer drops
 /// agent plugin files where the host-side agent actually reads them.
@@ -153,6 +162,7 @@ mod tests {
 
     #[test]
     fn runtime_socket_for_pid_is_distinct_per_process() {
+        let _g = crate::test_env::env_lock().lock().unwrap();
         let a = runtime_socket_for_pid(1234);
         let b = runtime_socket_for_pid(5678);
         assert_ne!(a, b, "two GUIs must bind two different sockets");
@@ -162,19 +172,23 @@ mod tests {
 
     #[test]
     fn runtime_socket_for_pid_does_not_collide_with_legacy_default() {
+        let _g = crate::test_env::env_lock().lock().unwrap();
         // The fallback `flowmux.sock` path is reserved for manual
         // CLI invocations from outside any flowmux PTY. Per-PID
         // sockets must never accidentally point at it.
         let pid = runtime_socket_for_pid(std::process::id());
         let legacy = runtime_socket();
         assert_ne!(pid, legacy);
+        let host = agent_host_socket();
+        assert_ne!(host, pid);
+        assert_ne!(host, legacy);
+        assert_eq!(host.parent(), legacy.parent());
     }
 
     #[test]
     fn runtime_socket_for_pid_uses_runtime_dir_when_available() {
-        // We can't force XDG_RUNTIME_DIR off in a parallel test
-        // without affecting other tests, so just confirm the path
-        // ends with the expected file name shape.
+        let _g = crate::test_env::env_lock().lock().unwrap();
+        // Accept either the configured runtime directory or the fallback name.
         let p = runtime_socket_for_pid(42);
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
         assert!(
@@ -212,6 +226,7 @@ mod tests {
 
     #[test]
     fn state_dir_is_available_on_non_xdg_platforms() {
+        let _g = crate::test_env::env_lock().lock().unwrap();
         let dir = state_dir().expect("state dir should fall back to data dir when needed");
         assert!(dir.ends_with("flowmux"));
     }

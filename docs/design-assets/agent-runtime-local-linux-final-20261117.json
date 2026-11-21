@@ -1,0 +1,739 @@
+{
+  "verified_at_utc": "2026-11-17T14:06:02.188523+00:00",
+  "source": "e2c99f8531eeda68c6b2ec17ca251c7ca33d47d2",
+  "base": "82554c97e3fc98645fc77cacb3eb65d3742bb1cf",
+  "product_source": "3f653299 (no changes to crates/vendor/Cargo manifests since this commit)",
+  "scope": "Local Linux x86_64; isolated X11/Xvfb, D-Bus, XDG, runtime and Host; RUST_TEST_THREADS=4; G_DEBUG=fatal-criticals. No user GUI restart or installation replacement.",
+  "coverage": {
+    "expected_phase_count": 51,
+    "passed_phase_count": 51,
+    "missing": [],
+    "single_monolithic_gate_passed": false,
+    "note": "Initial gate failed at Session Flow; continuation failed at SSH prerequisites. Passing coverage combines only phases in each run tests.jsonl, the fixed Session Flow targeted execution and the SSH targeted execution. Stale JSON outside each ledger is excluded. Final AR-083/084 change only orchestration budget and generated receipt cleanup, verified by the complete runner suite."
+  },
+  "initial_command": "RUST_TEST_THREADS=4 bash scripts/test-ci.sh linux extended",
+  "initial_log": {
+    "path": "/tmp/fm-runtime-linux-full-20261117.log",
+    "sha256": "89b3de3ac5928f93cfd6a204204d51b1d23aa437baa931aecbe24882348bcca5"
+  },
+  "continuation_command": "RUST_TEST_THREADS=4 bash /tmp/fm-runtime-linux-tail-gate-20261117.sh linux extended",
+  "continuation_log": {
+    "path": "/tmp/fm-runtime-linux-tail-20261117.log",
+    "sha256": "ba231a6b9822d60f2d0397af081fe6c615c7afa4d03e1540c2839485614b2aa0"
+  },
+  "continuation_scripts": [
+    {
+      "path": "/tmp/fm-runtime-linux-tail-20261117.sh",
+      "sha256": "9c863954d3faafcacdbab5b153292d0f0fa5f4bffb3c014a0b55f98a8bc73324"
+    },
+    {
+      "path": "/tmp/fm-runtime-linux-tail-gate-20261117.sh",
+      "sha256": "6059a8a2bc9f17a598776983cb1859ac577a96bc250939a7df137e0aeba01c98"
+    }
+  ],
+  "targeted_and_extra_command": "bash /tmp/fm-runtime-linux-final-checks-20261117.sh",
+  "targeted_and_extra_script": {
+    "path": "/tmp/fm-runtime-linux-final-checks-20261117.sh",
+    "sha256": "2763b4878962bdef9f45a2bba7cd309490149c274aea3582695e06ecf45d8863"
+  },
+  "targeted_and_extra_log": {
+    "path": "/tmp/fm-runtime-linux-final-checks-20261117.log",
+    "sha256": "fd113ca94808eaf49d7b7ee328559746413317dc5daf84955c8c3e962baf7dc0"
+  },
+  "original_failures_preserved": [
+    {
+      "phase": "session-flow",
+      "run": "initial",
+      "status": "failed",
+      "exit_code": 1,
+      "elapsed_seconds": 95.266,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/session-flow.json",
+        "sha256": "0ec84b79f49f54645442d832f9fb4d145017cbc147b2d4328a84e426c690fc45"
+      }
+    },
+    {
+      "phase": "ssh-workspace",
+      "run": "continuation",
+      "status": "failed",
+      "exit_code": 2,
+      "elapsed_seconds": 0.107,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/ssh-workspace.json",
+        "sha256": "800a37f5d283852a9ec1f2945f5619ad8ba9513d8f2dcec674f4c957d5de0a4c"
+      }
+    }
+  ],
+  "phases": [
+    {
+      "phase": "gui-harness",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.413,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/gui-harness.json",
+        "sha256": "b9e8da31c66106cf4b0edc2268f2811a1c279f7c02576d94d71d1a04cfadea4b"
+      }
+    },
+    {
+      "phase": "ssh-fixture-unit",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.615,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/ssh-fixture-unit.json",
+        "sha256": "fec9acba2ebe6f977f2509d056f524d50ba13220d0192d716d9cb03219b7f31e"
+      }
+    },
+    {
+      "phase": "build",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 44.29,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/build.json",
+        "sha256": "f8e5d078423d4ebab82aa12bdec3e771e0be1fbccda192b2f94afcce7d59a708"
+      }
+    },
+    {
+      "phase": "workspace",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 541.616,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/workspace.json",
+        "sha256": "eee92e0bedb104aa3cc0609867a3012a99db5229fbd77c9b2d19ae35084efdea"
+      }
+    },
+    {
+      "phase": "gtk-icon-preload",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 8.99,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/gtk-icon-preload.json",
+        "sha256": "6cb59098227851bb35ec1ada318a8105d7e61a9e2293e7badb3c66af3bb83453"
+      }
+    },
+    {
+      "phase": "browser-control",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 184.944,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/browser-control.json",
+        "sha256": "05bc9ad7ac92052de6405a0fe80592ea0e9df396537dc403f33a81b943f41129"
+      }
+    },
+    {
+      "phase": "browser-source",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 4.941,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/browser-source.json",
+        "sha256": "7dd364367869115523309595050b39be0cb8747478966f8b1f17930f6b1100e6"
+      }
+    },
+    {
+      "phase": "browser-bookmarks",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 44.987,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/browser-bookmarks.json",
+        "sha256": "248be96174573282c958999b3bac7f6fc0bdb43484a96e88b0e3bc36e63117a9"
+      }
+    },
+    {
+      "phase": "browser-feedback",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 69.84,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/browser-feedback.json",
+        "sha256": "ff58342048ae1d6c51f2737f6a459ee296d48678fa18d36032eec313b782d9ca"
+      }
+    },
+    {
+      "phase": "browser-import",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 354.3,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/browser-import.json",
+        "sha256": "67917f54216644452c79617db235d1247335e77555fd01fd49ee21a5f36e21f9"
+      }
+    },
+    {
+      "phase": "skills",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 46.004,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/skills.json",
+        "sha256": "03a7de5fba4733ed70784c499e3b18fb32a71d5237e1b35f8bd4f333616ddfae"
+      }
+    },
+    {
+      "phase": "notifications",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 44.301,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/notifications.json",
+        "sha256": "840e7696d49039969dfbdb08d11e34516d94c15a1b6f23aee6747c0632399cde"
+      }
+    },
+    {
+      "phase": "team-pingpong",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 43.469,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/team-pingpong.json",
+        "sha256": "c45a62992db15c7ca1e16306a1f7d9b73f6278c501436b4035d383085082bcd4"
+      }
+    },
+    {
+      "phase": "team-recovery",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 218.36,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/team-recovery.json",
+        "sha256": "9ad48b49e840ecc897dd55c1e8c4ee7110c4364e2c334a7f26db42f7283bd9b1"
+      }
+    },
+    {
+      "phase": "team-reuse",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 50.053,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/team-reuse.json",
+        "sha256": "8fd383014dd3c3446016d66e28e7214927b1ce78fc642f452ee32d715cd6369f"
+      }
+    },
+    {
+      "phase": "team-usage",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 463.978,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/team-usage.json",
+        "sha256": "2f8963a3a311901f1d89c470dadac16f58e228a2bd7f2786ceea894c56eb909c"
+      }
+    },
+    {
+      "phase": "session-save",
+      "run": "initial",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 9.173,
+      "receipt": {
+        "path": "/tmp/fm-runtime-linux-firstgate-report-20261117/tests/session-save.json",
+        "sha256": "e1137e75898ab0cc8552190eff6118c953303caf8b23780d8797238ce200e768"
+      }
+    },
+    {
+      "phase": "session-flow",
+      "run": "targeted after AR-081 fixture fix",
+      "status": "passed",
+      "exit_code": 0,
+      "exit_evidence": "Tool execution result from the previous continuation; this log has no exit-code marker.",
+      "pass_count": 6,
+      "gui_span_lower_bound_seconds": 69.625143,
+      "log": {
+        "path": "/tmp/fm-runtime-session-flow-local-fixed.log",
+        "sha256": "be33fe0586d23b60d087db61d5cb857ceda184860227a3b5b42448f458ca58b1"
+      },
+      "gui_log": {
+        "path": "/tmp/fm-gui-o1dvs_r8/session-flow.log",
+        "sha256": "334c7d9bf21c0565234049a9fb33e53ff3a9f1d3e5aec36bdb941a9e73fe2887"
+      }
+    },
+    {
+      "phase": "managed-session-flow",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 33.539,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/managed-session-flow.json",
+        "sha256": "88a50ec9f91f6fc1eb9aa79818707a9bbb31fd4a8bd7f3d395d6bbbda21815bd"
+      }
+    },
+    {
+      "phase": "pty-spawn-failure",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 2.856,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/pty-spawn-failure.json",
+        "sha256": "5a2e1efed03cc54b27a2d660f6279b08024cde72695fca9b64f0ee8e1fc23e5d"
+      }
+    },
+    {
+      "phase": "tab-windows",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 113.503,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/tab-windows.json",
+        "sha256": "020313a610ee4cc41d4e39193028b101f666510f192f69c3eaf846fb7c42f24f"
+      }
+    },
+    {
+      "phase": "agent-host",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 93.454,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-host.json",
+        "sha256": "7d613574a148df73e2606874d564f81fedd769bca50fb25c5317e8eb1dd54718"
+      }
+    },
+    {
+      "phase": "agent-terminal-budget",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 46.594,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-terminal-budget.json",
+        "sha256": "41f213ecc3772be6a50a827466d15fed23d242eb0f3ee7cec348a140647db32c"
+      }
+    },
+    {
+      "phase": "agent-gui-response-limit",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 5.544,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-gui-response-limit.json",
+        "sha256": "edbcf630ad9e7aff8da455ddcd935c05fbd38beb9183fff02938137c466e00f8"
+      }
+    },
+    {
+      "phase": "agent-containment",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 7.097,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-containment.json",
+        "sha256": "1de0a7f012c6b642f2af483891531785e70df7c909edf94b475fb0e4156f5e2c"
+      }
+    },
+    {
+      "phase": "agent-root-exit",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 4.125,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-root-exit.json",
+        "sha256": "d665e13727c2fb4acbc4e6e667ba57295bb9ac55071c7b852e89364603ad8796"
+      }
+    },
+    {
+      "phase": "agent-ready",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 16.483,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-ready.json",
+        "sha256": "59ba8a57f32c94521d10885826e14e060c36c2ceed5e274b1168fc458aecd934"
+      }
+    },
+    {
+      "phase": "agent-relay-replacement",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 20.731,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-relay-replacement.json",
+        "sha256": "b667871c576fc2cc8a993ceca7decc0173ee5700099b3b9cee7f31663a6a3da0"
+      }
+    },
+    {
+      "phase": "agent-gui-replacement",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 48.986,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-gui-replacement.json",
+        "sha256": "5705fe41141592b93c19cae4b6231a5b5565b5f05b2caa48e86e5fa62ae78e1a"
+      }
+    },
+    {
+      "phase": "agent-binding-restore",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 7.426,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-binding-restore.json",
+        "sha256": "4df49d7070b9649ba09511250b78d6fd99e158b46ae1eb63ca5abb387bc96866"
+      }
+    },
+    {
+      "phase": "agent-background-binding-restore",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 7.931,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-background-binding-restore.json",
+        "sha256": "eb344beac01653fdb99d46b6cc2c43ac5f804ced1299215147fc26f45b9e12c5"
+      }
+    },
+    {
+      "phase": "agent-drag",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 14.575,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-drag.json",
+        "sha256": "3a9928bf186a25598e1a6f6375ae87dc4c658e9e5e9f8c04529ea8ca47f161ef"
+      }
+    },
+    {
+      "phase": "managed-agent-drag",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 141.552,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/managed-agent-drag.json",
+        "sha256": "6855bd7dba7b8eb34095697a6b1531cc00c636fb4974852bac34b45cb899ed0b"
+      }
+    },
+    {
+      "phase": "managed-agent-click-load",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 20.808,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/managed-agent-click-load.json",
+        "sha256": "14a6dd2c4870310b46b371954b99e5aa88b285676b7498aa383dcaa3e07fa22c"
+      }
+    },
+    {
+      "phase": "managed-agent-tearoff",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 10.971,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/managed-agent-tearoff.json",
+        "sha256": "95f5b888f4a7fae80be2b51f27b9f41630f5a425958979cbb2b8eeadcd04c148"
+      }
+    },
+    {
+      "phase": "agent-native-hooks",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 115.657,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-native-hooks.json",
+        "sha256": "e94aa2dbc5dda71d431052285794e9db326e2633378fa7eb16f75346fb751db6"
+      }
+    },
+    {
+      "phase": "agent-session-resume",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 29.531,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-session-resume.json",
+        "sha256": "03f79e7cae9cd60ada1b99a29d8c0c8b5d94c12b6ed30c328e62c5b07baf44a3"
+      }
+    },
+    {
+      "phase": "new-agent",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 23.492,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/new-agent.json",
+        "sha256": "a6d3a9d43cad5eb9e276b352649a57c0ab299f4adcf290a44d1b08c6bf377fe3"
+      }
+    },
+    {
+      "phase": "agent-termination",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 52.594,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-termination.json",
+        "sha256": "e327050ccc7bc11e5bdc31ff5d3ebac8e3fb72991595a1219de11d894a1db0b5"
+      }
+    },
+    {
+      "phase": "agent-cli-controls",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 28.666,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/agent-cli-controls.json",
+        "sha256": "99c4cc7e82feeb0793b53f2096961cf72158b640c8a86dcd4aeaf30ae985d085"
+      }
+    },
+    {
+      "phase": "terminal-read-screen",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 9.71,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/terminal-read-screen.json",
+        "sha256": "b2aad4159d8c1e5627caef151dbe82344d12a98e330e7c7512e6e24f2abd796c"
+      }
+    },
+    {
+      "phase": "terminal-load",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 23.209,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/terminal-load.json",
+        "sha256": "e7ae30bed21bf7c33b6fa5a5aba09391cf2ca473d452e165130b966bd3dd09b1"
+      }
+    },
+    {
+      "phase": "terminal-image-links",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 87.081,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/terminal-image-links.json",
+        "sha256": "21cd9600c009344e99a65f0c290d3ba68fcb0bc4545f3f5db0142bc9da399442"
+      }
+    },
+    {
+      "phase": "ipc-recovery",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 5.695,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/ipc-recovery.json",
+        "sha256": "708053093f8937a29bc64d7d1e009d9bc8b56701be9861bce433f93c94705984"
+      }
+    },
+    {
+      "phase": "polling-delay",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 15.74,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/polling-delay.json",
+        "sha256": "c982b36bc3f1cae3b48f289d741d8ddb0f9f23306491aa6834c14abb058fba17"
+      }
+    },
+    {
+      "phase": "idle-stability-unit",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 0.208,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/idle-stability-unit.json",
+        "sha256": "00dff786f21bc8e5a75d508aac1061a83a99f34bcfe5d6d683f0e20a620972c3"
+      }
+    },
+    {
+      "phase": "idle-stability",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 119.888,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/idle-stability.json",
+        "sha256": "d31822bbca8f6600c042201768ae8b94df58ef2cc1be6b40b943aea08e9a46fe"
+      }
+    },
+    {
+      "phase": "editor-io",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 27.566,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/editor-io.json",
+        "sha256": "3add55732cafd791676dd42cf89994cd91e9a2bd74d1174d6ec1dab510a42c53"
+      }
+    },
+    {
+      "phase": "editor-renderer",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 24.728,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/editor-renderer.json",
+        "sha256": "436364f6ef1148bcad4811d9d51906b2f836094cb516e63359a7c6d32de4f0ba"
+      }
+    },
+    {
+      "phase": "lazy-restore",
+      "run": "continuation",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 9.206,
+      "receipt": {
+        "path": "target/ci/linux-tail/tests/lazy-restore.json",
+        "sha256": "819258363ce48252f6dc09a7d9b990788061b8eff1fd293ee3ff21ad5c1eb51e"
+      }
+    },
+    {
+      "phase": "ssh-workspace",
+      "run": "targeted SSH with extracted package executables",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_seconds": 253.837,
+      "receipt": {
+        "path": "target/ci/linux-local-final/ssh-workspace.json",
+        "sha256": "0eb3ac514e44806c28a8a5eff6b370a348ff0bc686ebc38734d407d3a008f1c8"
+      }
+    }
+  ],
+  "extra_checks": [
+    {
+      "phase": "headless-stress",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "flowmux-core",
+        "-p",
+        "flowmux-daemon",
+        "-p",
+        "flowmux-notify",
+        "--locked",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "timeout_seconds": 900.0,
+      "status": "passed",
+      "pid": 535146,
+      "exit_code": 0,
+      "elapsed_seconds": 32.046,
+      "receipt": {
+        "path": "target/ci/linux-local-final/headless-stress.json",
+        "sha256": "2343939fbb970698fc978054a3297d4173f797b163c4d37cb6d795b4cc6408ce"
+      }
+    },
+    {
+      "phase": "editor-web",
+      "command": [
+        "bash",
+        "-c",
+        "cd editor/flowmux-editor-web && npm test && npm run build && npm run verify && git diff --exit-code -- dist"
+      ],
+      "timeout_seconds": 300.0,
+      "status": "passed",
+      "pid": 536234,
+      "exit_code": 0,
+      "elapsed_seconds": 7.053,
+      "receipt": {
+        "path": "target/ci/linux-local-final/editor-web.json",
+        "sha256": "1c5e1beb4ef012636405d4ff5518bda5518d059e3de5776538592b26e84b3f55"
+      }
+    }
+  ],
+  "runner": {
+    "status": "passed",
+    "exit_code": 0,
+    "test_count": 28,
+    "skipped": 1,
+    "log": {
+      "path": "/tmp/fm-runtime-linux-final-runner-20261117.log",
+      "sha256": "f87c786a84c3bcf4c34836f58c12ea1ac37b63c9ecec702b4cad858e319152bb"
+    }
+  },
+  "clippy": {
+    "status": "passed",
+    "scope": "workspace all-targets, -D warnings at product source 3f653299; later edits are test scripts/docs",
+    "log": {
+      "path": "/tmp/fm-detached-focus-clippy.log",
+      "sha256": "d0842493cc55e9fabff2d37f03fbf323fb22b9dfb12b60bf3c3f184ceb05b374"
+    }
+  },
+  "duration": {
+    "measured_phase_seconds_excluding_targeted_session_flow": 3553.257,
+    "session_flow_gui_span_lower_bound_seconds": 69.625143,
+    "combined_lower_bound_seconds": 3622.882,
+    "old_gate_budget_seconds": 3600,
+    "new_gate_budget_seconds": 4200,
+    "outer_step_seconds": 5400,
+    "prephase_budget_seconds": 960
+  },
+  "binaries": {
+    "target/debug/flowmux": {
+      "path": "target/debug/flowmux",
+      "sha256": "1cd3a858dec350dd4e3c29a01c3454cef2300cbdda1ae380a2e1d7d026d0b8af"
+    },
+    "target/debug/flowmuxctl": {
+      "path": "target/debug/flowmuxctl",
+      "sha256": "a1598580c977e2903fe7df572c80944c5b11d3efcdfc1fe79fa7de9a4f75d418"
+    }
+  },
+  "host_binary_after_extra_checks": {
+    "path": "target/debug/flowmux-daemon",
+    "sha256": "3c2358e4e65ffe662ef56c0b2882e8317af98f9759b6f7dd51405ba3976a646d"
+  },
+  "host_hash_note": "The extra headless cargo test rebuilt the unchanged daemon source after all live phases. Its recorded hash is a post-check capture, not asserted to be the daemon hash used by the 51 live phases.",
+  "user_gui_pid_preserved": 1663486,
+  "unresolved_medium": [
+    "AR-006",
+    "AR-008",
+    "AR-010",
+    "AR-068",
+    "AR-071",
+    "AR-073"
+  ],
+  "unverified": [
+    "Current macOS gate",
+    "Current Wayland/compositor and Flatpak",
+    "Real provider 31-minute workload and atomic whole-work completion/idle shutdown contract",
+    "Intentional prolonged assertion-failure cleanup path in AR-080"
+  ],
+  "plan_complete": false
+}

@@ -22,6 +22,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -62,6 +63,33 @@ def alive(pid):
         return False
 
 
+# Run in a child process: without an accessibility bus Atspi aborts the interpreter.
+SHOWING_DIALOGS = r"""
+import json, sys
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+desktop = Atspi.get_desktop(0)
+desktop.clear_cache()
+application = next((child for child in map(desktop.get_child_at_index, range(desktop.get_child_count()))
+                    if child and child.get_process_id() == int(sys.argv[1])), None)
+dialogs, pending, seen = [], [(application, None)] if application else [], 0
+while pending and seen < 5000:
+    node, dialog = pending.pop()
+    seen += 1
+    node.clear_cache()
+    if node is not application and not node.get_state_set().contains(Atspi.StateType.SHOWING):
+        continue
+    if dialog is None and node.get_role() in (Atspi.Role.DIALOG, Atspi.Role.ALERT):
+        dialog = []
+        dialogs.append(dialog)
+    if dialog is not None and node.get_name() and len(dialog) < 12:
+        dialog.append(node.get_name()[:200])
+    pending += [(child, dialog) for child in map(node.get_child_at_index, range(node.get_child_count())) if child]
+print(json.dumps(dialogs))
+"""
+
+
 class Harness:
     def __init__(self, args):
         self.args = args
@@ -84,6 +112,12 @@ class Harness:
                         LIBGL_ALWAYS_SOFTWARE="1", HISTFILE="/dev/null",
                         PATH=str(Path(args.cli).parent) + os.pathsep + self.env.get("PATH", ""))
         assert self.env.get("HOME") == os.environ.get("HOME")
+        # These suites start, count and retire the Agent Host around agents alone; a
+        # window's own terminals stay out of it unless a suite is about them.
+        if not getattr(args, "hosted_terminals", False):
+            self.env["FLOWMUX_LOCAL_TERMINALS"] = "1"
+        # A closing window would ask what to do with running agents; these suites keep them.
+        self.env["FLOWMUX_CLOSE_AGENTS"] = "keep"
         self.state_path = self.root / "state/flowmux/state.json"
         # HOME stays user-owned; an isolated GUI must not refresh installed skills.
         marker = self.state_path.parent / "installed-skill-version"
@@ -122,16 +156,43 @@ class Harness:
         # Ask only this process's windows on our private Xvfb to close.
         # Normal GTK shutdown flushes state and LLVM coverage profiles;
         # SIGTERM skips both.
+        targets = []
         with closing(display.Display(self.env["DISPLAY"])) as connection:
             pid_atom = connection.intern_atom("_NET_WM_PID")
             for window in connection.screen().root.query_tree().children:
                 pid = window.get_full_property(pid_atom, X.AnyPropertyType)
                 if pid is not None and int(pid.value[0]) == process.pid:
+                    targets.append(window.id)
                     window.send_event(protocol.event.ClientMessage(
                         window=window, client_type=connection.intern_atom("WM_PROTOCOLS"),
                         data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
             connection.sync()
-        process.wait(timeout=20)
+        self.log("close_request", pid=process.pid, windows=targets)
+        assert targets, f"No X11 window for GUI {process.pid}; no close request was sent"
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            # Capture before cleanup signals the isolated process or stops Xvfb.
+            observation = {"pid": process.pid, "requested_windows": targets,
+                           "windows": [], "threads": {}}
+            try:
+                with closing(display.Display(self.env["DISPLAY"])) as connection:
+                    for window in connection.screen().root.query_tree().children:
+                        observation["windows"].append({
+                            "id": window.id, "name": str(window.get_wm_name()),
+                            "mapped": window.get_attributes().map_state,
+                        })
+                for task in Path(f"/proc/{process.pid}/task").glob("*"):
+                    observation["threads"][task.name] = (task / "wchan").read_text()
+            except Exception as error:
+                observation["capture_error"] = str(error)
+            try:
+                (self.root / f"close-timeout-{process.pid}.json").write_text(
+                    json.dumps(observation, indent=2))
+            except OSError as error:
+                print(f"Could not save close-timeout diagnostics: {error}", file=sys.stderr,
+                      flush=True)
+            raise
         assert process.returncode == 0, f"GUI exited with {process.returncode}"
         self.assert_protected()
 
@@ -157,6 +218,13 @@ class Harness:
             bus = self.spawn(["dbus-daemon", "--session", "--nofork", "--print-address=1"], stdout=subprocess.PIPE, stderr=log)
         assert select.select([bus.stdout], [], [], 10)[0], "D-Bus failed to report address"
         self.env["DBUS_SESSION_BUS_ADDRESS"] = bus.stdout.readline().decode().strip()
+        if self.env["GTK_A11Y"] == "atspi":
+            # AT-SPI reads the X root's bus before D-Bus; bind the driver to this display too.
+            os.environ.update(DISPLAY=self.env["DISPLAY"],
+                              DBUS_SESSION_BUS_ADDRESS=self.env["DBUS_SESSION_BUS_ADDRESS"])
+            for variable in ("AT_SPI_BUS_ADDRESS", "AT_SPI_DISPLAY", "WAYLAND_DISPLAY"):
+                os.environ.pop(variable, None)
+                self.env.pop(variable, None)
 
     def window(self, name):
         # These fixtures exercise the workspace UI, after onboarding.
@@ -171,13 +239,24 @@ class Harness:
             assert result is None, f"{name} GUI exited with {result}; see {self.root / (name + '.log')}"
             return path.exists() and self.rpc(path, "ping")
         wait_for(ready, f"{name} GUI socket")
+        def window_ready():
+            with closing(display.Display(self.env["DISPLAY"])) as connection:
+                pid_atom = connection.intern_atom("_NET_WM_PID")
+                for window in connection.screen().root.query_tree().children:
+                    pid = window.get_full_property(pid_atom, X.AnyPropertyType)
+                    if (pid is not None and int(pid.value[0]) == process.pid
+                            and window.get_attributes().map_state == X.IsViewable):
+                        return True
+            return False
+        wait_for(window_ready, f"{name} visible X11 window")
         return process, path
 
     def rpc(self, path, verb, **fields):
         assert path.parent == self.root / "run"
         request = {"id": 1, "kind": "request", "verb": verb, **fields}
         self.log("request", socket=str(path), request=request)
-        deadline = min(time.monotonic() + 20, WAIT_DEADLINE.get() or float('inf'))
+        timeout = 45 if verb == 'agent_view_open' else 20
+        deadline = min(time.monotonic() + timeout, WAIT_DEADLINE.get() or float('inf'))
         def remaining():
             seconds = deadline - time.monotonic()
             if seconds <= 0:
@@ -229,10 +308,21 @@ class Harness:
     def terminals(workspace):
         return [(pane["id"], tab) for pane in workspace["panes"] for tab in pane["tabs"] if tab["kind"] == "ssh_terminal"]
 
-    def screen(self, path, pane):
+    def wait_active(self, path, pane, tab):
+        """Keys and screen reads go to a pane's active tab; wait until that is `tab`."""
+        def active():
+            return any(item["id"] == pane and any(t["id"] == tab and t["active"] for t in item["tabs"])
+                       for workspace in self.tree(path) for item in workspace["panes"])
+        wait_for(active, f"tab {tab} is the active tab of pane {pane}")
+
+    def screen(self, path, pane, tab=None):
+        if tab is not None:
+            self.wait_active(path, pane, tab)
         return self.rpc(path, "pane_read_screen", pane=pane)["screen_contents"]["text"]
 
-    def send(self, path, pane, command):
+    def send(self, path, pane, command, tab=None):
+        if tab is not None:
+            self.wait_active(path, pane, tab)
         return self.rpc(path, "pane_send_keys", pane=pane, keys=command + "\n")
 
     def marker(self, path, pane, tab, cwd):
@@ -592,7 +682,54 @@ while time.monotonic() < deadline:
         self.close_window(first)
         self.close_window(second)
 
+    def record_failure(self):
+        """Save what each window showed when a suite failed. Never raises."""
+        record = {"error": repr(sys.exc_info()[1])[:500], "windows": {}, "log": []}
+        for process in self.children:
+            path = self.root / f"run/flowmux-{process.pid}.sock"
+            if process.poll() is not None or not path.exists():
+                continue
+            window = record["windows"][str(process.pid)] = {}
+
+            def ask(verb, **fields):
+                with socket.socket(socket.AF_UNIX) as connection:
+                    connection.settimeout(3)
+                    connection.connect(str(path))
+                    request = {"id": 1, "kind": "request", "verb": verb, **fields}
+                    connection.sendall((json.dumps(request) + "\n").encode())
+                    with connection.makefile("rb") as response:
+                        return json.loads(response.readline())
+
+            try:
+                window["tree"] = ask("workspace_tree")["tree"]["workspaces"]
+                window["screens"] = {
+                    item["id"]: ask("pane_read_screen", pane=item["id"])
+                    .get("screen_contents", {}).get("text", "").rstrip()[-1500:]
+                    for workspace in window["tree"] for item in workspace["panes"]}
+            except Exception as error:
+                window["capture_error"] = repr(error)
+            try:
+                # The text of every dialog the window shows, read through accessibility.
+                result = subprocess.run([sys.executable, "-c", SHOWING_DIALOGS, str(process.pid)],
+                                        env=self.env, capture_output=True, text=True, timeout=15)
+                window["dialogs"] = (json.loads(result.stdout) if result.returncode == 0
+                                     else f"unavailable: {result.stderr.strip()[-200:]}")
+            except Exception as error:
+                window["dialogs"] = f"unavailable: {error!r}"
+        try:
+            for log in sorted(self.root.glob("state/flowmux/logs/*")):
+                lines = [re.sub(r"\x1b\[[0-9;]*m", "", line)[:400]
+                         for line in log.read_text(errors="replace").splitlines()
+                         if " WARN " in line or "ERROR" in line]
+                record["log"] += [f"{log.name}: {line}" for line in lines[-30:]]
+            (self.root / "failure-state.json").write_text(json.dumps(record, indent=2, default=str))
+        except Exception as error:
+            print(f"Could not save failure state: {error}", file=sys.stderr, flush=True)
+
     def cleanup(self):
+        # Suites call this from `finally`: an exception in flight is a failed suite.
+        if sys.exc_info()[0] is not None:
+            self.record_failure()
         for remote_file in self.remote_files:
             try:
                 self.remote("rm -f -- " + shlex.quote(remote_file), check=False)

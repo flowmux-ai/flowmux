@@ -119,6 +119,7 @@ impl SavedAgentSession {
     /// shell applies the user's alias for it, as when they started the agent.
     /// When the agent exits or fails to start, erase both the visible screen
     /// and scrollback so the replacement shell starts clean.
+    /// An agent that exits by itself gives up the session; one ended by a signal keeps it.
     pub fn shell_command(&self) -> Option<String> {
         let argv = self.resume_argv();
         let executable = argv.first()?;
@@ -163,8 +164,15 @@ impl SavedAgentSession {
             ),
             _ => String::new(),
         };
+        // An agent ended by a signal was stopped, not finished: keep the session so the tab
+        // resumes it.
+        let cleanup = if cleanup.is_empty() {
+            cleanup
+        } else {
+            format!("if [ \"$flowmux_agent_status\" -lt 129 ]; then {cleanup}fi; ")
+        };
         Some(format!(
-            "if command -v {exe} >/dev/null 2>&1; then {command}; fi; printf '\\033[3J\\033[2J\\033[H'; {cleanup}printf '\\033c'",
+            "trap 'exit 129' HUP; flowmux_agent_status=0; if command -v {exe} >/dev/null 2>&1; then {command}; flowmux_agent_status=$?; fi; trap - HUP; printf '\\033[3J\\033[2J\\033[H'; {cleanup}printf '\\033c'",
             exe = shell_quote(executable),
         ))
     }
@@ -1140,6 +1148,52 @@ mod tests {
                 context: None,
             };
             assert_eq!(saved.resume_argv(), expected);
+        }
+    }
+
+    #[test]
+    fn resumed_agent_ended_by_a_signal_keeps_its_session() {
+        use std::os::unix::fs::PermissionsExt;
+        for (agent, status, gives_up) in [
+            ("claude", 0, true),
+            ("claude", 143, false),
+            ("claude", 129, false),
+            ("codex", 1, true),
+            ("codex", 137, false),
+        ] {
+            let td = tempfile::tempdir().unwrap();
+            let reported = td.path().join("reported");
+            for (name, body) in [
+                (agent, format!("#!/bin/sh\nexit {status}\n")),
+                (
+                    "flowmuxctl",
+                    format!(
+                        "#!/bin/sh\ncat > /dev/null\ntouch '{}'\n",
+                        reported.display()
+                    ),
+                ),
+            ] {
+                let path = td.path().join(name);
+                std::fs::write(&path, body).unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let command = SavedAgentSession {
+                agent: agent.into(),
+                session_id: "11111111-2222-3333-4444-555555555555".into(),
+                context: None,
+            }
+            .shell_command()
+            .unwrap();
+            let path = format!("{}:/usr/bin:/bin", td.path().display());
+            assert!(std::process::Command::new("/bin/sh")
+                .args(["-c", &command])
+                .env("PATH", path)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap()
+                .status
+                .success());
+            assert_eq!(reported.exists(), gives_up, "{agent} exiting with {status}");
         }
     }
 

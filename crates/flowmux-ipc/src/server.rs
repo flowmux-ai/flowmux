@@ -6,6 +6,7 @@ use std::future::Future;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -17,6 +18,8 @@ use tracing::{info, warn};
 /// Hard cap on a single envelope, including snapshots. Bounds memory when a
 /// peer streams without a terminating `\n`.
 pub(crate) const MAX_LINE_BYTES: usize = 1024 * 1024;
+// The byte cap alone permits hundreds of thousands of tiny buffered serde values.
+pub(crate) const MAX_JSON_STRUCTURAL_TOKENS: usize = 32 * 1024;
 // Independent connection pools protect control admission from ordinary peers.
 // One request at a time per connection bounds queued/in-flight handlers.
 const MAX_CONNECTIONS: usize = 64;
@@ -27,6 +30,11 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn query_timeout(request: &Request) -> Option<Duration> {
     match request {
+        Request::InAgentView { request, .. }
+        | Request::AgentHost {
+            request: crate::agent_host::HostRequest::DispatchContext { request, .. },
+        } => query_timeout(request),
+        Request::AgentHost { request } if request.is_query() => Some(QUERY_TIMEOUT),
         Request::BrowserOnSurface { request, .. } | Request::BrowserWithTask { request, .. } => {
             query_timeout(request)
         }
@@ -88,6 +96,12 @@ fn query_timeout(request: &Request) -> Option<Duration> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectionContext {
+    pub id: u64,
+    pub peer_pid: Option<u32>,
+}
+
 pub trait Handler: Send + Sync + 'static {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
 
@@ -98,6 +112,34 @@ pub trait Handler: Send + Sync + 'static {
         _peer_pid: Option<u32>,
     ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         self.handle(req)
+    }
+
+    fn handle_connection<'a>(
+        &'a self,
+        req: Request,
+        context: ConnectionContext,
+    ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+        self.handle_from(req, context.peer_pid)
+    }
+
+    /// Runs on EOF, framing/I/O errors and task cancellation. Implementations
+    /// must not block; GUI registration must never depend on a client goodbye.
+    fn connection_closed(&self, _context: ConnectionContext) {}
+
+    /// Regular connections served at once. A server whose clients stay connected needs more.
+    fn max_connections(&self) -> usize {
+        MAX_CONNECTIONS
+    }
+}
+
+struct ConnectionGuard<H: Handler> {
+    handler: Arc<H>,
+    context: ConnectionContext,
+}
+
+impl<H: Handler> Drop for ConnectionGuard<H> {
+    fn drop(&mut self) {
+        self.handler.connection_closed(self.context);
     }
 }
 
@@ -195,6 +237,16 @@ async fn remove_stale_socket(path: &Path) -> std::io::Result<()> {
 }
 
 pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<()> {
+    run_until(socket, handler, std::future::pending()).await
+}
+
+/// Stop accepting after the owner has serialized its final state transition.
+/// Dropping the connection tasks releases leases before the socket lock.
+pub async fn run_until<H: Handler>(
+    socket: &Path,
+    handler: Arc<H>,
+    shutdown: impl Future<Output = ()> + Send,
+) -> anyhow::Result<()> {
     let mut owner = SocketOwner::acquire(socket)?;
     let control_path = crate::control_socket_path(socket);
     remove_stale_socket(socket).await?;
@@ -212,12 +264,19 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
         Err(error) => return Err(error.into()),
     };
     let listener = owner.bind(socket)?;
-    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let connections = Arc::new(Semaphore::new(handler.max_connections()));
     let control_connections = Arc::new(Semaphore::new(MAX_CONTROL_CONNECTIONS));
     let mutations = Arc::new(Semaphore::new(MAX_MUTATIONS));
+    let forwarded_responses = Arc::new(Semaphore::new(
+        crate::agent_host::MAX_FORWARDED_GUI_RESPONSES,
+    ));
+    let mut tasks = tokio::task::JoinSet::new();
+    tokio::pin!(shutdown);
     info!(path = %socket.display(), "flowmux daemon listening");
     loop {
         let (accepted, control) = tokio::select! {
+            _ = &mut shutdown => break,
+            Some(_) = tasks.join_next(), if !tasks.is_empty() => continue,
             result = listener.accept() => (result, false),
             result = async { control_listener.as_ref().unwrap().accept().await },
                 if control_listener.is_some() => (result, true),
@@ -242,13 +301,19 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
         };
         let h = handler.clone();
         let mutations = mutations.clone();
-        tokio::spawn(async move {
+        let forwarded_responses = forwarded_responses.clone();
+        tasks.spawn(async move {
             let _permit = permit;
-            if let Err(e) = serve_connection(stream, h, control, mutations).await {
+            if let Err(e) =
+                serve_connection(stream, h, control, mutations, forwarded_responses).await
+            {
                 warn!(error = %e, "client disconnected with error");
             }
         });
     }
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    Ok(())
 }
 
 #[cfg(test)]
@@ -258,6 +323,9 @@ async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::R
         handler,
         false,
         Arc::new(Semaphore::new(MAX_MUTATIONS)),
+        Arc::new(Semaphore::new(
+            crate::agent_host::MAX_FORWARDED_GUI_RESPONSES,
+        )),
     )
     .await
 }
@@ -267,6 +335,7 @@ async fn serve_connection<H: Handler>(
     handler: Arc<H>,
     control: bool,
     mutations: Arc<Semaphore>,
+    forwarded_responses: Arc<Semaphore>,
 ) -> anyhow::Result<()> {
     let credentials = stream.peer_cred()?;
     anyhow::ensure!(
@@ -277,6 +346,15 @@ async fn serve_connection<H: Handler>(
         .pid()
         .and_then(|pid| u32::try_from(pid).ok())
         .filter(|pid| *pid > 0);
+    static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
+    let context = ConnectionContext {
+        id: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
+        peer_pid,
+    };
+    let _connection = ConnectionGuard {
+        handler: handler.clone(),
+        context,
+    };
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut buf = String::new();
@@ -298,6 +376,10 @@ async fn serve_connection<H: Handler>(
             }
             Err(e) => return Err(e.into()),
         }
+        if !json_structure_within_limit(&buf) {
+            warn!("client sent excessive JSON structure; dropping connection before dispatch");
+            return Ok(());
+        }
         let env: Envelope = match serde_json::from_str(buf.trim_end()) {
             Ok(e) => e,
             Err(e) => {
@@ -313,6 +395,26 @@ async fn serve_connection<H: Handler>(
                 continue;
             }
         };
+        // Keep the reservation through serialization and slow socket writes.
+        let _response_permit = if matches!(
+            &env.payload,
+            Payload::Request(Request::AgentHost {
+                request: crate::agent_host::HostRequest::DispatchContext { .. }
+            })
+        ) {
+            match forwarded_responses.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    let error = Response::Error(RpcError::Busy(
+                        "managed GUI response capacity reached; request not started".into(),
+                    ));
+                    write_response(&mut w, env.id, error).await?;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let response = match env.payload {
             Payload::Request(req) => {
                 let is_control = req.uses_control_socket();
@@ -321,7 +423,7 @@ async fn serve_connection<H: Handler>(
                         "request requires the regular socket; not started".into(),
                     ))
                 } else if let Some(budget) = query_timeout(&req) {
-                    timeout(budget, handler.handle_from(req, peer_pid))
+                    timeout(budget, handler.handle_connection(req, context))
                         .await
                         .unwrap_or_else(|_| {
                             Response::Error(RpcError::Io(format!(
@@ -330,13 +432,13 @@ async fn serve_connection<H: Handler>(
                             )))
                         })
                 } else if is_control {
-                    handler.handle_from(req, peer_pid).await
+                    handler.handle_connection(req, context).await
                 } else {
                     // No hidden admission queue: reject before calling the handler.
                     // After admission, even a dropped client or a confirmation
                     // dialog cannot cause us to cancel/replay an ambiguous effect.
                     match mutations.try_acquire() {
-                        Ok(_permit) => handler.handle_from(req, peer_pid).await,
+                        Ok(_permit) => handler.handle_connection(req, context).await,
                         Err(_) => Response::Error(RpcError::Busy(
                             "mutation capacity reached; request not started".into(),
                         )),
@@ -354,6 +456,10 @@ async fn serve_connection<H: Handler>(
 #[derive(serde::Deserialize)]
 struct RequestId {
     id: u64,
+}
+
+fn json_structure_within_limit(json: &str) -> bool {
+    flowmux_core::json::JsonStructureBudget::new(MAX_JSON_STRUCTURAL_TOKENS).check(json.as_bytes())
 }
 
 async fn write_response(
@@ -447,6 +553,146 @@ async fn read_line_bounded<R: AsyncBufRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_wrappers_keep_query_deadlines_and_never_cancel_mutations() {
+        use crate::agent_host::{AgentViewLocation, AgentViewReport, AttachmentKey, HostRequest};
+        let context = AgentViewReport {
+            key: AttachmentKey {
+                instance: flowmux_core::AgentInstanceId::new(),
+                epoch: uuid::Uuid::new_v4(),
+                lease: uuid::Uuid::new_v4(),
+                generation: 1,
+            },
+            location: AgentViewLocation {
+                window: uuid::Uuid::new_v4(),
+                workspace: flowmux_core::WorkspaceId::new(),
+                pane: flowmux_core::PaneId::new(),
+                surface: flowmux_core::SurfaceId::new(),
+                visible: false,
+            },
+        };
+        for request in [
+            Request::PaneReadScreen {
+                pane: context.location.pane,
+            },
+            Request::PaneClose {
+                pane: context.location.pane,
+            },
+        ] {
+            let expected = query_timeout(&request);
+            let gui = Request::InAgentView {
+                context: context.clone(),
+                request: Box::new(request.clone()),
+            };
+            assert_eq!(query_timeout(&gui), expected);
+            let host = Request::AgentHost {
+                request: HostRequest::DispatchContext {
+                    context: context.clone(),
+                    session_id: None,
+                    request: Box::new(request),
+                },
+            };
+            assert_eq!(query_timeout(&host), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_identity_is_stable_and_closed_on_eof_and_cancellation() {
+        #[derive(Default)]
+        struct Connections {
+            seen: std::sync::Mutex<Vec<u64>>,
+            closed: std::sync::Mutex<Vec<u64>>,
+        }
+        impl Handler for Connections {
+            fn handle<'a>(
+                &'a self,
+                _: Request,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                Box::pin(async { Response::Pong })
+            }
+            fn handle_connection<'a>(
+                &'a self,
+                request: Request,
+                context: ConnectionContext,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                self.seen.lock().unwrap().push(context.id);
+                self.handle(request)
+            }
+            fn connection_closed(&self, context: ConnectionContext) {
+                self.closed.lock().unwrap().push(context.id);
+            }
+        }
+        let handler = Arc::new(Connections::default());
+        for abort in [false, true] {
+            let dir = tempfile::tempdir_in("/tmp").unwrap();
+            let path = dir.path().join("context.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            let client = crate::client::Client::connect(&path).await.unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+            let task = tokio::spawn(serve_one(stream, handler.clone()));
+            // This fixture has no control socket, so queries use the persistent stream.
+            for _ in 0..2 {
+                assert!(matches!(
+                    client.call(Request::WorkspaceCurrent).await.unwrap(),
+                    Response::Pong
+                ));
+            }
+            if abort {
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+            } else {
+                drop(client);
+                timeout(Duration::from_secs(2), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+        let seen = handler.seen.lock().unwrap();
+        let closed = handler.closed.lock().unwrap();
+        assert_eq!(seen.len(), 4);
+        assert_eq!(seen[0], seen[1]);
+        assert_eq!(seen[2], seen[3]);
+        assert_ne!(seen[0], seen[2]);
+        assert_eq!(*closed, vec![seen[0], seen[2]]);
+    }
+
+    #[tokio::test]
+    async fn owner_shutdown_closes_connections_and_releases_socket_lock() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("shutdown.sock");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let socket = path.clone();
+        let task = tokio::spawn(async move {
+            run_until(&socket, Arc::new(PingHandler), async {
+                let _ = rx.await;
+            })
+            .await
+        });
+        let client = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(client) = crate::client::Client::connect(&path).await {
+                    break client;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        client.call(Request::Ping).await.unwrap();
+        tx.send(()).unwrap();
+        timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!path.exists());
+        assert!(!crate::control_socket_path(&path).exists());
+        assert!(SocketOwner::acquire(&path).is_ok());
+        assert!(client.call(Request::WorkspaceCurrent).await.is_err());
+    }
 
     #[test]
     fn writable_shared_ipc_directories_are_rejected() {
@@ -1196,6 +1442,56 @@ mod tests {
         assert!(matches!(env.payload, Payload::Response(Response::Pong)));
         drop(reader);
         task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn drops_structurally_oversized_envelope_before_dispatch() {
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let task = tokio::spawn(serve_one(server, Arc::new(PingHandler)));
+        let payload = format!(
+            "{{\"id\":7,\"kind\":\"request\",\"verb\":\"ping\",\"unused\":[{}0]}}\n",
+            "0,".repeat(150_000)
+        );
+        assert!(payload.len() < MAX_LINE_BYTES);
+        client.write_all(payload.as_bytes()).await.unwrap();
+        client.shutdown().await.unwrap();
+        let mut reader = BufReader::new(client);
+        let mut reply = String::new();
+        reader.read_line(&mut reply).await.unwrap();
+        drop(reader);
+        task.await.unwrap().unwrap();
+        assert!(
+            reply.is_empty(),
+            "oversized structure reached the handler: {reply}"
+        );
+    }
+
+    #[test]
+    fn structure_limit_preserves_maximum_relay_input_and_escaped_strings() {
+        use crate::agent_host::{AttachmentKey, HostRequest, MAX_INPUT_BYTES};
+        let request = Envelope {
+            id: 1,
+            payload: Payload::Request(Request::AgentHost {
+                request: HostRequest::Input {
+                    key: AttachmentKey {
+                        instance: flowmux_core::AgentInstanceId::new(),
+                        epoch: uuid::Uuid::new_v4(),
+                        lease: uuid::Uuid::new_v4(),
+                        generation: 1,
+                    },
+                    sequence: 1,
+                    data: vec![255; MAX_INPUT_BYTES],
+                },
+            }),
+        };
+        let wire = serde_json::to_string(&request).unwrap();
+        assert!(json_structure_within_limit(&wire));
+        assert!(serde_json::from_str::<Envelope>(&wire).is_ok());
+        let text = "[{:,}]\\\"\\\\".repeat(32_000);
+        let wire = serde_json::to_string(&text).unwrap();
+        assert!(wire.len() < MAX_LINE_BYTES);
+        assert!(json_structure_within_limit(&wire));
+        assert_eq!(serde_json::from_str::<String>(&wire).unwrap(), text);
     }
 
     #[tokio::test]

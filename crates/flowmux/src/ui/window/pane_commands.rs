@@ -5,7 +5,376 @@ use super::*;
 
 const OPEN_TIG_SHELL_COMMAND: &str = "tig\r";
 
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    async fn starting_snapshot_waits_for_connection_instead_of_reporting_exit() {
+        use flowmux_ipc::agent_host::{AgentInstance, ProcessState};
+        let (controller, _, pane) = super::super::tests::build_single_workspace_controller(
+            "com.flowmux.App.UiTest.StartingAgentView",
+        )
+        .await;
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        let (_, _, surface, _) = controller
+            .store
+            .ensure_agent_view(pane, binding, "Starting Agent".into(), "/tmp".into())
+            .await
+            .unwrap();
+        // Use the fixture's live terminal without creating a relay or a Host.
+        let terminal = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(pane)
+            .unwrap()
+            .clone();
+        assert!(terminal.pid.get().is_some());
+        controller
+            .pane_registry
+            .borrow_mut()
+            .terminals
+            .insert(surface, terminal);
+        controller.bridge.agent_registry.send_modify(|snapshot| {
+            snapshot.available = true;
+            snapshot.agents = vec![AgentInstance {
+                instance: binding.instance,
+                epoch: binding.epoch,
+                provider: "fixture".into(),
+                label: "Starting Agent".into(),
+                cwd: "/tmp".into(),
+                pid: None,
+                process_start: None,
+                boot_id: None,
+                state: ProcessState::Starting,
+                force_terminate_allowed: false,
+                exit_status: None,
+                view: None,
+                attachment: None,
+                view_owner: None,
+                error: None,
+                presence: None,
+                shell: false,
+            }];
+        });
+        let waiting = controller.wait_for_agent_view(pane, surface, binding);
+        let mut waiting = std::pin::pin!(waiting);
+        for state in [ProcessState::Starting, ProcessState::Running] {
+            controller
+                .bridge
+                .agent_registry
+                .send_modify(|snapshot| snapshot.agents[0].state = state);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    std::future::Future::poll(waiting.as_mut(), cx).is_pending()
+                ))
+                .await,
+                "{state:?} must wait for the relay"
+            );
+            glib::timeout_future(Duration::from_millis(110)).await;
+        }
+        controller
+            .bridge
+            .agent_registry
+            .send_modify(|snapshot| snapshot.agents[0].state = ProcessState::Exited);
+        assert_eq!(
+            waiting.await.unwrap_err(),
+            "Agent ended before the view connected"
+        );
+        controller
+            .pane_registry
+            .borrow_mut()
+            .terminals
+            .remove(&surface);
+    }
+}
+
 impl WindowController {
+    pub(super) async fn open_agent_view(
+        &self,
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let (pane, surface) = self.open_agent_view_at(pane, agent, None).await?;
+        self.wait_for_agent_view(pane, surface, binding).await
+    }
+
+    async fn wait_for_agent_view(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        binding: flowmux_core::AgentViewBinding,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        let generation = self
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&surface)
+            .ok_or("Agent view closed before connection")?
+            .program_status_generation;
+        let started = std::time::Instant::now();
+        loop {
+            if self.store.surface_host_binding(pane, surface).await != Some(binding) {
+                return Err("Agent destination changed before connection".into());
+            }
+            if !self
+                .pane_registry
+                .borrow()
+                .terminals
+                .get(&surface)
+                .is_some_and(|terminal| {
+                    terminal.program_status_generation == generation && terminal.pid.get().is_some()
+                })
+            {
+                return Err("Agent view disconnected. The execution was not stopped; reopen it from Agents to retry.".into());
+            }
+            let agent = {
+                let registry = self.bridge.agent_registry.borrow();
+                registry
+                    .available
+                    .then(|| {
+                        registry
+                            .agents
+                            .iter()
+                            .find(|agent| {
+                                agent.instance == binding.instance && agent.epoch == binding.epoch
+                            })
+                            .cloned()
+                    })
+                    .flatten()
+            };
+            if let Some(agent) = agent {
+                // The management snapshot can still predate the successful launch reply.
+                if !matches!(
+                    agent.state,
+                    flowmux_ipc::agent_host::ProcessState::Starting
+                        | flowmux_ipc::agent_host::ProcessState::Running
+                ) {
+                    return Err("Agent ended before the view connected".into());
+                }
+                if self
+                    .verified_agent_location(&agent)
+                    .await
+                    .is_some_and(|location| location.pane == pane && location.surface == surface)
+                {
+                    self.refresh_agent_connections().await;
+                    return Ok((pane, surface));
+                }
+            }
+            if started.elapsed() >= flowmux_ipc::agent_host::ATTACH_TIMEOUT {
+                return Err("Agent view connection timed out. Close this tab and reopen it from Agents to retry.".into());
+            }
+            // Wake the management connection: its next snapshot would otherwise wait
+            // for the one-second view poll, which is most of an agent's start time.
+            self.publish_agent_views().await;
+            gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    pub(super) async fn open_agent_view_at(
+        &self,
+        pane: PaneId,
+        agent: flowmux_ipc::agent_host::AgentInstance,
+        tab_anchor: Option<(SurfaceId, bool)>,
+    ) -> Result<(PaneId, SurfaceId), String> {
+        if let Some((target, _)) = tab_anchor {
+            if !self
+                .pane_registry
+                .borrow()
+                .surface_tabs
+                .get(&pane)
+                .is_some_and(|tabs| tabs.iter().any(|(id, _)| *id == target))
+            {
+                return Err("Agent destination tab closed".into());
+            }
+        }
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let takeover = agent
+            .attachment
+            .as_ref()
+            .filter(|attachment| attachment.ready)
+            .map(|attachment| attachment.key);
+        let takeover = if self.verified_agent_location(&agent).await.is_none() {
+            let workspace = self
+                .store
+                .workspace_for_pane(pane)
+                .await
+                .ok_or("Agent destination pane closed")?;
+            Some(crate::ui::agent_connection::AgentViewTakeover {
+                previous: takeover,
+                token: uuid::Uuid::new_v4(),
+                pane,
+                workspace,
+            })
+        } else {
+            None
+        };
+        // A terminal's shell comes back as the terminal it was, whether nobody shows it or
+        // another window does.
+        let reopened_shell = agent.shell && takeover.is_some();
+        let (workspace, source, surface, created) =
+            if reopened_shell && self.store.agent_view(binding).await.is_none() {
+                let previous = agent.view_owner.map(|owner| owner.surface);
+                let (workspace, source, surface) = self
+                    .store
+                    .reopen_shell_view(pane, binding, agent.label, agent.cwd, previous)
+                    .await?;
+                (workspace, source, surface, true)
+            } else {
+                self.store
+                    .ensure_agent_view(pane, binding, agent.label, agent.cwd)
+                    .await?
+            };
+        let disconnected = self
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&surface)
+            .is_some_and(|terminal| terminal.pid.get().is_none());
+        if disconnected || takeover.is_some() {
+            self.pane_registry
+                .borrow_mut()
+                .detach_surface_widget(source, surface);
+        }
+        if !self.pane_registry.borrow().has_surface(source, surface) {
+            if let Some(takeover) = takeover {
+                self.pane_registry
+                    .borrow_mut()
+                    .pending_agent_takeovers
+                    .insert(surface, takeover);
+            }
+            if let Err(error) = self
+                .attach_or_rerender_surface(workspace, source, surface, None)
+                .await
+            {
+                self.pane_registry
+                    .borrow_mut()
+                    .pending_agent_takeovers
+                    .remove(&surface);
+                if created {
+                    self.store.close_surface(source, surface).await;
+                }
+                return Err(error);
+            }
+        }
+        // Reconnecting a detached widget can change the strip's positions.
+        let target_index = match tab_anchor {
+            Some((target, after)) => {
+                let registry = self.pane_registry.borrow();
+                let tabs = registry
+                    .surface_tabs
+                    .get(&pane)
+                    .ok_or("Agent destination pane closed")?;
+                let target_index = tabs
+                    .iter()
+                    .position(|(id, _)| *id == target)
+                    .ok_or("Agent destination tab closed")?;
+                let src_index = tabs.iter().position(|(id, _)| *id == surface);
+                if target == surface {
+                    target_index
+                } else {
+                    crate::ui::workspace_view::tab_drop_final_index(target_index, after, src_index)
+                }
+            }
+            None => usize::MAX,
+        };
+        if source != pane || tab_anchor.is_some() {
+            self.move_surface(source, surface, None, pane, target_index)
+                .await?;
+        }
+        self.store.set_active_surface(pane, surface).await;
+        let workspace = self
+            .store
+            .workspace_for_pane(pane)
+            .await
+            .ok_or("Agent destination pane closed")?;
+        self.sync_pane_active_from_store(workspace, pane).await;
+        self.focus_pane(pane);
+        if takeover.is_none() {
+            let store = self.store.clone();
+            self.tokio_handle
+                .as_ref()
+                .ok_or("Agent Host runtime unavailable")?
+                .spawn(async move { store.save_now().await })
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| format!("Unable to save Agent destination: {error}"))?;
+        }
+        Ok((pane, surface))
+    }
+
+    pub(super) async fn open_managed_agent(
+        &self,
+        pane: Option<PaneId>,
+        tab_anchor: Option<(SurfaceId, bool)>,
+        payload: crate::ui::workspace_view::ManagedAgentDndPayload,
+    ) -> Result<(), String> {
+        let agent = self.lookup_managed_agent(&payload).await?;
+        let existing_view = self
+            .store
+            .agent_view(flowmux_core::AgentViewBinding {
+                instance: agent.instance,
+                epoch: agent.epoch,
+            })
+            .await;
+        let pane = if let Some(pane) = pane {
+            pane
+        } else if let Some((workspace, pane, surface)) = existing_view {
+            self.close_agent_office();
+            self.dismiss_workspace_overview_immediately();
+            self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+                .await;
+            self.workspace_window(workspace).present();
+            if self
+                .verified_agent_location(&agent)
+                .await
+                .is_some_and(|location| location.pane == pane && location.surface == surface)
+            {
+                return self
+                    .wait_for_agent_view(
+                        pane,
+                        surface,
+                        flowmux_core::AgentViewBinding {
+                            instance: agent.instance,
+                            epoch: agent.epoch,
+                        },
+                    )
+                    .await
+                    .map(|_| ());
+            }
+            pane
+        } else {
+            self.show_managed_agent_destination(payload, agent).await;
+            return Ok(());
+        };
+        let workspace = self
+            .store
+            .workspace_for_pane(pane)
+            .await
+            .ok_or("Agent destination pane closed")?;
+        if self.pane_registry.borrow().ssh.contains_key(&workspace) {
+            return Err("Local agents cannot open in an SSH pane".into());
+        }
+        let binding = flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        };
+        let (_, surface) = self.open_agent_view_at(pane, agent, tab_anchor).await?;
+        self.wait_for_agent_view(pane, surface, binding).await?;
+        self.refresh_agent_displays().await;
+        Ok(())
+    }
+
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
@@ -16,6 +385,8 @@ impl WindowController {
             | GtkCommand::ResizePane { pane, .. }
             | GtkCommand::CloseFocused { pane, .. }
             | GtkCommand::CloseSurface { pane, .. }
+            | GtkCommand::CloseSurfaceButton { pane, .. }
+            | GtkCommand::CloseMovedAgentView { pane, .. }
             | GtkCommand::ConfirmCloseSurface { pane, .. }
             | GtkCommand::CloseTerminatedSurface { pane, .. } => zoomed.is_some_and(|zoom| {
                 let registry = self.pane_registry.borrow();
@@ -40,6 +411,43 @@ impl WindowController {
         }
 
         match cmd {
+            GtkCommand::OpenManagedAgent {
+                pane,
+                tab_anchor,
+                payload,
+                ack,
+            } => {
+                let controller = self.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let result = controller
+                        .open_managed_agent(pane, tab_anchor, payload)
+                        .await;
+                    if let Err(error) = &result {
+                        controller.clipboard_toast.show_with_message(error);
+                    }
+                    let _ = ack.send(result);
+                });
+            }
+            GtkCommand::OpenAgentView { pane, agent, ack } => {
+                let binding = flowmux_core::AgentViewBinding {
+                    instance: agent.instance,
+                    epoch: agent.epoch,
+                };
+                // Apply guarded effects now; waiting for ready must not block close/cancel commands.
+                match self.open_agent_view_at(pane, agent, None).await {
+                    Ok((pane, surface)) => {
+                        let controller = self.clone();
+                        gtk::glib::spawn_future_local(async move {
+                            let result =
+                                controller.wait_for_agent_view(pane, surface, binding).await;
+                            let _ = ack.send(result);
+                        });
+                    }
+                    Err(error) => {
+                        let _ = ack.send(Err(error));
+                    }
+                }
+            }
             GtkCommand::CloseTerminatedSurface { pane, surface, ack } => {
                 let current_pane = self
                     .pane_registry
@@ -129,6 +537,7 @@ impl WindowController {
                     let _ = ack.send(Err("Pane close cancelled".into()));
                     return;
                 }
+                self.close_hosted_shells(&closing_surfaces);
                 let outcome = self.store.close_pane(pane).await;
                 if outcome.is_some()
                     && !matches!(
@@ -322,9 +731,33 @@ impl WindowController {
             GtkCommand::CloseSurface { pane, surface, ack } => {
                 self.close_surface_command(pane, surface, true, ack).await;
             }
+            GtkCommand::CloseSurfaceButton { pane, surface, ack } => {
+                // Only the tab's own close button asks; CLI closes keep detaching silently.
+                if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+                    let title = self.store.surface_title(pane, surface).await;
+                    if !self
+                        .confirm_close_agent_tab(binding, title.as_deref().unwrap_or("Agent"))
+                        .await
+                    {
+                        let _ = ack.send(Err("Tab close cancelled".into()));
+                        return;
+                    }
+                    // The agent prompt was the confirmation, also for a workspace's only tab.
+                    self.close_surface_command(pane, surface, false, ack).await;
+                    return;
+                }
+                self.close_surface_command(pane, surface, true, ack).await;
+            }
+            GtkCommand::CloseMovedAgentView { pane, surface, .. } => {
+                let (ack, _) = oneshot::channel();
+                self.close_surface(pane, surface, false, false, ack).await;
+            }
             GtkCommand::ConfirmCloseSurface { pane, surface, ack } => {
+                // An agent tab asks once, about the agent; nothing else follows it.
+                let managed = self.surface_agent_execution(pane, surface).await.is_some();
                 if self.confirm_close_tab(pane, surface).await {
-                    self.close_surface_command(pane, surface, true, ack).await;
+                    self.close_surface_command(pane, surface, !managed, ack)
+                        .await;
                 } else {
                     let _ = ack.send(Err("Tab close cancelled".into()));
                 }
@@ -471,14 +904,12 @@ impl WindowController {
                             .set_surface_title(surface, &latest);
                     }
                 }
-                // A status change already syncs the workspace label, so one
-                // title tick refreshes the agent displays once, not twice.
+                // A status change already schedules the workspace display refresh.
                 let synced = self
                     .refresh_agent_screen_status(surface, Some(signal_title))
                     .await;
                 if let Some(ws_id) = titled.filter(|ws_id| synced != Some(*ws_id)) {
-                    self.refresh_window_title().await;
-                    self.sync_workspace_label(ws_id).await;
+                    self.schedule_agent_display_refresh(ws_id);
                 }
             }
             GtkCommand::TerminalContentsChanged { surface } => {
@@ -582,6 +1013,46 @@ impl WindowController {
                 self.refresh_worktrees_from_focus().await;
                 self.refresh_session_panel(false).await;
             }
+            GtkCommand::BindShell {
+                surface,
+                binding,
+                pid,
+                ack,
+            } => {
+                let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
+                let result = match terminal {
+                    Some(terminal) => {
+                        self.store
+                            .set_surface_shell_binding(surface, Some(binding))
+                            .await;
+                        // A reopened shell already carries its explicit admission.
+                        let known = terminal
+                            .agent_connection
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|connection| connection.binding == binding);
+                        if !known {
+                            let mut connection = crate::ui::agent_connection::AgentConnection::new(
+                                binding,
+                                &terminal.container,
+                            );
+                            connection.shell = true;
+                            connection.render(true, None);
+                            *terminal.agent_connection.borrow_mut() = Some(connection);
+                        }
+                        // Known before the next Host poll: an agent resumed in this shell
+                        // reports its session as soon as it starts.
+                        if let (Some(pid), Some(connection)) =
+                            (pid, terminal.agent_connection.borrow().as_ref())
+                        {
+                            connection.host_pid.set(Some(pid));
+                        }
+                        Ok(())
+                    }
+                    None => Err("terminal tab closed".to_string()),
+                };
+                let _ = ack.send(result);
+            }
             GtkCommand::PaneSendKeys { pane, keys, ack } => {
                 let registry = self.pane_registry.borrow();
                 let res = match registry.active_terminal(pane) {
@@ -641,10 +1112,37 @@ impl WindowController {
 }
 
 impl WindowController {
+    /// The Host execution whose agent this tab shows: a managed agent's tab, or an
+    /// ordinary terminal with an agent running in its shell.
+    pub(super) async fn surface_agent_execution(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Option<flowmux_core::AgentViewBinding> {
+        if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
+            return Some(binding);
+        }
+        let binding = self.store.surface_host_binding(pane, surface).await?;
+        let registry = self.bridge.agent_registry.borrow();
+        registry
+            .agents
+            .iter()
+            .any(|agent| {
+                agent.instance == binding.instance
+                    && agent.epoch == binding.epoch
+                    && agent.state == flowmux_ipc::agent_host::ProcessState::Running
+                    && agent.presence.is_some()
+            })
+            .then_some(binding)
+    }
+
     async fn confirm_close_tab(&self, pane: PaneId, surface: SurfaceId) -> bool {
         let Some(title) = self.store.surface_title(pane, surface).await else {
             return false;
         };
+        if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+            return self.confirm_close_agent_tab(binding, &title).await;
+        }
         let last_tab = self.store.tab_count_in_pane(pane).await == Some(1);
         if last_tab
             && matches!(
@@ -688,6 +1186,19 @@ impl WindowController {
         confirm: bool,
         ack: oneshot::Sender<Result<(), String>>,
     ) {
+        self.close_surface(pane, surface, confirm, true, ack).await;
+    }
+
+    /// `ends_terminal`: closing this tab ends its hosted shell, as closing a terminal does.
+    /// Retiring a view that another window took over must not: the shell now shows there.
+    pub(super) async fn close_surface(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        confirm: bool,
+        ends_terminal: bool,
+        ack: oneshot::Sender<Result<(), String>>,
+    ) {
         // A successful in-process MOVE can rehome the surface before
         // DragSource::drag-end emits its fallback close for the old
         // pane. Reject that stale close before considering whether the
@@ -711,6 +1222,9 @@ impl WindowController {
         if confirm && !self.confirm_dirty_surfaces(&[surface]).await {
             let _ = ack.send(Err("Pane close cancelled".into()));
             return;
+        }
+        if ends_terminal {
+            self.close_hosted_shells(&[surface]);
         }
         let outcome = self.store.close_surface(pane, surface).await;
         if outcome.is_some()

@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-006 follow-up",
+  "source_parent": "2fb4537668a25e0b0d5082ce926453e0d5b6278b",
+  "change": "Share full diff and reconnect snapshot via one immutable Arc allocation; partial diffs retain a separate current snapshot.",
+  "before": {
+    "new_storage_sharing_regression": "failed at initial full frame pointer equality",
+    "earlier_same_fixture_live_peak_kib": 392576,
+    "earlier_receipt": "agent-runtime-resize-full-frames-20261117.json"
+  },
+  "after": {
+    "unit_tests_passed": 293,
+    "unit_tests_ignored": 1,
+    "max_width_unit_peak_kib": 295600,
+    "live_checks_passed": 3,
+    "live_exit_code": 0,
+    "host_peak_kib": 346424,
+    "heartbeat_max_seconds": 0.008654,
+    "same_pid_birth_and_fresh_hangul": true,
+    "natural_empty_host_cleanup": true
+  },
+  "checks": {
+    "locked_gui_daemon_cli_build": "passed",
+    "daemon_all_target_clippy": "passed (-D warnings)",
+    "format_and_whitespace": "passed"
+  },
+  "cleanup": {
+    "tracked_pids": [
+      294678,
+      294688,
+      294689,
+      294700
+    ],
+    "tracked_pids_gone": true,
+    "protected_pid": 1663486,
+    "protected_pid_alive": true
+  },
+  "artifacts": "/tmp/fm-gui-v5ikdjfx",
+  "sha256": {
+    "crates/flowmux-daemon/src/agent_host/terminal.rs": "18aa36d95b94a5d843146eae9080d2d17b0892723dc7a036335c6b15a72490c5",
+    "/tmp/fm-runtime-shared-snapshot-before.log": "4d0a754260943be1da437ae1032d663aa1580cc7d88050a1af27738c984bd51f",
+    "/tmp/fm-runtime-shared-snapshot-after.log": "92105c332f7d16c0d1d67c832018cbc8d59139693a679a4ef47a04d265aec27a",
+    "/tmp/fm-runtime-shared-snapshot-daemon.log": "762b0bbd08486361ef9c81c24b6a37ba35957b96a5348295377116a2fcaddf80",
+    "/tmp/fm-runtime-shared-snapshot-live.log": "b692590d35e8deb3714b53943734dd1bef9c57c5fce563cf6fefc9a2eacc683e",
+    "/tmp/fm-runtime-shared-snapshot-build.log": "45d6303428b42bac2677f716dfd0f04c0b276791afd3682f5c999a2584f826e5",
+    "/tmp/fm-runtime-shared-snapshot-clippy.log": "6d40d023d4fc26daec404b67d38063ac56dfd9b0253eb9865ac78006d1093724",
+    "target/debug/flowmux": "38450880938dac62514f9d9fdffdee5a81e70df476230aa517c5bee9cf5ce22b",
+    "target/debug/flowmuxctl": "dabffcf4785a40e1d4c766d0b7f32b5f6182fa62a7ed650ce718d398a818655b",
+    "target/debug/flowmux-daemon": "f6d4886bc1e0a41dd08480ab4a6fec4549395b74a9df130d00e5f2b7026e1b2d"
+  },
+  "limitations": [
+    "Earlier and current peaks are separate runs of the same fixture, not a controlled benchmark.",
+    "AR-006 full Host accounting remains open; this removes a known duplicate frame allocation.",
+    "Current remote runs 44073400067 and 44075770328 do not include this change.",
+    "No actual provider/model, native macOS, or Flatpak coverage in this local fixture."
+  ]
+}

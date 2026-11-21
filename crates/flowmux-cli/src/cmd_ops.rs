@@ -2,6 +2,48 @@
 //! Local command handlers: identify, capabilities, agent, doctor, fix, theme.
 
 use super::*;
+use std::path::Path;
+
+/// A hosted terminal shown again in another pane keeps its tab id and the environment of
+/// the pane it started in. Follow the tab, so a command without a pane goes where it is now.
+pub(crate) async fn follow_hosted_tab(socket: Option<&Path>) {
+    if std::env::var_os("FLOWMUX_HOSTED_SHELL").is_none() {
+        return;
+    }
+    let Some(surface) = hooks::surface_from_env() else {
+        return;
+    };
+    let socket = socket
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
+        .unwrap_or_else(flowmux_config::paths::runtime_socket);
+    let tree = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        Client::connect(&socket)
+            .await?
+            .call(Request::WorkspaceTree)
+            .await
+    });
+    let Ok(Ok(Response::Tree { workspaces })) = tree.await else {
+        return;
+    };
+    if let Some((workspace, pane)) = tab_location(&workspaces, surface) {
+        std::env::set_var("FLOWMUX_PANE_ID", pane.to_string());
+        std::env::set_var("FLOWMUX_WORKSPACE_ID", workspace.to_string());
+    }
+}
+
+fn tab_location(
+    workspaces: &[flowmux_ipc::protocol::TreeWorkspace],
+    surface: flowmux_core::SurfaceId,
+) -> Option<(flowmux_core::WorkspaceId, flowmux_core::PaneId)> {
+    workspaces.iter().find_map(|workspace| {
+        let pane = workspace
+            .panes
+            .iter()
+            .find(|pane| pane.tabs.iter().any(|tab| tab.id == surface))?;
+        Some((workspace.id, pane.id))
+    })
+}
 
 pub(crate) async fn run_identify(
     json: bool,
@@ -9,11 +51,15 @@ pub(crate) async fn run_identify(
     agent: Option<&str>,
     socket: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let source = if let Some(agent) = agent {
-        Some(hooks::resolve_direct_agent_source(agent, socket).await?)
-    } else if let Some(session) = session {
-        let hint = socket.or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from));
-        let (client, pane, surface, _) = hooks::resolve_codex_source(session, hint.clone())
+    let id = if let Some(identity) = managed_identity(session, socket.clone()).await? {
+        identity
+    } else {
+        let source = if let Some(agent) = agent {
+            Some(hooks::resolve_direct_agent_source(agent, socket).await?)
+        } else if let Some(session) = session {
+            let hint =
+                socket.or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from));
+            let (client, pane, surface, _) = hooks::resolve_codex_source(session, hint.clone())
             .await?
             .ok_or_else(|| {
                 let missing = hint
@@ -34,37 +80,38 @@ pub(crate) async fn run_identify(
                      with `codex --no-daemon` in the intended pane; keep active sessions open."
                 )
             })?;
-        Some((client, pane, surface))
-    } else {
-        None
-    };
-    let id = if let Some((client, pane, surface)) = source {
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            client.call(Request::WorkspaceTree),
-        )
-        .await??;
-        let Response::Tree { workspaces } = response else {
-            anyhow::bail!("Could not verify the session's workspace");
+            Some((client, pane, surface))
+        } else {
+            None
         };
-        let workspace = workspaces
-            .iter()
-            .find(|ws| {
-                ws.panes
-                    .iter()
-                    .any(|p| p.id == pane && p.tabs.iter().any(|tab| tab.id == surface))
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!("Session pane disappeared; retry from the originating pane")
-            })?;
-        Identity {
-            pane: Some(pane.to_string()),
-            surface: Some(surface.to_string()),
-            workspace: Some(workspace.id.to_string()),
-            socket: Some(client.socket_path().to_string_lossy().into_owned()),
+        if let Some((client, pane, surface)) = source {
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                client.call(Request::WorkspaceTree),
+            )
+            .await??;
+            let Response::Tree { workspaces } = response else {
+                anyhow::bail!("Could not verify the session's workspace");
+            };
+            let workspace = workspaces
+                .iter()
+                .find(|ws| {
+                    ws.panes
+                        .iter()
+                        .any(|p| p.id == pane && p.tabs.iter().any(|tab| tab.id == surface))
+                })
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Session pane disappeared; retry from the originating pane")
+                })?;
+            Identity {
+                pane: Some(pane.to_string()),
+                surface: Some(surface.to_string()),
+                workspace: Some(workspace.id.to_string()),
+                socket: Some(client.socket_path().to_string_lossy().into_owned()),
+            }
+        } else {
+            Identity::from_env()
         }
-    } else {
-        Identity::from_env()
     };
     if json {
         let v = serde_json::json!({
@@ -83,6 +130,138 @@ pub(crate) async fn run_identify(
     }
     Ok(())
 }
+
+pub(super) struct ManagedContext {
+    pub(super) client: Client,
+    pub(super) report: flowmux_ipc::agent_host::AgentViewReport,
+    socket: PathBuf,
+}
+
+pub(super) fn managed_execution(
+    socket: Option<&Path>,
+) -> anyhow::Result<Option<(flowmux_core::AgentViewBinding, PathBuf)>> {
+    if std::env::var_os("FLOWMUX_AGENT_INSTANCE_ID").is_none()
+        && std::env::var_os("FLOWMUX_AGENT_HOST_EPOCH").is_none()
+    {
+        return Ok(None);
+    }
+    let required =
+        |key| std::env::var(key).with_context(|| format!("missing managed context: {key}"));
+    let binding = flowmux_core::AgentViewBinding {
+        instance: required("FLOWMUX_AGENT_INSTANCE_ID")?.parse()?,
+        epoch: required("FLOWMUX_AGENT_HOST_EPOCH")?.parse()?,
+    };
+    let host_socket = std::env::var_os("FLOWMUX_SOCKET_PATH")
+        .map(PathBuf::from)
+        .or_else(|| socket.map(Path::to_path_buf))
+        .context("missing managed Host socket; no GUI fallback")?;
+    Ok(Some((binding, host_socket)))
+}
+
+pub(super) async fn managed_notification_client(
+    cmd: &Cmd,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<Option<Client>> {
+    use flowmux_ipc::agent_host::{ClientRole, HostClient};
+    let (Cmd::Notify { pane, .. } | Cmd::NotifyComplete { pane, .. } | Cmd::NotifyStream { pane }) =
+        cmd
+    else {
+        return Ok(None);
+    };
+    let Some((binding, host_socket)) = managed_execution(socket.as_deref())? else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        pane.is_none(),
+        "managed notifications target the execution; omit --pane"
+    );
+    if let Some(requested) = socket.as_ref() {
+        let normalize = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_owned());
+        if normalize(requested) != normalize(&host_socket) {
+            // An explicit GUI target must still be the execution's verified current GUI.
+            managed_context(None, socket.clone()).await?;
+        }
+    }
+    let host = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        HostClient::connect(&host_socket, ClientRole::Observer),
+    )
+    .await
+    .context("managed notification connection timed out; no GUI fallback")??;
+    Ok(Some(host.0.in_agent_notifications(binding)))
+}
+
+async fn managed_identity(
+    session: Option<&str>,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<Option<Identity>> {
+    Ok(managed_context(session, socket)
+        .await?
+        .map(|context| Identity {
+            pane: Some(context.report.location.pane.to_string()),
+            surface: Some(context.report.location.surface.to_string()),
+            workspace: Some(context.report.location.workspace.to_string()),
+            socket: Some(context.socket.to_string_lossy().into_owned()),
+        }))
+}
+
+pub(super) async fn managed_context(
+    session: Option<&str>,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<Option<ManagedContext>> {
+    use flowmux_ipc::agent_host::{ClientRole, HostClient, HostRequest, HostResponse};
+    let Some((binding, host_socket)) = managed_execution(socket.as_deref())? else {
+        return Ok(None);
+    };
+    let flowmux_core::AgentViewBinding { instance, epoch } = binding;
+    let identity = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let client = HostClient::connect(&host_socket, ClientRole::Observer).await?;
+        let HostResponse::Context {
+            key,
+            location,
+            socket: gui_socket,
+        } = client
+            .call(HostRequest::ResolveContext {
+                instance,
+                epoch,
+                session_id: session.map(str::to_owned),
+            })
+            .await?
+        else {
+            anyhow::bail!("unexpected managed context response");
+        };
+        anyhow::ensure!(
+            key.instance == instance
+                && key.epoch == epoch
+                && gui_socket.is_absolute()
+                && !location.pane.0.is_nil()
+                && !location.surface.0.is_nil()
+                && !location.workspace.0.is_nil(),
+            "invalid managed context response"
+        );
+        if let Some(requested) = socket.as_ref() {
+            let normalize =
+                |path: &std::path::Path| path.canonicalize().unwrap_or_else(|_| path.to_owned());
+            anyhow::ensure!(
+                normalize(requested) == normalize(&host_socket)
+                    || normalize(requested) == normalize(&gui_socket),
+                "--socket differs from the current managed Host or GUI; no GUI fallback"
+            );
+        }
+        let report = flowmux_ipc::agent_host::AgentViewReport { key, location };
+        Ok::<_, anyhow::Error>(ManagedContext {
+            client: client
+                .0
+                .in_agent_view(report.clone(), session.map(str::to_owned)),
+            report,
+            socket: gui_socket,
+        })
+    })
+    .await
+    .context("managed context lookup timed out; no GUI fallback")??;
+    Ok(Some(identity))
+}
+
 pub(crate) fn run_capabilities(json: bool) -> anyhow::Result<()> {
     let caps = flowmux_ipc::protocol::capabilities();
     if json {
@@ -104,10 +283,17 @@ pub(crate) fn run_capabilities(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn run_session_name(client: &Client) -> anyhow::Result<()> {
-    let workspace =
-        workspace_from_env().ok_or_else(|| anyhow::anyhow!("FLOWMUX_WORKSPACE_ID is not set"))?;
-    let surface = hooks::surface_from_env()
+pub(crate) async fn run_session_name(
+    client: &Client,
+    context: Option<&flowmux_ipc::agent_host::AgentViewLocation>,
+) -> anyhow::Result<()> {
+    let workspace = context
+        .map(|context| context.workspace)
+        .or_else(workspace_from_env)
+        .ok_or_else(|| anyhow::anyhow!("FLOWMUX_WORKSPACE_ID is not set"))?;
+    let surface = context
+        .map(|context| context.surface)
+        .or_else(hooks::surface_from_env)
         .ok_or_else(|| anyhow::anyhow!("FLOWMUX_SURFACE_ID is not set"))?;
     let Response::Tree { workspaces } = client.call(Request::WorkspaceTree).await? else {
         anyhow::bail!("unexpected response to WorkspaceTree");
@@ -204,6 +390,14 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
         };
 
     match op {
+        AgentOp::Open { .. }
+        | AgentOp::Run(_)
+        | AgentOp::Ls
+        | AgentOp::Interrupt { .. }
+        | AgentOp::StopHost { .. }
+        | AgentOp::Terminate { .. } => {
+            unreachable!("handled by the managed-agent request path")
+        }
         AgentOp::Install {
             agent: slugs,
             force,

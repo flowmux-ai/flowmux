@@ -1,0 +1,102 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-010",
+  "status": "open: provider whole-work completion and atomic idle-only shutdown contract unverified",
+  "inspection": "Read-only generation of local protocol schemas; no app-server connection, model request, shutdown, sign-out or trust change.",
+  "provider_version": "codex-cli 0.169.0",
+  "schema_command": [
+    "codex",
+    "app-server",
+    "generate-json-schema",
+    "--experimental",
+    "--out",
+    "/tmp/fm-runtime-codex-protocol-01690"
+  ],
+  "request_method_count": 184,
+  "relevant_methods": {
+    "thread/backgroundTerminals/list": {
+      "params": "ThreadBackgroundTerminalsListParams",
+      "fields": [
+        "cursor",
+        "limit",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ],
+      "schema_sha256": "7ac232410d59afd308dca04f8c0b08f20fa6e87f00bd0d3b5892b7ce8b31d2ee"
+    },
+    "thread/backgroundTerminals/clean": {
+      "params": "ThreadBackgroundTerminalsCleanParams",
+      "fields": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ],
+      "schema_sha256": "e07820971c6e4ef8ee1ca5565a6eb78b04a96e001a5828e136b8aca927096a51"
+    },
+    "thread/backgroundTerminals/terminate": {
+      "params": "ThreadBackgroundTerminalsTerminateParams",
+      "fields": [
+        "processId",
+        "threadId"
+      ],
+      "required": [
+        "processId",
+        "threadId"
+      ],
+      "schema_sha256": "4af4973b4e965228e7c6ffdff341c22c227c26bc48d4b44a8696993869b64103"
+    },
+    "thread/unsubscribe": {
+      "params": "ThreadUnsubscribeParams",
+      "fields": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ],
+      "schema_sha256": "77c67e0dc0a729af2d4612f30ed63f1297160232e96cd32b7cb9cc3e7fff0233"
+    },
+    "thread/archive": {
+      "params": "ThreadArchiveParams",
+      "fields": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ],
+      "schema_sha256": "dc2c0b133b814a5d9d543cc37afdb3f4f22feca35b7cea4272834b20a1e47705"
+    },
+    "turn/interrupt": {
+      "params": "TurnInterruptParams",
+      "fields": [
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "threadId",
+        "turnId"
+      ],
+      "schema_sha256": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b"
+    },
+    "thread/read": {
+      "params": "ThreadReadParams",
+      "fields": [
+        "includeTurns",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ],
+      "schema_sha256": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4"
+    }
+  },
+  "client_request_sha256": "b47eb1e37bf93ba91e01df12ed56ddd55c23d1f31ea04f91c77aa812bda9fd3a",
+  "conclusion": "Background terminal listing is available in this installed protocol. The inspected schemas do not establish whole-work completion or an atomic idle-only process shutdown guarantee. A list followed by unsubscribe or a signal does not supply such a guarantee.",
+  "limits": [
+    "Schema fields alone do not prove undocumented server behavior or whether a safe contract exists elsewhere.",
+    "Flowmux currently owns a provider PTY; an app-server transport adapter and its background-work coverage have not been implemented or verified.",
+    "No provider is automatically retired on this evidence."
+  ]
+}

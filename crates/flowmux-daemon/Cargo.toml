@@ -22,6 +22,14 @@ flowmux-vcs = { workspace = true }
 flowmux-procmon = { workspace = true }
 flowmux-notify = { workspace = true }
 flowmux-ipc = { workspace = true }
+flowmux-terminal = { workspace = true }
+
+# Preserve terminal state without a GUI, including reflow and wide cells.
+alacritty_terminal = { version = "0.26", default-features = false }
+libc = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+serde_json = { workspace = true }
 
 anyhow = { workspace = true }
 tokio = { workspace = true }
@@ -30,6 +38,8 @@ tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 chrono = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
-serde_json = { workspace = true }

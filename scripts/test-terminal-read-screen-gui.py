@@ -12,7 +12,8 @@ import signal
 import sys
 import time
 
-from Xlib import X, display
+from Xlib import X, XK, display
+from Xlib.ext import xtest
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location(
@@ -48,6 +49,14 @@ sys.stdout.write('\\x1b[H')
 sys.stdout.flush()
 Path(sys.argv[1]).write_text(json.dumps([rows, columns]))
 sys.stdin.readline()
+""")
+        input_probe = self.root / "input-probe.py"
+        input_probe.write_text("""import os, sys, tty
+from pathlib import Path
+tty.setraw(0)
+Path(sys.argv[1]).touch()
+with open(sys.argv[2], 'ab', buffering=0) as output:
+    while data := os.read(0, 4096): output.write(data)
 """)
         self.start_display()
         process, socket = self.window("read-screen")
@@ -106,6 +115,42 @@ sys.stdin.readline()
                         if missing:
                             failures.append(f"{height}/{mode}/{state}: missing rows/cells {missing}")
                     self.pass_check(f"{height}/{mode}: background read preserves workspace and X focus")
+
+            workspace = self.rpc(socket, "workspace_create", name="Nested close focus",
+                                 root=str(self.root))["workspace_created"]["id"]
+            pane_a = self.workspace(socket, workspace)["panes"][0]["id"]
+            self.rpc(socket, "workspace_focus", workspace=workspace)
+            pane_b = self.rpc(socket, "pane_split", pane=pane_a,
+                              direction="vertical")["pane_split_done"]["new_pane"]
+            pane_c = self.rpc(socket, "pane_split", pane=pane_b,
+                              direction="horizontal")["pane_split_done"]["new_pane"]
+            ready, received = self.root / "input-ready", self.root / "input-received"
+            self.send(socket, pane_b, shlex.join([sys.executable, str(input_probe),
+                                                str(ready), str(received)]))
+            fixture.wait_for(ready.exists, "surviving pane input probe")
+            for pane in (pane_a, pane_b, pane_c):
+                self.rpc(socket, "pane_focus", pane=pane)
+                time.sleep(.1)
+            self.rpc(socket, "pane_close", pane=pane_c)
+            time.sleep(.2)
+            for char in "survivor":
+                key = connection.keysym_to_keycode(XK.string_to_keysym(char))
+                xtest.fake_input(connection, X.KeyPress, key)
+                xtest.fake_input(connection, X.KeyRelease, key)
+            connection.sync()
+            fixture.wait_for(lambda: received.exists() and received.read_bytes() == b"survivor",
+                             "native input returns to the previous pane after nested close")
+            self.pass_check("nested focused pane close returns native keyboard input to the previous pane")
+
+            self.rpc(socket, "pane_close", pane=pane_a)
+            time.sleep(.2)
+            key = connection.keysym_to_keycode(XK.string_to_keysym("x"))
+            xtest.fake_input(connection, X.KeyPress, key)
+            xtest.fake_input(connection, X.KeyRelease, key)
+            connection.sync()
+            fixture.wait_for(lambda: received.read_bytes() == b"survivorx",
+                             "closing an unfocused pane preserves native input")
+            self.pass_check("unfocused pane close preserves native keyboard input")
         (self.root / "result.json").write_text(json.dumps(results, indent=2))
         self.close_window(process)
         assert not failures, "\n".join(failures)

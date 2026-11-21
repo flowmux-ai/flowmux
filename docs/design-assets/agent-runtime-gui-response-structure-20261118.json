@@ -1,0 +1,117 @@
+{
+  "recorded_at_utc": "2026-11-17T15:39:32.221877+00:00",
+  "action_item": "AR-087",
+  "severity": "medium",
+  "status": "resolved in limited GUI response deserialization path",
+  "source_anchor": "a7ce34b1c64207fdfe28deed28d393bdba05870f",
+  "affected_production_caller": "crates/flowmux-daemon/src/agent_host/host.rs: DispatchContext uses Client::with_response_limit(4 MiB)",
+  "reproduction": {
+    "command": "cargo test --locked -p flowmux-ipc response_limit_bounds_json_structure_before_deserialization_without_replay",
+    "exit_code": 101,
+    "request": "Ping over private Unix socket",
+    "response_array_elements": 40001,
+    "wire_bytes": 200050,
+    "finding": "Byte-limited client deserialized excessive structure before the fix; unlimited default accepts it intentionally. No Host RSS budget breach was measured.",
+    "log": {
+      "path": "/tmp/fm-runtime-gui-response-structure-before-20261118.log",
+      "sha256": "ecdba25f9e52a0ef10901cdb4d261593e733bce75cc125f49198f53829c623c0"
+    },
+    "source_provenance": {
+      "path": "/tmp/fm-runtime-gui-response-structure-before-provenance-20261118.json",
+      "sha256": "6859a5d764026c84b91ea534976e8464f114ee4e6b6237ea49425380ece5a0ba"
+    },
+    "source_archive": {
+      "path": "/tmp/fm-runtime-gui-response-structure-before-20261118.diff",
+      "sha256": "5393ee5530328b46e49ca733e5cd77f7b81ca7f9faa74c61d19c61ff3eb33c58"
+    }
+  },
+  "fix": "Apply existing 32,768-delimiter constant-space JsonStructureBudget before Envelope deserialization only on response-limited clients. Poison rejected stream; never replay. Default unlimited clients unchanged.",
+  "validation": {
+    "ipc": {
+      "command": "cargo test --locked -p flowmux-ipc",
+      "exit_code": 0,
+      "unit_passed": 97,
+      "integration_passed": 9,
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-after-20261118.log",
+        "sha256": "1e8f966660cbe612bb7b2efd8b99f755836047fc7894b00d762c22d26a16985e"
+      }
+    },
+    "format": {
+      "exit_code": 0,
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-fmt-20261118.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "clippy": {
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit_code": 0,
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-clippy-20261118.log",
+        "sha256": "d8964b0ce6333774cc9b7e785b97393f685e81d5158831fe7b4c7635865fd068"
+      }
+    },
+    "build": {
+      "command": "cargo build --workspace --locked",
+      "exit_code": 0,
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-build-20261118.log",
+        "sha256": "1c0c967d3e75e945f9da0c38e9c6816a56f8a8eb9717cb2c44c91d424d59fc5c"
+      }
+    },
+    "live_gui": {
+      "command": "python3 -u scripts/test-agent-gui-response-limit.py --protected-pid 1663486",
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-k15ffjcd",
+      "passed_checks": [
+        "small reply succeeds; oversized reply fails explicitly; GUI effect occurs once",
+        "slow clients retain at most seven forwarded replies; rejection precedes GUI effects and control stays responsive",
+        "closing slow clients releases forwarding capacity without replaying rejected effects",
+        "original provider survives reply rejection and accepts fresh Hangul input",
+        "natural exit reaps the provider and empty Host"
+      ],
+      "host_peak_kib": 96764,
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-live-20261118.log",
+        "sha256": "52e7a4f04b0ed9799045de7f1473e1905467c4b04b09fb9db19b95fedd2a2c7e"
+      }
+    },
+    "real_codex": {
+      "command": "python3 -u scripts/test-agent-codex-live.py --work-seconds 1 --protected-pid 1663486",
+      "exit_code": 0,
+      "artifacts": "/tmp/fm-gui-nhvwipxg",
+      "passed_checks": [
+        "real Codex model replies through the managed VTE",
+        "tab and last isolated GUI close preserve the actual Codex process",
+        "real Codex and its exact tool command survive 1.002s without any GUI",
+        "reconnected same Codex renders previous TUI and answers fresh Hangul round trip",
+        "explicit termination reaps this provider and empty Host without affecting user GUI"
+      ],
+      "log": {
+        "path": "/tmp/fm-runtime-gui-response-structure-codex-20261118.log",
+        "sha256": "aa4394dfc5436de2bb93897038b20ccd163611e51b51fc0710e77c87f6658d53"
+      }
+    },
+    "source_and_binary_provenance": {
+      "path": "/tmp/fm-runtime-gui-response-structure-after-provenance-20261118.json",
+      "sha256": "e64f8412eef1f1e03d3f11c579f4032bde8caa8eb3454224f284637fa3127773"
+    },
+    "files": {
+      "crates/flowmux-ipc/src/client.rs": "3c53fdf909cf484fa625f0286fda28baf223bed70fb80050aec3d8233e19ee02",
+      "crates/flowmux-ipc/src/server.rs": "47c5d92be0f04169ae158f641a1a834bec84332092e7c9a56a44b6e5b5edaf92",
+      "scripts/test-agent-gui-response-limit.py": "a2eeaa072f550aed4cfea187a4288f12e026ea8115de05257543a44027ed517f",
+      "scripts/test-agent-codex-live.py": "0487919e3e56b692e213a3360a7d869f8cbb195510c7f32916f5f8041e485067",
+      "target/debug/flowmux": "d4debc93f92a61142b3092bfc9f6236628f4b4d7ccb4968af4ff5b18c9d52e0e",
+      "target/debug/flowmuxctl": "74e9748b9b8d03d5ed268ccd82de3fad815e56da1577732cc9635f5e99becac2",
+      "target/debug/flowmux-daemon": "e0a8318e83a44ba91beebbfe1681d6ad96e89933712aef6c1e1dc8dbf1d7872f"
+    }
+  },
+  "protected_user_gui_pid": 1663486,
+  "limitations": [
+    "AR-006 full Host memory accounting remains open; rejecting structure does not prove the complete RSS budget.",
+    "Structural rejection is verified with a real IPC Unix socket. Live GUI checks cover normal/oversized bytes and retained responses, not a structural rejection generated by a native GUI.",
+    "No native macOS execution of AR-087 on this Linux host. Prior CI source 1ffd7c26 predates this change.",
+    "Existing 51-phase Linux evidence is a split run and was not repeated wholesale for this bounded client change."
+  ]
+}

@@ -1,0 +1,255 @@
+{
+  "date": "2026-11-18",
+  "scope": "independent review follow-up AR-100..AR-107 on agent/runtime-audit-20261117",
+  "base": "c6a513db",
+  "tip_verified": "2ce666a9",
+  "environment": {
+    "ssh_fixture": "local extracted OpenSSH and tmux via SSH_FIXTURE_SSHD/TMUX/LIBRARY_PATH",
+    "media": "local ffmpeg/ffprobe wrappers on PATH, GST_PLUGIN_PATH and LD_LIBRARY_PATH for the H.264 decoder",
+    "invoking_shell": "Claude Code session; gate isolation fixed by 3d78d585 and ea623777"
+  },
+  "gate_runs": [
+    {
+      "command": [
+        "bash",
+        "scripts/test-ci.sh",
+        "linux",
+        "extended"
+      ],
+      "commit": "61a98b2e",
+      "gate_exit": 1,
+      "regression_phases_run": 7,
+      "passed": 6,
+      "stopped_at": "browser-control",
+      "cause": "host has no ffmpeg/H.264 decoder on PATH; environment",
+      "log_sha256": "ac12c8b59939fbab58ef4a695f18d0f3ad9e4e64ed63107f45948e50b3de2146"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/test-ci.sh",
+        "linux",
+        "extended"
+      ],
+      "commit": "61a98b2e",
+      "gate_exit": 1,
+      "regression_phases_run": 10,
+      "passed": 9,
+      "stopped_at": "browser-feedback",
+      "cause": "browser-feedback 'selection captured' timeout; 4 standalone reruns passed",
+      "log_sha256": "2fc4de3618f080d75553b35f89573ebeb9a768492a9caf62e36ddcbb8898fa4d"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/test-ci.sh",
+        "linux",
+        "extended"
+      ],
+      "commit": "61a98b2e",
+      "gate_exit": 1,
+      "regression_phases_run": 12,
+      "passed": 11,
+      "stopped_at": "skills",
+      "cause": "skills Team sample: gate did not clear CLAUDE_CODE_ENTRYPOINT; fixed by ea623777",
+      "log_sha256": "f44344b81aee5c1a4bb440297637a7ee26e2a3727652456d9fe2227eee485289"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/test-ci.sh",
+        "linux",
+        "extended"
+      ],
+      "commit": "ea623777",
+      "gate_exit": 1,
+      "regression_phases_run": 26,
+      "passed": 25,
+      "stopped_at": "agent-gui-response-limit",
+      "cause": "agent-gui-response-limit fixture sent protocol 15; fixed by 2ce666a9",
+      "log_sha256": "c229e014dcc067fc7b19797c5e92f6246681e4e3c0031f22aa11212068622169"
+    }
+  ],
+  "followup_coverage": {
+    "commit": "2ce666a9",
+    "mode": "scripts/test-linux.sh extended resumed at agent-gui-response-limit, continuing after failures",
+    "phases": [
+      {
+        "test": "agent-gui-response-limit",
+        "elapsed_seconds": 6,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-containment",
+        "elapsed_seconds": 7,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-root-exit",
+        "elapsed_seconds": 5,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-ready",
+        "elapsed_seconds": 44,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-relay-replacement",
+        "elapsed_seconds": 54,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-gui-replacement",
+        "elapsed_seconds": 97,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-binding-restore",
+        "elapsed_seconds": 10,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-background-binding-restore",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-drag",
+        "elapsed_seconds": 7,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-drag",
+        "elapsed_seconds": 52,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-click-load",
+        "elapsed_seconds": 11,
+        "exit_code": 0
+      },
+      {
+        "test": "managed-agent-tearoff",
+        "elapsed_seconds": 9,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-native-hooks",
+        "elapsed_seconds": 46,
+        "exit_code": 1
+      },
+      {
+        "test": "agent-session-resume",
+        "elapsed_seconds": 21,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-session-tab-fallback",
+        "elapsed_seconds": 5,
+        "exit_code": 0
+      },
+      {
+        "test": "new-agent",
+        "elapsed_seconds": 13,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-termination",
+        "elapsed_seconds": 22,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-cli-controls",
+        "elapsed_seconds": 15,
+        "exit_code": 0
+      },
+      {
+        "test": "terminal-read-screen",
+        "elapsed_seconds": 8,
+        "exit_code": 0
+      },
+      {
+        "test": "terminal-load",
+        "elapsed_seconds": 19,
+        "exit_code": 0
+      },
+      {
+        "test": "terminal-image-links",
+        "elapsed_seconds": 79,
+        "exit_code": 0
+      },
+      {
+        "test": "ipc-recovery",
+        "elapsed_seconds": 4,
+        "exit_code": 0
+      },
+      {
+        "test": "polling-delay",
+        "elapsed_seconds": 15,
+        "exit_code": 0
+      },
+      {
+        "test": "agent-host-budget",
+        "elapsed_seconds": 67,
+        "exit_code": 0
+      },
+      {
+        "test": "idle-stability-unit",
+        "elapsed_seconds": 0,
+        "exit_code": 0
+      },
+      {
+        "test": "idle-stability",
+        "elapsed_seconds": 88,
+        "exit_code": 0
+      },
+      {
+        "test": "editor-io",
+        "elapsed_seconds": 24,
+        "exit_code": 0
+      },
+      {
+        "test": "editor-renderer",
+        "elapsed_seconds": 23,
+        "exit_code": 0
+      },
+      {
+        "test": "lazy-restore",
+        "elapsed_seconds": 15,
+        "exit_code": 0
+      },
+      {
+        "test": "ssh-workspace",
+        "elapsed_seconds": 143,
+        "exit_code": 0
+      }
+    ],
+    "log_sha256": "9c9df432ad1d12a26c7bd2179a887a3cc8a7c40cc082028a7d9f4df6de88b895"
+  },
+  "agent_native_hooks_rate": {
+    "check": "notification focuses the moved pane for native input",
+    "base_product_c6a513db": {
+      "runs": 6,
+      "failed": 2
+    },
+    "integrated_2ce666a9": {
+      "runs": 6,
+      "failed": 3
+    },
+    "interleaved": true,
+    "failure_focus_nodes": [
+      [
+        "scroll pane",
+        ""
+      ]
+    ],
+    "view_visible": true,
+    "attachment_ready": true
+  },
+  "not_run": [
+    "macOS",
+    "CI dispatch",
+    "real provider sessions"
+  ]
+}

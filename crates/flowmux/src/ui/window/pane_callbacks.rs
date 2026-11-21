@@ -192,7 +192,7 @@ impl PaneCallbackRouter {
             on_close_surface: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, surface| {
-                    dispatch_with_ack(&bridge, move |ack| GtkCommand::CloseSurface {
+                    dispatch_with_ack(&bridge, move |ack| GtkCommand::CloseSurfaceButton {
                         pane,
                         surface,
                         ack,
@@ -326,6 +326,16 @@ impl PaneCallbackRouter {
                 let bridge = bridge.clone();
                 Rc::new(move |command| {
                     dispatch_with_ack_result(&bridge, |ack| match command {
+                        TabDropCommand::OpenManagedAgent {
+                            payload,
+                            dst_pane,
+                            tab_anchor,
+                        } => GtkCommand::OpenManagedAgent {
+                            pane: Some(dst_pane),
+                            tab_anchor,
+                            payload,
+                            ack,
+                        },
                         TabDropCommand::MoveToPane {
                             src_pane,
                             surface,
@@ -430,6 +440,20 @@ impl PaneCallbackRouter {
                 let options = options.clone();
                 Rc::new(move || options.borrow().clone())
             },
+            host_execution_alive: {
+                let bridge = bridge.clone();
+                Rc::new(move |binding| {
+                    crate::agent_host::execution_alive(
+                        &bridge.agent_registry.borrow(),
+                        binding,
+                        || {
+                            crate::agent_host::host_absent(
+                                &flowmux_config::paths::agent_host_socket(),
+                            )
+                        },
+                    )
+                })
+            },
             position_of_surface_in_pane: {
                 let registry = Rc::downgrade(&pane_registry);
                 Rc::new(move |pane, surface| {
@@ -464,7 +488,7 @@ impl PaneCallbackRouter {
                 let registry = Rc::downgrade(&pane_registry);
                 Rc::new(move |pane, point| {
                     if let Some(registry) = registry.upgrade() {
-                        registry.borrow().update_tab_drag_preview(pane, point);
+                        registry.borrow().update_tab_drag_preview(Some(pane), point);
                     }
                 })
             },

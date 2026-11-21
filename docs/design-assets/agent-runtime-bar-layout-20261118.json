@@ -1,0 +1,301 @@
+{
+  "action_item": "AR-091",
+  "severity": "medium",
+  "problem": "The Agent bar root was horizontal but the managed live and ended lists remained vertical, so additional managed Agents increased the bottom bar height.",
+  "source_parent": "06cddd345aa0823569840b23ccb4e2b6fe227c3c",
+  "fix": "Pass orientation to ManagedAgents at construction; use horizontal live/ended lists in AgentBar and vertical lists in Sidebar.",
+  "regression": {
+    "before_exit": 101,
+    "after_exit": 0,
+    "related_gui_unit_tests_passed": 29,
+    "check": "A second live Agent must not increase the horizontal bar height; the vertical list must grow."
+  },
+  "live_layout": [
+    {
+      "name": "fixture · BAR-LAYOUT-3",
+      "x": 1092,
+      "y": 730,
+      "width": 127,
+      "height": 17,
+      "ancestors": [
+        "panel",
+        "panel",
+        "push button",
+        "panel",
+        "panel"
+      ]
+    },
+    {
+      "name": "fixture · BAR-LAYOUT-2",
+      "x": 875,
+      "y": 730,
+      "width": 127,
+      "height": 17,
+      "ancestors": [
+        "panel",
+        "panel",
+        "push button",
+        "panel",
+        "panel"
+      ]
+    },
+    {
+      "name": "fixture · BAR-LAYOUT-1",
+      "x": 657,
+      "y": 730,
+      "width": 128,
+      "height": 17,
+      "ancestors": [
+        "panel",
+        "panel",
+        "push button",
+        "panel",
+        "panel"
+      ]
+    },
+    {
+      "name": "fixture · BAR-LAYOUT-0",
+      "x": 439,
+      "y": 730,
+      "width": 128,
+      "height": 17,
+      "ancestors": [
+        "panel",
+        "panel",
+        "push button",
+        "panel",
+        "panel"
+      ]
+    }
+  ],
+  "screenshot": "agent-runtime-bar-layout-20261118.png",
+  "binary_sha256": {
+    "flowmux": "53e0e4bd2df741693c25ba6f5bc8942d589bd9a0ca2c6cdfc6d8ff275b052064",
+    "flowmuxctl": "74e9748b9b8d03d5ed268ccd82de3fad815e56da1577732cc9635f5e99becac2",
+    "flowmux-daemon": "e0a8318e83a44ba91beebbfe1681d6ad96e89933712aef6c1e1dc8dbf1d7872f"
+  },
+  "evidence": [
+    {
+      "path": "/tmp/fm-bar-unit-before-20261118.log",
+      "sha256": "f65cac07af554bbdee17d71272c7e049a7d8b71768292bd66ed0acc853a63b66"
+    },
+    {
+      "path": "/tmp/fm-bar-unit-after2-20261118.log",
+      "sha256": "ed93e16e3a43db880bdbcc439c5390d5bdfbb8cec2f8804d1b029b7a3bb5f1a3"
+    },
+    {
+      "path": "/tmp/fm-bar-related-20261118.log",
+      "sha256": "966b6b87e330ec18c21ff527de60243050d536f7aaa564c360935a7614892716"
+    },
+    {
+      "path": "/tmp/fm-bar-clippy-20261118.log",
+      "sha256": "d62b2ee328b410ec86e2d1d88eb0cb43db48d600f703f36375a0391036ea4c3a"
+    },
+    {
+      "path": "/tmp/fm-bar-fixed-build-20261118.log",
+      "sha256": "7ded062834e553239df0416e8d91c4ac5582b373c21f79061e6ea6b5fb78d673"
+    },
+    {
+      "path": "/tmp/fm-bar-layout-before3-20261118.log",
+      "sha256": "415a814bd6d6cdd4a68034c606cc8e33df41112db4c29bb2d7a406512f715cec"
+    },
+    {
+      "path": "/tmp/fm-bar-layout-after-20261118.log",
+      "sha256": "8ca8bf9e57d9923dbc4561f0fa104c0037f94913a6c91cb5f7385321379fcb20"
+    },
+    {
+      "path": "/tmp/fm-bar-layout-probe-20261118.py",
+      "sha256": "436034e846f9832aeea0a662cca54a23b8b1d31728ee7613e027b3278aac4de8"
+    },
+    {
+      "path": "/tmp/fm-gui-eoh5tlbh/layout.json",
+      "sha256": "d8b5d18cfb02adc36fb1575e40b8d57c2de25b22d2526482387712b104c52403"
+    },
+    {
+      "path": "/tmp/fm-final-local-20261118/managed-drag.json",
+      "sha256": "8798ca6a7fa8995fefd7501a4753f6128efca89d1a88fd140fba24d1940352f9"
+    },
+    {
+      "path": "/tmp/fm-final-managed-drag-20261118.log",
+      "sha256": "48e644362e845a5760cbd81ed06d226ad7f3382f560355fa3a42c5f4c87949b5"
+    },
+    {
+      "path": "/tmp/fm-final-local-20261118/termination.json",
+      "sha256": "23ec714130a373ff30db63e001f22f68b615283f909436c159cf387aa37142c3"
+    },
+    {
+      "path": "/tmp/fm-final-termination-20261118.log",
+      "sha256": "92e24217dbeafe1e171b8606ae43bf98d50b7d5a124e5fc908476c13443751ca"
+    },
+    {
+      "path": "/tmp/fm-final-local-20261118/native-hooks.json",
+      "sha256": "cef72f8ac2fdf093d1784d7a89b686232796a17d6d4265671d5d6e8f24ab0180"
+    },
+    {
+      "path": "/tmp/fm-final-native-hooks-20261118.log",
+      "sha256": "1676834db6aa6eeab6ea5334bfee36fa9f837143d07d98afac04a2b1a1170c40"
+    }
+  ],
+  "limits": [
+    "Full local Linux gate preceded the layout fix; the final binary is covered by the targeted follow-up checks in this record.",
+    "Six existing medium findings remain open; this UI fix does not close them.",
+    "The user GUI and installed binaries were not restarted or replaced."
+  ],
+  "followup_live_checks": [
+    {
+      "receipt": {
+        "phase": "managed-drag",
+        "command": [
+          "python3",
+          "scripts/test-agent-drag-gui.py",
+          "--managed",
+          "--gui",
+          "target/debug/flowmux",
+          "--cli",
+          "target/debug/flowmuxctl",
+          "--host",
+          "target/debug/flowmux-daemon",
+          "--protected-pid",
+          "1663486"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 965966,
+        "exit_code": 0,
+        "elapsed_seconds": 144.441
+      },
+      "checks_passed": 24,
+      "checks": [
+        "Agents visibly distinguishes tab-bound execution from Host-owned execution",
+        "Host verifies the live relay and reports the visible tab location",
+        "a foreign management connection cannot overwrite the owning GUI's location",
+        "paused GUI reports expire without losing the relay; fresh GTK observations restore Visible",
+        "Agents handle moves the existing tab into a pane body without splitting or restarting",
+        "GTK rejects a browser effect with a source location from before the drag",
+        "After native drag, the actual managed descendant identifies its current pane and surface",
+        "drag updates Host location; hidden tabs and workspaces stay Open and return to Visible",
+        "clicking an open registry row focuses its current pane after a drag",
+        "repeated drag reads the current pane location and preserves the same PID and input",
+        "Agents strip drops reorder the same tab before and after targets in both directions, preserving input and one process",
+        "cross-pane Agents strip drops honor before and after positions without replacing the relay",
+        "dropping an Agent onto either half of its own tab preserves its position without duplication",
+        "strip drop reconnects a disconnected relay at the current tab position and preserves the process",
+        "Escape cancels an Agents drag and leaves layout and terminal input working",
+        "tab closure keeps the registry row and same PID; Background strip drag inserts before its target without spawning",
+        "Background click requires a destination confirmation; cancel changes neither layout nor execution",
+        "Background click defaults to the recent terminal pane despite browser focus, with fresh input and one process start",
+        "cancelling Move to a new workspace creates no workspace and preserves the open view",
+        "Move to another workspace preserves the same Agent tab, process and destination shell",
+        "a destination closed during selection is rejected without moving the view or choosing another pane",
+        "confirmed New workspace moves the same execution and accepts fresh input without provider resume",
+        "Agents bar also exposes the registry and moves the same running process",
+        "closing the isolated GUI immediately clears its location and retains the same running Agent"
+      ],
+      "log_sha256": "48e644362e845a5760cbd81ed06d226ad7f3382f560355fa3a42c5f4c87949b5"
+    },
+    {
+      "receipt": {
+        "phase": "termination",
+        "command": [
+          "python3",
+          "scripts/test-agent-session-resume-gui.py",
+          "--termination",
+          "--gui",
+          "target/debug/flowmux",
+          "--cli",
+          "target/debug/flowmuxctl",
+          "--host",
+          "target/debug/flowmux-daemon",
+          "--protected-pid",
+          "1663486"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 966547,
+        "exit_code": 0,
+        "elapsed_seconds": 55.485
+      },
+      "checks_passed": 14,
+      "checks": [
+        "Sessions resume uses Host, configured shell startup, literal project/config and native argv",
+        "Focused managed tab browses the provider root's history rather than the relay's descendants",
+        "Closing the resumed tab preserves the same PID/birth and Background execution",
+        "Resume of an already running history session reconnects without a second spawn",
+        "GUI exit and saved-view restoration preserve the same resumed process and accept new input",
+        "Cancelling named termination preserves the exact running execution",
+        "Explicit Ctrl+C interrupts without declaring the execution ended",
+        "Normal termination stops and reaps the execution and updates Agents",
+        "Recently ended retains the execution after process exit; dismiss synchronizes the Host and hides the empty section",
+        "Normal timeout preserves Stopping and offers explicit force without automatic killing",
+        "Cancelling force termination keeps the stopping execution and its child alive",
+        "Confirmed force reaps root and owned child while preserving the original shell",
+        "Ended executions are reaped and the empty Host retires",
+        "Ended metadata remains dismissible in this window after Host shutdown without starting a Host"
+      ],
+      "log_sha256": "92e24217dbeafe1e171b8606ae43bf98d50b7d5a124e5fc908476c13443751ca"
+    },
+    {
+      "receipt": {
+        "phase": "native-hooks",
+        "command": [
+          "python3",
+          "scripts/test-agent-native-hooks-gui.py",
+          "--gui",
+          "target/debug/flowmux",
+          "--cli",
+          "target/debug/flowmuxctl",
+          "--host",
+          "target/debug/flowmux-daemon",
+          "--protected-pid",
+          "1663486"
+        ],
+        "timeout_seconds": 300.0,
+        "status": "passed",
+        "pid": 967555,
+        "exit_code": 0,
+        "elapsed_seconds": 116.413
+      },
+      "checks_passed": 30,
+      "checks": [
+        "notification preserves picker cancel, follows a moved view out of Code Review with native input, and keeps read/dismiss across duplicate hooks",
+        "claude: native wait creates one Host/bell/desktop notification after tab closure",
+        "managed explicit notify rejects copied identity, wrong epoch/instance/socket and explicit pane without fallback",
+        "notify, notify-complete and notify-stream retain headless notifications and unchanged lifecycle; stream survives 32 seconds of silence with exact output",
+        "claude: GUI imports headless notification history without desktop replay",
+        "attached explicit notification accepts only the current GUI socket and opens the same execution despite stale pane variables",
+        "claude: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified",
+        "codex: native wait creates one Host/bell/desktop notification after tab closure",
+        "Codex: late root progress/start/Stop preserve completed Background status in Host and visible Agents row",
+        "Codex: explicit stop-hook retry and reused child work settle without any GUI or replacement process",
+        "codex: GUI imports headless notification history without desktop replay",
+        "codex: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified",
+        "gemini: native wait creates one Host/bell/desktop notification after tab closure",
+        "gemini: approval wait invalidates pre-wait screen stability and restarts the ready grace",
+        "gemini: headless live screen/title settlement preserves continuation, outcome, process identity and notification deduplication",
+        "gemini: GUI imports headless notification history without desktop replay",
+        "gemini: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified",
+        "opencode: native wait creates one Host/bell/desktop notification after tab closure",
+        "opencode: GUI imports headless notification history without desktop replay",
+        "opencode: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified",
+        "cline: native wait creates one Host/bell/desktop notification after tab closure",
+        "cline: headless live screen/title settlement preserves continuation, outcome, process identity and notification deduplication",
+        "cline: GUI imports headless notification history without desktop replay",
+        "cline: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified",
+        "antigravity: native wait creates one Host/bell/desktop notification after tab closure",
+        "antigravity: approval wait invalidates pre-wait screen stability and restarts the ready grace",
+        "antigravity: headless live screen/title settlement preserves continuation, outcome, process identity and notification deduplication",
+        "Antigravity: repeated native failure produces one causal Error notification without a GUI",
+        "antigravity: GUI imports headless notification history without desktop replay",
+        "antigravity: product native hooks survive tab/GUI closure; sessions, root identity and fresh reattached input verified"
+      ],
+      "log_sha256": "1676834db6aa6eeab6ea5334bfee36fa9f837143d07d98afac04a2b1a1170c40"
+    }
+  ],
+  "source_sha256": {
+    "crates/flowmux/src/ui/agent_bar.rs": "25135dbb700236ed751c17899eaace9be1869c2f734a071d9d77a24ebd6dec5c",
+    "crates/flowmux/src/ui/managed_agents.rs": "096747077578b7dbd83b45a1401e738d1b52ed1b0195d43b2fd9e1195e8bde61",
+    "crates/flowmux/src/ui/sidebar.rs": "425ed510dec36aaf6828abde8bd687f1a77db6ecccaaf43d993e10068a87cb12"
+  },
+  "source_diff_sha256": "9ae94a82a3d1f37974f22df342ae6d1781ab9ac21d958af9fd641cec49fff758",
+  "followup_scope": "Native GUI and Unix-socket fixtures exercise the product runtime and hooks; this follow-up does not call live provider APIs."
+}

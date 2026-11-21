@@ -1,8 +1,59 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Native process inspection. No procfs assumptions escape this backend.
 use std::ffi::OsString;
+use std::io;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
+
+/// Snapshot a forkpty child's session after exit and before its sole waiter reaps it.
+/// The unreaped child pins the session ID against PID reuse during the scan.
+pub fn exiting_pty_session_members(root: libc::pid_t) -> io::Result<Option<Vec<(u32, u64)>>> {
+    let mut status: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: status is writable and the actor owns this unreaped child.
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            root as libc::id_t,
+            &mut status,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if status.si_pid != root {
+        return Ok(None);
+    }
+    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+    if count <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut pids = vec![0_i32; count as usize + 32];
+    let written = unsafe {
+        libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            std::mem::size_of_val(pids.as_slice()) as libc::c_int,
+        )
+    };
+    if written <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if written as usize >= pids.len() {
+        // The process table grew. Keep the root unreaped and retry on the next tick.
+        return Ok(None);
+    }
+    pids.truncate(written as usize);
+    let members = pids
+        .into_iter()
+        .filter(|&pid| pid > 0 && pid != root && unsafe { libc::getsid(pid) } == root)
+        .filter_map(|pid| {
+            let birth = super::process_start_time(pid as u32)?;
+            // A PID could have been reassigned between the first lookup and the birth read.
+            (unsafe { libc::getsid(pid) } == root).then_some((pid as u32, birth))
+        })
+        .collect();
+    Ok(Some(members))
+}
 
 /// The kernel changes this UUID at boot, independently of wall-clock changes.
 pub fn boot_session_id() -> Option<String> {

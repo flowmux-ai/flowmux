@@ -198,6 +198,25 @@ impl ResolvedTheme {
         );
     }
 
+    /// Default colors the Agent Host answers to provider color queries for this theme.
+    pub fn terminal_colors(&self) -> flowmux_ipc::agent_host::TerminalColors {
+        let rgb = |color: &gdk::RGBA| {
+            [color.red(), color.green(), color.blue()]
+                .map(|channel| (channel * 255.0).round().clamp(0.0, 255.0) as u8)
+        };
+        flowmux_ipc::agent_host::TerminalColors {
+            foreground: rgb(&self.fg),
+            background: rgb(&self.bg),
+            palette: self
+                .palette
+                .iter()
+                .map(rgb)
+                .collect::<Vec<_>>()
+                .try_into()
+                .ok(),
+        }
+    }
+
     pub fn is_dark(&self) -> bool {
         relative_luminance(&self.bg) < 0.5
     }
@@ -296,8 +315,15 @@ impl ResolvedTheme {
             .replace("$border", &pane_border_css)
             .replace("$hover", &control_hover_css)
             .replace("$accent", &focus_full_css);
-        let sidebar_zoom =
-            flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
+        // GTK uses 72 DPI on macOS and 96 DPI on Linux for point-sized sidebar text.
+        let sidebar_font_scale = if cfg!(target_os = "macos") {
+            4.0 / 3.0
+        } else {
+            1.0
+        };
+        let sidebar_zoom = flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64
+            / 100.0
+            * sidebar_font_scale;
         format!(
             r#"
 .flowmux-pane {{
@@ -1532,13 +1558,18 @@ mod tests {
         let cfg = flowmux_config::ghostty::GhosttyConfig::default();
         let theme = ResolvedTheme::from_ghostty(&cfg);
 
+        let (half_body, half_caption, double_body, double_caption) = if cfg!(target_os = "macos") {
+            ("8.00pt", "6.67pt", "32.00pt", "26.67pt")
+        } else {
+            ("6.00pt", "5.00pt", "24.00pt", "20.00pt")
+        };
         let half = theme.css("#fff4b3", 0.5, 50);
-        assert!(half.contains("font-size: 6.00pt;"));
-        assert!(half.contains("font-size: 5.00pt;"));
+        assert!(half.contains(&format!("font-size: {half_body};")));
+        assert!(half.contains(&format!("font-size: {half_caption};")));
 
         let double = theme.css("#fff4b3", 0.5, 200);
-        assert!(double.contains("font-size: 24.00pt;"));
-        assert!(double.contains("font-size: 20.00pt;"));
+        assert!(double.contains(&format!("font-size: {double_body};")));
+        assert!(double.contains(&format!("font-size: {double_caption};")));
     }
 
     /// Multi-tab panes paint a 2px top stripe on the active tab. The

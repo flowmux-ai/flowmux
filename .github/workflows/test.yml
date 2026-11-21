@@ -14,11 +14,17 @@ on:
       - 'docs/legal/**'
       - '!resources/screenshot/**'
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to verify
+        type: choice
+        default: all
+        options: [all, linux, macos]
   schedule:
     - cron: '23 3 * * 1'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.platform || 'all' }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
@@ -26,6 +32,7 @@ env:
 
 jobs:
   editor-web:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
     name: editor web
     runs-on: ubuntu-24.04
     defaults:
@@ -55,45 +62,82 @@ jobs:
         working-directory: .
         run: git diff --exit-code -- editor/flowmux-editor-web/dist
 
-  cargo-test:
-    name: Linux regression tests
+  # The Linux gate runs as independent groups on separate instances. linux-build
+  # compiles the binaries once for the GUI groups; cargo-test collects the results.
+  linux-build:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
+    name: Linux build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Install test dependencies
+        uses: ./.github/actions/linux-test-deps
+
+      - name: Build the workspace (same script as local)
+        run: bash scripts/test-ci.sh linux "$CI_TEST_SUITE" build
+
+      # A tar archive keeps the executable bits that artifact uploads drop.
+      - name: Package binaries for the GUI groups
+        run: tar -cf "$RUNNER_TEMP/flowmux-binaries.tar" -C target/debug flowmux flowmuxctl flowmux-daemon flowmux-md-viewer
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: ${{ runner.temp }}/flowmux-binaries.tar
+          retention-days: 1
+
+  # The script self-tests need only Python and rustfmt.
+  linux-scripts:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
+    name: Linux script tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Run script tests and formatting (same script as local)
+        run: bash scripts/test-ci.sh linux "$CI_TEST_SUITE" scripts
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-evidence-scripts
+          path: target/ci/linux
+          if-no-files-found: warn
+
+  linux-workspace:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
+    name: Linux workspace tests
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Check Rust toolchain and formatting
-        run: |
-          rustup show active-toolchain
-          cargo fmt --all -- --check
+      - name: Check Rust toolchain
+        run: rustup show active-toolchain
 
       - name: Install Node.js for the OpenCode hook integration test
         uses: actions/setup-node@v7
         with:
           node-version: 22
 
-      - name: Install system dependencies
-        run: |
-          # Prefer the runner's Ubuntu HTTPS fallback when Azure downloads trickle.
-          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|s/priority:1/priority:4/' /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
-            libwebkitgtk-6.0-dev libssl-dev \
-            gstreamer1.0-plugins-good gstreamer1.0-libav ffmpeg \
-            libssh2-1-dev libdbus-1-dev \
-            meson ninja-build \
-            dbus-x11 xvfb openssh-server tmux python3-xlib apparmor \
-            python3-gi gir1.2-atspi-2.0 at-spi2-core python3-pil gnome-keyring gcr python3-cryptography
+      - name: Install test dependencies
+        uses: ./.github/actions/linux-test-deps
 
-      - name: Install ThorVG (image viewer backend, all loaders + C API)
-        run: sudo ./scripts/install-thorvg.sh
-
-      - name: Allow WebKit namespaces for the test process
+      - name: Check the packaged WebKit profile lifecycle
         run: |
-          sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
-          sudo sh packaging/debian/postinst configure
           sudo sh packaging/debian/prerm upgrade
           aa-exec -p flowmux-webkit -- true
           sudo sh packaging/debian/prerm remove
@@ -103,15 +147,56 @@ jobs:
           fi
           sudo sh packaging/debian/postinst configure
 
-      - name: Run Linux regression tests (same script as local)
-        timeout-minutes: 55
-        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux "$CI_TEST_SUITE"
+      - name: Run workspace tests (same script as local)
+        timeout-minutes: 45
+        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux "$CI_TEST_SUITE" workspace
 
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-test-evidence
+          name: linux-test-evidence-workspace
+          path: target/ci/linux
+          if-no-files-found: warn
+
+  linux-gui:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
+    needs: linux-build
+    name: Linux GUI tests (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [team-usage, team, agent-host, agent-session, browser, terminal]
+    env:
+      CI_TEST_PREBUILT: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install test dependencies
+        uses: ./.github/actions/linux-test-deps
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: ${{ runner.temp }}
+
+      - name: Unpack binaries
+        run: |
+          mkdir -p target/debug
+          tar -xf "$RUNNER_TEMP/flowmux-binaries.tar" -C target/debug
+
+      - name: Run Linux GUI tests (same script as local)
+        timeout-minutes: 45
+        run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh linux "$CI_TEST_SUITE" "${{ matrix.group }}"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-evidence-${{ matrix.group }}
           path: |
             target/ci/linux
             /tmp/fm-gui-*/memory.jsonl
@@ -121,6 +206,17 @@ jobs:
             /tmp/fm-gui-*/editor-renderer.log
             /tmp/fm-gui-*/editor-io.log
             /tmp/fm-gui-*/session-flow.log
+            /tmp/fm-gui-*/session-resume*.log
+            /tmp/fm-gui-*/host.log
+            /tmp/fm-gui-*/host-budget-*.json
+            /tmp/fm-gui-*/native-host-hooks*.log
+            /tmp/fm-gui-*/headless-screen-result-*.log
+            /tmp/fm-gui-*/native-hooks-failure.json
+            /tmp/fm-gui-*/session-resume-startup.json
+            /tmp/fm-gui-*/session-resume-startup.png
+            /tmp/fm-gui-*/session-resume-failure.json
+            /tmp/fm-gui-*/session-resume-failure.png
+            /tmp/fm-gui-*/agent-drag.log
             /tmp/fm-gui-*/image-links.log
             /tmp/fm-gui-*/events.jsonl
             /tmp/fm-gui-*/recovery-entered
@@ -129,9 +225,35 @@ jobs:
             /tmp/fm-gui-*/office-after-idle.png
           if-no-files-found: warn
 
+  cargo-test:
+    # Report failed groups too, but not a run that was cancelled.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.platform != 'macos') }}
+    needs: [linux-build, linux-scripts, linux-workspace, linux-gui]
+    name: Linux regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every Linux group to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "linux-build linux-scripts linux-workspace linux-gui: $RESULTS"
+          for result in $RESULTS; do
+            [[ $result == success ]] || exit 1
+          done
+
+      - name: Collect test evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: linux-test-evidence
+          pattern: linux-test-evidence-*
+          separate-directories: true
+          delete-merged: true
+
   stress:
     name: headless stress probes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.platform != 'macos')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -142,57 +264,60 @@ jobs:
       - name: Run the separately ignored stress probes
         run: cargo test -p flowmux-core -p flowmux-daemon -p flowmux-notify --locked -- --ignored --nocapture
 
-  macos:
-    name: macOS build and native smoke
+  # The macOS gate runs as independent groups too; macos collects the results.
+  macos-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    name: macOS tests (${{ matrix.group }})
     runs-on: macos-15
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [scripts, headless, app, native]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Check Rust toolchain and formatting
-        run: |
-          rustup show active-toolchain
-          cargo fmt --all -- --check
-      - name: Install native dependencies
-        run: brew install pkg-config gtk4 libadwaita appstream vte3 meson ninja ffmpeg
-      # GTK 4.24.1's macOS popup remap path underflows update_freeze_count.
-      # GLib 2.90.1 also deadlocks in source_destroy_lock during native worker wakeups.
-      # Keep fatal-critical checks enabled with a compatible runtime stack.
-      - name: Install compatible GLib, GTK and libadwaita for native checks
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: |
-          brew tap-new --no-git flowmux/ci
-          for spec in \
-            c84201a409ee9fd5588cad21e51a5e4ca3379271/Formula/g/gtk4.rb \
-            10672485509320336f1d885f842b6b938aecfb0a/Formula/lib/libadwaita.rb; do
-            formula="$(brew --repository flowmux/ci)/Formula/${spec##*/}"
-            curl --fail --location --retry 3 \
-              "https://raw.githubusercontent.com/Homebrew/homebrew-core/$spec" \
-              --output "$formula"
-            # Fetch checksummed bottles from the original tap.
-            sed -i '' '/  bottle do/a\
-                root_url "https://ghcr.io/v2/homebrew/core"
-            ' "$formula"
-          done
-          cp .github/homebrew/glib.rb "$(brew --repository flowmux/ci)/Formula/glib.rb"
-          brew uninstall --ignore-dependencies libadwaita gtk4 glib
-          brew install --build-from-source flowmux/ci/glib
-          brew install --force-bottle --ignore-dependencies flowmux/ci/gtk4
-          # Dependencies were installed above; do not upgrade the pinned GTK.
-          brew install --force-bottle --ignore-dependencies flowmux/ci/libadwaita
-          test "$(pkg-config --modversion glib-2.0)" = 2.88.4
-          test "$(pkg-config --modversion gtk4)" = 4.22.3
-          test "$(pkg-config --modversion libadwaita-1)" = 1.9.3
-          pkg-config --print-errors --exists gtk4 libadwaita-1 vte-2.91-gtk4
-      - name: Install compatible ThorVG for native image and Lottie checks
-        run: PREFIX="$HOME/.local" bash scripts/install-thorvg.sh
-      - name: Run macOS tests and native smoke (same script as local)
-        run: bash scripts/test-ci.sh macos "$CI_TEST_SUITE"
+      - name: Check Rust toolchain
+        run: rustup show active-toolchain
+      # The script self-tests need only Python and rustfmt.
+      - name: Install test dependencies
+        if: matrix.group != 'scripts'
+        uses: ./.github/actions/macos-test-deps
+      - name: Run macOS tests (same script as local)
+        run: bash scripts/test-ci.sh macos "$CI_TEST_SUITE" "${{ matrix.group }}"
       - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-test-evidence
-          path: target/ci/macos
+          name: macos-test-evidence-${{ matrix.group }}
+          path: |
+            target/ci/macos
+            /tmp/fm-crash-*/gui-*.log
+            /tmp/fm-crash-*/starts
+            /tmp/fm-crash-*/progress
+            /tmp/fm-crash-*/state/flowmux/state.json
           if-no-files-found: warn
+
+  macos:
+    # Report failed groups too, but not a run that was cancelled.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.platform != 'linux') }}
+    needs: macos-tests
+    name: macOS build and native smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every macOS group to pass
+        env:
+          RESULT: ${{ needs.macos-tests.result }}
+        run: |
+          echo "macos-tests: $RESULT"
+          [[ $RESULT == success ]]
+
+      - name: Collect test evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: macos-test-evidence
+          pattern: macos-test-evidence-*
+          separate-directories: true
+          delete-merged: true

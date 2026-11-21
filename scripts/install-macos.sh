@@ -299,9 +299,9 @@ echo "==> building flowmux ($PROFILE)"
 build_log=$(mktemp /tmp/flowmux-build.XXXXXX)
 trap 'rm -f "$build_log"' EXIT
 if [ "${#build_args[@]}" -gt 0 ]; then
-    cargo build "${build_args[@]}" -p flowmux -p flowmux-cli -p flowmux-md-viewer --message-format=json-render-diagnostics > "$build_log"
+    cargo build "${build_args[@]}" -p flowmux -p flowmux-cli -p flowmux-md-viewer -p flowmux-daemon --message-format=json-render-diagnostics > "$build_log"
 else
-    cargo build -p flowmux -p flowmux-cli -p flowmux-md-viewer --message-format=json-render-diagnostics > "$build_log"
+    cargo build -p flowmux -p flowmux-cli -p flowmux-md-viewer -p flowmux-daemon --message-format=json-render-diagnostics > "$build_log"
 fi
 
 # Cargo reports the executable path including target-dir and target-triple settings.
@@ -320,6 +320,8 @@ PY
 flowmux_binary=$(built_executable flowmux)
 cli_binary=$(built_executable flowmuxctl)
 markdown_binary=$(built_executable flowmux-md-viewer)
+# The Agent Host: without it no terminal or agent outlives its window.
+daemon_binary=$(built_executable flowmux-daemon)
 
 version="$(workspace_version)"
 bundle_work="$REPO_ROOT/target/macos-bundle/Flowmux.app"
@@ -345,6 +347,7 @@ mkdir -p "$macos" "$resources"
 install -m755 "$flowmux_binary" "$macos/flowmux"
 install -m755 "$cli_binary" "$macos/flowmuxctl"
 install -m755 "$markdown_binary" "$macos/flowmux-md-viewer"
+install -m755 "$daemon_binary" "$macos/flowmux-daemon"
 install -m644 \
     "$REPO_ROOT/LICENSE" \
     "$REPO_ROOT/NOTICE" \
@@ -353,8 +356,10 @@ install -m644 \
 create_icon "$resources"
 write_info_plist "$contents/Info.plist" "$version"
 plutil -lint "$contents/Info.plist" >/dev/null
-xattr -cr "$bundle_work" "$macos/flowmux" "$macos/flowmuxctl" "$macos/flowmux-md-viewer"
-codesign --force --sign - "$macos/flowmux" "$macos/flowmuxctl" "$macos/flowmux-md-viewer" >/dev/null
+xattr -cr "$bundle_work" "$macos/flowmux" "$macos/flowmuxctl" "$macos/flowmux-md-viewer" \
+    "$macos/flowmux-daemon"
+codesign --force --sign - "$macos/flowmux" "$macos/flowmuxctl" "$macos/flowmux-md-viewer" \
+    "$macos/flowmux-daemon" >/dev/null
 codesign --force --deep --sign - "$bundle_work" >/dev/null
 
 if [ "$BUNDLE_ONLY" = true ]; then
@@ -395,6 +400,7 @@ PYTHON
 install -m755 "$flowmux_binary" "$BIN_DIR/flowmux"
 install -m755 "$cli_binary" "$BIN_DIR/flowmuxctl"
 install -m755 "$markdown_binary" "$BIN_DIR/flowmux-md-viewer"
+install -m755 "$daemon_binary" "$BIN_DIR/flowmux-daemon"
 
 "$BIN_DIR/flowmuxctl" hooks refresh-shims
 echo "==> existing agent wrappers refreshed; provider settings and hooks unchanged"
@@ -405,6 +411,7 @@ echo "    $bundle_dest"
 echo "    $BIN_DIR/flowmux"
 echo "    $BIN_DIR/flowmuxctl"
 echo "    $BIN_DIR/flowmux-md-viewer"
+echo "    $BIN_DIR/flowmux-daemon"
 echo "$installed_version"
 echo "==> running sessions keep their current version; the next app launch uses $version"
 echo "==> launch with: open \"$bundle_dest\""

@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-17",
+  "action_item": "AR-006 partial verification",
+  "product_revision": "96c72b228097e483f0dd1932436c459465460c8c",
+  "product_change": false,
+  "test": "agent_host::terminal::tests::maximum_width_and_overlapping_frames_bound_peak_memory",
+  "command": "cargo test -p flowmux-daemon --lib maximum_width_and_overlapping_frames_bound_peak_memory -- --nocapture",
+  "exit_code": 0,
+  "passed": 1,
+  "duration_seconds": 17.0,
+  "geometry": {
+    "rows": 80,
+    "cols": 500,
+    "cells": 40000
+  },
+  "load": {
+    "primary_rows": 1500,
+    "alternate_rows": 80,
+    "combining_marks_per_cell": 32,
+    "overlapping_snapshot_arcs": 3
+  },
+  "snapshot_bytes": 7252152,
+  "process_vm_hwm_kib": 186156,
+  "execution_reservation_kib": 393216,
+  "log": "/tmp/fm-runtime-max-width.log",
+  "log_sha256": "bac3e434bb830ee0ab58fc28dfb7c5cdd19679fa642a88eb36ff735046d7d1dd",
+  "test_source_sha256": "4372e139d75b0c397c21746f3c43f49a22e844646eeea72acc4d92888d55f2a6",
+  "limits": [
+    "Isolated terminal unit regression; no product or GUI behavior was changed.",
+    "This measures one load and does not prove all Host allocations or macOS memory behavior.",
+    "The initial 300x500 probe was rejected by TerminalSize::validate because it exceeds 40000 cells; it was not a runtime memory failure."
+  ],
+  "checks": {
+    "daemon_all_targets_clippy": "passed (-D warnings)",
+    "diff_whitespace": "passed"
+  }
+}

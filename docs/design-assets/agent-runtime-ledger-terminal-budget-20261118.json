@@ -1,0 +1,34 @@
+{
+  "scope": "AR-006 combined retained lifecycle ledger and resized terminal/frame allocation regression",
+  "date": "2026-11-18",
+  "base_commit": "45bf1682",
+  "command": "python3 scripts/test-agent-terminal-budget.py --protected-pid 1663486",
+  "exit_code": 0,
+  "passed_checks": 3,
+  "artifacts": "/tmp/fm-gui-g6sqwygo",
+  "lifecycle_overflow_sequence": 140,
+  "host_peak_kib": 357200,
+  "execution_reservation_kib": 393216,
+  "bulk_control_max_seconds": 0.029531,
+  "checks": [
+    "Retain bounded lifecycle ledger through terminal title/history/alternate-grid load and overlapping frames",
+    "Reconnect original provider PID/birth through live GUI, one spawn, fresh Hangul ACK",
+    "Natural provider exit and empty Host reclamation",
+    "Isolated Host/provider gone; protected user GUI PID 1663486 still alive"
+  ],
+  "limitations": [
+    "This is a combined allocation scenario, not a complete worst-case allocation proof for AR-006.",
+    "Lifecycle overflow blocks further lifecycle settlement; provider-screen settlement allocations are not combined in this scenario.",
+    "The earlier full Linux gate SSH shutdown timeout AR-098 remains unresolved; no new full gate or CI run or push."
+  ],
+  "sha256": {
+    "/tmp/fm-ar006-combined-ledger-terminal-before.log": "5c60446007d336d44080a79de287e5df0444efb5a796c3d118ac3e009b255641",
+    "/tmp/fm-gui-g6sqwygo/host.log": "d7a0d4ed30d1993cff040cd10cb30693f632f6706a61f5449af6575607ade317",
+    "target/debug/flowmux": "67b75a69c2e0762c69772ed70cb2687cfb8c7a5cd31c915a90155c86bfc477eb",
+    "target/debug/flowmuxctl": "479c9df50500e5f4bb7fb6251ce849ec840a32f93f345565c252d6c864302d43",
+    "target/debug/flowmux-daemon": "887b6357a685eecb956cc7484484ed25f731bfbd61d3d6da8ec35ac8eb271618",
+    "scripts/test-agent-terminal-budget.py": "135af3f58ce497b6e9110bf85f1ad0a1cbd8fb1568e642fcc436c6e84a64bd35",
+    "crates/flowmux-daemon/src/agent_host/host.rs": "b61df0a5660e19648dbfe8f26f4359ca183c5aa072b11db7c6a3a06215d8dab8",
+    "crates/flowmux-daemon/src/agent_host/terminal.rs": "18aa36d95b94a5d843146eae9080d2d17b0892723dc7a036335c6b15a72490c5"
+  }
+}

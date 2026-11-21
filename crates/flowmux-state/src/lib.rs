@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub mod agent_sessions;
+pub mod agent_views;
 pub mod instance_lock;
 pub mod office_designs;
 pub mod review_drafts;
@@ -25,7 +26,7 @@ pub mod session_history;
 pub use agent_sessions::{default_agent_session_store, AgentSessionStore, SavedAgentSession};
 pub use instance_lock::{try_acquire_state_lock, InstanceLock};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Window size and maximized state, saved on exit and restored on next launch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub struct WindowLayout {
     pub maximized: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowOwner {
     pub instance_id: Uuid,
     pub pid: u32,
@@ -56,6 +57,9 @@ impl WindowOwner {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SavedWindow {
     pub instance_id: Uuid,
+    /// Changes on each owned save so prepared Agent views cannot overwrite newer edits.
+    #[serde(default)]
+    pub save_id: Uuid,
     pub owner_pid: u32,
     /// Distinguishes a live owner from a different process reusing its PID.
     #[serde(default)]
@@ -155,9 +159,13 @@ pub fn load_from(path: &Path) -> Result<State, StateError> {
         return Ok(State::default());
     }
     let text = std::fs::read_to_string(path)?;
-    let mut raw: serde_json::Value = serde_json::from_str(&text)?;
+    load_text(path, &text)
+}
+
+fn load_text(path: &Path, text: &str) -> Result<State, StateError> {
+    let mut raw: serde_json::Value = serde_json::from_str(text)?;
     let version = checked_schema_version(&raw)?;
-    if version < u64::from(SCHEMA_VERSION) {
+    if version < 3 {
         for workspace in raw["workspaces"]
             .as_array_mut()
             .ok_or_else(|| StateError::Invalid("workspaces must be an array".into()))?
@@ -178,14 +186,15 @@ pub fn load_from(path: &Path) -> Result<State, StateError> {
                 serde_json::json!({"type": "local", "root_dir": root}),
             );
         }
-        raw["schema_version"] = SCHEMA_VERSION.into();
     }
+    raw["schema_version"] = SCHEMA_VERSION.into();
     let mut state: State = serde_json::from_value(raw)?;
     validate_locations(&state)?;
     if version < u64::from(SCHEMA_VERSION) {
         backup_legacy_state(path, version, text.as_bytes())?;
     }
     migrate_legacy_state(&mut state);
+    agent_views::reconcile(path, &mut state)?;
     Ok(state)
 }
 
@@ -266,6 +275,17 @@ fn validate_locations(state: &State) -> Result<(), StateError> {
             } => {
                 for surface in surfaces {
                     kind(&surface.kind, remote)?;
+                    if let Some(binding) = surface.agent_binding {
+                        if remote
+                            || !matches!(surface.kind, SurfaceKind::Terminal { .. })
+                            || binding.instance.0.is_nil()
+                            || binding.epoch.is_nil()
+                        {
+                            return Err(StateError::Invalid(
+                                "invalid managed Agent binding".into(),
+                            ));
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -295,7 +315,15 @@ pub fn save_to(path: &Path, state: &State) -> Result<(), StateError> {
     save_owned_to(path, state.clone())
 }
 
-fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
+fn save_owned_to(path: &Path, state: State) -> Result<(), StateError> {
+    save_owned_with_agent_view_to(path, state, None)
+}
+
+fn save_owned_with_agent_view_to(
+    path: &Path,
+    mut state: State,
+    agent_view: Option<(flowmux_core::AgentViewBinding, flowmux_core::SurfaceId)>,
+) -> Result<(), StateError> {
     if u64::from(state.schema_version) > u64::from(SCHEMA_VERSION) {
         return Err(StateError::SchemaTooNew {
             found: u64::from(state.schema_version),
@@ -304,7 +332,11 @@ fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
     }
     validate_locations(&state)?;
     if path.exists() {
-        let bytes = std::fs::read(path)?;
+        let bytes = if agent_view.is_some() {
+            agent_views::read(path)?
+        } else {
+            std::fs::read(path)?
+        };
         let raw = serde_json::from_slice(&bytes)?;
         let version = checked_schema_version(&raw)?;
         if version < u64::from(SCHEMA_VERSION) {
@@ -315,20 +347,80 @@ fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
         std::fs::create_dir_all(parent)?;
     }
     migrate_legacy_state(&mut state);
+    agent_views::reconcile_with_owner(path, &mut state, agent_view)?;
     state.last_saved = chrono::Utc::now();
 
+    if agent_view.is_some() {
+        atomic_write_with_limit(path, &state, agent_views::MAX_FILE_BYTES)
+    } else {
+        atomic_write(path, &state)
+    }
+}
+
+fn atomic_write(path: &Path, value: &impl Serialize) -> Result<(), StateError> {
+    atomic_write_with_limit(path, value, usize::MAX)
+}
+
+fn atomic_write_with_limit(
+    path: &Path,
+    value: &impl Serialize,
+    limit: usize,
+) -> Result<(), StateError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     // Atomic replace: write a PID-suffixed temporary file, fsync, then rename.
     let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
-    {
+    let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
-        let mut writer = std::io::BufWriter::new(&mut f);
-        serde_json::to_writer_pretty(&mut writer, &state)?;
+        let mut writer = LimitedWriter {
+            inner: std::io::BufWriter::new(&mut f),
+            remaining: limit,
+            structure: (limit != usize::MAX).then(|| {
+                flowmux_core::json::JsonStructureBudget::new(
+                    agent_views::MAX_JSON_STRUCTURAL_TOKENS,
+                )
+            }),
+        };
+        serde_json::to_writer_pretty(&mut writer, value)?;
         writer.flush()?;
         drop(writer);
         f.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(tmp);
     }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    result
+}
+
+struct LimitedWriter<W> {
+    inner: W,
+    remaining: usize,
+    structure: Option<flowmux_core::json::JsonStructureBudget>,
+}
+
+impl<W: Write> Write for LimitedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.remaining {
+            return Err(agent_views::file_too_large());
+        }
+        if self
+            .structure
+            .as_mut()
+            .is_some_and(|budget| !budget.check(bytes))
+        {
+            return Err(agent_views::json_too_complex());
+        }
+        self.inner.write_all(bytes)?;
+        self.remaining -= bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 fn migrate_legacy_state(state: &mut State) {
@@ -340,6 +432,7 @@ fn migrate_legacy_state(state: &mut State) {
     if needs_window {
         state.windows.push(SavedWindow {
             instance_id: legacy_id,
+            save_id: Uuid::nil(),
             owner_pid: 0,
             owner_start_time: None,
             boot_id: None,
@@ -428,7 +521,7 @@ fn bind_codex_title_sessions(state: &State, store: &AgentSessionStore, codex_hom
             let flowmux_core::SurfaceKind::Terminal { cwd: Some(cwd), .. } = &tab.kind else {
                 return;
             };
-            if tab.title_locked {
+            if tab.title_locked || tab.agent_binding.is_some() {
                 return;
             }
             let session = session_history::codex_session_for_title(codex_home, &tab.title, cwd);
@@ -477,6 +570,7 @@ fn claim_window_impl(
 ) -> Result<(State, Vec<flowmux_core::SurfaceId>), StateError> {
     let _lock = instance_lock::acquire_for_state(path)?;
     let mut disk = load_from(path)?;
+    agent_views::remove_stale_files(path, &disk);
     let stale_boot = |window: &SavedWindow| {
         matches!(
             (&window.boot_id, &current_boot),
@@ -573,6 +667,7 @@ fn claim_window_impl(
     }
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
+        save_id: Uuid::new_v4(),
         owner_pid: owner.pid,
         owner_start_time: flowmux_procmon::process_start_time(owner.pid),
         boot_id: current_boot.clone(),
@@ -616,7 +711,11 @@ fn save_window_owned_to(
     snapshot: State,
 ) -> Result<(), StateError> {
     let _lock = instance_lock::acquire_for_state(path)?;
-    let mut disk = load_from(path)?;
+    let disk = load_from(path)?;
+    save_owned_to(path, merge_window_snapshot(owner, snapshot, disk))
+}
+
+fn merge_window_snapshot(owner: WindowOwner, snapshot: State, mut disk: State) -> State {
     let previously_owned = disk
         .workspace_owners
         .iter()
@@ -644,6 +743,7 @@ fn save_window_owned_to(
         .retain(|window| window.instance_id != owner.instance_id);
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
+        save_id: Uuid::new_v4(),
         owner_pid: owner.pid,
         owner_start_time: flowmux_procmon::process_start_time(owner.pid),
         boot_id: current_boot_id(),
@@ -655,7 +755,7 @@ fn save_window_owned_to(
     disk.active_workspace = None;
     disk.window = None;
     disk.sidebar_position = None;
-    save_owned_to(path, disk)
+    disk
 }
 
 #[cfg(test)]
@@ -707,6 +807,8 @@ mod tests {
                             cwd: None,
                         },
                         scrollback: Some("old output".into()),
+                        agent_binding: None,
+                        shell_binding: None,
                         agent: None,
                     }],
                 },
@@ -719,6 +821,7 @@ mod tests {
         state.workspace_owners.insert(id, owner.instance_id);
         state.windows.push(SavedWindow {
             instance_id: owner.instance_id,
+            save_id: Uuid::new_v4(),
             owner_pid: owner.pid,
             owner_start_time: flowmux_procmon::process_start_time(owner.pid),
             boot_id: boot_id.map(str::to_string),
@@ -1123,7 +1226,7 @@ mod tests {
             "load never rewrites source"
         );
         save_to(&path, &migrated).unwrap();
-        assert_eq!(load_from(&path).unwrap().schema_version, 3);
+        assert_eq!(load_from(&path).unwrap().schema_version, SCHEMA_VERSION);
         assert_eq!(std::fs::read(&backup).unwrap(), bytes);
 
         std::fs::write(&path, &bytes).unwrap();
@@ -1132,6 +1235,645 @@ mod tests {
         assert!(save_to(&path, &migrated).is_err());
         assert_eq!(std::fs::read(&backup).unwrap(), b"earlier backup");
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn v3_migration_preserves_locations_ownership_and_managed_binding_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let tab = SurfaceId::new();
+        let original = state_with_owned_workspace(WindowOwner::current(), None, tab);
+        let mut raw = serde_json::to_value(&original).unwrap();
+        raw["schema_version"] = 3.into();
+        let bytes = serde_json::to_vec(&raw).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let mut migrated = load_from(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&migrated.workspaces).unwrap(),
+            raw["workspaces"]
+        );
+        assert_eq!(migrated.windows, original.windows);
+        assert_eq!(migrated.workspace_owners, original.workspace_owners);
+        assert_eq!(
+            std::fs::read(path.with_extension("json.v3.bak")).unwrap(),
+            bytes
+        );
+        let pane = migrated.workspaces[0].surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut migrated.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = surfaces
+            .iter_mut()
+            .find(|surface| surface.id == tab)
+            .unwrap();
+        surface.agent_binding = Some(binding);
+        surface.scrollback = None;
+        save_to(&path, &migrated).unwrap();
+        let restored = load_from(&path).unwrap();
+        assert_eq!(restored.schema_version, 4);
+        assert_eq!(
+            restored.workspaces[0].surfaces[0]
+                .root_pane
+                .find_surface_ref(pane, tab)
+                .unwrap()
+                .agent_binding,
+            Some(binding)
+        );
+        let mut remote = ssh_state();
+        let mut raw_remote = serde_json::to_value(&remote).unwrap();
+        raw_remote["schema_version"] = 3.into();
+        let remote_path = dir.path().join("remote.json");
+        std::fs::write(&remote_path, serde_json::to_vec(&raw_remote).unwrap()).unwrap();
+        remote = load_from(&remote_path).unwrap();
+        assert_eq!(
+            serde_json::to_value(remote.workspaces).unwrap(),
+            raw_remote["workspaces"]
+        );
+    }
+
+    #[test]
+    fn bounded_atomic_write_preserves_target_and_removes_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let value = serde_json::json!({"text": "한글\n\"\\"});
+        let bytes = serde_json::to_vec_pretty(&value).unwrap();
+        std::fs::write(&path, b"original").unwrap();
+        assert!(atomic_write_with_limit(&path, &value, bytes.len() - 1).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        assert!(!path
+            .with_extension(format!("tmp.{}", std::process::id()))
+            .exists());
+        atomic_write_with_limit(&path, &value, bytes.len()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        let dense = vec![0; 128 * 1024 + 1];
+        assert!(atomic_write_with_limit(&path, &dense, agent_views::MAX_FILE_BYTES).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(!path
+            .with_extension(format!("tmp.{}", std::process::id()))
+            .exists());
+        atomic_write(&path, &dense).unwrap();
+    }
+
+    #[test]
+    fn agent_authority_epochs_share_the_total_read_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let owner = WindowOwner::current();
+        let mut state = state_with_owned_workspace(owner, None, SurfaceId::new());
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("fixture tabs")
+        };
+        let mut second = surfaces[0].clone();
+        second.id = SurfaceId::new();
+        surfaces.push(second);
+        let mut authorities = Vec::new();
+        for tab in surfaces {
+            let binding = AgentViewBinding {
+                instance: AgentInstanceId::new(),
+                epoch: Uuid::new_v4(),
+            };
+            tab.agent_binding = Some(binding);
+            authorities.push((
+                path.with_extension(format!("agent-views.{}.json", binding.epoch)),
+                serde_json::to_vec(&serde_json::json!({binding.instance.0.to_string(): tab.id}))
+                    .unwrap(),
+            ));
+        }
+        save_to(&path, &state).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        for (authority, bytes) in &authorities {
+            let mut padded = bytes.clone();
+            padded.resize(17 * 1024 * 1024, b' ');
+            std::fs::write(authority, padded).unwrap();
+        }
+        // Restoration ignores the unreadable fence; a save still refuses it.
+        let restored = load_from(&path).unwrap();
+        let mut tabs = 0;
+        for_each_workspace_tab(&restored.workspaces[0], &mut |_| tabs += 1);
+        assert_eq!(tabs, 2);
+        let error = save_to(&path, &state).unwrap_err().to_string();
+        assert!(error.contains("total read budget"), "{error}");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        for (authority, bytes) in authorities {
+            std::fs::write(authority, bytes).unwrap();
+        }
+        assert!(load_from(&path).is_ok());
+    }
+
+    #[test]
+    fn stale_agent_view_files_are_removed_only_when_old_and_unreferenced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let mut state = state_with_owned_workspace(WindowOwner::current(), None, SurfaceId::new());
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("fixture tabs")
+        };
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        surfaces[0].agent_binding = Some(binding);
+        let file = |name: String, old: bool| {
+            let file = path.with_extension(name);
+            std::fs::write(&file, b"{}").unwrap();
+            if old {
+                let then =
+                    std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 24 * 60 * 60);
+                std::fs::File::options()
+                    .write(true)
+                    .open(&file)
+                    .unwrap()
+                    .set_modified(then)
+                    .unwrap();
+            }
+            file
+        };
+        let gone = Uuid::new_v4();
+        let referenced = file(format!("agent-views.{}.json", binding.epoch), true);
+        let recent = file(format!("agent-views.{}.json", Uuid::new_v4()), false);
+        let stale = file(format!("agent-views.{gone}.json"), true);
+        let checkpoint = file(
+            format!("agent-view-prepared.{gone}.{}.json", Uuid::new_v4()),
+            true,
+        );
+        let unrelated = file("json.v3.bak".into(), true);
+        agent_views::remove_stale_files(&path, &state);
+        assert!(referenced.exists() && recent.exists() && unrelated.exists());
+        assert!(!stale.exists() && !checkpoint.exists());
+        assert_eq!(agent_views::clear_bindings(&mut state), 1);
+        let mut bound = 0;
+        for_each_workspace_tab(&state.workspaces[0], &mut |tab| {
+            bound += usize::from(tab.agent_binding.is_some());
+        });
+        assert_eq!((bound, agent_views::clear_bindings(&mut state)), (0, 0));
+    }
+
+    #[test]
+    fn agent_view_operations_reject_a_contended_state_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let surface = SurfaceId::new();
+        let lease = (Uuid::new_v4(), 1);
+        for operation in ["prepare", "commit", "discard"] {
+            let lock = instance_lock::acquire_for_state(&path).unwrap();
+            let worker_path = path.clone();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let path = worker_path;
+                let result = match operation {
+                    "prepare" => agent_views::prepare(
+                        &path,
+                        binding,
+                        surface,
+                        lease,
+                        WindowOwner::current(),
+                        State::default(),
+                    ),
+                    "commit" => agent_views::commit(&path, binding, surface),
+                    _ => agent_views::discard_prepared(&path, binding, lease, None),
+                };
+                let _ = sender.send(result);
+            });
+            let result = receiver.recv_timeout(std::time::Duration::from_millis(500));
+            let still_locked = matches!(
+                instance_lock::try_acquire_for_state(&path),
+                Err(StateError::Io(ref error)) if error.kind() == std::io::ErrorKind::WouldBlock
+            );
+            drop(lock);
+            worker.join().unwrap();
+            assert!(
+                still_locked,
+                "a failed acquisition must not unlock the owner"
+            );
+            assert!(
+                matches!(result, Ok(Err(StateError::Io(ref error)))
+                    if error.kind() == std::io::ErrorKind::WouldBlock),
+                "{operation} must reject contention without waiting: {result:?}"
+            );
+        }
+        agent_views::commit(&path, binding, surface).unwrap();
+    }
+
+    #[test]
+    fn oversized_agent_destination_keeps_saved_source_and_authority() {
+        use std::io::Read;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let owner = WindowOwner::current();
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let old = SurfaceId::new();
+        let winner = SurfaceId::new();
+        let lease = (Uuid::new_v4(), 2);
+        let mut source = state_with_owned_workspace(owner, None, old);
+        let mut destination = state_with_owned_workspace(owner, None, winner);
+        for state in [&mut source, &mut destination] {
+            let Pane::Leaf {
+                content: PaneContent::Tabs { surfaces, .. },
+                ..
+            } = &mut state.workspaces[0].surfaces[0].root_pane
+            else {
+                panic!("fixture tabs")
+            };
+            surfaces[0].agent_binding = Some(binding);
+        }
+        save_window_to(&path, owner, &source).unwrap();
+        agent_views::commit(&path, binding, old).unwrap();
+        let authority = path.with_extension(format!("agent-views.{}.json", binding.epoch));
+        let checkpoint = path.with_extension(format!(
+            "agent-view-prepared.{}.{}.json",
+            binding.epoch, binding.instance.0
+        ));
+        let original_state = std::fs::read(&path).unwrap();
+        let original_authority = std::fs::read(&authority).unwrap();
+        for oversized in [&checkpoint, &path, &authority] {
+            agent_views::prepare(&path, binding, winner, lease, owner, destination.clone())
+                .unwrap();
+            let original = std::fs::read(oversized).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(oversized)
+                .unwrap();
+            // Valid JSON with trailing whitespace must be rejected before deserialization.
+            std::io::copy(&mut std::io::repeat(b' ').take(32 * 1024 * 1024), &mut file).unwrap();
+            drop(file);
+            if oversized == &path {
+                assert!(
+                    load_from(&path).is_ok(),
+                    "ordinary GUI restoration stays available"
+                );
+            }
+            assert!(
+                agent_views::commit_gui(&path, binding, winner, lease, owner.pid).is_err(),
+                "accepted oversized {}",
+                oversized.display()
+            );
+            std::fs::write(oversized, original).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), original_state);
+            assert_eq!(std::fs::read(&authority).unwrap(), original_authority);
+        }
+        for structured in [&checkpoint, &path] {
+            let original = std::fs::read(structured).unwrap();
+            let mut raw: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            raw["ignored"] = serde_json::json!(vec![0; 128 * 1024 + 1]);
+            std::fs::write(structured, serde_json::to_vec(&raw).unwrap()).unwrap();
+            assert!(
+                agent_views::commit_gui(&path, binding, winner, lease, owner.pid).is_err(),
+                "accepted excessive JSON structure {}",
+                structured.display()
+            );
+            std::fs::write(structured, original).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), original_state);
+            assert_eq!(std::fs::read(&authority).unwrap(), original_authority);
+        }
+        agent_views::commit_gui(&path, binding, winner, lease, owner.pid).unwrap();
+        assert!(!checkpoint.exists());
+    }
+
+    #[test]
+    fn gui_admission_saves_destination_before_authority_and_preserves_source_on_write_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let source_owner = WindowOwner::current();
+        let destination_owner = WindowOwner::current();
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let old = SurfaceId::new();
+        let winner = SurfaceId::new();
+        let lease = (Uuid::new_v4(), 2);
+        let bound = |owner, surface| {
+            let mut state = state_with_owned_workspace(owner, None, surface);
+            let Pane::Leaf {
+                content: PaneContent::Tabs { surfaces, .. },
+                ..
+            } = &mut state.workspaces[0].surfaces[0].root_pane
+            else {
+                panic!("fixture tabs")
+            };
+            surfaces[0].agent_binding = Some(binding);
+            state
+        };
+        let source = bound(source_owner, old);
+        let destination = bound(destination_owner, winner);
+        save_window_to(&path, source_owner, &source).unwrap();
+        agent_views::commit(&path, binding, old).unwrap();
+        assert!(
+            agent_views::commit_gui(&path, binding, winner, lease, destination_owner.pid).is_err()
+        );
+        agent_views::prepare(
+            &path,
+            binding,
+            winner,
+            lease,
+            destination_owner,
+            destination.clone(),
+        )
+        .unwrap();
+        // Preparing alone neither saves the new layout nor invalidates the original view.
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(before.contains(&old.to_string()) && !before.contains(&winner.to_string()));
+        assert!(agent_views::commit_gui(
+            &path,
+            binding,
+            winner,
+            (Uuid::new_v4(), 2),
+            destination_owner.pid
+        )
+        .is_err());
+        assert!(agent_views::commit_gui(&path, binding, winner, lease, u32::MAX).is_err());
+        assert!(agent_views::prepare(
+            &path,
+            binding,
+            winner,
+            (Uuid::new_v4(), 1),
+            destination_owner,
+            destination.clone()
+        )
+        .is_err());
+
+        let mut edited_destination = destination.clone();
+        edited_destination.workspaces[0].name = "Saved after preparation".into();
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut edited_destination.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("fixture tabs")
+        };
+        let mut extra = surfaces[0].clone();
+        extra.id = SurfaceId::new();
+        extra.agent_binding = None;
+        surfaces.push(extra);
+        save_window_to(&path, destination_owner, &edited_destination).unwrap();
+        assert!(
+            agent_views::commit_gui(&path, binding, winner, lease, destination_owner.pid).is_err(),
+            "a stale checkpoint must not overwrite the newer window save"
+        );
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("Saved after preparation"));
+        agent_views::prepare(
+            &path,
+            binding,
+            winner,
+            lease,
+            destination_owner,
+            edited_destination.clone(),
+        )
+        .unwrap();
+        save_window_to(&path, source_owner, &source).unwrap();
+
+        // Fail the second write, after the destination state file has been atomically replaced.
+        let authority = path.with_extension(format!("agent-views.{}.json", binding.epoch));
+        let blocked_tmp = authority.with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::create_dir(&blocked_tmp).unwrap();
+        let error = agent_views::commit_gui(&path, binding, winner, lease, destination_owner.pid)
+            .unwrap_err();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            raw.contains(&old.to_string()) && raw.contains(&winner.to_string()),
+            "admission failed before saving the destination: {error:?}"
+        );
+        let visible = serde_json::to_string(&load_from(&path).unwrap()).unwrap();
+        assert!(visible.contains(&old.to_string()) && !visible.contains(&winner.to_string()));
+        std::fs::remove_dir(blocked_tmp).unwrap();
+        agent_views::prepare(
+            &path,
+            binding,
+            winner,
+            lease,
+            destination_owner,
+            edited_destination,
+        )
+        .unwrap();
+        agent_views::commit_gui(&path, binding, winner, lease, destination_owner.pid).unwrap();
+        // There is no subsequent GUI save. A crashed destination still has its exact workspace.
+        let saved = load_from(&path).unwrap();
+        assert!(saved
+            .workspaces
+            .iter()
+            .any(|ws| ws.id == destination.workspaces[0].id));
+        let visible = serde_json::to_string(&saved).unwrap();
+        assert!(!visible.contains(&old.to_string()) && visible.contains(&winner.to_string()));
+        save_window_to(&path, source_owner, &source).unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains(&winner.to_string()));
+        // Closing the destination later must not replay the admission checkpoint.
+        save_window_to(&path, destination_owner, &State::default()).unwrap();
+        assert!(!serde_json::to_string(&load_from(&path).unwrap())
+            .unwrap()
+            .contains(&winner.to_string()));
+    }
+
+    #[test]
+    fn committed_agent_view_fences_late_window_saves_and_offline_restores() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let owner = WindowOwner {
+            instance_id: Uuid::new_v4(),
+            pid: u32::MAX,
+        };
+        let old = SurfaceId::new();
+        let winner = SurfaceId::new();
+        let ordinary = SurfaceId::new();
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let mut stale = state_with_owned_workspace(owner, None, old);
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut stale.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("fixture tabs")
+        };
+        let mut plain = surfaces[0].clone();
+        plain.id = ordinary;
+        surfaces[0].agent_binding = Some(binding);
+        surfaces.push(plain);
+        save_window_to(&path, owner, &stale).unwrap();
+        agent_views::commit(&path, binding, winner).unwrap();
+        // No Host query is available to this state-only caller.
+        std::fs::write(&path, serde_json::to_vec(&stale).unwrap()).unwrap();
+        let offline = load_from(&path).unwrap();
+        let mut restored_tabs = Vec::new();
+        for_each_workspace_tab(&offline.workspaces[0], &mut |tab| {
+            restored_tabs.push(tab.id)
+        });
+        assert_eq!(restored_tabs, vec![ordinary]);
+        for _ in 0..2 {
+            save_window_to(&path, owner, &stale).unwrap();
+        }
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains(&old.to_string()));
+        assert!(raw.contains(&ordinary.to_string()));
+        let restored = claim_window_from(&path, WindowOwner::current()).unwrap();
+        let root = &restored.workspaces[0].surfaces[0].root_pane;
+        let pane = root.first_leaf_id().unwrap();
+        assert_eq!(root.active_surface_id(pane), Some(ordinary));
+        assert_eq!(root.surface_count(pane), Some(1));
+
+        // An unrelated epoch and the winning surface are never removed.
+        let mut winning = stale.clone();
+        let Pane::Leaf {
+            content: PaneContent::Tabs { active, surfaces },
+            ..
+        } = &mut winning.workspaces[0].surfaces[0].root_pane
+        else {
+            unreachable!()
+        };
+        surfaces[0].id = winner;
+        *active = winner;
+        save_to(&path, &winning).unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains(&winner.to_string()));
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut winning.workspaces[0].surfaces[0].root_pane
+        else {
+            unreachable!()
+        };
+        surfaces[0].agent_binding.as_mut().unwrap().epoch = Uuid::new_v4();
+        save_to(&path, &winning).unwrap();
+        assert_eq!(load_from(&path).unwrap().workspaces.len(), 1);
+    }
+
+    #[test]
+    fn agent_view_authority_collapses_only_the_obsolete_split() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let old = SurfaceId::new();
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let mut state = state_with_owned_workspace(WindowOwner::current(), None, old);
+        let surface = &mut state.workspaces[0].surfaces[0];
+        let ordinary = surface.root_pane.clone();
+        let ordinary_pane = ordinary.first_leaf_id().unwrap();
+        let Pane::Leaf {
+            id,
+            content: PaneContent::Tabs { surfaces, .. },
+        } = &mut surface.root_pane
+        else {
+            unreachable!()
+        };
+        *id = PaneId::new();
+        surfaces[0].agent_binding = Some(binding);
+        let obsolete = surface.root_pane.clone();
+        surface.root_pane = Pane::Split {
+            id: PaneId::new(),
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(obsolete),
+            second: Box::new(ordinary),
+        };
+        agent_views::commit(&path, binding, SurfaceId::new()).unwrap();
+        save_to(&path, &state).unwrap();
+        let restored = load_from(&path).unwrap();
+        let root = &restored.workspaces[0].surfaces[0].root_pane;
+        assert!(matches!(root, Pane::Leaf { .. }));
+        assert_eq!(root.first_leaf_id(), Some(ordinary_pane));
+        assert_eq!(root.active_surface_id(ordinary_pane), Some(old));
+    }
+
+    #[test]
+    fn agent_view_authority_prunes_empty_layouts_and_fails_closed_on_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let owner = WindowOwner::current();
+        let old = SurfaceId::new();
+        let binding = AgentViewBinding {
+            instance: AgentInstanceId::new(),
+            epoch: Uuid::new_v4(),
+        };
+        let mut stale = state_with_owned_workspace(owner, None, old);
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut stale.workspaces[0].surfaces[0].root_pane
+        else {
+            unreachable!()
+        };
+        surfaces[0].agent_binding = Some(binding);
+        agent_views::commit(&path, binding, SurfaceId::new()).unwrap();
+        save_window_to(&path, owner, &stale).unwrap();
+        let restored = load_from(&path).unwrap();
+        assert!(restored.workspaces.is_empty());
+        assert!(restored.workspace_order.is_empty());
+        assert!(restored.workspace_owners.is_empty());
+        assert!(restored.windows[0].workspace_order.is_empty());
+        let before = std::fs::read(&path).unwrap();
+        let authority = path.with_extension(format!("agent-views.{}.json", binding.epoch));
+        std::fs::write(&authority, b"corrupt").unwrap();
+        assert!(save_window_to(&path, owner, &stale).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(agent_views::commit(&path, binding, old).is_err());
+        assert_eq!(std::fs::read(&authority).unwrap(), b"corrupt");
+    }
+
+    #[test]
+    fn managed_binding_rejects_browser_and_nil_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let tab = SurfaceId::new();
+        let mut state = state_with_owned_workspace(WindowOwner::current(), None, tab);
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = &mut surfaces[0];
+        surface.agent_binding = Some(flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: Uuid::nil(),
+        });
+        assert!(save_to(&path, &state).is_err());
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut state.workspaces[0].surfaces[0].root_pane
+        else {
+            panic!("expected fixture tabs");
+        };
+        let surface = &mut surfaces[0];
+        surface.agent_binding.as_mut().unwrap().epoch = Uuid::new_v4();
+        surface.kind = SurfaceKind::Browser { initial_url: None };
+        assert!(save_to(&path, &state).is_err());
+        assert!(!path.exists());
     }
 
     fn ssh_state() -> State {

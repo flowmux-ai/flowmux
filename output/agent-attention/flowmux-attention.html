@@ -1,0 +1,131 @@
+<div id="fm-attention-preview">
+  <div class="fm-simulation">
+    <label for="fm-scenario">예시 상태</label>
+    <select id="fm-scenario">
+      <option value="new">새 승인 요청</option>
+      <option value="read">요청을 읽은 후</option>
+      <option value="resolved">해결 이벤트 수신 후</option>
+    </select>
+    <span>설계안 · 실제 세션과 연결되지 않음</span>
+  </div>
+  <div class="fm-window">
+    <header class="fm-chrome"><strong>Flowmux</strong><span>Agent workspace</span><span class="fm-bell" data-unread>안 읽음 3</span></header>
+    <div class="fm-layout">
+      <aside class="fm-sidebar" aria-label="Workspace와 조치 목록">
+        <div class="fm-section-label">WORKSPACES</div>
+        <div class="fm-workspace"><strong>flowmux</strong><span class="fm-warning" data-action>조치 2</span></div>
+        <div class="fm-repo">feature / agent-attention</div>
+        <div class="fm-section-label fm-space">조치 필요</div>
+        <button type="button" class="fm-agent fm-selected" id="fm-open">
+          <span class="fm-agent-top"><strong>Claude · 결제 모듈</strong><span id="fm-dot">●</span></span>
+          <span class="fm-warning" id="fm-wait-label">승인 필요 · 2분 대기</span>
+          <span class="fm-sub" id="fm-read-label">요청 보기</span>
+        </button>
+        <div class="fm-agent" id="fm-action-anchor"><strong>Codex · API 연결</strong><span class="fm-warning">답변 필요 · 하위 요청 1</span><span class="fm-sub">어떤 인증 방식을 사용할까요?</span></div>
+        <div class="fm-section-label fm-space">결과 확인</div>
+        <div class="fm-agent"><strong>Claude · 문서 정리</strong><span class="fm-result">응답 완료</span><span class="fm-sub">결과를 아직 확인하지 않음</span></div>
+        <div class="fm-section-label fm-space">진행 중</div>
+        <div class="fm-agent" id="fm-running-anchor"><strong>Codex · 회귀 검증</strong><span class="fm-sub">실행 중 · 테스트 명령 수행</span></div>
+      </aside>
+      <main class="fm-main">
+        <div class="fm-tab">Claude · 결제 모듈 <span>~/projects/checkout</span></div>
+        <div class="fm-terminal" aria-label="예시 터미널">
+          <div class="fm-terminal-muted">Claude Code</div>
+          <p>결제 모듈 변경 사항을 확인하고 있습니다.</p>
+          <p class="fm-terminal-muted">다음 명령을 실행하려고 합니다.</p>
+          <pre>npm run test -- checkout</pre>
+          <div class="fm-request" id="fm-request"><strong>명령 실행 승인이 필요합니다</strong><p>원래 터미널에서 요청을 검토하고 응답합니다.</p><span class="fm-warning">승인 대기</span></div>
+          <div class="fm-request" id="fm-running" hidden><strong>요청이 해결되어 실행을 재개했습니다</strong><p>테스트 실행 중…</p><span class="fm-result">진행 중</span></div>
+        </div>
+        <div class="fm-status" aria-live="polite"><strong id="fm-summary">승인 필요</strong><span id="fm-status-detail">미해결 요청 1 · 아직 읽지 않음</span></div>
+        <details class="fm-evidence" open>
+          <summary>상태 근거</summary>
+          <dl><dt>판정</dt><dd id="fm-evidence-kind">hook 확인 · PermissionRequest</dd><dt>마지막 관측</dt><dd id="fm-evidence-time">2분 전 · 로컬 연결 정상</dd><dt>대상</dt><dd>flowmux / Claude / 현재 탭</dd></dl>
+        </details>
+      </main>
+    </div>
+    <footer class="fm-footer"><span id="fm-foot-state">조치 2 · 결과 확인 1 · 진행 중 1</span><span>Claude · 승인 필요</span></footer>
+  </div>
+</div>
+<style>
+#fm-attention-preview { --fm-bg:light-dark(#ffffff,#16191d); --fm-side:light-dark(#f3f4f5,#202429); --fm-text:light-dark(#20252c,#e4e8ed); --fm-muted:light-dark(#606974,#a8b1be); --fm-line:light-dark(#d9dde2,#373e47); --fm-warn:light-dark(#8a4900,#ffc47b); --fm-warn-bg:light-dark(#fff2df,#3b2e1d); --fm-selected:light-dark(#e7ebf0,#303943); --fm-blue:light-dark(#245d94,#92bfe8); color:var(--fm-text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+#fm-attention-preview * { box-sizing:border-box; }
+#fm-attention-preview { container:fm-preview / inline-size; }
+#fm-attention-preview [hidden] { display:none !important; }
+#fm-attention-preview .fm-simulation { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:14px; }
+#fm-attention-preview .fm-simulation>span { color:var(--fm-muted); font-size:12px; }
+#fm-attention-preview select { font:inherit; color:var(--fm-text); background:var(--fm-bg); border:1px solid var(--fm-line); padding:7px 9px; border-radius:6px; max-width:100%; }
+#fm-attention-preview .fm-window { background:var(--fm-bg); border:1px solid var(--fm-line); border-radius:10px; overflow:hidden; }
+#fm-attention-preview .fm-chrome { display:flex; align-items:center; gap:22px; flex-wrap:wrap; padding:13px 18px; padding-right:100px; background:var(--fm-side); border-bottom:1px solid var(--fm-line); }
+#fm-attention-preview strong { font-weight:600; }
+#fm-attention-preview .fm-chrome>span { font-size:12px; color:var(--fm-muted); }
+#fm-attention-preview .fm-chrome .fm-bell { margin-left:auto; color:var(--fm-text); }
+#fm-attention-preview .fm-layout { display:grid; grid-template-columns:260px minmax(0,1fr); }
+#fm-attention-preview .fm-sidebar { padding:18px 12px; background:var(--fm-side); border-right:1px solid var(--fm-line); }
+#fm-attention-preview .fm-section-label { font-size:11px; font-weight:600; letter-spacing:.04em; color:var(--fm-muted); padding:0 8px; }
+#fm-attention-preview .fm-space { margin-top:20px; margin-bottom:7px; }
+#fm-attention-preview .fm-workspace { display:flex; justify-content:space-between; gap:8px; padding:8px 8px 0; }
+#fm-attention-preview .fm-repo { padding:0 8px; font-size:12px; color:var(--fm-muted); }
+#fm-attention-preview .fm-warning { color:var(--fm-warn); }
+#fm-attention-preview .fm-result { color:var(--fm-blue); }
+#fm-attention-preview .fm-agent { display:flex; flex-direction:column; gap:3px; padding:10px; border:0; border-radius:6px; width:100%; font:inherit; text-align:left; color:var(--fm-text); background:transparent; }
+#fm-attention-preview .fm-agent strong { font-size:13px; }
+#fm-attention-preview .fm-selected { background:var(--fm-selected); }
+#fm-attention-preview .fm-agent-top { display:flex; justify-content:space-between; gap:8px; }
+#fm-attention-preview #fm-dot { color:var(--fm-warn); font-size:11px; }
+#fm-attention-preview .fm-sub { color:var(--fm-muted); font-size:12px; }
+#fm-attention-preview .fm-main { min-width:0; }
+#fm-attention-preview .fm-tab { padding:10px 20px; border-bottom:1px solid var(--fm-line); display:flex; flex-wrap:wrap; gap:15px; font-size:12px; }
+#fm-attention-preview .fm-tab span { color:var(--fm-muted); overflow-wrap:anywhere; }
+#fm-attention-preview .fm-terminal { padding:26px 24px; min-height:315px; font:13px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace; }
+#fm-attention-preview .fm-terminal-muted { color:var(--fm-muted); }
+#fm-attention-preview pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:12px; background:var(--fm-side); border-radius:5px; font:inherit; }
+#fm-attention-preview .fm-request { padding:15px; background:var(--fm-warn-bg); border-radius:6px; }
+#fm-attention-preview .fm-request p { margin:7px 0; }
+#fm-attention-preview .fm-status { margin:0 24px; display:flex; flex-wrap:wrap; gap:8px 16px; padding:13px 0; border-top:1px solid var(--fm-line); }
+#fm-attention-preview .fm-status strong { color:var(--fm-warn); }
+#fm-attention-preview .fm-status span { color:var(--fm-muted); font-size:12px; align-self:center; }
+#fm-attention-preview .fm-evidence { margin:8px 24px 24px; color:var(--fm-muted); font-size:12px; }
+#fm-attention-preview summary { color:var(--fm-text); }
+#fm-attention-preview dl { display:grid; grid-template-columns:85px minmax(0,1fr); gap:7px 10px; }
+#fm-attention-preview dd { margin:0; overflow-wrap:anywhere; color:var(--fm-text); }
+#fm-attention-preview .fm-footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:9px 18px; border-top:1px solid var(--fm-line); background:var(--fm-side); font-size:12px; color:var(--fm-muted); }
+@container fm-preview (max-width:600px) { #fm-attention-preview .fm-layout { grid-template-columns:1fr; } #fm-attention-preview .fm-sidebar { border-right:0; border-bottom:1px solid var(--fm-line); } #fm-attention-preview .fm-terminal { padding:18px; min-height:0; } #fm-attention-preview .fm-chrome { padding-right:18px; } }
+@media(pointer:coarse) { #fm-attention-preview select,#fm-attention-preview summary { min-height:44px; } }
+</style>
+<script>
+(() => {
+ const root = document.getElementById('fm-attention-preview');
+ const select = root.querySelector('#fm-scenario');
+ const q = s => root.querySelector(s);
+ const design = { evidence: true };
+ function render() {
+   const resolved = select.value === 'resolved';
+   const read = select.value !== 'new';
+   q(resolved ? '#fm-running-anchor' : '#fm-action-anchor').before(q('#fm-open'));
+   q('[data-action]').textContent = `조치 ${resolved ? 1 : 2}`;
+   q('[data-unread]').textContent = `안 읽음 ${read ? 2 : 3}`;
+   q('#fm-dot').hidden = read;
+   q('#fm-wait-label').textContent = resolved ? '실행 재개 · 요청 해결됨' : '승인 필요 · 2분 대기';
+   q('#fm-wait-label').className = resolved ? 'fm-result' : 'fm-warning';
+   q('#fm-read-label').textContent = resolved ? '현재 작업 보기' : read ? '읽음 · 해결 대기' : '요청 보기';
+   q('#fm-request').hidden = resolved;
+   q('#fm-running').hidden = !resolved;
+   q('#fm-summary').textContent = resolved ? '진행 중' : '승인 필요';
+   q('#fm-summary').style.color = resolved ? 'var(--fm-blue)' : 'var(--fm-warn)';
+   q('#fm-status-detail').textContent = resolved ? '미해결 요청 0 · 실행 재개 확인' : `미해결 요청 1 · ${read ? '읽었지만 해결되지 않음' : '아직 읽지 않음'}`;
+   q('#fm-evidence-kind').textContent = resolved ? 'hook 확인 · 일치하는 요청 해제' : 'hook 확인 · PermissionRequest';
+   q('#fm-evidence-time').textContent = resolved ? '방금 · 로컬 연결 정상' : '2분 전 · 로컬 연결 정상';
+   q('#fm-foot-state').textContent = resolved ? '조치 1 · 결과 확인 1 · 진행 중 2' : '조치 2 · 결과 확인 1 · 진행 중 1';
+   q('.fm-footer span:last-child').textContent = resolved ? 'Claude · 진행 중' : 'Claude · 승인 필요';
+   q('.fm-evidence').open = design.evidence;
+ }
+ select.addEventListener('change', render);
+ q('#fm-open').addEventListener('click', () => { if (select.value === 'new') select.value = 'read'; render(); });
+ render();
+ if (globalThis.Tweak) {
+   const tweak = new Tweak({ container: root.querySelector('.fm-evidence'), onChange: render });
+   tweak.addToggle(design, 'evidence', { label: '상태 근거 기본 펼침' });
+ }
+})();
+</script>

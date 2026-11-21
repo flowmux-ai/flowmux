@@ -295,32 +295,26 @@ impl WindowController {
                     registry.workspace_of_pane(pane)?,
                     pane,
                     *surface,
-                    terminal.pid.get()? as u32,
+                    terminal.process_root()?,
                 ))
             })
             .collect();
         let mut anchors = Vec::new();
-        for (workspace, pane, surface, root_pid) in terminals.iter().copied() {
-            if let Some(located) = self.store.located_agent_presence(surface).await {
-                let agent = SessionAgent::from_name(&located.presence.name);
-                let mut session_id = located.presence.session_id;
-                if session_id.is_none() && agent == Some(SessionAgent::Codex) {
-                    session_id = self.codex_probe(surface, pane, root_pid).await;
-                }
-                if let (Some(agent), Some(session_id)) = (agent, session_id) {
-                    anchors.push(Anchor {
-                        workspace,
-                        target: SessionTarget {
-                            agent,
-                            focused: Some(FocusedSession {
-                                pane,
-                                surface,
-                                root_pid,
-                                session_id: Some(session_id),
-                            }),
-                        },
-                    });
-                }
+        for (workspace, pane, surface, _) in terminals.iter().copied() {
+            let Some(mut target) = self.terminal_session_target(pane, surface).await else {
+                continue;
+            };
+            let Some(focused) = &mut target.focused else {
+                continue;
+            };
+            if focused.session_id.is_none()
+                && target.agent == SessionAgent::Codex
+                && focused.process_start.is_none()
+            {
+                focused.session_id = self.codex_probe(surface, pane, focused.root_pid).await;
+            }
+            if focused.session_id.is_some() {
+                anchors.push(Anchor { workspace, target });
             }
         }
         anchors.sort_by_key(|a| a.target.focused.as_ref().map(|f| f.surface.0));
@@ -346,6 +340,7 @@ impl WindowController {
                 pane,
                 surface,
                 root_pid,
+                process_start: None,
                 session_id: None,
             }),
         };
@@ -464,12 +459,9 @@ impl WindowController {
         for anchor in anchors {
             if let Some(focused) = &anchor.target.focused {
                 if self
-                    .store
-                    .located_agent_presence(focused.surface)
+                    .terminal_session_presence(focused.pane, focused.surface)
                     .await
-                    .is_some_and(|p| {
-                        matches!(p.presence.status, AgentStatus::Idle | AgentStatus::Done)
-                    })
+                    .is_some_and(|p| matches!(p.status, AgentStatus::Idle | AgentStatus::Done))
                 {
                     idle.insert(focused.surface);
                 }
@@ -688,6 +680,33 @@ impl WindowController {
             }
         }
         if fork_source.is_none() {
+            let destination = self
+                .session_resume_pane()
+                .ok_or("Focus a local terminal pane to open this session")?;
+            let provider =
+                SessionAgent::from_name(&key.provider).ok_or("Unknown session provider")?;
+            if let Some(agent) = self
+                .running_session(provider, &key.id, &key.home, destination)
+                .await?
+            {
+                let binding = flowmux_core::AgentViewBinding {
+                    instance: agent.instance,
+                    epoch: agent.epoch,
+                };
+                let pane = if let Some((workspace, pane, surface)) =
+                    self.store.agent_view(binding).await
+                {
+                    self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+                        .await;
+                    pane
+                } else {
+                    destination.0
+                };
+                self.open_agent_view(pane, agent).await?;
+                return Ok(());
+            }
+        }
+        if fork_source.is_none() {
             let source = key.clone();
             let live = gtk::gio::spawn_blocking(move || -> std::io::Result<Vec<LiveSession>> {
                 Ok(FlowStore::open(&FlowStore::default_path()?)?
@@ -760,23 +779,17 @@ impl WindowController {
             return Err("Target workspace changed; select the session again".into());
         }
         let mut expected_hook_id = None;
+        let mut managed_source = None;
         if fork_source.is_some() {
-            let root_pid = self
-                .pane_registry
-                .borrow()
-                .terminals
-                .get(&source.1)
-                .and_then(|terminal| terminal.pid.get())
-                .ok_or("Source process ended")? as u32;
-            let target = SessionTarget {
-                agent: session.agent,
-                focused: Some(FocusedSession {
-                    pane: source.0,
-                    surface: source.1,
-                    root_pid,
-                    session_id: Some(key.id.clone()),
-                }),
-            };
+            let target = self
+                .terminal_session_target(source.0, source.1)
+                .await
+                .ok_or("Source process ended")?;
+            let root_pid = target
+                .focused
+                .as_ref()
+                .ok_or("Source process ended")?
+                .root_pid;
             let current = gtk::gio::spawn_blocking(move || session_home(&target))
                 .await
                 .map_err(|_| "Source environment reader failed")??;
@@ -787,21 +800,20 @@ impl WindowController {
             }
             home = current;
             let presence = self
-                .store
-                .located_agent_presence(source.1)
+                .terminal_session_presence(source.0, source.1)
                 .await
-                .ok_or("Fork source is no longer running")?
-                .presence;
-            expected_hook_id = presence.session_id.clone();
+                .ok_or("Fork source is no longer running")?;
+            if let Some(binding) = self.store.surface_agent_binding(source.0, source.1).await {
+                managed_source = Some(flowmux_ipc::agent_host::ForkSource {
+                    instance: binding.instance,
+                    epoch: binding.epoch,
+                    session_id: key.id.clone(),
+                });
+            } else {
+                expected_hook_id = presence.session_id.clone();
+            }
             let source_id = if presence.session_id.is_none() && session.agent == SessionAgent::Codex
             {
-                let root_pid = self
-                    .pane_registry
-                    .borrow()
-                    .terminals
-                    .get(&source.1)
-                    .and_then(|terminal| terminal.pid.get())
-                    .ok_or("Source process ended")? as u32;
                 let home = home.path.clone();
                 gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home))
                     .await
@@ -828,15 +840,39 @@ impl WindowController {
                     .into(),
             );
         }
-        let fork = fork_source.is_some();
-        let line = sessions::session_shell_line(&session, &home, fork, fork)?;
+        let handle = self
+            .tokio_handle
+            .as_ref()
+            .ok_or("Agent Host runtime unavailable")?;
+        let shell = self
+            .options
+            .borrow()
+            .default_shell
+            .clone()
+            .or_else(|| std::env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/bash".into());
+        let mut launch = sessions::prepare_session_launch(
+            &session,
+            &home,
+            fork_source.is_some(),
+            fork_source.is_some(),
+            shell,
+        )?;
+        launch.fork_source = managed_source;
+        let tab_line = sessions::native_session_line(
+            &session,
+            &home,
+            fork_source.is_some(),
+            fork_source.is_some(),
+            false,
+        )?;
         let surface = SurfaceId::new();
         let operation = Operation {
-            request: uuid::Uuid::new_v4(),
+            request: launch.request_id,
             owner: self.flow.owner,
             owner_pid: std::process::id(),
             source: key.clone(),
-            kind: if fork {
+            kind: if fork_source.is_some() {
                 OperationKind::Fork
             } else {
                 OperationKind::Resume
@@ -854,13 +890,59 @@ impl WindowController {
         if !reserved {
             return Err("This session operation has already been requested".into());
         }
-        let outcome = async {
-            if self.store.active_workspace().await != Some(workspace)
-                || (fork_source.is_none() && self.focused_pane.get() != Some(source.0))
-            {
-                return Err("Target changed while preparing the session".into());
+        if self.store.active_workspace().await != Some(workspace)
+            || (fork_source.is_none() && self.focused_pane.get() != Some(source.0))
+            || self.pane_registry.borrow().active_surface(source.0) != Some(source.1)
+        {
+            let failed = operation.clone();
+            let _ = gtk::gio::spawn_blocking(move || {
+                FlowStore::open(&FlowStore::default_path()?)?.fail(&failed)
+            })
+            .await;
+            return Err("Target changed while preparing the session".into());
+        }
+        self.flow
+            .panel
+            .status
+            .set_text("Starting session in Agent Host…");
+        let socket = flowmux_config::paths::agent_host_socket();
+        let result = handle
+            .spawn(async move { flowmux_cli::agent_host::launch(&socket, launch).await })
+            .await;
+        let mut tab_bound = None;
+        let agent = match result {
+            Ok(Ok(agent)) => Some(agent),
+            Ok(Err(error)) if sessions::tab_fallback_reason(&error).is_some() => {
+                tab_bound = sessions::tab_fallback_reason(&error);
+                None
             }
-            self.clear_pane_zoom();
+            Ok(Err(error)) => {
+                // Only an explicit pre-admission rejection makes it safe to release the reservation.
+                let rejected = error.chain().any(|cause| {
+                    cause.is::<flowmux_ipc::agent_host::IncompatibleHost>()
+                        || cause.downcast_ref::<flowmux_ipc::agent_host::HostRpcError>().is_some_and(|error| {
+                            matches!(error.0, flowmux_ipc::RpcError::Busy(_) | flowmux_ipc::RpcError::InvalidArgument(_))
+                        })
+                });
+                if rejected {
+                    let failed = operation.clone();
+                    let _ = gtk::gio::spawn_blocking(move || {
+                        FlowStore::open(&FlowStore::default_path()?)?.fail(&failed)
+                    }).await;
+                    return Err(format!("Session launch rejected: {error:#}"));
+                }
+                return Err(format!("Session launch not confirmed: {error:#}. The operation remains reserved; inspect Agents before retrying."));
+            }
+            Err(error) => return Err(format!("Session launch result unknown: {error}. The operation remains reserved; inspect Agents before retrying.")),
+        };
+        let binding = agent.as_ref().map(|agent| flowmux_core::AgentViewBinding {
+            instance: agent.instance,
+            epoch: agent.epoch,
+        });
+        // The Host never ran the provider, so the native line may run in an ordinary tab.
+        let line = tab_bound.is_some().then_some(tab_line);
+        self.clear_pane_zoom();
+        let split = async {
             let (workspace, pane) = self
                 .store
                 .split_session_pane(
@@ -869,13 +951,16 @@ impl WindowController {
                     expected_hook_id.as_deref(),
                     surface,
                     session.cwd.clone(),
+                    binding,
                 )
                 .await?;
             #[cfg(target_os = "macos")]
-            self.pane_registry
-                .borrow_mut()
-                .pending_terminal_commands
-                .insert(surface, line.clone());
+            if let Some(line) = &line {
+                self.pane_registry
+                    .borrow_mut()
+                    .pending_terminal_commands
+                    .insert(surface, line.clone());
+            }
             let split = self
                 .apply_split_incremental_or_rerender(
                     workspace,
@@ -893,7 +978,7 @@ impl WindowController {
             }
             split?;
             #[cfg(not(target_os = "macos"))]
-            {
+            if let Some(line) = &line {
                 let terminal = self
                     .pane_registry
                     .borrow()
@@ -906,37 +991,52 @@ impl WindowController {
                     .map_err(|e| e.to_string())?;
             }
             self.focus_pane(pane);
-            Ok(pane)
+            Ok::<_, String>(pane)
         }
         .await;
-        let pane = match outcome {
-            Ok(pane) => pane,
-            Err(error) => {
+        let pane = match (split, &agent) {
+            (Ok(pane), _) => pane,
+            (Err(error), Some(agent)) => {
+                self.refresh_agent_displays().await;
+                return Err(format!("Agent {} is still running; cannot open its reserved tab: {error}. The operation remains reserved.", agent.instance));
+            }
+            (Err(error), None) => {
                 let failed = operation.clone();
                 let _ = gtk::gio::spawn_blocking(move || {
-                    let mut store = FlowStore::open(&FlowStore::default_path()?)?;
-                    store.fail(&failed)
+                    FlowStore::open(&FlowStore::default_path()?)?.fail(&failed)
                 })
                 .await;
                 return Err(error);
             }
         };
-        self.flow
-            .panel
-            .status
-            .set_text("Opening session · waiting for its native identity…");
+        if let Some(reason) = &tab_bound {
+            // Fork starts from the terminal menu with the panel closed; keep the notice visible.
+            self.clipboard_toast.show_with_message_for(&format!("Session opened in an ordinary tab of this window; it ends when the tab closes. Managed launch unavailable: {reason}"), Duration::from_secs(8));
+        }
+        self.flow.panel.status.set_text(&match &tab_bound {
+            Some(reason) => format!("Opening session in an ordinary tab of this window; it ends when the tab closes. Managed launch unavailable: {reason} · waiting for its native identity…"),
+            None => "Opening session · waiting for its native identity…".into(),
+        });
         let controller = self.clone();
         glib::MainContext::default().spawn_local(async move {
             for _ in 0..30 {
                 glib::timeout_future(Duration::from_secs(1)).await;
                 if !controller.window.is_visible() { return; }
-                let Some(located) = controller.store.located_agent_presence(surface).await else { continue; };
-                if located.pane != pane || SessionAgent::from_name(&located.presence.name) != Some(session.agent) { continue; }
-                let Some(root_pid) = controller.pane_registry.borrow().terminals.get(&surface).and_then(|terminal| terminal.pid.get()).map(|pid| pid as u32) else { continue; };
-                let id = if located.presence.session_id.is_none() && session.agent == SessionAgent::Codex {
-                    let home = home.path.clone();
-                    gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home)).await.ok().and_then(Result::ok).flatten()
-                } else { located.presence.session_id };
+                let (root_pid, id) = if let Some(binding) = binding {
+                    let Some(agent) = controller.managed_session_agent(binding) else { continue; };
+                    if SessionAgent::from_name(&agent.provider) != Some(session.agent) { continue; }
+                    let Some(root_pid) = agent.pid else { continue; };
+                    (root_pid, agent.presence.and_then(|presence| presence.session_id))
+                } else {
+                    let Some(located) = controller.store.located_agent_presence(surface).await else { continue; };
+                    if located.pane != pane || SessionAgent::from_name(&located.presence.name) != Some(session.agent) { continue; }
+                    let Some(root_pid) = controller.pane_registry.borrow().terminals.get(&surface).and_then(|terminal| terminal.process_root()) else { continue; };
+                    let id = if located.presence.session_id.is_none() && session.agent == SessionAgent::Codex {
+                        let home = home.path.clone();
+                        gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home)).await.ok().and_then(Result::ok).flatten()
+                    } else { located.presence.session_id };
+                    (root_pid, id)
+                };
                 let Some(id) = id else { continue; };
                 let observed = SessionKey { id, ..key.clone() };
                 let live = LiveSession { owner: operation.owner, pid: root_pid, started: flowmux_procmon::process_start_time(root_pid), workspace: workspace.0, pane: pane.0, surface: surface.0, socket: flowmux_config::paths::runtime_socket_for_pid(std::process::id()) };
@@ -1155,6 +1255,7 @@ pub(super) async fn check_native(
                 pane,
                 surface: source,
                 root_pid: pid.unwrap() as u32,
+                process_start: None,
                 session_id: Some(child.clone()),
             }),
         },
@@ -1329,7 +1430,7 @@ pub(super) async fn check_native(
     let new_surface = SurfaceId::new();
     let (_, sibling) = controller
         .store
-        .split_session_pane(pane, source, Some(&child), new_surface, root.into())
+        .split_session_pane(pane, source, Some(&child), new_surface, root.into(), None)
         .await
         .unwrap();
     controller
@@ -2403,6 +2504,7 @@ impl WindowController {
                 pane: PaneId(live.pane),
                 surface: SurfaceId(live.surface),
                 root_pid: live.pid,
+                process_start: None,
                 session_id: Some(key.id.clone()),
             }),
         };

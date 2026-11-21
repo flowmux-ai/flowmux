@@ -4,29 +4,41 @@
 use super::*;
 
 impl WindowController {
+    async fn materialize_workspace(&self, id: WorkspaceId, activate: bool) -> Result<(), String> {
+        // Use the authoritative pane ids so later split/close commands find them.
+        let ws = self
+            .store
+            .get_workspace(id)
+            .await
+            .ok_or("Workspace no longer exists")?;
+        if activate {
+            self.render_workspace(&ws);
+            self.activate_workspace(id).await;
+        } else {
+            self.render_workspace_with_activation(&ws, false);
+            self.sync_workspace_label(id).await;
+        }
+        Ok(())
+    }
+
     pub(super) async fn dispatch_workspace_command(&self, cmd: GtkCommand) {
         match cmd {
+            GtkCommand::CreateWorkspace {
+                name,
+                root,
+                team,
+                activate,
+                ack,
+            } => {
+                let id = self.store.create_workspace_kind(name, root, team).await;
+                let result = self.materialize_workspace(id, activate).await;
+                if result.is_err() {
+                    self.store.remove_workspace(id).await;
+                }
+                let _ = ack.send(result.map(|()| id));
+            }
             GtkCommand::WorkspaceCreated { id, activate, ack } => {
-                // Pull the authoritative workspace (with the store's
-                // pane ids) instead of fabricating new ones — otherwise
-                // `focused_pane` gets a UUID that doesn't exist in the
-                // store and split / close shortcuts no-op.
-                let result = match self.store.get_workspace(id).await {
-                    Some(ws) if activate => {
-                        self.render_workspace(&ws);
-                        self.activate_workspace(id).await;
-                        Ok(())
-                    }
-                    Some(ws) => {
-                        // `--background`: render behind the visible workspace
-                        // like a restored one, so the user keeps their view.
-                        self.render_workspace_with_activation(&ws, false);
-                        self.sync_workspace_label(id).await;
-                        Ok(())
-                    }
-                    None => Err("Workspace no longer exists".into()),
-                };
-                let _ = ack.send(result);
+                let _ = ack.send(self.materialize_workspace(id, activate).await);
             }
             GtkCommand::NewWorkspace {
                 root,
@@ -69,13 +81,19 @@ impl WindowController {
                     self.activate_workspace(id).await;
                 }
             }
-            GtkCommand::CloseDetachedWindow { workspaces } => {
+            GtkCommand::CloseDetachedWindow {
+                workspaces,
+                closed_by_user,
+            } => {
                 let surfaces = workspaces
                     .iter()
                     .flat_map(|id| self.pane_registry.borrow().surface_ids_in_workspace(*id))
                     .collect::<Vec<_>>();
                 if !self.confirm_dirty_surfaces(&surfaces).await {
                     return;
+                }
+                if closed_by_user {
+                    self.close_hosted_shells(&surfaces);
                 }
                 for id in workspaces {
                     if self.store.remove_workspace(id).await {
@@ -94,6 +112,7 @@ impl WindowController {
                     let _ = ack.send(Err("Workspace close cancelled".into()));
                     return;
                 }
+                self.close_hosted_shells(&closing_surfaces);
                 if self.store.remove_workspace(id).await {
                     self.drop_workspace(id);
                     self.activate_active_or_show_empty().await;
@@ -116,6 +135,14 @@ impl WindowController {
                     let _ = ack.send(());
                     return;
                 }
+                let terminals = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>();
+                self.close_hosted_shells(&terminals);
                 for id in self.store.remove_all_workspaces().await {
                     self.drop_workspace(id);
                 }
