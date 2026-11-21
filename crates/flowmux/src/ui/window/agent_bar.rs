@@ -283,9 +283,14 @@ impl WindowController {
                         .map(|a| a.key),
                 );
             } else if snapshot.available
-                && agent
-                    .and_then(|agent| agent.view_owner)
-                    .is_some_and(|owner| connection.superseded_by(surface, owner))
+                && agent.is_some_and(|agent| {
+                    let terminal_pid = terminal.pid.get().and_then(|pid| u32::try_from(pid).ok());
+                    let elsewhere =
+                        crate::ui::agent_connection::shown_elsewhere(terminal_pid, agent);
+                    agent
+                        .view_owner
+                        .is_some_and(|owner| connection.superseded_by(surface, owner, elsewhere))
+                })
             {
                 self.bridge.send_from_ui(GtkCommand::CloseMovedAgentView {
                     pane: terminal.id(),
