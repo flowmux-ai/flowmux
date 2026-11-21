@@ -3,12 +3,12 @@
 //! provider queries or replayable clipboard/notification escape sequences.
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Charsets, Dimensions};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, CellExtra, Flags};
 use alacritty_terminal::term::{Config, Osc52, TermMode};
 use alacritty_terminal::vte::ansi::{
-    self, Color, CursorShape, Handler, NamedColor, Processor, Rgb,
+    self, CharsetIndex, Color, CursorShape, Handler, NamedColor, Processor, Rgb, StandardCharset,
 };
 use alacritty_terminal::Term;
 use flowmux_ipc::agent_host::{TerminalColors, TerminalSize};
@@ -92,6 +92,20 @@ enum OscState {
     Overflow,
 }
 
+/// Where program output stands between escape sequences and characters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sequence {
+    Ground,
+    /// Continuation bytes still expected.
+    Character(u8),
+    Escape,
+    Intermediate,
+    Control,
+    /// A string that ends at ST, and at BEL when `true`.
+    String(bool),
+    StringEscape,
+}
+
 pub(super) struct Terminal {
     term: Term<Events>,
     links: LinkBudget,
@@ -113,6 +127,10 @@ pub(super) struct Terminal {
     /// The passthrough view was last drawn on the alternate screen, so its own terminal
     /// holds no primary screen to return to.
     view_lacks_primary: bool,
+    parse: Sequence,
+    /// The bytes of the escape sequence or character that output has begun and not ended. A
+    /// redrawn view needs them before the rest arrives.
+    pending: Vec<u8>,
     /// Bytes not yet framed; `None` until the view has been redrawn.
     unframed: Option<Vec<u8>>,
     /// A new shell's output so far. Its first view gets these bytes, not a redraw that would clear
@@ -334,6 +352,8 @@ impl Terminal {
             colors: None,
             passthrough: false,
             view_lacks_primary: false,
+            parse: Sequence::Ground,
+            pending: Vec::new(),
             unframed: None,
             introduction: None,
         }
@@ -364,6 +384,9 @@ impl Terminal {
     pub fn feed_view(&mut self, data: &[u8], viewed: bool) -> Vec<u8> {
         let alternate = self.term.mode().contains(TermMode::ALT_SCREEN);
         let replies = self.feed(data);
+        if self.passthrough {
+            self.track_pending(data);
+        }
         // Leaving the alternate screen shows a primary screen the view never received.
         if self.view_lacks_primary && alternate && !self.term.mode().contains(TermMode::ALT_SCREEN)
         {
@@ -387,6 +410,61 @@ impl Terminal {
             }
         }
         replies
+    }
+
+    fn track_pending(&mut self, data: &[u8]) {
+        for &byte in data {
+            let mut state = self.parse;
+            if state == Sequence::StringEscape {
+                if byte == b'\\' {
+                    self.parse = Sequence::Ground;
+                    self.pending.clear();
+                    continue;
+                }
+                // The string ended without its terminator; this escape begins another sequence.
+                self.pending.clear();
+                self.pending.push(0x1b);
+                state = Sequence::Escape;
+            }
+            self.parse = match (state, byte) {
+                (Sequence::String(_), 0x1b) => Sequence::StringEscape,
+                (Sequence::String(true), 0x07) => Sequence::Ground,
+                (_, 0x18 | 0x1a) => Sequence::Ground,
+                (Sequence::String(bell), _) => Sequence::String(bell),
+                (_, 0x1b) => {
+                    self.pending.clear();
+                    Sequence::Escape
+                }
+                (Sequence::Escape, b'[') => Sequence::Control,
+                (Sequence::Escape, b']') => Sequence::String(true),
+                (Sequence::Escape, b'P' | b'^' | b'_' | b'X') => Sequence::String(false),
+                (Sequence::Escape | Sequence::Intermediate, 0x20..=0x2f) => Sequence::Intermediate,
+                (Sequence::Escape | Sequence::Intermediate, _) => Sequence::Ground,
+                (Sequence::Control, 0x40..=0x7e) => Sequence::Ground,
+                (Sequence::Control, _) => Sequence::Control,
+                (Sequence::Character(left), 0x80..=0xbf) if left > 1 => {
+                    Sequence::Character(left - 1)
+                }
+                (_, 0xc2..=0xf4) => {
+                    self.pending.clear();
+                    Sequence::Character(match byte {
+                        0xc2..=0xdf => 1,
+                        0xe0..=0xef => 2,
+                        _ => 3,
+                    })
+                }
+                _ => Sequence::Ground,
+            };
+            if self.parse == Sequence::Ground {
+                self.pending.clear();
+            } else if self.pending.len() <= MAX_OSC_PAYLOAD {
+                self.pending.push(byte);
+            } else {
+                // ponytail: a longer string is not carried; its rest then shows as text.
+                self.parse = Sequence::Ground;
+                self.pending.clear();
+            }
+        }
     }
 
     pub fn set_colors(&mut self, colors: TerminalColors) {
@@ -537,7 +615,7 @@ impl Terminal {
                     let snapshot: Arc<str> = Arc::from(projection.snapshot());
                     self.diff = snapshot.clone();
                     self.snapshot = Some(snapshot);
-                    self.unframed = Some(Vec::new());
+                    self.unframed = Some(self.pending.clone());
                     self.sequence += 1;
                 }
             }
@@ -568,7 +646,10 @@ impl Terminal {
                 Some(previous) if !self.passthrough => previous.snapshot(),
                 _ => {
                     let projection = self.project();
-                    self.view_lacks_primary = self.passthrough && projection.alternate;
+                    if self.passthrough {
+                        self.view_lacks_primary = projection.alternate;
+                        self.unframed = Some(self.pending.clone());
+                    }
                     projection.snapshot()
                 }
             };
@@ -661,6 +742,28 @@ impl Terminal {
         history.reverse();
         let cursor = grid.cursor.point;
         let mut trailer = String::from("\x1b[0m");
+        // A passthrough view's own terminal carries on from here, so it also needs the state
+        // only later output reveals. A rendered view never does: each frame draws it anew.
+        let columns = usize::from(self.size.cols);
+        if self.passthrough && (0..columns).any(|c| self.term.tab_stop(Column(c)) != (c % 8 == 0)) {
+            trailer.push_str("\x1b[3g");
+            for column in (0..columns).filter(|c| self.term.tab_stop(Column(*c))) {
+                let _ = write!(trailer, "\x1b[1;{}H\x1bH", column + 1);
+            }
+        }
+        let saved = &grid.saved_cursor;
+        let saved_cursor = self.passthrough && *saved != Default::default();
+        if saved_cursor {
+            designate(&mut trailer, &saved.charsets);
+            let _ = write!(
+                trailer,
+                "\x1b[{};{}H",
+                saved.point.line.0 + 1,
+                saved.point.column.0 + 1
+            );
+            style(&mut trailer, &saved.template);
+            trailer.push_str("\x1b7\x1b[0m");
+        }
         // What the program writes next scrolls within its region. Setting one moves the
         // cursor, so it comes first.
         let region = self.term.scroll_region();
@@ -723,6 +826,17 @@ impl Terminal {
             style(&mut trailer, &line[Column(column)]);
             glyph(&mut trailer, &line[Column(column)]);
             trailer.push_str("\x1b[0m");
+        }
+        if self.passthrough {
+            if saved_cursor || grid.cursor.charsets != Charsets::default() {
+                designate(&mut trailer, &grid.cursor.charsets);
+            }
+            if self.term.active_charset() == CharsetIndex::G1 {
+                trailer.push('\x0e');
+            }
+            if self.term.mode().contains(TermMode::INSERT) {
+                trailer.push_str("\x1b[4h");
+            }
         }
         // The program's pen: what it writes next keeps its colors and attributes.
         let pen = &grid.cursor.template;
@@ -815,6 +929,21 @@ fn history_overlap(previous: &[String], next: &[String]) -> usize {
 
 fn safe_osc(value: &str) -> bool {
     value.len() <= 4096 && !value.chars().any(char::is_control)
+}
+
+fn designate(data: &mut String, charsets: &Charsets) {
+    for (index, slot) in [
+        (CharsetIndex::G0, '('),
+        (CharsetIndex::G1, ')'),
+        (CharsetIndex::G2, '*'),
+        (CharsetIndex::G3, '+'),
+    ] {
+        let set = match charsets[index] {
+            StandardCharset::Ascii => 'B',
+            StandardCharset::SpecialCharacterAndLineDrawing => '0',
+        };
+        let _ = write!(data, "\x1b{slot}{set}");
+    }
 }
 
 /// The length of `bytes` without a character split across two reads at its end.
@@ -1751,6 +1880,35 @@ mod tests {
                 b"\x1b[2;3r\x1b[?6h",
                 b"\x1b[1;1HZ\x1b[2;1HW",
             ),
+            (
+                "the saved cursor keeps its place and its pen",
+                b"\x1b[31m\x1b[2;5H\x1b7\x1b[0m\x1b[1;1H",
+                b"\x1b8Z",
+            ),
+            (
+                "typed characters are inserted",
+                b"abcdef\x1b[4h\x1b[1;1H",
+                b"XY",
+            ),
+            ("line drawing is designated", b"\x1b(0", b"qqxx"),
+            ("line drawing is shifted in", b"\x1b)0\x0e", b"qqxx"),
+            (
+                "tab stops are the program's",
+                b"\x1b[3g\x1b[1;5H\x1bH\x1b[1;1H",
+                b"a\tb\tc",
+            ),
+            ("a control sequence is split", b"ab\x1b[31", b"mX"),
+            ("a title is split", b"ab\x1b]0;ti", b"tle\x07X"),
+            (
+                "an escape is split after its first byte",
+                b"ab\x1b",
+                b"[31mX",
+            ),
+            (
+                "a character is split",
+                &"ab\u{d55c}".as_bytes()[..4],
+                &"\u{d55c}X".as_bytes()[2..],
+            ),
         ] {
             let mut host = Terminal::new(size);
             host.set_passthrough();
@@ -1764,6 +1922,33 @@ mod tests {
             host.feed_view(after, true);
             view.feed(host.frame(sequence).3.as_bytes());
             assert_eq!(view.status_signals().0, host.status_signals().0, "{case}");
+            assert_eq!(view.project().rows, host.project().rows, "{case}");
+            assert_eq!(
+                view.term.grid().cursor.point,
+                host.term.grid().cursor.point,
+                "{case}"
+            );
+        }
+        // Wherever a redraw falls in a stream, the rest of it means the same to the view.
+        let stream = "a\x1b[31mb\x1b]0;t\x07c\x1b]2;u\x1b\\d\x1bPq\x1b\\e\x1b(0q\x1b(Bf\u{d55c}g\x1b[0mh\r\n\x1b7\x1b[4hi\x1b8j"
+            .as_bytes();
+        for split in 0..=stream.len() {
+            let mut host = Terminal::new(size);
+            host.set_passthrough();
+            host.feed_view(b"\r", false);
+            host.frame(0);
+            host.feed_view(&stream[..split], false);
+            let (sequence, _, _, data) = host.frame(0);
+            let mut view = Terminal::new(size);
+            view.feed(data.as_bytes());
+            host.feed_view(&stream[split..], true);
+            view.feed(host.frame(sequence).3.as_bytes());
+            assert_eq!(view.project().rows, host.project().rows, "split at {split}");
+            assert_eq!(
+                view.term.grid().cursor.point,
+                host.term.grid().cursor.point,
+                "split at {split}"
+            );
         }
         // A character split across two reads is not lost with the first frame.
         let mut host = Terminal::new(size);
