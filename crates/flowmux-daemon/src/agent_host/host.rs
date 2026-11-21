@@ -1203,7 +1203,14 @@ impl AgentHost {
         };
         let spawned = tokio::task::spawn_blocking(move || {
             let argv: Vec<_> = launch.argv.iter().map(String::as_str).collect();
-            Pty::spawn_gated_with_environment(&argv, &launch.cwd, &launch.env, size.cols, size.rows)
+            Pty::spawn_gated_with_environment(
+                &argv,
+                &launch.cwd,
+                &launch.env,
+                size.cols,
+                size.rows,
+                launch.umask.map(|mask| mask as libc::mode_t),
+            )
         })
         .await;
         let spawned = match spawned {
@@ -1406,6 +1413,11 @@ fn launch_millis(id: Uuid) -> u64 {
 fn validate_launch(launch: &LaunchAgent) -> Result<()> {
     // launch.colors needs no check here: TerminalColors admits only bounded RGB triples.
     launch.size.validate()?;
+    if launch.umask.is_some_and(|mask| mask > 0o777) {
+        return Err(RpcError::InvalidArgument(
+            "launch file creation mask is invalid".into(),
+        ));
+    }
     if launch.request_id.get_version_num() != 7 {
         return Err(RpcError::InvalidArgument(
             "launch request ID must be UUIDv7".into(),
@@ -3473,6 +3485,7 @@ mod tests {
                 fork_source: None,
                 colors: None,
                 shell: false,
+                umask: None,
             }
         }
 
@@ -7402,6 +7415,32 @@ for line in sys.stdin:
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_launch_keeps_its_launcher_file_creation_mask() {
+        let fixture = Fixture::new().await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        for (name, mask) in [("plain", 0o022), ("group", 0o002)] {
+            let mut launch = fixture.launch(&format!("umask > {name}"));
+            launch.umask = Some(mask);
+            gui.call(HostRequest::Launch { launch }).await.unwrap();
+            let file = fixture._directory.path().join(name);
+            timeout(Duration::from_secs(10), async {
+                while std::fs::read_to_string(&file).is_ok_and(|text| text.is_empty())
+                    || !file.exists()
+                {
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let shown = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(u32::from_str_radix(shown.trim(), 8).unwrap(), mask);
+        }
+        let mut launch = fixture.launch("true");
+        launch.umask = Some(0o1000);
+        assert!(gui.call(HostRequest::Launch { launch }).await.is_err());
     }
 
     #[tokio::test]

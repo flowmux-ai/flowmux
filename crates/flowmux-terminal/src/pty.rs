@@ -130,10 +130,10 @@ impl Pty {
             argv,
             cwd,
             build_envp(extra_env)?,
-            cols,
-            rows,
+            (cols, rows),
             oom_score_adj,
             false,
+            None,
         )
     }
 
@@ -146,6 +146,7 @@ impl Pty {
         environment: &[(String, String)],
         cols: u16,
         rows: u16,
+        umask: Option<libc::mode_t>,
     ) -> io::Result<(Pty, SpawnGate)> {
         if argv
             .first()
@@ -160,10 +161,10 @@ impl Pty {
             argv,
             Some(cwd),
             build_envp_from(std::iter::empty(), environment)?,
-            cols,
-            rows,
+            (cols, rows),
             None,
             true,
+            umask,
         )
     }
 
@@ -171,10 +172,10 @@ impl Pty {
         argv: &[&str],
         cwd: Option<&Path>,
         c_env: Vec<CString>,
-        cols: u16,
-        rows: u16,
+        (cols, rows): (u16, u16),
         oom_score_adj: Option<i32>,
         strict_cwd: bool,
+        umask: Option<libc::mode_t>,
     ) -> io::Result<(Pty, SpawnGate)> {
         if argv.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty argv"));
@@ -255,6 +256,9 @@ impl Pty {
             // ---- Child: async-signal-safe only, then exec or _exit. ----
             unsafe {
                 libc::close(gate_write);
+                if let Some(mask) = umask {
+                    libc::umask(mask);
+                }
                 let inherited = INHERITED_OPEN_FILES.load(std::sync::atomic::Ordering::Relaxed);
                 if inherited != 0 {
                     let mut limit = libc::rlimit {
@@ -682,6 +686,7 @@ mod tests {
             &[("ONLY".into(), "isolated".into())],
             80,
             24,
+            None,
         )
         .unwrap();
         gate.release();
@@ -696,7 +701,7 @@ mod tests {
             output.extend_from_slice(&buffer[..n]);
         }
         assert_eq!(String::from_utf8(output).unwrap().trim(), "ONLY=isolated");
-        assert!(Pty::spawn_gated_with_environment(&["env"], &cwd, &[], 80, 24).is_err());
+        assert!(Pty::spawn_gated_with_environment(&["env"], &cwd, &[], 80, 24, None).is_err());
         let missing = cwd.join(format!(".missing-agent-cwd-{}", std::process::id()));
         assert!(!missing.exists());
         let (mut pty, gate) = Pty::spawn_gated_with_environment(
@@ -705,6 +710,7 @@ mod tests {
             &[],
             80,
             24,
+            None,
         )
         .unwrap();
         gate.release();
