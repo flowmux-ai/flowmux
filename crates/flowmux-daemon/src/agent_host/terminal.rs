@@ -81,6 +81,8 @@ struct Projection {
     alternate: bool,
     history: Vec<String>,
     rows: Vec<String>,
+    /// For a passthrough view, whether each history and screen row wraps into the next.
+    soft: Vec<bool>,
     trailer: String,
 }
 
@@ -691,11 +693,27 @@ impl Terminal {
     fn project(&self) -> Projection {
         let grid = self.term.grid();
         let mut link_bytes = MAX_PROJECTION_LINK_BYTES;
+        let columns = usize::from(self.size.cols);
+        let wraps = |line: i32| {
+            grid[Line(line)][Column(columns - 1)]
+                .flags
+                .contains(Flags::WRAPLINE)
+        };
         let mut row = |line: i32| {
             let mut result = String::new();
             let mut previous: Option<&Cell> = None;
             let mut link = None;
-            for column in 0..usize::from(self.size.cols) {
+            // A passthrough view's terminal keeps these rows as its own lines: the blank
+            // cells after a line's end are not part of it.
+            let end = if self.passthrough && !wraps(line) {
+                (0..columns)
+                    .rev()
+                    .find(|column| !blank(&grid[Line(line)][Column(*column)]))
+                    .map_or(0, |column| column + 1)
+            } else {
+                columns
+            };
+            for column in 0..end {
                 let cell = &grid[Line(line)][Column(column)];
                 if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
                     continue;
@@ -730,6 +748,7 @@ impl Terminal {
         let rows: Vec<_> = (0..i32::from(self.size.rows)).map(&mut row).collect();
         let mut bytes = rows.iter().map(|row| row.len() + 2).sum::<usize>();
         let mut history = Vec::new();
+        let mut soft = Vec::new();
         for line in (-(grid.history_size() as i32)..0).rev() {
             let rendered = row(line);
             // Leave room for cursor/mode controls and diff row addresses.
@@ -738,13 +757,18 @@ impl Terminal {
             }
             bytes += rendered.len() + 2;
             history.push(rendered);
+            soft.push(wraps(line));
         }
         history.reverse();
+        soft.reverse();
+        soft.extend((0..i32::from(self.size.rows)).map(wraps));
+        if !self.passthrough {
+            soft.clear();
+        }
         let cursor = grid.cursor.point;
         let mut trailer = String::from("\x1b[0m");
         // A passthrough view's own terminal carries on from here, so it also needs the state
         // only later output reveals. A rendered view never does: each frame draws it anew.
-        let columns = usize::from(self.size.cols);
         if self.passthrough && (0..columns).any(|c| self.term.tab_stop(Column(c)) != (c % 8 == 0)) {
             trailer.push_str("\x1b[3g");
             for column in (0..columns).filter(|c| self.term.tab_stop(Column(*c))) {
@@ -851,6 +875,7 @@ impl Terminal {
             alternate: self.term.mode().contains(TermMode::ALT_SCREEN),
             history,
             rows,
+            soft,
             trailer,
         }
     }
@@ -862,8 +887,20 @@ impl Projection {
         if self.alternate {
             data.push_str("\x1b[?1049h");
         }
-        data.push_str("\x1b[?7l\x1b[H");
-        self.write_rows(&mut data, &self.history);
+        if self.soft.is_empty() {
+            data.push_str("\x1b[?7l\x1b[H");
+            self.write_rows(&mut data, &self.history);
+        } else {
+            // Drawn with wrapping, so a line that wrapped is one line in the view's terminal
+            // too: it copies and reflows there as it does here.
+            data.push_str("\x1b[?7h\x1b[H");
+            for (index, row) in self.history.iter().chain(&self.rows).enumerate() {
+                if index != 0 && !self.soft[index - 1] {
+                    data.push_str("\r\n");
+                }
+                data.push_str(row);
+            }
+        }
         data.push_str(&self.trailer);
         data
     }
@@ -929,6 +966,14 @@ fn history_overlap(previous: &[String], next: &[String]) -> usize {
 
 fn safe_osc(value: &str) -> bool {
     value.len() <= 4096 && !value.chars().any(char::is_control)
+}
+
+fn blank(cell: &Cell) -> bool {
+    cell.c == ' '
+        && cell.bg == Color::Named(NamedColor::Background)
+        && (cell.flags - Flags::WRAPLINE).is_empty()
+        && cell.zerowidth().is_none()
+        && cell.hyperlink().is_none()
 }
 
 fn designate(data: &mut String, charsets: &Charsets) {
@@ -1918,6 +1963,8 @@ mod tests {
             let (sequence, snapshot, _, data) = host.frame(0);
             assert!(snapshot, "{case}");
             let mut view = Terminal::new(size);
+            // Rows are compared as both draw them.
+            view.set_passthrough();
             view.feed(data.as_bytes());
             host.feed_view(after, true);
             view.feed(host.frame(sequence).3.as_bytes());
@@ -1929,6 +1976,21 @@ mod tests {
                 "{case}"
             );
         }
+        // A line that wrapped stays one line for the view, and a short line ends where it ends.
+        let mut host = Terminal::new(size);
+        host.set_passthrough();
+        host.feed_view(b"\r", false);
+        host.frame(0);
+        host.feed_view(format!("L1\r\n{}\r\nend", "w".repeat(30)).as_bytes(), false);
+        let data = host.frame(0).3;
+        assert!(!data.contains("L1 "), "{data:?}");
+        let mut view = Terminal::new(size);
+        view.feed(data.as_bytes());
+        let wide = TerminalSize { rows: 4, cols: 40 };
+        host.resize(wide);
+        view.resize(wide);
+        assert_eq!(view.status_signals().0, host.status_signals().0);
+        assert!(host.status_signals().0.contains(&"w".repeat(30)));
         // Wherever a redraw falls in a stream, the rest of it means the same to the view.
         let stream = "a\x1b[31mb\x1b]0;t\x07c\x1b]2;u\x1b\\d\x1bPq\x1b\\e\x1b(0q\x1b(Bf\u{d55c}g\x1b[0mh\r\n\x1b7\x1b[4hi\x1b8j"
             .as_bytes();
@@ -1940,6 +2002,8 @@ mod tests {
             host.feed_view(&stream[..split], false);
             let (sequence, _, _, data) = host.frame(0);
             let mut view = Terminal::new(size);
+            // Rows are compared as both draw them.
+            view.set_passthrough();
             view.feed(data.as_bytes());
             host.feed_view(&stream[split..], true);
             view.feed(host.frame(sequence).3.as_bytes());
