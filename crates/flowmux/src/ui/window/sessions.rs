@@ -481,8 +481,7 @@ impl WindowController {
             .borrow()
             .terminals
             .get(&surface)?
-            .pid
-            .get()? as u32;
+            .process_root()?;
         let presence = self.store.located_agent_presence(surface).await?.presence;
         Some(SessionTarget {
             agent: SessionAgent::from_name(&presence.name)?,
