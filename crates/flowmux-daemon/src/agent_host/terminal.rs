@@ -658,6 +658,8 @@ impl Terminal {
         let cursor = grid.cursor.point;
         let mut trailer = format!("\x1b[0m\x1b[{};{}H", cursor.line.0 + 1, cursor.column.0 + 1);
         for (flag, mode) in [
+            // Rows are drawn without wrapping; what the program writes next wraps again.
+            (TermMode::LINE_WRAP, 7),
             (TermMode::SHOW_CURSOR, 25),
             (TermMode::APP_CURSOR, 1),
             (TermMode::BRACKETED_PASTE, 2004),
@@ -1625,6 +1627,10 @@ mod tests {
         terminal.feed_view(b"later", true);
         let (_, _, _, data) = terminal.frame(third);
         assert!(data.contains("before") && data.contains("later"));
+        assert!(
+            data.rfind("\x1b[?7h") > data.rfind("\x1b[?7l"),
+            "output after a redraw wraps again"
+        );
     }
 
     #[test]
