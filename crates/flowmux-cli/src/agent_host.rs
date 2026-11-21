@@ -23,6 +23,14 @@ const HOST_ENVIRONMENT_KEYS: &[&str] = &[
     "FLOWMUX_LOG",
 ];
 
+/// This process's file creation mask. Reading it means setting it; nothing else runs in between.
+#[allow(clippy::unnecessary_cast)] // mode_t is 16 bits on macOS and 32 on Linux
+fn file_creation_mask() -> u32 {
+    let mask = unsafe { libc::umask(0o077) };
+    unsafe { libc::umask(mask) };
+    mask as u32
+}
+
 /// Resolve the executable against the caller's launch environment, preserving shims.
 /// Preparation never starts a Host or a process.
 pub fn prepare_launch(
@@ -89,6 +97,7 @@ pub fn prepare_launch(
         // `agent run` has no view theme; Host defaults apply until a view attaches.
         colors: None,
         shell: false,
+        umask: Some(file_creation_mask()),
     })
 }
 

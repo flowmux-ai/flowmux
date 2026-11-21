@@ -81,6 +81,9 @@ pub struct LaunchAgent {
     /// An ordinary terminal's shell. It lives with its view unless an agent runs inside it.
     #[serde(default)]
     pub shell: bool,
+    /// The launcher's file creation mask. The Host's own is private and is not for its children.
+    #[serde(default)]
+    pub umask: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
