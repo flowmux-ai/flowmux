@@ -1182,6 +1182,16 @@ impl AgentHost {
         let size = launch.size;
         let colors = launch.colors;
         let shell = launch.shell;
+        // A terminal's shell keeps the memory limits its pane has in a window.
+        let memory_limits = if shell {
+            let options = flowmux_config::options::load();
+            (
+                options.pane_memory_high_bytes(),
+                options.pane_memory_max_bytes(),
+            )
+        } else {
+            (None, None)
+        };
         let spawned = tokio::task::spawn_blocking(move || {
             let argv: Vec<_> = launch.argv.iter().map(String::as_str).collect();
             Pty::spawn_gated_with_environment(&argv, &launch.cwd, &launch.env, size.cols, size.rows)
@@ -1198,7 +1208,14 @@ impl AgentHost {
                     });
                 match prepared {
                     Ok((start, io)) => {
-                        match ExecutionScope::attach(self, instance, pty.child_pid() as u32).await {
+                        match ExecutionScope::attach(
+                            self,
+                            instance,
+                            pty.child_pid() as u32,
+                            memory_limits,
+                        )
+                        .await
+                        {
                             Ok(scope) => Ok((
                                 gate,
                                 PreparedProcess {
@@ -1580,6 +1597,7 @@ impl ExecutionScope {
         host: &AgentHost,
         instance: AgentInstanceId,
         pid: u32,
+        (memory_high, memory_max): (Option<u64>, Option<u64>),
     ) -> std::result::Result<Self, String> {
         let isolation = host
             .scope_isolation
@@ -1593,7 +1611,10 @@ impl ExecutionScope {
                 &unit,
                 "Flowmux managed Agent",
                 pid,
-                crate::process_scope::ScopeLimits::default(),
+                crate::process_scope::ScopeLimits {
+                    memory_high,
+                    memory_max,
+                },
             ),
         )
         .await
@@ -1615,6 +1636,7 @@ impl ExecutionScope {
         _: &AgentHost,
         _: AgentInstanceId,
         _: u32,
+        _: (Option<u64>, Option<u64>),
     ) -> std::result::Result<Self, String> {
         // shortcut: macOS retains birth-checked polling until native containment exists.
         Ok(Self {})
