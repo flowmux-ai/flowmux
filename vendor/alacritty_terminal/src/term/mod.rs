@@ -710,6 +710,12 @@ impl<T> Term<T> {
         &self.mode
     }
 
+    /// Flowmux: the scrolling region, from its first line to one past its last.
+    #[inline]
+    pub fn scroll_region(&self) -> &Range<Line> {
+        &self.scroll_region
+    }
+
     /// Swap primary and alternate screen buffer.
     pub fn swap_alt(&mut self) {
         if !self.mode.contains(TermMode::ALT_SCREEN) {

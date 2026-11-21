@@ -656,7 +656,19 @@ impl Terminal {
         }
         history.reverse();
         let cursor = grid.cursor.point;
-        let mut trailer = format!("\x1b[0m\x1b[{};{}H", cursor.line.0 + 1, cursor.column.0 + 1);
+        let mut trailer = String::from("\x1b[0m");
+        // What the program writes next scrolls within its region. Setting one moves the
+        // cursor, so it comes first.
+        let region = self.term.scroll_region();
+        if region.start.0 != 0 || region.end.0 != i32::from(self.size.rows) {
+            let _ = write!(trailer, "\x1b[{};{}r", region.start.0 + 1, region.end.0);
+        }
+        let _ = write!(
+            trailer,
+            "\x1b[{};{}H",
+            cursor.line.0 + 1,
+            cursor.column.0 + 1
+        );
         for (flag, mode) in [
             // Rows are drawn without wrapping; what the program writes next wraps again.
             (TermMode::LINE_WRAP, 7),
@@ -1630,6 +1642,12 @@ mod tests {
         assert!(
             data.rfind("\x1b[?7h") > data.rfind("\x1b[?7l"),
             "output after a redraw wraps again"
+        );
+        // A program's scrolling region survives the redraw, set before the cursor is placed.
+        terminal.feed_view(b"\x1b[2;3r\x1b[3;1H", false);
+        let (_, _, _, data) = terminal.frame(0);
+        assert!(
+            data.ends_with("\x1b[2;3r\x1b[3;1H") || data.contains("\x1b[2;3r\x1b[3;1H\x1b[?7h")
         );
     }
 
