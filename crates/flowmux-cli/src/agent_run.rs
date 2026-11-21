@@ -52,11 +52,21 @@ pub(crate) async fn run(
     let destination = if args.background {
         None
     } else {
-        let pane = resolve_pane(args.pane)?;
-        let socket = socket
-            .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
-            .unwrap_or_else(paths::runtime_socket);
-        let gui = Client::connect(&socket).await?;
+        // Inside a managed agent the Host knows the pane and the window that show it now;
+        // its environment names neither.
+        let (gui, pane) = match managed_context(None, socket.clone()).await? {
+            Some(managed) => {
+                let pane = args.pane.unwrap_or(managed.report.location.pane);
+                (managed.client, pane)
+            }
+            None => {
+                let pane = resolve_pane(args.pane)?;
+                let socket = socket
+                    .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
+                    .unwrap_or_else(paths::runtime_socket);
+                (Client::connect(&socket).await?, pane)
+            }
+        };
         let Response::Tree { workspaces } = gui.call(Request::WorkspaceTree).await? else {
             anyhow::bail!("could not validate the agent destination");
         };
