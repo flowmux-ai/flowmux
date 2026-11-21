@@ -1756,6 +1756,8 @@ struct TerminalActor {
     stop_all: bool,
     /// The shell is ending because its terminal went away, not because of a stop request.
     closed_terminal: bool,
+    /// When a stop asked of the agent in a shell, which never stops the shell, may be forced.
+    agent_stop: Option<Instant>,
 }
 
 impl TerminalActor {
@@ -1805,6 +1807,7 @@ impl TerminalActor {
             detected_agent: false,
             stop_all: false,
             closed_terminal: false,
+            agent_stop: None,
         }
     }
 
@@ -1907,6 +1910,12 @@ impl TerminalActor {
                             }
                         }
                     }
+                    if self.agent_stop.is_some_and(|deadline| Instant::now() >= deadline) {
+                        self.agent_stop = None;
+                        let mut registry = self.host.registry();
+                        registry.entries.get_mut(&self.instance).unwrap().agent.force_terminate_allowed = true;
+                        registry.revision += 1;
+                    }
                     if self.root_status.is_some() && self.owned.is_empty() && self.scope.is_empty() && self.eof {
                         self.finished();
                         break;
@@ -1967,12 +1976,15 @@ impl TerminalActor {
     fn detect_agent(&mut self, now: Instant) -> bool {
         self.agent_checked = Some(now);
         self.observe_processes();
+        let known = self.presence.as_ref().and_then(|presence| presence.pid);
         // The root counts too: `exec claude` turns the shell itself into the agent.
+        // The agent already shown comes first, so one running inside it does not replace it.
         #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
-        let mut found = self
-            .owned
-            .keys()
-            .find_map(|&pid| flowmux_procmon::agent_name_for_pid(pid).map(|name| (pid, name)));
+        let mut found = known
+            .filter(|pid| self.owned.contains_key(pid))
+            .into_iter()
+            .chain(self.owned.keys().copied())
+            .find_map(|pid| flowmux_procmon::agent_name_for_pid(pid).map(|name| (pid, name)));
         #[cfg(target_os = "linux")]
         if found.is_none()
             && self
@@ -1988,19 +2000,20 @@ impl TerminalActor {
             // An unreadable scope keeps what was known: never close on uncertainty.
             return false;
         }
-        if found.is_some() != self.detected_agent {
+        // Another agent can have taken the place of the one that ended since the last look.
+        if found.is_some() != self.detected_agent || found.map(|(pid, _)| pid) != known {
             self.detected_agent = found.is_some();
             // Without hooks nothing tells a working agent from a waiting one.
             self.presence = found.map(|(pid, name)| {
                 flowmux_core::AgentPresence::new(name, flowmux_core::AgentActivity::Idle, Some(pid))
             });
+            self.agent_stop = None;
             let mut registry = self.host.registry();
-            registry
-                .entries
-                .get_mut(&self.instance)
-                .unwrap()
-                .agent
-                .presence = self.presence.clone();
+            let agent = &mut registry.entries.get_mut(&self.instance).unwrap().agent;
+            agent.presence = self.presence.clone();
+            if self.stopping.is_none() {
+                agent.force_terminate_allowed = false;
+            }
             registry.revision += 1;
         }
         true
@@ -2575,6 +2588,9 @@ impl TerminalActor {
                                 } else {
                                     libc::kill(pid as i32, signal);
                                 }
+                            }
+                            if !kill {
+                                self.agent_stop.get_or_insert(Instant::now() + STOP_GRACE);
                             }
                         }
                         // A shell ignores SIGTERM; it ends the way a closed terminal ends it.
@@ -7303,6 +7319,57 @@ for line in sys.stdin:
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn shell_follows_its_next_agent_and_offers_force_when_a_stop_is_ignored() {
+        let fixture = Fixture::new().await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let directory = fixture._directory.path();
+        std::fs::write(directory.join("claude"), "import time\ntime.sleep(3)\n").unwrap();
+        std::fs::write(
+            directory.join("codex"),
+            "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)\n",
+        )
+        .unwrap();
+        let mut launch = fixture.launch("python3 ./claude; python3 ./codex");
+        launch.shell = true;
+        let HostResponse::Launched { agent } =
+            gui.call(HostRequest::Launch { launch }).await.unwrap()
+        else {
+            panic!("expected launch")
+        };
+        let shown = || {
+            fixture.host.registry().entries[&agent.instance]
+                .agent
+                .clone()
+        };
+        let name = || shown().presence.map(|presence| presence.name);
+        async fn until(ready: impl Fn() -> bool, message: &str) {
+            timeout(Duration::from_secs(15), async {
+                while !ready() {
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect(message)
+        }
+        // One agent directly after another: neither look finds the shell without an agent.
+        until(|| name().as_deref() == Some("claude"), "first agent").await;
+        until(|| name().as_deref() == Some("codex"), "second agent").await;
+        let terminate = |mode| {
+            gui.call(HostRequest::Terminate {
+                instance: agent.instance,
+                epoch: agent.epoch,
+                mode,
+            })
+        };
+        terminate(TerminateMode::Terminate).await.unwrap();
+        until(|| shown().force_terminate_allowed, "force is offered").await;
+        // Only the agent was asked to stop; its shell still runs.
+        assert_eq!(shown().state, ProcessState::Running);
+        terminate(TerminateMode::Force).await.unwrap();
+        until(|| shown().presence.is_none(), "forced agent ends").await;
     }
 
     #[test]
