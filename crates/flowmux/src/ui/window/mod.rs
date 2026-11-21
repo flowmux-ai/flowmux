@@ -2849,6 +2849,49 @@ impl WindowController {
         }
     }
 
+    /// Closing a terminal tab ends its shell in the Host right away, as closing any terminal does,
+    /// instead of after the grace that covers a tab being rebuilt or moved. The Host keeps a
+    /// shell that runs an agent or that another tab shows.
+    pub(super) fn close_hosted_shells(&self, surfaces: &[SurfaceId]) {
+        let shells: Vec<_> = {
+            let registry = self.pane_registry.borrow();
+            surfaces
+                .iter()
+                .filter_map(|surface| {
+                    let terminal = registry.terminals.get(surface)?;
+                    let connection = terminal.agent_connection.borrow();
+                    let connection = connection.as_ref().filter(|connection| connection.shell)?;
+                    Some((connection.binding, *surface))
+                })
+                .collect()
+        };
+        let Some(handle) = self.tokio_handle.clone().filter(|_| !shells.is_empty()) else {
+            return;
+        };
+        let socket = flowmux_config::paths::agent_host_socket();
+        handle.spawn(async move {
+            for (binding, surface) in shells {
+                let closed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    flowmux_ipc::agent_host::HostClient::connect(
+                        &socket,
+                        flowmux_ipc::agent_host::ClientRole::Relay,
+                    )
+                    .await?
+                    .call(flowmux_ipc::agent_host::HostRequest::CloseTerminal {
+                        instance: binding.instance,
+                        epoch: binding.epoch,
+                        surface,
+                    })
+                    .await
+                })
+                .await;
+                if !matches!(closed, Ok(Ok(_))) {
+                    tracing::debug!("the Host ends a closed tab's shell after its grace");
+                }
+            }
+        });
+    }
+
     /// Remove controller-side caches whose keys belong to panes that no longer
     /// exist. These maps outlive individual workspace widgets, so relying on
     /// GTK teardown alone would retain file-tree paths and stale MRU ids.

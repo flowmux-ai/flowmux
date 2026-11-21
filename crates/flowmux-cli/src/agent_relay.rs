@@ -101,19 +101,33 @@ fn size() -> anyhow::Result<TerminalSize> {
         return Err(io::Error::last_os_error().into());
     }
     let size = unsafe { size.assume_init() };
-    TerminalSize {
+    let size = TerminalSize {
         rows: size.ws_row,
         cols: size.ws_col,
+    };
+    // A terminal without a usable size is not one to start a program in.
+    if size.rows == 0 || size.cols < 2 {
+        return Err(HostRpcError(RpcError::InvalidArgument(
+            "terminal size is out of bounds".into(),
+        ))
+        .into());
     }
-    .validate()
-    .map_err(|error| HostRpcError(error).into())
+    // A view larger than the Host keeps shows the program at the largest size instead of
+    // losing it; the program only learns a smaller size.
+    Ok(size.clamped())
 }
+
+/// The shortest time between two frames of an agent's terminal. The Host renders each of
+/// them from its whole screen, so a flood of output must not ask for one per read. A shell's
+/// frames are its program's bytes and follow them at once.
+const AGENT_FRAME_INTERVAL: Duration = Duration::from_millis(50);
 
 async fn frames(
     client: HostClient,
     key: AttachmentKey,
     first: TerminalFrame,
     sender: mpsc::Sender<anyhow::Result<TerminalFrame>>,
+    interval: Duration,
 ) {
     let result = async {
         let mut frame = first;
@@ -127,16 +141,25 @@ async fn frames(
             if next.is_none() && ended {
                 return Ok(());
             }
-            if next.is_none() {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+            // The first change after a quiet moment is shown at once; a stream of them is paced.
+            if next.is_none() && !interval.is_zero() {
+                tokio::time::sleep(interval).await;
             }
-            let response = tokio::time::timeout(
-                Duration::from_secs(15),
-                client.call(HostRequest::Frame {
+            // The Host answers a wait as soon as the terminal changes.
+            let request = match next {
+                Some(offset) => HostRequest::Frame {
                     key,
                     after: sequence,
-                    offset: next.unwrap_or(0),
-                }),
+                    offset,
+                },
+                None => HostRequest::NextFrame {
+                    key,
+                    after: sequence,
+                },
+            };
+            let response = tokio::time::timeout(
+                Duration::from_secs(15) + NEXT_FRAME_WAIT,
+                client.call(request),
             )
             .await??;
             let HostResponse::Frame { frame: next_frame } = response else {
@@ -292,129 +315,354 @@ pub async fn run_shell(
     colors: Option<&str>,
     argv: Vec<String>,
 ) -> anyhow::Result<()> {
-    let end = ViewEnd::default();
-    let kept = std::sync::atomic::AtomicBool::new(false);
-    let hosted = async {
-        // Without its window nothing could show the shell; start nothing in the Host.
-        let surface = std::env::var("FLOWMUX_SURFACE_ID")
-            .context("terminal surface is missing")?
-            .parse()
-            .context("terminal surface is invalid")?;
-        let gui = std::env::var_os("FLOWMUX_SOCKET_PATH").context("terminal window is missing")?;
-        let window = tokio::time::timeout(
-            Duration::from_secs(5),
-            flowmux_ipc::client::Client::connect(Path::new(&gui)),
-        )
-        .await
-        .context("terminal window did not answer")??;
-        let mut binding = None;
-        if let Some((instance, epoch)) = previous {
-            // Only an existing Host can still run the shell an agent kept alive.
-            if let Ok(host) = HostClient::connect(socket, ClientRole::Observer).await {
-                if let Ok(HostResponse::List { terminals, .. }) = host.call(HostRequest::List).await
-                {
-                    binding = terminals
-                        .iter()
-                        .find(|agent| {
-                            agent.instance == instance
-                                && agent.epoch == epoch
-                                && agent.state == ProcessState::Running
-                        })
-                        .map(|agent| (instance, epoch, agent.pid));
-                }
-            }
-        }
-        kept.store(binding.is_some(), std::sync::atomic::Ordering::Relaxed);
-        let (instance, epoch, shell) = match binding {
-            Some(binding) => binding,
-            None => {
-                let environment = std::env::vars_os()
-                    .filter_map(|(key, value)| {
-                        Some((key.into_string().ok()?, value.into_string().ok()?))
-                    })
-                    .collect();
-                let mut launch = flowmux_cli::agent_host::prepare_launch(
-                    argv.clone(),
-                    Path::new("."),
-                    environment,
-                )?;
-                launch.shell = true;
-                launch.size = size()?;
-                launch.colors = colors.and_then(|colors| serde_json::from_str(colors).ok());
-                let agent = flowmux_cli::agent_host::launch(socket, launch).await?;
-                (agent.instance, agent.epoch, agent.pid)
-            }
-        };
-        // The terminal reads its child's directory as its shell's, for the tab's
-        // title and working directory. This process is that child; follow the shell.
-        if let Some(shell) = shell {
-            tokio::spawn(async move {
-                loop {
-                    if let Some(cwd) = flowmux_procmon::process_cwd(shell) {
-                        if std::env::current_dir().ok().as_ref() != Some(&cwd)
-                            && std::env::set_current_dir(&cwd).is_ok()
-                        {
-                            // The terminal looks again when it wakes; SIGWINCH is
-                            // the wakeup it already expects and otherwise ignores.
-                            unsafe { libc::kill(libc::getppid(), libc::SIGWINCH) };
-                        }
-                    }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-            });
-        }
-        let response = tokio::time::timeout(
-            Duration::from_secs(5),
-            window.call(flowmux_ipc::Request::ShellBind {
-                surface,
-                instance,
-                epoch,
-                pid: shell,
-            }),
-        )
-        .await
-        .context("terminal window did not accept its shell")??;
-        anyhow::ensure!(
-            matches!(response, flowmux_ipc::Response::Ok),
-            "terminal window rejected its shell: {response:?}"
-        );
-        view(
+    let (mut previous, mut replace, mut ready_token) = (previous, replace, ready_token);
+    let mut recoveries = 0;
+    // Showing again a shell that still runs after its view was lost.
+    let mut reattaching = false;
+    loop {
+        let end = ViewEnd::default();
+        let kept = std::sync::atomic::AtomicBool::new(false);
+        let bound = std::sync::Mutex::new(None);
+        let launched = std::sync::Mutex::new(None);
+        let follow = std::sync::Mutex::new(None);
+        let hosted = shell_view(
             socket,
+            ShellView {
+                previous,
+                replace,
+                ready_token,
+                colors,
+                argv: &argv,
+                reattach: reattaching,
+                end: &end,
+                kept: &kept,
+                bound: &bound,
+                launched: &launched,
+                follow: &follow,
+            },
+        )
+        .await;
+        if let Some(follow) = follow.lock().unwrap().take() {
+            follow.abort();
+        }
+        let shown = end.shown.load(std::sync::atomic::Ordering::Relaxed);
+        let error = match hosted {
+            // Once the shell was shown, this terminal ends when and how the shell did.
+            Ok(()) if shown => {
+                if let Some(status) = *end.status.lock().unwrap() {
+                    crate::pty_tee::exit_with(if libc::WIFSIGNALED(status) {
+                        crate::pty_tee::TeeExit::Signal(libc::WTERMSIG(status))
+                    } else {
+                        crate::pty_tee::TeeExit::Code(libc::WEXITSTATUS(status))
+                    });
+                }
+                return Ok(());
+            }
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if !shown && !reattaching {
+            // The shell an agent kept alive still runs; another shell here would not be it.
+            if kept.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(error.context("cannot show this terminal's shell; open it from Agents"));
+            }
+            // A shell started in the Host that this tab cannot show ends now, not after its
+            // grace.
+            let unshown = launched.lock().unwrap().take();
+            if let Some((instance, epoch, surface)) = unshown {
+                close_unshown_shell(socket, instance, epoch, surface).await;
+            }
+            // Not a warning: it would print into this terminal.
+            tracing::debug!(%error, "terminal shell runs in this window, not in the Agent Host");
+            let (program, arguments) = argv.split_first().context("shell command is required")?;
+            return Err(std::os::unix::process::CommandExt::exec(
+                std::process::Command::new(program).args(arguments),
+            )
+            .into());
+        }
+        // The view of a running shell was lost, or showing it again failed. Nothing to recover
+        // for a tab that closed.
+        let shell = if shown {
+            bound.lock().unwrap().take()
+        } else {
+            previous
+        };
+        if recoveries >= MAX_SHELL_RECOVERIES || !terminal_open() {
+            return Err(error);
+        }
+        recoveries += 1;
+        let Some((instance, epoch)) = shell else {
+            return Err(error);
+        };
+        match shell_fate(socket, instance, epoch).await {
+            ShellFate::Running => {
+                tracing::debug!(%error, "reconnecting this terminal's shell");
+                previous = Some((instance, epoch));
+                reattaching = true;
+            }
+            // The Host that ran the shell is gone, and the shell with it: keep the tab usable.
+            ShellFate::HostGone => {
+                tracing::debug!(%error, "Agent Host lost this terminal's shell");
+                lost_shell_notice();
+                previous = None;
+                reattaching = false;
+            }
+            // The shell ended as its view failed; the terminal ends with it.
+            ShellFate::Ended => return Ok(()),
+            // A Host that answers too slowly still runs the shell; never replace it.
+            ShellFate::Unknown => return Err(error),
+        }
+        (replace, ready_token) = (None, None);
+    }
+}
+
+/// Bounds reconnecting and replacing a lost shell, so a failing Host cannot loop a tab.
+const MAX_SHELL_RECOVERIES: u32 = 3;
+
+struct ShellView<'a> {
+    previous: Option<(AgentInstanceId, Uuid)>,
+    replace: Option<AttachmentKey>,
+    ready_token: Option<Uuid>,
+    colors: Option<&'a str>,
+    argv: &'a [String],
+    /// Show only the running shell `previous`; never start another.
+    reattach: bool,
+    end: &'a ViewEnd,
+    kept: &'a std::sync::atomic::AtomicBool,
+    /// The shell this view showed or was about to show.
+    bound: &'a std::sync::Mutex<Option<(AgentInstanceId, Uuid)>>,
+    /// The shell this view started in the Host.
+    launched: &'a std::sync::Mutex<Option<(AgentInstanceId, Uuid, flowmux_core::SurfaceId)>>,
+    follow: &'a std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+async fn shell_view(socket: &Path, shell_view: ShellView<'_>) -> anyhow::Result<()> {
+    let ShellView {
+        previous,
+        replace,
+        ready_token,
+        colors,
+        argv,
+        reattach,
+        end,
+        kept,
+        bound,
+        launched,
+        follow,
+    } = shell_view;
+    // Without its window nothing could show the shell; start nothing in the Host.
+    let surface = std::env::var("FLOWMUX_SURFACE_ID")
+        .context("terminal surface is missing")?
+        .parse()
+        .context("terminal surface is invalid")?;
+    let gui = std::env::var_os("FLOWMUX_SOCKET_PATH").context("terminal window is missing")?;
+    let window = tokio::time::timeout(
+        Duration::from_secs(5),
+        flowmux_ipc::client::Client::connect(Path::new(&gui)),
+    )
+    .await
+    .context("terminal window did not answer")??;
+    let mut binding = None;
+    if let Some((instance, epoch)) = previous {
+        // Only an existing Host can still run the shell an agent kept alive.
+        if let Ok(host) = HostClient::connect(socket, ClientRole::Observer).await {
+            if let Ok(HostResponse::List { terminals, .. }) = host.call(HostRequest::List).await {
+                binding = terminals
+                    .iter()
+                    .find(|agent| {
+                        agent.instance == instance
+                            && agent.epoch == epoch
+                            && agent.state == ProcessState::Running
+                    })
+                    .map(|agent| (instance, epoch, agent.pid));
+            }
+        }
+    }
+    kept.store(binding.is_some(), std::sync::atomic::Ordering::Relaxed);
+    if reattach && binding.is_none() {
+        bail!("this terminal's shell cannot be shown again");
+    }
+    let (instance, epoch, shell) = match binding {
+        Some(binding) => binding,
+        None => {
+            let environment = std::env::vars_os()
+                .filter_map(|(key, value)| {
+                    Some((key.into_string().ok()?, value.into_string().ok()?))
+                })
+                .collect();
+            let mut launch = flowmux_cli::agent_host::prepare_launch(
+                argv.to_vec(),
+                Path::new("."),
+                environment,
+            )?;
+            launch.shell = true;
+            launch.size = size()?;
+            launch.colors = colors.and_then(|colors| serde_json::from_str(colors).ok());
+            let agent = flowmux_cli::agent_host::launch(socket, launch).await?;
+            *launched.lock().unwrap() = Some((agent.instance, agent.epoch, surface));
+            (agent.instance, agent.epoch, agent.pid)
+        }
+    };
+    // The terminal reads its child's directory as its shell's, for the tab's
+    // title and working directory. This process is that child; follow the shell.
+    *bound.lock().unwrap() = Some((instance, epoch));
+    if let Some(shell) = shell {
+        *follow.lock().unwrap() = Some(tokio::spawn(async move {
+            loop {
+                if let Some(cwd) = flowmux_procmon::process_cwd(shell) {
+                    if std::env::current_dir().ok().as_ref() != Some(&cwd)
+                        && std::env::set_current_dir(&cwd).is_ok()
+                    {
+                        // The terminal looks again when it wakes; SIGWINCH is
+                        // the wakeup it already expects and otherwise ignores.
+                        unsafe { libc::kill(libc::getppid(), libc::SIGWINCH) };
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }));
+    }
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        window.call(flowmux_ipc::Request::ShellBind {
+            surface,
             instance,
             epoch,
-            true,
-            replace,
-            ready_token,
-            colors,
-            &end,
-        )
-        .await
-    }
-    .await;
-    // Once the shell was shown, this terminal ends when and how the shell did.
-    if end.shown.load(std::sync::atomic::Ordering::Relaxed) {
-        hosted?;
-        if let Some(status) = *end.status.lock().unwrap() {
-            crate::pty_tee::exit_with(if libc::WIFSIGNALED(status) {
-                crate::pty_tee::TeeExit::Signal(libc::WTERMSIG(status))
-            } else {
-                crate::pty_tee::TeeExit::Code(libc::WEXITSTATUS(status))
-            });
-        }
-        return Ok(());
-    }
-    let Err(error) = hosted else { return Ok(()) };
-    // The shell an agent kept alive still runs; another shell here would not be it.
-    if kept.load(std::sync::atomic::Ordering::Relaxed) {
-        return Err(error.context("cannot show this terminal's shell; open it from Agents"));
-    }
-    // A shell left in the Host ends by itself. Not a warning: it would print into this terminal.
-    tracing::debug!(%error, "terminal shell runs in this window, not in the Agent Host");
-    let (program, arguments) = argv.split_first().context("shell command is required")?;
-    Err(std::os::unix::process::CommandExt::exec(
-        std::process::Command::new(program).args(arguments),
+            pid: shell,
+        }),
     )
-    .into())
+    .await
+    .context("terminal window did not accept its shell")??;
+    anyhow::ensure!(
+        matches!(response, flowmux_ipc::Response::Ok),
+        "terminal window rejected its shell: {response:?}"
+    );
+    view(
+        socket,
+        instance,
+        epoch,
+        true,
+        replace,
+        ready_token,
+        colors,
+        end,
+        Duration::ZERO,
+    )
+    .await
+}
+
+/// Whether this process's terminal is still open, so a new shell would be seen.
+fn terminal_open() -> bool {
+    let mut terminal = libc::pollfd {
+        fd: 0,
+        events: 0,
+        revents: 0,
+    };
+    let polled = unsafe { libc::poll(&mut terminal, 1, 0) };
+    polled >= 0
+        && terminal.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) == 0
+        && unsafe { libc::isatty(0) } == 1
+}
+
+/// What became of a shell whose view was lost.
+#[derive(Debug, PartialEq, Eq)]
+enum ShellFate {
+    Running,
+    /// The shell ended, or is ending, in the Host that runs it.
+    Ended,
+    /// No Host runs at the socket, or another Host replaced the one that ran the shell.
+    HostGone,
+    /// A Host answers too slowly or refuses to say.
+    Unknown,
+}
+
+async fn shell_fate(socket: &Path, instance: AgentInstanceId, epoch: Uuid) -> ShellFate {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        let fate = tokio::time::timeout(Duration::from_secs(3), async {
+            let host = match HostClient::connect(socket, ClientRole::Observer).await {
+                Ok(host) => host,
+                Err(error) if host_absent(&error) => return ShellFate::HostGone,
+                Err(_) => return ShellFate::Unknown,
+            };
+            match host.call(HostRequest::List).await {
+                Ok(HostResponse::List {
+                    epoch: host_epoch,
+                    terminals,
+                    ..
+                }) => classify_shell(host_epoch, &terminals, instance, epoch),
+                _ => ShellFate::Unknown,
+            }
+        })
+        .await
+        .unwrap_or(ShellFate::Unknown);
+        if fate != ShellFate::Unknown {
+            return fate;
+        }
+    }
+    ShellFate::Unknown
+}
+
+fn host_absent(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            )
+        }) || cause.downcast_ref::<IncompatibleHost>().is_some()
+    })
+}
+
+fn classify_shell(
+    host_epoch: Uuid,
+    terminals: &[AgentInstance],
+    instance: AgentInstanceId,
+    epoch: Uuid,
+) -> ShellFate {
+    if host_epoch != epoch {
+        return ShellFate::HostGone;
+    }
+    match terminals
+        .iter()
+        .find(|shell| shell.instance == instance && shell.epoch == epoch)
+        .map(|shell| shell.state)
+    {
+        Some(ProcessState::Running) => ShellFate::Running,
+        Some(ProcessState::Starting) => ShellFate::Unknown,
+        Some(ProcessState::Stopping | ProcessState::Exited | ProcessState::Failed) | None => {
+            ShellFate::Ended
+        }
+    }
+}
+
+fn lost_shell_notice() {
+    let notice = b"\r\n\x1b[0m[Flowmux: the Agent runtime ended and this terminal's shell with it. Starting a new shell.]\r\n";
+    unsafe { libc::write(1, notice.as_ptr().cast(), notice.len()) };
+}
+
+async fn close_unshown_shell(
+    socket: &Path,
+    instance: AgentInstanceId,
+    epoch: Uuid,
+    surface: flowmux_core::SurfaceId,
+) {
+    let closed = tokio::time::timeout(Duration::from_secs(2), async {
+        HostClient::connect(socket, ClientRole::Relay)
+            .await?
+            .call(HostRequest::CloseTerminal {
+                instance,
+                epoch,
+                surface,
+            })
+            .await
+    })
+    .await;
+    if !matches!(closed, Ok(Ok(_))) {
+        tracing::debug!("the Host ends the unshown shell after its grace");
+    }
 }
 
 pub async fn run(
@@ -435,6 +683,7 @@ pub async fn run(
         ready_token,
         colors,
         &ViewEnd::default(),
+        AGENT_FRAME_INTERVAL,
     )
     .await
 }
@@ -458,6 +707,7 @@ async fn view(
     ready_token: Option<Uuid>,
     colors: Option<&str>,
     end: &ViewEnd,
+    frame_interval: Duration,
 ) -> anyhow::Result<()> {
     let mut hangup = signal(SignalKind::hangup())?;
     let mut terminate = signal(SignalKind::terminate())?;
@@ -534,7 +784,7 @@ async fn view(
     let stdin = io_fd(0)?;
     let stdout = io_fd(1)?;
     let (sender, mut incoming) = mpsc::channel(2);
-    let reader = tokio::spawn(frames(frame_reader, key, frame, sender));
+    let reader = tokio::spawn(frames(frame_reader, key, frame, sender, frame_interval));
     let mut pending_input: Option<tokio::task::JoinHandle<anyhow::Result<()>>> = None;
     let result = async {
         let mut current: Option<(TerminalFrame,usize)> = None;
@@ -659,6 +909,64 @@ async fn view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lost_shell_is_replaced_only_when_its_host_is_gone() {
+        let instance = AgentInstanceId::new();
+        let epoch = Uuid::new_v4();
+        let shell = |state| AgentInstance {
+            instance,
+            epoch,
+            provider: "shell".into(),
+            label: "shell".into(),
+            cwd: "/".into(),
+            pid: None,
+            process_start: None,
+            boot_id: None,
+            state,
+            force_terminate_allowed: false,
+            exit_status: None,
+            error: None,
+            view: None,
+            view_owner: None,
+            presence: None,
+            shell: true,
+            attachment: None,
+        };
+        let fate =
+            |host, terminals: &[AgentInstance]| classify_shell(host, terminals, instance, epoch);
+        // Another Host replaced the one that ran it.
+        assert_eq!(
+            fate(Uuid::new_v4(), &[shell(ProcessState::Running)]),
+            ShellFate::HostGone
+        );
+        assert_eq!(
+            fate(epoch, &[shell(ProcessState::Running)]),
+            ShellFate::Running
+        );
+        // The same Host ended it: the terminal ends, no second shell starts.
+        for state in [
+            ProcessState::Stopping,
+            ProcessState::Exited,
+            ProcessState::Failed,
+        ] {
+            assert_eq!(fate(epoch, &[shell(state)]), ShellFate::Ended);
+        }
+        assert_eq!(fate(epoch, &[]), ShellFate::Ended);
+        assert_eq!(
+            fate(epoch, &[shell(ProcessState::Starting)]),
+            ShellFate::Unknown
+        );
+        // Only an absent or incompatible Host counts as gone; a slow one does not.
+        let absent = |kind| anyhow::Error::from(io::Error::from(kind)).context("connect");
+        assert!(host_absent(&absent(io::ErrorKind::NotFound)));
+        assert!(host_absent(&absent(io::ErrorKind::ConnectionRefused)));
+        assert!(!host_absent(&absent(io::ErrorKind::TimedOut)));
+        assert!(!host_absent(&anyhow::anyhow!(HostRpcError(
+            RpcError::Busy("stopping".into())
+        ))));
+    }
+
     use clap::Parser;
 
     #[derive(Parser)]

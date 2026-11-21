@@ -537,6 +537,7 @@ impl WindowController {
                     let _ = ack.send(Err("Pane close cancelled".into()));
                     return;
                 }
+                self.close_hosted_shells(&closing_surfaces);
                 let outcome = self.store.close_pane(pane).await;
                 if outcome.is_some()
                     && !matches!(
@@ -1209,6 +1210,7 @@ impl WindowController {
             let _ = ack.send(Err("Pane close cancelled".into()));
             return;
         }
+        self.close_hosted_shells(&[surface]);
         let outcome = self.store.close_surface(pane, surface).await;
         if outcome.is_some()
             && !matches!(

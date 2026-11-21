@@ -147,7 +147,10 @@ pub(crate) async fn stop_host(force: bool) -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(3), HostClient::stop_all(&socket, force))
         .await
         .context("Stop result unknown: Agent Host timed out. Check `flowmux agent ls`")??;
-    println!("Stop accepted. The Host exits after its last agent ends.");
+    println!(
+        "Stop accepted. Agents and the shells of terminal tabs in the Host end; \
+         the Host exits after the last of them."
+    );
     Ok(())
 }
 
