@@ -262,19 +262,21 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
     if !valid_process() {
         return Err("The agent process was replaced".into());
     }
-    let pids = if focused.process_start.is_some() {
-        [focused.root_pid].into()
-    } else {
-        flowmux_procmon::descendants(focused.root_pid).map_err(|e| e.to_string())?
+    let is_agent = |pid: &u32| {
+        flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
+            == Some(target.agent)
     };
-    let pid = pids
-        .into_iter()
-        .filter(|pid| {
-            flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
-                == Some(target.agent)
-        })
-        .min()
-        .ok_or("The agent is no longer running in this tab")?;
+    // A managed root is the provider, or a launcher with the provider beneath it.
+    let pid = if focused.process_start.is_some() && is_agent(&focused.root_pid) {
+        focused.root_pid
+    } else {
+        flowmux_procmon::descendants(focused.root_pid)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(is_agent)
+            .min()
+            .ok_or("The agent is no longer running in this tab")?
+    };
     let flowmux_state::session_history::SessionLaunchContext {
         environment,
         arguments,
