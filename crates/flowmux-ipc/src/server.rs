@@ -125,6 +125,11 @@ pub trait Handler: Send + Sync + 'static {
     /// Runs on EOF, framing/I/O errors and task cancellation. Implementations
     /// must not block; GUI registration must never depend on a client goodbye.
     fn connection_closed(&self, _context: ConnectionContext) {}
+
+    /// Regular connections served at once. A server whose clients stay connected needs more.
+    fn max_connections(&self) -> usize {
+        MAX_CONNECTIONS
+    }
 }
 
 struct ConnectionGuard<H: Handler> {
@@ -259,7 +264,7 @@ pub async fn run_until<H: Handler>(
         Err(error) => return Err(error.into()),
     };
     let listener = owner.bind(socket)?;
-    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let connections = Arc::new(Semaphore::new(handler.max_connections()));
     let control_connections = Arc::new(Semaphore::new(MAX_CONTROL_CONNECTIONS));
     let mutations = Arc::new(Semaphore::new(MAX_MUTATIONS));
     let forwarded_responses = Arc::new(Semaphore::new(

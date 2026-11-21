@@ -26,6 +26,8 @@ const MAX_INSTANCES: usize = 32;
 /// Open terminals allowed at once. ponytail: a shell is counted, not charged
 /// EXECUTION_MEMORY_BYTES; charge live allocations if 64 idle shells approach the Host's budget.
 const MAX_SHELLS: usize = 64;
+/// Every view keeps a relay and a frame connection; the rest serves windows, hooks and commands.
+const MAX_HOST_CONNECTIONS: usize = 2 * (MAX_INSTANCES + MAX_SHELLS) + 64;
 const MAX_ENDED_INSTANCES: usize = 64;
 const MAX_INPUT_PENDING: usize = 256 * 1024;
 const FRAME_CHUNK: usize = 64 * 1024;
@@ -1276,6 +1278,10 @@ impl AgentHost {
 struct HostHandler(Arc<AgentHost>);
 
 impl Handler for HostHandler {
+    fn max_connections(&self) -> usize {
+        MAX_HOST_CONNECTIONS
+    }
+
     fn handle<'a>(&'a self, _: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async {
             Response::Error(RpcError::InvalidArgument(
@@ -3225,6 +3231,8 @@ fn write_fd(fd: i32, data: &[u8]) -> io::Result<usize> {
 }
 
 pub async fn run(socket: &Path, idle_timeout: Duration) -> anyhow::Result<()> {
+    // A launchd job starts with 256: fewer than the PTYs and connections of a full Host.
+    flowmux_terminal::pty::raise_open_file_limit(4096);
     let host = AgentHost::new(
         socket.to_owned(),
         idle_timeout,
