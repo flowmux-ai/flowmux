@@ -42,6 +42,21 @@
     실패는 재현되지 않았다.
   - 이 수정 뒤 **전체 gate를 다시 연속 실행하지 않았다**. 위 결과는 보완 실행이다.
 
+### `c6fae33a` 후속 — PR 검토 2건과 회귀 재검사, AR-114–117
+
+| ID | 출처 | 변경 | 검증 |
+| --- | --- | --- | --- |
+| AR-114 | Codex PR 검토, 독립 검토 F1 | 다른 창이 같은 tab id로 shell을 가져간 뒤 원래 창이 그 tab을 닫으면 `CloseTerminal`이 이동한 shell을 끝낼 수 있었다. 이동한 view 정리는 Host에 요청하지 않고, Host는 active·pending lease의 relay가 요청한 GUI 프로세스에 속할 때만 닫는다 | 단위 검사(다른 프로세스 lease 유지). 격리 두 GUI: 창 B가 shell을 가져간 뒤 shell·job 생존, B 입력 가능 |
+| AR-115 | Codex PR 검토 | 500열·80,000 cells보다 큰 view는 Host 크기로 맞춰졌지만 shell의 원래 bytes를 받아 view와 Host의 줄바꿈이 달랐다. relay가 `ViewOversized`를 보내면 Host는 그동안 그 view를 화면 projection으로 그리고, 다시 맞으면 passthrough로 돌아간다 | 단위 검사. 격리: 160x500 shell에서 550자 뒤 커서 위로 이동한 `MARK`가 Host와 같은 둘째 줄 50열에 표시(수정 전 554열 한 줄) |
+| AR-116 | 회귀 재검사 | 다른 tab의 flood 중 echo p50이 `ae13bd05` 20ms에서 37–56ms로 나빠졌다. 즉시 응답하는 long-poll이 4KB 단위 frame을 4배 자주 보냈다. 연속 출력 중에는 shell frame을 16ms 모은다 | 3회 반복: 수정 전 37–56ms, 수정 후 17.8ms. 혼자 입력하는 echo p50 2.2ms 유지 |
+| AR-117 | 독립 검토 F2·F4 | 복구 중 relay가 SIGHUP·SIGTERM·SIGINT를 놓쳐 닫힌 tab에 shell을 다시 만들 수 있었다. 복구 횟수는 60초 넘게 동작한 view 뒤에 초기화한다 | relay 단위 검사, Host SIGKILL 격리 재검사 |
+
+- 재검사에서 회귀 없음: flood 중 Ctrl-C, 숨긴 tab의 400,000줄 flood와 scrollback,
+  15초 정지한 view 해제, agent가 실행 중인 shell tab 닫기(agent·shell 유지).
+- 같은 build로 hosted-terminal 4·agent-host 33·agent-gui-response-limit 5·agent-drag 4·
+  managed-agent-drag 27·managed-agent-tearoff 9·agent-ready 6·relay-replacement 9·
+  gui-replacement 14·tab-windows 14개 통과. 전체 gate 연속 실행은 하지 않았다.
+
 ## 독립 검토 후속 — 2026-11-18 KST, AR-100–107
 
 - `c6a513db`를 독립적으로 다시 읽어 확인한 8개 항목이다. 항목마다 별도

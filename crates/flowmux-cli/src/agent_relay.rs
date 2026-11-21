@@ -96,6 +96,11 @@ fn io_fd(source: i32) -> io::Result<AsyncFd<OwnedFd>> {
 }
 
 fn size() -> anyhow::Result<TerminalSize> {
+    Ok(view_size()?.0)
+}
+
+/// The size to give the Host, and whether the view is larger than it.
+fn view_size() -> anyhow::Result<(TerminalSize, bool)> {
     let mut size = std::mem::MaybeUninit::<libc::winsize>::zeroed();
     if unsafe { libc::ioctl(0, libc::TIOCGWINSZ, size.as_mut_ptr()) } < 0 {
         return Err(io::Error::last_os_error().into());
@@ -114,13 +119,21 @@ fn size() -> anyhow::Result<TerminalSize> {
     }
     // A view larger than the Host keeps shows the program at the largest size instead of
     // losing it; the program only learns a smaller size.
-    Ok(size.clamped())
+    let clamped = size.clamped();
+    Ok((clamped, clamped != size))
 }
 
 /// The shortest time between two frames of an agent's terminal. The Host renders each of
 /// them from its whole screen, so a flood of output must not ask for one per read. A shell's
 /// frames are its program's bytes and follow them at once.
 const AGENT_FRAME_INTERVAL: Duration = Duration::from_millis(50);
+/// While a shell's output keeps coming, frames are gathered for this long, so a flood is sent
+/// in a few large writes instead of one per PTY read.
+const SHELL_FRAME_GATHER: Duration = Duration::from_millis(16);
+/// A frame answered this soon was already waiting: its program is still writing.
+const FRAME_ALREADY_WAITING: Duration = Duration::from_millis(2);
+/// A frame this large comes from a program writing faster than the view reads.
+const STREAMING_FRAME_BYTES: usize = 4096;
 
 async fn frames(
     client: HostClient,
@@ -131,6 +144,8 @@ async fn frames(
 ) {
     let result = async {
         let mut frame = first;
+        // Whether the last frame was already waiting when it was asked for.
+        let mut streaming = false;
         loop {
             let sequence = frame.sequence;
             let next = frame.next_offset;
@@ -142,8 +157,12 @@ async fn frames(
                 return Ok(());
             }
             // The first change after a quiet moment is shown at once; a stream of them is paced.
-            if next.is_none() && !interval.is_zero() {
-                tokio::time::sleep(interval).await;
+            if next.is_none() {
+                if !interval.is_zero() {
+                    tokio::time::sleep(interval).await;
+                } else if streaming {
+                    tokio::time::sleep(SHELL_FRAME_GATHER).await;
+                }
             }
             // The Host answers a wait as soon as the terminal changes.
             let request = match next {
@@ -157,6 +176,7 @@ async fn frames(
                     after: sequence,
                 },
             };
+            let asked = tokio::time::Instant::now();
             let response = tokio::time::timeout(
                 Duration::from_secs(15) + NEXT_FRAME_WAIT,
                 client.call(request),
@@ -165,6 +185,11 @@ async fn frames(
             let HostResponse::Frame { frame: next_frame } = response else {
                 bail!("unexpected Agent Host frame response");
             };
+            if next.is_none() {
+                streaming = !next_frame.data.is_empty()
+                    && (asked.elapsed() < FRAME_ALREADY_WAITING
+                        || next_frame.data.len() >= STREAMING_FRAME_BYTES);
+            }
             if let Some(offset) = next {
                 anyhow::ensure!(
                     next_frame.sequence == sequence && next_frame.offset == offset,
@@ -319,7 +344,24 @@ pub async fn run_shell(
     let mut recoveries = 0;
     // Showing again a shell that still runs after its view was lost.
     let mut reattaching = false;
+    // A terminal closed between views must not get another shell.
+    let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    for kind in [
+        SignalKind::hangup(),
+        SignalKind::terminate(),
+        SignalKind::interrupt(),
+    ] {
+        let mut stream = signal(kind)?;
+        let closing = closing.clone();
+        tokio::spawn(async move {
+            if stream.recv().await.is_some() {
+                closing.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
+    let closed = || closing.load(std::sync::atomic::Ordering::Relaxed) || !terminal_open();
     loop {
+        let started = tokio::time::Instant::now();
         let end = ViewEnd::default();
         let kept = std::sync::atomic::AtomicBool::new(false);
         let bound = std::sync::Mutex::new(None);
@@ -387,14 +429,22 @@ pub async fn run_shell(
         } else {
             previous
         };
-        if recoveries >= MAX_SHELL_RECOVERIES || !terminal_open() {
+        // A view that worked for a while was not a failing Host: count recoveries afresh.
+        if shown && started.elapsed() >= RECOVERY_RESET {
+            recoveries = 0;
+        }
+        if recoveries >= MAX_SHELL_RECOVERIES || closed() {
             return Err(error);
         }
         recoveries += 1;
         let Some((instance, epoch)) = shell else {
             return Err(error);
         };
-        match shell_fate(socket, instance, epoch).await {
+        let fate = shell_fate(socket, instance, epoch).await;
+        if closed() {
+            return Err(error);
+        }
+        match fate {
             ShellFate::Running => {
                 tracing::debug!(%error, "reconnecting this terminal's shell");
                 previous = Some((instance, epoch));
@@ -418,6 +468,7 @@ pub async fn run_shell(
 
 /// Bounds reconnecting and replacing a lost shell, so a failing Host cannot loop a tab.
 const MAX_SHELL_RECOVERIES: u32 = 3;
+const RECOVERY_RESET: Duration = Duration::from_secs(60);
 
 struct ShellView<'a> {
     previous: Option<(AgentInstanceId, Uuid)>,
@@ -764,12 +815,26 @@ async fn view(
     let HostResponse::Prepared { key, .. } = response else {
         bail!("unexpected Agent Host attachment response");
     };
+    let (committed, oversized) = view_size()?;
     let HostResponse::Attached { frame, .. } = control
-        .call(HostRequest::CommitAttach { key, size: size()? })
+        .call(HostRequest::CommitAttach {
+            key,
+            size: committed,
+        })
         .await?
     else {
         bail!("unexpected Agent Host commit response");
     };
+    let mut reported_oversized = false;
+    if oversized {
+        control
+            .call(HostRequest::ViewOversized {
+                key,
+                oversized: true,
+            })
+            .await?;
+        reported_oversized = true;
+    }
     // Colors only refine query replies; a rejected value keeps the Host defaults.
     if let Some(colors) = colors.and_then(|colors| {
         serde_json::from_str(colors)
@@ -806,7 +871,15 @@ async fn view(
                     return Err(failed.unwrap().0);
                 }
                 _ = resize.recv(), if failed.is_none() => {
-                    if let Err(error) = control.call(HostRequest::Resize {key,size:size()?}).await {
+                    let (size, oversized) = view_size()?;
+                    let mut result = control.call(HostRequest::Resize {key,size}).await;
+                    if result.is_ok() && oversized != reported_oversized {
+                        result = control.call(HostRequest::ViewOversized {key,oversized}).await;
+                        if result.is_ok() {
+                            reported_oversized = oversized;
+                        }
+                    }
+                    if let Err(error) = result {
                         failed = Some((error, grace()));
                     }
                 }

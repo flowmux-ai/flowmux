@@ -894,6 +894,7 @@ impl AgentHost {
             | HostRequest::Frame { key, .. }
             | HostRequest::Input { key, .. }
             | HostRequest::Resize { key, .. }
+            | HostRequest::ViewOversized { key, .. }
             | HostRequest::ViewColors { key, .. } => key.instance,
             _ => unreachable!(),
         };
@@ -2753,11 +2754,49 @@ impl TerminalActor {
                 self.terminal.set_colors(colors);
                 Ok(HostResponse::Ok)
             }
+            HostRequest::ViewOversized { key, oversized } => {
+                self.input_lease(key, connection)?;
+                self.terminal.set_view_oversized(oversized);
+                Ok(HostResponse::Ok)
+            }
             HostRequest::CloseTerminal { epoch, surface, .. } => {
                 if epoch != self.host.epoch || !self.shell {
                     return Err(stale_lease());
                 }
-                let elsewhere = |lease: &Lease| lease.surface != Some(surface);
+                // Another window shows a shell it took over under the same tab id: only a
+                // view whose relay runs in the closing process, or that is the requester itself,
+                // belongs to the tab being closed.
+                let requester = {
+                    let registry = self.host.registry();
+                    registry
+                        .peers
+                        .get(&connection)
+                        .and_then(|peer| peer.identity)
+                        .filter(|(pid, birth)| {
+                            flowmux_procmon::process_start_time(*pid) == Some(*birth)
+                        })
+                };
+                let Some(requester) = requester else {
+                    return Ok(HostResponse::Ok);
+                };
+                let owners: Vec<_> = {
+                    let registry = self.host.registry();
+                    self.active
+                        .iter()
+                        .chain(self.pending.iter())
+                        .map(|lease| {
+                            let mine = registry.peers.get(&lease.connection).is_some_and(|peer| {
+                                peer.identity == Some(requester)
+                                    || peer.parent == Some(requester)
+                                    || peer.grandparent == Some(requester)
+                            });
+                            (lease.key, mine)
+                        })
+                        .collect()
+                };
+                let mine =
+                    |lease: &Lease| owners.iter().any(|(key, mine)| *key == lease.key && *mine);
+                let elsewhere = |lease: &Lease| lease.surface != Some(surface) || !mine(lease);
                 // Another tab took the shell, or is taking it; an agent in it was asked about.
                 if self.root_status.is_some()
                     || self.stopping.is_some()
@@ -7974,12 +8013,31 @@ for line in sys.stdin:
         let state = |instance| fixture.host.registry().entries[&instance].agent.state;
         let gui = fixture.client(ClientRole::Gui).await;
         let tab = flowmux_core::SurfaceId::new();
-        let (_relay, agent, _key, _) = shell_view(&fixture, "sleep 60", Some(tab)).await;
+        let (relay, agent, _key, _) = shell_view(&fixture, "sleep 60", Some(tab)).await;
         let close = |surface| HostRequest::CloseTerminal {
             instance: agent.instance,
             epoch: agent.epoch,
             surface,
         };
+        // Another window took the shell over under the same tab id: its relay is not this
+        // process's. Closing the old window's tab must leave that window's shell running.
+        let relay_connection = connection_id(&relay, ClientRole::Relay).await;
+        let saved = {
+            let mut registry = fixture.host.registry();
+            let peer = registry.peers.get_mut(&relay_connection).unwrap();
+            let other = Some((1, flowmux_procmon::process_start_time(1).unwrap()));
+            let saved = (peer.identity, peer.parent, peer.grandparent);
+            (peer.identity, peer.parent, peer.grandparent) = (other, other, other);
+            saved
+        };
+        gui.call(close(tab)).await.unwrap();
+        sleep(Duration::from_millis(500)).await;
+        assert_eq!(state(agent.instance), ProcessState::Running);
+        {
+            let mut registry = fixture.host.registry();
+            let peer = registry.peers.get_mut(&relay_connection).unwrap();
+            (peer.identity, peer.parent, peer.grandparent) = saved;
+        }
         // Another tab, such as one in a window the shell has left, does not close it.
         gui.call(close(flowmux_core::SurfaceId::new()))
             .await

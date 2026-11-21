@@ -126,6 +126,9 @@ pub(super) struct Terminal {
     /// A shell's view receives the program's own bytes. The emulated screen only redraws a view
     /// that connects or fell behind.
     passthrough: bool,
+    /// The view is larger than this terminal, so it cannot follow the program's own bytes and
+    /// is drawn from this screen, as an agent's view is.
+    rendered: bool,
     /// The passthrough view was last drawn on the alternate screen, so its own terminal
     /// holds no primary screen to return to.
     view_lacks_primary: bool,
@@ -353,6 +356,7 @@ impl Terminal {
             snapshot: None,
             colors: None,
             passthrough: false,
+            rendered: false,
             view_lacks_primary: false,
             parse: Sequence::Ground,
             pending: Vec::new(),
@@ -368,7 +372,7 @@ impl Terminal {
     }
 
     fn config(&self, size: TerminalSize) -> Config {
-        let cells = if self.passthrough {
+        let cells = if self.passthrough || self.rendered {
             SHELL_HISTORY_CELLS
         } else {
             HISTORY_CELLS
@@ -471,6 +475,23 @@ impl Terminal {
 
     pub fn set_colors(&mut self, colors: TerminalColors) {
         self.colors = Some(colors);
+    }
+
+    /// Draw the view from this screen while it is larger than this terminal; follow the
+    /// program's bytes again once it fits.
+    pub fn set_view_oversized(&mut self, oversized: bool) {
+        // Only a shell's view follows bytes; an agent's is always drawn.
+        if !(self.passthrough || self.rendered) || self.rendered == oversized {
+            return;
+        }
+        self.rendered = oversized;
+        self.passthrough = !oversized;
+        // Either way the view is redrawn once for the new way of following.
+        self.introduction = None;
+        self.unframed = None;
+        self.previous = None;
+        self.snapshot = None;
+        self.dirty = true;
     }
 
     /// Program output a passthrough view follows but has not taken yet.
@@ -1913,6 +1934,42 @@ mod tests {
         assert!(
             data.ends_with("\x1b[2;3r\x1b[3;1H") || data.contains("\x1b[2;3r\x1b[3;1H\x1b[?7h")
         );
+    }
+
+    #[test]
+    fn an_oversized_shell_view_is_drawn_from_the_screen_until_it_fits() {
+        let mut terminal = Terminal::new(TerminalSize { rows: 4, cols: 10 });
+        terminal.set_passthrough();
+        terminal.feed_view(b"$ ", false);
+        let (first, ..) = terminal.frame(0);
+        // The view is wider than the Host: raw bytes would wrap at a different column there.
+        terminal.set_view_oversized(true);
+        let long = "0123456789abcdef";
+        terminal.feed_view(long.as_bytes(), true);
+        let (second, snapshot, _, data) = terminal.frame(first);
+        assert!(second > first);
+        assert_ne!(&*data, long, "an oversized view gets no raw bytes");
+        // Rows are placed by the Host without the view wrapping them, so the view shows the
+        // Host's wrap and cursor. The first such frame redraws the whole view.
+        let _ = snapshot;
+        assert!(data.starts_with("\x1bc"), "{data:?}");
+        assert!(data.contains("\x1b[?7l\x1b[H"), "{data:?}");
+        assert!(data.contains("\r\n\x1b[0;39;49m89abcdef"), "{data:?}");
+        assert!(data.contains("\x1b[2;9H"), "{data:?}");
+        terminal.feed_view(b"Z", true);
+        let (third, _, _, data) = terminal.frame(second);
+        assert_ne!(&*data, "Z");
+        // Fitting again, the view follows the program's bytes after one redraw.
+        terminal.set_view_oversized(false);
+        terminal.feed_view(b"Y", true);
+        // Delivered as the next frame, but a whole redraw that wraps as passthrough does.
+        let (fourth, _, _, data) = terminal.frame(third);
+        assert!(data.starts_with("\x1bc\x1b[?7h"), "{data:?}");
+        assert!(data.contains("89abcdefZ"), "{data:?}");
+        terminal.feed_view(b"X", true);
+        let (_, snapshot, _, data) = terminal.frame(fourth);
+        assert!(!snapshot);
+        assert_eq!(&*data, "X");
     }
 
     #[test]
