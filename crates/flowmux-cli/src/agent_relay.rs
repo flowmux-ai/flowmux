@@ -144,6 +144,12 @@ async fn frames(
 ) {
     let result = async {
         let mut frame = first;
+        let wait_for_frame = client.supports_next_frame();
+        let interval = if wait_for_frame {
+            interval
+        } else {
+            AGENT_FRAME_INTERVAL
+        };
         // Whether the last frame was already waiting when it was asked for.
         let mut streaming = false;
         loop {
@@ -166,14 +172,14 @@ async fn frames(
             }
             // The Host answers a wait as soon as the terminal changes.
             let request = match next {
-                Some(offset) => HostRequest::Frame {
+                None if wait_for_frame => HostRequest::NextFrame {
                     key,
                     after: sequence,
-                    offset,
                 },
-                None => HostRequest::NextFrame {
+                offset => HostRequest::Frame {
                     key,
                     after: sequence,
+                    offset: offset.unwrap_or(0),
                 },
             };
             let asked = tokio::time::Instant::now();

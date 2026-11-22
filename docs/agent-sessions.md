@@ -23,6 +23,10 @@ ask and keeps them. `FLOWMUX_CLOSE_AGENTS=keep` or `stop` answers ahead of time.
 exits, its tab stays in place, keeps the agent's last screen and continues as an ordinary
 terminal in the agent's project directory, without taking focus.
 
+A protocol 18 Flowmux can also reconnect to an Agent Host running protocol 17
+after an update. The Host keeps its existing processes and terminal limits until
+it exits.
+
 When Flowmux starts and no Agent Host is running, the saved executions no longer
 exist. Their tabs are restored as ordinary terminal tabs, and the ordinary
 session resume applies to them when **Resume agent sessions** is enabled.

@@ -210,7 +210,7 @@ pub(super) async fn managed_notification_client(
     )
     .await
     .context("managed notification connection timed out; no GUI fallback")??;
-    Ok(Some(host.0.in_agent_notifications(binding)))
+    Ok(Some(host.client.in_agent_notifications(binding)))
 }
 
 async fn managed_identity(
@@ -273,7 +273,7 @@ pub(super) async fn managed_context(
         let report = flowmux_ipc::agent_host::AgentViewReport { key, location };
         Ok::<_, anyhow::Error>(ManagedContext {
             client: client
-                .0
+                .client
                 .in_agent_view(report.clone(), session.map(str::to_owned)),
             report,
             socket: gui_socket,

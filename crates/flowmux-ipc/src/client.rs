@@ -134,7 +134,7 @@ impl Client {
                     crate::agent_host::ClientRole::Observer,
                 )
                 .await?;
-                host.0
+                host.client
                     .call_raw(Request::AgentHost {
                         request: crate::agent_host::HostRequest::Notify {
                             instance: binding.instance,
