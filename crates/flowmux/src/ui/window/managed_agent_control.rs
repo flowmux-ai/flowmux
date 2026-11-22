@@ -2,9 +2,117 @@
 //! Closing a view detaches; stopping an execution requires an explicit action.
 
 use super::*;
-use flowmux_ipc::agent_host::TerminateMode;
+use flowmux_ipc::agent_host::{HostClient, TerminateMode};
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 impl WindowController {
+    pub(crate) fn show_stop_other_agent_host_dialog(&self, window: &adw::ApplicationWindow) {
+        let controller = self.clone();
+        let window = window.clone();
+        glib::spawn_future_local(async move {
+            if let Err(error) = controller.stop_other_agent_host(&window).await {
+                show_error_dialog(&window, "Cannot stop Agent Host", &format!("{error:#}")).await;
+            }
+        });
+    }
+
+    async fn stop_other_agent_host(&self, window: &adw::ApplicationWindow) -> anyhow::Result<()> {
+        let current = flowmux_config::paths::agent_host_socket();
+        let hosts: Vec<_> = self
+            .bridge
+            .agent_registry
+            .borrow()
+            .other_hosts
+            .iter()
+            .filter(|socket| **socket != current)
+            .filter_map(|socket| Some((socket.clone(), socket_identity(socket)?)))
+            .collect();
+        let paths: Vec<_> = hosts
+            .iter()
+            .map(|(socket, _)| socket.to_string_lossy())
+            .collect();
+        let body = "Stopping this Host ends its agents and the shells of its terminal tabs. Work in progress may be lost.";
+        let body = match paths.as_slice() {
+            [] => return Ok(()),
+            [path] => format!("{body}\n\n{path}"),
+            _ => format!("Choose which Host to stop. {body}"),
+        };
+        let dialog = adw::AlertDialog::new(Some("Stop other Agent Host?"), Some(&body));
+        let picker = gtk::DropDown::from_strings(
+            &paths.iter().map(|path| path.as_ref()).collect::<Vec<_>>(),
+        );
+        if hosts.len() > 1 {
+            picker.update_property(&[gtk::accessible::Property::Label("Agent Host socket")]);
+            dialog.set_extra_child(Some(&picker));
+        }
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("stop", "Stop Host");
+        dialog.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let response = {
+            let _native_view_suspend =
+                crate::ui::browser_pane::suspend_native_browser_views_for_window(
+                    window.upcast_ref(),
+                );
+            dialog.choose_future(window).await
+        };
+        if response != "stop" {
+            return Ok(());
+        }
+        let Some((socket, identity)) = hosts.into_iter().nth(picker.selected() as usize) else {
+            return Ok(());
+        };
+        if !self
+            .bridge
+            .agent_registry
+            .borrow()
+            .other_hosts
+            .contains(&socket)
+        {
+            return Ok(());
+        }
+        let handle = self
+            .tokio_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Agent Host runtime unavailable"))?;
+        let stopped = handle
+            .spawn(async move {
+                match socket_identity(&socket) {
+                    None => return Ok(false),
+                    Some(found) if found != identity => {
+                        anyhow::bail!("The Agent Host changed. Reopen the dialog to stop it.")
+                    }
+                    _ => {}
+                }
+                let result = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    HostClient::stop_all(&socket, false),
+                )
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("Stop result unknown. Check Agents before retrying.")
+                })?;
+                if result.as_ref().is_err_and(|error| {
+                    error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                        matches!(
+                            error.kind(),
+                            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                        )
+                    })
+                }) {
+                    return Ok(false);
+                }
+                result.map(|()| true)
+            })
+            .await??;
+        if stopped {
+            self.clipboard_toast
+                .show_with_message("Stop requested for the selected Agent Host.");
+        }
+        Ok(())
+    }
+
     pub(super) async fn control_managed_agent(
         &self,
         binding: flowmux_core::AgentViewBinding,
@@ -124,7 +232,7 @@ impl WindowController {
         let stopped = handle
             .spawn(async move {
                 if !shared {
-                    return flowmux_ipc::agent_host::HostClient::stop_all(&socket, false).await;
+                    return HostClient::stop_all(&socket, false).await;
                 }
                 for agent in agents {
                     let binding = flowmux_core::AgentViewBinding {
@@ -183,6 +291,14 @@ impl WindowController {
             _ => false,
         }
     }
+}
+
+fn socket_identity(socket: &std::path::Path) -> Option<(u64, u64)> {
+    let metadata = std::fs::symlink_metadata(socket).ok()?;
+    metadata
+        .file_type()
+        .is_socket()
+        .then(|| (metadata.dev(), metadata.ino()))
 }
 
 /// The one question a closing window asks about the agents it would leave behind.

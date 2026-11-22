@@ -34,6 +34,7 @@ pub(super) fn new_agent_button() -> gtk::Button {
 pub(super) struct ManagedAgents {
     pub root: gtk::Box,
     notice: gtk::Label,
+    stop_other_host: gtk::Button,
     live: gtk::Box,
     rows: Rc<RefCell<HashMap<(AgentInstanceId, uuid::Uuid), Row>>>,
     attention: Rc<RefCell<Vec<AgentAttention>>>,
@@ -73,11 +74,17 @@ impl ManagedAgents {
             notice.set_max_width_chars(48);
         }
         root.append(&notice);
+        let stop_other_host = gtk::Button::with_label("Stop other Host…");
+        stop_other_host.set_action_name(Some("win.stop-other-agent-host"));
+        stop_other_host.set_halign(gtk::Align::Start);
+        stop_other_host.set_visible(false);
+        root.append(&stop_other_host);
         let live = gtk::Box::new(orientation, 6);
         root.append(&live);
         Self {
             root,
             notice,
+            stop_other_host,
             live,
             rows: Default::default(),
             attention: Default::default(),
@@ -272,6 +279,8 @@ impl ManagedAgents {
         self.notice.set_label(notice.as_deref().unwrap_or_default());
         self.notice.set_tooltip_text(notice.as_deref());
         self.notice.set_visible(notice.is_some());
+        self.stop_other_host
+            .set_visible(!snapshot.other_hosts.is_empty());
         self.root.set_visible(!rows.is_empty() || notice.is_some());
     }
 }

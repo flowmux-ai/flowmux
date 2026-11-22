@@ -101,7 +101,9 @@ def main():
     host_birth = None
     resize_agents = []
     host_socket = harness.root / "run" / agent_host_protocol.SOCKET_NAME
+    previous_socket = host_socket.with_name(f"flowmux-agent-host.v{PROTOCOL_VERSION - 1}.sock")
     previous_host = None
+    previous_control = None
     try:
         harness.start_display()
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = harness.env["DBUS_SESSION_BUS_ADDRESS"]
@@ -111,24 +113,41 @@ def main():
         from gi.repository import Atspi
         Atspi.set_timeout(3000, 3000)
 
-        def label_visible(process, label):
+        def visible_accessible(process, name, role):
             def walk(node):
-                if (node.get_role() == Atspi.Role.LABEL
-                        and node.get_name().startswith(label)
+                if (node.get_role() == role
+                        and node.get_name().startswith(name)
                         and node.get_state_set().contains(Atspi.StateType.SHOWING)):
-                    return True
-                return any(walk(child) for index in range(node.get_child_count())
-                           if (child := node.get_child_at_index(index)))
+                    return node
+                return next((found for index in range(node.get_child_count())
+                             if (child := node.get_child_at_index(index))
+                             and (found := walk(child)) is not None), None)
             desktop = Atspi.get_desktop(0)
-            return any(application.get_process_id() == process.pid and walk(application)
-                       for index in range(desktop.get_child_count())
-                       if (application := desktop.get_child_at_index(index)))
+            return next((walk(application) for index in range(desktop.get_child_count())
+                         if (application := desktop.get_child_at_index(index))
+                         and application.get_process_id() == process.pid), None)
+
+        def label_visible(process, label):
+            return visible_accessible(process, label, Atspi.Role.LABEL) is not None
+
+        def button_visible(process, label):
+            return visible_accessible(process, label, Atspi.Role.PUSH_BUTTON)
+
+        def click_button(process, label):
+            button = fixture.wait_for(lambda: button_visible(process, label), label)
+            assert button.get_action_iface().do_action(0), label
 
         # Stand in for a retained Host at an older build's endpoint.
-        previous_socket = host_socket.with_name(f"flowmux-agent-host.v{PROTOCOL_VERSION - 1}.sock")
-        previous_host = socket.socket(socket.AF_UNIX)
-        previous_host.bind(str(previous_socket))
-        previous_host.listen(32)
+        with (harness.root / "previous-host.log").open("w") as log:
+            previous_host = harness.spawn([args.host, "--agent-host", "--socket", str(previous_socket)],
+                                          stdout=log, stderr=log, cwd=harness.root)
+        fixture.wait_for(previous_socket.exists, "previous Agent Host socket")
+        previous_control = HostClient(previous_socket, "relay")
+        retained = previous_control.call("launch", launch={
+            "request_id": launch_request_id(), "provider": "fixture", "label": "Retained agent",
+            "argv": [sys.executable, "-c", "import time; time.sleep(300)"],
+            "cwd": str(harness.root), "env": [], "size": {"rows": 24, "cols": 80},
+        })["agent"]
         rejected = subprocess.run([args.host, "--agent-host", "--socket", str(host_socket),
             "--require-agent-host-protocol", str(PROTOCOL_VERSION + 1)],
             env=harness.env, capture_output=True, text=True, timeout=5)
@@ -323,9 +342,19 @@ while True:
         agent_surface = json.loads(opened.stdout)["surface_created"]["id"]
         notice = "Another Flowmux Agent Host is still running"
         fixture.wait_for(lambda: label_visible(app, notice), "previous Host notice alongside current agents")
-        assert previous_socket.exists()
-        previous_host.close()
-        fixture.wait_for(lambda: not label_visible(app, notice), "stale previous socket no longer shown")
+        click_button(app, "Stop other Host…")
+        fixture.wait_for(lambda: label_visible(app, "Stop other Agent Host?"), "stop confirmation")
+        click_button(app, "Cancel")
+        fixture.wait_for(lambda: not label_visible(app, "Stop other Agent Host?"), "dismissed confirmation")
+        assert previous_control.call("list")["agents"][0]["pid"] == retained["pid"]
+        assert previous_host.poll() is None
+        click_button(app, "Stop other Host…")
+        click_button(app, "Stop Host")
+        assert previous_host.wait(timeout=20) == 0
+        assert not Path(f"/proc/{retained['pid']}").exists()
+        fixture.wait_for(lambda: not label_visible(app, notice) and not button_visible(app, "Stop other Host…"),
+                         "notice and stop button disappear after previous Host exits")
+        harness.pass_check("Agents can cancel or stop the retained Host without closing a current agent")
         harness.pass_check("a retained Host leaves the current protocol free to start; a mismatched helper cannot bind it")
         duplicate = harness.rpc(gui_socket, "agent_view_open", pane=target, instance=agent["instance"])
         assert duplicate["surface_created"]["id"] == agent_surface, duplicate
@@ -1117,8 +1146,12 @@ while not (root / 'memory-release').exists(): time.sleep(0.05)
         assert not host_socket.exists()
         harness.pass_check("the Host exits and releases its socket once its window's terminals are gone")
     finally:
-        if previous_host is not None:
-            previous_host.close()
+        if previous_control is not None:
+            if previous_host.poll() is None:
+                with contextlib.suppress(OSError, AssertionError, subprocess.TimeoutExpired):
+                    previous_control.call("stop_all", force=False)
+                    previous_host.wait(timeout=20)
+            previous_control.close()
         if hook_connection is not None:
             hook_connection.close()
         if control_connection is not None and host_socket.exists():

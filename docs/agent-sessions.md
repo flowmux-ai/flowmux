@@ -101,6 +101,11 @@ is running, Flowmux can reconnect sessions in its current Host and start new
 agents. It blocks a history resume if it cannot rule out a duplicate execution
 in the other Host.
 
+To stop an Agent Host from a different protocol version, select **Stop other
+Host…** in Agents, choose the Host if several are running, and confirm.
+Flowmux removes the notice when all other Hosts have exited. Stopping the
+selected Host ends its agents and terminal shells.
+
 `flowmux agent stop-host` stops the Host for the current build. To stop a Host
 on a different socket, pass its exact path with `--host-socket PATH`. Stopping
 a Host ends its agents and the shells of its terminal tabs. Add `--force` only

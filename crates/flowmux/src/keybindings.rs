@@ -351,6 +351,12 @@ pub(crate) fn install_actions_for_window(
             move |_, _, _| bridge.send_from_ui(GtkCommand::NewAgent)
         })
         .build();
+    let stop_other_host = gtk::gio::ActionEntry::builder("stop-other-agent-host")
+        .activate({
+            let controller = controller.clone();
+            move |window, _, _| controller.show_stop_other_agent_host_dialog(window)
+        })
+        .build();
     let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
     let toggle_session_flow = make_toggle_session_flow_action(bridge.clone());
     let review_bridge = bridge.clone();
@@ -561,6 +567,7 @@ pub(crate) fn install_actions_for_window(
         toggle_workspace_overview,
         toggle_session_panel,
         new_agent,
+        stop_other_host,
         toggle_session_flow,
         open_diff_review,
         next_workspace,
