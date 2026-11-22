@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Fill all seven execution reservations and both IPC pools in a private Host."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import contextlib
 import importlib.util
@@ -41,7 +43,7 @@ def main():
         try:
             h.start_display()
             _, gui_socket = h.window('host-budget')
-            host_socket = h.root / 'run/flowmux-agent-host.sock'
+            host_socket = h.root / "run" / SOCKET_NAME
             with (h.root / 'host.log').open('w') as log:
                 host = h.spawn([args.host, '--agent-host', '--socket', str(host_socket)],
                                stdout=log, stderr=log, cwd=h.root)

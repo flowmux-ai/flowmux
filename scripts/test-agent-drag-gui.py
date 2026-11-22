@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Drag an existing Agents row between panes using native input in an isolated GUI."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -14,6 +16,7 @@ import sys
 import time
 
 from Xlib import X, XK, display
+from Xlib.error import BadWindow
 from Xlib.ext import xtest
 
 sys.dont_write_bytecode = True
@@ -40,7 +43,7 @@ def main():
     app = None
     connection = None
     control = None
-    host_socket = h.root / "run/flowmux-agent-host.sock"
+    host_socket = h.root / "run" / SOCKET_NAME
     try:
         h.env.update(GTK_A11Y="atspi")
         if args.managed:
@@ -317,9 +320,13 @@ int main(int argc, char **argv) {
             view = fixture.wait_for(detached_view, "registered detached Agent window", timeout=35)
             def detached_native_window():
                 for w in connection.screen().root.query_tree().children:
-                    owner = w.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
-                    if owner is not None and int(owner.value[0]) != app.pid and w.get_attributes().map_state == X.IsViewable:
-                        return w, int(owner.value[0])
+                    try:
+                        owner = w.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
+                        if owner is not None and int(owner.value[0]) != app.pid and w.get_attributes().map_state == X.IsViewable:
+                            return w, int(owner.value[0])
+                    except BadWindow:
+                        # The drag window can disappear after query_tree().
+                        continue
                 return None
             torn_window, detached_pid = fixture.wait_for(detached_native_window, "detached native window")
             assert detached_pid not in h.protected_pids

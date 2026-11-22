@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise native tab tear-off, window-to-window drops and detached-window actions."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -141,7 +143,7 @@ def exercise(h):
                 "host_fixture", Path(__file__).with_name("test-agent-host-gui.py"))
             host_fixture = importlib.util.module_from_spec(host_spec)
             host_spec.loader.exec_module(host_fixture)
-            host_socket = h.root / "run/flowmux-agent-host.sock"
+            host_socket = h.root / "run" / SOCKET_NAME
             with (h.root / "host.log").open("w") as log:
                 h.spawn([h.args.host, "--agent-host", "--socket", str(host_socket)], stdout=log, stderr=log)
             fixture.wait_for(host_socket.exists, "private Host")

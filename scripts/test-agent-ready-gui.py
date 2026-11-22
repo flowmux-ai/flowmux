@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Delay actual relay snapshot writes; verify readiness, cancellation and recovery."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
@@ -177,7 +179,7 @@ ssize_t write(int fd, const void *data, size_t count) {
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi, GLib
         Atspi.set_timeout(3000, 3000)
-        host_socket = h.root / "run/flowmux-agent-host.sock"
+        host_socket = h.root / "run" / SOCKET_NAME
         with (h.root / "host.log").open("w") as log:
             h.spawn([args.host, "--agent-host", "--socket", str(host_socket)], stdout=log, stderr=log)
         gui.wait_for(host_socket.exists, "Host socket")

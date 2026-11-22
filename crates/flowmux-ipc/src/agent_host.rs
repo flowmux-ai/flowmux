@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 18;
+pub use flowmux_core::AGENT_HOST_PROTOCOL_VERSION as PROTOCOL_VERSION;
 pub const MAX_INPUT_BYTES: usize = 16 * 1024;
 /// A bounded 16 MiB snapshot must reach the terminal before input ownership changes.
 pub const ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -180,9 +180,9 @@ impl std::fmt::Display for IncompatibleHost {
             f,
             " and this Flowmux uses protocol {PROTOCOL_VERSION}. Its agents keep running, \
              but this version cannot open them. Finish them from the Flowmux version that \
-             started them, or stop them all with `flowmux agent stop-host`, which also ends \
-             the shells of terminal tabs that run in that Host; the Host exits after its last \
-             agent and terminal end, and this version then starts a new one."
+             started them. To stop an older Host and its terminal shells, run \
+             `flowmux agent stop-host --host-socket PATH` with this Host's socket: {}.",
+            self.socket.display()
         )?;
         #[cfg(target_os = "linux")]
         write!(

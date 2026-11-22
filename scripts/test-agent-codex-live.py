@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Opt-in real Codex TUI reconnect check; uses existing login and model access."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -54,7 +56,7 @@ def main():
     for variable in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDECODE"):
         h.env.pop(variable, None)
     connection = agent = host = None
-    host_socket = h.root / "run/flowmux-agent-host.sock"
+    host_socket = h.root / "run" / SOCKET_NAME
     try:
         h.start_display()
         app, gui_socket = h.window("codex-live")

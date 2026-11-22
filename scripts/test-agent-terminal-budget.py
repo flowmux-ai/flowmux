@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise resized VT caches and overlapping large frames in an isolated Host/GUI."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 from pathlib import Path
@@ -74,7 +76,7 @@ def main():
     clients = []
     host = None
     agent = None
-    host_socket = h.root / 'run/flowmux-agent-host.sock'
+    host_socket = h.root / "run" / SOCKET_NAME
     try:
         h.start_display()
         app, gui_socket = h.window('terminal-budget')

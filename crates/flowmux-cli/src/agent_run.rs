@@ -138,13 +138,14 @@ pub(crate) async fn list(json: bool) -> anyhow::Result<()> {
 }
 
 /// Never starts a Host: a missing endpoint means there is nothing to stop.
-pub(crate) async fn stop_host(force: bool) -> anyhow::Result<()> {
-    let socket = paths::agent_host_socket();
+pub(crate) async fn stop_host(socket: Option<&Path>, force: bool) -> anyhow::Result<()> {
+    let default = paths::agent_host_socket();
+    let socket = socket.unwrap_or(&default);
     if !socket.try_exists()? {
         println!("No Agent Host is running.");
         return Ok(());
     }
-    tokio::time::timeout(Duration::from_secs(3), HostClient::stop_all(&socket, force))
+    tokio::time::timeout(Duration::from_secs(3), HostClient::stop_all(socket, force))
         .await
         .context("Stop result unknown: Agent Host timed out. Check `flowmux agent ls`")??;
     println!(

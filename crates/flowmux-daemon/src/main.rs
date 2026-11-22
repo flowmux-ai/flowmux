@@ -18,6 +18,9 @@ struct Cli {
     /// Own managed agent PTYs independently of GUI windows.
     #[arg(long)]
     agent_host: bool,
+    /// Refuse to bind if the launching client expects a different protocol.
+    #[arg(long, requires = "agent_host", hide = true)]
+    require_agent_host_protocol: Option<u32>,
     /// Override the unix socket path.
     #[arg(long, env = "FLOWMUX_SOCKET")]
     socket: Option<PathBuf>,
@@ -41,6 +44,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let version = flowmux_ipc::agent_host::PROTOCOL_VERSION;
+    anyhow::ensure!(
+        cli.require_agent_host_protocol
+            .is_none_or(|expected| expected == version),
+        "Agent Host protocol {version} does not match this Flowmux build's protocol {}",
+        cli.require_agent_host_protocol.unwrap_or_default()
+    );
     let socket = cli.socket.unwrap_or_else(|| {
         if cli.agent_host {
             paths::agent_host_socket()

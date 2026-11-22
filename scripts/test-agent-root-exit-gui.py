@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reconnect a surviving child PTY after the managed provider root exits."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -70,7 +72,7 @@ while True:
             continue
         print('\\r\\nACK:<' + line.decode() + '>', flush=True)
 ''')
-        socket = harness.root / "run/flowmux-agent-host.sock"
+        socket = harness.root / "run" / SOCKET_NAME
         log = (harness.root / "host.log").open("w")
         host = subprocess.Popen([args.host, "--agent-host", "--socket", str(socket)],
                                 env=harness.env, stdout=log, stderr=log)

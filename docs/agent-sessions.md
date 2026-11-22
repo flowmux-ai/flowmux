@@ -93,13 +93,23 @@ When the provider has exited but its child processes keep the execution alive,
 the row reads **Provider exited; background processes still running** until
 they end or you terminate the execution.
 
-If an Agent Host started by another Flowmux version is still running, the Agents
-area shows a notice. Its agents keep running, but this version cannot open
-them. Finish them from the version that started them, or stop them all with
-`flowmux agent stop-host` (add `--force` only after a normal stop has timed out).
-This also ends the shells of terminal tabs running in that Host, as closing their
-tabs would. A Host older than this command rejects it. The Host exits after its
-last agent and terminal end.
+Each Flowmux build uses an Agent Host socket named for its protocol version.
+Existing Hosts on a different socket keep their agents and shells running when
+you switch builds. Agents shows a notice beside the current Host's executions.
+Use the build that started the other Host to reopen its tabs. While that Host
+is running, Flowmux can reconnect sessions in its current Host and start new
+agents. It blocks a history resume if it cannot rule out a duplicate execution
+in the other Host.
+
+To stop an Agent Host from a different protocol version, select **Stop other
+Host…** in Agents, choose the Host if several are running, and confirm.
+Flowmux removes the notice when all other Hosts have exited. Stopping the
+selected Host ends its agents and terminal shells.
+
+`flowmux agent stop-host` stops the Host for the current build. To stop a Host
+on a different socket, pass its exact path with `--host-socket PATH`. Stopping
+a Host ends its agents and the shells of its terminal tabs. Add `--force` only
+after a normal stop has timed out. A Host older than this command rejects it.
 
 Clicking an execution open in this window focuses its existing tab. Clicking a **Background**
 execution first asks where to open it: one of this window's local terminal

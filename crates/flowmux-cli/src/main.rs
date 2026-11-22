@@ -965,9 +965,11 @@ enum AgentOp {
         #[arg(long)]
         force: bool,
     },
-    /// Stop every execution of the running Agent Host, including a Host started by
-    /// another Flowmux version that this version cannot manage. Work in progress may be lost.
+    /// Stop every execution of the selected Agent Host. Work in progress may be lost.
     StopHost {
+        /// Target this exact Host socket. Defaults to this build's Host.
+        #[arg(long)]
+        host_socket: Option<PathBuf>,
         /// Force only after a normal stop request has timed out (5 seconds).
         #[arg(long)]
         force: bool,
@@ -1446,8 +1448,8 @@ async fn run_cli(mut cli: Cli) -> anyhow::Result<()> {
             .await;
         }
         Cmd::Agent {
-            op: AgentOp::StopHost { force },
-        } => return agent_run::stop_host(*force).await,
+            op: AgentOp::StopHost { force, host_socket },
+        } => return agent_run::stop_host(host_socket.as_deref(), *force).await,
         Cmd::Agent {
             op: AgentOp::Terminate { instance, force },
         } => {

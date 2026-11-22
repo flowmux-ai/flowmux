@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Check Fork session with Session Flow hidden in a disposable Linux GUI."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -40,7 +42,7 @@ def main():
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     h = gui.Harness(args)
     connection = None
-    host_socket = h.root / "run/flowmux-agent-host.sock"
+    host_socket = h.root / "run" / SOCKET_NAME
     try:
         h.env.update(GTK_A11Y="atspi", CLAUDE_CONFIG_DIR=str(h.root / "claude-home"))
         h.env.pop("AT_SPI_BUS_ADDRESS", None)
