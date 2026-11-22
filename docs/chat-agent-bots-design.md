@@ -5,6 +5,10 @@
 상태: 아이디어 검토·설계 초안(검토 반영 1회 §12, 봇 workspace·실행 범위·이벤트 추가 §6.14–6.17). 구현 없음. 작성일 2026-11-21.
 기준: `origin/main` (`aaa633ee`). 코드 참조(경로·IPC 요청·`LaunchAgent` 필드·`PaneSendKeys` 동작)는 이 리비전에서 다시 확인했다.
 
+> 구현 검토 반영본은 [구현 아키텍처와 작업 계획](chat-agent-bots-implementation-plan.md)이다.
+> 구현은 그 문서의 소유권·권한·복구 계약과 단계별 수용 기준을 따른다. 아래는 PR에 실린
+> 제품 구상과 검토 이력이다.
+
 ## 1. 의도
 
 Flowmux 안에 **이름·역할·기억을 가진 상주 채팅 에이전트(봇)** 를 둔다. 사용자는
@@ -204,8 +208,9 @@ flowchart LR
 | Claude Code | 턴마다 `claude -p --resume <sid> --output-format stream-json --verbose`, 새 대화는 `--session-id` | stream의 `result` 이벤트와 exit code | `--permission-prompt-tool`로 Flowmux가 띄운 stdio MCP 도구에 묻고, 봇 서비스가 client 또는 Needs you로 중계 | 턴 settings의 PreToolUse hook이 §6.8 판정. `--disallowedTools`로 쓰기·웹·하위 에이전트 도구 제거, `--strict-mcp-config`로 사용자 MCP 제외 | `--tools ""`, `--strict-mcp-config`, hook이 전부 거절 |
 | Codex | `codex app-server` JSON-RPC. 대화당 thread, 턴마다 `turn/start` | `turn/completed` 알림 | 명령·파일 변경 승인 요청을 봇 서비스가 받아 client 또는 Needs you로 중계 | 승인 요청을 봇 서비스가 §6.8 allow-list로 자동 응답. MCP·웹 검색·plugin 끔 | `features.shell_tool`·`unified_exec`·`apps`·`multi_agent` 등을 thread 설정으로 끔 |
 
-- Codex는 이미 사용량 조회에 쓰는 app-server JSON-RPC 연결(`crates/flowmux/src/usage/codex.rs`)을
-  재사용한다. app-server 프로세스는 봇 서비스당 하나이고, 10분간 턴이 없으면 닫는다.
+- Codex는 사용량 조회(`crates/flowmux/src/usage/codex.rs`)의 실행 파일 탐색과 초기화를 참고한다.
+  app-server는 실행 attempt마다 독립적으로 띄운다. 일치하는 thread/turn에 `turn/interrupt`를
+  보낸 뒤 그 실행의 종료를 기다린다. 강제 종료도 해당 실행에만 적용한다.
 - Claude 턴 settings는 턴마다 만드는 임시 파일(권한 0600, 턴 종료 시 삭제)이다. 그 안의
   PreToolUse hook 명령은 `flowmux bot hook pre-tool-use`이고, `FLOWMUX_BOT_TOKEN`으로 턴
   모드를 확인한다. PreToolUse의 거절은 사용자의 allow 규칙과 권한 모드보다 우선한다.
@@ -229,8 +234,9 @@ flowchart LR
 
 ### 6.4 봇 CLI (`flowmux bot ...`)
 
-봇과 worker가 봇 서비스에 말하는 경로다. 모든 요청은 `FLOWMUX_BOT_TOKEN`으로
-봇·턴·모드를 확인한다. **읽기 전용·도구 없음 턴의 토큰으로는 쓰기 명령이 거절된다.**
+봇과 worker가 봇 서비스에 말하는 경로다. 봇 요청은 `FLOWMUX_BOT_TOKEN`으로
+봇·턴·모드를 확인한다. worker의 `bot job report`는 job 전용 권한을 사용한다(§6.10).
+**읽기 전용·도구 없음 턴의 토큰으로는 쓰기 명령이 거절된다.**
 프롬프트가 아니라 여기서 강제한다. 터미널·pane·브라우저를 다루는 기존 flowmux CLI도 봇 턴에서
 쓸 수 있으며, 같은 토큰으로 대상 범위를 검사한다(§6.15).
 
@@ -309,17 +315,11 @@ automation 생성·삭제와 봇 메일 발송은 항상 그 대화에 "무엇�
 
 - 봇의 첫 대화 이후 설정한 주기(기본 매일 업무 시간 중 1회)마다 별도 새 대화로 실행한다.
 - prompt: 사용자를 기다리는 일과 다음 할 일을 찾아 제안하라. 읽기만 한다.
-- 허용 명령(Claude PreToolUse와 봇 CLI에서 같은 판정 함수 사용):
-  - `flowmux bot list/chats/item list/item show/work list/job list`, `automations list/show`
-  - `flowmux --json tree/agents/identify`, `flowmux read-screen`, `flowmux browser snapshot/get/wait` (모든 workspace, 읽기만)
-  - `git log/show/diff/status/branch(목록만)/rev-parse/ls-files`
-  - `gh pr view/list/checks/diff`, `gh issue view/list`, `gh run view/list` (github.com만)
-  - 도구: Read, Grep, Glob, LS
-- 명령 판정은 단어 분해를 먼저 한다. 체인·리다이렉트·치환·glob·환경변수 접두가 있으면
-  거절한다. `git -c`·`--output`·`--ext-diff`·`--textconv`, `gh --method/--input/-f/--web`도
-  거절한다. 판정 함수는 표 기반 단위 테스트를 둔다.
-- Codex 봇은 같은 판정 함수로 app-server의 명령 승인 요청에 자동 응답한다. 허용 목록에 없는
-  명령과 모든 파일 변경 요청은 거절로 답한다.
+- Flowmux가 봇의 일정·Items와 사용자가 공유한 작업 메타데이터를 수집해 응답 전용 턴에
+  전달한다. 턴에 Git·GitHub CLI나 임의 파일/셸 도구를 노출하지 않는다.
+- 추후 Git diff/show 수집기를 추가하면 Flowmux가 인자를 고정하고 `--no-textconv`와
+  `--no-ext-diff`를 항상 지정한다. 설정된 변환기나 외부 diff 프로그램이 실행되지 않음을
+  격리된 fixture에서 검증한다. 자세한 경계는 구현 계획 §4·§6.2를 따른다.
 - 결과: 최종 메시지의 JSON 블록을 제안 목록으로 저장한다. 사용자의 **Start**는 제안을
   Home Chat 턴으로 보내고, **Dismiss**는 다시 제안하지 않게 기록한다. 봇의 자율 수준이
   `auto`면 봇 workspace 안에서 끝나는 제안은 봇이 스스로 시작한다(§6.17).
@@ -356,6 +356,8 @@ automation 생성·삭제와 봇 메일 발송은 항상 그 대화에 "무엇�
   있는 worker는 "작업 중"으로 두되, 2시간마다 봇에게 "아직 보고 없음" 상태 메일을 보내
   봇이 worker에게 물어보거나 사용자에게 알리게 한다.
 - 보고는 봇의 원래 대화에 새 턴으로 들어간다. `--item`이 있으면 그 항목에 연결한다.
+  작업 시작 시 해당 job·실행에 한정한 보고 권한을 발급한다. 시작 턴이 끝나도 보고할 수
+  있으며, job 종료 또는 만료 시 폐기한다. 중복 보고를 원래 대화에 다시 넣지 않는다.
 - 작업 기록은 대화와 worker의 연결만 저장한다. PR·CI 상태는 필요할 때 `gh`로 새로 읽는다.
 - Agent Host를 쓸 수 없으면 `bot work start`는 오류를 반환한다. GUI 자식으로 우회하지 않는다.
 
@@ -393,17 +395,16 @@ automation 생성·삭제와 봇 메일 발송은 항상 그 대화에 "무엇�
   provider 등)는 오퍼레이터의 `MEMORY.md`에 남는다.
 - **봇 관리만 한다.** worker 시작·Look around·Items·예약 실행 생성은 하지 않는다. 다른 봇의 코드
   작업이나 GitHub 조회도 하지 않는다.
-- 오퍼레이터 턴은 관리 모드로 실행한다. 허용 도구는 Bots 데이터 폴더 안의 Read·Grep·Glob과
-  `flowmux bot` 관리 명령뿐이다. Claude는 PreToolUse, Codex는 승인 자동 응답(§6.3)으로 강제하며,
-  그 밖의 셸 명령·쓰기 도구·웹·MCP는 거절한다. 오퍼레이터가 읽는 입력은 사용자 대화와 봇 홈으로
-  한정되어 외부 콘텐츠가 들어오지 않는다.
+- 오퍼레이터 턴에는 사용자 대화와 서비스가 선택한 봇 정보를 전달한다. 관리 제안은
+  구조화된 응답으로 받고, 서비스에서 검증해 사용자에게 카드를 표시한다.
+  셸·파일·웹 도구를 열지 않는다.
 
-**오퍼레이터 전용 명령** (오퍼레이터 턴 토큰에서만 허용):
+**오퍼레이터 관리 제안과 사용자 UI에서의 적용**:
 
 | 명령 | 효과 | 적용 방식 |
 | --- | --- | --- |
 | `bot create --offer --name --purpose --provider [--style]` | 생성 카드 | 사용자가 카드에서 `만들기`. 카드 하나에 봇 하나, 여러 GUI에서 눌러도 한 번만 생성 |
-| `bot soul propose --bot <name> --file <md>` | 페르소나 변경 | 대화에 diff를 보여 주고 바로 적용. 직전 판을 이력에 남기고 `되돌리기` 제공 |
+| 페르소나 제안 `{bot_id, expected_soul_revision, markdown}` | 페르소나 변경 | 응답 본문에서 새 Markdown을 직접 받는다. 사용자가 diff를 확인하면 적용하고, 직전 판을 이력에 남겨 되돌릴 수 있게 한다. |
 | `bot pause\|resume --bot` | 일시정지·재개 | 바로 적용, 대화에 기록 |
 | `bot look-around set --bot ... --on\|--off\|--every` | Look around 조절 | 바로 적용 |
 | `automations list\|remove --bot` | 예약 실행 확인·삭제 | 삭제는 바로 적용, 대화에 기록 |
