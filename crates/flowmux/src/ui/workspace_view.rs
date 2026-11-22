@@ -4418,10 +4418,7 @@ fn build_panel(
                 // The shell an agent kept alive in the Host is shown again as it is.
                 let kept_shell = surface
                     .shell_binding
-                    .filter(|_| shell_alive == Some(Some(true)));
-                // A Host that cannot be asked may still run this tab's agent; resuming its
-                // session here would start a second one.
-                let agent_may_run = shell_alive == Some(None);
+                    .filter(|_| matches!(shell_alive, Some(Some(true) | None)));
                 let inherited_shell = argv.first().map(String::as_str);
                 let requested_shell = (!managed)
                     .then(|| {
@@ -4475,10 +4472,7 @@ fn build_panel(
                 let font = theme.terminal_font(&opts);
                 let resume_command = take_restored_agent_shell_command(
                     surface.id,
-                    opts.auto_resume_agent_sessions
-                        && !managed
-                        && kept_shell.is_none()
-                        && !agent_may_run,
+                    opts.auto_resume_agent_sessions && !managed && kept_shell.is_none(),
                     flowmux_state::default_agent_session_store(),
                 );
                 #[cfg(target_os = "macos")]

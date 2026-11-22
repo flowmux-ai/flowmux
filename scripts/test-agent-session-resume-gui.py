@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Resume from Sessions, close the tab, and reopen the same Host process in an isolated GUI."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
 import os
+import socket as socket_module
 from pathlib import Path
 import shlex
 import sqlite3
@@ -181,7 +184,7 @@ int main(int argc, char **argv) {
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
         Atspi.set_timeout(3000, 3000)
-        host_socket = h.root / "run/flowmux-agent-host.sock"
+        host_socket = h.root / "run" / SOCKET_NAME
         if args.cli_controls:
             for verb in ("interrupt", "terminate"):
                 absent = subprocess.run([args.cli, "agent", verb, str(uuid.uuid4())],
@@ -279,6 +282,16 @@ int main(int argc, char **argv) {
         click(Atspi.Role.TOGGLE_BUTTON, "Claude sessions")
         click(Atspi.Role.CHECK_BOX, "YOLO")
         if args.tab_fallback:
+            previous_socket = h.root / "run/flowmux-agent-host.sock"
+            with socket_module.socket(socket_module.AF_UNIX) as previous:
+                previous.bind(str(previous_socket))
+                previous.listen(8)
+                resume()
+                gui.wait_for(lambda: find(Atspi.Role.LABEL, contains="may already own this session"),
+                             "resume blocked while an older Host is running")
+                assert not (h.root / "starts").exists()
+                assert not (h.root / "service-refused").exists()
+            h.pass_check("A live legacy Host blocks an unverified resume without spawning another execution")
             resume()
             status = gui.wait_for(lambda: find(Atspi.Role.LABEL, contains="in an ordinary tab of this window"),
                                   "tab-bound fallback status", timeout=20)

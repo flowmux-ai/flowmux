@@ -144,12 +144,6 @@ async fn frames(
 ) {
     let result = async {
         let mut frame = first;
-        let wait_for_frame = client.supports_next_frame();
-        let interval = if wait_for_frame {
-            interval
-        } else {
-            AGENT_FRAME_INTERVAL
-        };
         // Whether the last frame was already waiting when it was asked for.
         let mut streaming = false;
         loop {
@@ -172,14 +166,14 @@ async fn frames(
             }
             // The Host answers a wait as soon as the terminal changes.
             let request = match next {
-                None if wait_for_frame => HostRequest::NextFrame {
+                Some(offset) => HostRequest::Frame {
                     key,
                     after: sequence,
+                    offset,
                 },
-                offset => HostRequest::Frame {
+                None => HostRequest::NextFrame {
                     key,
                     after: sequence,
-                    offset: offset.unwrap_or(0),
                 },
             };
             let asked = tokio::time::Instant::now();
@@ -369,7 +363,6 @@ pub async fn run_shell(
     loop {
         let started = tokio::time::Instant::now();
         let end = ViewEnd::default();
-        let kept = std::sync::atomic::AtomicBool::new(false);
         let bound = std::sync::Mutex::new(None);
         let launched = std::sync::Mutex::new(None);
         let follow = std::sync::Mutex::new(None);
@@ -381,9 +374,7 @@ pub async fn run_shell(
                 ready_token,
                 colors,
                 argv: &argv,
-                reattach: reattaching,
                 end: &end,
-                kept: &kept,
                 bound: &bound,
                 launched: &launched,
                 follow: &follow,
@@ -411,7 +402,7 @@ pub async fn run_shell(
         };
         if !shown && !reattaching {
             // The shell an agent kept alive still runs; another shell here would not be it.
-            if kept.load(std::sync::atomic::Ordering::Relaxed) {
+            if previous.is_some() {
                 return Err(error.context("cannot show this terminal's shell; open it from Agents"));
             }
             // A shell started in the Host that this tab cannot show ends now, not after its
@@ -482,10 +473,7 @@ struct ShellView<'a> {
     ready_token: Option<Uuid>,
     colors: Option<&'a str>,
     argv: &'a [String],
-    /// Show only the running shell `previous`; never start another.
-    reattach: bool,
     end: &'a ViewEnd,
-    kept: &'a std::sync::atomic::AtomicBool,
     /// The shell this view showed or was about to show.
     bound: &'a std::sync::Mutex<Option<(AgentInstanceId, Uuid)>>,
     /// The shell this view started in the Host.
@@ -500,9 +488,7 @@ async fn shell_view(socket: &Path, shell_view: ShellView<'_>) -> anyhow::Result<
         ready_token,
         colors,
         argv,
-        reattach,
         end,
-        kept,
         bound,
         launched,
         follow,
@@ -519,28 +505,23 @@ async fn shell_view(socket: &Path, shell_view: ShellView<'_>) -> anyhow::Result<
     )
     .await
     .context("terminal window did not answer")??;
-    let mut binding = None;
-    if let Some((instance, epoch)) = previous {
-        // Only an existing Host can still run the shell an agent kept alive.
-        if let Ok(host) = HostClient::connect(socket, ClientRole::Observer).await {
-            if let Ok(HostResponse::List { terminals, .. }) = host.call(HostRequest::List).await {
-                binding = terminals
-                    .iter()
-                    .find(|agent| {
-                        agent.instance == instance
-                            && agent.epoch == epoch
-                            && agent.state == ProcessState::Running
-                    })
-                    .map(|agent| (instance, epoch, agent.pid));
-            }
+    let (instance, epoch, shell) = match previous {
+        Some((instance, epoch)) => {
+            // A saved tab may still run in another build's Host. Attach only to its exact shell.
+            let host = HostClient::connect(socket, ClientRole::Observer).await?;
+            let HostResponse::List { terminals, .. } = host.call(HostRequest::List).await? else {
+                bail!("unexpected Agent Host list response");
+            };
+            let shell = terminals
+                .into_iter()
+                .find(|agent| {
+                    agent.instance == instance
+                        && agent.epoch == epoch
+                        && agent.state == ProcessState::Running
+                })
+                .context("the saved shell is unavailable in this Agent Host")?;
+            (instance, epoch, shell.pid)
         }
-    }
-    kept.store(binding.is_some(), std::sync::atomic::Ordering::Relaxed);
-    if reattach && binding.is_none() {
-        bail!("this terminal's shell cannot be shown again");
-    }
-    let (instance, epoch, shell) = match binding {
-        Some(binding) => binding,
         None => {
             let environment = std::env::vars_os()
                 .filter_map(|(key, value)| {
@@ -669,7 +650,7 @@ fn host_absent(error: &anyhow::Error) -> bool {
                 io.kind(),
                 io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
             )
-        }) || cause.downcast_ref::<IncompatibleHost>().is_some()
+        })
     })
 }
 
@@ -1036,11 +1017,15 @@ mod tests {
             fate(epoch, &[shell(ProcessState::Starting)]),
             ShellFate::Unknown
         );
-        // Only an absent or incompatible Host counts as gone; a slow one does not.
+        // Only an absent endpoint establishes that its Host is gone.
         let absent = |kind| anyhow::Error::from(io::Error::from(kind)).context("connect");
         assert!(host_absent(&absent(io::ErrorKind::NotFound)));
         assert!(host_absent(&absent(io::ErrorKind::ConnectionRefused)));
         assert!(!host_absent(&absent(io::ErrorKind::TimedOut)));
+        assert!(!host_absent(&anyhow::anyhow!(IncompatibleHost {
+            host_version: Some(PROTOCOL_VERSION + 1),
+            socket: "/tmp/host.sock".into(),
+        })));
         assert!(!host_absent(&anyhow::anyhow!(HostRpcError(
             RpcError::Busy("stopping".into())
         ))));

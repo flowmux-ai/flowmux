@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A terminal's shell runs in the Agent Host: an agent typed into it outlives the window."""
 
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -30,7 +32,7 @@ def main():
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     h = gui.Harness(SimpleNamespace(gui=args.gui, cli=args.cli, protected_pid=args.protected_pid,
                                     hosted_terminals=True))
-    host_socket = h.root / "run/flowmux-agent-host.sock"
+    host_socket = h.root / "run" / SOCKET_NAME
 
     def hosted():
         if not h.state_path.exists():

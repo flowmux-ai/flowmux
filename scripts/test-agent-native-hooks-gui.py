@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise product native hooks after closing a Host-owned Agent tab and GUI."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -30,7 +32,7 @@ def main():
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     h = fixture.Harness(args)
     executions = []
-    socket = h.root / "run/flowmux-agent-host.sock"
+    socket = h.root / "run" / SOCKET_NAME
     try:
         options = h.root / "config/flowmux/options.json"
         options.parent.mkdir(parents=True, exist_ok=True)

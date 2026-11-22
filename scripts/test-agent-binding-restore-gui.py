@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import copy
 import fcntl
@@ -36,7 +38,7 @@ try:
     options.parent.mkdir(parents=True, exist_ok=True)
     options.write_text(json.dumps({'default_shell': '/bin/sh'}))
     h.start_display()
-    host_socket = h.root / 'run/flowmux-agent-host.sock'
+    host_socket = h.root / "run" / SOCKET_NAME
     with (h.root / 'host.log').open('w') as log:
         h.spawn([args.host, '--agent-host', '--socket', str(host_socket)],
                 stdout=log, stderr=log)

@@ -100,7 +100,8 @@ def main():
     host_pid = None
     host_birth = None
     resize_agents = []
-    host_socket = harness.root / "run/flowmux-agent-host.sock"
+    host_socket = harness.root / "run" / agent_host_protocol.SOCKET_NAME
+    previous_host = None
     try:
         harness.start_display()
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = harness.env["DBUS_SESSION_BUS_ADDRESS"]
@@ -123,6 +124,16 @@ def main():
                        for index in range(desktop.get_child_count())
                        if (application := desktop.get_child_at_index(index)))
 
+        # Stand in for a retained Host at an older build's endpoint.
+        previous_socket = host_socket.with_name(f"flowmux-agent-host.v{PROTOCOL_VERSION - 1}.sock")
+        previous_host = socket.socket(socket.AF_UNIX)
+        previous_host.bind(str(previous_socket))
+        previous_host.listen(32)
+        rejected = subprocess.run([args.host, "--agent-host", "--socket", str(host_socket),
+            "--require-agent-host-protocol", str(PROTOCOL_VERSION + 1)],
+            env=harness.env, capture_output=True, text=True, timeout=5)
+        assert rejected.returncode and "does not match" in rejected.stderr, rejected
+        assert not host_socket.exists()
         app, gui_socket = harness.window("agent-host-first")
         if not args.service_start:
             with (harness.root / "host.log").open("w") as log:
@@ -310,6 +321,12 @@ while True:
                    "--pane", target]
         opened = subprocess.run(command, env=harness.env, check=True, capture_output=True, text=True)
         agent_surface = json.loads(opened.stdout)["surface_created"]["id"]
+        notice = "Another Flowmux Agent Host is still running"
+        fixture.wait_for(lambda: label_visible(app, notice), "previous Host notice alongside current agents")
+        assert previous_socket.exists()
+        previous_host.close()
+        fixture.wait_for(lambda: not label_visible(app, notice), "stale previous socket no longer shown")
+        harness.pass_check("a retained Host leaves the current protocol free to start; a mismatched helper cannot bind it")
         duplicate = harness.rpc(gui_socket, "agent_view_open", pane=target, instance=agent["instance"])
         assert duplicate["surface_created"]["id"] == agent_surface, duplicate
         assert len(harness.tree(gui_socket)[0]["panes"][0]["tabs"]) == 2
@@ -1100,6 +1117,8 @@ while not (root / 'memory-release').exists(): time.sleep(0.05)
         assert not host_socket.exists()
         harness.pass_check("the Host exits and releases its socket once its window's terminals are gone")
     finally:
+        if previous_host is not None:
+            previous_host.close()
         if hook_connection is not None:
             hook_connection.close()
         if control_connection is not None and host_socket.exists():

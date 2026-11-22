@@ -128,6 +128,8 @@ pub async fn lookup_running(
 pub struct RegistrySnapshot {
     pub agents: Vec<AgentInstance>,
     pub available: bool,
+    pub epoch: Option<uuid::Uuid>,
+    pub other_hosts: Vec<PathBuf>,
     pub notifications: Vec<flowmux_ipc::agent_host::ManagedNotification>,
     /// A running Host this version cannot manage; cleared once it is gone.
     pub incompatible: Option<IncompatibleHost>,
@@ -145,6 +147,21 @@ pub fn host_absent(socket: &Path) -> bool {
     )
 }
 
+pub async fn other_live_hosts(current: &Path) -> Vec<PathBuf> {
+    let mut live = Vec::new();
+    for socket in flowmux_config::paths::other_agent_host_sockets(current) {
+        let result =
+            tokio::time::timeout(RPC_TIMEOUT, tokio::net::UnixStream::connect(&socket)).await;
+        if !matches!(result, Ok(Err(error)) if matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        )) {
+            live.push(socket);
+        }
+    }
+    live
+}
+
 /// Whether the Host runs `binding`. `None` when a Host is there but cannot be asked: its
 /// executions may be running.
 pub fn execution_alive(
@@ -152,14 +169,19 @@ pub fn execution_alive(
     binding: flowmux_core::AgentViewBinding,
     absent: impl FnOnce() -> bool,
 ) -> Option<bool> {
-    if registry.available {
+    if registry.available && registry.epoch == Some(binding.epoch) {
         Some(registry.agents.iter().any(|agent| {
             agent.instance == binding.instance
                 && agent.epoch == binding.epoch
                 && agent.state == flowmux_ipc::agent_host::ProcessState::Running
         }))
-    } else {
+    } else if registry.other_hosts.is_empty() {
+        if registry.available {
+            return Some(false);
+        }
         absent().then_some(false)
+    } else {
+        None
     }
 }
 
@@ -197,10 +219,33 @@ pub async fn start(
     // GUI relays require a registered management connection before attaching.
     // A failed handshake leaves saved bindings disconnected, never resumed.
     let (mut client, mut incompatible) = connect(&socket, initial_minutes).await;
+    let other_hosts = other_live_hosts(&socket).await;
+    let mut others_changed = !other_hosts.is_empty();
+    registry.send_modify(|snapshot| snapshot.other_hosts = other_hosts);
     tokio::spawn(async move {
+        let mut scan_after = tokio::time::Instant::now() + RECONNECT_INTERVAL;
         let mut last_revision = None;
         let mut report_pending = true;
         loop {
+            if tokio::time::Instant::now() >= scan_after {
+                let other_hosts = other_live_hosts(&socket).await;
+                others_changed |= registry.send_if_modified(|snapshot| {
+                    if snapshot.other_hosts == other_hosts {
+                        return false;
+                    }
+                    snapshot.other_hosts = other_hosts;
+                    true
+                });
+                scan_after = tokio::time::Instant::now() + RECONNECT_INTERVAL;
+            }
+            if std::mem::take(&mut others_changed)
+                && updates
+                    .send(crate::bridge::GtkCommand::AgentRegistryChanged)
+                    .await
+                    .is_err()
+            {
+                return;
+            }
             if let Some(connected) = client.as_ref() {
                 if report_pending {
                     report_pending = false;
@@ -238,11 +283,12 @@ pub async fn start(
                                     agent.provider = presence.name.clone();
                                 }
                             }
-                            registry.send_replace(RegistrySnapshot {
-                                agents,
-                                available: true,
-                                notifications,
-                                incompatible: None,
+                            registry.send_modify(|snapshot| {
+                                snapshot.agents = agents;
+                                snapshot.available = true;
+                                snapshot.epoch = Some(epoch);
+                                snapshot.notifications = notifications;
+                                snapshot.incompatible = None;
                             });
                             last_revision = Some((epoch, revision));
                             if updates
@@ -563,8 +609,13 @@ mod tests {
         assert_eq!(execution_alive(&registry, binding, || true), Some(false));
         assert_eq!(execution_alive(&registry, binding, || false), None);
         registry.available = true;
+        registry.epoch = Some(binding.epoch);
         let never = || -> bool { panic!("a Host that answered is not probed") };
         assert_eq!(execution_alive(&registry, binding, never), Some(false));
+        registry.other_hosts.push("other.sock".into());
+        assert_eq!(execution_alive(&registry, binding, never), Some(false));
+        registry.epoch = Some(uuid::Uuid::new_v4());
+        assert_eq!(execution_alive(&registry, binding, never), None);
     }
 
     #[tokio::test]

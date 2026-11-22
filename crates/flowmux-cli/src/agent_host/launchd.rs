@@ -32,7 +32,8 @@ fn job(socket: &Path, daemon: &Path) -> anyhow::Result<serde_json::Value> {
     }
     Ok(serde_json::json!({
         "Label": label,
-        "ProgramArguments": [daemon, "--agent-host", "--socket", socket],
+        "ProgramArguments": [daemon, "--agent-host", "--require-agent-host-protocol",
+            &flowmux_ipc::agent_host::PROTOCOL_VERSION.to_string(), "--socket", socket],
         "EnvironmentVariables": environment,
         "WorkingDirectory": "/",
         "Umask": 63,
@@ -197,7 +198,13 @@ mod tests {
                 .to_str()
                 .unwrap()
         );
-        assert_eq!(value["ProgramArguments"][3], socket.to_str().unwrap());
+        let arguments = value["ProgramArguments"].as_array().unwrap();
+        assert_eq!(arguments.last().unwrap(), socket.to_str().unwrap());
+        assert_eq!(arguments[2], "--require-agent-host-protocol");
+        assert_eq!(
+            arguments[3],
+            flowmux_ipc::agent_host::PROTOCOL_VERSION.to_string()
+        );
         assert_eq!(value["RunAtLoad"], true);
         assert_eq!(value["KeepAlive"], false);
         assert_eq!(value["ThrottleInterval"], 0);

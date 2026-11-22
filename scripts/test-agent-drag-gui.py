@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Drag an existing Agents row between panes using native input in an isolated GUI."""
+from agent_host_protocol import SOCKET_NAME
+
 import argparse
 import importlib.util
 import json
@@ -40,7 +42,7 @@ def main():
     app = None
     connection = None
     control = None
-    host_socket = h.root / "run/flowmux-agent-host.sock"
+    host_socket = h.root / "run" / SOCKET_NAME
     try:
         h.env.update(GTK_A11Y="atspi")
         if args.managed:

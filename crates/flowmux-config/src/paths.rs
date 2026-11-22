@@ -12,7 +12,8 @@
 //! (manifest carries `--filesystem=home`), so a socket placed under
 //! `$HOME/.cache/flowmux/` is reachable from both sides.
 
-use std::path::PathBuf;
+use std::os::unix::fs::FileTypeExt;
+use std::path::{Path, PathBuf};
 
 fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
@@ -157,13 +158,53 @@ fn window_sockets_in(dir: &std::path::Path, prefix: &str) -> Vec<PathBuf> {
     sockets
 }
 
-/// Stable managed-agent endpoint, independent of the current GUI pointer.
+/// Stable within a Host protocol, independent of other builds and GUI windows.
 pub fn agent_host_socket() -> PathBuf {
-    runtime_socket().with_file_name(if base_runtime_dir().is_some() || is_flatpak_sandbox() {
-        "flowmux-agent-host.sock".to_owned()
+    let (prefix, suffix) = agent_host_socket_name();
+    let version = flowmux_core::AGENT_HOST_PROTOCOL_VERSION;
+    runtime_socket().with_file_name(format!("{prefix}.v{version}{suffix}"))
+}
+
+fn agent_host_socket_name() -> (&'static str, String) {
+    let suffix = if base_runtime_dir().is_some() || is_flatpak_sandbox() {
+        ".sock".into()
     } else {
-        format!("flowmux-agent-host-{}.sock", whoami())
-    })
+        format!("-{}.sock", whoami())
+    };
+    ("flowmux-agent-host", suffix)
+}
+
+/// Discover default endpoints left by other builds. A caller must probe for liveness.
+pub fn other_agent_host_sockets(current: &Path) -> Vec<PathBuf> {
+    let (prefix, suffix) = agent_host_socket_name();
+    agent_host_sockets_in(current, prefix, &suffix)
+}
+
+fn agent_host_sockets_in(current: &Path, prefix: &str, suffix: &str) -> Vec<PathBuf> {
+    let mut sockets: Vec<_> = current
+        .parent()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_socket())
+                && entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.strip_prefix(prefix)?.strip_suffix(suffix))
+                    .is_some_and(|rest| {
+                        rest.is_empty()
+                            || rest.strip_prefix(".v").is_some_and(|version| {
+                                !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit())
+                            })
+                    })
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path != current)
+        .collect();
+    sockets.sort();
+    sockets
 }
 
 /// `$HOME/.config/opencode/` (or analogous) bypassing the
@@ -189,6 +230,32 @@ fn whoami() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_hosts_include_legacy_and_versioned_sockets_for_this_user() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let current = dir.path().join("host.v4-user.sock");
+        let listeners: Vec<_> = [
+            "host-user.sock",
+            "host.v3-user.sock",
+            "host.v4-user.sock",
+            "host.v-user.sock",
+            "host.v3-other.sock",
+            "host.v3-user.sock.ctl",
+        ]
+        .into_iter()
+        .map(|name| std::os::unix::net::UnixListener::bind(dir.path().join(name)).unwrap())
+        .collect();
+        std::fs::write(dir.path().join("host.v2-user.sock"), "").unwrap();
+        assert_eq!(
+            agent_host_sockets_in(&current, "host", "-user.sock"),
+            [
+                dir.path().join("host-user.sock"),
+                dir.path().join("host.v3-user.sock"),
+            ]
+        );
+        drop(listeners);
+    }
 
     #[test]
     fn window_sockets_list_only_per_instance_sockets() {

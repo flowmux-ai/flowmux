@@ -264,7 +264,11 @@ impl ManagedAgents {
             }
             previous = Some(row.root.clone().upcast());
         }
-        let notice = snapshot.incompatible.as_ref().map(ToString::to_string);
+        let notice = snapshot.incompatible.as_ref().map(ToString::to_string).or_else(|| {
+            (!snapshot.other_hosts.is_empty()).then(|| {
+                "Another Flowmux Agent Host is still running. Open its agents with the Flowmux build that started it.".to_owned()
+            })
+        });
         self.notice.set_label(notice.as_deref().unwrap_or_default());
         self.notice.set_tooltip_text(notice.as_deref());
         self.notice.set_visible(notice.is_some());
@@ -424,8 +428,7 @@ mod tests {
         let mut snapshot = RegistrySnapshot {
             agents: vec![agent.clone()],
             available: true,
-            notifications: Vec::new(),
-            incompatible: None,
+            ..Default::default()
         };
         bridge.agent_registry.send_replace(snapshot.clone());
         let sidebar = crate::ui::sidebar::Sidebar::new(
@@ -711,8 +714,7 @@ mod tests {
         let mut snapshot = RegistrySnapshot {
             agents: vec![agent.clone()],
             available: true,
-            notifications: Vec::new(),
-            incompatible: None,
+            ..Default::default()
         };
         list.render(&snapshot, &bridge, Default::default(), |_| None);
         let key = (agent.instance, agent.epoch);

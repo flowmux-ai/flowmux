@@ -268,7 +268,12 @@ fn main() -> anyhow::Result<()> {
         Ok(mut initial) => {
             // Without any Host the saved executions are gone. Restore their tabs as
             // ordinary terminals so the usual session resume applies to them.
-            if agent_host::host_absent(&paths::agent_host_socket()) {
+            let socket = paths::agent_host_socket();
+            if agent_host::host_absent(&socket)
+                && rt
+                    .block_on(agent_host::other_live_hosts(&socket))
+                    .is_empty()
+            {
                 let cleared = flowmux_state::agent_views::clear_bindings(&mut initial);
                 if cleared > 0 {
                     info!(

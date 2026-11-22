@@ -353,7 +353,11 @@ impl WindowController {
             {
                 finished.push((terminal.id(), surface));
             }
-            let error = if terminal.pid.get().is_none() {
+            let other_host =
+                !snapshot.other_hosts.is_empty() && snapshot.epoch != Some(binding.epoch);
+            let error = if other_host && terminal.pid.get().is_none() {
+                Some("This tab may still be running in another Agent Host. Reopen it with the Flowmux build that started it.")
+            } else if terminal.pid.get().is_none() {
                 Some("Agent connection failed. Reopen from Agents to retry.")
             } else if agent.is_some_and(|agent| {
                 matches!(

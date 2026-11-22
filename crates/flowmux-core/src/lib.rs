@@ -12,6 +12,8 @@ use uuid::Uuid;
 pub mod json;
 pub mod session_flow;
 
+pub const AGENT_HOST_PROTOCOL_VERSION: u32 = 18;
+
 const TERMINAL_TAB_TITLE_MAX_CHARS: usize = 17;
 const FALLBACK_TERMINAL_TAB_TITLE: &str = "Terminal";
 pub const AGENT_BAR_ITEM_MIN_WIDTH_PX: u16 = 84;

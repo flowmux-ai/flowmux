@@ -133,8 +133,8 @@ class RunnerTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("agent_host_protocol", root / "scripts/agent_host_protocol.py")
         host = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(host)
-        source = (root / "crates/flowmux-ipc/src/agent_host.rs").read_text()
-        self.assertIn(f"pub const PROTOCOL_VERSION: u32 = {host.PROTOCOL_VERSION};", source)
+        source = (root / "crates/flowmux-core/src/lib.rs").read_text()
+        self.assertIn(f"pub const AGENT_HOST_PROTOCOL_VERSION: u32 = {host.PROTOCOL_VERSION};", source)
         # A literal hello version fails deep inside a GUI suite once the protocol changes.
         pinned = re.compile(r"""(['"]version['"]\s*:\s*|version=)\d+\s*,\s*['"]?role""")
         offenders = [path.name for path in sorted((root / "scripts").glob("*.py"))

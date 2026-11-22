@@ -310,6 +310,8 @@ fn service_command(socket: &Path, daemon: &Path) -> anyhow::Result<std::process:
         .arg("--")
         .arg(daemon)
         .arg("--agent-host")
+        .arg("--require-agent-host-protocol")
+        .arg(flowmux_ipc::agent_host::PROTOCOL_VERSION.to_string())
         .arg("--socket")
         .arg(socket);
     command.stdin(std::process::Stdio::null());
@@ -812,7 +814,7 @@ mod tests {
         for expected in [
             "The running Agent Host uses another protocol",
             "Its agents keep running, but this version cannot open them",
-            "stop them all with `flowmux agent stop-host`",
+            "flowmux agent stop-host --host-socket PATH",
         ] {
             assert!(message.contains(expected), "{message}");
         }

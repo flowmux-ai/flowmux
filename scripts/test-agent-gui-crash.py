@@ -86,7 +86,7 @@ while not (root / 'release').exists():
     agent = None
     stream = None
     reader = None
-    host_socket = root / "run/flowmux-agent-host.sock"
+    host_socket = root / "run" / agent_host_protocol.SOCKET_NAME
 
     def rpc(path, verb, **fields):
         with socket.socket(socket.AF_UNIX) as connection:

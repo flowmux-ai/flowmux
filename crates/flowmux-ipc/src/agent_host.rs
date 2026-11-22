@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 18;
-const LEGACY_PROTOCOL_VERSION: u32 = 17;
+pub use flowmux_core::AGENT_HOST_PROTOCOL_VERSION as PROTOCOL_VERSION;
 pub const MAX_INPUT_BYTES: usize = 16 * 1024;
 /// A bounded 16 MiB snapshot must reach the terminal before input ownership changes.
 pub const ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -181,9 +180,9 @@ impl std::fmt::Display for IncompatibleHost {
             f,
             " and this Flowmux uses protocol {PROTOCOL_VERSION}. Its agents keep running, \
              but this version cannot open them. Finish them from the Flowmux version that \
-             started them, or stop them all with `flowmux agent stop-host`, which also ends \
-             the shells of terminal tabs that run in that Host; the Host exits after its last \
-             agent and terminal end, and this version then starts a new one."
+             started them. To stop an older Host and its terminal shells, run \
+             `flowmux agent stop-host --host-socket PATH` with this Host's socket: {}.",
+            self.socket.display()
         )?;
         #[cfg(target_os = "linux")]
         write!(
@@ -586,40 +585,18 @@ pub enum HostResponse {
 
 /// One persistent control connection. A relay uses a second connection for
 /// blocking frame reads so output cannot hold up keystrokes or resize.
-pub struct HostClient {
-    pub client: Client,
-    version: u32,
-}
+pub struct HostClient(pub Client);
 
 impl HostClient {
     pub async fn connect(socket: &Path, role: ClientRole) -> anyhow::Result<Self> {
-        let mut host = Self {
-            client: Client::connect(socket).await?,
-            version: PROTOCOL_VERSION,
-        };
-        if let Err(error) = host.hello(socket, role).await {
-            if error
-                .downcast_ref::<IncompatibleHost>()
-                .and_then(|host| host.host_version)
-                != Some(LEGACY_PROTOCOL_VERSION)
-            {
-                return Err(error);
-            }
-            // Version 17 rejects Hello before registering the connection.
-            host.version = LEGACY_PROTOCOL_VERSION;
-            host.hello(socket, role).await?;
-        }
-        Ok(host)
-    }
-
-    async fn hello(&self, socket: &Path, role: ClientRole) -> anyhow::Result<()> {
+        let client = Self(Client::connect(socket).await?);
         let incompatible = |host_version| IncompatibleHost {
             host_version,
             socket: socket.to_owned(),
         };
-        let hello = self
+        let hello = client
             .call(HostRequest::Hello {
-                version: self.version,
+                version: PROTOCOL_VERSION,
                 role,
             })
             .await
@@ -633,51 +610,26 @@ impl HostClient {
                 }
             })?;
         match hello {
-            HostResponse::Hello { version, .. } if version == self.version => Ok(()),
+            HostResponse::Hello {
+                version: PROTOCOL_VERSION,
+                ..
+            } => Ok(client),
             HostResponse::Hello { version, .. } => Err(incompatible(Some(version)).into()),
             _ => anyhow::bail!("unexpected Agent Host handshake response"),
         }
     }
 
-    pub fn supports_next_frame(&self) -> bool {
-        self.version == PROTOCOL_VERSION
-    }
-
     /// Ask the Host at `socket` to stop all its executions, whatever its protocol version.
     pub async fn stop_all(socket: &Path, force: bool) -> anyhow::Result<()> {
-        let client = Client::connect(socket).await?;
-        match Self::exchange(&client, HostRequest::StopAll { force }).await? {
+        let client = Self(Client::connect(socket).await?);
+        match client.call(HostRequest::StopAll { force }).await? {
             HostResponse::Ok => Ok(()),
             _ => anyhow::bail!("unexpected Agent Host stop response"),
         }
     }
 
-    pub async fn call(&self, mut request: HostRequest) -> anyhow::Result<HostResponse> {
-        if self.version == LEGACY_PROTOCOL_VERSION {
-            let size = match &mut request {
-                HostRequest::Launch { launch } => Some(&mut launch.size),
-                HostRequest::CommitAttach { size, .. } | HostRequest::Resize { size, .. } => {
-                    Some(size)
-                }
-                HostRequest::ViewOversized { .. } => return Ok(HostResponse::Ok),
-                HostRequest::CloseTerminal { .. } => {
-                    // The old Host ends an unviewed shell after its detach grace.
-                    return Err(HostRpcError(RpcError::Unimplemented(
-                        "Agent Host does not support closing a terminal immediately".into(),
-                    ))
-                    .into());
-                }
-                _ => None,
-            };
-            if let Some(size) = size.filter(|size| size.validate().is_ok()) {
-                size.rows = size.rows.min((40_000 / usize::from(size.cols)) as u16);
-            }
-        }
-        Self::exchange(&self.client, request).await
-    }
-
-    async fn exchange(client: &Client, request: HostRequest) -> anyhow::Result<HostResponse> {
-        match client.call_raw(Request::AgentHost { request }).await? {
+    pub async fn call(&self, request: HostRequest) -> anyhow::Result<HostResponse> {
+        match self.0.call_raw(Request::AgentHost { request }).await? {
             Response::AgentHost { response } => Ok(response),
             Response::Error(error) => Err(HostRpcError(error).into()),
             _ => anyhow::bail!("unexpected agent host response"),
@@ -812,106 +764,6 @@ mod tests {
             }
             server.await.unwrap();
         }
-    }
-
-    #[tokio::test]
-    async fn client_reconnects_to_protocol_17_with_its_terminal_limits() {
-        use crate::protocol::{Envelope, Payload};
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-        let root = tempfile::tempdir().unwrap();
-        let socket = root.path().join("host.sock");
-        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
-        let key = AttachmentKey {
-            instance: AgentInstanceId::new(),
-            epoch: Uuid::new_v4(),
-            lease: Uuid::new_v4(),
-            generation: 1,
-        };
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (read, mut write) = stream.into_split();
-            let mut lines = BufReader::new(read).lines();
-            for (expected, response) in [
-                (
-                    HostRequest::Hello {
-                        version: PROTOCOL_VERSION,
-                        role: ClientRole::Relay,
-                    },
-                    Response::Error(RpcError::InvalidArgument(
-                        "incompatible Agent Host protocol; Host version 17".into(),
-                    )),
-                ),
-                (
-                    HostRequest::Hello {
-                        version: 17,
-                        role: ClientRole::Relay,
-                    },
-                    Response::AgentHost {
-                        response: HostResponse::Hello {
-                            version: 17,
-                            epoch: key.epoch,
-                            connection: 1,
-                        },
-                    },
-                ),
-                (
-                    HostRequest::Resize {
-                        key,
-                        size: TerminalSize {
-                            rows: 80,
-                            cols: 500,
-                        },
-                    },
-                    Response::AgentHost {
-                        response: HostResponse::Ok,
-                    },
-                ),
-            ] {
-                let request: Envelope =
-                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-                let Payload::Request(Request::AgentHost { request: actual }) = request.payload
-                else {
-                    panic!("expected Agent Host request");
-                };
-                assert_eq!(
-                    serde_json::to_value(actual).unwrap(),
-                    serde_json::to_value(expected).unwrap()
-                );
-                let reply = Envelope {
-                    id: request.id,
-                    payload: Payload::Response(response),
-                };
-                write
-                    .write_all(format!("{}\n", serde_json::to_string(&reply).unwrap()).as_bytes())
-                    .await
-                    .unwrap();
-            }
-            assert!(lines.next_line().await.unwrap().is_none());
-        });
-        let client = HostClient::connect(&socket, ClientRole::Relay)
-            .await
-            .unwrap();
-        assert!(!client.supports_next_frame());
-        client
-            .call(HostRequest::ViewOversized {
-                key,
-                oversized: true,
-            })
-            .await
-            .unwrap();
-        client
-            .call(HostRequest::Resize {
-                key,
-                size: TerminalSize {
-                    rows: 150,
-                    cols: 500,
-                },
-            })
-            .await
-            .unwrap();
-        drop(client);
-        server.await.unwrap();
     }
 
     #[test]

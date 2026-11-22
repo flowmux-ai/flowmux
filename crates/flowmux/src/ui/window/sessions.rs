@@ -455,6 +455,21 @@ impl WindowController {
                 );
             }
         }
+        if found.is_none() {
+            let other_hosts = handle
+                .spawn(async {
+                    crate::agent_host::other_live_hosts(&flowmux_config::paths::agent_host_socket())
+                        .await
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            if !other_hosts.is_empty() {
+                return Err(
+                    "Another Flowmux Agent Host is running and may already own this session. Resume it from the Flowmux build that started that Host."
+                        .into(),
+                );
+            }
+        }
         Ok(found)
     }
 
