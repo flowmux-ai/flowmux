@@ -127,6 +127,36 @@ pub fn runtime_socket_for_pid(pid: u32) -> PathBuf {
     }
 }
 
+/// The per-instance sockets of the windows running now (see [`runtime_socket_for_pid`]).
+pub fn window_sockets() -> Vec<PathBuf> {
+    let template = runtime_socket_for_pid(0);
+    let (Some(dir), Some(name)) = (
+        template.parent(),
+        template.file_name().and_then(|name| name.to_str()),
+    ) else {
+        return Vec::new();
+    };
+    window_sockets_in(dir, name.strip_suffix("0.sock").unwrap_or(name))
+}
+
+fn window_sockets_in(dir: &std::path::Path, prefix: &str) -> Vec<PathBuf> {
+    let mut sockets: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_prefix(prefix)?.strip_suffix(".sock"))
+                .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .map(|entry| entry.path())
+        .collect();
+    sockets.sort();
+    sockets
+}
+
 /// Stable managed-agent endpoint, independent of the current GUI pointer.
 pub fn agent_host_socket() -> PathBuf {
     runtime_socket().with_file_name(if base_runtime_dir().is_some() || is_flatpak_sandbox() {
@@ -159,6 +189,28 @@ fn whoami() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_sockets_list_only_per_instance_sockets() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "flowmux-12.sock",
+            "flowmux-345.sock",
+            "flowmux.sock",
+            "flowmux-agent-host.sock",
+            "flowmux-12.sock.lock",
+            "flowmux-.sock",
+        ] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        assert_eq!(
+            window_sockets_in(dir.path(), "flowmux-"),
+            vec![
+                dir.path().join("flowmux-12.sock"),
+                dir.path().join("flowmux-345.sock")
+            ]
+        );
+    }
 
     #[test]
     fn runtime_socket_for_pid_is_distinct_per_process() {

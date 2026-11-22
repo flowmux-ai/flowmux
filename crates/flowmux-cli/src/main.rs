@@ -1373,7 +1373,7 @@ fn main() -> anyhow::Result<()> {
         .block_on(run_cli(cli))
 }
 
-async fn run_cli(cli: Cli) -> anyhow::Result<()> {
+async fn run_cli(mut cli: Cli) -> anyhow::Result<()> {
     let mut cmd = cli.cmd;
 
     // Local-only commands — handled before the daemon connect so they
@@ -1469,8 +1469,10 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
         // Plain identity/capability probes work offline. Session identity
         // resolves a live binding instead of the shared server environment.
         Cmd::Identify { session, agent } => {
-            follow_hosted_tab(cli.socket.as_deref()).await;
-            return run_identify(cli.json, session.as_deref(), agent.as_deref(), cli.socket).await;
+            let socket = follow_hosted_tab(cli.socket.as_deref())
+                .await
+                .or(cli.socket);
+            return run_identify(cli.json, session.as_deref(), agent.as_deref(), socket).await;
         }
         Cmd::Capabilities => return run_capabilities(cli.json),
         // Hook runtime handlers connect to the daemon themselves. Setup and
@@ -1493,7 +1495,9 @@ async fn run_cli(cli: Cli) -> anyhow::Result<()> {
     }
 
     let json_mode = cli.json;
-    follow_hosted_tab(cli.socket.as_deref()).await;
+    if let Some(socket) = follow_hosted_tab(cli.socket.as_deref()).await {
+        cli.socket = Some(socket);
+    }
     // Managed process ancestry is authoritative; inherited native session variables can be stale.
     let notification_client =
         cmd_ops::managed_notification_client(&cmd, cli.socket.clone()).await?;
