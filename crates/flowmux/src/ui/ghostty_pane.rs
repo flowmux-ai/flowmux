@@ -83,6 +83,7 @@ pub struct GhosttyPane {
     terminal_alternate_screen: Rc<Cell<bool>>,
     terminal_minimap: TerminalMinimap,
     wheel_scroll_multiplier: Rc<Cell<f64>>,
+    fork_menu: Rc<RefCell<std::rc::Weak<ForkMenu>>>,
     /// Last non-empty text selection VTE reported. Agent TUIs (Claude Code,
     /// Codex) repaint constantly; VTE clears the drag-selection on the next
     /// output frame (`deselect_all` in `process_incoming`), so by the time the
@@ -95,6 +96,27 @@ pub struct GhosttyPane {
     /// the shell survives; pane close starts bounded off-thread group reaping.
     /// VTE renders/IOs a dup of the same master.
     _pty: Rc<RefCell<Option<flowmux_terminal::pty::Pty>>>,
+}
+
+struct ForkMenu {
+    button: glib::WeakRef<gtk::Button>,
+    source: std::cell::OnceCell<flowmux_core::session_flow::SessionKey>,
+}
+
+impl ForkMenu {
+    fn update(&self, eligible: Option<&flowmux_core::session_flow::SessionKey>) {
+        let Some(button) = self.button.upgrade() else {
+            return;
+        };
+        // Once offered, this menu stays tied to that conversation until dismissed.
+        let enabled = eligible.is_some_and(|key| self.source.get_or_init(|| key.clone()) == key);
+        button.set_sensitive(enabled);
+        button.set_tooltip_text(Some(if enabled {
+            "Fork the conversation in a right split, using the same project files"
+        } else {
+            "Requires an idle session, a native session ID, and a supported fork command"
+        }));
+    }
 }
 
 /// Shift+Enter input sequence: VTE-era agent TUIs treat ESC+CR as "insert a
@@ -755,6 +777,7 @@ impl GhosttyPane {
         };
         let command = argv.first().cloned().unwrap_or_default();
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+        let fork_menu = Rc::new(RefCell::new(std::rc::Weak::new()));
         let scrollback_dirty = Rc::new(Cell::new(false));
         let term = vte::Terminal::new();
         let wheel_scroll_multiplier = crate::ui::terminal_scroll::install(&term);
@@ -1025,6 +1048,7 @@ impl GhosttyPane {
             let on_view_session_flow = callbacks.on_view_session_flow.clone();
             let on_fork_session = callbacks.on_fork_session.clone();
             let fork_session_key = callbacks.fork_session_key.clone();
+            let open_fork_menu = fork_menu.clone();
             let surface_for_menu = surface;
             let pane_id = pane_id.clone();
             let term_widget = term.downgrade();
@@ -1100,23 +1124,25 @@ impl GhosttyPane {
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
                 let fork = mk("Fork session");
-                let fork_key = fork_session_key(surface_for_menu);
-                let enabled = fork_key.is_some();
-                fork.set_sensitive(enabled);
-                fork.set_tooltip_text(Some(if enabled {
-                    "Fork the conversation in a right split, using the same project files"
-                } else {
-                    "Requires an idle session, a native session ID, and a supported fork command"
-                }));
+                let menu = Rc::new(ForkMenu {
+                    button: fork.downgrade(),
+                    source: Default::default(),
+                });
+                menu.update(fork_session_key(surface_for_menu).as_ref());
+                *open_fork_menu.borrow_mut() = Rc::downgrade(&menu);
                 let pop = popover.downgrade();
                 let cb = on_fork_session.clone();
+                let current_key = fork_session_key.clone();
                 fork.connect_clicked(move |_| {
+                    let Some(key) =
+                        current_key(surface_for_menu).filter(|key| menu.source.get() == Some(key))
+                    else {
+                        return;
+                    };
                     if let Some(pop) = pop.upgrade() {
                         pop.popdown();
                     }
-                    if let Some(key) = fork_key.clone() {
-                        (cb.borrow_mut())(id, surface_for_menu, key);
-                    }
+                    (cb.borrow_mut())(id, surface_for_menu, key);
                 });
                 v.append(&fork);
 
@@ -1310,9 +1336,19 @@ impl GhosttyPane {
             terminal_alternate_screen,
             terminal_minimap,
             wheel_scroll_multiplier,
+            fork_menu,
             last_selection,
             _pty: pty_slot,
         })
+    }
+
+    pub(super) fn update_fork_menu(
+        &self,
+        eligible: Option<&flowmux_core::session_flow::SessionKey>,
+    ) {
+        if let Some(menu) = self.fork_menu.borrow().upgrade() {
+            menu.update(eligible);
+        }
     }
 
     /// Plain-text dump of the terminal buffer for `flowmux read-screen`.

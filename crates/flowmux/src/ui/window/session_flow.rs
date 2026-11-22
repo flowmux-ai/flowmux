@@ -464,7 +464,13 @@ impl WindowController {
                 if self
                     .terminal_session_presence(focused.pane, focused.surface)
                     .await
-                    .is_some_and(|p| matches!(p.status, AgentStatus::Idle | AgentStatus::Done))
+                    .is_some_and(|p| {
+                        SessionAgent::from_name(&p.name) == Some(anchor.target.agent)
+                            && p.session_id
+                                .as_ref()
+                                .is_none_or(|id| focused.session_id.as_ref() == Some(id))
+                            && matches!(p.status, AgentStatus::Idle | AgentStatus::Done)
+                    })
                 {
                     idle.insert(focused.surface);
                 }
@@ -501,7 +507,17 @@ impl WindowController {
                 forkable.insert(focused.surface, key.clone());
             }
         }
-        self.pane_registry.borrow_mut().session_flow_forkable = forkable;
+        let mut registry = self.pane_registry.borrow_mut();
+        if registry.session_flow_forkable != forkable {
+            let previous = std::mem::replace(&mut registry.session_flow_forkable, forkable);
+            for (surface, terminal) in &registry.terminals {
+                let eligible = registry.session_flow_forkable.get(surface);
+                if previous.get(surface) != eligible {
+                    terminal.update_fork_menu(eligible);
+                }
+            }
+        }
+        drop(registry);
         // Hidden panels still refresh fork eligibility and saved open state.
         if !visible {
             return;

@@ -136,7 +136,10 @@ int main(int argc, char **argv) {
                     return node
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
 
-        def menu_enabled(activate=False):
+        def fork_button():
+            return find(Atspi.Role.PUSH_BUTTON, "Fork session")
+
+        def open_menu():
             # Native input needs a mapped X window, not a particular accessibility role.
             bounds = window.get_geometry()
             point = connection.screen().root.translate_coords(
@@ -146,17 +149,31 @@ int main(int argc, char **argv) {
             xtest.fake_input(connection, X.ButtonPress, 3)
             xtest.fake_input(connection, X.ButtonRelease, 3)
             connection.sync()
-            button = gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fork session"), "Fork menu")
-            enabled = button.get_state_set().contains(Atspi.StateType.SENSITIVE)
-            if activate and enabled:
+            return gui.wait_for(fork_button, "Fork menu")
+
+        def finish_menu(button=None):
+            if button is not None:
                 assert button.get_action_iface().do_action(0)
             else:
                 code = connection.keysym_to_keycode(XK.string_to_keysym("Escape"))
                 xtest.fake_input(connection, X.KeyPress, code)
                 xtest.fake_input(connection, X.KeyRelease, code)
             connection.sync()
-            gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fork session") is None, "closed menu")
+            gui.wait_for(lambda: fork_button() is None, "closed menu")
+
+        def menu_enabled(activate=False):
+            button = open_menu()
+            enabled = button.get_state_set().contains(Atspi.StateType.SENSITIVE)
+            finish_menu(button if activate and enabled else None)
             return enabled
+
+        def wait_for_menu_state(enabled, message):
+            def matches():
+                button = fork_button()
+                return button is not None and (
+                    button.get_state_set().contains(Atspi.StateType.SENSITIVE) == enabled)
+
+            gui.wait_for(matches, message, timeout=8)
 
         def report(session, activity="idle", start=False):
             h.rpc(socket, "agent_activity_update", pane=pane, surface=surface, agent="claude",
@@ -278,11 +295,19 @@ int main(int argc, char **argv) {
             gui.wait_for(lambda: find(Atspi.Role.LABEL, prefix=text + " · "),
                          "updated activity row text")
         h.pass_check("activity row text updates without changing agent state")
+        open_menu()
         report(first, "running")
-        gui.wait_for(lambda: not menu_enabled(), "working session fork disabled", timeout=8)
+        wait_for_menu_state(False, "open Fork menu disables while the session works")
         report(first)
-        gui.wait_for(menu_enabled, "completed session fork enabled", timeout=8)
-        h.pass_check("working session stays disabled and completion re-enables Fork")
+        wait_for_menu_state(True, "open Fork menu enables when the session completes")
+        finish_menu()
+        report(first, "running")
+        gui.wait_for(lambda: not menu_enabled(), "working session fork disabled on open", timeout=8)
+        open_menu()
+        report(first)
+        wait_for_menu_state(True, "Fork menu first opened during work enables on completion")
+        finish_menu()
+        h.pass_check("Fork follows working and completed states without reopening its menu")
         report(second, start=True)
         gui.wait_for(lambda: not menu_enabled(), "changed session cannot use stale fork", timeout=8)
         # Let the first catalog load finish before the provider saves its transcript.
