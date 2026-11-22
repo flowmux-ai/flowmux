@@ -16,6 +16,7 @@ import sys
 import time
 
 from Xlib import X, XK, display
+from Xlib.error import BadWindow
 from Xlib.ext import xtest
 
 sys.dont_write_bytecode = True
@@ -319,9 +320,13 @@ int main(int argc, char **argv) {
             view = fixture.wait_for(detached_view, "registered detached Agent window", timeout=35)
             def detached_native_window():
                 for w in connection.screen().root.query_tree().children:
-                    owner = w.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
-                    if owner is not None and int(owner.value[0]) != app.pid and w.get_attributes().map_state == X.IsViewable:
-                        return w, int(owner.value[0])
+                    try:
+                        owner = w.get_full_property(connection.intern_atom("_NET_WM_PID"), X.AnyPropertyType)
+                        if owner is not None and int(owner.value[0]) != app.pid and w.get_attributes().map_state == X.IsViewable:
+                            return w, int(owner.value[0])
+                    except BadWindow:
+                        # The drag window can disappear after query_tree().
+                        continue
                 return None
             torn_window, detached_pid = fixture.wait_for(detached_native_window, "detached native window")
             assert detached_pid not in h.protected_pids
