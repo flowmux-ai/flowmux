@@ -46,9 +46,37 @@ unset CODEX_THREAD_ID CODEX_SESSION_ID CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 # A provider CLI or Team worker exports its real homes; tests must never resolve them.
 unset CLAUDE_CONFIG_DIR CODEX_HOME GEMINI_CLI_HOME
 test_root=$(mktemp -d /tmp/fm-ci.XXXXXX)
+# Desktop services the gate's private bus and display started can outlive an interrupted run:
+# their FUSE mounts make the runtime directory unremovable and they keep running.
+release_test_root() {
+    if [[ -r /proc/self/mountinfo ]]; then
+        local mount
+        awk -v root="$test_root/" 'index($5, root) == 1 { print $5 }' /proc/self/mountinfo |
+            sort -r | while IFS= read -r mount; do
+                fusermount3 -u -z "$mount" 2>/dev/null || fusermount -u -z "$mount" 2>/dev/null ||
+                    umount -l "$mount" 2>/dev/null || true
+            done
+    fi
+    local pids pid
+    pids=$(pgrep -u "$(id -u)" -f -- "$test_root/" 2>/dev/null || true)
+    [[ -n $pids ]] || return 0
+    for pid in $pids; do
+        [[ $pid == "$$" ]] || kill "$pid" 2>/dev/null || true
+    done
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -u "$(id -u)" -f -- "$test_root/" >/dev/null 2>&1 || return 0
+        sleep 0.2
+    done
+    for pid in $(pgrep -u "$(id -u)" -f -- "$test_root/" 2>/dev/null || true); do
+        [[ $pid == "$$" ]] || kill -KILL "$pid" 2>/dev/null || true
+    done
+}
 cleanup() {
     local result=$?
-    echo "CI_GATE_EXIT=$result"
+    # On Ctrl-C the log's tee can end first; writing to it must not kill cleanup with SIGPIPE.
+    trap '' PIPE
+    echo "CI_GATE_EXIT=$result" 2>/dev/null || true
+    release_test_root
     if [[ $result == 0 ]]; then
         rm -rf "$test_root" || echo "CI cleanup incomplete: $test_root" >&2
     else
@@ -62,6 +90,9 @@ cleanup() {
     exit "$result"
 }
 trap cleanup EXIT
+# An interrupted gate still releases its test root: bash runs no EXIT trap when it dies of a signal.
+trap 'trap - INT; exit 130' INT
+trap 'trap - TERM; exit 143' TERM
 export TMPDIR="$test_root/tmp" FLOWMUX_RUNTIME_DIR="$test_root/run"
 export XDG_RUNTIME_DIR="$test_root/run" XDG_CONFIG_HOME="$test_root/config"
 export XDG_STATE_HOME="$test_root/state" XDG_DATA_HOME="$test_root/data"
@@ -83,6 +114,15 @@ if [[ $group != scripts ]]; then
     pkg-config --modversion glib-2.0 gtk4 libadwaita-1
     if [[ $mode == linux ]]; then
         run_phase ssh-prerequisites 30 python3 scripts/ssh-workspace-fixture.py --check
+        # WebKit's sandbox needs user namespaces. Where AppArmor restricts them, an unprofiled
+        # gate fails only when its first browser starts, long after this point.
+        if [[ $group != build && $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null) == 1 ]] &&
+            command -v bwrap >/dev/null && ! bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
+            echo "error: this host restricts user namespaces and the gate is not in the WebKit profile." >&2
+            echo "       Run: aa-exec -p flowmux-webkit -- bash scripts/test-ci.sh $mode $suite $group" >&2
+            echo "       (install the profile with packaging/apparmor/flowmux-webkit; see docs/setup.md)" >&2
+            exit 2
+        fi
     fi
 fi
 # The full failure/marker matrix starts many mock processes on hosted macOS.

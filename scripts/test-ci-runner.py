@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -127,6 +128,19 @@ if name == 'cargo' and 'macos_native' in args:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_agent_host_fixtures_follow_the_protocol_version(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location("host_fixture", root / "scripts/test-agent-host-gui.py")
+        host = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(host)
+        source = (root / "crates/flowmux-ipc/src/agent_host.rs").read_text()
+        self.assertIn(f"pub const PROTOCOL_VERSION: u32 = {host.PROTOCOL_VERSION};", source)
+        # A literal hello version fails deep inside a GUI suite once the protocol changes.
+        pinned = re.compile(r"""(['"]version['"]\s*:\s*|version=)\d+\s*,\s*['"]?role""")
+        offenders = [path.name for path in sorted((root / "scripts").glob("*.py"))
+                     if pinned.search(path.read_text(errors="replace"))]
+        self.assertEqual(offenders, [])
+
     @unittest.skipUnless(sys.platform == 'linux', 'Linux subreaper ownership')
     def test_phase_reaps_exited_orphans_while_command_is_running(self):
         job = """
@@ -323,7 +337,7 @@ time.sleep(60)
                     stale.write_text('{"status":"passed","exit_code":0}')
                     stale.with_suffix('.log').write_text('previous failure diagnostics')
                     stale_reports.append(stale)
-            names = ['uname', 'rustc', 'rustup', 'cargo', 'pkg-config', 'xvfb-run', 'python3']
+            names = ['uname', 'rustc', 'rustup', 'cargo', 'pkg-config', 'xvfb-run', 'python3', 'bwrap']
             if 'TEST_CLEANUP_EXIT' in extra:
                 names.append('rm')
             for name in names:
