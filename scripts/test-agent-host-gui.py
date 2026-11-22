@@ -573,10 +573,12 @@ while not (root / 'memory-release').exists(): time.sleep(0.05)
             verify_view(gui_socket)
             assert not (harness.root / f"memory-ready-{len(extras)}").exists()
         finally:
-            release.touch()
+            # Abort the prepared views before releasing their programs: a released program can
+            # end first, and then its attachment is no longer there to abort.
             memory_peers.close()
             for prepared in prepared_pressure:
                 control_connection.call('abort_attach', key=prepared['key'])
+            release.touch()
         def pressure_ended():
             states = {item["instance"]: item["state"] for item in control_connection.call("list")["agents"]}
             return all(states.get(item["instance"]) == "exited" for item in extras)
