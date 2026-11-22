@@ -4516,11 +4516,17 @@ fn build_panel(
                 }
                 // VTE is the only terminal backend. GhosttyPane owns the
                 // PTY + render; title/cwd changes are forwarded from inside it.
+                // A managed relay starts in its agent's project: its terminal resolves relative
+                // file links and reports its directory from there, as a tab running the agent does.
                 let pane: PaneTerminal = GhosttyPane::spawn(
                     pane_id,
                     surface.id,
                     argv,
-                    if managed { None } else { cwd.clone() },
+                    if managed {
+                        cwd.clone().filter(|project| project.is_dir())
+                    } else {
+                        cwd.clone()
+                    },
                     extra_env,
                     opts.scrollback_lines_or_default(),
                     callbacks.clone(),

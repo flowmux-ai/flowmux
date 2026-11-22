@@ -4,32 +4,54 @@
 use super::*;
 use std::path::Path;
 
-/// A hosted terminal shown again in another pane keeps its tab id and the environment of
-/// the pane it started in. Follow the tab, so a command without a pane goes where it is now.
-pub(crate) async fn follow_hosted_tab(socket: Option<&Path>) {
-    if std::env::var_os("FLOWMUX_HOSTED_SHELL").is_none() {
-        return;
-    }
-    let Some(surface) = hooks::surface_from_env() else {
-        return;
-    };
+/// A hosted terminal shown again in another pane, or in another window, keeps its tab id and the
+/// environment of the pane it started in. Follow the tab, so a command without a pane goes where
+/// it is now. Returns the socket of the window that shows it when that is not `socket`.
+pub(crate) async fn follow_hosted_tab(socket: Option<&Path>) -> Option<PathBuf> {
+    std::env::var_os("FLOWMUX_HOSTED_SHELL")?;
+    let surface = hooks::surface_from_env()?;
     let socket = socket
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
         .unwrap_or_else(flowmux_config::paths::runtime_socket);
+    if let Some((workspace, pane)) = window_tab(&socket, surface).await {
+        set_tab_context(workspace, pane);
+        return None;
+    }
+    // Another window took the shell over; its relay, not this shell's environment, knows it.
+    let mut found = Vec::new();
+    for window in flowmux_config::paths::window_sockets() {
+        if window != socket {
+            if let Some(location) = window_tab(&window, surface).await {
+                found.push((window, location));
+            }
+        }
+    }
+    let [(window, (workspace, pane))] = <[_; 1]>::try_from(found).ok()?;
+    set_tab_context(workspace, pane);
+    std::env::set_var("FLOWMUX_SOCKET_PATH", &window);
+    Some(window)
+}
+
+fn set_tab_context(workspace: flowmux_core::WorkspaceId, pane: flowmux_core::PaneId) {
+    std::env::set_var("FLOWMUX_PANE_ID", pane.to_string());
+    std::env::set_var("FLOWMUX_WORKSPACE_ID", workspace.to_string());
+}
+
+async fn window_tab(
+    socket: &Path,
+    surface: flowmux_core::SurfaceId,
+) -> Option<(flowmux_core::WorkspaceId, flowmux_core::PaneId)> {
     let tree = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        Client::connect(&socket)
+        Client::connect(socket)
             .await?
             .call(Request::WorkspaceTree)
             .await
     });
     let Ok(Ok(Response::Tree { workspaces })) = tree.await else {
-        return;
+        return None;
     };
-    if let Some((workspace, pane)) = tab_location(&workspaces, surface) {
-        std::env::set_var("FLOWMUX_PANE_ID", pane.to_string());
-        std::env::set_var("FLOWMUX_WORKSPACE_ID", workspace.to_string());
-    }
+    tab_location(&workspaces, surface)
 }
 
 fn tab_location(
