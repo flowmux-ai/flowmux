@@ -827,6 +827,50 @@ int main(int argc, char **argv) {
                 assert len((h.root / "starts").read_text().splitlines()) == 2
                 assert len(rows("SELECT request FROM operations WHERE state='complete'")) == 1
                 h.pass_check("Session Flow focuses the restored Codex fork without a startup hook")
+
+                # Reuse coordinates from the old global row, with only two families visible.
+                far_parent, far_child = str(uuid.uuid4()), str(uuid.uuid4())
+                transcript(far_parent, "Distant parent")
+                transcript(far_child, "Distant fork", far_parent)
+                with sqlite3.connect(database) as db:
+                    (key,), = db.execute("SELECT key FROM sessions WHERE json_extract(key, '$.id') = ?",
+                                         (session,)).fetchall()
+                    for index, sid in enumerate((far_parent, far_child)):
+                        db.execute("INSERT INTO sessions(key,x,y) VALUES(?,?,?)",
+                                   (json.dumps(dict(json.loads(key), id=sid), ensure_ascii=False, separators=(",", ":")),
+                                    12000 + index * 105, 0))
+                other = h.root / "other-family"
+                other.mkdir()
+                tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(project))["surface_created"]
+                h.send(socket, tab["pane"], f"FIXTURE_ROOT={shlex.quote(str(other))} {shlex.quote(str(h.root / provider))}")
+                gui.wait_for(lambda: (other / "starts").exists(), "second family process")
+                h.rpc(socket, "agent_activity_update", pane=tab["pane"], surface=tab["id"], agent="codex",
+                      status="idle", source="flowmux:hook", session_id=far_parent)
+                click(Atspi.Role.PUSH_BUTTON, "↻")
+                gui.wait_for(lambda: find(Atspi.Role.LABEL, "4 sessions"), "both families in Session Flow")
+
+                def families_centered():
+                    view, = (json.loads(state) for ws, state in rows("SELECT workspace,state FROM views")
+                             if ws == workspace)
+                    camera = view["camera"]
+                    points = [(x, y) for key, x, y in rows("SELECT key,x,y FROM sessions WHERE metadata IS NOT NULL AND x IS NOT NULL AND y IS NOT NULL")
+                              if json.loads(key)["id"] in (session, child_id, far_parent, far_child)]
+                    if len(points) != 4 or max(x for x, _ in points) - min(x for x, _ in points) > 800:
+                        return False
+                    canvas = find(None, description="Session Flow graph. Arrow keys select a session; Enter opens it.")
+                    bounds = canvas.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                    for axis, size in enumerate((bounds.width, bounds.height)):
+                        offset = camera["origin"]["xy"[axis]]
+                        low, high = [bound(p[axis] for p in points) * camera["zoom"] + offset for bound in (min, max)]
+                        if not (0 < low < high + 1 < size and abs(low + high - size) < 8):
+                            return False
+                    return True
+
+                gui.wait_for(families_centered, "distant families are compact and centered in the canvas", timeout=12)
+                from PIL import ImageGrab
+                ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "centered-families.png")
+                h.pass_check("Session Flow compacts and centers disconnected families with legacy positions")
+                h.send(socket, tab["pane"], "quit")
                 h.close_window(process)
                 return
 

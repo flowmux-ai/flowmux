@@ -60,6 +60,7 @@ struct Scene {
     drag_active: bool,
     last_zoom: Option<std::time::Instant>,
     space_pan: bool,
+    arrange_pending: bool,
     fit_during_settle: bool,
 }
 
@@ -101,6 +102,11 @@ impl Scene {
             view.camera = camera;
             view.initialized = true;
         }
+    }
+
+    fn arrange(&mut self, width: f64, height: f64) -> bool {
+        self.arrange_pending = false;
+        self.layout.pack(&self.graph, width / height)
     }
 }
 
@@ -252,9 +258,10 @@ impl FlowPanel {
                 }
                 match action {
                     2 => {
-                        p.scene
-                            .borrow_mut()
-                            .fit(p.area.width() as f64, p.area.height() as f64);
+                        let (width, height) = (p.area.width() as f64, p.area.height() as f64);
+                        let mut scene = p.scene.borrow_mut();
+                        scene.arrange(width, height);
+                        scene.fit(width, height);
                         p.area.queue_draw();
                     }
                     3 => p.send(FlowAction::Refresh),
@@ -297,6 +304,15 @@ impl FlowPanel {
         self.select_workspace(workspace);
         let mut scene = self.scene.borrow_mut();
         self.empty.set_visible(graph.is_empty());
+        if scene.graph != graph && !graph.is_empty() {
+            scene.arrange_pending = true;
+            let refit = !scene.graph.is_empty()
+                && (scene.graph.has_multiple_families() || graph.has_multiple_families());
+            if let Some(view) = scene.view().filter(|_| refit) {
+                view.initialized = false;
+            }
+            self.schedule_save();
+        }
         scene.graph = graph;
         scene.anchors = anchors;
         drop(scene);

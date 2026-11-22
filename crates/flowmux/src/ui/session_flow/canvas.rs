@@ -47,7 +47,12 @@ mod imp {
                 snapshot.append_color(&gtk::gdk::RGBA::new(0.02, 0.03, 0.08, 1.0), &bounds);
             } else {
                 let mut scene = self.scene.get().unwrap().borrow_mut();
-                if !scene.graph.is_empty() && scene.view().is_some_and(|v| !v.initialized) {
+                let arranged = !scene.graph.is_empty()
+                    && scene.arrange_pending
+                    && scene.arrange(width as f64, height as f64);
+                if !scene.graph.is_empty()
+                    && (arranged || scene.view().is_some_and(|v| !v.initialized))
+                {
                     scene.fit(width as f64, height as f64);
                     scene.fit_during_settle = true;
                 }

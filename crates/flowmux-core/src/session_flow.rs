@@ -98,11 +98,7 @@ impl Lineage {
             children.entry(parent).or_default().push(child);
         }
         let mut families = Vec::new();
-        for root in self
-            .branches
-            .iter()
-            .filter(|key| !self.parents.contains_key(*key))
-        {
+        for root in self.roots() {
             let mut nodes = BTreeSet::new();
             let mut queue = VecDeque::from([root]);
             while let Some(key) = queue.pop_front() {
@@ -114,6 +110,16 @@ impl Lineage {
             families.push(nodes);
         }
         families
+    }
+
+    fn roots(&self) -> impl Iterator<Item = &SessionKey> {
+        self.branches
+            .iter()
+            .filter(|key| !self.parents.contains_key(*key))
+    }
+
+    pub fn has_multiple_families(&self) -> bool {
+        self.roots().nth(1).is_some()
     }
 
     pub fn nodes(&self) -> BTreeSet<&SessionKey> {
@@ -135,6 +141,19 @@ impl Point {
     pub fn finite(self) -> bool {
         self.x.is_finite() && self.y.is_finite()
     }
+}
+
+fn point_bounds(points: impl Iterator<Item = Point>) -> Option<(Point, Point)> {
+    let mut points = points.filter(|p| p.finite());
+    let first = points.next()?;
+    let (mut min, mut max) = (first, first);
+    for p in points {
+        min.x = min.x.min(p.x);
+        min.y = min.y.min(p.y);
+        max.x = max.x.max(p.x);
+        max.y = max.y.max(p.y);
+    }
+    Some((min, max))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,17 +202,9 @@ impl Camera {
         if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
             return;
         }
-        let mut points = points.filter(|p| p.finite());
-        let Some(first) = points.next() else {
+        let Some((min, max)) = point_bounds(points) else {
             return;
         };
-        let (mut min, mut max) = (first, first);
-        for p in points {
-            min.x = min.x.min(p.x);
-            min.y = min.y.min(p.y);
-            max.x = max.x.max(p.x);
-            max.y = max.y.max(p.y);
-        }
         self.zoom = ((width - 100.0).max(1.0) / (max.x - min.x + 100.0))
             .min((height - 60.0).max(1.0) / (max.y - min.y + 60.0))
             .clamp(0.1, 2.0);
@@ -220,10 +231,21 @@ impl Layout {
         self.centers.clear();
         for family in lineage.families() {
             let radius = 100.0 + (family.len() as f64).sqrt() * 32.0;
-            let center = Point {
-                x: offset + radius,
-                y: 0.0,
-            };
+            let center = point_bounds(
+                family
+                    .iter()
+                    .filter_map(|key| self.positions.get(key).copied()),
+            )
+            .map_or(
+                Point {
+                    x: offset + radius,
+                    y: 0.0,
+                },
+                |(min, max)| Point {
+                    x: min.x.midpoint(max.x),
+                    y: min.y.midpoint(max.y),
+                },
+            );
             offset += radius * 2.0 + 120.0;
             for key in family {
                 self.centers.insert(key.clone(), center);
@@ -247,6 +269,81 @@ impl Layout {
             }
         }
         self.wake();
+    }
+
+    /// Arrange the visible families in centered rows, preserving each family's shape.
+    pub fn pack(&mut self, lineage: &Lineage, aspect: f64) -> bool {
+        const GAP: f64 = 90.0;
+        if !aspect.is_finite() || aspect <= 0.0 || !lineage.has_multiple_families() {
+            return false;
+        }
+        let families: Vec<_> = lineage
+            .families()
+            .into_iter()
+            .filter_map(|keys| {
+                let (min, max) = point_bounds(
+                    keys.iter()
+                        .filter_map(|key| self.positions.get(key).copied()),
+                )?;
+                let width = max.x - min.x;
+                let height = max.y - min.y;
+                (width + height)
+                    .is_finite()
+                    .then_some((keys, min, width, height))
+            })
+            .collect();
+        if families.len() < 2 {
+            return false;
+        }
+        let area: f64 = families
+            .iter()
+            .map(|(_, _, w, h)| (w + GAP) * (h + GAP))
+            .sum();
+        let widest = families.iter().map(|(_, _, w, _)| *w).fold(0.0, f64::max);
+        let target_width = (area * aspect).sqrt().max(widest);
+        let mut remaining = families.as_slice();
+        let mut y = 0.0;
+        let mut moved = false;
+        while !remaining.is_empty() {
+            let mut row_width = 0.0;
+            let mut row_height: f64 = 0.0;
+            let mut count = 0;
+            for (_, _, width, height) in remaining {
+                let next_width = row_width + width + GAP;
+                if count > 0 && next_width - GAP > target_width {
+                    break;
+                }
+                row_width = next_width;
+                row_height = row_height.max(*height);
+                count += 1;
+            }
+            let (row, rest) = remaining.split_at(count);
+            let mut x = -(row_width - GAP) / 2.0;
+            for (keys, min, width, height) in row {
+                let delta = Point {
+                    x: x - min.x,
+                    y: y + (row_height - height) / 2.0 - min.y,
+                };
+                x += width + GAP;
+                if !delta.finite() || delta.x.abs().max(delta.y.abs()) < 0.5 {
+                    continue;
+                }
+                for key in keys {
+                    if let Some(point) = self.positions.get_mut(key) {
+                        point.x += delta.x;
+                        point.y += delta.y;
+                    }
+                    if let Some(center) = self.centers.get_mut(key) {
+                        center.x += delta.x;
+                        center.y += delta.y;
+                    }
+                }
+                moved = true;
+            }
+            y += row_height + GAP;
+            remaining = rest;
+        }
+        moved
     }
 
     pub fn wake(&mut self) {
@@ -465,6 +562,50 @@ mod tests {
             c.screen(Point { x: 99.0, y: -20.0 }),
             Point { x: 400.0, y: 150.0 }
         );
+    }
+
+    #[test]
+    fn packing_saved_families_closes_hidden_gaps_and_preserves_links() {
+        let mut all = Lineage::default();
+        let mut layout = Layout::default();
+        for i in 0..9 {
+            let parent = key(&format!("{i}-parent"));
+            let child = key(&format!("{i}-child"));
+            all.link(parent.clone(), child.clone()).unwrap();
+            let x = f64::from(i) * 1500.0;
+            layout.positions.insert(parent, Point { x, y: 0.0 });
+            layout.positions.insert(
+                child,
+                Point {
+                    x: x + 105.0,
+                    y: 15.0,
+                },
+            );
+        }
+        let visible = all.project([&key("0-parent"), &key("7-parent"), &key("8-parent")]);
+        let hidden = layout.positions[&key("1-parent")];
+        assert!(layout.pack(&visible, 4.0));
+        assert!(!layout.pack(&visible, 4.0));
+        assert_eq!(layout.positions[&key("1-parent")], hidden);
+        for (parent, child) in visible.edges() {
+            let (p, c) = (layout.positions[parent], layout.positions[child]);
+            assert_eq!((c.x - p.x, c.y - p.y), (105.0, 15.0));
+        }
+        let points = || visible.nodes().into_iter().map(|key| layout.positions[key]);
+        let (min, max) = point_bounds(points()).unwrap();
+        assert_eq!(max.x - min.x, 3.0 * 105.0 + 2.0 * 90.0);
+        let mut camera = Camera::default();
+        camera.fit(points(), 1000.0, 250.0);
+        let (min, max) = (camera.screen(min), camera.screen(max));
+        assert!((min.x + max.x - 1000.0).abs() < 0.01);
+        assert!((min.y + max.y - 250.0).abs() < 0.01);
+        assert!(min.x > 0.0 && max.x < 1000.0);
+
+        assert!(layout.pack(&visible, 0.7));
+        let (min, max) =
+            point_bounds(visible.nodes().into_iter().map(|key| layout.positions[key])).unwrap();
+        assert_eq!(max.x - min.x, 105.0);
+        assert_eq!(max.y - min.y, 3.0 * 15.0 + 2.0 * 90.0);
     }
     #[test]
     fn shared_geometry_is_deterministic_dragged_nodes_stay_and_simulation_stops() {
