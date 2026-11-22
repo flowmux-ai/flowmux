@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! AgentOffice uses the same live model and navigation as the Agents bar.
+//! AgentOffice maps live agents to their workspace terminals.
 
 use super::*;
 use crate::ui::agent_office::AgentOffice;
+use flowmux_core::{AgentActivity, AgentBarItem, AgentBarModel, AgentPresence, AgentStatus};
 
 pub(super) struct ActiveAgentOffice {
     pub(super) view: AgentOffice,
@@ -12,6 +13,44 @@ pub(super) struct ActiveAgentOffice {
 }
 
 impl WindowController {
+    pub(super) async fn agent_office_model(
+        &self,
+        terminal_agents: &AgentBarModel,
+    ) -> AgentBarModel {
+        let mut model = terminal_agents.clone();
+        for agent in self.running_agents() {
+            let Some(view) = self.verified_agent_location(&agent).await else {
+                continue;
+            };
+            let Some(title) = self.store.surface_title(view.pane, view.surface).await else {
+                continue;
+            };
+            let presence = agent.presence.unwrap_or_else(|| {
+                let mut presence =
+                    AgentPresence::new(agent.provider, AgentActivity::Idle, agent.pid);
+                presence.status = AgentStatus::Unknown;
+                presence
+            });
+            let color = self.sidebar.workspace_color(view.workspace);
+            if let Some(item) = AgentBarItem::from_presence(
+                view.workspace,
+                view.pane,
+                view.surface,
+                &title,
+                &presence,
+                color.as_deref(),
+            ) {
+                if let Some(previous) = model.items.iter_mut().find(|i| i.surface == view.surface) {
+                    *previous = item;
+                } else {
+                    model.items.push(item);
+                }
+            }
+        }
+        model.visible = !model.items.is_empty();
+        model
+    }
+
     pub(super) async fn toggle_agent_office(&self) {
         if self.agent_office.borrow().is_some() {
             self.close_agent_office();
@@ -20,7 +59,10 @@ impl WindowController {
         self.dismiss_workspace_overview_immediately();
         self.cancel_pane_zoom_transition();
         let view = AgentOffice::new(self.bridge.clone());
-        let model = self.store.agent_bar_model().await;
+        let terminals = self
+            .agent_display_model(self.store.agent_bar_model().await)
+            .await;
+        let model = self.agent_office_model(&terminals).await;
         view.render(&self.sidebar.workspace_titles().borrow(), &model);
         let saved_focus =
             gtk::prelude::GtkWindowExt::focus(&self.window).map(|widget| widget.downgrade());

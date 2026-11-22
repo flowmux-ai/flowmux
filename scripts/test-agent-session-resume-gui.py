@@ -7,6 +7,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import socket as socket_module
 from pathlib import Path
 import shlex
@@ -385,8 +386,36 @@ int main(int argc, char **argv) {
         assert agent["provider"] == provider
         h.pass_check(("New Agent" if args.new_agent else "Sessions resume") +
                      " uses Host, configured shell startup, literal project/config and native argv")
+        if args.new_agent:
+            managed_tab = next(t for t in h.workspace(socket, workspace)["panes"][0]["tabs"] if t["active"])
+            local_tab = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(project))["surface_created"]
+            codex = h.root / "codex"
+            shutil.copyfile(shutil.which("sleep"), codex)
+            codex.chmod(0o700)
+            h.send(socket, pane, f"exec {shlex.quote(str(codex))} 120")
+            h.rpc(socket, "agent_activity_update", pane=pane, surface=local_tab["id"], agent="codex",
+                  status="working", source="flowmux:hook", session_id=str(uuid.uuid4()))
+            office = gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "AgentOffice", showing=False),
+                                  "AgentOffice button")
+            assert office.get_action_iface().do_action(0)
+            gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, contains="codex · "), "terminal agent in Office")
+            gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, contains="Unknown · checking in"),
+                         "managed agent in Office before its first hook")
         control.call("native_session", instance=agent["instance"], epoch=agent["epoch"], pid=pid,
                      process_start=birth, session_id=session, seq=1, event=dict(event="started", status="idle"))
+        if args.new_agent:
+            character = gui.wait_for(lambda: next((n for n in find(Atspi.Role.PUSH_BUTTON,
+                contains="Idle · resting", all_matches=True) if n.get_name().startswith("claude · ")), None),
+                "managed character updates to idle without reopening Office")
+            assert find(Atspi.Role.LABEL, contains="2 teammates · ")
+            click(Atspi.Role.PUSH_BUTTON, character.get_name())
+            gui.wait_for(lambda: not find(Atspi.Role.PUSH_BUTTON, "Back to workspace"),
+                         "managed character closes Office")
+            tabs = h.workspace(socket, workspace)["panes"][0]["tabs"]
+            assert len(tabs) == 3 and next(t for t in tabs if t["active"])["id"] == managed_tab["id"], tabs
+            assert (h.root / "starts").read_text().splitlines() == [str(pid)]
+            h.rpc(socket, "surface_close", pane=pane, surface=local_tab["id"])
+            h.pass_check("AgentOffice counts terminal and managed agents once, updates status, and focuses the original managed tab")
         gui.wait_for(lambda: find(Atspi.Role.LABEL, "Ready · Visible"), "native registry presence")
         if args.new_agent:
             click(Atspi.Role.PUSH_BUTTON, "Options")

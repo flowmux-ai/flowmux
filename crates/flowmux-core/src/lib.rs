@@ -1345,9 +1345,14 @@ impl Pane {
                     let Some(agent) = &surface.agent else {
                         continue;
                     };
-                    if let Some(item) =
-                        AgentBarItem::from_presence(workspace, *id, surface, agent, workspace_color)
-                    {
+                    if let Some(item) = AgentBarItem::from_presence(
+                        workspace,
+                        *id,
+                        surface.id,
+                        &surface.title,
+                        agent,
+                        workspace_color,
+                    ) {
                         out.push(item);
                     }
                 }
@@ -2475,10 +2480,11 @@ impl AgentBarItem {
         )
     }
 
-    fn from_presence(
+    pub fn from_presence(
         workspace: WorkspaceId,
         pane: PaneId,
-        surface: &PaneSurface,
+        surface: SurfaceId,
+        surface_label: &str,
         agent: &AgentPresence,
         workspace_color: Option<&str>,
     ) -> Option<Self> {
@@ -2488,8 +2494,8 @@ impl AgentBarItem {
         Some(Self {
             workspace,
             pane,
-            surface: surface.id,
-            surface_label: surface.title.clone(),
+            surface,
+            surface_label: surface_label.to_owned(),
             agent_name: agent.name.clone(),
             status,
             visual_status,
@@ -2503,7 +2509,7 @@ impl AgentBarItem {
                 .unwrap_or_else(|| status.as_str().to_string()),
             color: workspace_color
                 .map(str::to_string)
-                .unwrap_or_else(|| agent_bar_color_for_surface(surface.id)),
+                .unwrap_or_else(|| agent_bar_color_for_surface(surface)),
         })
     }
 }

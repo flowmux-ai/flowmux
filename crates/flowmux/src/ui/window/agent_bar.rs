@@ -213,13 +213,17 @@ impl WindowController {
         }
         self.refresh_session_panel(false).await;
         self.refresh_session_flow(false).await;
-        let model = self.store.agent_bar_model().await;
-        if let Some(office) = self.agent_office.borrow().as_ref() {
-            office
-                .view
-                .render(&self.sidebar.workspace_titles().borrow(), &model);
+        let model = self
+            .agent_display_model(self.store.agent_bar_model().await)
+            .await;
+        if self.agent_office.borrow().is_some() {
+            let office_model = self.agent_office_model(&model).await;
+            if let Some(office) = self.agent_office.borrow().as_ref() {
+                office
+                    .view
+                    .render(&self.sidebar.workspace_titles().borrow(), &office_model);
+            }
         }
-        let model = self.agent_display_model(model).await;
         if self.options.borrow().agent_bar_mode {
             self.render_agent_bar(&model);
         } else {
