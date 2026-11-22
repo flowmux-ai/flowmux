@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Session Flow projection and native launch coordination; no workspace-owned lineage.
 
-use super::sessions::{session_home, FocusedSession, SessionHome, SessionTarget};
+use super::sessions::{
+    process_session_home, session_home, FocusedSession, SessionHome, SessionTarget,
+};
 use super::*;
 use crate::ui::session_flow::{FlowAction, FlowPanel, Node};
 use flowmux_core::session_flow::SessionKey;
@@ -27,6 +29,7 @@ struct Catalog {
     snapshot: Snapshot,
     available: BTreeMap<SessionKey, HistorySession>,
     resumable: BTreeSet<SessionKey>,
+    deferred_claude_forks: BTreeMap<SessionKey, SessionKey>,
     homes: BTreeMap<SessionKey, SessionHome>,
     bindings: HashMap<SurfaceId, SessionKey>,
     forkable: BTreeSet<SessionKey>,
@@ -35,15 +38,16 @@ struct Catalog {
     warnings: Vec<String>,
 }
 
-/// Process evidence for one Codex tab, re-read on the agent poll cadence.
-struct CodexProbe {
+/// Process evidence for one tab, re-read on the agent poll cadence.
+struct SessionProbe {
+    provider: SessionAgent,
     root_pid: u32,
     process_start: u64,
     at: Instant,
     id: Option<String>,
 }
 
-const CODEX_PROBE_INTERVAL: Duration = Duration::from_secs(2);
+const SESSION_PROBE_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub(super) struct FlowState {
@@ -52,7 +56,7 @@ pub(super) struct FlowState {
     targets: Rc<RefCell<Vec<Anchor>>>,
     loading: Rc<Cell<bool>>,
     last_load: Rc<Cell<Option<Instant>>>,
-    probes: Rc<RefCell<HashMap<SurfaceId, CodexProbe>>>,
+    probes: Rc<RefCell<HashMap<SurfaceId, SessionProbe>>>,
     pub owner: uuid::Uuid,
 }
 
@@ -76,10 +80,17 @@ impl FlowState {
 /// a login shell and the agent's `--help`; a forced refresh clears the cache
 /// so an upgrade is noticed on demand rather than on every catalog load.
 static CAPABILITIES: std::sync::LazyLock<
-    std::sync::Mutex<HashMap<(&'static str, std::path::PathBuf), (bool, bool)>>,
+    std::sync::Mutex<HashMap<(&'static str, std::path::PathBuf), Capabilities>>,
 > = std::sync::LazyLock::new(Default::default);
 
-fn cached_probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Capabilities {
+    resume: bool,
+    fork: bool,
+    restore_claude_fork: bool,
+}
+
+fn cached_probe_agent(agent: SessionAgent, home: &SessionHome) -> Capabilities {
     let key = (agent.name(), home.path.clone());
     if let Some(found) = CAPABILITIES
         .lock()
@@ -96,7 +107,7 @@ fn cached_probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
     probed
 }
 
-fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
+fn probe_agent(agent: SessionAgent, home: &SessionHome) -> Capabilities {
     use std::process::{Command, Stdio};
     let (command, resume, fork) = match agent {
         SessionAgent::Claude => ("claude --help", "--resume", Some("--fork-session")),
@@ -109,13 +120,13 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     // Use a file so a verbose helper cannot fill a pipe and deadlock before wait.
     let Ok(output) = tempfile::tempfile() else {
-        return (false, false);
+        return Capabilities::default();
     };
     let Ok(stdout) = output.try_clone() else {
-        return (false, false);
+        return Capabilities::default();
     };
     let Ok(stderr) = output.try_clone() else {
-        return (false, false);
+        return Capabilities::default();
     };
     let mut cmd = Command::new(shell);
     let environment = home
@@ -136,32 +147,38 @@ fn probe_agent(agent: SessionAgent, home: &SessionHome) -> (bool, bool) {
         }
     }
     let Ok(mut child) = cmd.spawn() else {
-        return (false, false);
+        return Capabilities::default();
     };
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
-                    return (false, false);
+                    return Capabilities::default();
                 }
                 use std::io::{Read, Seek};
                 let mut output = output;
                 let _ = output.rewind();
                 let mut text = String::new();
                 if output.take(256 * 1024).read_to_string(&mut text).is_err() {
-                    return (false, false);
+                    return Capabilities::default();
                 }
-                return (
-                    text.contains(resume),
-                    fork.is_some_and(|token| text.contains(token)),
-                );
+                let resume = text.contains(resume);
+                let fork = fork.is_some_and(|token| text.contains(token));
+                return Capabilities {
+                    resume,
+                    fork,
+                    restore_claude_fork: agent == SessionAgent::Claude
+                        && resume
+                        && fork
+                        && text.contains("--session-id"),
+                };
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return (false, false);
+                return Capabilities::default();
             }
         }
     }
@@ -178,6 +195,7 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         snapshot: Snapshot::default(),
         available: BTreeMap::new(),
         resumable: BTreeSet::new(),
+        deferred_claude_forks: BTreeMap::new(),
         homes: BTreeMap::new(),
         bindings: HashMap::new(),
         forkable: BTreeSet::new(),
@@ -186,6 +204,7 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         warnings: Vec::new(),
     };
     let mut namespaces = BTreeSet::new();
+    let mut claude_recovery_homes = BTreeSet::new();
     for anchor in targets {
         let home = session_home(&anchor.target)?;
         let focused = anchor
@@ -202,17 +221,20 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         if namespaces.insert((key.provider.clone(), key.home.clone())) {
             let native = import_native(&mut store, anchor.target.agent, &home.path)
                 .map_err(|e| e.to_string())?;
-            let (resumable, forkable) = cached_probe_agent(anchor.target.agent, &home);
+            let capabilities = cached_probe_agent(anchor.target.agent, &home);
+            if capabilities.restore_claude_fork {
+                claude_recovery_homes.insert(key.home.clone());
+            }
             catalog.warnings.extend(native.warnings);
             for (native_key, session) in native.sessions {
-                if resumable
+                if capabilities.resume
                     && session.cwd.is_dir()
                     && session.path.is_file()
                     && session.resume_command().is_ok()
                 {
                     catalog.resumable.insert(native_key.clone());
                 }
-                if forkable && session.fork_command().is_ok() {
+                if capabilities.fork && session.fork_command().is_ok() {
                     catalog.forkable.insert(native_key.clone());
                 }
                 catalog.homes.insert(native_key.clone(), home.clone());
@@ -249,7 +271,36 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         !bindings.is_empty()
     });
     catalog.snapshot = store.snapshot().map_err(|e| e.to_string())?;
+    for (parent, child) in catalog.snapshot.lineage.edges() {
+        if parent.provider == "claude"
+            && claude_recovery_homes.contains(&parent.home)
+            && catalog.resumable.contains(parent)
+            && !catalog.snapshot.records.contains_key(child)
+            && deferred_claude_fork_command(&catalog.available[parent], child).is_ok()
+        {
+            catalog
+                .deferred_claude_forks
+                .insert(child.clone(), parent.clone());
+        }
+    }
     Ok(catalog)
+}
+
+fn deferred_claude_fork_command(
+    parent: &HistorySession,
+    child: &SessionKey,
+) -> Result<String, String> {
+    let id = uuid::Uuid::parse_str(&child.id).map_err(|_| "Invalid Claude fork ID")?;
+    // shortcut: Use current parent history until Flowmux can restore the fork-time checkpoint.
+    let child_path = parent.path.with_file_name(format!("{id}.jsonl"));
+    if !child_path
+        .symlink_metadata()
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Err("Claude fork history must be loaded before resuming".into());
+    }
+    let fork = parent.fork_command().map_err(|e| e.to_string())?;
+    Ok(format!("{fork} --session-id {id}"))
 }
 
 // The identity has already been observed on the operation's reserved live surface.
@@ -274,11 +325,18 @@ fn complete_observed_session(
         store
             .import(&[(native.clone(), SessionRecord::from(child))], &[])
             .map_err(|e| e.to_string())?;
-    } else if agent != SessionAgent::Claude || operation.kind != OperationKind::Fork {
-        return Err("Native session record is not yet available".into());
+    } else {
+        let deferred = agent == SessionAgent::Claude
+            && (operation.kind == OperationKind::Fork
+                || (operation.source == *native
+                    && store
+                        .is_deferred_claude_fork(native)
+                        .map_err(|e| e.to_string())?));
+        if !deferred {
+            return Err("Native session record is not yet available".into());
+        }
     }
-    // Claude defers a fork's history file until input. Its live hook identity proves
-    // the edge; without a native record the node can only focus its existing pane.
+    // Claude defers a fork's history until input. Its observed live identity proves the operation.
     store
         .complete_running(operation, native, live)
         .map_err(|e| e.to_string())
@@ -309,8 +367,8 @@ impl WindowController {
                 continue;
             };
             let mut focused = focused.clone();
-            if focused.session_id.is_none() && target.agent == SessionAgent::Codex {
-                focused.session_id = self.codex_probe(&target).await;
+            if focused.session_id.is_none() {
+                focused.session_id = self.session_probe(&target).await;
             }
             if focused.session_id.is_some() {
                 target.focused = Some(focused);
@@ -325,10 +383,15 @@ impl WindowController {
         anchors
     }
 
-    /// Process evidence for a Codex tab without a hook session id. Every title
-    /// change reaches here through the agent displays, so one tab is probed at
-    /// most once per [`CODEX_PROBE_INTERVAL`] unless a forced refresh clears it.
-    async fn codex_probe(&self, target: &SessionTarget) -> Option<String> {
+    /// Cache process evidence so title changes do not trigger repeated probes.
+    async fn session_probe(&self, target: &SessionTarget) -> Option<String> {
+        let provider = target.agent;
+        match provider {
+            SessionAgent::Codex => {}
+            #[cfg(target_os = "linux")]
+            SessionAgent::Claude => {}
+            _ => return None,
+        }
         let focused = target.focused.as_ref()?;
         let (surface, root_pid) = (focused.surface, focused.root_pid);
         let process_start = flowmux_procmon::process_start_time(root_pid)?;
@@ -339,16 +402,26 @@ impl WindowController {
             return None;
         }
         if let Some(probe) = self.flow.probes.borrow().get(&surface) {
-            if probe.root_pid == root_pid
+            if probe.provider == provider
+                && probe.root_pid == root_pid
                 && probe.process_start == process_start
-                && probe.at.elapsed() < CODEX_PROBE_INTERVAL
+                && probe.at.elapsed() < SESSION_PROBE_INTERVAL
             {
                 return probe.id.clone();
             }
         }
-        let target = target.clone();
         let id = gtk::gio::spawn_blocking(move || {
-            let home = session_home(&target).ok()?;
+            let (pid, start, home) =
+                process_session_home(provider, root_pid, Some(process_start)).ok()?;
+            #[cfg(target_os = "linux")]
+            if provider == SessionAgent::Claude {
+                let id =
+                    flowmux_state::session_flow::claude_process_session(pid, start, &home.path)?;
+                return (flowmux_procmon::process_start_time(root_pid) == Some(process_start))
+                    .then_some(id);
+            }
+            #[cfg(not(target_os = "linux"))]
+            let _ = (pid, start);
             let saved = flowmux_state::default_agent_session_store();
             let expected = saved
                 .as_ref()
@@ -371,7 +444,8 @@ impl WindowController {
         .flatten();
         self.flow.probes.borrow_mut().insert(
             surface,
-            CodexProbe {
+            SessionProbe {
+                provider,
                 root_pid,
                 process_start,
                 at: Instant::now(),
@@ -456,8 +530,39 @@ impl WindowController {
         });
     }
 
+    async fn detached_flow_sessions(&self) -> BTreeSet<SessionKey> {
+        let agents: Vec<_> = self
+            .running_agents()
+            .into_iter()
+            .filter_map(|agent| {
+                if agent.shell || agent.attachment.is_some() {
+                    return None;
+                }
+                Some((
+                    SessionAgent::from_name(&agent.provider)?,
+                    agent.presence?.session_id?,
+                    agent.pid?,
+                    agent.process_start?,
+                ))
+            })
+            .collect();
+        if agents.is_empty() {
+            return BTreeSet::new();
+        }
+        gtk::gio::spawn_blocking(move || {
+            agents
+                .into_iter()
+                .filter_map(|(provider, id, pid, start)| {
+                    let (_, _, home) = process_session_home(provider, pid, Some(start)).ok()?;
+                    session_key(provider, &home.path, &id).ok()
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     async fn render_session_flow(&self, anchors: &[Anchor]) {
-        let active = self.store.active_workspace().await;
         let mut idle = HashSet::new();
         for anchor in anchors {
             if let Some(focused) = &anchor.target.focused {
@@ -476,12 +581,29 @@ impl WindowController {
                 }
             }
         }
+        let active = self.store.active_workspace().await;
+        let visible = {
+            let catalog = self.flow.catalog.borrow();
+            let Some(catalog) = catalog.as_ref() else {
+                return;
+            };
+            self.flow.panel.restore_views(&catalog.views);
+            self.flow.panel.select_workspace(active)
+        };
+        let detached = if visible {
+            let detached = self.detached_flow_sessions().await;
+            if self.store.active_workspace().await != active {
+                return;
+            }
+            detached
+        } else {
+            BTreeSet::new()
+        };
+        let visible = visible && self.flow.panel.root.is_visible();
         let catalog = self.flow.catalog.borrow();
         let Some(catalog) = catalog.as_ref() else {
             return;
         };
-        self.flow.panel.restore_views(&catalog.views);
-        let visible = self.flow.panel.select_workspace(active);
         let mut workspace_anchors: HashMap<WorkspaceId, BTreeSet<SessionKey>> = HashMap::new();
         let mut running = BTreeSet::new();
         let mut forkable = HashMap::new();
@@ -533,8 +655,10 @@ impl WindowController {
             .into_iter()
             .map(|key| {
                 let record = catalog.snapshot.records.get(key);
-                let is_running = running.contains(key) || catalog.live.contains_key(key);
-                let available = is_running || catalog.resumable.contains(key);
+                let is_detached = detached.contains(key);
+                let is_running = running.contains(key) || (!is_detached && catalog.live.contains_key(key));
+                let restore_fork = catalog.deferred_claude_forks.contains_key(key);
+                let available = is_running || is_detached || restore_fork || catalog.resumable.contains(key);
                 let title = record
                     .map(|r| r.title.clone())
                     .unwrap_or_else(|| key.id.clone());
@@ -544,6 +668,10 @@ impl WindowController {
                     title,
                     if is_running {
                         "Open session · select to focus"
+                    } else if is_detached {
+                        "Background session · select to reconnect"
+                    } else if restore_fork {
+                        "Select to resume from parent history"
                     } else if available {
                         "Select to resume in a right split"
                     } else {
@@ -719,10 +847,7 @@ impl WindowController {
                 .ok_or("Focus a local terminal pane to open this session")?;
             let provider =
                 SessionAgent::from_name(&key.provider).ok_or("Unknown session provider")?;
-            if let Some(agent) = self
-                .running_session(provider, &key.id, &key.home, destination)
-                .await?
-            {
+            if let Some(agent) = self.running_session(provider, &key.id, &key.home).await? {
                 let binding = flowmux_core::AgentViewBinding {
                     instance: agent.instance,
                     epoch: agent.epoch,
@@ -764,24 +889,45 @@ impl WindowController {
                 return self.focus_foreign_flow_session(&key, live).await;
             }
         }
-        let (session, mut home) = {
+        let (mut session, mut home, mut restore_fork) = {
             let catalog = self.flow.catalog.borrow();
             let catalog = catalog.as_ref().ok_or("Session history is still loading")?;
+            let parent = if fork_source.is_none() {
+                catalog.deferred_claude_forks.get(&key)
+            } else {
+                None
+            };
+            let history_key = parent.unwrap_or(&key);
             let session = catalog
                 .available
-                .get(&key)
+                .get(history_key)
                 .cloned()
                 .ok_or("Native session history is unavailable")?;
             let home = catalog
                 .homes
-                .get(&key)
+                .get(history_key)
                 .cloned()
                 .ok_or("Session store is unavailable")?;
             if fork_source.is_some() && !catalog.forkable.contains(&key) {
                 return Err("This agent's installed CLI does not support external fork".into());
             }
-            (session, home)
+            (session, home, parent.is_some())
         };
+        if restore_fork {
+            // The detached process may have saved a transcript since the graph was loaded.
+            let key = key.clone();
+            if let Some(saved) = gtk::gio::spawn_blocking(move || {
+                flowmux_state::session_history::list_sessions(SessionAgent::Claude, &key.home)
+                    .map(|sessions| sessions.into_iter().find(|session| session.id == key.id))
+            })
+            .await
+            .map_err(|_| "Claude history reader failed")?
+            .map_err(|e| e.to_string())?
+            {
+                session = saved;
+                restore_fork = false;
+            }
+        }
         if !session.cwd.is_dir() || !session.path.is_file() {
             return Err("Session history or project directory is no longer available".into());
         }
@@ -885,20 +1031,40 @@ impl WindowController {
             .clone()
             .or_else(|| std::env::var("SHELL").ok())
             .unwrap_or_else(|| "/bin/bash".into());
-        let mut launch = sessions::prepare_session_launch(
-            &session,
+        let fork = fork_source.is_some();
+        let command = if restore_fork {
+            deferred_claude_fork_command(&session, &key)?
+        } else {
+            if fork {
+                session.fork_command()
+            } else {
+                session.resume_command()
+            }
+            .map_err(|e| e.to_string())?
+        };
+        let managed_line = sessions::provider_shell_line(
+            session.agent,
+            &session.cwd,
             &home,
-            fork_source.is_some(),
-            fork_source.is_some(),
+            fork,
+            true,
+            &command,
+        )?;
+        let mut launch = sessions::prepare_managed_launch(
+            session.agent,
+            &session.cwd,
+            managed_line,
+            format!("{} · {}", session.agent.name(), key.id),
             shell,
         )?;
         launch.fork_source = managed_source;
-        let tab_line = sessions::native_session_line(
-            &session,
+        let tab_line = sessions::provider_shell_line(
+            session.agent,
+            &session.cwd,
             &home,
-            fork_source.is_some(),
-            fork_source.is_some(),
+            fork,
             false,
+            &command,
         )?;
         let surface = SurfaceId::new();
         let operation = Operation {
@@ -1061,21 +1227,24 @@ impl WindowController {
                     if SessionAgent::from_name(&agent.provider) != Some(session.agent) { continue; }
                     let Some(root_pid) = agent.pid else { continue; };
                     let mut id = agent.presence.and_then(|presence| presence.session_id);
-                    if id.is_none() && session.agent == SessionAgent::Codex {
+                    if id.is_none() {
                         let target = SessionTarget {
                             agent: session.agent,
                             focused: Some(FocusedSession { pane, surface, root_pid, process_start: agent.process_start, session_id: None }),
                         };
-                        id = controller.codex_probe(&target).await;
+                        id = controller.session_probe(&target).await;
                     }
                     (root_pid, id)
                 } else {
                     let Some(located) = controller.store.located_agent_presence(surface).await else { continue; };
                     if located.pane != pane || SessionAgent::from_name(&located.presence.name) != Some(session.agent) { continue; }
                     let Some(root_pid) = controller.pane_registry.borrow().terminals.get(&surface).and_then(|terminal| terminal.process_root()) else { continue; };
-                    let id = if located.presence.session_id.is_none() && session.agent == SessionAgent::Codex {
-                        let home = home.path.clone();
-                        gtk::gio::spawn_blocking(move || codex_process_session(root_pid, &home)).await.ok().and_then(Result::ok).flatten()
+                    let id = if located.presence.session_id.is_none() {
+                        let target = SessionTarget {
+                            agent: session.agent,
+                            focused: Some(FocusedSession { pane, surface, root_pid, process_start: None, session_id: None }),
+                        };
+                        controller.session_probe(&target).await
                     } else { located.presence.session_id };
                     (root_pid, id)
                 };
@@ -1316,6 +1485,7 @@ pub(super) async fn check_native(
     *controller.flow.catalog.borrow_mut() = Some(Catalog {
         snapshot: store.snapshot().unwrap(),
         resumable: available.keys().cloned().collect(),
+        deferred_claude_forks: BTreeMap::new(),
         available,
         homes,
         bindings: [(source, key(&child))].into(),
@@ -1823,35 +1993,29 @@ pub(super) async fn check_real_provider(
         .flow
         .panel
         .assert_native_graph(workspace, &family);
-    if agent == SessionAgent::Claude {
-        assert!(
-            !controller.flow.panel.try_click_native_node(&child),
-            "missing native history must not resume"
-        );
-        assert_eq!(controller.pane_registry.borrow().terminals.len(), 1);
-    } else {
-        controller.focus_pane(pane);
-        assert!(controller.flow.panel.try_click_native_node(&child));
-        glib::future_with_timeout(Duration::from_secs(40), async {
-            loop {
-                controller.poll_agent_processes().await;
-                if controller.flow_anchors().await.iter().any(|a| {
-                    a.target
-                        .focused
-                        .as_ref()
-                        .is_some_and(|f| f.session_id.as_deref() == Some(&child.id))
-                }) && db.pending().unwrap().is_empty()
-                {
-                    break;
-                }
-                glib::timeout_future(Duration::from_millis(250)).await;
+    controller.focus_pane(pane);
+    assert!(controller.flow.panel.try_click_native_node(&child));
+    glib::future_with_timeout(Duration::from_secs(40), async {
+        loop {
+            controller.poll_agent_processes().await;
+            if controller.flow_anchors().await.iter().any(|a| {
+                a.target
+                    .focused
+                    .as_ref()
+                    .is_some_and(|f| f.session_id.as_deref() == Some(&child.id))
+            }) && db.pending().unwrap().is_empty()
+            {
+                break;
             }
-        })
-        .await
-        .expect("OpenCode resume must retain the child ID");
-        assert_eq!(controller.pane_registry.borrow().terminals.len(), 2);
-        assert_eq!(db.snapshot().unwrap().lineage, family);
+            glib::timeout_future(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .expect("Resume must retain the child ID");
+    assert_eq!(controller.pane_registry.borrow().terminals.len(), 2);
+    assert_eq!(db.snapshot().unwrap().lineage, family);
 
+    if agent == SessionAgent::OpenCode {
         let resumed = controller
             .flow_anchors()
             .await
@@ -2650,6 +2814,7 @@ mod tests {
             snapshot: db.snapshot().unwrap(),
             available: BTreeMap::new(),
             resumable: BTreeSet::new(),
+            deferred_claude_forks: BTreeMap::new(),
             homes: BTreeMap::new(),
             bindings: HashMap::new(),
             forkable: BTreeSet::new(),
@@ -2815,12 +2980,34 @@ mod tests {
             !snapshot.records.contains_key(&child),
             "do not invent resumable history"
         );
-        assert_eq!(db.live_sessions().unwrap().get(&child), Some(&vec![live]));
+        assert_eq!(
+            db.live_sessions().unwrap().get(&child),
+            Some(&vec![live.clone()])
+        );
         assert!(
             flowmux_state::session_history::list_sessions(SessionAgent::Claude, &home)
                 .unwrap()
                 .is_empty()
         );
+        assert!(db.is_deferred_claude_fork(&child).unwrap());
+        assert!(!db.is_deferred_claude_fork(&source).unwrap());
+        db.sync_live_sessions(live.owner, &[]).unwrap();
+        let resume = Operation {
+            request: uuid::Uuid::new_v4(),
+            source: child.clone(),
+            kind: OperationKind::Resume,
+            target_surface: uuid::Uuid::new_v4(),
+            ..operation
+        };
+        let resumed = LiveSession {
+            surface: resume.target_surface,
+            ..live
+        };
+        assert!(db.begin(&resume).unwrap());
+        assert!(complete_observed_session(&mut db, &resume, &source, &resumed).is_err());
+        complete_observed_session(&mut db, &resume, &child, &resumed).unwrap();
+        assert_eq!(db.snapshot().unwrap().lineage, snapshot.lineage);
+        assert!(db.pending().unwrap().is_empty());
     }
 
     #[test]
@@ -2886,7 +3073,9 @@ mod tests {
         ] {
             std::fs::write(&cli, format!("#!/bin/sh\n{body}\n")).unwrap();
             std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
-            assert_eq!(probe_agent(SessionAgent::OpenCode, &home), expected);
+            let capabilities = probe_agent(SessionAgent::OpenCode, &home);
+            assert_eq!((capabilities.resume, capabilities.fork), expected);
+            assert!(!capabilities.restore_claude_fork);
         }
     }
 }

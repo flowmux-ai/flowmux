@@ -150,7 +150,7 @@ static void on_interrupt(int sig) { (void)sig; interrupted = 1; }
 static void on_stop(int sig) { (void)sig; stopping = 1; }
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--help")) {
-        puts("--resume --fork-session resume fork"); return 0;
+        puts("--resume --fork-session --session-id resume fork"); return 0;
     }
     char path[4096], cwd[4096], line[1024];
     snprintf(path, sizeof path, "%s/starts", getenv("FIXTURE_ROOT"));
@@ -710,19 +710,24 @@ int main(int argc, char **argv) {
                 assert child_live[0]["surface"] == child_surface
                 assert not (history / f"{child_id}.jsonl").exists()
                 h.pass_check("Host root identity completes the reserved fork and publishes lineage before Claude writes history")
-            transcript(child_id, "Managed flow child", session)
+            if args.codex_flow:
+                transcript(child_id, "Managed flow child", session)
             click(Atspi.Role.PUSH_BUTTON, "Session Flow")
             gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "visible Flow graph")
-            click(Atspi.Role.PUSH_BUTTON, "↻")
-            gui.wait_for(lambda: any(child_id in key for key, in rows("SELECT key FROM sessions WHERE metadata IS NOT NULL")),
-                         "saved child history")
+            if args.codex_flow:
+                click(Atspi.Role.PUSH_BUTTON, "↻")
+                gui.wait_for(lambda: any(child_id in key for key, in rows("SELECT key FROM sessions WHERE metadata IS NOT NULL")),
+                             "saved child history")
 
-            def open_child(attached=False):
+            def open_child(attached=False, without_history=False, background=False):
                 def canvas():
                     return find(None, description="Session Flow graph. Arrow keys select a session; Enter opens it.")
 
-                title = f"{provider} · Managed flow child · "
-                suffix = "Open session · select to focus" if attached else "Select to resume in a right split"
+                title = f"{provider} · {child_id if without_history else 'Managed flow child'} · "
+                suffix = ("Open session · select to focus" if attached else
+                          "Background session · select to reconnect" if background else
+                          "Select to resume from parent history" if without_history else
+                          "Select to resume in a right split")
                 last_child_selection = None
                 try:
                     mapped = gui.wait_for(window, "mapped window")
@@ -749,11 +754,34 @@ int main(int argc, char **argv) {
                             last_child_selection = selected
                         return selected == title + suffix
 
-                    gui.wait_for(select_next, "child node state: " + suffix, timeout=40)
+                    gui.wait_for(select_next, "child node state: " + suffix, timeout=15 if without_history else 40)
                     if attached:
                         from PIL import ImageGrab
                         ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "restored-fork.png")
-                    keypress("Return")
+                    if without_history and not background:
+                        def selected_position():
+                            view, = (json.loads(state) for ws, state in rows("SELECT workspace,state FROM views")
+                                     if ws == workspace)
+                            if (view["selected"] or {}).get("id") != child_id:
+                                return None
+                            for key, x, y in rows("SELECT key,x,y FROM sessions WHERE x IS NOT NULL AND y IS NOT NULL"):
+                                if json.loads(key)["id"] == child_id:
+                                    camera = view["camera"]
+                                    return (round(x * camera["zoom"] + camera["origin"]["x"]),
+                                            round(y * camera["zoom"] + camera["origin"]["y"]))
+
+                        x, y = gui.wait_for(selected_position, "saved position of the terminated fork")
+                        bounds = canvas().get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                        assert 0 < x < bounds.width and 0 < y < bounds.height
+                        point = connection.screen().root.translate_coords(mapped, bounds.x + x, bounds.y + y)
+                        from PIL import ImageGrab
+                        ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "terminated-fork-resumable.png")
+                        xtest.fake_input(connection, X.MotionNotify, x=point.x, y=point.y)
+                        xtest.fake_input(connection, X.ButtonPress, 1)
+                        xtest.fake_input(connection, X.ButtonRelease, 1)
+                        connection.sync()
+                    else:
+                        keypress("Return")
                 except AssertionError as error:
                     try:
                         (h.root / "session-flow-selection.json").write_text(json.dumps([
@@ -802,12 +830,9 @@ int main(int argc, char **argv) {
                 h.close_window(process)
                 return
 
-            if args.codex_flow:
-                h.rpc(socket, "surface_focus", pane=child_pane, surface=child_surface)
-                keypress("w", "Alt_L")
-                click(Atspi.Role.PUSH_BUTTON, "Keep running")
-            else:
-                h.rpc(socket, "surface_close", pane=child_pane, surface=child_surface)
+            h.rpc(socket, "surface_focus", pane=child_pane, surface=child_surface)
+            keypress("w", "Alt_L")
+            click(Atspi.Role.PUSH_BUTTON, "Keep running")
             gui.wait_for(lambda: child_pane not in tab_layout(), "fork view closed")
 
             detached = gui.wait_for(lambda: next((a for a in live() if a["instance"] == child["instance"]
@@ -817,7 +842,7 @@ int main(int argc, char **argv) {
                 assert not (detached.get("presence") or {}).get("session_id"), detached
             h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
             before = tab_layout()
-            open_child()
+            open_child(without_history=not args.codex_flow, background=not args.codex_flow)
 
             def background_opened():
                 error = find(None, contains="Cannot reserve") or find(None, contains="ownership is still updating")
@@ -836,26 +861,38 @@ int main(int argc, char **argv) {
             assert len((h.root / "starts").read_text().splitlines()) == 2
             assert len(rows("SELECT request FROM operations")) == 1
             h.pass_check("Opening a Background node in Session Flow reconnects the same process without resume or spawn")
-            h.send(socket, pane, "quit")
-            gui.wait_for(lambda: all(a["instance"] != child["instance"] for a in live()), "child natural exit")
-            h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
-            open_child()
+            if not args.codex_flow:
+                assert not (history / f"{child_id}.jsonl").exists()
+                keypress("w", "Alt_L")
+                click(Atspi.Role.PUSH_BUTTON, "Terminate agent")
+                gui.wait_for(lambda: tab_layout() == before, "terminated fork view closed")
+            else:
+                h.send(socket, pane, "quit")
+            gui.wait_for(lambda: all(a["instance"] != child["instance"] for a in live()), "child execution ended")
+            if args.codex_flow:
+                h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
+            open_child(without_history=not args.codex_flow)
             resumed = gui.wait_for(lambda: next((a for a in live() if a["instance"] != agent["instance"]), None),
                                    "Flow native resume via Host")
+            assert resumed["instance"] != child["instance"]
             panes = gui.wait_for(lambda: panes if len(panes := h.workspace(socket, workspace)["panes"]) == len(before) + 1 else None,
                                 "resumed right split")
             resumed_pane = next(p["id"] for p in panes if p["id"] not in before)
             gui.wait_for(lambda: f"fixture-pid:{resumed['pid']}" in h.screen(socket, resumed_pane), "resumed relay")
-            assert (h.root / "launch").read_text().splitlines() == expected[:3] + [
-                "resume" if args.codex_flow else "--resume", child_id]
+            resume_argv = (expected[:3] + ["resume", child_id] if args.codex_flow else
+                           expected + ["--fork-session", "--session-id", child_id])
+            assert (h.root / "launch").read_text().splitlines() == resume_argv
             if not args.codex_flow:
                 control.call("native_session", instance=resumed["instance"], epoch=resumed["epoch"], pid=resumed["pid"],
                              process_start=resumed["process_start"], session_id=child_id, seq=1,
                              event=dict(event="started", status="idle"))
             gui.wait_for(lambda: len(rows("SELECT request FROM operations WHERE state='complete'")) == 2,
                          "resume reservation completes")
+            assert len(rows("SELECT child FROM forks")) == 1
             assert len((h.root / "starts").read_text().splitlines()) == 3
             h.pass_check("An ended Flow node resumes through Host in a reserved split with one new process")
+            if not args.codex_flow:
+                transcript(child_id, "Managed flow child", session)
             h.close_window(process)
             assert all(Path(f"/proc/{a['pid']}").exists() for a in (agent, resumed))
             process, socket = h.window("session-flow-reopened")
@@ -865,9 +902,47 @@ int main(int argc, char **argv) {
             assert len((h.root / "starts").read_text().splitlines()) == 3
             assert next(a for a in live() if a["instance"] == resumed["instance"])["process_start"] == resumed["process_start"]
             h.pass_check("GUI exit restores the Host-backed Flow tab with the same PID/birth and fresh input")
-            h.send(socket, resumed_pane, "quit")
+            if not args.codex_flow:
+                resumed_surface = tab_layout()[resumed_pane][0]
+                h.rpc(socket, "surface_focus", pane=resumed_pane, surface=resumed_surface)
+                keypress("w", "Alt_L")
+                click(Atspi.Role.PUSH_BUTTON, "Keep running")
+                gui.wait_for(lambda: resumed_pane not in tab_layout(), "restored fork view closed")
+            else:
+                h.send(socket, resumed_pane, "quit")
             h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
             h.send(socket, pane, "quit")
+            if not args.codex_flow:
+                gui.wait_for(lambda: all(a["instance"] != agent["instance"] for a in live()), "original managed parent exited")
+                h.rpc(socket, "surface_focus", pane=pane, surface=original)
+                unhooked = h.root / "unhooked"
+                unhooked.mkdir()
+                h.send(socket, pane, f"FIXTURE_ROOT={shlex.quote(str(unhooked))} {shlex.quote(str(h.root / provider))}")
+                starts = unhooked / "starts"
+                parent_pid = gui.wait_for(lambda: int(starts.read_text()), "Claude running in a regular shell tab")
+                parent_birth = Path(f"/proc/{parent_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+                registry = profile / "sessions"
+                registry.mkdir()
+                machine = Path("/etc/machine-id").read_text().strip()
+                namespace = os.readlink(f"/proc/{parent_pid}/ns/pid")
+                (registry / f"{parent_pid}.json").write_text(json.dumps(dict(
+                    pid=parent_pid, sessionId=session, procStart=parent_birth, pidDomain=f"linux:{machine}:{namespace}")))
+                gui.wait_for(lambda: any(
+                    json.loads(key)["id"] == session and json.loads(binding)["socket"] == str(socket)
+                    and json.loads(binding)["surface"] == original
+                    for key, binding in rows("SELECT key,binding FROM live_sessions")),
+                    "Session Flow recovers the hook-free Claude parent", timeout=15)
+                open_child(background=True)
+                gui.wait_for(lambda: f"fixture-pid:{resumed['pid']}" in h.screen(socket, pane),
+                             "Session Flow reconnects the fork from its recovered parent")
+                h.send(socket, pane, "flow-unhooked-parent")
+                gui.wait_for(lambda: "ACK:flow-unhooked-parent" in h.screen(socket, pane), "reconnected fork accepts input")
+                assert len((h.root / "starts").read_text().splitlines()) == 3
+                assert len(rows("SELECT request FROM operations")) == 2
+                h.pass_check("Claude without a hook session ID anchors its fork family and reconnects the retained fork")
+                h.send(socket, pane, "quit")
+                h.rpc(socket, "surface_focus", pane=pane, surface=original)
+                h.send(socket, pane, "quit")
             control.close()
             control = None
             gui.wait_for(lambda: host.poll() == 0, "Flow roots exit and Host retires", timeout=15)

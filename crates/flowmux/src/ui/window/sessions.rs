@@ -254,45 +254,57 @@ pub(super) fn session_home(target: &SessionTarget) -> Result<SessionHome, String
             arguments: Vec::new(),
         });
     };
+    let (_, _, home) = process_session_home(target.agent, focused.root_pid, focused.process_start)?;
+    Ok(home)
+}
+
+pub(super) fn process_session_home(
+    provider: SessionAgent,
+    root_pid: u32,
+    process_start: Option<u64>,
+) -> Result<(u32, u64, SessionHome), String> {
     let valid_process = || {
-        focused.process_start.is_none_or(|start| {
-            flowmux_procmon::process_start_time(focused.root_pid) == Some(start)
-        })
+        process_start
+            .is_none_or(|start| flowmux_procmon::process_start_time(root_pid) == Some(start))
     };
     if !valid_process() {
         return Err("The agent process was replaced".into());
     }
     let is_agent = |pid: &u32| {
         flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
-            == Some(target.agent)
+            == Some(provider)
     };
     // A managed root is the provider, or a launcher with the provider beneath it.
-    let pid = if focused.process_start.is_some() && is_agent(&focused.root_pid) {
-        focused.root_pid
+    let pid = if process_start.is_some() && is_agent(&root_pid) {
+        root_pid
     } else {
-        flowmux_procmon::descendants(focused.root_pid)
+        flowmux_procmon::descendants(root_pid)
             .map_err(|e| e.to_string())?
             .into_iter()
             .filter(is_agent)
             .min()
             .ok_or("The agent is no longer running in this tab")?
     };
+    let start = flowmux_procmon::process_start_time(pid).ok_or("The agent is no longer running")?;
     let flowmux_state::session_history::SessionLaunchContext {
         environment,
         arguments,
-    } = flowmux_state::session_history::SessionLaunchContext::read(target.agent, pid)?;
-    if !valid_process() {
+    } = flowmux_state::session_history::SessionLaunchContext::read(provider, pid)?;
+    if !valid_process() || flowmux_procmon::process_start_time(pid) != Some(start) {
         return Err("The agent process was replaced".into());
     }
-    let path = target
-        .agent
+    let path = provider
         .history_home(|key| environment.get(key).map(PathBuf::from))
         .ok_or("Agent home directory is unavailable")?;
-    Ok(SessionHome {
-        path,
-        environment,
-        arguments,
-    })
+    Ok((
+        pid,
+        start,
+        SessionHome {
+            path,
+            environment,
+            arguments,
+        },
+    ))
 }
 
 impl WindowController {
@@ -352,7 +364,6 @@ impl WindowController {
         provider: SessionAgent,
         id: &str,
         home: &std::path::Path,
-        location: (PaneId, SurfaceId),
     ) -> Result<Option<flowmux_ipc::agent_host::AgentInstance>, String> {
         let handle = self
             .tokio_handle
@@ -441,17 +452,9 @@ impl WindowController {
                     {
                         return Ok(false);
                     }
-                    let target = SessionTarget {
-                        agent: provider,
-                        focused: Some(FocusedSession {
-                            pane: location.0,
-                            surface: location.1,
-                            root_pid,
-                            process_start: Some(process_start),
-                            session_id: None,
-                        }),
-                    };
-                    let current = session_home(&target)?
+                    let (_, _, current_home) =
+                        process_session_home(provider, root_pid, Some(process_start))?;
+                    let current = current_home
                         .path
                         .canonicalize()
                         .map_err(|e| e.to_string())?;
@@ -726,7 +729,7 @@ impl WindowController {
             return;
         }
         match self
-            .running_session(session.agent, &session.id, &home.path, (pane, surface))
+            .running_session(session.agent, &session.id, &home.path)
             .await
         {
             Ok(Some(agent)) => {

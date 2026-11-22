@@ -1,10 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Exact process-to-rollout evidence for Codex versions that defer startup hooks.
+//! Native session identity for live processes without a hook session ID.
 //! Never infer identity from the newest file, a title, or a shared daemon.
 use crate::session_history::{session, SessionAgent};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Check Claude's per-process registry against the live PID and its birth marker.
+// shortcut: Linux birth markers only, extend after verifying the macOS registry format.
+#[cfg(target_os = "linux")]
+pub fn claude_process_session(pid: u32, start: u64, home: &Path) -> Option<String> {
+    use std::io::Read;
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Registration {
+        pid: u32,
+        proc_start: String,
+        pid_domain: String,
+        session_id: uuid::Uuid,
+    }
+
+    let namespace = std::fs::read_link("/proc/self/ns/pid").ok()?;
+    if std::fs::read_link(format!("/proc/{pid}/ns/pid")).ok()? != namespace {
+        return None;
+    }
+    let machine = std::fs::read_to_string("/etc/machine-id").unwrap_or_default();
+    let path = home.join("sessions").join(format!("{pid}.json"));
+    if !path.metadata().ok()?.is_file() {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let record: Registration = serde_json::from_reader(file.take(16 * 1024)).ok()?;
+    (record.pid == pid
+        && record.proc_start.parse::<u64>().ok() == Some(start)
+        && record.pid_domain == format!("linux:{}:{}", machine.trim(), namespace.display())
+        && flowmux_procmon::process_start_time(pid) == Some(start))
+    .then(|| record.session_id.to_string())
+}
 
 /// Parse only the rollouts the process tree holds open for writing. Walking
 /// every transcript under `home` on each call read hundreds of megabytes per
@@ -153,6 +186,39 @@ mod tests {
 
 #[cfg(all(test, target_os = "linux"))]
 mod linux_tests {
+    #[test]
+    fn claude_registration_must_match_process_birth_and_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = dir.path().join("sessions");
+        std::fs::create_dir(&sessions).unwrap();
+        let pid = std::process::id();
+        let start = flowmux_procmon::process_start_time(pid).unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let machine = std::fs::read_to_string("/etc/machine-id").unwrap_or_default();
+        let namespace = std::fs::read_link("/proc/self/ns/pid").unwrap();
+        let domain = format!("linux:{}:{}", machine.trim(), namespace.display());
+        let registration = sessions.join(format!("{pid}.json"));
+        let write_registration = |birth: u64, domain: &str| {
+            std::fs::write(
+                &registration,
+                serde_json::json!({
+                    "pid": pid, "procStart": birth.to_string(), "pidDomain": domain, "sessionId": id,
+                })
+                .to_string(),
+            )
+            .unwrap();
+        };
+        write_registration(start + 1, &domain);
+        assert_eq!(super::claude_process_session(pid, start, dir.path()), None);
+        write_registration(start, "foreign");
+        assert_eq!(super::claude_process_session(pid, start, dir.path()), None);
+        write_registration(start, &domain);
+        assert_eq!(
+            super::claude_process_session(pid, start, dir.path()),
+            Some(id)
+        );
+    }
+
     #[test]
     fn process_session_parses_only_rollouts_the_tree_writes() {
         let dir = tempfile::tempdir().unwrap();

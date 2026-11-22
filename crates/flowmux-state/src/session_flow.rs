@@ -13,6 +13,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 mod process;
+#[cfg(target_os = "linux")]
+pub use process::claude_process_session;
 pub use process::codex_process_session;
 
 const SCHEMA: i64 = 4;
@@ -318,6 +320,20 @@ impl FlowStore {
         read_snapshot(&self.connection)
     }
 
+    pub fn is_deferred_claude_fork(&self, key: &SessionKey) -> io::Result<bool> {
+        if key.provider != "claude" {
+            return Ok(false);
+        }
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM forks JOIN sessions ON sessions.key=forks.child
+                 WHERE forks.child=?1 AND sessions.metadata IS NULL)",
+                [encode(key)?],
+                |row| row.get(0),
+            )
+            .map_err(io::Error::other)
+    }
+
     /// Import a batch transactionally; inconsistent evidence rejects the whole batch.
     pub fn import(
         &mut self,
@@ -535,18 +551,22 @@ impl FlowStore {
                 continue;
             };
             let sessions = crate::session_history::list_sessions(agent, &operation.source.home)?;
-            let Some(session) = sessions.iter().find(|session| session.id == id) else {
-                continue;
-            };
+            let session = sessions.iter().find(|session| session.id == id);
             let observed = SessionKey {
                 id,
                 ..operation.source.clone()
             };
             let verified = match operation.kind {
-                OperationKind::Resume => observed == operation.source,
-                OperationKind::Fork => {
-                    session.fork_parent()?.as_deref() == Some(&operation.source.id)
+                OperationKind::Resume => {
+                    observed == operation.source
+                        && (session.is_some() || self.is_deferred_claude_fork(&observed)?)
                 }
+                OperationKind::Fork => match session {
+                    Some(session) => {
+                        session.fork_parent()?.as_deref() == Some(&operation.source.id)
+                    }
+                    None => false,
+                },
             };
             if verified {
                 self.complete(&operation, &observed)?;
