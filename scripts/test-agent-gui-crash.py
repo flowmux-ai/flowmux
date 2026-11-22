@@ -7,6 +7,7 @@ Linux needs a display and the real systemd user bus; macOS uses launchd.
 Only GUI processes created here are killed. Logs and state remain under /tmp.
 """
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,11 @@ import sys
 import tempfile
 import time
 import uuid
+
+_host = importlib.util.spec_from_file_location(
+    "host_fixture", Path(__file__).resolve().with_name("test-agent-host-gui.py"))
+host_fixture = importlib.util.module_from_spec(_host)
+_host.loader.exec_module(host_fixture)
 
 
 def wait_for(check, description, timeout=30):
@@ -107,7 +113,7 @@ while not (root / 'release').exists():
 
     def host_call(op):
         stream.sendall((json.dumps({"id": 1, "kind": "request", "verb": "agent_host",
-                                   "request": {"op": op, **({"version": 18, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
+                                   "request": {"op": op, **({"version": host_fixture.PROTOCOL_VERSION, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
         response = json.loads(reader.readline())
         assert response["id"] == 1, response
         assert "error" not in response, response
