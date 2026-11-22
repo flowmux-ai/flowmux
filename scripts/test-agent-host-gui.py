@@ -35,15 +35,11 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
-def protocol_version():
-    """The Agent Host protocol of this checkout, so fixtures follow a version change."""
-    source = (Path(__file__).resolve().parents[1] / "crates/flowmux-ipc/src/agent_host.rs").read_text()
-    match = re.search(r"^pub const PROTOCOL_VERSION: u32 = (\d+);", source, re.M)
-    assert match, "Agent Host PROTOCOL_VERSION not found"
-    return int(match.group(1))
-
-
-PROTOCOL_VERSION = protocol_version()
+_protocol = importlib.util.spec_from_file_location(
+    "agent_host_protocol", Path(__file__).resolve().with_name("agent_host_protocol.py"))
+agent_host_protocol = importlib.util.module_from_spec(_protocol)
+_protocol.loader.exec_module(agent_host_protocol)
+PROTOCOL_VERSION = agent_host_protocol.PROTOCOL_VERSION
 
 
 def launch_request_id():

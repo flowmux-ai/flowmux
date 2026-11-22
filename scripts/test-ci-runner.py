@@ -130,7 +130,7 @@ if name == 'cargo' and 'macos_native' in args:
 class RunnerTests(unittest.TestCase):
     def test_agent_host_fixtures_follow_the_protocol_version(self):
         root = Path(__file__).resolve().parents[1]
-        spec = importlib.util.spec_from_file_location("host_fixture", root / "scripts/test-agent-host-gui.py")
+        spec = importlib.util.spec_from_file_location("agent_host_protocol", root / "scripts/agent_host_protocol.py")
         host = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(host)
         source = (root / "crates/flowmux-ipc/src/agent_host.rs").read_text()

@@ -19,10 +19,10 @@ import tempfile
 import time
 import uuid
 
-_host = importlib.util.spec_from_file_location(
-    "host_fixture", Path(__file__).resolve().with_name("test-agent-host-gui.py"))
-host_fixture = importlib.util.module_from_spec(_host)
-_host.loader.exec_module(host_fixture)
+_protocol = importlib.util.spec_from_file_location(
+    "agent_host_protocol", Path(__file__).resolve().with_name("agent_host_protocol.py"))
+agent_host_protocol = importlib.util.module_from_spec(_protocol)
+_protocol.loader.exec_module(agent_host_protocol)
 
 
 def wait_for(check, description, timeout=30):
@@ -113,7 +113,7 @@ while not (root / 'release').exists():
 
     def host_call(op):
         stream.sendall((json.dumps({"id": 1, "kind": "request", "verb": "agent_host",
-                                   "request": {"op": op, **({"version": host_fixture.PROTOCOL_VERSION, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
+                                   "request": {"op": op, **({"version": agent_host_protocol.PROTOCOL_VERSION, "role": "observer"} if op == "hello" else {})}}) + "\n").encode())
         response = json.loads(reader.readline())
         assert response["id"] == 1, response
         assert "error" not in response, response
