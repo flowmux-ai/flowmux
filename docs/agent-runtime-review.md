@@ -51,6 +51,10 @@
 | AR-116 | 회귀 재검사 | 다른 tab의 flood 중 echo p50이 `ae13bd05` 20ms에서 37–56ms로 나빠졌다. 즉시 응답하는 long-poll이 4KB 단위 frame을 4배 자주 보냈다. 연속 출력 중에는 shell frame을 16ms 모은다 | 3회 반복: 수정 전 37–56ms, 수정 후 17.8ms. 혼자 입력하는 echo p50 2.2ms 유지 |
 | AR-117 | 독립 검토 F2·F4 | 복구 중 relay가 SIGHUP·SIGTERM·SIGINT를 놓쳐 닫힌 tab에 shell을 다시 만들 수 있었다. 복구 횟수는 60초 넘게 동작한 view 뒤에 초기화한다 | relay 단위 검사, Host SIGKILL 격리 재검사 |
 
+| AR-118 | Codex PR 검토 | managed relay가 GUI 작업 디렉터리에서 시작해 agent 출력의 상대 파일 링크와 pty-tee OSC 7이 다른 디렉터리를 가리켰다. relay를 agent project(존재할 때)에서 시작한다 | 격리: project ≠ GUI cwd에서 relay·pty-tee cwd가 project |
+| AR-119 | Codex PR 검토 | 다른 창이 가져간 hosted shell 안의 `flowmux` 명령이 원래 창 socket과 pane을 썼다. 원래 창에 tab이 없으면 다른 창 socket 중 그 tab을 가진 하나를 찾아 socket·pane·workspace를 바꾼다 | 격리 두 GUI: `ae13bd05` `identify`는 A 창, 수정본은 B 창·B pane |
+| AR-120 | PR CI | regression의 browser-control이 파일 선택(GUI 연결 끊김·GLib critical)과 pointer 이동 대기에서 간헐 실패했다. 이 PR 이전 20회 이상 통과, 이후 4회 중 2회 실패. 로컬 15회 이상(portal 유무, fatal criticals, CPU 부하)에서 GUI 연결 끊김은 재현되지 않았고 부하 시 수정 전·후 빌드 모두 타이밍 실패가 있었다. 두 단계를 extended 전용(`FLOWMUX_BROWSER_NATIVE_DIALOGS=1`)으로 옮겼다 | 로컬 regression 22·extended 23 통과. **원인 미확정** |
+
 - 재검사에서 회귀 없음: flood 중 Ctrl-C, 숨긴 tab의 400,000줄 flood와 scrollback,
   15초 정지한 view 해제, agent가 실행 중인 shell tab 닫기(agent·shell 유지).
 - 같은 build로 hosted-terminal 4·agent-host 33·agent-gui-response-limit 5·agent-drag 4·

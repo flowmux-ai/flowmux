@@ -18,6 +18,10 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Native dialogs and pointer-driven navigation wait on the desktop's own timing; the regression
+# suite leaves them to the extended one.
+NATIVE_DIALOGS = os.environ.get("FLOWMUX_BROWSER_NATIVE_DIALOGS") == "1"
+
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1253,71 +1257,8 @@ def exercise(cli, url, root):
     evaluate("window.removeEventListener('keyup',blockDialogKeyUp,true); dialogButton.remove(); 'removed'")
     evaluate("mutations.length=0; 'reset fixture changes'")
     print("PASS: page dialogs require matching IDs, complete native clicks/keys and preserve confirm/prompt/alert replies", flush=True)
-    def chooser(*args, **kwargs):
-        if args and args[0] == "select":
-            args = (*args, "--root", str(root))
-        result = browser("file-chooser", *(args or ("status",)), **kwargs)
-        return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["file_chooser"]
-
-    def open_chooser(name):
-        browser("focus", reference(snapshot(), name))
-        browser("press", "Enter")
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            pending = chooser()
-            if pending:
-                return pending
-            time.sleep(.02)
-        raise AssertionError("file chooser did not appear")
-
-    upload_file = root / "한글 upload.txt"
-    upload_file.write_text("private fixture 한글🙂")
-    another_file = root / "second.txt"
-    another_file.write_text("second fixture")
-    assert chooser() is None
-    pending = open_chooser("Upload file")
-    assert not pending["multiple"]
-    chooser("select", "stale-id", str(upload_file), error=True)
-    chooser("select", pending["id"], str(root / "missing"), error=True)
-    chooser("select", pending["id"], str(root), error=True)
-    chooser("select", pending["id"], str(upload_file), str(another_file), error=True)
-    assert chooser()["id"] == pending["id"]
-    browser("file-chooser", "select", pending["id"], str(upload_file), error=True)
-    escape = root / "escape.txt"
-    escape.symlink_to("/etc/hosts")
-    chooser("select", pending["id"], str(escape), error=True)
-    assert chooser()["id"] == pending["id"]
-    chooser("select", pending["id"], str(upload_file))
-    assert browser("wait", "--js", "window.uploadResult?.files.length === 1")["browser_bool_result"]["value"]
-    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
-    for item in uploaded["files"]:
-        item["name"] = unicodedata.normalize("NFC", item["name"])
-    assert uploaded == {"trusted": True, "files": [{"name": upload_file.name, "text": upload_file.read_text()}]}, uploaded
-    pending = open_chooser("Upload files")
-    assert pending["multiple"]
-    chooser("select", pending["id"], str(upload_file), str(another_file))
-    assert browser("wait", "--js", "window.uploadResult?.files.length === 2")["browser_bool_result"]["value"]
-    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
-    for item in uploaded["files"]:
-        item["name"] = unicodedata.normalize("NFC", item["name"])
-    assert uploaded["trusted"] and uploaded["files"] == [{"name": f.name, "text": f.read_text()} for f in [upload_file, another_file]], uploaded
-    previous_id = pending["id"]
-    pending = open_chooser("Upload files")
-    chooser("cancel", previous_id, error=True)
-    chooser("cancel", pending["id"])
-    assert chooser() is None
-    assert evaluate("String(uploads.files.length)") == "2", "cancel replaced existing files"
-    original_surface = snapshot()["page"]["surface_id"]
-    cli("browser", "open", url, pane_context=terminal)
-    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
-    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
-    closing_surface = snapshot()["page"]["surface_id"]
-    pending = open_chooser("Upload file")
-    cli("close-tab", closing_surface, "--pane", pane)
-    assert snapshot()["page"]["surface_id"] == original_surface
-    chooser("select", pending["id"], str(upload_file), error=True)
-    assert chooser() is None
-    print("PASS: native file selection validates paths and IDs and delivers exact file contents", flush=True)
+    if NATIVE_DIALOGS:
+        exercise_file_chooser(browser, cli, reference, snapshot, evaluate, terminal, pane, url, root)
     before = evaluate("document.documentElement.outerHTML")
     first = snapshot()
     assert evaluate("document.documentElement.outerHTML") == before
@@ -1810,6 +1751,75 @@ def exercise_navigation(cli, url, state, server):
     print("BROWSER_NAVIGATION_COMPLETION_OK", flush=True)
 
 
+
+def exercise_file_chooser(browser, cli, reference, snapshot, evaluate, terminal, pane, url, root):
+    """Native file chooser dialogs: their timing depends on the desktop's dialog services."""
+    def chooser(*args, **kwargs):
+        if args and args[0] == "select":
+            args = (*args, "--root", str(root))
+        result = browser("file-chooser", *(args or ("status",)), **kwargs)
+        return result if kwargs.get("error") else json.loads(result["browser_result"]["value"])["file_chooser"]
+
+    def open_chooser(name):
+        browser("focus", reference(snapshot(), name))
+        browser("press", "Enter")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            pending = chooser()
+            if pending:
+                return pending
+            time.sleep(.02)
+        raise AssertionError("file chooser did not appear")
+
+    upload_file = root / "한글 upload.txt"
+    upload_file.write_text("private fixture 한글🙂")
+    another_file = root / "second.txt"
+    another_file.write_text("second fixture")
+    assert chooser() is None
+    pending = open_chooser("Upload file")
+    assert not pending["multiple"]
+    chooser("select", "stale-id", str(upload_file), error=True)
+    chooser("select", pending["id"], str(root / "missing"), error=True)
+    chooser("select", pending["id"], str(root), error=True)
+    chooser("select", pending["id"], str(upload_file), str(another_file), error=True)
+    assert chooser()["id"] == pending["id"]
+    browser("file-chooser", "select", pending["id"], str(upload_file), error=True)
+    escape = root / "escape.txt"
+    escape.symlink_to("/etc/hosts")
+    chooser("select", pending["id"], str(escape), error=True)
+    assert chooser()["id"] == pending["id"]
+    chooser("select", pending["id"], str(upload_file))
+    assert browser("wait", "--js", "window.uploadResult?.files.length === 1")["browser_bool_result"]["value"]
+    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
+    for item in uploaded["files"]:
+        item["name"] = unicodedata.normalize("NFC", item["name"])
+    assert uploaded == {"trusted": True, "files": [{"name": upload_file.name, "text": upload_file.read_text()}]}, uploaded
+    pending = open_chooser("Upload files")
+    assert pending["multiple"]
+    chooser("select", pending["id"], str(upload_file), str(another_file))
+    assert browser("wait", "--js", "window.uploadResult?.files.length === 2")["browser_bool_result"]["value"]
+    uploaded = json.loads(evaluate("JSON.stringify(uploadResult)"))
+    for item in uploaded["files"]:
+        item["name"] = unicodedata.normalize("NFC", item["name"])
+    assert uploaded["trusted"] and uploaded["files"] == [{"name": f.name, "text": f.read_text()} for f in [upload_file, another_file]], uploaded
+    previous_id = pending["id"]
+    pending = open_chooser("Upload files")
+    chooser("cancel", previous_id, error=True)
+    chooser("cancel", pending["id"])
+    assert chooser() is None
+    assert evaluate("String(uploads.files.length)") == "2", "cancel replaced existing files"
+    original_surface = snapshot()["page"]["surface_id"]
+    cli("browser", "open", url, pane_context=terminal)
+    assert browser("wait", "--url", url)["browser_bool_result"]["value"]
+    assert browser("wait", "--ready-state", "complete")["browser_bool_result"]["value"]
+    closing_surface = snapshot()["page"]["surface_id"]
+    pending = open_chooser("Upload file")
+    cli("close-tab", closing_surface, "--pane", pane)
+    assert snapshot()["page"]["surface_id"] == original_surface
+    chooser("select", pending["id"], str(upload_file), error=True)
+    assert chooser() is None
+    print("PASS: native file selection validates paths and IDs and delivers exact file contents", flush=True)
+
 def main():
     binary = Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/flowmux").resolve()
     cli_binary = binary.with_name("flowmuxctl")
@@ -1860,7 +1870,8 @@ def main():
                     exercise_page_reads(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_scroll_pages(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_covered_clicks(cli, f"http://127.0.0.1:{server.server_port}/", root)
-                    exercise_pointer_navigation(cli, f"http://127.0.0.1:{server.server_port}/", root)
+                    if NATIVE_DIALOGS:
+                        exercise_pointer_navigation(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_run_batch(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_ownership(cli, f"http://127.0.0.1:{server.server_port}/", root)
                     exercise_diagnostics(cli, f"http://127.0.0.1:{server.server_port}/", root)
