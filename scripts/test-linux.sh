@@ -16,6 +16,8 @@ case "${1:-}" in
 esac
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+# Native browser dialogs and pointer navigation follow desktop timing: extended only.
+if [[ $suite == extended ]]; then export FLOWMUX_BROWSER_NATIVE_DIALOGS=1; fi
 test_log="$CARGO_TARGET_DIR/ci/linux/tests.jsonl"
 mkdir -p "$(dirname "$test_log")"
 rm -f -- "$(dirname "$test_log")/tests/"*.json

@@ -10,6 +10,8 @@ case "$mode:$(uname -s)" in
     *) echo "Usage: $0 linux|macos (on the matching OS)" >&2; exit 2 ;;
 esac
 suite=${2:-regression}
+# Native browser dialogs and pointer navigation follow desktop timing: extended only.
+if [[ $suite == extended ]]; then export FLOWMUX_BROWSER_NATIVE_DIALOGS=1; fi
 case "$suite" in
     regression|extended) ;;
     *) echo "Usage: $0 linux|macos [regression|extended]" >&2; exit 2 ;;
