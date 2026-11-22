@@ -632,9 +632,29 @@ int main(int argc, char **argv) {
             gui.wait_for(fork_enabled, "managed session fork eligibility", timeout=15)
             assert find(Atspi.Role.PUSH_BUTTON, "Fit") is None
             h.pass_check("Managed Host identity and idle presence enable Fork while Session Flow is hidden")
+            if args.codex_flow:
+                # Reproduce a previous window leaving a Resume pending for a session that is already open.
+                request = str(uuid.uuid4())
+                with sqlite3.connect(database) as db:
+                    source, = db.execute("SELECT key FROM sessions WHERE json_extract(key, '$.id') = ?",
+                                         (session,)).fetchone()
+                    intent = dict(request=request, owner=str(uuid.uuid4()), owner_pid=2**31 - 1,
+                                  source=json.loads(source), kind="Resume", target_surface=str(uuid.uuid4()))
+                    db.execute("INSERT INTO operations(request,source,intent,state) VALUES(?,?,?,'pending')",
+                               (request, source, json.dumps(intent)))
             assert fork_menu().get_action_iface().do_action(0)
-            child = gui.wait_for(lambda: next((a for a in live() if a["instance"] != agent["instance"]), None),
-                                 "managed fork child")
+
+            def fork_child():
+                error = find(None, contains="Cannot reserve this session")
+                assert error is None, error.get_name() if error else ""
+                return next((a for a in live() if a["instance"] != agent["instance"]), None)
+
+            child = gui.wait_for(fork_child, "managed fork child")
+            if args.codex_flow:
+                with sqlite3.connect(database) as db:
+                    assert db.execute("SELECT state FROM operations WHERE request=?", (request,)).fetchone() == ("pending",)
+                    db.execute("DELETE FROM operations WHERE request=?", (request,))
+                h.pass_check("An earlier pending Resume does not block the live Codex session from forking")
             panes = gui.wait_for(lambda: panes if len(panes := h.workspace(socket, workspace)["panes"]) == 2 else None,
                                 "reserved right split")
             child_pane = next(p for p in panes if p["id"] != pane)

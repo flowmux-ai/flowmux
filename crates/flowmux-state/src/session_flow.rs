@@ -15,7 +15,7 @@ use uuid::Uuid;
 mod process;
 pub use process::codex_process_session;
 
-const SCHEMA: i64 = 3;
+const SCHEMA: i64 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionRecord {
@@ -209,6 +209,17 @@ impl FlowStore {
         if version < 3 {
             transaction.execute_batch("CREATE TABLE live_sessions (key TEXT NOT NULL, owner TEXT NOT NULL, surface TEXT NOT NULL, binding TEXT NOT NULL, PRIMARY KEY(key,owner,surface)); PRAGMA user_version = 3;").map_err(io::Error::other)?;
         }
+        if version < 4 {
+            // Resume opens the source itself; Fork uses it to create a different session.
+            transaction
+                .execute_batch(
+                    "DROP INDEX active_operation;
+                     CREATE UNIQUE INDEX active_operation ON operations(source, json_extract(intent, '$.kind'))
+                     WHERE state = 'pending';
+                     PRAGMA user_version = 4;",
+                )
+                .map_err(io::Error::other)?;
+        }
         transaction.commit().map_err(io::Error::other)?;
         Ok(Self { connection })
     }
@@ -398,15 +409,27 @@ impl FlowStore {
                 "This session is already open in a Flowmux window",
             ));
         }
-        tx.execute(
-            "INSERT INTO operations(request,source,intent,state) VALUES(?1,?2,?3,'pending')",
-            params![
-                operation.request.to_string(),
-                encode(&operation.source)?,
-                encode(operation)?
-            ],
-        )
-        .map_err(io::Error::other)?;
+        let inserted = tx
+            .execute(
+                "INSERT INTO operations(request,source,intent,state) VALUES(?1,?2,?3,'pending')
+                 ON CONFLICT DO NOTHING",
+                params![
+                    operation.request.to_string(),
+                    encode(&operation.source)?,
+                    encode(operation)?
+                ],
+            )
+            .map_err(io::Error::other)?;
+        if inserted == 0 {
+            let action = match operation.kind {
+                OperationKind::Fork => "fork",
+                OperationKind::Resume => "resume",
+            };
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("A {action} is already pending for this session"),
+            ));
+        }
         tx.commit().map_err(io::Error::other)?;
         Ok(true)
     }
@@ -725,7 +748,7 @@ mod tests {
         let op = operation(OperationKind::Fork);
         assert!(a.begin(&op).unwrap());
         assert!(!b.begin(&op).unwrap());
-        assert!(b.begin(&operation(OperationKind::Resume)).is_err());
+        assert!(b.begin(&operation(OperationKind::Fork)).is_err());
         assert!(a.complete(&op, &op.source).is_err());
         assert_eq!(b.pending().unwrap(), std::slice::from_ref(&op));
         let mut stolen = op.clone();
@@ -738,6 +761,28 @@ mod tests {
         assert_eq!(b.snapshot().unwrap().lineage.edges().count(), 1);
         assert!(b.complete(&op, &key("different")).is_err());
         assert!(!b.begin(&op).unwrap());
+    }
+
+    #[test]
+    fn v3_pending_resume_does_not_block_a_fork_after_migration() {
+        let (dir, mut db) = store();
+        db.connection
+            .execute_batch(
+                "DROP INDEX active_operation;
+                 CREATE UNIQUE INDEX active_operation ON operations(source) WHERE state = 'pending';
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        let resume = operation(OperationKind::Resume);
+        assert!(db.begin(&resume).unwrap());
+        drop(db);
+
+        let mut db = FlowStore::open(&dir.path().join("flow.sqlite")).unwrap();
+        let fork = operation(OperationKind::Fork);
+        assert!(db.begin(&fork).unwrap());
+        assert!(db.pending().unwrap().contains(&resume));
+        assert!(db.begin(&operation(OperationKind::Resume)).is_err());
+        assert!(db.begin(&operation(OperationKind::Fork)).is_err());
     }
     #[test]
     fn crash_keeps_intent_and_only_matching_owner_can_fail_or_finish() {
