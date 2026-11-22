@@ -69,7 +69,8 @@ jobs:
             libwebkitgtk-6.0-dev libssl-dev \
             libssh2-1-dev libdbus-1-dev libsecret-1-dev \
             meson ninja-build \
-            dbus xvfb apparmor
+            dbus-x11 xvfb apparmor \
+            python3-xlib python3-gi gir1.2-atspi-2.0 at-spi2-core python3-pil
 
       - name: Install ThorVG (image viewer backend, all loaders + C API)
         run: sudo ./scripts/install-thorvg.sh
@@ -89,6 +90,20 @@ jobs:
         run: |
           cargo build --release --locked \
             -p flowmux -p flowmux-md-viewer -p flowmux-cli -p flowmux-daemon
+
+      - name: Verify Codex fork recovery with release binaries
+        timeout-minutes: 5
+        env:
+          TMPDIR: /tmp
+          G_DEBUG: fatal-criticals
+        run: |
+          set -euo pipefail
+          for scenario in --codex-flow --codex-flow-restore; do
+            aa-exec -p flowmux-webkit -- python3 scripts/test-agent-session-resume-gui.py "$scenario" \
+              --gui target/release/flowmux \
+              --cli target/release/flowmuxctl \
+              --host target/release/flowmux-daemon
+          done
 
       - name: Stage tarball
         run: |

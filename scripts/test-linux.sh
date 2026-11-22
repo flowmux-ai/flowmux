@@ -122,6 +122,14 @@ TMPDIR=/tmp run_test managed-session-flow python3 scripts/test-agent-session-res
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \
   --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
   --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test managed-codex-flow-background python3 scripts/test-agent-session-resume-gui.py --codex-flow \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
+TMPDIR=/tmp run_test managed-codex-flow-restore python3 scripts/test-agent-session-resume-gui.py --codex-flow-restore \
+  --gui "$CARGO_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_TARGET_DIR/debug/flowmuxctl" \
+  --host "$CARGO_TARGET_DIR/debug/flowmux-daemon"
 section=terminal
 run_test pty-spawn-failure python3 scripts/test-pty-spawn-failure-gui.py \
   --gui "$CARGO_TARGET_DIR/debug/flowmux" \

@@ -38,6 +38,7 @@ struct Catalog {
 /// Process evidence for one Codex tab, re-read on the agent poll cadence.
 struct CodexProbe {
     root_pid: u32,
+    process_start: u64,
     at: Instant,
     id: Option<String>,
 }
@@ -242,6 +243,11 @@ fn load_catalog(targets: &[Anchor], owner: uuid::Uuid) -> Result<Catalog, String
         .sync_live_sessions_if_unchanged(owner, &live, &live_baseline)
         .map_err(|e| e.to_string())?;
     catalog.live = store.live_sessions().map_err(|e| e.to_string())?;
+    // A retained process can outlive its window. Keep its reservation guard in the store.
+    catalog.live.retain(|_, bindings| {
+        bindings.retain(|live| live.socket.exists());
+        !bindings.is_empty()
+    });
     catalog.snapshot = store.snapshot().map_err(|e| e.to_string())?;
     Ok(catalog)
 }
@@ -291,29 +297,23 @@ impl WindowController {
                 if registry.is_ssh_pane(pane) {
                     return None;
                 }
-                Some((
-                    registry.workspace_of_pane(pane)?,
-                    pane,
-                    *surface,
-                    terminal.process_root()?,
-                ))
+                Some((registry.workspace_of_pane(pane)?, pane, *surface))
             })
             .collect();
         let mut anchors = Vec::new();
-        for (workspace, pane, surface, _) in terminals.iter().copied() {
+        for (workspace, pane, surface) in terminals.iter().copied() {
             let Some(mut target) = self.terminal_session_target(pane, surface).await else {
                 continue;
             };
-            let Some(focused) = &mut target.focused else {
+            let Some(focused) = &target.focused else {
                 continue;
             };
-            if focused.session_id.is_none()
-                && target.agent == SessionAgent::Codex
-                && focused.process_start.is_none()
-            {
-                focused.session_id = self.codex_probe(surface, pane, focused.root_pid).await;
+            let mut focused = focused.clone();
+            if focused.session_id.is_none() && target.agent == SessionAgent::Codex {
+                focused.session_id = self.codex_probe(&target).await;
             }
             if focused.session_id.is_some() {
+                target.focused = Some(focused);
                 anchors.push(Anchor { workspace, target });
             }
         }
@@ -321,38 +321,40 @@ impl WindowController {
         self.flow
             .probes
             .borrow_mut()
-            .retain(|surface, _| terminals.iter().any(|(_, _, live, _)| live == surface));
+            .retain(|surface, _| terminals.iter().any(|(_, _, live)| live == surface));
         anchors
     }
 
     /// Process evidence for a Codex tab without a hook session id. Every title
     /// change reaches here through the agent displays, so one tab is probed at
     /// most once per [`CODEX_PROBE_INTERVAL`] unless a forced refresh clears it.
-    async fn codex_probe(&self, surface: SurfaceId, pane: PaneId, root_pid: u32) -> Option<String> {
+    async fn codex_probe(&self, target: &SessionTarget) -> Option<String> {
+        let focused = target.focused.as_ref()?;
+        let (surface, root_pid) = (focused.surface, focused.root_pid);
+        let process_start = flowmux_procmon::process_start_time(root_pid)?;
+        if focused
+            .process_start
+            .is_some_and(|start| start != process_start)
+        {
+            return None;
+        }
         if let Some(probe) = self.flow.probes.borrow().get(&surface) {
-            if probe.root_pid == root_pid && probe.at.elapsed() < CODEX_PROBE_INTERVAL {
+            if probe.root_pid == root_pid
+                && probe.process_start == process_start
+                && probe.at.elapsed() < CODEX_PROBE_INTERVAL
+            {
                 return probe.id.clone();
             }
         }
-        let target = SessionTarget {
-            agent: SessionAgent::Codex,
-            focused: Some(FocusedSession {
-                pane,
-                surface,
-                root_pid,
-                process_start: None,
-                session_id: None,
-            }),
-        };
+        let target = target.clone();
         let id = gtk::gio::spawn_blocking(move || {
             let home = session_home(&target).ok()?;
-            let born = flowmux_procmon::process_start_time(root_pid)?;
             let saved = flowmux_state::default_agent_session_store();
             let expected = saved
                 .as_ref()
                 .and_then(|store| store.lookup("codex", surface));
             let id = codex_process_session(root_pid, &home.path).ok().flatten()?;
-            if flowmux_procmon::process_start_time(root_pid) != Some(born) {
+            if flowmux_procmon::process_start_time(root_pid) != Some(process_start) {
                 return None;
             }
             if let Some(saved) = saved {
@@ -371,6 +373,7 @@ impl WindowController {
             surface,
             CodexProbe {
                 root_pid,
+                process_start,
                 at: Instant::now(),
                 id: id.clone(),
             },
@@ -664,19 +667,34 @@ impl WindowController {
             }
         }
         if fork_source.is_none() {
-            let live = {
-                let catalog = self.flow.catalog.borrow();
+            let provider =
+                SessionAgent::from_name(&key.provider).ok_or("Unknown session provider")?;
+            let key = key.clone();
+            let live = gtk::gio::spawn_blocking(move || {
                 anchors.iter().find_map(|anchor| {
                     let focused = anchor.target.focused.as_ref()?;
-                    let matches = catalog.as_ref()?.bindings.get(&focused.surface) == Some(&key)
-                        && focused.session_id.as_ref() == Some(&key.id);
-                    matches.then_some((anchor.workspace, focused.pane, focused.surface))
+                    if anchor.target.agent != provider
+                        || focused.session_id.as_ref() != Some(&key.id)
+                    {
+                        return None;
+                    }
+                    let home = session_home(&anchor.target)
+                        .ok()?
+                        .path
+                        .canonicalize()
+                        .ok()?;
+                    (home == key.home).then_some((anchor.workspace, focused.pane, focused.surface))
                 })
-            };
+            })
+            .await
+            .map_err(|_| "Open session lookup failed")?;
             if let Some((workspace, pane, surface)) = live {
-                self.activate_workspace_at(workspace, Some((pane, Some(surface))))
-                    .await;
-                return Ok(());
+                if self
+                    .activate_workspace_at(workspace, Some((pane, Some(surface))))
+                    .await
+                {
+                    return Ok(());
+                }
             }
         }
         if fork_source.is_none() {
@@ -1026,7 +1044,15 @@ impl WindowController {
                     let Some(agent) = controller.managed_session_agent(binding) else { continue; };
                     if SessionAgent::from_name(&agent.provider) != Some(session.agent) { continue; }
                     let Some(root_pid) = agent.pid else { continue; };
-                    (root_pid, agent.presence.and_then(|presence| presence.session_id))
+                    let mut id = agent.presence.and_then(|presence| presence.session_id);
+                    if id.is_none() && session.agent == SessionAgent::Codex {
+                        let target = SessionTarget {
+                            agent: session.agent,
+                            focused: Some(FocusedSession { pane, surface, root_pid, process_start: agent.process_start, session_id: None }),
+                        };
+                        id = controller.codex_probe(&target).await;
+                    }
+                    (root_pid, id)
                 } else {
                     let Some(located) = controller.store.located_agent_presence(surface).await else { continue; };
                     if located.pane != pane || SessionAgent::from_name(&located.presence.name) != Some(session.agent) { continue; }

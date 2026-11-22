@@ -58,6 +58,8 @@ def main():
     parser.add_argument("--cli", default="target/debug/flowmuxctl")
     parser.add_argument("--host", default="target/debug/flowmux-daemon")
     parser.add_argument("--session-flow", action="store_true", help="exercise managed Session Flow fork, resume and Background reuse")
+    parser.add_argument("--codex-flow", action="store_true", help="exercise Background reuse and resume of a Codex fork without a startup hook")
+    parser.add_argument("--codex-flow-restore", action="store_true", help="focus an already-open Codex fork after GUI restart")
     parser.add_argument("--termination", action="store_true", help="verify explicit interrupt, normal and force termination UI")
     parser.add_argument("--cli-controls", action="store_true", help="verify CLI interrupt, termination and force on live managed execution")
     parser.add_argument("--context", action="store_true", help="query current managed context from actual provider descendants")
@@ -65,21 +67,41 @@ def main():
     parser.add_argument("--tab-fallback", action="store_true", help="refuse Host startup and resume in an ordinary tab")
     parser.add_argument("--protected-pid", type=int, action="append", default=[])
     args = parser.parse_args()
+    args.codex_flow = args.codex_flow or args.codex_flow_restore
+    args.session_flow = args.session_flow or args.codex_flow
     args.termination = args.termination or args.cli_controls
     for name in ("gui", "cli", "host"):
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
     h = gui.Harness(args)
     connection = control = keeper = None
     try:
-        profile = h.root / "claude ' 한글 $(exit 8)"
-        history = profile / "projects/fixture"
+        provider = "codex" if args.codex_flow else "claude"
+        display_name = "Codex" if args.codex_flow else "Claude"
+        profile = h.root / f"{provider} ' 한글 $(exit 8)"
+        history = profile / ("sessions/2026/11/22" if args.codex_flow else "projects/fixture")
         history.mkdir(parents=True)
         project = h.root / "project ' 한글 $(exit 9)"
         project.mkdir()
         session = str(uuid.uuid4())
-        (history / f"{session}.jsonl").write_text(json.dumps(dict(
-            type="user", sessionId=session, cwd=str(project),
-            message=dict(role="user", content="Managed resume fixture"))) + "\n")
+        child_id = str(uuid.uuid4())
+
+        def transcript(session_id, title, parent=None):
+            if args.codex_flow:
+                path = history / f"rollout-2026-11-22T00-00-00-{session_id}.jsonl"
+                meta = dict(id=session_id, source="cli", cwd=str(project))
+                if parent:
+                    meta["forked_from_id"] = parent
+                records = [dict(type="session_meta", payload=meta),
+                           dict(type="response_item", payload=dict(type="message", role="user",
+                                content=[dict(type="input_text", text=title)]))]
+            else:
+                path = history / f"{session_id}.jsonl"
+                records = [dict(type="user", sessionId=session_id, cwd=str(project),
+                                message=dict(role="user", content=title))]
+            path.write_text("".join(json.dumps(record) + "\n" for record in records))
+            return path
+
+        transcript(session, "Managed resume fixture")
         shell = h.root / "configured-shell"
         shell.write_text("#!/bin/sh\nexport PATH=" + shlex.quote(str(h.root)) + ":$PATH\n"
                          "export FIXTURE_STARTUP=initialized\n"
@@ -89,7 +111,11 @@ def main():
         options = h.root / "config/flowmux/options.json"
         options.parent.mkdir(parents=True, exist_ok=True)
         options.write_text(json.dumps(dict(default_shell=str(shell), auto_resume_agent_sessions=True)))
-        h.env.update(GTK_A11Y="atspi", CLAUDE_CONFIG_DIR=str(profile), FIXTURE_ROOT=str(h.root), SHELL=str(shell))
+        h.env.update(GTK_A11Y="atspi", FIXTURE_ROOT=str(h.root), SHELL=str(shell))
+        h.env["CODEX_HOME" if args.codex_flow else "CLAUDE_CONFIG_DIR"] = str(profile)
+        if args.codex_flow:
+            h.env["FIXTURE_ROLLOUT"] = str(history / f"rollout-2026-11-22T00-00-00-{child_id}.jsonl")
+            h.env["FIXTURE_CHILD"] = child_id
         if args.termination:
             h.env["FIXTURE_TERMINATION"] = "1"
         if args.context:
@@ -117,12 +143,13 @@ def main():
 #include <unistd.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <fcntl.h>
 static volatile sig_atomic_t interrupted, stopping;
 static void on_interrupt(int sig) { (void)sig; interrupted = 1; }
 static void on_stop(int sig) { (void)sig; stopping = 1; }
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--help")) {
-        puts("--resume --fork-session"); return 0;
+        puts("--resume --fork-session resume fork"); return 0;
     }
     char path[4096], cwd[4096], line[1024];
     snprintf(path, sizeof path, "%s/starts", getenv("FIXTURE_ROOT"));
@@ -130,9 +157,15 @@ int main(int argc, char **argv) {
     fprintf(file, "%d\n", getpid()); fclose(file);
     snprintf(path, sizeof path, "%s/launch", getenv("FIXTURE_ROOT"));
     file = fopen(path, "w"); if (!file || !getcwd(cwd, sizeof cwd)) return 1;
-    fprintf(file, "%s\n%s\n%s\n", cwd, getenv("CLAUDE_CONFIG_DIR"), getenv("FIXTURE_STARTUP"));
+    const char *profile = getenv(getenv("FIXTURE_ROLLOUT") ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR");
+    fprintf(file, "%s\n%s\n%s\n", cwd, profile, getenv("FIXTURE_STARTUP"));
     for (int i = 1; i < argc; ++i) fprintf(file, "%s\n", argv[i]);
     fclose(file);
+    if (getenv("FIXTURE_ROLLOUT") && (argc > 1 && !strcmp(argv[1], "fork") ||
+        argc > 2 && !strcmp(argv[1], "resume") && !strcmp(argv[2], getenv("FIXTURE_CHILD")))) {
+        int rollout = open(getenv("FIXTURE_ROLLOUT"), O_WRONLY | O_CREAT | O_APPEND, 0600);
+        if (rollout < 0) return 2;
+    }
     printf("fixture-pid:%d\n", getpid()); fflush(stdout);
     if (getenv("FIXTURE_TERMINATION")) {
         signal(SIGINT, on_interrupt); signal(SIGTERM, on_stop);
@@ -176,7 +209,7 @@ int main(int argc, char **argv) {
     }
 }
 ''')
-        subprocess.run(["cc", str(source), "-o", str(h.root / "claude")], check=True, timeout=30)
+        subprocess.run(["cc", str(source), "-o", str(h.root / provider)], check=True, timeout=30)
         h.start_display()
         os.environ["DBUS_SESSION_BUS_ADDRESS"] = h.env["DBUS_SESSION_BUS_ADDRESS"]
         os.environ.pop("AT_SPI_BUS_ADDRESS", None)
@@ -279,7 +312,7 @@ int main(int argc, char **argv) {
             raise
         action = sessions.get_action_iface()
         assert action and action.get_n_actions() and action.do_action(0), "open Agent sessions"
-        click(Atspi.Role.TOGGLE_BUTTON, "Claude sessions")
+        click(Atspi.Role.TOGGLE_BUTTON, f"{display_name} sessions")
         click(Atspi.Role.CHECK_BOX, "YOLO")
         if args.tab_fallback:
             previous_socket = h.root / "run/flowmux-agent-host.sock"
@@ -347,9 +380,9 @@ int main(int argc, char **argv) {
         metadata = (h.root / "launch").read_text().splitlines()
         expected = [str(project), str(profile), "initialized"]
         if not args.new_agent:
-            expected += ["--resume", session]
+            expected += ["resume" if args.codex_flow else "--resume", session]
         assert metadata == expected, metadata
-        assert agent["provider"] == "claude"
+        assert agent["provider"] == provider
         h.pass_check(("New Agent" if args.new_agent else "Sessions resume") +
                      " uses Host, configured shell startup, literal project/config and native argv")
         control.call("native_session", instance=agent["instance"], epoch=agent["epoch"], pid=pid,
@@ -372,8 +405,8 @@ int main(int argc, char **argv) {
             click(Atspi.Role.PUSH_BUTTON, "Cancel")
             assert (h.root / "starts").read_text().splitlines() == [str(pid)]
             h.pass_check("The Agents header opens New Agent without changing the running execution on cancel")
-        click(Atspi.Role.TOGGLE_BUTTON, "Claude sessions")
-        gui.wait_for(lambda: find(Atspi.Role.LABEL, "Claude · 1 sessions · all projects"), "focused managed root history")
+        click(Atspi.Role.TOGGLE_BUTTON, f"{display_name} sessions")
+        gui.wait_for(lambda: find(Atspi.Role.LABEL, f"{display_name} · 1 sessions · all projects"), "focused managed root history")
         h.pass_check("Focused managed tab browses the provider root's history rather than the relay's descendants")
 
         def context_probe(expected=True, team=False, **request):
@@ -562,10 +595,15 @@ int main(int argc, char **argv) {
                 with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
                     return db.execute(query).fetchall()
 
-            def keypress(name):
+            def keypress(name, modifier=None):
                 code = connection.keysym_to_keycode(XK.string_to_keysym(name))
+                if modifier:
+                    modifier = connection.keysym_to_keycode(XK.string_to_keysym(modifier))
+                    xtest.fake_input(connection, X.KeyPress, modifier)
                 xtest.fake_input(connection, X.KeyPress, code)
                 xtest.fake_input(connection, X.KeyRelease, code)
+                if modifier:
+                    xtest.fake_input(connection, X.KeyRelease, modifier)
                 connection.sync()
 
             def fork_menu():
@@ -603,37 +641,40 @@ int main(int argc, char **argv) {
             child_surface = child_pane["tabs"][0]["id"]
             child_pane = child_pane["id"]
             gui.wait_for(lambda: f"fixture-pid:{child['pid']}" in h.screen(socket, child_pane), "fork relay output")
-            fork_argv = expected + ["--fork-session", "--allow-dangerously-skip-permissions",
-                                    "--permission-mode", "bypassPermissions"]
+            fork_argv = (expected[:3] + ["fork", session, "--dangerously-bypass-approvals-and-sandbox"]
+                         if args.codex_flow else expected + ["--fork-session", "--allow-dangerously-skip-permissions",
+                                                            "--permission-mode", "bypassPermissions"])
             assert (h.root / "launch").read_text().splitlines() == fork_argv
             assert len((h.root / "starts").read_text().splitlines()) == 2
             assert len(rows("SELECT request FROM operations WHERE state='pending'")) == 1
             h.pass_check("Fork launches once in Host with the main-branch permission policy and reserved split surface")
-            child_id = str(uuid.uuid4())
-            control.call("native_session", instance=child["instance"], epoch=child["epoch"], pid=child["pid"],
-                         process_start=child["process_start"], session_id=child_id, seq=1,
-                         event=dict(event="started", status="idle"))
-            gui.wait_for(lambda: rows("SELECT child FROM forks"), "observed fork lineage")
-            assert len(rows("SELECT request FROM operations WHERE state='complete'")) == 1
-            assert not rows("SELECT request FROM operations WHERE state='pending'")
-            child_live = [json.loads(binding) for key, binding in rows("SELECT key,binding FROM live_sessions")
-                          if json.loads(key)["id"] == child_id]
-            assert child_live and child_live[0]["pid"] == child["pid"]
-            assert child_live[0]["surface"] == child_surface
-            assert not (history / f"{child_id}.jsonl").exists()
-            h.pass_check("Host root identity completes the reserved fork and publishes lineage before Claude writes history")
-            (history / f"{child_id}.jsonl").write_text(json.dumps(dict(type="user", sessionId=child_id,
-                cwd=str(project), message=dict(role="user", content="Managed flow child"))) + "\n")
+            if not args.codex_flow:
+                control.call("native_session", instance=child["instance"], epoch=child["epoch"], pid=child["pid"],
+                             process_start=child["process_start"], session_id=child_id, seq=1,
+                             event=dict(event="started", status="idle"))
+                gui.wait_for(lambda: rows("SELECT child FROM forks"), "observed fork lineage")
+                assert len(rows("SELECT request FROM operations WHERE state='complete'")) == 1
+                assert not rows("SELECT request FROM operations WHERE state='pending'")
+                child_live = [json.loads(binding) for key, binding in rows("SELECT key,binding FROM live_sessions")
+                              if json.loads(key)["id"] == child_id]
+                assert child_live and child_live[0]["pid"] == child["pid"]
+                assert child_live[0]["surface"] == child_surface
+                assert not (history / f"{child_id}.jsonl").exists()
+                h.pass_check("Host root identity completes the reserved fork and publishes lineage before Claude writes history")
+            transcript(child_id, "Managed flow child", session)
             click(Atspi.Role.PUSH_BUTTON, "Session Flow")
             gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "visible Flow graph")
             click(Atspi.Role.PUSH_BUTTON, "↻")
             gui.wait_for(lambda: any(child_id in key for key, in rows("SELECT key FROM sessions WHERE metadata IS NOT NULL")),
                          "saved child history")
 
-            def open_child():
+            def open_child(attached=False):
                 def canvas():
                     return find(None, description="Session Flow graph. Arrow keys select a session; Enter opens it.")
 
+                title = f"{provider} · Managed flow child · "
+                suffix = "Open session · select to focus" if attached else "Select to resume in a right split"
+                last_child_selection = None
                 try:
                     mapped = gui.wait_for(window, "mapped window")
                     mapped.set_input_focus(X.RevertToParent, X.CurrentTime)
@@ -648,18 +689,23 @@ int main(int argc, char **argv) {
                         gui.wait_for(lambda: (n := find(None, description=description))
                                      and n.get_state_set().contains(Atspi.StateType.FOCUSED),
                                      "keyboard focus: " + description)
-                    for attempt in range(3):
+                    def select_next():
+                        nonlocal last_child_selection
                         previous = canvas().get_name()
                         keypress("Down")
                         selected = gui.wait_for(lambda: (n := canvas()) and n.get_name() != previous and n,
                                                 "Flow keyboard selection").get_name()
-                        h.log("flow-selection", attempt=attempt, selected=selected)
-                        if selected in ("claude · Managed flow child · " + suffix for suffix in
-                                        ("Open session · select to focus", "Select to resume in a right split")):
-                            keypress("Return")
-                            return
-                    raise AssertionError("Cannot select child in Session Flow")
-                except AssertionError:
+                        h.log("flow-selection", selected=selected)
+                        if selected.startswith(title):
+                            last_child_selection = selected
+                        return selected == title + suffix
+
+                    gui.wait_for(select_next, "child node state: " + suffix, timeout=40)
+                    if attached:
+                        from PIL import ImageGrab
+                        ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "restored-fork.png")
+                    keypress("Return")
+                except AssertionError as error:
                     try:
                         (h.root / "session-flow-selection.json").write_text(json.dumps([
                             dict(name=n.get_name(), role=n.get_role_name(), description=n.get_description(),
@@ -669,33 +715,94 @@ int main(int argc, char **argv) {
                         ImageGrab.grab(xdisplay=h.env["DISPLAY"]).save(h.root / "session-flow-selection.png")
                     except Exception as error:
                         print(f"Flow selection diagnostics failed: {error}", file=sys.stderr, flush=True)
-                    raise
+                    raise AssertionError(f"Expected {title + suffix!r}, last child selection: "
+                                         f"{last_child_selection!r}") from error
 
-            h.rpc(socket, "surface_close", pane=child_pane, surface=child_surface)
-            gui.wait_for(lambda: len(h.workspace(socket, workspace)["panes"]) == 1, "fork view closed")
+            def tab_layout():
+                return {p["id"]: [t["id"] for t in p["tabs"]]
+                        for p in h.workspace(socket, workspace)["panes"]}
+
+            if args.codex_flow_restore:
+                h.rpc(socket, "surface_focus", pane=child_pane, surface=child_surface)
+                sibling = h.rpc(socket, "surface_create", workspace=workspace, cwd=str(project))["surface_created"]["id"]
+                h.wait_active(socket, child_pane, sibling)
+                before = tab_layout()
+                h.close_window(process)
+                assert all(Path(f"/proc/{a['pid']}").exists() for a in (agent, child))
+                process, socket = h.window("session-flow-fork-hidden")
+                gui.wait_for(lambda: find(Atspi.Role.PUSH_BUTTON, "Fit"), "saved Session Flow is open")
+                h.wait_active(socket, child_pane, sibling)
+                control.close()
+                control = host_fixture.HostClient(host_socket, "relay")
+                restored = next(a for a in live() if a["instance"] == child["instance"])
+                assert (restored["pid"], restored["process_start"]) == (child["pid"], child["process_start"])
+                assert not (restored.get("presence") or {}).get("session_id")
+                open_child(attached=True)
+                gui.wait_for(lambda: tab_layout() != before or any(
+                    tab["id"] == child_surface and tab["active"]
+                    for item in h.workspace(socket, workspace)["panes"] for tab in item["tabs"]),
+                             "focus an existing fork or open another tab")
+                assert tab_layout() == before, (before, tab_layout())
+                gui.wait_for(lambda: f"fixture-pid:{child['pid']}" in h.screen(socket, child_pane),
+                             "restored Codex process in the focused tab")
+                h.send(socket, child_pane, "flow-restored-fork")
+                gui.wait_for(lambda: "ACK:flow-restored-fork" in h.screen(socket, child_pane), "restored fork accepts input")
+                assert len((h.root / "starts").read_text().splitlines()) == 2
+                assert len(rows("SELECT request FROM operations WHERE state='complete'")) == 1
+                h.pass_check("Session Flow focuses the restored Codex fork without a startup hook")
+                h.close_window(process)
+                return
+
+            if args.codex_flow:
+                h.rpc(socket, "surface_focus", pane=child_pane, surface=child_surface)
+                keypress("w", "Alt_L")
+                click(Atspi.Role.PUSH_BUTTON, "Keep running")
+            else:
+                h.rpc(socket, "surface_close", pane=child_pane, surface=child_surface)
+            gui.wait_for(lambda: child_pane not in tab_layout(), "fork view closed")
+
+            detached = gui.wait_for(lambda: next((a for a in live() if a["instance"] == child["instance"]
+                                                  and not a["attachment"]), None),
+                                    "same fork execution goes to Background")
+            if args.codex_flow:
+                assert not (detached.get("presence") or {}).get("session_id"), detached
+            h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
+            before = tab_layout()
             open_child()
-            gui.wait_for(lambda: f"fixture-pid:{child['pid']}" in h.screen(socket, pane), "Flow Background reconnect")
+
+            def background_opened():
+                error = find(None, contains="Cannot reserve") or find(None, contains="ownership is still updating")
+                assert error is None, error.get_name() if error else ""
+                after = tab_layout()
+                assert after.keys() == before.keys(), ("Background opened a new split", before, after)
+                return len(after[pane]) == len(before[pane]) + 1
+
+            gui.wait_for(background_opened, "Flow Background tab opens")
+            reopened = gui.wait_for(lambda: next((a for a in live() if a["instance"] == child["instance"]
+                                                 and (a.get("attachment") or {}).get("ready")), None),
+                                    "same fork execution reconnects")
+            assert (reopened["pid"], reopened["process_start"]) == (child["pid"], child["process_start"])
             h.send(socket, pane, "flow-background")
             gui.wait_for(lambda: "ACK:flow-background" in h.screen(socket, pane), "same fork process accepts input")
             assert len((h.root / "starts").read_text().splitlines()) == 2
+            assert len(rows("SELECT request FROM operations")) == 1
             h.pass_check("Opening a Background node in Session Flow reconnects the same process without resume or spawn")
             h.send(socket, pane, "quit")
             gui.wait_for(lambda: all(a["instance"] != child["instance"] for a in live()), "child natural exit")
             h.rpc(socket, "surface_focus", pane=pane, surface=parent_surface)
-            # Refresh removes the old live binding before an explicit resume.
-            click(Atspi.Role.PUSH_BUTTON, "↻")
-            time.sleep(.5)
             open_child()
             resumed = gui.wait_for(lambda: next((a for a in live() if a["instance"] != agent["instance"]), None),
                                    "Flow native resume via Host")
-            panes = gui.wait_for(lambda: panes if len(panes := h.workspace(socket, workspace)["panes"]) == 2 else None,
+            panes = gui.wait_for(lambda: panes if len(panes := h.workspace(socket, workspace)["panes"]) == len(before) + 1 else None,
                                 "resumed right split")
-            resumed_pane = next(p["id"] for p in panes if p["id"] != pane)
+            resumed_pane = next(p["id"] for p in panes if p["id"] not in before)
             gui.wait_for(lambda: f"fixture-pid:{resumed['pid']}" in h.screen(socket, resumed_pane), "resumed relay")
-            assert (h.root / "launch").read_text().splitlines() == expected[:3] + ["--resume", child_id]
-            control.call("native_session", instance=resumed["instance"], epoch=resumed["epoch"], pid=resumed["pid"],
-                         process_start=resumed["process_start"], session_id=child_id, seq=1,
-                         event=dict(event="started", status="idle"))
+            assert (h.root / "launch").read_text().splitlines() == expected[:3] + [
+                "resume" if args.codex_flow else "--resume", child_id]
+            if not args.codex_flow:
+                control.call("native_session", instance=resumed["instance"], epoch=resumed["epoch"], pid=resumed["pid"],
+                             process_start=resumed["process_start"], session_id=child_id, seq=1,
+                             event=dict(event="started", status="idle"))
             gui.wait_for(lambda: len(rows("SELECT request FROM operations WHERE state='complete'")) == 2,
                          "resume reservation completes")
             assert len((h.root / "starts").read_text().splitlines()) == 3

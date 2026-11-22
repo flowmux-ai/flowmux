@@ -714,9 +714,14 @@ time.sleep(60)
                                          '--', '--nocapture']])
                 timings = [json.loads(line.split('=', 1)[1]) for line in result.stdout.splitlines()
                            if line.startswith('CI_TEST_RESULT=')]
-                self.assertEqual(len(timings), 53 if suite == 'extended' else 50)
-                self.assertLessEqual({'agent-session-tab-fallback', 'session-flow-tab-fallback'},
+                self.assertEqual(len(timings), 55 if suite == 'extended' else 52)
+                self.assertLessEqual({'agent-session-tab-fallback', 'session-flow-tab-fallback',
+                                      'managed-codex-flow-background', 'managed-codex-flow-restore'},
                                      {row['test'] for row in timings})
+                codex_cases = {c['args'][1] for c in calls if c['name'] == 'python3'
+                               and c['args'][0] == 'scripts/test-agent-session-resume-gui.py'
+                               and c['args'][1].startswith('--codex-flow')}
+                self.assertEqual(codex_cases, {'--codex-flow', '--codex-flow-restore'})
                 tearoff = next(c for c in calls if c['name'] == 'python3'
                                and c['args'][:3] == ['scripts/test-agent-drag-gui.py', '--managed', '--tearoff'])
                 self.assertIn('--host', tearoff['args'])

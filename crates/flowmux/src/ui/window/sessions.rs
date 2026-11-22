@@ -393,68 +393,86 @@ impl WindowController {
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        let matches = |agent: &flowmux_ipc::agent_host::AgentInstance| {
-            agent.state == flowmux_ipc::agent_host::ProcessState::Running
-                && SessionAgent::from_name(&agent.provider) == Some(provider)
-                && agent
-                    .presence
-                    .as_ref()
-                    .and_then(|p| p.session_id.as_deref())
-                    == Some(id)
+        let check_cached = agents.is_empty();
+        let candidates = if check_cached {
+            self.bridge.agent_registry.borrow().agents.clone()
+        } else {
+            agents
         };
-        if agents.is_empty()
-            && self
-                .bridge
-                .agent_registry
-                .borrow()
-                .agents
-                .iter()
-                .any(|agent| {
-                    matches(agent)
-                        && agent
-                            .pid
-                            .zip(agent.process_start)
-                            .is_some_and(|(pid, start)| {
-                                flowmux_procmon::process_start_time(pid) == Some(start)
-                            })
-                })
-        {
-            return Err(
-                "Agent Host unavailable; the previously observed session process is still alive"
-                    .into(),
-            );
-        }
-        let candidates = agents.into_iter().filter(matches);
-        let home = home.canonicalize().map_err(|e| e.to_string())?;
-        let mut found = None;
-        for agent in candidates {
-            let Some((root_pid, process_start)) = agent.pid.zip(agent.process_start) else {
-                return Err("Running session identity is not yet available".into());
-            };
-            let target = SessionTarget {
-                agent: provider,
-                focused: Some(FocusedSession {
-                    pane: location.0,
-                    surface: location.1,
-                    root_pid,
-                    process_start: Some(process_start),
-                    session_id: Some(id.into()),
-                }),
-            };
-            let current = gtk::gio::spawn_blocking(move || {
-                session_home(&target)?
-                    .path
-                    .canonicalize()
-                    .map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|_| "Running session environment reader failed")??;
-            if current == home && found.replace(agent).is_some() {
-                return Err(
-                    "This session has multiple running executions; select one in Agents".into(),
-                );
+        let id = id.to_owned();
+        let home = home.to_path_buf();
+        let found = gtk::gio::spawn_blocking(move || -> Result<_, String> {
+            let home = home.canonicalize().map_err(|e| e.to_string())?;
+            let mut found = None;
+            for agent in candidates {
+                if agent.state != flowmux_ipc::agent_host::ProcessState::Running
+                    || SessionAgent::from_name(&agent.provider) != Some(provider)
+                {
+                    continue;
+                }
+                let reported = agent.presence.as_ref().and_then(|p| p.session_id.as_deref());
+                // A detached Codex fork can have a writable rollout before its first hook.
+                let probe = reported.is_none() && provider == SessionAgent::Codex && !agent.shell;
+                if reported != Some(id.as_str()) && !probe {
+                    continue;
+                }
+                let Some((root_pid, process_start)) = agent.pid.zip(agent.process_start) else {
+                    if check_cached || probe {
+                        continue;
+                    }
+                    return Err("Running session identity is not yet available".into());
+                };
+                let alive = || -> Result<bool, String> {
+                    match flowmux_procmon::process_start_time(root_pid) {
+                        Some(start) => Ok(start == process_start),
+                        None if !flowmux_procmon::pid_alive(root_pid) => Ok(false),
+                        None => Err("Running session process identity is unavailable".into()),
+                    }
+                };
+                if !alive()? {
+                    continue;
+                }
+                let matches = (|| -> Result<bool, String> {
+                    if probe
+                        && flowmux_state::session_flow::codex_process_session(root_pid, &home)
+                            .map_err(|e| e.to_string())?
+                            .as_deref()
+                            != Some(id.as_str())
+                    {
+                        return Ok(false);
+                    }
+                    let target = SessionTarget {
+                        agent: provider,
+                        focused: Some(FocusedSession {
+                            pane: location.0,
+                            surface: location.1,
+                            root_pid,
+                            process_start: Some(process_start),
+                            session_id: None,
+                        }),
+                    };
+                    let current = session_home(&target)?
+                        .path
+                        .canonicalize()
+                        .map_err(|e| e.to_string())?;
+                    Ok(current == home)
+                })();
+                if !alive()? || !matches? {
+                    continue;
+                }
+                if check_cached {
+                    return Err("Agent Host unavailable; the previously observed session process is still alive".into());
+                }
+                if found.replace(agent).is_some() {
+                    return Err(
+                        "This session has multiple running executions; select one in Agents".into(),
+                    );
+                }
             }
-        }
+            Ok(found)
+        })
+        .await
+        .map_err(|_| "Running session identity reader failed")??;
         if found.is_none() {
             let other_hosts = handle
                 .spawn(async {
