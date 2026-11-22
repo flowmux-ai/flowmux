@@ -46,7 +46,7 @@ for index in range(56):
         data = b''
         while not data.endswith(b'\n'): data += stream.recv(4096)
         return json.loads(data)['agent_host']['response']
-    call(1, {'op': 'hello', 'version': 18, 'role': 'relay'})
+    call(1, {'op': 'hello', 'version': @PROTOCOL_VERSION@, 'role': 'relay'})
     context = call(2, {'op': 'resolve_context', 'instance': os.environ['FLOWMUX_AGENT_INSTANCE_ID'],
                       'epoch': os.environ['FLOWMUX_AGENT_HOST_EPOCH'], 'session_id': None})
     request = {'op': 'dispatch_context', 'context': {'key': context['key'], 'location': context['location']},
@@ -105,7 +105,7 @@ def main():
         fixture.wait_for(host_socket.exists, 'private Host socket')
         observer = host_fixture.HostClient(host_socket, 'relay')
         provider = h.root / 'provider.py'
-        provider.write_text(PROVIDER)
+        provider.write_text(PROVIDER.replace('@PROTOCOL_VERSION@', str(host_fixture.PROTOCOL_VERSION)))
         agent = observer.call('launch', launch={
             'request_id': host_fixture.launch_request_id(), 'provider': 'fixture',
             'label': 'response bound', 'argv': ['/usr/bin/python3', '-u', str(provider), str(h.root), args.cli],

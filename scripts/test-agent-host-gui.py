@@ -35,6 +35,17 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 
+def protocol_version():
+    """The Agent Host protocol of this checkout, so fixtures follow a version change."""
+    source = (Path(__file__).resolve().parents[1] / "crates/flowmux-ipc/src/agent_host.rs").read_text()
+    match = re.search(r"^pub const PROTOCOL_VERSION: u32 = (\d+);", source, re.M)
+    assert match, "Agent Host PROTOCOL_VERSION not found"
+    return int(match.group(1))
+
+
+PROTOCOL_VERSION = protocol_version()
+
+
 def launch_request_id():
     # UUIDv7 timestamp stays fixed when replaying an evicted launch request.
     value = ((time.time_ns() // 1_000_000) << 80) | (uuid.uuid4().int & ((1 << 80) - 1))
@@ -48,7 +59,7 @@ class HostClient:
         self.stream.connect(str(path))
         self.reader = self.stream.makefile("rb")
         self.identifier = 0
-        self.call("hello", version=18, role=role)
+        self.call("hello", version=PROTOCOL_VERSION, role=role)
 
     def call(self, op, **fields):
         self.identifier += 1
