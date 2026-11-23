@@ -668,6 +668,19 @@ impl AgentOffice {
     }
 
     pub(crate) fn render(&self, workspaces: &[(WorkspaceId, String)], model: &AgentBarModel) {
+        // Show what the other agent displays show: an automatic retry is not a request for
+        // input, and a failed turn is not a finished task.
+        let model = &AgentBarModel {
+            visible: model.visible,
+            items: model
+                .items
+                .iter()
+                .map(|item| AgentBarItem {
+                    status: crate::ui::agent_attention_visual_status(item.status, item.attention()),
+                    ..item.clone()
+                })
+                .collect(),
+        };
         let mut world = self.world.borrow_mut();
         let mut rooms = Vec::new();
         for (id, name) in workspaces {
@@ -1107,6 +1120,60 @@ fn resident(item: &AgentBarItem, slot: usize, plan: Rc<Plan>, bridge: &Bridge) -
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn office_status_matches_the_other_agent_displays() {
+        let (bridge, _receiver) = Bridge::new();
+        let office = AgentOffice::new(bridge);
+        let workspace = WorkspaceId::new();
+        let item = |status, seen, turn_outcome, pending_waits| AgentBarItem {
+            status_evidence: None,
+            pending_waits,
+            turn_outcome,
+            workspace,
+            pane: PaneId::new(),
+            surface: SurfaceId::new(),
+            surface_label: "Terminal".into(),
+            agent_name: "claude".into(),
+            status,
+            visual_status: flowmux_core::AgentBarVisualStatus::Waiting,
+            seen,
+            status_text: "status".into(),
+            color: "#ffffff".into(),
+        };
+        let retry = flowmux_core::AgentWaitSummary {
+            scope: flowmux_core::AgentWaitScope::Session,
+            reason: flowmux_core::AgentWaitReason::Quota,
+            actor: flowmux_core::AgentWaitActor::External,
+            retry: flowmux_core::AgentRetryState::Automatic,
+            context_evidence: None,
+            count: 1,
+            since: chrono::Utc::now(),
+        };
+        let cases = [
+            (
+                item(AgentStatus::Blocked, true, None, vec![retry]),
+                AgentStatus::Idle,
+            ),
+            (
+                item(
+                    AgentStatus::Done,
+                    false,
+                    Some(flowmux_core::AgentTurnOutcome::Failed),
+                    Vec::new(),
+                ),
+                AgentStatus::Blocked,
+            ),
+        ];
+        let model = AgentBarModel {
+            visible: true,
+            items: cases.iter().map(|(item, _)| item.clone()).collect(),
+        };
+        office.render(&[(workspace, "Office".into())], &model);
+        for (item, expected) in cases {
+            assert_eq!(office.rendered_status(item.surface), Some(expected));
+        }
+    }
 
     #[gtk::test]
     fn shared_events_invite_a_few_resting_actors_at_separate_times() {
