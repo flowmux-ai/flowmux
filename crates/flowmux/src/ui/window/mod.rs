@@ -2951,17 +2951,25 @@ impl WindowController {
             Some(ws) => ws.display_title().to_string(),
             None => return true, // Already gone — nothing to confirm.
         };
-        // Closing only detaches a Host agent; say so instead of promising it stops.
-        let agents = if self.managed_presence_workspaces().contains(&id) {
-            " Its running agents keep working in Background."
-        } else {
-            ""
-        };
+        // Closing only detaches a Host agent, so its tabs' agents are asked about as one tab's is.
+        let surfaces = self.pane_registry.borrow().surface_ids_in_workspace(id);
+        let mut agents = Vec::new();
+        for surface in surfaces {
+            let pane = self.pane_registry.borrow().pane_for_surface(surface);
+            if let Some(pane) = pane {
+                if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+                    if !agents.contains(&binding) {
+                        agents.push(binding);
+                    }
+                }
+            }
+        }
+        if !agents.is_empty() {
+            return self.confirm_close_workspace_agents(&title, &agents).await;
+        }
         let dialog = adw::AlertDialog::new(
             Some("Close workspace?"),
-            Some(&format!(
-                "This will close “{title}” and stop its tabs.{agents}"
-            )),
+            Some(&format!("This will close “{title}” and stop its tabs.")),
         );
         dialog.add_response("cancel", "Cancel");
         dialog.add_response("close", "Close");

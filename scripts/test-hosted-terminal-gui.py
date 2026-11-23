@@ -107,6 +107,48 @@ def main():
         gui.wait_for(ticks.exists, "agent started in the terminal")
         kept = gui.wait_for(lambda: next((a for a in agents() if a.get("presence")), None),
                             "the Host finds the agent by its process")
+
+        # Closing a workspace from the side panel asks about its agent instead of detaching it.
+        closing = h.rpc(socket, "workspace_create", name="Closing", root=str(h.root))["workspace_created"]["id"]
+        closing_pane = h.workspace(socket, closing)["panes"][0]["id"]
+        gui.wait_for(lambda: len(hosted()) == 3, "the new workspace's terminal runs in the Host")
+        (h.root / "closing").mkdir()
+        (h.root / "closing/claude").write_text(fake.read_text())
+        h.send(socket, closing_pane, f"cd {h.root / 'closing'} && python3 ./claude")
+        doomed = gui.wait_for(lambda: next((a for a in agents()
+                                            if a.get("presence") and a["instance"] != kept["instance"]), None),
+                              "the Host finds the second workspace's agent")
+        doomed_pid = doomed["presence"]["pid"]
+
+        def has_name(node, text):
+            node.clear_cache()
+            return text in (node.get_name() or "") or any(
+                (child := node.get_child_at_index(i)) and has_name(child, text) for i in range(node.get_child_count()))
+
+        def close_workspace(answer):
+            # The side panel shows the workspace name, which follows the terminal's directory.
+            name = h.workspace(socket, closing)["name"]
+            def side_panel_close(node):
+                row = node.get_parent() and node.get_parent().get_parent()
+                return (node.get_role() == Atspi.Role.PUSH_BUTTON and node.get_name() == "Close tab"
+                        and row is not None and row.get_role() == Atspi.Role.LIST_ITEM and has_name(row, name))
+            x = gui.wait_for(lambda: accessible(process.pid, side_panel_close), "side panel close button")
+            assert x.get_action_iface().do_action(0)
+            gui.wait_for(lambda: accessible(process.pid, lambda n: "has 1 running agent" in (n.get_name() or "")),
+                         "the close dialog asks about the workspace's agent")
+            choice = gui.wait_for(lambda: button(process.pid, lambda name: name == answer), answer)
+            assert choice.get_action_iface().do_action(0)
+
+        close_workspace("Cancel")
+        time.sleep(1)
+        assert any(w["id"] == closing for w in h.tree(socket)) and Path(f"/proc/{doomed_pid}").exists()
+        close_workspace("Terminate agent")
+        gui.wait_for(lambda: all(w["id"] != closing for w in h.tree(socket)), "the workspace closes")
+        gui.wait_for(lambda: not Path(f"/proc/{doomed_pid}").exists(), "the workspace's agent is terminated")
+        gui.wait_for(lambda: all(a["instance"] != doomed["instance"] for a in agents()), "the Host drops it")
+        assert Path(f"/proc/{kept['presence']['pid']}").exists(), "another workspace's agent keeps running"
+        h.pass_check("closing a workspace asks about its agent; Cancel keeps it and Terminate stops only it")
+
         # The Host sees only the process, which it reports as idle; the hook reaches the window.
         session = str(uuid.uuid4())
         def hook(status):

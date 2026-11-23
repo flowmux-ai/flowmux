@@ -291,6 +291,60 @@ impl WindowController {
             _ => false,
         }
     }
+
+    /// Closing a workspace only detaches its agents, so ask whether they should keep running.
+    /// Returns whether the workspace should close.
+    pub(super) async fn confirm_close_workspace_agents(
+        &self,
+        title: &str,
+        agents: &[flowmux_core::AgentViewBinding],
+    ) -> bool {
+        let dialog = close_workspace_with_agents_dialog(title, agents.len());
+        let _native_view_suspend = crate::ui::browser_pane::suspend_native_browser_views_for_window(
+            self.window.upcast_ref(),
+        );
+        match dialog.choose_future(&self.window).await.as_str() {
+            "keep" => true,
+            "stop" => {
+                for binding in agents {
+                    if let Err(error) = self
+                        .send_agent_control(*binding, TerminateMode::Terminate)
+                        .await
+                    {
+                        show_error_dialog(&self.window, "Cannot terminate agent", &error).await;
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+fn close_workspace_with_agents_dialog(title: &str, count: usize) -> adw::AlertDialog {
+    let (agents, them, stop) = if count == 1 {
+        ("1 running agent".to_owned(), "it", "Terminate agent")
+    } else {
+        (
+            format!("{count} running agents"),
+            "them",
+            "Terminate agents",
+        )
+    };
+    let dialog = adw::AlertDialog::new(
+        Some("Close workspace?"),
+        Some(&format!(
+            "“{title}” has {agents}. Keep {them} running in Background and reopen {them} from Agents, or terminate {them}. Terminating may lose work in progress."
+        )),
+    );
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("stop", stop);
+    dialog.add_response("keep", "Keep running");
+    dialog.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("keep"));
+    dialog.set_close_response("cancel");
+    dialog
 }
 
 fn socket_identity(socket: &std::path::Path) -> Option<(u64, u64)> {
@@ -348,5 +402,106 @@ mod tests {
         for response in ["cancel", "stop", "keep"] {
             assert!(dialog.has_response(response), "missing response {response}");
         }
+    }
+
+    #[gtk::test]
+    async fn closing_workspace_asks_about_its_agents() {
+        use flowmux_ipc::agent_host::{AgentInstance, ProcessState};
+        let (controller, workspace, pane) = super::super::tests::build_single_workspace_controller(
+            "com.flowmux.App.UiTest.CloseWorkspaceAgents",
+        )
+        .await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        // An ordinary terminal whose shell runs an agent in the Host.
+        let binding = flowmux_core::AgentViewBinding {
+            instance: flowmux_core::AgentInstanceId::new(),
+            epoch: uuid::Uuid::new_v4(),
+        };
+        controller
+            .store
+            .set_surface_shell_binding(surface, Some(binding))
+            .await;
+        controller.bridge.agent_registry.send_modify(|snapshot| {
+            snapshot.available = true;
+            snapshot.agents = vec![AgentInstance {
+                instance: binding.instance,
+                epoch: binding.epoch,
+                provider: "bash".into(),
+                label: "shell".into(),
+                cwd: "/tmp".into(),
+                pid: None,
+                process_start: None,
+                boot_id: None,
+                state: ProcessState::Running,
+                force_terminate_allowed: false,
+                exit_status: None,
+                view: None,
+                attachment: None,
+                view_owner: None,
+                error: None,
+                presence: Some(flowmux_core::AgentPresence::new(
+                    "claude",
+                    flowmux_core::AgentActivity::Running,
+                    None,
+                )),
+                shell: true,
+            }];
+        });
+        let (bridge, rx) = Bridge::new();
+        spawn_dispatch_loop(rx, controller.clone());
+        controller.window.present();
+        let mut previous: Option<adw::AlertDialog> = None;
+        for response in ["cancel", "keep"] {
+            let (ack, closed) = oneshot::channel();
+            bridge
+                .tx
+                .send(GtkCommand::RemoveWorkspace {
+                    id: workspace,
+                    confirm: true,
+                    ack,
+                })
+                .await
+                .unwrap();
+            let dialog = glib::future_with_timeout(Duration::from_secs(2), async {
+                loop {
+                    // The answered dialog stays visible while it animates closed.
+                    if let Some(dialog) = controller
+                        .window
+                        .visible_dialog()
+                        .and_downcast::<adw::AlertDialog>()
+                        .filter(|dialog| previous.as_ref() != Some(dialog))
+                    {
+                        break dialog;
+                    }
+                    glib::timeout_future(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                dialog.body().contains("has 1 running agent"),
+                "{}",
+                dialog.body()
+            );
+            assert_eq!(dialog.default_response().as_deref(), Some("keep"));
+            assert!(dialog.has_response("stop"));
+            dialog.emit_by_name::<()>("response", &[&response]);
+            dialog.close();
+            previous = Some(dialog);
+            let result = glib::future_with_timeout(Duration::from_secs(2), closed)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.is_ok(), response == "keep", "{response}: {result:?}");
+            assert_eq!(
+                controller.store.get_workspace(workspace).await.is_some(),
+                response == "cancel"
+            );
+        }
+        controller.window.destroy();
     }
 }

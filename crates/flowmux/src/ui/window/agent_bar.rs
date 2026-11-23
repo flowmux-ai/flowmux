@@ -558,20 +558,6 @@ impl WindowController {
             .collect()
     }
 
-    /// Workspaces that hold a view of a running Host agent in this window.
-    pub(super) fn managed_presence_workspaces(&self) -> HashSet<WorkspaceId> {
-        let snapshot = self.bridge.agent_registry.borrow();
-        snapshot
-            .agents
-            .iter()
-            .filter(|agent| agent.state == flowmux_ipc::agent_host::ProcessState::Running)
-            .filter(|agent| !agent.shell || agent.presence.is_some())
-            .filter_map(|agent| agent.view.as_ref())
-            .filter(|view| view.window == self.flow.owner)
-            .map(|view| view.workspace)
-            .collect()
-    }
-
     /// Refresh the workspace rows whose Host agents changed status.
     fn refresh_managed_workspace_rows(&self) {
         let mut current: HashMap<WorkspaceId, String> = HashMap::new();
