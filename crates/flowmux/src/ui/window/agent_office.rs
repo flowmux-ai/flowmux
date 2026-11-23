@@ -22,6 +22,11 @@ impl WindowController {
             let Some(view) = self.verified_agent_location(&agent).await else {
                 continue;
             };
+            // A terminal's hooks reach this window; the Host only sees its agent's process,
+            // which it reports as idle. The terminal's own item keeps the live status.
+            if model.items.iter().any(|item| item.surface == view.surface) {
+                continue;
+            }
             let Some(title) = self.store.surface_title(view.pane, view.surface).await else {
                 continue;
             };
@@ -40,11 +45,7 @@ impl WindowController {
                 &presence,
                 color.as_deref(),
             ) {
-                if let Some(previous) = model.items.iter_mut().find(|i| i.surface == view.surface) {
-                    *previous = item;
-                } else {
-                    model.items.push(item);
-                }
+                model.items.push(item);
             }
         }
         model.visible = !model.items.is_empty();

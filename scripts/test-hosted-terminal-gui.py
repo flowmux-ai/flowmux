@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from types import SimpleNamespace
 
 sys.dont_write_bytecode = True
@@ -45,8 +46,31 @@ def main():
         assert result.returncode == 0, (result.stdout, result.stderr)
         return json.loads(result.stdout)
 
+    def accessible(pid, match):
+        desktop = Atspi.get_desktop(0)
+        desktop.clear_cache()
+        pending = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+        pending = [node for node in pending if node and node.get_process_id() == pid]
+        while pending:
+            node = pending.pop()
+            if node:
+                node.clear_cache()
+                if match(node):
+                    return node
+                pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
+        return None
+
+    def button(pid, match):
+        return accessible(pid, lambda node: node.get_role() == Atspi.Role.PUSH_BUTTON and match(node.get_name()))
+
     try:
+        h.env["GTK_A11Y"] = "atspi"
         h.start_display()
+        import gi
+        gi.require_version("Atspi", "2.0")
+        global Atspi
+        from gi.repository import Atspi
+        Atspi.set_timeout(3000, 3000)
         config = h.root / "config/flowmux"
         config.mkdir(parents=True, exist_ok=True)
         (config / "options.json").write_text(json.dumps({"default_shell": "/bin/sh"}))
@@ -83,6 +107,24 @@ def main():
         gui.wait_for(ticks.exists, "agent started in the terminal")
         kept = gui.wait_for(lambda: next((a for a in agents() if a.get("presence")), None),
                             "the Host finds the agent by its process")
+        # The Host sees only the process, which it reports as idle; the hook reaches the window.
+        session = str(uuid.uuid4())
+        def hook(status):
+            h.rpc(socket, "agent_activity_update", pane=pane, surface=first, agent="claude", status=status,
+                  source="flowmux:hook", session_id=session)
+        def office_status(expected):
+            node = button(process.pid, lambda name: name.startswith("claude · "))
+            if node and not node.get_name().endswith(expected):
+                raise ValueError(node.get_name())
+            return node
+        hook("working")
+        office = gui.wait_for(lambda: button(process.pid, lambda name: name == "AgentOffice"), "AgentOffice button")
+        assert office.get_action_iface().do_action(0)
+        gui.wait_for(lambda: office_status("Working · at the desk"),
+                     "AgentOffice shows the hook's status, not the Host's process guess")
+        hook("idle")
+        gui.wait_for(lambda: office_status("Done · taking a break"), "AgentOffice shows the finished turn")
+        h.pass_check("AgentOffice shows a hosted terminal's agent with its hook status")
         h.close_window(process)
         # The Host ends a shell nobody views ten seconds after its window, unless an agent runs in it.
         gui.wait_for(lambda: not Path(f"/proc/{plain_pid}").exists(),
