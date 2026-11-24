@@ -82,7 +82,10 @@ jobs:
           sudo sh packaging/debian/postinst configure
 
       - name: Run test suite
-        run: GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals aa-exec -p flowmux-webkit -- xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
+        run: |
+          cargo build --locked -p flowmux-cli --bin flowmuxctl
+          export PATH="$PWD/target/debug:$PATH"
+          GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals aa-exec -p flowmux-webkit -- xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
 
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
