@@ -1,5 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "Maintenance advisory only. Remove this exception when persisted and IPC timestamps have migrated off chrono." },
+    { id = "RUSTSEC-2026-0594", reason = "The macOS webdriver dependency does not enable encrypted cookies. The feature check below guards this while webdriver requires cookie 0.16." },
+]
+
+[[bans.features]]
+crate = "cookie:<0.18.3"
+deny = ["private"]
+
 [licenses]
 unused-allowed-license = "allow"
 confidence-threshold = 0.8
