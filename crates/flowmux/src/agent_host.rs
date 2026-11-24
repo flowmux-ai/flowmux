@@ -96,22 +96,29 @@ pub async fn notification_request(request: HostRequest) -> anyhow::Result<HostRe
     })?
 }
 
+pub async fn list_executions(socket: &Path) -> anyhow::Result<Vec<AgentInstance>> {
+    let client = HostClient::connect(socket, ClientRole::Observer).await?;
+    let HostResponse::List {
+        mut agents,
+        terminals,
+        ..
+    } = client.call(HostRequest::List).await?
+    else {
+        anyhow::bail!("unexpected Agent Host list response");
+    };
+    agents.extend(terminals);
+    Ok(agents)
+}
+
 pub async fn lookup_running(
     socket: &Path,
     instance: flowmux_core::AgentInstanceId,
     epoch: Option<uuid::Uuid>,
 ) -> Result<AgentInstance, flowmux_ipc::RpcError> {
     tokio::time::timeout(Duration::from_secs(2), async {
-        let client = HostClient::connect(socket, ClientRole::Observer).await?;
-        let HostResponse::List {
-            agents, terminals, ..
-        } = client.call(HostRequest::List).await?
-        else {
-            anyhow::bail!("unexpected Agent Host list response");
-        };
-        agents
+        list_executions(socket)
+            .await?
             .into_iter()
-            .chain(terminals)
             .find(|agent| {
                 agent.instance == instance
                     && epoch.is_none_or(|epoch| epoch == agent.epoch)

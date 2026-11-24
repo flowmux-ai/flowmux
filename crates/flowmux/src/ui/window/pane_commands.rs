@@ -733,7 +733,8 @@ impl WindowController {
             }
             GtkCommand::CloseSurfaceButton { pane, surface, ack } => {
                 // Only the tab's own close button asks; CLI closes keep detaching silently.
-                if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+                if let Some(binding) = self.surface_agent_execution(pane, surface, &mut None).await
+                {
                     let title = self.store.surface_title(pane, surface).await;
                     if !self
                         .confirm_close_agent_tab(binding, title.as_deref().unwrap_or("Agent"))
@@ -754,9 +755,9 @@ impl WindowController {
             }
             GtkCommand::ConfirmCloseSurface { pane, surface, ack } => {
                 // An agent tab asks once, about the agent; nothing else follows it.
-                let managed = self.surface_agent_execution(pane, surface).await.is_some();
-                if self.confirm_close_tab(pane, surface).await {
-                    self.close_surface_command(pane, surface, !managed, ack)
+                let agent = self.surface_agent_execution(pane, surface, &mut None).await;
+                if self.confirm_close_tab(pane, surface, agent).await {
+                    self.close_surface_command(pane, surface, agent.is_none(), ack)
                         .await;
                 } else {
                     let _ = ack.send(Err("Tab close cancelled".into()));
@@ -1113,20 +1114,43 @@ impl WindowController {
 
 impl WindowController {
     /// The Host execution whose agent this tab shows: a managed agent's tab, or an
-    /// ordinary terminal with an agent running in its shell.
+    /// ordinary terminal with an agent running in its shell. Share one fresh Host
+    /// snapshot when confirming the closure of multiple tabs.
     pub(super) async fn surface_agent_execution(
         &self,
         pane: PaneId,
         surface: SurfaceId,
+        host_snapshot: &mut Option<Vec<flowmux_ipc::agent_host::AgentInstance>>,
     ) -> Option<flowmux_core::AgentViewBinding> {
         if let Some(binding) = self.store.surface_agent_binding(pane, surface).await {
             return Some(binding);
         }
         let binding = self.store.surface_host_binding(pane, surface).await?;
-        let registry = self.bridge.agent_registry.borrow();
-        registry
-            .agents
+        if host_snapshot.is_none() {
+            // The display snapshot can lag the Host's detection of a new agent.
+            let fresh = match &self.tokio_handle {
+                Some(handle) => handle
+                    .spawn(async {
+                        let socket = flowmux_config::paths::agent_host_socket();
+                        tokio::time::timeout(
+                            Duration::from_secs(1),
+                            crate::agent_host::list_executions(&socket),
+                        )
+                        .await
+                        .ok()?
+                        .ok()
+                    })
+                    .await
+                    .ok()
+                    .flatten(),
+                None => None,
+            };
+            *host_snapshot =
+                Some(fresh.unwrap_or_else(|| self.bridge.agent_registry.borrow().agents.clone()));
+        }
+        host_snapshot
             .iter()
+            .flatten()
             .any(|agent| {
                 agent.instance == binding.instance
                     && agent.epoch == binding.epoch
@@ -1136,11 +1160,16 @@ impl WindowController {
             .then_some(binding)
     }
 
-    async fn confirm_close_tab(&self, pane: PaneId, surface: SurfaceId) -> bool {
+    async fn confirm_close_tab(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        agent: Option<flowmux_core::AgentViewBinding>,
+    ) -> bool {
         let Some(title) = self.store.surface_title(pane, surface).await else {
             return false;
         };
-        if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+        if let Some(binding) = agent {
             return self.confirm_close_agent_tab(binding, &title).await;
         }
         let last_tab = self.store.tab_count_in_pane(pane).await == Some(1);

@@ -139,6 +139,7 @@ def main():
             choice = gui.wait_for(lambda: button(process.pid, lambda name: name == answer), answer)
             assert choice.get_action_iface().do_action(0)
 
+        # Close after the Host sees the agent, even if the GUI has yet to poll its list.
         close_workspace("Cancel")
         time.sleep(1)
         assert any(w["id"] == closing for w in h.tree(socket)) and Path(f"/proc/{doomed_pid}").exists()

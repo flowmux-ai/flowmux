@@ -14,9 +14,10 @@ interrupt work. macOS and Flatpak lifetime behavior has not been verified.
 Closing an agent tab with its close button or the close-tab shortcut asks whether
 to **Keep running** in Background or **Terminate agent**. A tab closed by a CLI
 command detaches without asking. Closing a workspace's only tab asks the same
-question once. Closing a workspace leaves these agents running in Background;
-the confirmation says so. Closing the Flowmux window while agents are running
-asks once: **Keep running** leaves them working in Background, **Stop agents**
+question once. Closing a workspace with running agents asks once whether to
+keep them running in Background, terminate them, or cancel. Closing the Flowmux
+window while agents are running asks once: **Keep running** leaves them working
+in Background, **Stop agents**
 ends them and, when no other window is using it, the Agent Host with them, and
 **Cancel** keeps the window. A window closed by a termination signal does not
 ask and keeps them. `FLOWMUX_CLOSE_AGENTS=keep` or `stop` answers ahead of time. When an agent

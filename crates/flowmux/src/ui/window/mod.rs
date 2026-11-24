@@ -2954,10 +2954,14 @@ impl WindowController {
         // Closing only detaches a Host agent, so its tabs' agents are asked about as one tab's is.
         let surfaces = self.pane_registry.borrow().surface_ids_in_workspace(id);
         let mut agents = Vec::new();
+        let mut host_snapshot = None;
         for surface in surfaces {
             let pane = self.pane_registry.borrow().pane_for_surface(surface);
             if let Some(pane) = pane {
-                if let Some(binding) = self.surface_agent_execution(pane, surface).await {
+                if let Some(binding) = self
+                    .surface_agent_execution(pane, surface, &mut host_snapshot)
+                    .await
+                {
                     if !agents.contains(&binding) {
                         agents.push(binding);
                     }
