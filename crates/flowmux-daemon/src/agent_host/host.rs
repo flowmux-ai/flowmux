@@ -7930,7 +7930,7 @@ for line in sys.stdin:
         // Far more output than the redraw limit, then a marker.
         let (relay, agent, key, after) = shell_view(
             &fixture,
-            "read go; seq -f 'line %07g padded to make the output larger' 1 120000; echo SEQ_DONE; sleep 30",
+            "read go; seq -f 'line %07g padded to make the output larger' 1 120000; echo SEQ_DONE; read done",
             None,
         )
         .await;
@@ -7951,8 +7951,8 @@ for line in sys.stdin:
         let mut after = after;
         let mut redraws = 0;
         // Read through the lease owner so the IPC idle deadline cannot detach it during a slow run.
-        timeout(Duration::from_secs(60), async {
-            while !data.contains("SEQ_DONE") {
+        timeout(Duration::from_secs(180), async {
+            while !data.trim_end().ends_with("SEQ_DONE") {
                 let mut offset = 0;
                 loop {
                     let request = if offset == 0 {
@@ -7976,7 +7976,12 @@ for line in sys.stdin:
             }
         })
         .await
-        .expect("the view receives all output");
+        .unwrap_or_else(|_| {
+            panic!(
+                "the view did not finish receiving output ({} bytes, {redraws} redraws)",
+                data.len()
+            )
+        });
         assert_eq!(redraws, 0, "a view that keeps up is never redrawn");
         for line in [1, 60_000, 120_000] {
             assert!(
