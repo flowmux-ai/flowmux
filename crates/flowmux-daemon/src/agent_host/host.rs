@@ -7934,7 +7934,6 @@ for line in sys.stdin:
             None,
         )
         .await;
-        let observer = fixture.client(ClientRole::Observer).await;
         // Output starts once the view is attached, as a shell's does after its tab connects.
         relay
             .call(HostRequest::Input {
@@ -7951,7 +7950,8 @@ for line in sys.stdin:
         let mut data = String::new();
         let mut after = after;
         let mut redraws = 0;
-        timeout(Duration::from_secs(30), async {
+        // Read through the lease owner so the IPC idle deadline cannot detach it during a slow run.
+        timeout(Duration::from_secs(60), async {
             while !data.contains("SEQ_DONE") {
                 let mut offset = 0;
                 loop {
@@ -7960,8 +7960,7 @@ for line in sys.stdin:
                     } else {
                         HostRequest::Frame { key, after, offset }
                     };
-                    let HostResponse::Frame { frame } = observer.call(request).await.unwrap()
-                    else {
+                    let HostResponse::Frame { frame } = relay.call(request).await.unwrap() else {
                         panic!("expected frame")
                     };
                     if frame.offset == 0 && frame.snapshot && frame.sequence != after {
