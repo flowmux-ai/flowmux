@@ -1159,6 +1159,10 @@ fn default_color(index: usize) -> Rgb {
 mod tests {
     use super::*;
 
+    // The production RSS budgets exclude ASan's shadow memory and allocator quarantine.
+    #[cfg(target_os = "linux")]
+    const CHECK_RSS: bool = option_env!("FLOWMUX_TEST_ASAN").is_none();
+
     #[test]
     fn narrowing_history_bounds_peak_memory_and_preserves_both_screens() {
         #[cfg(target_os = "linux")]
@@ -1214,7 +1218,7 @@ mod tests {
             assert!(source.term.grid().history_size() * 2 <= HISTORY_CELLS);
         }
         #[cfg(target_os = "linux")]
-        {
+        if CHECK_RSS {
             let growth = peak_kib().saturating_sub(before);
             eprintln!("NARROW_PEAK_GROWTH_KIB={growth}");
             assert!(
@@ -1276,7 +1280,7 @@ mod tests {
             assert!(source.term.grid().history_size() * 500 <= HISTORY_CELLS);
         }
         #[cfg(target_os = "linux")]
-        {
+        if CHECK_RSS {
             let growth = peak_kib().saturating_sub(before);
             eprintln!("RESIZE_PEAK_GROWTH_KIB={growth}");
             assert!(
@@ -1437,7 +1441,7 @@ mod tests {
         eprintln!("MAX_WIDTH_PRIMARY_FRAME_BYTES={}", first.len());
         eprintln!("MAX_WIDTH_FRAME_BYTES={}", current.len());
         #[cfg(target_os = "linux")]
-        {
+        if CHECK_RSS {
             let status = std::fs::read_to_string("/proc/self/status").unwrap();
             let peak: usize = status
                 .lines()

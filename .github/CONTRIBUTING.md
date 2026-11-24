@@ -42,5 +42,5 @@ Run the dependency policy check from the repository root:
 
 ```sh
 cargo install cargo-deny --version 0.20.2 --locked
-cargo deny --locked --config packaging/licenses/deny.toml check advisories licenses sources
+cargo deny --locked --config packaging/licenses/deny.toml check advisories bans licenses sources
 ```

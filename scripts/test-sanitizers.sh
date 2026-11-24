@@ -30,6 +30,7 @@ ASAN_SYMBOLIZER_PATH=${ASAN_SYMBOLIZER_PATH:-$(command -v llvm-symbolizer || com
 
 # Use a private desktop/state even when launched from an existing flowmux pane.
 for variable in ${!FLOWMUX_@}; do unset "$variable"; done
+export FLOWMUX_TEST_ASAN=1
 test_root=$(mktemp -d /tmp/flowmux-sanitizers.XXXXXX)
 trap 'rm -rf "$test_root"' EXIT
 export XDG_RUNTIME_DIR="$test_root/run" XDG_CONFIG_HOME="$test_root/config"
