@@ -41,8 +41,13 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 # Explicit --target keeps build scripts/proc macros out of the instrumented
 # target graph; build-std instruments Rust's standard library as well.
-command=(cargo +"$toolchain" test --locked -Zbuild-std --target "$target" "${packages[@]}" "$@")
+cargo_target=(--locked -Zbuild-std --target "$target")
+command=(cargo +"$toolchain" test "${cargo_target[@]}" "${packages[@]}" "$@")
 if [[ "$mode" == gui* ]]; then
+    # GUI relay tests need the helper from this instrumented build.
+    cargo +"$toolchain" build "${cargo_target[@]}" -p flowmux-cli --bin flowmuxctl
+    export FLOWMUX_BUNDLED_CLI_PATH="$CARGO_TARGET_DIR/$target/debug/flowmuxctl"
+    export PATH="$CARGO_TARGET_DIR/$target/debug:$PATH"
     export GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals GSK_RENDERER=cairo
     xvfb-run -a dbus-run-session -- "${command[@]}"
 else
