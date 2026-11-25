@@ -426,6 +426,7 @@ impl EditorSession {
     ) -> Result<Vec<HostMessage>, EditorSessionError> {
         match message {
             EditorMessage::EditorReady
+            | EditorMessage::CloseTabRequested
             | EditorMessage::ZoomChanged { .. }
             | EditorMessage::NativeEditRequested { .. }
             | EditorMessage::FocusDirectionRequested { .. }

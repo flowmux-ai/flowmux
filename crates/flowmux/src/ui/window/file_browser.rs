@@ -105,14 +105,34 @@ impl WindowController {
             return;
         };
 
-        // A file owns one pane-level Editor surface, just like a terminal tab.
-        // Never reuse an existing editor for a different file: doing so hides
-        // the previous document inside the WebView instead of leaving a visible
-        // flowmux tab the user can move, split, or return to.
         let Some(root) = workspace_state.local_root() else {
             return;
         };
         let editor_root = editor_workspace_root(&path, root);
+        // Older sessions can restore a tab whose last document was already closed.
+        let empty_editor = self
+            .pane_registry
+            .borrow()
+            .active_editor(target_pane)
+            .filter(|editor| {
+                editor.workspace_root() == editor_root
+                    && editor.session_state().open_files.is_empty()
+            })
+            .cloned();
+        if let Some(editor) = empty_editor {
+            match editor.open_file(&path).await {
+                Ok(()) => {
+                    self.persist_editor_sessions().await;
+                    self.refresh_file_browser_from_focus().await;
+                    self.focus_pane(target_pane);
+                }
+                Err(error) => self
+                    .clipboard_toast
+                    .show_with_message(&format!("Could not open file: {error}")),
+            }
+            return;
+        }
+        // Each open file keeps its own pane-level tab.
         let Some((workspace_id, editor_surface)) = self
             .store
             .add_editor_surface_to_pane(target_pane, editor_root)

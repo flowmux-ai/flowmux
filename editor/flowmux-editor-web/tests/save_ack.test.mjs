@@ -118,6 +118,7 @@ for (const saveAs of [false, true]) {
       assert.equal(f.sent.at(-1).type, "flush_completed");
       assert.equal(f.sent.at(-1).requestId, 7);
       assert.equal(f.document.payload.dirty, true);
+      f.context.addOrReplaceDocument({ ...f.document.payload, id: "other", uri: "flowmux://other" });
       f.context.requestCloseActiveDocument();
       assert.equal(f.context.closePrompted, true);
       f.context.requestSave();
@@ -132,17 +133,40 @@ for (const saveAs of [false, true]) {
 
   test(`${label} acknowledgement marks an unchanged buffer clean`, () => {
     const f = editorFixture(saveAs);
-    if (!saveAs) f.context.closeAfterSaveDocumentId = "doc";
     f.acknowledge();
     assert.equal(f.document.payload.dirty, false);
     assert.equal(f.model.getValue(), "saved earlier");
     assert.equal(f.document.pendingChanges, false);
     assert.equal(f.document.payload.version, 2);
     if (saveAs) assert.equal(f.document.payload.relativePath, "renamed.ts");
-    else {
-      assert.equal(f.sent.at(-1).type, "close_requested");
-      assert.equal(f.sent.at(-1).dirty, false);
-      assert.equal(f.context.closeAfterSaveDocumentId, null);
-    }
   });
 }
+
+test("Save and Close rechecks whether the saved document is the last one", () => {
+  for (const otherClosed of [false, true]) {
+    const f = editorFixture();
+    f.context.addOrReplaceDocument({ ...f.document.payload, id: "other", uri: "flowmux://other" });
+    f.context.closeAfterSaveDocumentId = "doc";
+    if (otherClosed) f.context.documents.delete("other");
+    f.acknowledge();
+    assert.equal(f.context.closeAfterSaveDocumentId, null);
+    assert.equal(f.sent.at(-1).type, otherClosed ? "close_tab_requested" : "close_requested");
+    if (!otherClosed) {
+      assert.equal(f.sent.at(-1).documentId, "doc");
+      assert.equal(f.sent.at(-1).dirty, false);
+    }
+  }
+});
+
+test("closing the last document sends its tab through the native close guard", () => {
+  const f = editorFixture();
+  f.acknowledge();
+  for (const dirty of [false, true]) {
+    if (dirty) f.edit("pending change");
+    f.context.requestCloseActiveDocument();
+    assert.equal(f.sent.at(-1).type, "close_tab_requested");
+    assert.equal(f.sent.at(-1).surfaceId, "surface");
+    assert.equal(f.context.documents.size, 1);
+    assert.equal(f.document.payload.dirty, dirty);
+  }
+});

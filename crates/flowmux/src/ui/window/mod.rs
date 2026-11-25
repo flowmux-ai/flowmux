@@ -8200,6 +8200,15 @@ mod tests {
             .unwrap()
             .join("live-editor.rs");
         std::fs::write(&file, "fn main() {}\n").unwrap();
+        let (_, empty_tab) = controller
+            .store
+            .add_editor_surface_to_pane(pane, file.parent().unwrap().to_path_buf())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(ws_id, pane, empty_tab, None)
+            .await
+            .unwrap();
         controller.focused_pane.set(Some(pane));
         controller.open_file_in_editor(file, Some(pane)).await;
         let surface = controller
@@ -8208,6 +8217,10 @@ mod tests {
             .active_surface(pane)
             .unwrap();
 
+        assert_eq!(
+            surface, empty_tab,
+            "reuse the empty tab from an older session"
+        );
         controller.persist_editor_sessions().await;
 
         assert_eq!(

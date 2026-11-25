@@ -222,6 +222,7 @@ pub enum EditorNativeEditAction {
 )]
 pub enum EditorMessage {
     EditorReady,
+    CloseTabRequested,
     ZoomChanged {
         zoom_percent: u16,
     },
@@ -399,7 +400,9 @@ pub fn javascript_for_host_message(
 
 fn validate_editor_message(message: &EditorMessage) -> Result<(), ProtocolError> {
     match message {
-        EditorMessage::EditorReady | EditorMessage::FocusDirectionRequested { .. } => Ok(()),
+        EditorMessage::EditorReady
+        | EditorMessage::CloseTabRequested
+        | EditorMessage::FocusDirectionRequested { .. } => Ok(()),
         EditorMessage::FlushCompleted { error, .. } => {
             if error
                 .as_ref()

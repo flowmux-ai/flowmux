@@ -7,7 +7,7 @@
 
 use crate::theme::ResolvedTheme;
 use crate::ui::browser_pane::BrowserPane;
-use crate::ui::editor_pane::EditorPane;
+use crate::ui::editor_pane::{EditorPane, EditorPaneAction};
 use crate::ui::ghostty_pane::{is_flatpak_sandbox, GhosttyPane};
 use crate::ui::pane_terminal::{PaneCallbacks, PaneTerminal, TabDropCommand};
 use flowmux_config::keybindings::ActionId;
@@ -4729,8 +4729,15 @@ fn build_panel(
             };
 
             let on_focus_direction = callbacks.on_editor_focus_direction.clone();
-            editor.connect_focus_direction(move |pane, direction| {
-                (on_focus_direction.borrow_mut())(pane, direction);
+            let on_close_surface = callbacks.on_close_surface.clone();
+            let surface_id = surface.id;
+            editor.connect_pane_action(move |pane, action| match action {
+                EditorPaneAction::Focus(direction) => {
+                    (on_focus_direction.borrow_mut())(pane, direction);
+                }
+                EditorPaneAction::CloseTab => {
+                    (on_close_surface.borrow_mut())(pane, surface_id);
+                }
             });
 
             #[cfg(target_os = "macos")]

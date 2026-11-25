@@ -111,25 +111,54 @@ def main():
                     ))
             connection.sync()
 
+        def walk(node):
+            node.clear_cache()
+            yield node
+            for index in range(node.get_child_count()):
+                child = node.get_child_at_index(index)
+                if child:
+                    yield from walk(child)
+
         def sync_error_visible():
-            def walk(node):
-                yield node
-                for index in range(node.get_child_count()):
-                    child = node.get_child_at_index(index)
-                    if child:
-                        yield from walk(child)
             return any(node.get_name() == "Could not synchronize changes"
                        and node.get_state_set().contains(Atspi.StateType.SHOWING)
                        for node in walk(Atspi.get_desktop(0)))
 
+        def tab_close_button():
+            for dialog in walk(Atspi.get_desktop(0)):
+                if dialog.get_role() == Atspi.Role.DIALOG:
+                    for node in walk(dialog):
+                        if (node.get_role() == Atspi.Role.PUSH_BUTTON and node.get_name() == "Close"
+                                and node.get_state_set().contains(Atspi.StateType.SHOWING)):
+                            return node
+            return None
+
+        def editor_tab():
+            return next((tab for p in h.workspace(path, workspace)["panes"]
+                         for tab in p["tabs"] if tab["kind"] == "editor"), None)
+
+        def editor_closed():
+            return not editor_tab() and not any(
+                node.get_role() == Atspi.Role.PUSH_BUTTON and node.get_name() in ("Editor", document.name)
+                and node.get_state_set().contains(Atspi.StateType.SHOWING)
+                for node in walk(Atspi.get_desktop(0))
+            )
+
+        def open_selected_file():
+            key("Right", ("Alt_L",))
+            key("Return")
+            tab = gui.wait_for(editor_tab, "editor tab")
+            gui.wait_for(lambda: any(n.get_name() == "Editor content" for n in walk(Atspi.get_desktop(0))),
+                         "editor is ready")
+            return tab
+
         gui.wait_for(focus_window, "mapped editor test window")
         time.sleep(0.5)
         key("f", ("Control_L", "Alt_L"))
-        key("Right", ("Alt_L",))
-        key("Return")
-        editor = gui.wait_for(lambda: next((t for w in h.tree(path) for p in w["panes"]
-                                           for t in p["tabs"] if t["kind"] == "editor"), None), "editor tab")
-        time.sleep(2)
+        open_selected_file()
+        key("w", ("Control_L",))
+        gui.wait_for(editor_closed, "closing the last document removes its editor tab")
+        editor = open_selected_file()
         terminal = h.rpc(path, "pane_split", pane=pane, direction="vertical")["pane_split_done"]["new_pane"]
         h.rpc(path, "surface_focus", pane=pane, surface=editor["id"])
         time.sleep(0.3)
@@ -204,7 +233,11 @@ def main():
         gui.wait_for(recovery_entered.exists, "delayed recovery fsync")
         key("s", ("Control_L",), delay=.01)
         gui.wait_for(lambda: document.read_text().endswith("x"), "save during delayed recovery write")
-        h.rpc(path, "surface_close", pane=pane, surface=editor["id"])
+        key("w", ("Alt_L",))
+        button = gui.wait_for(tab_close_button, "confirm closing the saved editor tab")
+        assert button.do_action(0)
+        gui.wait_for(editor_closed, "confirmed Alt+W removes the saved editor tab")
+        assert document.read_text().endswith("x")
         latency = responsive(terminal)
         recovery_root = h.root / "state/flowmux/editor-recovery"
         gui.wait_for(lambda: not list(recovery_root.rglob("*.json"))

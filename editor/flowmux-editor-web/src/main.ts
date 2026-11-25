@@ -883,6 +883,14 @@ function closeDocument(documentId: string): void {
 }
 
 function requestClose(document: OpenDocument): void {
+  if (documents.size === 1) {
+    postToHost({ protocolVersion: PROTOCOL_VERSION, surfaceId, type: "close_tab_requested" });
+    return;
+  }
+  if (document.payload.dirty) {
+    showCloseDialog(document);
+    return;
+  }
   if (!syncDocument(document)) {
     return;
   }
@@ -898,12 +906,7 @@ function requestClose(document: OpenDocument): void {
 
 function requestCloseActiveDocument(): void {
   const document = activeDocumentId === null ? undefined : documents.get(activeDocumentId);
-  if (document === undefined) {
-    return;
-  }
-  if (document.payload.dirty) {
-    showCloseDialog(document);
-  } else {
+  if (document !== undefined) {
     requestClose(document);
   }
 }

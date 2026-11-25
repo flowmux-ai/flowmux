@@ -3,12 +3,11 @@
 
 use super::{
     handle_bridge_message, is_allowed_editor_navigation, queue_host_messages,
-    should_poll_editor_documents, EditorBridgeState, EditorFocusDirectionCallback, EditorHostState,
+    should_poll_editor_documents, EditorBridgeState, EditorHostState, EditorPaneActionCallback,
 };
 use flowmux_core::{EditorSessionState, PaneId, SurfaceId};
 use flowmux_editor::{
-    EditorAppearance, EditorAssetServer, EditorFocusDirection, EditorNativeEditAction, HostMessage,
-    ProtocolError,
+    EditorAppearance, EditorAssetServer, EditorNativeEditAction, HostMessage, ProtocolError,
 };
 use gtk::gio;
 use gtk::prelude::*;
@@ -57,7 +56,7 @@ pub struct EditorPane {
     appearance: Rc<RefCell<EditorAppearance>>,
     file_monitors: Rc<RefCell<HashMap<PathBuf, gio::FileMonitor>>>,
     file_monitor_generation: Rc<Cell<u64>>,
-    on_focus_direction: EditorFocusDirectionCallback,
+    on_pane_action: EditorPaneActionCallback,
     retry_button: gtk::Button,
 }
 
@@ -84,7 +83,7 @@ impl EditorPane {
             surface_id,
         ));
         let pane_id = Rc::new(Cell::new(pane_id));
-        let on_focus_direction: EditorFocusDirectionCallback = Rc::new(RefCell::new(None));
+        let on_pane_action: EditorPaneActionCallback = Rc::new(RefCell::new(None));
         let closed = Rc::new(Cell::new(false));
         let appearance = Rc::new(RefCell::new(appearance));
         let (failure_page, retry_button) = super::editor_failure_page();
@@ -115,7 +114,7 @@ impl EditorPane {
             let host = host.clone();
             let web_view = web_view.downgrade();
             let pane_id = pane_id.clone();
-            let on_focus_direction = on_focus_direction.clone();
+            let on_pane_action = on_pane_action.clone();
             user_content_manager.connect_script_message_received(
                 Some(MESSAGE_HANDLER_NAME),
                 move |_, value| {
@@ -124,12 +123,12 @@ impl EditorPane {
                     let host = host.clone();
                     let web_view = web_view.clone();
                     let pane_id = pane_id.clone();
-                    let on_focus_direction = on_focus_direction.clone();
+                    let on_pane_action = on_pane_action.clone();
                     gtk::glib::spawn_future_local(async move {
                         let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
-                        if let Some(direction) = dispatch.focus_direction {
-                            if let Some(callback) = on_focus_direction.borrow_mut().as_mut() {
-                                callback(pane_id.get(), direction);
+                        if let Some(action) = dispatch.pane_action {
+                            if let Some(callback) = on_pane_action.borrow_mut().as_mut() {
+                                callback(pane_id.get(), action);
                             }
                         }
                         if let Some(web_view) = web_view.upgrade() {
@@ -258,7 +257,7 @@ impl EditorPane {
             appearance,
             file_monitors: Rc::new(RefCell::new(HashMap::new())),
             file_monitor_generation: Rc::new(Cell::new(0)),
-            on_focus_direction,
+            on_pane_action,
             retry_button,
         };
         let initial_appearance = pane.appearance.borrow().clone();
@@ -342,11 +341,11 @@ impl EditorPane {
         self.focus_widget().grab_focus();
     }
 
-    pub fn connect_focus_direction<F: FnMut(PaneId, EditorFocusDirection) + 'static>(
+    pub(crate) fn connect_pane_action<F: FnMut(PaneId, super::EditorPaneAction) + 'static>(
         &self,
         callback: F,
     ) {
-        *self.on_focus_direction.borrow_mut() = Some(Box::new(callback));
+        *self.on_pane_action.borrow_mut() = Some(Box::new(callback));
     }
 
     pub fn apply_appearance(&self, appearance: EditorAppearance) {

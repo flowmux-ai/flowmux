@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use flowmux_core::{EditorSessionState, PaneId, SurfaceId};
-use flowmux_editor::{EditorAppearance, EditorFocusDirection, HostMessage, ProtocolError};
+use flowmux_editor::{EditorAppearance, HostMessage, ProtocolError};
 use gtk::prelude::*;
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -58,7 +58,7 @@ impl EditorPane {
         self.root.grab_focus();
     }
 
-    pub fn connect_focus_direction<F: FnMut(PaneId, EditorFocusDirection) + 'static>(
+    pub(crate) fn connect_pane_action<F: FnMut(PaneId, super::EditorPaneAction) + 'static>(
         &self,
         _callback: F,
     ) {

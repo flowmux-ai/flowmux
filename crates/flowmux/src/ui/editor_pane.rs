@@ -64,8 +64,14 @@ impl EditorNavigationKey {
     }
 }
 
-pub(super) type EditorFocusDirectionCallback =
-    Rc<RefCell<Option<Box<dyn FnMut(PaneId, EditorFocusDirection)>>>>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditorPaneAction {
+    Focus(EditorFocusDirection),
+    CloseTab,
+}
+
+pub(super) type EditorPaneActionCallback =
+    Rc<RefCell<Option<Box<dyn FnMut(PaneId, EditorPaneAction)>>>>;
 
 enum SearchWorkerMessage {
     QuickOpen {
@@ -103,7 +109,7 @@ pub(super) struct EditorBridgeReceive {
 
 pub(super) struct EditorBridgeDispatch {
     pub scripts: Vec<String>,
-    pub focus_direction: Option<EditorFocusDirection>,
+    pub pane_action: Option<EditorPaneAction>,
     pub native_edit_action: Option<EditorNativeEditAction>,
     pub native_edit_text: Option<String>,
     pub zoom_percent: Option<u16>,
@@ -1031,7 +1037,7 @@ pub(super) async fn handle_bridge_message(
 ) -> EditorBridgeDispatch {
     let received = bridge.receive(raw);
     let mut scripts = received.scripts;
-    let mut focus_direction = None;
+    let mut pane_action = None;
     let mut native_edit_action = None;
     let mut native_edit_text = None;
     let mut zoom_percent = None;
@@ -1044,7 +1050,10 @@ pub(super) async fn handle_bridge_message(
                 zoom_percent = Some(changed);
             }
             EditorMessage::FocusDirectionRequested { direction } => {
-                focus_direction = Some(direction);
+                pane_action = Some(EditorPaneAction::Focus(direction));
+            }
+            EditorMessage::CloseTabRequested => {
+                pane_action = Some(EditorPaneAction::CloseTab);
             }
             EditorMessage::NativeEditRequested { action, text } => {
                 native_edit_action = Some(action);
@@ -1076,7 +1085,7 @@ pub(super) async fn handle_bridge_message(
     }
     EditorBridgeDispatch {
         scripts,
-        focus_direction,
+        pane_action,
         native_edit_action,
         native_edit_text,
         zoom_percent,
@@ -1427,7 +1436,10 @@ mod tests {
 
         let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
 
-        assert_eq!(dispatch.focus_direction, Some(EditorFocusDirection::Down));
+        assert_eq!(
+            dispatch.pane_action,
+            Some(EditorPaneAction::Focus(EditorFocusDirection::Down))
+        );
         assert!(dispatch.scripts.is_empty());
     }
 

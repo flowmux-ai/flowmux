@@ -3,13 +3,12 @@
 
 use super::{
     handle_bridge_message, is_allowed_editor_navigation, queue_host_messages,
-    should_poll_editor_documents, EditorBridgeState, EditorFocusDirectionCallback, EditorHostState,
-    EditorNavigationKey,
+    should_poll_editor_documents, EditorBridgeState, EditorHostState, EditorNavigationKey,
+    EditorPaneActionCallback,
 };
 use flowmux_core::{EditorSessionState, PaneId, SurfaceId};
 use flowmux_editor::{
-    EditorAppearance, EditorAssetServer, EditorFocusDirection, EditorNativeEditAction, HostMessage,
-    ProtocolError,
+    EditorAppearance, EditorAssetServer, EditorNativeEditAction, HostMessage, ProtocolError,
 };
 use gtk::gio;
 use gtk::glib::{self, translate::ToGlibPtr};
@@ -82,7 +81,7 @@ pub struct EditorPane {
     file_monitors: Rc<RefCell<HashMap<PathBuf, gio::FileMonitor>>>,
     file_monitor_generation: Rc<Cell<u64>>,
     on_focus: EditorFocusCallback,
-    on_focus_direction: EditorFocusDirectionCallback,
+    on_pane_action: EditorPaneActionCallback,
     retry_button: gtk::Button,
 }
 
@@ -98,7 +97,7 @@ struct EditorScriptMessageHandlerIvars {
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
     pane_id: Rc<Cell<PaneId>>,
-    on_focus_direction: EditorFocusDirectionCallback,
+    on_pane_action: EditorPaneActionCallback,
 }
 
 define_class!(
@@ -127,14 +126,14 @@ define_class!(
             let raw = body.to_string();
             let bridge = self.ivars().bridge.clone();
             let host = self.ivars().host.clone();
-            let on_focus_direction = self.ivars().on_focus_direction.clone();
+            let on_pane_action = self.ivars().on_pane_action.clone();
             let pane_id = self.ivars().pane_id.clone();
             let web_view = unsafe { message.webView() };
             glib::spawn_future_local(async move {
                 let dispatch = handle_bridge_message(&bridge, &host, &raw).await;
-                if let Some(direction) = dispatch.focus_direction {
-                    if let Some(callback) = on_focus_direction.borrow_mut().as_mut() {
-                        callback(pane_id.get(), direction);
+                if let Some(action) = dispatch.pane_action {
+                    if let Some(callback) = on_pane_action.borrow_mut().as_mut() {
+                        callback(pane_id.get(), action);
                     }
                 }
                 let Some(web_view) = web_view else {
@@ -300,7 +299,7 @@ impl EditorPane {
         ));
         let pane_id = Rc::new(Cell::new(pane_id));
         let on_focus: EditorFocusCallback = Rc::new(RefCell::new(None));
-        let on_focus_direction: EditorFocusDirectionCallback = Rc::new(RefCell::new(None));
+        let on_pane_action: EditorPaneActionCallback = Rc::new(RefCell::new(None));
         let appearance = Rc::new(RefCell::new(appearance));
         let (failure_page, retry_button) = super::editor_failure_page();
         let viewport = gtk::DrawingArea::new();
@@ -320,7 +319,7 @@ impl EditorPane {
                 web_widget: web_widget.downgrade(),
             },
             pane_id.clone(),
-            on_focus_direction.clone(),
+            on_pane_action.clone(),
         ));
 
         crate::ui::browser_pane::install_native_view_still(&viewport, &native.web_view);
@@ -417,7 +416,7 @@ impl EditorPane {
             file_monitors: Rc::new(RefCell::new(HashMap::new())),
             file_monitor_generation: Rc::new(Cell::new(0)),
             on_focus,
-            on_focus_direction,
+            on_pane_action,
             retry_button,
         };
         let initial_appearance = pane.appearance.borrow().clone();
@@ -523,11 +522,11 @@ impl EditorPane {
         }
     }
 
-    pub fn connect_focus_direction<F: FnMut(PaneId, EditorFocusDirection) + 'static>(
+    pub(crate) fn connect_pane_action<F: FnMut(PaneId, super::EditorPaneAction) + 'static>(
         &self,
         callback: F,
     ) {
-        *self.on_focus_direction.borrow_mut() = Some(Box::new(callback));
+        *self.on_pane_action.borrow_mut() = Some(Box::new(callback));
     }
 
     pub fn apply_appearance(&self, appearance: EditorAppearance) {
@@ -774,7 +773,7 @@ fn create_native_editor_view(
     mtm: MainThreadMarker,
     navigation: EditorNavigationDelegateIvars,
     pane_id: Rc<Cell<PaneId>>,
-    on_focus_direction: EditorFocusDirectionCallback,
+    on_pane_action: EditorPaneActionCallback,
 ) -> NativeEditorView {
     let configuration = unsafe { WKWebViewConfiguration::new(mtm) };
     let preferences = unsafe { WKPreferences::new(mtm) };
@@ -784,7 +783,7 @@ fn create_native_editor_view(
             bridge: navigation.bridge.clone(),
             host: navigation.host.clone(),
             pane_id,
-            on_focus_direction,
+            on_pane_action,
         });
     let script_message_handler: Retained<EditorScriptMessageHandler> =
         unsafe { msg_send![super(script_message_handler), init] };

@@ -171,6 +171,7 @@ interface EditorMessageBase {
 
 export type EditorMessage =
   | (EditorMessageBase & { type: "editor_ready" })
+  | (EditorMessageBase & { type: "close_tab_requested" })
   | (EditorMessageBase & { type: "zoom_changed"; zoomPercent: number })
   | (EditorMessageBase & {
       type: "native_edit_requested";
