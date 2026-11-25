@@ -2,7 +2,9 @@
 //! Closing a view detaches; stopping an execution requires an explicit action.
 
 use super::*;
-use flowmux_ipc::agent_host::{HostClient, TerminateMode};
+use flowmux_ipc::agent_host::{
+    AgentInstance, AttachmentKey, ClientRole, HostClient, HostRequest, HostResponse, TerminateMode,
+};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 impl WindowController {
@@ -165,7 +167,7 @@ impl WindowController {
     }
 
     /// Agents the Host is running: managed ones and terminals with an agent in their shell.
-    pub(super) fn running_agents(&self) -> Vec<flowmux_ipc::agent_host::AgentInstance> {
+    pub(super) fn running_agents(&self) -> Vec<AgentInstance> {
         let registry = self.bridge.agent_registry.borrow();
         if !registry.available {
             return Vec::new();
@@ -173,81 +175,102 @@ impl WindowController {
         registry
             .agents
             .iter()
-            .filter(|agent| {
-                agent.state == flowmux_ipc::agent_host::ProcessState::Running
-                    && agent.exit_status.is_none()
-                    && (!agent.shell || agent.presence.is_some())
-            })
+            .filter(|agent| agent.is_running_agent())
             .cloned()
             .collect()
     }
 
-    /// Closing the window leaves its agents working in Background. Ask once whether
-    /// that is wanted: `Some(true)` stops them, `Some(false)` keeps them, `None` cancels.
-    pub(super) async fn confirm_close_with_agents(&self) -> Option<bool> {
-        let count = self.running_agents().len();
-        if count == 0 {
-            return Some(false);
+    pub(super) async fn host_executions_for_close(&self) -> Vec<AgentInstance> {
+        // The display snapshot can lag the Host's detection of a new agent.
+        if let Some(handle) = &self.tokio_handle {
+            if let Ok(Ok(Ok(agents))) = handle
+                .spawn(async {
+                    tokio::time::timeout(
+                        Duration::from_secs(1),
+                        crate::agent_host::list_executions(
+                            &flowmux_config::paths::agent_host_socket(),
+                        ),
+                    )
+                    .await
+                })
+                .await
+            {
+                return agents;
+            }
         }
-        // Scripts and tests that close windows answer ahead of time.
+        self.bridge.agent_registry.borrow().agents.clone()
+    }
+
+    /// Capture the attachments covered by the question. A later close step may be cancelled,
+    /// or an agent may move to another window before its stop reaches the Host.
+    pub(super) async fn confirm_close_with_agents(&self) -> Option<Vec<AttachmentKey>> {
+        let mut targets = Vec::new();
+        for agent in self
+            .host_executions_for_close()
+            .await
+            .into_iter()
+            .filter(AgentInstance::is_running_agent)
+        {
+            if self
+                .verified_agent_location(&agent)
+                .await
+                .is_some_and(|location| self.workspace_window(location.workspace) == self.window)
+            {
+                targets.push(agent.attachment.expect("verified attachment").key);
+            }
+        }
+        if targets.is_empty() {
+            return Some(targets);
+        }
         match std::env::var("FLOWMUX_CLOSE_AGENTS").as_deref() {
-            Ok("keep") => return Some(false),
-            Ok("stop") => return Some(true),
+            Ok("keep") => return Some(Vec::new()),
+            Ok("stop") => return Some(targets),
             _ => {}
         }
         if crate::ui::is_unattended_close() {
-            return Some(false);
+            return Some(Vec::new());
         }
-        let dialog = close_with_agents_dialog(count);
+        let dialog = close_with_agents_dialog(targets.len());
         let _native_view_suspend = crate::ui::browser_pane::suspend_native_browser_views_for_window(
             self.window.upcast_ref(),
         );
         match dialog.choose_future(&self.window).await.as_str() {
-            "keep" => Some(false),
-            "stop" => Some(true),
+            "keep" => Some(Vec::new()),
+            "stop" => Some(targets),
             _ => None,
         }
     }
 
-    /// Stop every agent, and the whole Host with them unless another window shows something from
-    /// it.
-    pub(super) async fn stop_agents(&self) {
-        let Some(handle) = self.tokio_handle.clone() else {
-            return;
-        };
-        let agents = self.running_agents();
-        let shared = self
-            .bridge
-            .agent_registry
-            .borrow()
-            .agents
-            .iter()
-            .any(|agent| {
-                agent
-                    .view
-                    .as_ref()
-                    .is_some_and(|view| view.window != self.flow.owner)
-            });
+    pub(super) async fn stop_viewed_agents(
+        &self,
+        targets: Vec<AttachmentKey>,
+    ) -> anyhow::Result<()> {
+        let handle = self
+            .tokio_handle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Agent Host runtime unavailable"))?;
         let socket = flowmux_config::paths::agent_host_socket();
-        let stopped = handle
+        handle
             .spawn(async move {
-                if !shared {
-                    return HostClient::stop_all(&socket, false).await;
-                }
-                for agent in agents {
-                    let binding = flowmux_core::AgentViewBinding {
-                        instance: agent.instance,
-                        epoch: agent.epoch,
-                    };
-                    flowmux_cli::agent_host::control(&socket, binding, TerminateMode::Terminate)
-                        .await?;
+                let client = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    HostClient::connect(&socket, ClientRole::Relay),
+                )
+                .await??;
+                for key in targets {
+                    let reply = tokio::time::timeout(
+                        Duration::from_secs(3),
+                        client.call(HostRequest::StopViewedAgent { key }),
+                    )
+                    .await??;
+                    anyhow::ensure!(
+                        matches!(reply, HostResponse::Ok),
+                        "Unexpected response to the agent stop request"
+                    );
                 }
                 Ok(())
             })
-            .await;
-        if let Ok(Err(error)) = stopped {
-            tracing::warn!(%error, "agents could not be stopped while closing the window");
-        }
+            .await?
     }
 
     /// Closing a managed tab only detaches, so ask whether the agent should keep running.
@@ -365,7 +388,7 @@ pub(super) fn close_with_agents_dialog(count: usize) -> adw::AlertDialog {
     let dialog = adw::AlertDialog::new(
         Some(&heading),
         Some(&format!(
-            "Keep {them} working in Background, or stop {them} along with the Agent runtime. Stopping may lose work in progress."
+            "Keep {them} working in Background, or stop {them} when this window closes. Stopping may lose work in progress."
         )),
     );
     dialog.add_response("cancel", "Cancel");

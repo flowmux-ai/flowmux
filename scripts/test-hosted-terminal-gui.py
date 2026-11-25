@@ -5,6 +5,7 @@
 from agent_host_protocol import SOCKET_NAME
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 from pathlib import Path
@@ -150,6 +151,40 @@ def main():
         assert Path(f"/proc/{kept['presence']['pid']}").exists(), "another workspace's agent keeps running"
         h.pass_check("closing a workspace asks about its agent; Cancel keeps it and Terminate stops only it")
 
+        del h.env["FLOWMUX_CLOSE_AGENTS"]
+        empty, _ = h.window("window-without-agents")
+        h.close_window(empty)
+        h.pass_check("a window with no agents closes while the other window's agent is running")
+        other, other_socket = h.window("other-window")
+        h.env["FLOWMUX_CLOSE_AGENTS"] = "keep"
+        other_ws = h.rpc(other_socket, "workspace_create", name="Other", root=str(h.root))["workspace_created"]["id"]
+        other_pane = h.workspace(other_socket, other_ws)["panes"][0]["id"]
+        h.send(other_socket, other_pane, f"cd {h.root / 'closing'} && python3 ./claude")
+        other_agent = gui.wait_for(lambda: next((a for a in agents() if a.get("presence")
+                                                and (a.get("view") or {}).get("pane") == other_pane), None),
+                                   "the second window shows its agent on the same Host")
+        launched = subprocess.run([args.cli, "--socket", str(other_socket), "--json", "agent", "run",
+                                   "--pane", other_pane, "--cwd", str(h.root), "--", "/bin/sleep", "120"],
+                                  env=h.env, capture_output=True, text=True, check=True, timeout=45)
+        managed = json.loads(launched.stdout)["agent"]
+        gui.wait_for(lambda: any(a["instance"] == other_agent["instance"] and a.get("view")
+                                 and not a["view"]["visible"] for a in agents()),
+                     "the hosted agent is still attached behind the managed agent's tab")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            closed = pool.submit(h.close_window, other)
+            stop = gui.wait_for(lambda: button(other.pid, lambda name: name == "Stop agents"), "Stop agents")
+            assert accessible(other.pid, lambda n: n.get_name() == "2 agents are still running")
+            assert stop.get_action_iface().do_action(0)
+            closed.result()
+        assert any(a["instance"] == kept["instance"] and (a.get("presence") or {}).get("pid") == kept["presence"]["pid"]
+                   for a in agents()), "closing the second window stopped the first window's agent"
+        for pid in (other_agent["presence"]["pid"], managed["pid"]):
+            gui.wait_for(lambda: not Path(f"/proc/{pid}").exists(), f"the second window's agent {pid} stops")
+        before = int(ticks.read_text() or 0)
+        gui.wait_for(lambda: int(ticks.read_text() or 0) > before, "the first window's agent keeps working")
+        assert "FAKE_AGENT" in h.screen(socket, pane)
+        h.pass_check("Stop agents ends both agents in the second window, including its hidden tab; the first keeps working")
+
         # The Host sees only the process, which it reports as idle; the hook reaches the window.
         session = str(uuid.uuid4())
         def hook(status):
@@ -172,7 +207,7 @@ def main():
         # The Host ends a shell nobody views ten seconds after its window, unless an agent runs in it.
         gui.wait_for(lambda: not Path(f"/proc/{plain_pid}").exists(),
                      "the plain terminal ends with its window", timeout=40)
-        listed = agents()
+        listed = [a for a in agents() if a["state"] not in ("exited", "failed")]
         assert [a["instance"] for a in listed] == [kept["instance"]] and listed[0]["state"] == "running", listed
         before = int(ticks.read_text() or 0)
         gui.wait_for(lambda: int(ticks.read_text() or 0) > before, "the agent keeps working without a window")
@@ -186,16 +221,23 @@ def main():
         h.close_window(process)
         assert next(a for a in agents() if a["instance"] == kept["instance"])["state"] == "running"
 
-        # Answering the closing window's question with "stop" ends the agents and the Host.
+        # With no other window, a background execution still belongs to nobody's close dialog.
         h.env["FLOWMUX_CLOSE_AGENTS"] = "stop"
         process, socket = h.window("stopping")
         gui.wait_for(lambda: "FAKE_AGENT" in h.screen(socket, pane), "the agent is shown again")
-        # The window asks about the agents it has heard of; it polls the Host every second.
-        time.sleep(3)
+        launched = subprocess.run([args.cli, "--json", "agent", "run", "--background",
+                                   "--cwd", str(h.root), "--", "/bin/sleep", "120"],
+                                  env=h.env, capture_output=True, text=True, check=True, timeout=20)
+        background = json.loads(launched.stdout)["agent"]
         h.close_window(process)
         gui.wait_for(lambda: not Path(f"/proc/{kept['pid']}").exists(), "the agent's terminal is stopped")
+        assert any(a["instance"] == background["instance"] and a["state"] == "running"
+                   and a["pid"] == background["pid"] and not a.get("attachment") for a in agents())
+        h.pass_check("stopping the last window's agent leaves the background agent running")
+        subprocess.run([args.cli, "agent", "terminate", background["instance"]], env=h.env,
+                       check=True, capture_output=True, timeout=20)
         gui.wait_for(lambda: not host_socket.exists(), "the Agent runtime exits with its last agent", timeout=40)
-        h.pass_check("closing the window with \"stop\" ends the agents and the Agent runtime")
+        h.pass_check("the Agent runtime exits after its final execution ends")
         print("HOSTED_TERMINAL_OK", flush=True)
     finally:
         if host_socket.exists():

@@ -2471,7 +2471,7 @@ impl WindowController {
             }
         }
         // Asked first and acted on last, so a close cancelled further down stops nothing.
-        let Some(stop_agents) = self.confirm_close_with_agents().await else {
+        let Some(agents_to_stop) = self.confirm_close_with_agents().await else {
             self.window_close.prompting.set(false);
             return;
         };
@@ -2534,10 +2534,20 @@ impl WindowController {
             self.window_close.prompting.set(false);
             return;
         }
-        self.window_close.approved.set(true);
-        if stop_agents {
-            self.stop_agents().await;
+        if !agents_to_stop.is_empty() {
+            if let Err(error) = self.stop_viewed_agents(agents_to_stop).await {
+                self.window.set_sensitive(true);
+                show_error_dialog(
+                    &self.window,
+                    "Could not confirm agent shutdown",
+                    &format!("{error:#}. Check Agents before retrying."),
+                )
+                .await;
+                self.window_close.prompting.set(false);
+                return;
+            }
         }
+        self.window_close.approved.set(true);
         self.pane_registry.borrow_mut().ssh.clear();
         // Stop loads before destruction; navigating to about:blank would start
         // another load that immediately gets cancelled during teardown.

@@ -100,7 +100,7 @@ pub(crate) fn set_hosted_terminals(surfaces: std::collections::HashSet<flowmux_c
 }
 
 thread_local! {
-    /// Agents the Agent Host is running, as last reported by it.
+    /// Running agents attached to the main window when its views were last verified.
     static RUNNING_AGENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 

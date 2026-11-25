@@ -148,11 +148,15 @@ impl WindowController {
 
         let agents = self.bridge.agent_registry.borrow().agents.clone();
         let mut reports = Vec::new();
+        let mut closing_agents = 0;
         for agent in agents {
             let Some(mut location) = self.verified_agent_location(&agent).await else {
                 continue;
             };
             let window = self.workspace_window(location.workspace);
+            if window == self.window && agent.is_running_agent() {
+                closing_agents += 1;
+            }
             let minimized = window
                 .surface()
                 .and_then(|surface| surface.downcast::<gtk::gdk::Toplevel>().ok())
@@ -179,13 +183,13 @@ impl WindowController {
         if !self.window.is_realized() {
             reports.clear();
         }
+        crate::ui::set_running_agents(closing_agents);
         // Each GTK observation is a heartbeat; the manager must not renew cached locations.
         self.bridge.agent_view_reports.send_replace(reports);
     }
 
     pub(super) async fn refresh_agent_displays(&self) {
         self.refresh_agent_connections().await;
-        crate::ui::set_running_agents(self.running_agents().len());
         crate::ui::set_hosted_terminals(
             self.pane_registry
                 .borrow()

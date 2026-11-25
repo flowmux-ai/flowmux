@@ -1127,26 +1127,7 @@ impl WindowController {
         }
         let binding = self.store.surface_host_binding(pane, surface).await?;
         if host_snapshot.is_none() {
-            // The display snapshot can lag the Host's detection of a new agent.
-            let fresh = match &self.tokio_handle {
-                Some(handle) => handle
-                    .spawn(async {
-                        let socket = flowmux_config::paths::agent_host_socket();
-                        tokio::time::timeout(
-                            Duration::from_secs(1),
-                            crate::agent_host::list_executions(&socket),
-                        )
-                        .await
-                        .ok()?
-                        .ok()
-                    })
-                    .await
-                    .ok()
-                    .flatten(),
-                None => None,
-            };
-            *host_snapshot =
-                Some(fresh.unwrap_or_else(|| self.bridge.agent_registry.borrow().agents.clone()));
+            *host_snapshot = Some(self.host_executions_for_close().await);
         }
         host_snapshot
             .iter()

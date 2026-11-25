@@ -887,6 +887,7 @@ impl AgentHost {
             | HostRequest::Terminate { instance, .. }
             | HostRequest::CloseTerminal { instance, .. } => *instance,
             HostRequest::CommitAttach { key, .. }
+            | HostRequest::StopViewedAgent { key }
             | HostRequest::ViewReady { key, .. }
             | HostRequest::GuiViewReady { key, .. }
             | HostRequest::AbortAttach { key }
@@ -934,12 +935,18 @@ impl AgentHost {
                 return result;
             }
         }
-        let sender = self
+        let Some(sender) = self
             .registry()
             .entries
             .get(&instance)
             .and_then(|entry| entry.commands.clone())
-            .ok_or_else(|| RpcError::NotFound("Agent is no longer running".into()))?;
+        else {
+            return if matches!(request, HostRequest::StopViewedAgent { .. }) {
+                Ok(HostResponse::Ok)
+            } else {
+                Err(RpcError::NotFound("Agent is no longer running".into()))
+            };
+        };
         let (reply, response) = oneshot::channel();
         sender
             .try_send(Command {
@@ -1897,7 +1904,6 @@ struct TerminalActor {
     agent_checked: Option<Instant>,
     /// The current status came from finding the agent's process, not from its hooks.
     detected_agent: bool,
-    stop_all: bool,
     /// The shell is ending because its terminal went away, not because of a stop request.
     closed_terminal: bool,
     /// When a stop asked of the agent in a shell, which never stops the shell, may be forced.
@@ -1953,7 +1959,6 @@ impl TerminalActor {
             unattached_since: None,
             agent_checked: None,
             detected_agent: false,
-            stop_all: false,
             closed_terminal: false,
             agent_stop: None,
             output: tokio::sync::watch::channel(0).0,
@@ -1980,10 +1985,9 @@ impl TerminalActor {
                 }
                 command = self.commands.recv() => if let Some(command) = command {
                     self.clear_disconnected();
-                    self.stop_all = command.stop_all;
                     // A frame read changes nothing a waiting view needs to hear about.
                     let changes = !matches!(command.request, HostRequest::Frame { .. });
-                    let result = self.command(command.connection,command.request);
+                    let result = self.command(command.connection, command.request, command.stop_all);
                     let _ = command.reply.send(result);
                     if changes {
                         self.output_changed();
@@ -2235,10 +2239,40 @@ impl TerminalActor {
         self.pty.try_wait()
     }
 
-    fn command(&mut self, mut connection: u64, request: HostRequest) -> Result<HostResponse> {
+    fn command(
+        &mut self,
+        mut connection: u64,
+        request: HostRequest,
+        stop_all: bool,
+    ) -> Result<HostResponse> {
+        let stop_shell = stop_all || matches!(&request, HostRequest::StopViewedAgent { .. });
         let gui_admitted = matches!(&request, HostRequest::GuiViewReady { .. });
         let mut admitting_gui = None;
         let request = match request {
+            HostRequest::StopViewedAgent { key } => {
+                let registry = self.host.registry();
+                let gui = registry
+                    .peers
+                    .get(&connection)
+                    .and_then(|peer| peer.identity);
+                let owned = self.active.as_ref().is_some_and(|lease| {
+                    lease.ready
+                        && lease.key == key
+                        && gui.is_some()
+                        && registry.peers.get(&lease.connection).is_some_and(|peer| {
+                            peer.identity == gui || peer.parent == gui || peer.grandparent == gui
+                        })
+                });
+                if !owned || self.pending.is_some() {
+                    // A moved, detached or transferring agent survives the old window.
+                    return Ok(HostResponse::Ok);
+                }
+                HostRequest::Terminate {
+                    instance: key.instance,
+                    epoch: key.epoch,
+                    mode: TerminateMode::Terminate,
+                }
+            }
             HostRequest::GuiViewReady {
                 key,
                 surface,
@@ -2833,7 +2867,7 @@ impl TerminalActor {
                     let kill = mode == TerminateMode::Force;
                     match self.presence.as_ref().and_then(|presence| presence.pid) {
                         // Stopping the agent in a terminal leaves the terminal.
-                        Some(pid) if !self.stop_all => {
+                        Some(pid) if !stop_shell => {
                             let signal = if kill { libc::SIGKILL } else { libc::SIGTERM };
                             // An interactive shell runs the agent as its own job.
                             let (group, shell) = unsafe {
@@ -8012,12 +8046,52 @@ for line in sys.stdin:
     }
 
     #[tokio::test]
+    async fn window_close_stops_only_the_attachment_confirmed_before_a_move() {
+        let fixture = Fixture::new().await;
+        let gui = fixture.client(ClientRole::Gui).await;
+        let old = fixture.client(ClientRole::Relay).await;
+        let new = fixture.client(ClientRole::Relay).await;
+        let agent = fixture.launch_agent(&old, "sleep 60").await;
+        let key = attach(&old, &agent).await;
+        let pending = prepare(&new, &agent, Some(key)).await;
+        gui.call(HostRequest::StopViewedAgent { key })
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture.host.registry().entries[&agent.instance].agent.state,
+            ProcessState::Running
+        );
+        new.call(HostRequest::AbortAttach { key: pending })
+            .await
+            .unwrap();
+        old.call(HostRequest::Detach { key }).await.unwrap();
+        gui.call(HostRequest::StopViewedAgent { key })
+            .await
+            .unwrap();
+        let current = attach(&new, &agent).await;
+        gui.call(HostRequest::StopViewedAgent { key })
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture.host.registry().entries[&agent.instance].agent.state,
+            ProcessState::Running
+        );
+        gui.call(HostRequest::StopViewedAgent { key: current })
+            .await
+            .unwrap();
+        assert_ne!(
+            fixture.host.registry().entries[&agent.instance].agent.state,
+            ProcessState::Running
+        );
+    }
+
+    #[tokio::test]
     async fn closing_a_terminal_tab_ends_its_shell_now_unless_another_view_or_agent_keeps_it() {
         let fixture = Fixture::new().await;
         let state = |instance| fixture.host.registry().entries[&instance].agent.state;
         let gui = fixture.client(ClientRole::Gui).await;
         let tab = flowmux_core::SurfaceId::new();
-        let (relay, agent, _key, _) = shell_view(&fixture, "sleep 60", Some(tab)).await;
+        let (relay, agent, key, _) = shell_view(&fixture, "sleep 60", Some(tab)).await;
         let close = |surface| HostRequest::CloseTerminal {
             instance: agent.instance,
             epoch: agent.epoch,
@@ -8051,6 +8125,9 @@ for line in sys.stdin:
             (peer.identity, peer.parent, peer.grandparent) = (other, other, other);
             saved
         };
+        gui.call(HostRequest::StopViewedAgent { key })
+            .await
+            .unwrap();
         gui.call(close(tab)).await.unwrap();
         sleep(Duration::from_millis(500)).await;
         assert_eq!(state(agent.instance), ProcessState::Running);

@@ -307,6 +307,14 @@ pub struct AgentInstance {
     pub shell: bool,
 }
 
+impl AgentInstance {
+    pub fn is_running_agent(&self) -> bool {
+        self.state == ProcessState::Running
+            && self.exit_status.is_none()
+            && (!self.shell || self.presence.is_some())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminateMode {
@@ -476,6 +484,10 @@ pub enum HostRequest {
         instance: AgentInstanceId,
         epoch: Uuid,
         mode: TerminateMode,
+    },
+    /// Stop the execution only while the closing GUI still owns this confirmed attachment.
+    StopViewedAgent {
+        key: AttachmentKey,
     },
     /// The terminal tab `surface` of this shell was closed: end the shell now, as closing a
     /// terminal does. A shell that runs an agent, or that another tab shows or is taking,
