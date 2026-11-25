@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 name: Release
+run-name: ${{ inputs.build_only && 'Verify release' || 'Release' }} ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -12,9 +13,13 @@ on:
         description: 'Tag to build (e.g. v0.1.0). Must already exist.'
         required: true
         type: string
+      build_only:
+        description: Build and verify packages without publishing them
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   license-audit:
@@ -235,7 +240,17 @@ jobs:
         run: |
           set -euo pipefail
           image="dist/flowmux-${VERSION}-${TARGET_TRIPLE}.dmg"
-          bash scripts/package-macos.sh target/macos-bundle/Flowmux.app "$image"
+          log="$RUNNER_TEMP/flowmux-dmg.log"
+          for attempt in 1 2 3; do
+            bash scripts/package-macos.sh target/macos-bundle/Flowmux.app "$image" 2>&1 | tee "$log" && break
+            status=$?
+            if [[ $attempt == 3 ]] || ! grep -Fq 'hdiutil: create failed - Resource busy' "$log"; then
+              exit "$status"
+            fi
+            echo "Retrying disk image creation after hdiutil reported Resource busy"
+            rm -f "$image"
+            sleep 5
+          done
           mount="$RUNNER_TEMP/flowmux-macos-mounted"
           hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount"
           trap 'hdiutil detach "$mount"' EXIT
@@ -269,8 +284,11 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.build_only }}
     needs: [build, build-macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       # Full history + tags are required so the release-notes step can diff
       # this tag against the previous v* tag and produce a categorized
