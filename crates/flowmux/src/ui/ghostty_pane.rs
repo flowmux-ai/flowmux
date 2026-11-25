@@ -780,6 +780,7 @@ impl GhosttyPane {
         let fork_menu = Rc::new(RefCell::new(std::rc::Weak::new()));
         let scrollback_dirty = Rc::new(Cell::new(false));
         let term = vte::Terminal::new();
+        keep_drag_selection_on_repaint(&term);
         let wheel_scroll_multiplier = crate::ui::terminal_scroll::install(&term);
         term.set_hexpand(true);
         term.set_vexpand(true);
@@ -809,9 +810,8 @@ impl GhosttyPane {
         // back does not leave the echoed text off-screen.
         term.set_scroll_on_keystroke(true);
 
-        // Snapshot ordinary selections. Agent TUIs repaint constantly and VTE
-        // drops the drag-selection on the next output frame, so this cache is
-        // what Copy reads once `has_selection()` has gone false. Oversized
+        // Keep the last completed selection for Copy when later output
+        // overwrites the selected text and VTE clears the range. Oversized
         // selections are not duplicated into a long-lived fallback buffer.
         // Empty deselect notifications still leave the current cache alone; a
         // fresh primary press clears it (see install_url_link_handling).
@@ -1883,6 +1883,32 @@ fn terminal_file_candidate(
         .filter(|value| !value.is_empty() && value.len() <= 4096)
 }
 
+fn vte_motion_controller(term: &vte::Terminal) -> Option<gtk::EventControllerMotion> {
+    term.observe_controllers()
+        .iter::<glib::Object>()
+        .flatten()
+        .filter_map(|object| object.downcast::<gtk::EventControllerMotion>().ok())
+        .find(|motion| motion.name().as_deref() == Some("vte-motion-controller"))
+}
+
+fn keep_drag_selection_on_repaint(term: &vte::Terminal) {
+    let Some(motion) = vte_motion_controller(term) else {
+        return;
+    };
+    // VTE compares the live range with PRIMARY on output. Refresh PRIMARY after
+    // VTE handles each drag motion so even an unrelated redraw keeps the range.
+    motion.connect_motion(glib::clone!(
+        #[weak]
+        term,
+        move |motion, _, _| {
+            let buttons = motion.current_event_state();
+            if buttons.contains(gtk::gdk::ModifierType::BUTTON1_MASK) && term.has_selection() {
+                term.copy_primary();
+            }
+        }
+    ));
+}
+
 fn reset_terminal_link_matches(term: &vte::Terminal) {
     // VTE caches both matching and nonmatching spans until all matches are cleared.
     term.match_remove_all();
@@ -1893,20 +1919,11 @@ fn reset_terminal_link_matches(term: &vte::Terminal) {
 }
 
 fn refresh_terminal_link_hint(term: &vte::Terminal, position: Option<(f64, f64)>) {
-    // shortcut: use VTE’s named motion controller until a public hover refresh API is available.
-    for controller in term
-        .observe_controllers()
-        .iter::<glib::Object>()
-        .flatten()
-        .filter_map(|object| object.downcast::<gtk::EventController>().ok())
-    {
-        if controller.name().as_deref() == Some("vte-motion-controller") {
-            if let Some((x, y)) = position {
-                controller.emit_by_name::<()>("enter", &[&x, &y]);
-            } else {
-                controller.emit_by_name::<()>("leave", &[]);
-            }
-            break;
+    if let Some(controller) = vte_motion_controller(term) {
+        if let Some((x, y)) = position {
+            controller.emit_by_name::<()>("enter", &[&x, &y]);
+        } else {
+            controller.emit_by_name::<()>("leave", &[]);
         }
     }
 }
