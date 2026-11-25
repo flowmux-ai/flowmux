@@ -780,7 +780,6 @@ impl GhosttyPane {
         let fork_menu = Rc::new(RefCell::new(std::rc::Weak::new()));
         let scrollback_dirty = Rc::new(Cell::new(false));
         let term = vte::Terminal::new();
-        keep_drag_selection_on_repaint(&term);
         let wheel_scroll_multiplier = crate::ui::terminal_scroll::install(&term);
         term.set_hexpand(true);
         term.set_vexpand(true);
@@ -1891,22 +1890,68 @@ fn vte_motion_controller(term: &vte::Terminal) -> Option<gtk::EventControllerMot
         .find(|motion| motion.name().as_deref() == Some("vte-motion-controller"))
 }
 
-fn keep_drag_selection_on_repaint(term: &vte::Terminal) {
-    let Some(motion) = vte_motion_controller(term) else {
-        return;
+/// Returns the cleanup for a primary-button release or a cancelled pointer grab.
+fn keep_drag_selection_on_repaint(term: &vte::Terminal) -> impl Fn() + 'static {
+    let edge_frame = Rc::new(Cell::new(
+        None::<(gtk::gdk::FrameClock, glib::SignalHandlerId)>,
+    ));
+    let stop_edge_sync = {
+        let edge_frame = edge_frame.clone();
+        move || {
+            if let Some((clock, handler)) = edge_frame.take() {
+                clock.disconnect(handler);
+            }
+        }
     };
+    let Some(motion) = vte_motion_controller(term) else {
+        return stop_edge_sync;
+    };
+    term.connect_unmap({
+        let stop_edge_sync = stop_edge_sync.clone();
+        move |_| stop_edge_sync()
+    });
     // VTE compares the live range with PRIMARY on output. Refresh PRIMARY after
     // VTE handles each drag motion so even an unrelated redraw keeps the range.
     motion.connect_motion(glib::clone!(
         #[weak]
         term,
-        move |motion, _, _| {
+        #[strong]
+        stop_edge_sync,
+        move |motion, _, y| {
+            stop_edge_sync();
             let buttons = motion.current_event_state();
-            if buttons.contains(gtk::gdk::ModifierType::BUTTON1_MASK) && term.has_selection() {
+            if !buttons.contains(gtk::gdk::ModifierType::BUTTON1_MASK) {
+                return;
+            }
+            if term.has_selection() {
                 term.copy_primary();
             }
+            if (0.0..f64::from(term.height())).contains(&y) {
+                return;
+            }
+            let (Some(clock), Some(scroll)) = (term.frame_clock(), term.vadjustment()) else {
+                return;
+            };
+            // A stationary pointer can extend the range on each autoscroll tick.
+            // Sync before VTE processes output in the frame clock's update phase.
+            let handler = clock.connect_before_paint(glib::clone!(
+                #[weak]
+                term,
+                move |_| {
+                    let can_scroll = if y < 0.0 {
+                        scroll.value() > scroll.lower()
+                    } else {
+                        scroll.value() < scroll.upper() - scroll.page_size()
+                    };
+                    if can_scroll && term.has_selection() {
+                        term.copy_primary();
+                    }
+                }
+            ));
+            edge_frame.set(Some((clock, handler)));
         }
     ));
+    stop_edge_sync
 }
 
 fn reset_terminal_link_matches(term: &vte::Terminal) {
@@ -2193,9 +2238,13 @@ fn install_url_link_handling(
 
     let release = gtk::EventControllerLegacy::new();
     release.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let stop_edge_sync = keep_drag_selection_on_repaint(term);
     let term_widget = term.downgrade();
     let click_for_release = click.clone();
     release.connect_event(move |_, event| {
+        if event.event_type() == gtk::gdk::EventType::GrabBroken {
+            stop_edge_sync();
+        }
         let Some(term_widget) = term_widget.upgrade() else {
             return glib::Propagation::Proceed;
         };
@@ -2205,6 +2254,7 @@ fn install_url_link_handling(
         if !is_primary_button_release(event.event_type(), button) {
             return glib::Propagation::Proceed;
         }
+        stop_edge_sync();
         let Some(pending) = activation.borrow_mut().release() else {
             return glib::Propagation::Proceed;
         };
