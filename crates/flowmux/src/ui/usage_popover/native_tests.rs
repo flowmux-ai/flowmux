@@ -73,6 +73,7 @@ pub(crate) async fn check(usage: &UsagePopover) {
                 tokens: FieldRefresh::Success(crate::usage::TokenTotals {
                     today: Some(12_500),
                     lifetime: Some(50_000),
+                    by_model: Vec::new(),
                 }),
                 limits: FieldRefresh::Success(
                     [(300, "5 hours", 22.0), (10_080, "Weekly", 35.0)]
@@ -102,12 +103,20 @@ pub(crate) async fn check(usage: &UsagePopover) {
         .iter()
         .any(|text| text.contains("Tokens today 12.5K")));
     assert_eq!(
-        original_footer,
-        ["22%(5h)", "35%(1W)", "22%(5h)", "35%(1W)"]
+        original_footer
+            .iter()
+            .map(|label| label.split_once(" · ").unwrap().0)
+            .collect::<Vec<_>>(),
+        ["22%(5h)", "35%(All 1W)", "22%(5h)", "35%(1W)"]
     );
     let pins = buttons(usage);
     assert_eq!(pins.len(), 4);
     assert!(pins.iter().all(|pin| pin.is_active() && pin.is_mapped()));
+    assert_eq!(pins[0].icon_name().as_deref(), Some("flowmux-pin-symbolic"));
+    assert_eq!(
+        pins[0].tooltip_text().as_deref(),
+        Some("Unpin from usage bar")
+    );
     pins[0].emit_clicked();
     wait(|| {
         options::load()
@@ -118,6 +127,11 @@ pub(crate) async fn check(usage: &UsagePopover) {
     })
     .await;
     assert!(!pins[0].is_active());
+    assert_eq!(
+        pins[0].icon_name().as_deref(),
+        Some("flowmux-pin-outline-symbolic")
+    );
+    assert_eq!(pins[0].tooltip_text().as_deref(), Some("Pin to usage bar"));
     assert_eq!(
         labels(usage.cards.upcast_ref()),
         original_text,
@@ -133,6 +147,10 @@ pub(crate) async fn check(usage: &UsagePopover) {
     gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
     let reopened = buttons(usage);
     assert!(!reopened[0].is_active());
+    assert_eq!(
+        reopened[0].icon_name().as_deref(),
+        Some("flowmux-pin-outline-symbolic")
+    );
     assert!(reopened[1].is_active());
     assert_eq!(labels(usage.cards.upcast_ref()), original_text);
     let restored = UsagePopover::new(None);
@@ -153,6 +171,10 @@ pub(crate) async fn check(usage: &UsagePopover) {
             .is_some_and(|pins| pins.len() == 2)
     })
     .await;
+    assert_eq!(
+        reopened[0].icon_name().as_deref(),
+        Some("flowmux-pin-symbolic")
+    );
     assert_eq!(labels(usage.bar.root.upcast_ref()), original_footer);
     assert_eq!(labels(usage.cards.upcast_ref()), original_text);
     usage.set_bar_enabled(false);

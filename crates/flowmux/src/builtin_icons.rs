@@ -130,6 +130,10 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M5 1h6v2h-1v4l2 2v2H9v4l-1 1-1-1v-4H4V9l2-2V3H5z",
     },
     SymbolicIcon {
+        name: "flowmux-pin-outline-symbolic",
+        path: "M5 1h6v2h-1v4l2 2v2H9v4l-1 1-1-1v-4H4V9l2-2V3H5zM7 2v5.4l-2 2V10h6v-.6l-2-2V2z",
+    },
+    SymbolicIcon {
         name: "flowmux-diff-symbolic",
         path: "M2 1h12v14H2zm1.5 1.5v11h9v-11zM5 5h6v1.5H5zm2.25 3h1.5v1.5H11V11H8.75v1.5h-1.5V11H5V9.5h2.25z",
     },

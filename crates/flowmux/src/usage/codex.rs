@@ -304,7 +304,7 @@ fn parse_node_version(value: &OsStr) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-fn is_executable(path: &Path) -> bool {
+pub(super) fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
@@ -321,7 +321,7 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-fn is_flowmux_agent_wrapper(path: &Path) -> bool {
+pub(super) fn is_flowmux_agent_wrapper(path: &Path) -> bool {
     let Ok(file) = fs::File::open(path) else {
         return false;
     };
@@ -473,7 +473,11 @@ fn parse_token_usage_response(value: &Value, day: NaiveDate) -> Result<TokenTota
         }
         Some(_) => return Err(invalid_response()),
     };
-    Ok(TokenTotals { today, lifetime })
+    Ok(TokenTotals {
+        today,
+        lifetime,
+        ..TokenTotals::default()
+    })
 }
 
 fn response_result(value: &Value) -> Result<&Value, UsageError> {
@@ -858,7 +862,8 @@ mod tests {
                 .unwrap(),
             TokenTotals {
                 today: Some(789),
-                lifetime: Some(123456)
+                lifetime: Some(123456),
+                ..TokenTotals::default()
             }
         );
     }
@@ -893,7 +898,8 @@ mod tests {
                 .unwrap(),
             TokenTotals {
                 today: None,
-                lifetime: Some(123456)
+                lifetime: Some(123456),
+                ..TokenTotals::default()
             }
         );
     }

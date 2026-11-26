@@ -10,13 +10,13 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const FABLE_WEEKLY: &str = "top:seven_day_fable";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_TRANSCRIPT_LINE_BYTES: usize = 16 * 1024 * 1024;
 // A locked login keychain makes `security` block on a GUI unlock/authorization
 // prompt with no timeout of its own, which would wedge the whole usage refresh.
 #[cfg(target_os = "macos")]
@@ -34,7 +34,7 @@ pub(crate) async fn collect(home: PathBuf, client: reqwest::Client) -> ProviderR
     let tokens_task = tokio::task::spawn_blocking(move || {
         sum_transcript_tree(&transcript_root, day, offset).map(|today| TokenTotals {
             today: Some(today),
-            lifetime: None,
+            ..TokenTotals::default()
         })
     });
     let limits_task = fetch_limits(&credentials_path, &client);
@@ -256,11 +256,12 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
             continue;
         }
         let (duration_minutes, scope) = window_metadata(key);
+        let source_id = format!("top:{key}");
         windows.extend(parse_named_window(
             Some(entry),
             duration_minutes,
             scope,
-            format!("top:{key}"),
+            canonical_source_id(&source_id).to_owned(),
         ));
     }
     // Same for the optional "limits" array, which carries kind/group metadata.
@@ -279,12 +280,20 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
                     limit.get("scope")
                 ])
             );
-            windows.extend(parse_named_window(
-                Some(limit),
-                duration_minutes,
-                limit_scope(limit),
-                canonical_source_id(&source_id).to_owned(),
-            ));
+            let source_id = canonical_source_id(&source_id);
+            let scope = if source_id == FABLE_WEEKLY {
+                Some("Fable".into())
+            } else {
+                limit_scope(limit)
+            };
+            let window =
+                parse_named_window(Some(limit), duration_minutes, scope, source_id.to_owned());
+            if let Some(window) = window {
+                if source_id == FABLE_WEEKLY {
+                    windows.retain(|entry| entry.source_id.as_deref() != Some(FABLE_WEEKLY));
+                }
+                windows.push(window);
+            }
         }
     }
     deduplicate_windows(&mut windows);
@@ -296,7 +305,38 @@ pub(crate) fn canonical_source_id(source_id: &str) -> &str {
     match source_id {
         r#"limits:[null,"session","session",null]"# => "top:five_hour",
         r#"limits:[null,"weekly_all","weekly",null]"# => "top:seven_day",
+        "top:fable_weekly" | "top:fable_seven_day" => FABLE_WEEKLY,
+        raw if is_fable_scope_key(raw) => FABLE_WEEKLY,
         _ => source_id,
+    }
+}
+
+fn is_fable_scope_key(source_id: &str) -> bool {
+    let Some(key) = source_id.strip_prefix("limits:") else {
+        return false;
+    };
+    let Ok([_, kind, group, scope]) = serde_json::from_str::<[Value; 4]>(key) else {
+        return false;
+    };
+    if !matches!(
+        kind.as_str(),
+        Some("weekly_scoped" | "weekly" | "seven_day")
+    ) || scope
+        .get("surface")
+        .is_some_and(|surface| !surface.is_null())
+    {
+        return false;
+    }
+    match scope.get("model").filter(|model| !model.is_null()) {
+        Some(model) => ["display_name", "id"].iter().any(|key| {
+            model.get(key).and_then(Value::as_str).is_some_and(|name| {
+                name.trim().eq_ignore_ascii_case("fable")
+                    || name.trim().eq_ignore_ascii_case("claude-fable")
+            })
+        }),
+        None => group
+            .as_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case("fable")),
     }
 }
 
@@ -325,7 +365,9 @@ fn limit_scope(limit: &Value) -> Option<String> {
 }
 
 fn window_metadata(key: &str) -> (Option<u64>, Option<String>) {
-    if let Some(rest) = key.strip_prefix("five_hour_") {
+    if matches!(key, "fable_weekly" | "fable_seven_day") {
+        (Some(10_080), Some("Fable".into()))
+    } else if let Some(rest) = key.strip_prefix("five_hour_") {
         (Some(300), Some(scope_label(rest)))
     } else if let Some(rest) = key.strip_prefix("seven_day_") {
         (Some(10_080), Some(scope_label(rest)))
@@ -361,14 +403,10 @@ fn parse_named_window(
     source_id: String,
 ) -> Option<UsageWindow> {
     let object = value?.as_object()?;
-    let used_percent = ["utilization", "percent"]
+    let used_percent = ["utilization", "percent", "used_percentage"]
         .iter()
         .find_map(|key| object.get(*key).and_then(json_number))?;
-    let resets_at = object
-        .get("resets_at")
-        .and_then(Value::as_str)
-        .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
-        .map(|value| value.with_timezone(&Utc));
+    let resets_at = object.get("resets_at").and_then(super::reset_timestamp);
     Some(UsageWindow {
         source_id: Some(source_id),
         label: duration_label(duration_minutes),
@@ -506,20 +544,7 @@ fn sum_transcript_reader<R: BufRead>(
 ) -> io::Result<u64> {
     let mut total = 0_u64;
     let mut line = Vec::new();
-    loop {
-        line.clear();
-        if reader
-            .by_ref()
-            .take(MAX_TRANSCRIPT_LINE_BYTES as u64 + 1)
-            .read_until(b'\n', &mut line)?
-            == 0
-        {
-            break;
-        }
-        // Do not silently report a partial total when a record cannot be read safely.
-        if line.len() > MAX_TRANSCRIPT_LINE_BYTES {
-            return Err(io::Error::from(io::ErrorKind::FileTooLarge));
-        }
+    while super::read_transcript_line(&mut reader, &mut line)? {
         let line = std::str::from_utf8(&line)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         let Ok(entry) = serde_json::from_str::<TranscriptEntry>(line) else {
@@ -731,6 +756,26 @@ mod tests {
     }
 
     #[test]
+    fn fable_aliases_preserve_one_weekly_limit_and_prefer_scoped_metadata() {
+        let response = serde_json::json!({
+            "seven_day": {"utilization": 77},
+            "fable_weekly": {"used_percentage": 50},
+            "seven_day_fable": {"utilization": 51},
+            "limits": [{"kind": "weekly_scoped", "group": "weekly", "percent": 52,
+                "resets_at": "1900000000000", "scope": {"model": {"display_name": "Fable"}}}]
+        });
+        let windows = parse_usage_response(&response).unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].source_id.as_deref(), Some("top:seven_day"));
+        assert_eq!(windows[1].source_id.as_deref(), Some(FABLE_WEEKLY));
+        assert_eq!(windows[1].scope.as_deref(), Some("Fable"));
+        assert_eq!(windows[1].duration_minutes, Some(10_080));
+        assert_eq!(windows[1].used_percent, 52.0);
+        assert_eq!(windows[1].resets_at.unwrap().timestamp(), 1_900_000_000);
+        assert_eq!(canonical_source_id("top:fable_seven_day"), FABLE_WEEKLY);
+    }
+
+    #[test]
     fn usage_response_allows_missing_optional_sections() {
         assert!(parse_usage_response(&serde_json::json!({}))
             .unwrap()
@@ -780,7 +825,7 @@ mod tests {
     fn oversized_history_reports_unavailable_instead_of_a_partial_total() {
         let temp = tempfile::tempdir().unwrap();
         let file = File::create(temp.path().join("large.jsonl")).unwrap();
-        file.set_len(MAX_TRANSCRIPT_LINE_BYTES as u64 + 1).unwrap();
+        file.set_len(16 * 1024 * 1024 + 1).unwrap();
         let error = sum_transcript_tree(
             temp.path(),
             NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),

@@ -80,6 +80,10 @@ pub struct UsageBarPin {
 pub struct UsageBarPins {
     pub claude: Option<Vec<UsageBarPin>>,
     pub codex: Option<Vec<UsageBarPin>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub antigravity: Option<Vec<UsageBarPin>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gemini: Option<Vec<UsageBarPin>>,
 }
 
 /// Profile selection for new browser tabs. Every variant uses the platform

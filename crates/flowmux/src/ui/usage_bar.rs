@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::usage::{Provider, ProviderState, UsagePanelState, UsageWindow};
+use crate::usage::{
+    format_token_count, reset_countdown, Provider, ProviderState, UsagePanelState, UsageWindow,
+};
+use chrono::Utc;
 use flowmux_config::options::{UsageBarPin, UsageBarPins};
 use gtk::prelude::*;
 use std::cell::RefCell;
@@ -8,10 +11,10 @@ use std::cell::RefCell;
 /// Persistent widgets: refreshing changes values without rebuilding the footer.
 pub(crate) struct UsageBar {
     pub(crate) root: gtk::Box,
-    icons: [gtk::Image; 2],
+    icons: [gtk::Image; Provider::ALL.len()],
     separator: gtk::Box,
-    providers: [gtk::Box; 2],
-    meters: [RefCell<Vec<Meter>>; 2],
+    providers: [gtk::Box; Provider::ALL.len()],
+    meters: [RefCell<Vec<Meter>>; Provider::ALL.len()],
     pins: RefCell<UsageBarPins>,
 }
 
@@ -28,14 +31,16 @@ impl Meter {
             progress: gtk::ProgressBar::new(),
             percent: gtk::Label::new(None),
         };
-        meter.progress.add_css_class(["claude", "codex"][provider]);
+        meter.progress.add_css_class(Provider::ALL[provider].icon());
         meter.progress.set_valign(gtk::Align::Center);
-        meter.progress.set_width_request(143);
+        meter.progress.set_width_request(54);
         meter.percent.add_css_class("numeric");
         meter
             .percent
             .set_width_chars(if provider == 0 && period == 0 { 8 } else { 9 });
         meter.percent.set_xalign(0.0);
+        meter.percent.set_max_width_chars(30);
+        meter.percent.set_ellipsize(gtk::pango::EllipsizeMode::End);
         meter.root.append(&meter.progress);
         meter.root.append(&meter.percent);
         meter
@@ -50,7 +55,7 @@ impl UsageBar {
         root.set_visible(false);
         let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         let providers = std::array::from_fn(|_| gtk::Box::new(gtk::Orientation::Horizontal, 8));
-        let icons = ["claude", "codex"].map(super::agent_icon);
+        let icons = Provider::ALL.map(|provider| super::agent_icon(provider.icon()));
         let meters = std::array::from_fn(|provider| {
             if provider == 1 {
                 root.append(&separator);
@@ -122,66 +127,37 @@ impl UsageBar {
         match state.provider {
             Provider::Claude => pins.claude = Some(selected),
             Provider::Codex => pins.codex = Some(selected),
+            Provider::Antigravity => pins.antigravity = Some(selected),
+            Provider::Gemini => pins.gemini = Some(selected),
         }
     }
 
     pub(crate) fn render(&self, state: &UsagePanelState, enabled: bool) {
-        let mut visible = [false; 2];
-        for (provider, state) in [&state.claude, &state.codex].into_iter().enumerate() {
-            let mut slots = [(300, "5h"), (10_080, "1W")].map(|(duration, label)| {
-                window_percent(state, duration).map(|value| (label, label.to_owned(), value))
-            });
-            // Credit-based and enterprise plans report no 5h/1W window at all:
-            // Claude may send "Extra usage", a seat key, or only "Spend", and
-            // Codex its seat allowance under the limit's own name. Show the
-            // provider's credit balance, or else its highest limit of any kind,
-            // in the first slot so the bar still reports usage on such plans.
-            if slots.iter().all(Option::is_none) {
-                slots[0] = scope_percent(state, CREDIT_SCOPES[provider])
-                    .map(|value| {
-                        (
-                            CREDIT_LABELS[provider],
-                            CREDIT_LABELS[provider].to_owned(),
-                            value,
-                        )
-                    })
-                    .or_else(|| any_limit(state).map(|(name, value)| ("Limit", name, value)));
-            }
+        let now = Utc::now();
+        let mut visible = [false; Provider::ALL.len()];
+        for kind in Provider::ALL {
+            let provider = kind.index();
+            let state = state.provider(kind);
             let pins = self.pins.borrow();
-            let selected = effective_pins(state, &pins);
-            let slots: Vec<_> = match provider_pins(state.provider, &pins) {
-                None => slots.into_iter().collect(),
-                Some(_) => state
+            let slots = if provider_pins(state.provider, &pins).is_none() {
+                automatic_windows(state)
+            } else {
+                let selected = effective_pins(state, &pins);
+                state
                     .limits
                     .iter()
                     .flat_map(|limits| &limits.value)
                     .filter(|window| {
                         valid_percent(window) && selected.contains(&window_pin(window))
                     })
-                    .map(|window| {
-                        let label = match window.duration_minutes {
-                            Some(300) => "5h",
-                            Some(10_080) => "1W",
-                            _ if window.scope.as_deref() == Some(CREDIT_SCOPES[provider]) => {
-                                CREDIT_LABELS[provider]
-                            }
-                            _ => "Limit",
-                        };
-                        let name = match &window.scope {
-                            Some(scope) if label == "5h" || label == "1W" => {
-                                format!("{scope} {label}")
-                            }
-                            Some(scope) if label == "Limit" => match window.duration_minutes {
-                                Some(_) => format!("{scope} {}", window.label),
-                                None => scope.clone(),
-                            },
-                            _ if label == "Limit" => window.label.clone(),
-                            _ => label.to_owned(),
-                        };
-                        Some((label, name, window.used_percent))
-                    })
-                    .collect(),
+                    .map(Some)
+                    .collect()
             };
+            let gemini_summary = (kind == Provider::Gemini
+                && slots.iter().all(Option::is_none)
+                && provider_pins(kind, &pins).is_none())
+            .then(|| gemini_summary(state))
+            .flatten();
             let mut meters = self.meters[provider].borrow_mut();
             while meters.len() < slots.len() {
                 let meter = Meter::new(provider, meters.len());
@@ -192,27 +168,42 @@ impl UsageBar {
                 meters.push(meter);
             }
             for (period, meter) in meters.iter().enumerate() {
-                let slot = slots.get(period).and_then(Option::as_ref);
-                if let Some((label, long_label, value)) = &slot {
-                    let (label, value) = (*label, *value);
-                    let name = ["Claude", "Codex"][provider];
-                    // Values kept from an earlier collection say so on hover,
-                    // since the bar itself has no room for a staleness marker.
+                let slot = slots.get(period).copied().flatten();
+                let summary = gemini_summary.as_ref().filter(|_| period == 0);
+                if let Some(window) = slot {
+                    let (label, long_label) = meter_labels(state.provider, window);
+                    let name = state.provider.name();
                     let stale = if state.limits_error.is_some() {
                         " (last known)"
                     } else {
                         ""
                     };
-                    let description = format!("{name} {long_label} usage{stale}");
+                    let value = window.used_percent;
+                    let mut description = format!("{name} {long_label} usage{stale}");
+                    let mut caption = format!("{value:.0}%({label})");
+                    if let Some(reset) = window.resets_at {
+                        let countdown = reset_countdown(reset, now);
+                        caption.push_str(&format!(" · {countdown}"));
+                        description.push_str(&format!(
+                            " · {} · {}",
+                            countdown,
+                            super::usage_popover::format_reset_at(reset)
+                        ));
+                    }
                     meter.root.set_tooltip_text(Some(&description));
                     meter
                         .progress
                         .update_property(&[gtk::accessible::Property::Label(&description)]);
                     meter.progress.set_fraction((value / 100.0).clamp(0.0, 1.0));
-                    meter.percent.set_text(&format!("{value:.0}%({label})"));
+                    meter.percent.set_text(&caption);
+                } else if let Some((caption, description)) = summary {
+                    meter.percent.set_text(caption);
+                    meter.root.set_tooltip_text(Some(description));
                 }
-                meter.root.set_visible(slot.is_some());
-                visible[provider] |= slot.is_some();
+                meter.progress.set_visible(slot.is_some());
+                let showing = slot.is_some() || summary.is_some();
+                meter.root.set_visible(showing);
+                visible[provider] |= showing;
             }
             self.providers[provider].set_visible(visible[provider]);
         }
@@ -235,6 +226,8 @@ fn provider_pins(provider: Provider, pins: &UsageBarPins) -> Option<&Vec<UsageBa
     match provider {
         Provider::Claude => pins.claude.as_ref(),
         Provider::Codex => pins.codex.as_ref(),
+        Provider::Antigravity => pins.antigravity.as_ref(),
+        Provider::Gemini => pins.gemini.as_ref(),
     }
 }
 
@@ -259,7 +252,7 @@ fn effective_pins(state: &ProviderState, pins: &UsageBarPins) -> Vec<UsageBarPin
                                     Provider::Claude => {
                                         crate::usage::canonical_claude_source_id(id)
                                     }
-                                    Provider::Codex => id.as_str(),
+                                    _ => id.as_str(),
                                 })
                         }
                         None => {
@@ -282,83 +275,132 @@ fn effective_pins(state: &ProviderState, pins: &UsageBarPins) -> Vec<UsageBarPin
             })
             .collect();
     }
-    let Some(limits) = &state.limits else {
-        return Vec::new();
-    };
-    let highest = |matches: &dyn Fn(&UsageWindow) -> bool| {
-        let value = max_percent(state, matches)?;
-        limits
-            .value
-            .iter()
-            .find(|window| matches(window) && window.used_percent == value)
-    };
-    let mut selected: Vec<_> = [300, 10_080]
+    automatic_windows(state)
         .into_iter()
-        .filter_map(|duration| highest(&|window| window.duration_minutes == Some(duration)))
+        .flatten()
         .map(window_pin)
-        .collect();
-    if selected.is_empty() {
-        let scope = match state.provider {
-            Provider::Claude => CREDIT_SCOPES[0],
-            Provider::Codex => CREDIT_SCOPES[1],
-        };
-        if let Some(window) =
-            highest(&|window| window.scope.as_deref() == Some(scope)).or_else(|| highest(&|_| true))
-        {
-            selected.push(window_pin(window));
+        .collect()
+}
+
+fn automatic_windows(state: &ProviderState) -> Vec<Option<&UsageWindow>> {
+    let highest = |matches: &dyn Fn(&UsageWindow) -> bool| highest_window(state, matches);
+    if matches!(state.provider, Provider::Antigravity | Provider::Gemini) {
+        return vec![highest(&|_| true)];
+    }
+    let session = highest(&|window| window.duration_minutes == Some(300));
+    let is_weekly = |window: &UsageWindow| window.duration_minutes == Some(10_080);
+    let weekly = if state.provider == Provider::Claude {
+        highest(&|window| is_weekly(window) && window.scope.is_none())
+    } else {
+        None
+    }
+    .or_else(|| highest(&is_weekly));
+    let credit_scope = credit_labels(state.provider).0;
+    let fallback = || {
+        highest(&|window| window.scope.as_deref() == Some(credit_scope))
+            .or_else(|| highest(&|_| true))
+    };
+    let session = if session.is_none() && weekly.is_none() {
+        fallback()
+    } else {
+        session
+    };
+    let mut slots = vec![session, weekly];
+    if state.provider == Provider::Claude {
+        let fable =
+            highest(&|window| is_weekly(window) && window.scope.as_deref() == Some("Fable"));
+        if fable.is_some() && fable != weekly {
+            slots.push(fable);
         }
     }
-    selected
+    slots
 }
 
-/// The only limit a credit-based plan reports, per provider, and the short
-/// label the bar shows for it.
-const CREDIT_SCOPES: [&str; 2] = ["Extra usage", "Individual"];
-const CREDIT_LABELS: [&str; 2] = ["Extra", "Individual"];
-
-fn window_percent(state: &ProviderState, duration: u64) -> Option<f64> {
-    max_percent(state, |window| window.duration_minutes == Some(duration))
+fn credit_labels(provider: Provider) -> (&'static str, &'static str) {
+    match provider {
+        Provider::Claude => ("Extra usage", "Extra"),
+        Provider::Codex => ("Individual", "Individual"),
+        Provider::Antigravity | Provider::Gemini => ("", "Limit"),
+    }
 }
 
-fn scope_percent(state: &ProviderState, scope: &str) -> Option<f64> {
-    max_percent(state, |window| window.scope.as_deref() == Some(scope))
-}
-
-/// The highest limit of any scope or period, with the name the popover uses.
-/// The bar only has room for a short fixed label, so the name goes in the
-/// tooltip.
-fn any_limit(state: &ProviderState) -> Option<(String, f64)> {
-    let value = max_percent(state, |_| true)?;
-    let window = state
-        .limits
-        .as_ref()?
-        .value
-        .iter()
-        .find(|window| window.used_percent == value)?;
-    let name = match (&window.scope, window.duration_minutes) {
-        (Some(scope), Some(_)) => format!("{scope} {}", window.label),
-        (Some(scope), None) => scope.clone(),
-        (None, _) => window.label.clone(),
+fn meter_labels(provider: Provider, window: &UsageWindow) -> (String, String) {
+    if let Some(scope) = &window.scope {
+        match provider {
+            Provider::Antigravity => {
+                let short = match scope.as_str() {
+                    "Gemini Models" => "Gemini",
+                    "Claude and GPT models" => "Claude/GPT",
+                    _ => scope,
+                };
+                let period = match window.duration_minutes {
+                    Some(300) => "5h",
+                    Some(1_440) => "1d",
+                    Some(10_080) => "1W",
+                    _ => &window.label,
+                };
+                return (
+                    format!("{short} {period}"),
+                    format!("{scope} {}", window.label),
+                );
+            }
+            Provider::Gemini => return (scope.clone(), format!("{scope} quota")),
+            _ => {}
+        }
+    }
+    let (credit_scope, credit_label) = credit_labels(provider);
+    let period = match window.duration_minutes {
+        Some(300) => "5h",
+        Some(10_080) => "1W",
+        _ if window.scope.as_deref() == Some(credit_scope) => credit_label,
+        _ => "Limit",
     };
-    Some((name, value))
+    let labels = match (&window.scope, period) {
+        (Some(scope), "5h" | "1W") => format!("{scope} {period}"),
+        (None, "1W") if provider == Provider::Claude => "All 1W".to_owned(),
+        (Some(scope), "Limit") if window.duration_minutes.is_some() => {
+            return (period.into(), format!("{scope} {}", window.label));
+        }
+        (Some(scope), "Limit") => return (period.into(), scope.clone()),
+        (None, "Limit") => return (period.into(), window.label.clone()),
+        _ => period.to_owned(),
+    };
+    (labels.clone(), labels)
 }
 
-/// A failed refresh keeps whatever was collected last — the endpoint rate
-/// limits often enough that hiding the bar on a single failure would make it
-/// blink out while the numbers are still fresh enough to act on. Only a
-/// provider that never reported anything has no slots to show.
-fn max_percent(state: &ProviderState, matches: impl Fn(&UsageWindow) -> bool) -> Option<f64> {
-    // Some plans return several scoped limits. Show the highest utilization
-    // for each period so the compact bar doesn't understate a reached limit.
+fn gemini_summary(state: &ProviderState) -> Option<(String, String)> {
+    let tokens = state.tokens.as_ref()?.value.today?;
+    Some((
+        format!("{} tokens", format_token_count(tokens)),
+        format!("Gemini CLI tokens today · {tokens}"),
+    ))
+}
+
+fn highest_window(
+    state: &ProviderState,
+    matches: impl Fn(&UsageWindow) -> bool,
+) -> Option<&UsageWindow> {
     state
         .limits
         .as_ref()?
         .value
         .iter()
-        .filter(|window| matches(window))
+        .filter(|window| valid_percent(window) && matches(window))
+        .max_by(|a, b| {
+            a.used_percent
+                .total_cmp(&b.used_percent)
+                .then_with(|| match (a.resets_at, b.resets_at) {
+                    (Some(a), Some(b)) => b.cmp(&a),
+                    _ => a.resets_at.cmp(&b.resets_at),
+                })
+                .then_with(|| b.source_id.cmp(&a.source_id))
+        })
+}
+
+#[cfg(test)]
+fn window_percent(state: &ProviderState, duration: u64) -> Option<f64> {
+    highest_window(state, |window| window.duration_minutes == Some(duration))
         .map(|window| window.used_percent)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .max_by(f64::total_cmp)
 }
 
 #[cfg(test)]
@@ -366,6 +408,34 @@ pub(crate) mod tests {
     use super::*;
     use crate::usage::{FieldRefresh, Provider, ProviderRefresh, UsageError, UsageWindow};
     use chrono::Utc;
+
+    #[test]
+    fn gemini_summary_requires_recorded_usage() {
+        use crate::usage::{TokenTotals, UsageErrorKind};
+
+        let mut state = UsagePanelState::default();
+        let mut update = ProviderRefresh {
+            provider: Provider::Gemini,
+            tokens: FieldRefresh::Success(TokenTotals::default()),
+            limits: FieldRefresh::Failure(UsageError::new(
+                UsageErrorKind::Unavailable,
+                "Quota unavailable",
+            )),
+            collected_at: Utc::now(),
+        };
+        state.apply(update.clone());
+        assert!(gemini_summary(state.provider(Provider::Gemini)).is_none());
+
+        update.tokens = FieldRefresh::Success(TokenTotals {
+            today: Some(2_200),
+            ..TokenTotals::default()
+        });
+        state.apply(update);
+        assert_eq!(
+            gemini_summary(state.provider(Provider::Gemini)).unwrap().0,
+            "2.2K tokens"
+        );
+    }
 
     fn refresh(provider: Provider, values: &[(u64, f64)]) -> ProviderRefresh {
         ProviderRefresh {
@@ -421,10 +491,11 @@ pub(crate) mod tests {
         bar.set_pins(UsageBarPins {
             claude: Some(vec![]),
             codex: Some(vec![]),
+            ..UsageBarPins::default()
         });
         bar.toggle_pin(&state.claude, &windows[1], true);
         bar.render(&state, true);
-        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "40%(1W)");
+        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "40%(All 1W)");
         assert!(!bar.meters[0].borrow()[1].root.is_visible());
         assert!(!bar.is_pinned(&state.claude, &windows[0]));
         assert!(bar.is_pinned(&state.claude, &windows[1]));
@@ -436,13 +507,17 @@ pub(crate) mod tests {
         refreshed[0].resets_at = Some(Utc::now());
         bar.set_pins(saved);
         bar.render(&state, true);
-        assert_eq!(bar.meters[0].borrow()[0].percent.text(), "75%(1W)");
+        assert_eq!(
+            bar.meters[0].borrow()[0].percent.text(),
+            "75%(All 1W) · Reset due"
+        );
         assert!(!bar.meters[0].borrow()[1].root.is_visible());
         let mut legacy = window_pin(&windows[0]);
         legacy.source_id = None;
         bar.set_pins(UsageBarPins {
             claude: Some(vec![legacy]),
             codex: Some(vec![]),
+            ..UsageBarPins::default()
         });
         assert_eq!(
             effective_pins(&state.claude, &bar.pins()),
@@ -488,7 +563,7 @@ pub(crate) mod tests {
                 })
                 .to_vec(),
             ),
-            codex: None,
+            ..UsageBarPins::default()
         };
         let expected: Vec<_> = windows.iter().map(window_pin).collect();
         assert_eq!(effective_pins(&state.claude, &pins), expected);
@@ -547,8 +622,8 @@ pub(crate) mod tests {
             assert_eq!(meters.len(), 3);
             assert_eq!(meters[0].root, first);
             assert_eq!(meters[0].percent.text(), "22%(5h)");
-            assert_eq!(meters[1].percent.text(), "35%(1W)");
-            assert_eq!(meters[2].percent.text(), "15%(1W)");
+            assert_eq!(meters[1].percent.text(), "35%(All 1W)");
+            assert_eq!(meters[2].percent.text(), "15%(Sonnet 1W)");
             assert_eq!(
                 meters[2].percent.attributes(),
                 meters[0].percent.attributes()
@@ -560,11 +635,15 @@ pub(crate) mod tests {
         updated.resets_at = Some(Utc::now());
         state.claude.limits_error = Some(UsageError::network());
         bar.render(&state, true);
-        assert_eq!(bar.meters[0].borrow()[2].percent.text(), "46%(1W)");
         assert_eq!(
-            bar.meters[0].borrow()[2].root.tooltip_text().as_deref(),
-            Some("Claude Sonnet 1W usage (last known)")
+            bar.meters[0].borrow()[2].percent.text(),
+            "46%(Sonnet 1W) · Reset due"
         );
+        assert!(bar.meters[0].borrow()[2]
+            .root
+            .tooltip_text()
+            .unwrap()
+            .starts_with("Claude Sonnet 1W usage (last known) · Reset due"));
         state.claude.limits = None;
         bar.render(&state, true);
         assert!(!bar.providers[0].is_visible());
@@ -573,7 +652,7 @@ pub(crate) mod tests {
         state.apply(refresh(Provider::Claude, &[(300, 0.0), (10_080, 120.0)]));
         bar.render(&state, true);
         assert_eq!(bar.meters[0].borrow()[0].percent.text(), "0%(5h)");
-        assert_eq!(bar.meters[0].borrow()[1].percent.text(), "120%(1W)");
+        assert_eq!(bar.meters[0].borrow()[1].percent.text(), "120%(All 1W)");
         assert_eq!(bar.meters[0].borrow()[1].progress.fraction(), 1.0);
         assert!(!bar.meters[0].borrow()[2].root.is_visible());
         for window in &windows {

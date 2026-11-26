@@ -970,6 +970,7 @@ dependencies = [
 name = "flowmux"
 version = "0.15.1"
 dependencies = [
+ "anstream",
  "anyhow",
  "async-channel",
  "base64",

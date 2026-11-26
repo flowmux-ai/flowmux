@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::usage::{
-    collect_all, format_token_count, FieldRefresh, Provider, ProviderRefresh, ProviderState,
-    UsageError, UsageErrorKind, UsagePanelState, UsageWindow,
+    collect_all, collect_antigravity, collect_gemini, format_token_count, reset_countdown,
+    FieldRefresh, Provider, ProviderRefresh, ProviderState, UsageError, UsageErrorKind,
+    UsagePanelState, UsageWindow,
 };
 use chrono::{DateTime, Local, Utc};
 use flowmux_config::options::UsageBarPins;
@@ -40,14 +41,22 @@ struct PinControls {
 impl PinControls {
     fn button(self: &Rc<Self>, state: &ProviderState, window: &UsageWindow) -> gtk::ToggleButton {
         let button = gtk::ToggleButton::new();
-        button.set_icon_name("flowmux-pin-symbolic");
         button.add_css_class("flat");
         button.set_widget_name("flowmux-usage-pin");
         button.set_active(self.bar.is_pinned(state, window));
-        button.set_tooltip_text(Some("Pin to usage bar"));
+        let update_appearance = |button: &gtk::ToggleButton| {
+            let (icon, tooltip) = if button.is_active() {
+                ("flowmux-pin-symbolic", "Unpin from usage bar")
+            } else {
+                ("flowmux-pin-outline-symbolic", "Pin to usage bar")
+            };
+            button.set_icon_name(icon);
+            button.set_tooltip_text(Some(tooltip));
+        };
+        update_appearance(&button);
         let description = format!(
             "Pin {} {}{} to usage bar",
-            provider_name(state.provider),
+            state.provider.name(),
             window
                 .scope
                 .as_ref()
@@ -60,12 +69,10 @@ impl PinControls {
         let provider = state.provider;
         let window = window.clone();
         button.connect_toggled(move |button| {
+            update_appearance(button);
             {
                 let state = controls.state.borrow();
-                let provider_state = match provider {
-                    Provider::Claude => &state.claude,
-                    Provider::Codex => &state.codex,
-                };
+                let provider_state = state.provider(provider);
                 controls
                     .bar
                     .toggle_pin(provider_state, &window, button.is_active());
@@ -163,7 +170,7 @@ impl UsagePopover {
             &pins,
         );
 
-        let (result_tx, result_rx) = async_channel::bounded(1);
+        let (result_tx, result_rx) = async_channel::bounded(4);
         let bar_weak = Rc::downgrade(&bar);
         let show_bar_weak = show_bar.downgrade();
         let state_for_results = state.clone();
@@ -177,34 +184,42 @@ impl UsagePopover {
         let pins_for_results = Rc::downgrade(&pins);
         gtk::glib::MainContext::default().spawn_local(async move {
             let mut attempt = 0;
-            while let Ok(refreshes) = result_rx.recv().await {
+            while let Ok(event) = result_rx.recv().await {
+                let finished = matches!(&event, RefreshEvent::Finished);
                 {
                     let mut state = state_for_results.borrow_mut();
-                    for refresh in refreshes {
-                        state.apply(refresh);
+                    match event {
+                        RefreshEvent::Core(refreshes) => {
+                            for refresh in refreshes {
+                                state.apply(refresh);
+                            }
+                        }
+                        RefreshEvent::Provider(refresh) => state.apply(refresh),
+                        RefreshEvent::Finished => state.finish_refresh(Utc::now()),
                     }
-                    state.finish_refresh(Utc::now());
                 }
                 if let (Some(bar), Some(toggle)) = (bar_weak.upgrade(), show_bar_weak.upgrade()) {
                     bar.render(&state_for_results.borrow(), toggle.is_active());
                 }
                 // A failed fetch leaves the last known values on screen, so
                 // retry it without waiting out the periodic refresh.
-                let failed = {
-                    let state = state_for_results.borrow();
-                    state.claude.limits_error.is_some() || state.codex.limits_error.is_some()
-                };
-                let (delay, next_attempt) = next_retry(failed, attempt);
-                attempt = next_attempt;
-                if let Some(delay) = delay {
-                    let state = state_for_results.clone();
-                    let handle = handle_for_retry.clone();
-                    let result_tx = tx_for_retry.clone();
-                    gtk::glib::timeout_add_seconds_local_once(delay, move || {
-                        request_refresh(&state, true, &handle, &result_tx);
-                    });
+                if finished {
+                    let failed = {
+                        let state = state_for_results.borrow();
+                        state.claude.limits_error.is_some() || state.codex.limits_error.is_some()
+                    };
+                    let (delay, next_attempt) = next_retry(failed, attempt);
+                    attempt = next_attempt;
+                    if let Some(delay) = delay {
+                        let state = state_for_results.clone();
+                        let handle = handle_for_retry.clone();
+                        let result_tx = tx_for_retry.clone();
+                        gtk::glib::timeout_add_seconds_local_once(delay, move || {
+                            request_refresh(&state, RefreshMode::CoreRetry, &handle, &result_tx);
+                        });
+                    }
                 }
-                let animate = !manual_for_results.replace(false);
+                let animate = finished && !manual_for_results.replace(false);
                 let Some(popover) = popover_weak.upgrade() else {
                     break;
                 };
@@ -239,7 +254,7 @@ impl UsagePopover {
         popover.connect_show(move |_| {
             request_refresh(
                 &state_for_show,
-                false,
+                RefreshMode::Cached,
                 &handle_for_show,
                 &result_tx_for_show,
             );
@@ -264,7 +279,7 @@ impl UsagePopover {
             manual_for_refresh.set(true);
             request_refresh(
                 &state_for_refresh,
-                true,
+                RefreshMode::Manual,
                 &handle_for_refresh,
                 &result_tx_for_refresh,
             );
@@ -279,7 +294,7 @@ impl UsagePopover {
         });
 
         // Warm the cache before the first open; the on-show throttle prevents a duplicate fetch.
-        request_refresh(&state, false, &tokio_handle, &result_tx);
+        request_refresh(&state, RefreshMode::Cached, &tokio_handle, &result_tx);
 
         let state_for_toggle = state.clone();
         let bar_for_toggle = bar.clone();
@@ -287,9 +302,28 @@ impl UsagePopover {
         let tx_for_toggle = result_tx.clone();
         show_bar.connect_toggled(move |toggle| {
             if toggle.is_active() {
-                request_refresh(&state_for_toggle, false, &handle_for_toggle, &tx_for_toggle);
+                request_refresh(
+                    &state_for_toggle,
+                    RefreshMode::Cached,
+                    &handle_for_toggle,
+                    &tx_for_toggle,
+                );
             }
             bar_for_toggle.render(&state_for_toggle.borrow(), toggle.is_active());
+        });
+
+        let countdown_toggle = show_bar.downgrade();
+        let countdown_bar = Rc::downgrade(&bar);
+        let countdown_state = state.clone();
+        gtk::glib::timeout_add_seconds_local(15, move || {
+            let (Some(toggle), Some(bar)) = (countdown_toggle.upgrade(), countdown_bar.upgrade())
+            else {
+                return gtk::glib::ControlFlow::Break;
+            };
+            if bar.root.is_mapped() && toggle.is_active() {
+                bar.render(&countdown_state.borrow(), true);
+            }
+            gtk::glib::ControlFlow::Continue
         });
 
         let toggle_weak = show_bar.downgrade();
@@ -304,7 +338,12 @@ impl UsagePopover {
             if toggle.is_active() || !teams_for_refresh.borrow().is_empty() {
                 // The periodic refresh must not be postponed by the popover
                 // cache throttle; the in-flight guard still prevents overlap.
-                request_refresh(&state, true, &tokio_handle, &result_tx);
+                let mode = if toggle.is_active() {
+                    RefreshMode::Periodic
+                } else {
+                    RefreshMode::CoreRetry
+                };
+                request_refresh(&state, mode, &tokio_handle, &result_tx);
                 // Render retained values while the refresh is in flight.
                 bar.render(&state.borrow(), toggle.is_active());
             }
@@ -373,16 +412,30 @@ impl UsagePopover {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefreshMode {
+    Cached,
+    Periodic,
+    Manual,
+    CoreRetry,
+}
+
+enum RefreshEvent {
+    Core([ProviderRefresh; 2]),
+    Provider(ProviderRefresh),
+    Finished,
+}
+
 fn request_refresh(
     state: &Rc<RefCell<UsagePanelState>>,
-    forced: bool,
+    mode: RefreshMode,
     tokio_handle: &Option<tokio::runtime::Handle>,
-    result_tx: &async_channel::Sender<[ProviderRefresh; 2]>,
+    result_tx: &async_channel::Sender<RefreshEvent>,
 ) {
-    let started = if forced {
-        state.borrow_mut().begin_forced_refresh()
-    } else {
+    let started = if mode == RefreshMode::Cached {
         state.borrow_mut().begin_refresh(Utc::now())
+    } else {
+        state.borrow_mut().begin_forced_refresh()
     };
     if !started {
         return;
@@ -405,29 +458,70 @@ fn request_refresh(
         );
         return;
     };
+    let now = Utc::now();
+    let check_antigravity = mode == RefreshMode::Manual
+        || state
+            .borrow()
+            .provider(Provider::Antigravity)
+            .limits_error
+            .as_ref()
+            .is_none_or(|error| {
+                !matches!(
+                    error.kind,
+                    UsageErrorKind::NotLoggedIn | UsageErrorKind::Unavailable
+                )
+            });
+    let check_gemini = {
+        let state = state.borrow();
+        let gemini = state.provider(Provider::Gemini);
+        mode == RefreshMode::Manual
+            || (gemini.limits_error.is_none()
+                && gemini
+                    .limits
+                    .as_ref()
+                    .is_none_or(|limits| now - limits.updated_at >= chrono::Duration::minutes(10)))
+    };
     let result_tx = result_tx.clone();
     handle.spawn(async move {
-        // Overall deadline: the popover only leaves its "Loading usage…" state
-        // when a result is sent here, and `begin_refresh` blocks any retry while
-        // `refreshing` is set, so a collector that never returns would strand the
-        // popover forever. On timeout, deliver a synthetic failure so the state
-        // machine always finishes and the user can refresh again.
-        let result = match tokio::time::timeout(REFRESH_DEADLINE, collect_all(home.clone())).await {
-            Ok(refreshes) => refreshes,
-            Err(_) => refresh_timeout_failure(),
+        let core = async {
+            let result =
+                match tokio::time::timeout(REFRESH_DEADLINE, collect_all(home.clone())).await {
+                    Ok(refreshes) => refreshes,
+                    Err(_) => refresh_timeout_failure(),
+                };
+            if let Err(error) = crate::usage::team::publish(&home, &result) {
+                tracing::warn!(%error, "could not publish Team usage observations");
+            }
+            send_refresh(&result_tx, RefreshEvent::Core(result)).await;
         };
-        if let Err(error) = crate::usage::team::publish(&home, &result) {
-            tracing::warn!(%error, "could not publish Team usage observations");
-        }
-        let _ = result_tx.send(result).await;
-        // Wake the GTK main loop explicitly. On the macOS backend the main loop
-        // parks in AppKit's `nextEventMatchingMask`, and async-channel readiness
-        // signalled from this worker thread does not reliably break that wait —
-        // the result then sits unprocessed (popover stuck on "Loading usage…",
-        // its modal grab swallowing input) until an unrelated event nudges the
-        // loop. An explicit wakeup guarantees the receiver runs promptly.
-        gtk::glib::MainContext::default().wakeup();
+        let antigravity = async {
+            if mode != RefreshMode::CoreRetry && check_antigravity {
+                let update = collect_antigravity(home.clone()).await;
+                send_refresh(&result_tx, RefreshEvent::Provider(update)).await;
+            }
+        };
+        let gemini = async {
+            if mode != RefreshMode::CoreRetry {
+                let update = tokio::time::timeout(
+                    REFRESH_DEADLINE,
+                    collect_gemini(home.clone(), check_gemini),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    refresh_failure(Provider::Gemini, refresh_timeout_error(), Utc::now())
+                });
+                send_refresh(&result_tx, RefreshEvent::Provider(update)).await;
+            }
+        };
+        tokio::join!(core, antigravity, gemini);
+        send_refresh(&result_tx, RefreshEvent::Finished).await;
     });
+}
+
+async fn send_refresh(result_tx: &async_channel::Sender<RefreshEvent>, event: RefreshEvent) {
+    let _ = result_tx.send(event).await;
+    // Channel readiness alone does not wake the GTK main loop on macOS.
+    gtk::glib::MainContext::default().wakeup();
 }
 
 const BAR_REFRESH_SECONDS: u32 = 150;
@@ -447,34 +541,34 @@ fn next_retry(failed: bool, attempt: usize) -> (Option<u32>, usize) {
     (RETRY_DELAYS.get(attempt).copied(), attempt + 1)
 }
 
-/// Backstop deadline for a full usage refresh. Comfortably larger than the sum
-/// of the collectors' own internal timeouts so it only fires when something
-/// genuinely wedged rather than pre-empting a slow-but-live fetch.
+/// Backstop for providers with shorter internal deadlines. Antigravity has its own deadline.
 const REFRESH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn refresh_timeout_error() -> UsageError {
+    UsageError::new(UsageErrorKind::Timeout, "The usage request timed out.")
+}
+
+fn refresh_failure(provider: Provider, error: UsageError, now: DateTime<Utc>) -> ProviderRefresh {
+    ProviderRefresh {
+        provider,
+        tokens: FieldRefresh::Failure(error.clone()),
+        limits: FieldRefresh::Failure(error),
+        collected_at: now,
+    }
+}
 
 fn refresh_timeout_failure() -> [ProviderRefresh; 2] {
     let now = Utc::now();
-    let error = UsageError::new(UsageErrorKind::Timeout, "The usage request timed out.");
-    let refresh = |provider| ProviderRefresh {
-        provider,
-        tokens: FieldRefresh::Failure(error.clone()),
-        limits: FieldRefresh::Failure(error.clone()),
-        collected_at: now,
-    };
-    [refresh(Provider::Claude), refresh(Provider::Codex)]
+    [Provider::Claude, Provider::Codex]
+        .map(|provider| refresh_failure(provider, refresh_timeout_error(), now))
 }
 
 fn apply_local_failure(state: &Rc<RefCell<UsagePanelState>>, error: UsageError) {
     let now = Utc::now();
-    let refresh = |provider| ProviderRefresh {
-        provider,
-        tokens: FieldRefresh::Failure(error.clone()),
-        limits: FieldRefresh::Failure(error.clone()),
-        collected_at: now,
-    };
     let mut state = state.borrow_mut();
-    state.apply(refresh(Provider::Claude));
-    state.apply(refresh(Provider::Codex));
+    for provider in Provider::ALL {
+        state.apply(refresh_failure(provider, error.clone(), now));
+    }
     state.finish_refresh(now);
 }
 
@@ -490,18 +584,14 @@ fn render_usage(
     while let Some(child) = cards.first_child() {
         cards.remove(&child);
     }
-    cards.append(&provider_card(
-        &state.claude,
-        state.refreshing,
-        animate,
-        pins,
-    ));
-    cards.append(&provider_card(
-        &state.codex,
-        state.refreshing,
-        animate,
-        pins,
-    ));
+    for provider in Provider::ALL {
+        cards.append(&provider_card(
+            state.provider(provider),
+            state.refreshing,
+            animate,
+            pins,
+        ));
+    }
 }
 
 fn set_refresh_controls(refresh_button: &gtk::Button, spinner: &gtk::Spinner, refreshing: bool) {
@@ -534,7 +624,7 @@ fn provider_card(
     content.set_margin_end(12);
 
     let provider_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let name = gtk::Label::new(Some(provider_name(state.provider)));
+    let name = gtk::Label::new(Some(state.provider.name()));
     name.add_css_class("heading");
     name.set_halign(gtk::Align::Start);
     name.set_hexpand(true);
@@ -576,7 +666,12 @@ fn provider_card(
             content.append(&empty);
         } else {
             for window in &limits.value {
-                content.append(&limit_row(window, animate, &pins.button(state, window)));
+                content.append(&limit_row(
+                    state.provider,
+                    window,
+                    animate,
+                    &pins.button(state, window),
+                ));
             }
         }
     }
@@ -597,7 +692,12 @@ fn provider_card(
     list.upcast()
 }
 
-fn limit_row(window: &UsageWindow, animate: bool, pin: &gtk::ToggleButton) -> gtk::Widget {
+fn limit_row(
+    provider: Provider,
+    window: &UsageWindow,
+    animate: bool,
+    pin: &gtk::ToggleButton,
+) -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
     root.set_margin_top(2);
 
@@ -606,6 +706,8 @@ fn limit_row(window: &UsageWindow, animate: bool, pin: &gtk::ToggleButton) -> gt
     if let Some(scope) = &window.scope {
         title_text.push_str(" · ");
         title_text.push_str(scope);
+    } else if provider == Provider::Claude && window.duration_minutes == Some(10_080) {
+        title_text.push_str(" · All models");
     }
     let title = gtk::Label::new(Some(&title_text));
     title.set_halign(gtk::Align::Start);
@@ -627,10 +729,20 @@ fn limit_row(window: &UsageWindow, animate: bool, pin: &gtk::ToggleButton) -> gt
     root.append(&progress);
 
     if let Some(resets_at) = window.resets_at {
-        let reset = gtk::Label::new(Some(&format_reset_at(resets_at)));
+        let reset = gtk::Label::new(Some(&reset_detail(resets_at)));
         reset.set_halign(gtk::Align::Start);
         reset.add_css_class("caption");
         reset.add_css_class("dim-label");
+        let reset_weak = reset.downgrade();
+        gtk::glib::timeout_add_seconds_local(15, move || {
+            let Some(reset) = reset_weak.upgrade() else {
+                return gtk::glib::ControlFlow::Break;
+            };
+            if reset.is_mapped() {
+                reset.set_text(&reset_detail(resets_at));
+            }
+            gtk::glib::ControlFlow::Continue
+        });
         root.append(&reset);
     }
     root.upcast()
@@ -668,13 +780,6 @@ fn animate_fraction(progress: &gtk::ProgressBar, target: f64) {
     });
 }
 
-fn provider_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Claude => "Claude",
-        Provider::Codex => "Codex",
-    }
-}
-
 fn provider_text_rows(state: &ProviderState) -> Vec<String> {
     let mut rows = Vec::new();
     if let Some(tokens) = &state.tokens {
@@ -683,6 +788,12 @@ fn provider_text_rows(state: &ProviderState) -> Vec<String> {
         }
         if let Some(lifetime) = tokens.value.lifetime {
             rows.push(format!("Lifetime tokens {}", format_token_count(lifetime)));
+        }
+        for (model, amount) in &tokens.value.by_model {
+            rows.push(format!(
+                "{model} · {} tokens today",
+                format_token_count(*amount)
+            ));
         }
         if state.token_error.is_some() {
             rows.push(format_field_updated_at("Token data", tokens.updated_at));
@@ -725,7 +836,15 @@ fn format_updated_at(value: DateTime<Utc>) -> String {
     format!("Updated {}", local.format("%H:%M"))
 }
 
-fn format_reset_at(value: DateTime<Utc>) -> String {
+fn reset_detail(value: DateTime<Utc>) -> String {
+    format!(
+        "{} · {}",
+        reset_countdown(value, Utc::now()),
+        format_reset_at(value)
+    )
+}
+
+pub(super) fn format_reset_at(value: DateTime<Utc>) -> String {
     let local: DateTime<Local> = value.into();
     if local.date_naive() == Local::now().date_naive() {
         format!("Resets today at {}", local.format("%H:%M"))
@@ -809,6 +928,7 @@ pub(crate) mod tests {
                 value: TokenTotals {
                     today: Some(12_500),
                     lifetime: None,
+                    by_model: Vec::new(),
                 },
                 updated_at: Utc::now(),
             }),
@@ -836,6 +956,7 @@ pub(crate) mod tests {
             tokens: FieldRefresh::Success(TokenTotals {
                 today: Some(12_500),
                 lifetime: None,
+                by_model: Vec::new(),
             }),
             limits: FieldRefresh::Success(Vec::new()),
             collected_at: old,

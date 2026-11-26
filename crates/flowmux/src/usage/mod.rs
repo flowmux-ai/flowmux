@@ -2,13 +2,17 @@
 
 use chrono::{DateTime, Duration, Utc};
 use std::future::Future;
+use std::io::{self, BufRead, Read};
 use std::path::PathBuf;
 
+mod antigravity;
 mod claude;
 mod codex;
+mod gemini;
 pub(crate) mod team;
 
 pub(crate) use claude::canonical_source_id as canonical_claude_source_id;
+pub(crate) use {antigravity::collect as collect_antigravity, gemini::collect as collect_gemini};
 
 pub(crate) async fn collect_all(home: PathBuf) -> [ProviderRefresh; 2] {
     join_provider_refreshes(
@@ -31,12 +35,41 @@ where
 pub(crate) enum Provider {
     Claude,
     Codex,
+    Antigravity,
+    Gemini,
+}
+
+impl Provider {
+    pub(crate) const ALL: [Self; 4] = [Self::Claude, Self::Codex, Self::Antigravity, Self::Gemini];
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Antigravity => "antigravity",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+            Self::Antigravity => "Antigravity",
+            Self::Gemini => "Gemini CLI",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TokenTotals {
     pub(crate) today: Option<u64>,
     pub(crate) lifetime: Option<u64>,
+    pub(crate) by_model: Vec<(String, u64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,6 +91,7 @@ pub(crate) enum UsageErrorKind {
     Network,
     InvalidData,
     Io,
+    Unavailable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +127,7 @@ impl UsageError {
 pub(crate) enum FieldRefresh<T> {
     Success(T),
     Failure(UsageError),
+    Skipped,
 }
 
 #[derive(Clone, Debug)]
@@ -139,6 +174,7 @@ impl ProviderState {
                 self.token_error = None;
             }
             FieldRefresh::Failure(error) => self.token_error = Some(error),
+            FieldRefresh::Skipped => {}
         }
         match update.limits {
             FieldRefresh::Success(value) => {
@@ -148,20 +184,8 @@ impl ProviderState {
                 });
                 self.limits_error = None;
             }
-            FieldRefresh::Failure(error) => {
-                self.limits_error = Some(error);
-                if let Some(limits) = &mut self.limits {
-                    for window in &mut limits.value {
-                        if window
-                            .resets_at
-                            .is_some_and(|reset| reset <= update.collected_at)
-                        {
-                            window.used_percent = 0.0;
-                            window.resets_at = None;
-                        }
-                    }
-                }
-            }
+            FieldRefresh::Failure(error) => self.limits_error = Some(error),
+            FieldRefresh::Skipped => {}
         }
     }
 }
@@ -170,6 +194,8 @@ impl ProviderState {
 pub(crate) struct UsagePanelState {
     pub(crate) claude: ProviderState,
     pub(crate) codex: ProviderState,
+    antigravity: ProviderState,
+    gemini: ProviderState,
     pub(crate) refreshing: bool,
     last_finished_at: Option<DateTime<Utc>>,
 }
@@ -179,6 +205,8 @@ impl Default for UsagePanelState {
         Self {
             claude: ProviderState::new(Provider::Claude),
             codex: ProviderState::new(Provider::Codex),
+            antigravity: ProviderState::new(Provider::Antigravity),
+            gemini: ProviderState::new(Provider::Gemini),
             refreshing: false,
             last_finished_at: None,
         }
@@ -186,10 +214,21 @@ impl Default for UsagePanelState {
 }
 
 impl UsagePanelState {
+    pub(crate) fn provider(&self, provider: Provider) -> &ProviderState {
+        match provider {
+            Provider::Claude => &self.claude,
+            Provider::Codex => &self.codex,
+            Provider::Antigravity => &self.antigravity,
+            Provider::Gemini => &self.gemini,
+        }
+    }
+
     pub(crate) fn apply(&mut self, update: ProviderRefresh) {
         match update.provider {
             Provider::Claude => self.claude.apply(update),
             Provider::Codex => self.codex.apply(update),
+            Provider::Antigravity => self.antigravity.apply(update),
+            Provider::Gemini => self.gemini.apply(update),
         }
     }
 
@@ -233,12 +272,72 @@ pub(crate) fn duration_label(minutes: Option<u64>) -> String {
     }
 }
 
+pub(crate) fn reset_countdown(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let seconds = (resets_at - now).num_seconds();
+    match seconds {
+        ..=0 => "Reset due".into(),
+        1..60 => "<1m".into(),
+        60..3600 => format!("{}m", seconds / 60),
+        3600..86400 => format!("{}h {:02}m", seconds / 3600, seconds % 3600 / 60),
+        _ => format!("{}d {}h", seconds / 86400, seconds % 86400 / 3600),
+    }
+}
+
 /// Usage services send some numbers as JSON strings (`"120.0"`); accept both.
 pub(crate) fn json_number(value: &serde_json::Value) -> Option<f64> {
     value
         .as_f64()
         .or_else(|| value.as_str()?.trim().parse().ok())
         .filter(|value| value.is_finite())
+}
+
+pub(crate) fn reset_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
+    if let Some(epoch) = value.as_i64().or_else(|| value.as_str()?.parse().ok()) {
+        return if epoch >= 10_000_000_000 {
+            DateTime::from_timestamp_millis(epoch)
+        } else {
+            DateTime::from_timestamp(epoch, 0)
+        };
+    }
+    DateTime::parse_from_rfc3339(value.as_str()?)
+        .ok()
+        .map(Into::into)
+}
+
+fn read_transcript_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> io::Result<bool> {
+    const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+    line.clear();
+    let read = reader
+        .take(MAX_LINE_BYTES as u64 + 1)
+        .read_until(b'\n', line)?;
+    if read > MAX_LINE_BYTES {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    Ok(read != 0)
+}
+
+fn native_program(home: &std::path::Path, name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .filter(|path| path.is_absolute())
+        .chain([
+            home.join(".local/bin"),
+            "/opt/homebrew/bin".into(),
+            "/usr/local/bin".into(),
+        ])
+        .map(|dir| dir.join(name))
+        .find(|path| codex::is_executable(path) && !codex::is_flowmux_agent_wrapper(path))
+}
+
+fn cli_version(output: &str) -> Option<(u64, u64, u64)> {
+    let version = output.trim().split_ascii_whitespace().last()?;
+    let mut parts = version.trim_start_matches('v').split(['.', '-', '+']);
+    Some((
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ))
 }
 
 pub(crate) fn format_token_count(value: u64) -> String {
@@ -281,6 +380,7 @@ mod tests {
             tokens: FieldRefresh::Success(TokenTotals {
                 today: Some(123),
                 lifetime: None,
+                by_model: Vec::new(),
             }),
             limits: FieldRefresh::Success(vec![window(300, 25.0)]),
             collected_at: now,
@@ -302,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_refresh_expires_usage_after_its_reset() {
+    fn failed_refresh_preserves_the_last_observed_reset_and_usage() {
         let now = Utc::now();
         let mut expired = window(300, 100.0);
         expired.resets_at = Some(now + Duration::minutes(1));
@@ -324,10 +424,26 @@ mod tests {
         });
 
         let limits = &state.claude.limits.as_ref().unwrap().value;
-        assert_eq!(limits[0].used_percent, 0.0);
-        assert_eq!(limits[0].resets_at, None);
+        assert_eq!(limits[0].used_percent, 100.0);
+        assert_eq!(limits[0].resets_at, Some(now + Duration::minutes(1)));
         assert_eq!(limits[1].used_percent, 42.0);
         assert!(limits[1].resets_at.is_some());
+    }
+
+    #[test]
+    fn reset_countdown_covers_minute_hour_day_and_elapsed_boundaries() {
+        let now = Utc::now();
+        for (minutes, expected) in [
+            (0, "Reset due"),
+            (24, "24m"),
+            (564, "9h 24m"),
+            (1500, "1d 1h"),
+        ] {
+            assert_eq!(
+                reset_countdown(now + Duration::minutes(minutes), now),
+                expected
+            );
+        }
     }
 
     #[test]

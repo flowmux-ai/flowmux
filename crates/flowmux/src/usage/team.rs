@@ -18,6 +18,7 @@ pub(crate) fn publish(home: &Path, refreshes: &[ProviderRefresh; 2]) -> io::Resu
         let (agent, variable, default) = match refresh.provider {
             Provider::Claude => ("claude", "CLAUDE_CONFIG_DIR", ".claude"),
             Provider::Codex => ("codex", "CODEX_HOME", ".codex"),
+            Provider::Antigravity | Provider::Gemini => continue,
         };
         let configured = std::env::var_os(variable)
             .filter(|value| !value.is_empty())
@@ -41,6 +42,8 @@ fn write_snapshot(
     refresh: &ProviderRefresh,
 ) -> io::Result<PathBuf> {
     let profile = profile.to_string_lossy();
+    let key = format!("{agent}-{:x}", Sha256::digest(profile.as_bytes()));
+    let target = directory.join(format!("{key}.json"));
     let mut value = json!({
         "schema": 1, "agent": agent, "profile": profile,
         "collected_at": refresh.collected_at.timestamp(),
@@ -58,10 +61,9 @@ fn write_snapshot(
             );
         }
         FieldRefresh::Failure(_) => value["error"] = json!("Usage refresh unavailable"),
+        FieldRefresh::Skipped => return Ok(target),
     }
     fs::create_dir_all(directory)?;
-    let key = format!("{agent}-{:x}", Sha256::digest(profile.as_bytes()));
-    let target = directory.join(format!("{key}.json"));
     let temporary = directory.join(format!(".{key}-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -96,6 +98,7 @@ mod tests {
             tokens: FieldRefresh::Success(TokenTotals {
                 today: Some(123),
                 lifetime: None,
+                by_model: Vec::new(),
             }),
             limits: FieldRefresh::Success(vec![UsageWindow {
                 source_id: None,

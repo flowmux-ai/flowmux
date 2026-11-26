@@ -682,7 +682,7 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
     border: none;
 }}
 .flowmux-usage-bar progressbar trough {{
-    min-width: 143px;
+    min-width: 54px;
     background-color: {border};
 }}
 .flowmux-usage-bar progressbar.claude progress {{
@@ -690,6 +690,14 @@ headerbar.flowmux-window-header windowcontrols > button.close:active {{
 }}
 .flowmux-usage-bar progressbar.codex progress {{
     background-color: #7a9dff;
+}}
+.flowmux-usage-bar progressbar.antigravity progress,
+.flowmux-usage-bar progressbar.gemini progress {{
+    background-color: @accent_bg_color;
+}}
+button#flowmux-usage-pin:checked {{
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
 }}
 .flowmux-agent-bar {{
     background-color: {sidebar};
