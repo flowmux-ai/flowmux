@@ -91,6 +91,7 @@ anstream = { version = "1", default-features = false }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+comrak = { version = "0.52", default-features = false }
 quick-xml = { workspace = true }
 reqwest = { workspace = true }
 sha2 = { workspace = true }

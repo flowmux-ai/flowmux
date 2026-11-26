@@ -183,6 +183,25 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::NewSurface { pane });
                 }))
             },
+            chat_runtime: None,
+            on_new_chat_surface: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane| {
+                    dispatch_detached(&bridge, GtkCommand::NewChatSurface { pane });
+                }))
+            },
+            on_chat_open_file: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane, path| {
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::OpenFileInEditor {
+                            path,
+                            source_pane: Some(pane),
+                        },
+                    );
+                }))
+            },
             on_new_browser_surface: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane| {

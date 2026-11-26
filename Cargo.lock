@@ -976,6 +976,7 @@ dependencies = [
  "base64",
  "block2",
  "chrono",
+ "comrak",
  "flowmux-browser",
  "flowmux-cli",
  "flowmux-config",

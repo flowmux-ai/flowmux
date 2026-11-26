@@ -2058,6 +2058,34 @@ impl StateStore {
         None
     }
 
+    /// Add a chat tab to a local pane.
+    pub async fn add_chat_surface_to_pane(
+        &self,
+        pane: PaneId,
+        agent: String,
+        cwd: std::path::PathBuf,
+    ) -> Option<(WorkspaceId, SurfaceId)> {
+        let mut state = self.inner.lock().await;
+        for workspace in state
+            .workspaces
+            .iter_mut()
+            .filter(|ws| ws.local_root().is_some())
+        {
+            for root in &mut workspace.surfaces {
+                if let Some(surface) = root
+                    .root_pane
+                    .add_surface_to_leaf(pane, PaneSurface::chat(agent.clone(), cwd.clone()))
+                {
+                    let workspace = workspace.id;
+                    drop(state);
+                    self.mark_dirty();
+                    return Some((workspace, surface));
+                }
+            }
+        }
+        None
+    }
+
     /// Add an editor surface to a specific pane using the supplied document root.
     pub async fn add_editor_surface_to_pane(
         &self,
@@ -2494,7 +2522,8 @@ fn normalize_state(state: &mut State) -> bool {
                 SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
                 SurfaceKind::SshTerminal { .. }
                 | SurfaceKind::Browser { .. }
-                | SurfaceKind::Editor { .. } => None,
+                | SurfaceKind::Editor { .. }
+                | SurfaceKind::Chat { .. } => None,
             };
             changed |= surface.root_pane.normalize_leaf_tabs(fallback_cwd);
         }
@@ -10728,6 +10757,31 @@ Do you want to continue?";
     }
 
     #[tokio::test]
+    async fn add_chat_activates_the_local_tab_without_terminal_inference() {
+        let store = StateStore::new_lazy(State::default());
+        let cwd = std::path::PathBuf::from("/tmp/chat-project");
+        let workspace = store.create_workspace(None, cwd.clone()).await;
+        let pane = first_pane(&store.get_workspace(workspace).await.unwrap());
+        let (_, chat) = store
+            .add_chat_surface_to_pane(pane, "Codex".into(), cwd.clone())
+            .await
+            .unwrap();
+        let model = store.get_workspace(workspace).await.unwrap();
+        assert_eq!(first_pane_active_surface(&model), chat);
+        let surface = model.surfaces[0]
+            .root_pane
+            .find_surface(pane, chat)
+            .unwrap();
+        assert!(
+            matches!(surface.kind, SurfaceKind::Chat { agent, cwd: path } if agent == "Codex" && path == cwd)
+        );
+        assert!(store
+            .report_agent_screen_signals(chat, None, Some("Codex Chat"))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn add_browser_surface_to_pane_appends_browser_tab_and_activates() {
         // Creating a workspace creates one terminal tab in the first pane. Pressing
         // the browser-tab add button should add a new browser tab to the same
@@ -11305,6 +11359,10 @@ Do you want to continue?";
         Browser {
             initial_url: Option<String>,
         },
+        Chat {
+            agent: String,
+            cwd: std::path::PathBuf,
+        },
         Editor {
             workspace_root: std::path::PathBuf,
             open_files: Vec<std::path::PathBuf>,
@@ -11324,6 +11382,10 @@ Do you want to continue?";
             },
             SurfaceKind::Browser { initial_url } => SurfaceKindFingerprint::Browser {
                 initial_url: initial_url.clone(),
+            },
+            SurfaceKind::Chat { agent, cwd } => SurfaceKindFingerprint::Chat {
+                agent: agent.clone(),
+                cwd: cwd.clone(),
             },
             SurfaceKind::Editor {
                 workspace_root,

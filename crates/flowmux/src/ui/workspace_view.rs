@@ -10,6 +10,7 @@ use crate::ui::browser_pane::BrowserPane;
 use crate::ui::editor_pane::{EditorPane, EditorPaneAction};
 use crate::ui::ghostty_pane::{is_flatpak_sandbox, GhosttyPane};
 use crate::ui::pane_terminal::{PaneCallbacks, PaneTerminal, TabDropCommand};
+use adw::prelude::BreakpointBinExt;
 use flowmux_config::keybindings::ActionId;
 use flowmux_core::{
     terminal_tab_title_for_cwd, EditorFileState, Pane, PaneContent, PaneId, PaneSurface,
@@ -347,6 +348,8 @@ pub struct PaneRegistry {
     pub terminals: HashMap<SurfaceId, PaneTerminal>,
     pub browsers: HashMap<SurfaceId, BrowserPane>,
     pub editors: HashMap<SurfaceId, EditorPane>,
+    pub(crate) chats: HashMap<SurfaceId, super::chat_pane::ChatPane>,
+    pending_chat_reuse: HashMap<SurfaceId, super::chat_pane::ChatPane>,
     active_terminal_by_pane: HashMap<PaneId, SurfaceId>,
     active_browser_by_pane: HashMap<PaneId, SurfaceId>,
     active_editor_by_pane: HashMap<PaneId, SurfaceId>,
@@ -418,6 +421,10 @@ impl PaneRegistry {
         self.active_editor_by_pane
             .get(&pane)
             .and_then(|surface| self.editors.get(surface))
+    }
+
+    pub(crate) fn active_chat(&self, pane: PaneId) -> Option<&super::chat_pane::ChatPane> {
+        self.chats.get(&self.active_surface(pane)?)
     }
 
     pub fn active_deferred_surface(&self, pane: PaneId) -> Option<&PaneSurface> {
@@ -558,6 +565,16 @@ impl PaneRegistry {
             .or_else(|| self.active_browser_by_pane.get(&pane))
             .or_else(|| self.active_editor_by_pane.get(&pane))
             .copied()
+            .or_else(|| {
+                let id = SurfaceId(
+                    self.surface_stacks
+                        .get(&pane)?
+                        .visible_child_name()?
+                        .parse()
+                        .ok()?,
+                );
+                self.chats.contains_key(&id).then_some(id)
+            })
     }
 
     pub fn is_ssh_pane(&self, pane: PaneId) -> bool {
@@ -766,6 +783,8 @@ impl PaneRegistry {
                 MovingHandle::Terminal(self.terminals.remove(&surface).unwrap())
             } else if let Some(browser) = self.browsers.remove(&surface) {
                 MovingHandle::Browser(browser)
+            } else if let Some(chat) = self.chats.remove(&surface) {
+                MovingHandle::Chat(chat)
             } else {
                 continue;
             };
@@ -773,6 +792,7 @@ impl PaneRegistry {
                 MovingHandle::Terminal(terminal) => terminal.root_widget(),
                 MovingHandle::Browser(browser) => browser.root.clone().upcast(),
                 MovingHandle::Editor(_) => unreachable!(),
+                MovingHandle::Chat(chat) => chat.root.clone().upcast(),
             };
             self.remove_surface_focus_controller(surface);
             if let Some(parent) = content.parent() {
@@ -793,6 +813,7 @@ impl PaneRegistry {
     /// Close detached sessions the rebuilt tree did not re-adopt (their
     /// surfaces no longer exist in the workspace).
     pub fn discard_unused_detached_surfaces(&mut self) {
+        self.pending_chat_reuse.clear();
         for (_, terminal) in self.pending_terminal_reuse.drain() {
             terminal.close_pty();
         }
@@ -844,6 +865,7 @@ impl PaneRegistry {
             .filter_map(|(surface, owner)| (*owner == workspace).then_some(*surface))
             .collect();
         for surface in surfaces {
+            self.chats.remove(&surface);
             if let Some(terminal) = self.terminals.remove(&surface) {
                 terminal.close_pty();
             }
@@ -927,7 +949,12 @@ impl PaneRegistry {
         let Some(paned) = self.split_paneds.get(&split_id) else {
             return false;
         };
-        apply_ratio_when_sized(paned, ratio.clamp(0.05, 0.95));
+        let direction = if paned.orientation() == gtk::Orientation::Horizontal {
+            SplitDirection::Vertical
+        } else {
+            SplitDirection::Horizontal
+        };
+        apply_ratio_when_sized(paned, direction.clamp_ratio(ratio));
         true
     }
 
@@ -971,6 +998,10 @@ impl PaneRegistry {
             self.active_editor_by_pane.insert(pane, surface);
             self.active_terminal_by_pane.remove(&pane);
             self.active_browser_by_pane.remove(&pane);
+        } else if self.chats.contains_key(&surface) {
+            self.active_terminal_by_pane.remove(&pane);
+            self.active_browser_by_pane.remove(&pane);
+            self.active_editor_by_pane.remove(&pane);
         }
         if let Some(tabs) = self.surface_tabs.get(&pane) {
             for (id, tab) in tabs {
@@ -1160,6 +1191,7 @@ impl PaneRegistry {
             .unwrap_or_default();
         for s in surfaces {
             self.surface_errors.remove(&s);
+            self.chats.remove(&s);
             if let Some(terminal) = self.terminals.remove(&s) {
                 terminal.close_pty();
             }
@@ -1236,6 +1268,7 @@ impl PaneRegistry {
             }
         }
         // Clean PaneRegistry indexes.
+        self.chats.remove(&surface);
         if let Some(terminal) = self.terminals.remove(&surface) {
             terminal.close_pty();
         }
@@ -1283,6 +1316,8 @@ impl PaneRegistry {
             MovingHandle::Terminal(terminal)
         } else if let Some(browser) = self.browsers.remove(&surface) {
             MovingHandle::Browser(browser)
+        } else if let Some(chat) = self.chats.remove(&surface) {
+            MovingHandle::Chat(chat)
         } else {
             MovingHandle::Editor(self.editors.remove(&surface)?)
         };
@@ -1353,6 +1388,10 @@ impl PaneRegistry {
                 browser.set_pane_id(dst_pane);
                 self.browsers.insert(surface, browser);
             }
+            MovingHandle::Chat(chat) => {
+                chat.set_pane_id(dst_pane);
+                self.chats.insert(surface, chat);
+            }
             MovingHandle::Editor(editor) => {
                 editor.set_pane_id(dst_pane);
                 self.editors.insert(surface, editor);
@@ -1379,6 +1418,9 @@ impl PaneRegistry {
             MovingHandle::Browser(browser) => {
                 self.pending_browser_reuse.insert(moving.surface, browser);
             }
+            MovingHandle::Chat(chat) => {
+                self.pending_chat_reuse.insert(moving.surface, chat);
+            }
             MovingHandle::Editor(editor) => {
                 self.pending_editor_reuse.insert(moving.surface, editor);
             }
@@ -1399,6 +1441,7 @@ pub enum MovingHandle {
     Terminal(PaneTerminal),
     Browser(BrowserPane),
     Editor(EditorPane),
+    Chat(super::chat_pane::ChatPane),
 }
 
 /// Apply the saved split ratio once GTK reports a nonzero size. Retry on a
@@ -1664,7 +1707,9 @@ pub fn build_surface(
             cwd.clone(),
         ),
         SurfaceKind::Browser { .. } => (Vec::new(), None),
-        SurfaceKind::Editor { .. } | SurfaceKind::SshTerminal { .. } => (Vec::new(), None),
+        SurfaceKind::Editor { .. } | SurfaceKind::Chat { .. } | SurfaceKind::SshTerminal { .. } => {
+            (Vec::new(), None)
+        }
     };
     build_pane(
         workspace,
@@ -1818,6 +1863,13 @@ fn build_leaf_pane(
     stack.set_hexpand(true);
     stack.set_vexpand(true);
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
+    stack.connect_visible_child_notify(|stack| {
+        // Background terminal and browser tabs should not set a chat's minimum width.
+        let chat = stack
+            .visible_child()
+            .is_some_and(|child| child.widget_name() == "flowmux-chat");
+        stack.set_hhomogeneous(!chat);
+    });
 
     let mut tab_widgets = Vec::new();
     for surface in &surfaces {
@@ -1934,6 +1986,16 @@ fn build_leaf_pane(
     }
     tools.append(&add);
 
+    let add_chat = pane_tool_button("chat-message-new-symbolic", "Add chat");
+    add_chat.set_widget_name("flowmux-add-chat");
+    add_chat.update_property(&[gtk::accessible::Property::Label("Add chat")]);
+    add_chat.set_sensitive(!registry.borrow().ssh.contains_key(&workspace));
+    {
+        let cb = callbacks.on_new_chat_surface.clone();
+        add_chat.connect_clicked(move |_| (cb.borrow_mut())(pane_id));
+    }
+    tools.append(&add_chat);
+
     let add_browser = pane_tool_button("web-browser-symbolic", "Add browser tab");
     {
         let cb = callbacks.on_new_browser_surface.clone();
@@ -1942,6 +2004,45 @@ fn build_leaf_pane(
     tools.append(&add_browser);
 
     let pane_menu = pane_menu_button(pane_id, callbacks);
+    let compact = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    compact.set_visible(false);
+    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 245px").unwrap());
+    for (name, tool) in [
+        ("Toggle Pane Zoom", &zoom),
+        ("Split Right", &split_right),
+        ("Split Down", &split_down),
+        ("Add Tab", &add),
+        ("Add Chat", &add_chat),
+        ("Add Browser Tab", &add_browser),
+    ] {
+        narrow.add_setter(tool, "visible", Some(&false.to_value()));
+        let item = gtk::Button::with_label(name);
+        item.add_css_class("flat");
+        item.child()
+            .and_downcast::<gtk::Label>()
+            .unwrap()
+            .set_xalign(0.0);
+        tool.bind_property("sensitive", &item, "sensitive")
+            .sync_create()
+            .build();
+        let tool = tool.downgrade();
+        let menu = pane_menu.downgrade();
+        item.connect_clicked(move |_| {
+            if let (Some(tool), Some(menu)) = (tool.upgrade(), menu.upgrade()) {
+                menu.popdown();
+                tool.emit_clicked();
+            }
+        });
+        compact.append(&item);
+    }
+    let menu_items = pane_menu
+        .popover()
+        .unwrap()
+        .child()
+        .and_downcast::<gtk::Box>()
+        .unwrap();
+    menu_items.prepend(&compact);
+    narrow.add_setter(&compact, "visible", Some(&true.to_value()));
     tools.append(&pane_menu);
 
     // The File browser toggle lives in the side-panel footer (next to the
@@ -1952,7 +2053,11 @@ fn build_leaf_pane(
     }
     tabbar.append(&tab_scroll);
     tabbar.append(&tools);
-    root.append(&tabbar);
+    let adaptive_tabbar = adw::BreakpointBin::new();
+    adaptive_tabbar.set_size_request(38, 35);
+    adaptive_tabbar.set_child(Some(&tabbar));
+    adaptive_tabbar.add_breakpoint(narrow);
+    root.append(&adaptive_tabbar);
     root.append(&stack);
 
     // Overlay a translucent preview on top of the pane body so a drag can show
@@ -4103,6 +4208,7 @@ fn surface_tab(surface: &PaneSurface, active: bool) -> (gtk::Box, gtk::Label) {
         }
         SurfaceKind::Browser { .. } => "web-browser-symbolic",
         SurfaceKind::Editor { .. } => "text-x-generic-symbolic",
+        SurfaceKind::Chat { .. } => "chat-message-new-symbolic",
     };
     row.append(&gtk::Image::from_icon_name(icon_name));
     let label = gtk::Label::new(Some(&surface.title));
@@ -4687,6 +4793,18 @@ fn build_panel(
             let mut r = registry.borrow_mut();
             r.browsers.insert(surface.id, pane);
             r.surface_workspace.insert(surface.id, workspace);
+            widget
+        }
+        SurfaceKind::Chat { agent, cwd } => {
+            let reused = registry.borrow_mut().pending_chat_reuse.remove(&surface.id);
+            let chat = reused.unwrap_or_else(|| {
+                super::chat_pane::ChatPane::new(pane_id, agent, cwd.clone(), callbacks)
+            });
+            chat.set_pane_id(pane_id);
+            let widget = chat.root.clone().upcast::<gtk::Widget>();
+            let mut registry = registry.borrow_mut();
+            registry.chats.insert(surface.id, chat);
+            registry.surface_workspace.insert(surface.id, workspace);
             widget
         }
         SurfaceKind::Editor {

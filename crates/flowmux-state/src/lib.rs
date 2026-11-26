@@ -26,7 +26,7 @@ pub mod session_history;
 pub use agent_sessions::{default_agent_session_store, AgentSessionStore, SavedAgentSession};
 pub use instance_lock::{try_acquire_state_lock, InstanceLock};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Window size and maximized state, saved on exit and restored on next launch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -241,9 +241,15 @@ fn backup_legacy_state(path: &Path, version: u64, bytes: &[u8]) -> Result<(), St
 fn validate_locations(state: &State) -> Result<(), StateError> {
     fn kind(kind: &SurfaceKind, remote: bool) -> Result<(), StateError> {
         match kind {
-            SurfaceKind::Terminal { .. } | SurfaceKind::Editor { .. } if remote => Err(
-                StateError::Invalid("SSH workspace contains a local terminal or editor".into()),
-            ),
+            SurfaceKind::Terminal { .. }
+            | SurfaceKind::Editor { .. }
+            | SurfaceKind::Chat { .. }
+                if remote =>
+            {
+                Err(StateError::Invalid(
+                    "SSH workspace contains a local terminal or editor".into(),
+                ))
+            }
             SurfaceKind::SshTerminal { .. } if !remote => Err(StateError::Invalid(
                 "local workspace contains an SSH terminal".into(),
             )),
@@ -1281,7 +1287,7 @@ mod tests {
         surface.scrollback = None;
         save_to(&path, &migrated).unwrap();
         let restored = load_from(&path).unwrap();
-        assert_eq!(restored.schema_version, 4);
+        assert_eq!(restored.schema_version, SCHEMA_VERSION);
         assert_eq!(
             restored.workspaces[0].surfaces[0]
                 .root_pane

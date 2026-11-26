@@ -2601,7 +2601,9 @@ fn agent_presence_slot_in_pane(
             ..
         } => surfaces
             .iter()
-            .find(|surface| surface.id == surface_id)
+            .find(|surface| {
+                surface.id == surface_id && !matches!(surface.kind, SurfaceKind::Chat { .. })
+            })
             .map(|surface| surface.agent.clone()),
         Pane::Leaf { .. } => None,
         Pane::Split { first, second, .. } => agent_presence_slot_in_pane(first, surface_id)

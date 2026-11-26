@@ -824,13 +824,20 @@ fn set_split_ratio_clamps_extreme_values() {
     let Pane::Split { ratio, .. } = &tree else {
         unreachable!()
     };
-    assert!((ratio - 0.95).abs() < 0.001);
+    assert_eq!(*ratio, 1.0 - f32::EPSILON);
+
+    assert!(tree.set_split_ratio(split_id, 0.02));
+    let Pane::Split { ratio, .. } = &tree else {
+        unreachable!()
+    };
+    assert_eq!(*ratio, 0.02);
 
     assert!(tree.set_split_ratio(split_id, 0.0));
     let Pane::Split { ratio, .. } = &tree else {
         unreachable!()
     };
-    assert!((ratio - 0.05).abs() < 0.001);
+    assert_eq!(*ratio, f32::EPSILON);
+    assert_eq!(SplitDirection::Horizontal.clamp_ratio(0.02), 0.05);
 }
 
 #[test]

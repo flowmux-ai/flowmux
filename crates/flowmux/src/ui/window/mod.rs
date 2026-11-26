@@ -94,6 +94,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::CreateSurface { .. }
             | GtkCommand::OpenAgentView { .. }
             | GtkCommand::OpenManagedAgent { pane: Some(_), .. }
+            | GtkCommand::NewChatSurface { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
@@ -245,6 +246,7 @@ fn stored_surface_copy_text_from_workspace(
                 live_terminal_cwd: None,
             }),
             SurfaceKind::Browser { initial_url } => initial_url.and_then(CopyableText::url),
+            SurfaceKind::Chat { cwd, .. } => Some(CopyableText::live_path(cwd)),
             SurfaceKind::Editor { workspace_root, .. } => {
                 Some(CopyableText::stored_path(workspace_root))
             }
@@ -264,6 +266,7 @@ fn stored_terminal_cwd_from_workspace(
             SurfaceKind::SshTerminal { .. }
             | SurfaceKind::Browser { .. }
             | SurfaceKind::Editor { .. } => None,
+            SurfaceKind::Chat { cwd, .. } => Some(cwd.clone()),
         })
 }
 
@@ -761,6 +764,8 @@ fn grab_registered_pane_focus(
             browser.focus_widget().is_mapped()
         } else if let Some(editor) = registry.active_editor(pane) {
             editor.focus_widget().is_mapped()
+        } else if let Some(chat) = registry.active_chat(pane) {
+            chat.root.is_mapped()
         } else {
             false
         }
@@ -776,6 +781,8 @@ fn grab_registered_pane_focus(
             browser.grab_focus();
         } else if let Some(editor) = registry.active_editor(pane) {
             editor.grab_focus();
+        } else if let Some(chat) = registry.active_chat(pane) {
+            chat.grab_focus();
         } else {
             tracing::debug!(%pane, "focus_pane: no surface registered for pane");
         }
@@ -1311,6 +1318,7 @@ pub(crate) mod macos_smoke;
 mod managed_agent_control;
 mod managed_agent_destination;
 mod new_agent;
+mod new_chat;
 mod notification_commands;
 mod notification_coordinator;
 mod pane_callbacks;
@@ -1841,7 +1849,7 @@ impl WindowController {
         );
         let options = Rc::new(RefCell::new(initial_options));
         let (tab_drag_drop_seen, tab_drag_drop_committed) = sidebar.tab_drag_drop_state();
-        let callbacks = pane_callbacks::PaneCallbackRouter::new(
+        let mut callbacks = pane_callbacks::PaneCallbackRouter::new(
             focused_pane.clone(),
             bridge.clone(),
             options.clone(),
@@ -1851,6 +1859,7 @@ impl WindowController {
             tab_drag_drop_committed,
         )
         .into_callbacks();
+        callbacks.chat_runtime = tokio_handle.clone();
 
         let content_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content_box.set_hexpand(true);
@@ -2631,6 +2640,9 @@ impl WindowController {
                 editor.workspace_root().to_path_buf(),
             ));
         }
+        if let Some(chat) = registry.chats.get(&surface) {
+            return Some(CopyableText::live_path(chat.cwd().to_path_buf()));
+        }
         registry
             .browsers
             .get(&surface)
@@ -3240,6 +3252,7 @@ impl WindowController {
             | GtkCommand::TeamSpawn { pane, .. }
             | GtkCommand::NewSurface { pane }
             | GtkCommand::OpenAgentView { pane, .. }
+            | GtkCommand::NewChatSurface { pane }
             | GtkCommand::NewBrowserSurface { pane }
             | GtkCommand::OpenTig { pane }
             | GtkCommand::ActivateSurface { pane, .. }
@@ -3488,6 +3501,7 @@ impl WindowController {
             | GtkCommand::CreateSurface { .. }
             | GtkCommand::OpenAgentView { .. }
             | GtkCommand::OpenManagedAgent { .. }
+            | GtkCommand::NewChatSurface { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
@@ -3646,7 +3660,8 @@ impl WindowController {
         if let Some((id, _)) = best {
             let has_active_surface = registry.active_terminal(id).is_some()
                 || registry.active_browser(id).is_some()
-                || registry.active_editor(id).is_some();
+                || registry.active_editor(id).is_some()
+                || registry.active_chat(id).is_some();
             drop(registry);
 
             if has_active_surface {
@@ -3927,6 +3942,7 @@ fn collect_subtitle_lines_excluding(
             SurfaceKind::Terminal { cwd: None, .. } => None,
             SurfaceKind::Browser { .. } => Some(format!("Browser-{}", surface.title)),
             SurfaceKind::Editor { .. } => Some(format!("Editor-{}", surface.title)),
+            SurfaceKind::Chat { .. } => Some(surface.title.clone()),
             SurfaceKind::SshTerminal { .. } => Some(format!("SSH-{}", surface.title)),
         }
     };
@@ -12875,6 +12891,7 @@ mod tests {
                     SurfaceKind::SshTerminal { .. } => "ssh_terminal",
                     SurfaceKind::Browser { .. } => "browser",
                     SurfaceKind::Editor { .. } => "editor",
+                    SurfaceKind::Chat { .. } => "chat",
                 })
             })
             .collect();

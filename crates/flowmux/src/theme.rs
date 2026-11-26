@@ -315,6 +315,7 @@ impl ResolvedTheme {
             .replace("$border", &pane_border_css)
             .replace("$hover", &control_hover_css)
             .replace("$accent", &focus_full_css);
+        let chat_css = include_str!("ui/chat_pane/chat.css");
         // GTK uses 72 DPI on macOS and 96 DPI on Linux for point-sized sidebar text.
         let sidebar_font_scale = if cfg!(target_os = "macos") {
             4.0 / 3.0
@@ -1043,8 +1044,10 @@ label.subtitle {{
     color: {fg};
 }}
 {browser_css}
+{chat_css}
 "#,
             browser_css = browser_css,
+            chat_css = chat_css,
             bg = bg_css,
             fg = rgba_css(&self.fg),
             border = pane_border_css,

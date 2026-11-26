@@ -220,6 +220,7 @@ fn surface_kind_label(kind: &SurfaceKind) -> &'static str {
         SurfaceKind::Terminal { .. } => "terminal",
         SurfaceKind::Browser { .. } => "browser",
         SurfaceKind::Editor { .. } => "editor",
+        SurfaceKind::Chat { .. } => "chat",
     }
 }
 
@@ -622,7 +623,7 @@ pub enum Request {
     PaneFocus {
         pane: PaneId,
     },
-    /// `flowmux resize-pane <pane> --ratio <0.05..0.95>` — resize pane's
+    /// `flowmux resize-pane <pane> --ratio <0..1>` — resize pane's
     /// parent split by setting the first-child ratio.
     PaneResize {
         pane: PaneId,

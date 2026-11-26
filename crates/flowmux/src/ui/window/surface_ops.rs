@@ -419,6 +419,8 @@ impl WindowController {
                             browser.grab_focus();
                         } else if let Some(editor) = r.editors.get(&surface_id) {
                             editor.grab_focus();
+                        } else if let Some(chat) = r.chats.get(&surface_id) {
+                            chat.grab_focus();
                         }
                     });
                 }

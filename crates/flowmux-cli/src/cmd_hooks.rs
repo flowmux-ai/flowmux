@@ -199,6 +199,21 @@ pub(crate) fn generic_resume_return_forget_request(
 /// connect to the daemon.
 pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyhow::Result<()> {
     use hook_install::HookInstallStatus;
+    if std::env::var_os("FLOWMUX_CHAT_SESSION").is_some()
+        && matches!(
+            op,
+            HooksOp::Claude { .. }
+                | HooksOp::Codex { .. }
+                | HooksOp::Opencode { .. }
+                | HooksOp::Gemini { .. }
+                | HooksOp::Antigravity { .. }
+                | HooksOp::Cline { .. }
+        )
+    {
+        // Chat receives activity from the agent protocol; terminal hook routing
+        // could otherwise attach this activity to another tab in the same directory.
+        return Ok(());
+    }
     match op {
         HooksOp::RefreshShims => {
             for path in hook_install::refresh_agent_shims()? {

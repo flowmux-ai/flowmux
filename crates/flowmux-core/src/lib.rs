@@ -415,6 +415,10 @@ pub enum SurfaceKind {
     Browser {
         initial_url: Option<String>,
     },
+    Chat {
+        agent: String,
+        cwd: PathBuf,
+    },
     Editor {
         workspace_root: PathBuf,
         #[serde(default)]
@@ -557,6 +561,17 @@ pub enum Pane {
 pub enum SplitDirection {
     Horizontal,
     Vertical,
+}
+
+impl SplitDirection {
+    pub fn clamp_ratio(self, ratio: f32) -> f32 {
+        // Left/right splits use the pane's measured minimum width, independent of screen size.
+        let edge = match self {
+            Self::Vertical => f32::EPSILON,
+            Self::Horizontal => 0.05,
+        };
+        ratio.clamp(edge, 1.0 - edge)
+    }
 }
 
 /// How `flowmux browser open` placed its browser surface relative to the
@@ -1292,7 +1307,8 @@ impl Pane {
                         }
                         SurfaceKind::Terminal { cwd: None, .. }
                         | SurfaceKind::Browser { .. }
-                        | SurfaceKind::Editor { .. } => None,
+                        | SurfaceKind::Editor { .. }
+                        | SurfaceKind::Chat { .. } => None,
                     };
                     out.push(WorkspaceAgentBlock {
                         pane: *id,
@@ -1740,26 +1756,28 @@ impl Pane {
     }
 
     /// Update the ratio for the Split node identified by `target`. Clamp to
-    /// [0.05, 0.95] to avoid exact 0/1 extremes and return `true` only for
+    /// the direction's supported range and return `true` only for
     /// meaningful changes so callers can skip dirty marking.
     pub fn set_split_ratio(&mut self, target: PaneId, new_ratio: f32) -> bool {
-        let clamped = new_ratio.clamp(0.05, 0.95);
         match self {
             Pane::Split {
                 id,
+                direction,
                 ratio,
                 first,
                 second,
                 ..
             } => {
                 if *id == target {
+                    let clamped = direction.clamp_ratio(new_ratio);
                     if (*ratio - clamped).abs() < f32::EPSILON {
                         return false;
                     }
                     *ratio = clamped;
                     return true;
                 }
-                first.set_split_ratio(target, clamped) || second.set_split_ratio(target, clamped)
+                first.set_split_ratio(target, new_ratio)
+                    || second.set_split_ratio(target, new_ratio)
             }
             Pane::Leaf { .. } => false,
         }
@@ -2081,6 +2099,19 @@ impl PaneSurface {
         }
     }
 
+    pub fn chat(agent: String, cwd: PathBuf) -> Self {
+        Self {
+            id: SurfaceId::new(),
+            title: format!("{agent} Chat"),
+            title_locked: false,
+            kind: SurfaceKind::Chat { agent, cwd },
+            agent_binding: None,
+            shell_binding: None,
+            scrollback: None,
+            agent: None,
+        }
+    }
+
     pub fn editor(title: impl Into<String>, workspace_root: PathBuf) -> Self {
         Self {
             id: SurfaceId::new(),
@@ -2164,13 +2195,15 @@ impl PaneContent {
         match &active_surface.kind {
             SurfaceKind::SshTerminal { .. } => None,
             SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
-            SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. } => surfaces[..active_idx]
-                .iter()
-                .rev()
-                .find_map(|surface| match &surface.kind {
-                    SurfaceKind::Terminal { cwd: Some(cwd), .. } => Some(cwd.clone()),
-                    _ => None,
-                }),
+            SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. } | SurfaceKind::Chat { .. } => {
+                surfaces[..active_idx]
+                    .iter()
+                    .rev()
+                    .find_map(|surface| match &surface.kind {
+                        SurfaceKind::Terminal { cwd: Some(cwd), .. } => Some(cwd.clone()),
+                        _ => None,
+                    })
+            }
         }
     }
 

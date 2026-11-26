@@ -828,19 +828,29 @@ pub fn legacy_local_agent_shims() -> Vec<PathBuf> {
 }
 
 pub fn agent_has_real_binary(agent: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|path| agent_has_real_binary_on_path(agent, path.as_os_str()))
+    resolve_agent_binary(agent).is_some()
 }
 
+pub fn resolve_agent_binary(agent: &str) -> Option<PathBuf> {
+    resolve_agent_binary_on_path(agent, &std::env::var_os("PATH")?)
+}
+
+#[cfg(test)]
 fn agent_has_real_binary_on_path(agent: &str, path: &std::ffi::OsStr) -> bool {
+    resolve_agent_binary_on_path(agent, path).is_some()
+}
+
+pub fn resolve_agent_binary_on_path(agent: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
-    std::env::split_paths(path).any(|dir| {
-        let candidate = dir.join(agent);
-        std::fs::metadata(&candidate)
-            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-            && !is_legacy_local_agent_shim(&candidate)
-    })
+    std::env::split_paths(path)
+        .map(|dir| dir.join(agent))
+        .find_map(|candidate| {
+            let valid = std::fs::metadata(&candidate).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            }) && !is_legacy_local_agent_shim(&candidate);
+            valid.then(|| std::path::absolute(candidate).ok()).flatten()
+        })
 }
 
 /// A shim names itself on its second line. Read only that much: a provider

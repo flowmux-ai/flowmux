@@ -682,6 +682,12 @@ impl WindowController {
                 };
                 let _ = ack.send(result);
             }
+            GtkCommand::NewChatSurface { pane } => {
+                let controller = self.clone();
+                glib::spawn_future_local(async move {
+                    controller.show_new_chat_dialog(pane).await;
+                });
+            }
             GtkCommand::NewBrowserSurface { pane } => {
                 if let Some((ws_id, surface_id)) = self
                     .store
@@ -722,6 +728,8 @@ impl WindowController {
                         browser.grab_focus();
                     } else if let Some(editor) = r.editors.get(&surface) {
                         editor.grab_focus();
+                    } else if let Some(chat) = r.chats.get(&surface) {
+                        chat.grab_focus();
                     }
                     if let Some(ack) = ack {
                         let _ = ack.send(Ok(()));

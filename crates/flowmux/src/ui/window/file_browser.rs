@@ -258,6 +258,9 @@ impl WindowController {
             return Some(editor_file_browser_root(session, workspace_root));
         }
 
+        if let Some(chat) = self.pane_registry.borrow().active_chat(pane) {
+            return Some(chat.cwd().to_path_buf());
+        }
         if let Some(dir) = self.pane_registry.borrow().current_dir_for_pane(pane) {
             return Some(dir);
         }

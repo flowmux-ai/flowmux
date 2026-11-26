@@ -246,6 +246,10 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M1 2h4v2H1zm0 5h6v2H1zm0 5h8v2H1zM11 14h2V5l2 2 1-1-4-4-4 4 1 1 2-2z",
     },
     SymbolicIcon {
+        name: "chat-message-new-symbolic",
+        path: "M2 2h12v9H7l-4 3v-3H2zm2 2v5h1v1l1-1h6V4zm3 1h2v1h2v2H9v1H7V8H5V6h2z",
+    },
+    SymbolicIcon {
         name: "web-browser-symbolic",
         path: "M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM8 3c.7.8 1.1 1.7 1.3 2.5H6.7C6.9 4.7 7.3 3.8 8 3zM3.8 7h2.6a7 7 0 0 0 0 2H3.8a5 5 0 0 1 0-2zm.8 3.5h2.1c.2.9.6 1.8 1.3 2.5a5 5 0 0 1-3.4-2.5zM8 13c-.7-.8-1.1-1.7-1.3-2.5h2.6C9.1 11.3 8.7 12.2 8 13zm1.6-4H6.4a7 7 0 0 1 0-2h3.2a7 7 0 0 1 0 2zM9.3 5.5A8 8 0 0 0 8 3a5 5 0 0 1 3.4 2.5zm0 5h2.1A5 5 0 0 1 8 13c.7-.7 1.1-1.6 1.3-2.5zM9.6 9a7 7 0 0 0 0-2h2.6a5 5 0 0 1 0 2z",
     },

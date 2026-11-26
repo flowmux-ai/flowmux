@@ -14,6 +14,8 @@ pub(crate) mod browser_feedback;
 mod browser_file_chooser;
 mod browser_import;
 pub mod browser_pane;
+mod chat_pane;
+mod chat_runtime;
 pub mod editor_pane;
 pub mod file_browser;
 pub mod ghostty_pane;

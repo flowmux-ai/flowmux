@@ -456,6 +456,9 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<(PaneId, SurfaceId), String>>,
     },
     /// Add an empty about:blank browser tab to the same pane.
+    NewChatSurface {
+        pane: PaneId,
+    },
     NewBrowserSurface {
         pane: PaneId,
     },
