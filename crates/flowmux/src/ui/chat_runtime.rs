@@ -195,13 +195,15 @@ pub(super) fn hosted(
                         let Ok(next) = next else { return Ok(()) };
                         let send = matches!(next, Input::Send { .. });
                         let stop = matches!(next, Input::Stop);
+                        let steer = matches!(next, Input::Steer { .. });
                         if let Err(error) = request(&client, Request::Input { id, input: next }).await {
                             if error.downcast_ref::<flowmux_ipc::agent_host::HostRpcError>().is_none() {
                                 return Err(error.context("Could not confirm the chat command; check the saved conversation"));
                             }
                             let detail = format!("{error:#}");
                             output.send(if send { Event::Rejected(detail) }
-                                else if stop { Event::StopFailed(detail) } else { Event::Notice(detail) }).await?;
+                                else if stop { Event::StopFailed(detail) }
+                                else if steer { Event::SteerRejected(detail) } else { Event::Notice(detail) }).await?;
                         }
                     }
                     _ = tick.tick() => {

@@ -57,6 +57,8 @@ struct ChatUi {
     queue_paused: Cell<bool>,
     queue_edit: RefCell<Option<QueueEdit>>,
     steering: Cell<Option<u64>>,
+    /// The settings the running turn started with.
+    turn_settings: RefCell<Option<Settings>>,
     queue_panel: gtk::Box,
     queue_title: gtk::Label,
     queue_rows: gtk::Box,
@@ -263,6 +265,7 @@ impl ChatPane {
             queue_paused: Cell::new(false),
             queue_edit: RefCell::new(None),
             steering: Cell::new(None),
+            turn_settings: RefCell::new(None),
             queue_panel,
             queue_title,
             queue_rows,
@@ -997,10 +1000,11 @@ impl ChatUi {
         }
         if !self.try_input(Input::Send {
             text: text.to_owned(),
-            settings,
+            settings: settings.clone(),
         }) {
             return false;
         }
+        *self.turn_settings.borrow_mut() = Some(settings);
         self.show_notice("");
         self.busy.set(true);
         *self.last_text.borrow_mut() = Some(text.to_owned());
@@ -1084,7 +1088,7 @@ impl ChatUi {
         };
         if !self.ready.get() {
             self.show_notice("Connect to the agent to send queued messages.");
-        } else if self.can_steer() {
+        } else if self.can_steer(&self.queue.borrow()[index].settings) {
             let text = self.queue.borrow()[index].text.clone();
             if self.try_input(Input::Steer { text }) {
                 self.steering.set(Some(id));
@@ -1105,12 +1109,22 @@ impl ChatUi {
         }
     }
 
-    /// Codex accepts more input in its running turn; other agents stop and send.
-    fn can_steer(&self) -> bool {
+    /// Codex accepts more input in its running turn; other agents stop and send. A message
+    /// queued with other settings, such as Plan, must not run under the current turn's.
+    fn can_steer(&self, settings: &Settings) -> bool {
         self.provider == Some(Provider::Codex)
             && self.busy.get()
             && !self.stopping.get()
             && self.steering.get().is_none()
+            && self.turn_settings.borrow().as_ref().is_some_and(|turn| {
+                (&turn.model, &turn.access, &turn.effort, turn.plan)
+                    == (
+                        &settings.model,
+                        &settings.access,
+                        &settings.effort,
+                        settings.plan,
+                    )
+            })
     }
 
     fn send_next_queued(self: &Rc<Self>) {
@@ -1201,7 +1215,7 @@ impl ChatUi {
                     "Steering",
                     "Adding this message to the running turn…",
                 )
-            } else if self.can_steer() {
+            } else if self.can_steer(&entry.settings) {
                 (
                     "mail-send-symbolic",
                     "Steer",
@@ -1273,6 +1287,7 @@ impl ChatUi {
                 settings,
             } => {
                 *self.native_id.borrow_mut() = native_id;
+                *self.turn_settings.borrow_mut() = busy.then(|| settings.clone());
                 self.startup_settings.borrow_mut().get_or_insert(settings);
                 self.resume_pending.set(false);
                 self.busy.set(busy);
@@ -1423,6 +1438,7 @@ impl ChatUi {
     fn clear_turn(&self) {
         // An unconfirmed steer stays queued and can start the next turn.
         self.steering.set(None);
+        self.turn_settings.borrow_mut().take();
         self.busy.set(false);
         self.stopping.set(false);
         self.last_text.borrow_mut().take();
