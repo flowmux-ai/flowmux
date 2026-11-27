@@ -257,9 +257,15 @@ fn render_table<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, table: &NodeTable) {
         for (x, cell) in row.children().enumerate() {
             let text = text_label("");
             text.set_markup(&inline(cell, 0));
-            // Wrapping cells are measured at their minimum width; keeping it equal to the drawn
-            // width stops the scrolled table from reserving the height of a narrower layout.
-            text.set_width_chars(text.text().chars().take(28).count() as i32);
+            // The scrolled table reserves the height its cells take at their minimum width, so
+            // that width must equal the drawn one. Short cells stay on one line at their real
+            // width; an average-width estimate can be narrower and wrap them. Long cells wrap
+            // at 28 average characters, which is both their minimum and their natural width.
+            if text.text().chars().count() <= 28 {
+                text.set_wrap(false);
+            } else {
+                text.set_width_chars(28);
+            }
             text.set_xalign(match table.alignments[x] {
                 TableAlignment::Center => 0.5,
                 TableAlignment::Right => 1.0,
