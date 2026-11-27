@@ -47,6 +47,7 @@ struct View {
     jump_pending: Cell<bool>,
     jump_target: Cell<Option<usize>>,
     adjustment_scheduled: Cell<bool>,
+    text_flush_scheduled: Cell<bool>,
     replaying: Cell<bool>,
     rail_buttons: RefCell<Vec<(usize, gtk::Button)>>,
     open_file: RefCell<Rc<OpenFile>>,
@@ -88,6 +89,7 @@ struct TextRow {
     contents: gtk::Box,
     kind: TextKind,
     text: String,
+    blocks: markdown::Blocks,
     dirty: bool,
     live: bool,
 }
@@ -111,6 +113,14 @@ fn text_label(text: &str) -> gtk::Label {
     let label = label(text);
     label.set_selectable(true);
     label
+}
+
+fn copy_button(action: &str) -> gtk::Button {
+    let button = gtk::Button::from_icon_name("edit-copy-symbolic");
+    button.set_tooltip_text(Some(action));
+    button.update_property(&[gtk::accessible::Property::Label(action)]);
+    button.add_css_class("flat");
+    button
 }
 
 fn bubble(text: &str) -> gtk::Label {
@@ -251,6 +261,7 @@ impl Transcript {
             jump_pending: Cell::new(false),
             jump_target: Cell::new(None),
             adjustment_scheduled: Cell::new(false),
+            text_flush_scheduled: Cell::new(false),
             replaying: Cell::new(false),
             rail_buttons: RefCell::new(Vec::new()),
             open_file: RefCell::new(Rc::new(|_| {})),
@@ -578,6 +589,7 @@ impl Transcript {
                 contents,
                 kind,
                 text: String::new(),
+                blocks: markdown::Blocks::default(),
                 dirty: false,
                 live: true,
             })
@@ -607,7 +619,7 @@ impl Transcript {
         let Some(turn) = turns.last_mut() else {
             return;
         };
-        turn.flush();
+        turn.flush(false);
         turn.open_run = None;
         turn.entries.append(&bubble(text));
         drop(turns);
@@ -615,10 +627,19 @@ impl Transcript {
     }
 
     pub fn flush_text(&self) {
-        if let Some(turn) = self.view.turns.borrow_mut().last_mut() {
-            turn.flush();
+        if self.view.text_flush_scheduled.replace(true) {
+            return;
         }
-        self.view.schedule_adjustment();
+        let weak = Rc::downgrade(&self.view);
+        glib::timeout_add_local_once(Duration::from_millis(32), move || {
+            if let Some(view) = weak.upgrade() {
+                view.text_flush_scheduled.set(false);
+                if let Some(turn) = view.turns.borrow_mut().last_mut() {
+                    turn.flush(false);
+                }
+                view.schedule_adjustment();
+            }
+        });
     }
 
     pub fn work(&self, work: Work) {
@@ -792,6 +813,7 @@ impl Transcript {
 
     pub fn finish(&self, status: &str, detail: Option<&str>, elapsed: u64) {
         let mut turns = self.view.turns.borrow_mut();
+        let index = turns.len().saturating_sub(1);
         let Some(turn) = turns.last_mut() else {
             return;
         };
@@ -803,17 +825,13 @@ impl Transcript {
         }
         for row in turn.rows.values_mut() {
             match row {
-                Row::Text(text) => {
-                    text.live = false;
-                    text.dirty = true;
-                }
                 Row::Work(work) if work.work.running => {
                     work.work.running = false;
                     work.work.changes.clear();
                     let group = work.run.and_then(|index| turn.runs[index].group.as_ref());
                     work.update(false, group);
                 }
-                Row::Work(_) => {}
+                _ => {}
             }
         }
         for index in 0..turn.runs.len() {
@@ -825,7 +843,20 @@ impl Transcript {
         turn.open.set(expanded);
         turn.activity.set_active(expanded);
         turn.show_process();
-        turn.flush();
+        turn.flush(true);
+        if turn.answer().is_some() {
+            let copy = copy_button("Copy response");
+            copy.set_halign(gtk::Align::Start);
+            let weak = Rc::downgrade(&self.view);
+            copy.connect_clicked(move |button| {
+                if let Some(view) = weak.upgrade() {
+                    if let Some(answer) = view.turns.borrow().get(index).and_then(Turn::answer) {
+                        button.clipboard().set_text(&answer.text);
+                    }
+                }
+            });
+            turn.result.append(&copy);
+        }
         let mut changes = BTreeMap::<&str, Vec<&Change>>::new();
         let mut checks = Vec::new();
         for row in turn.rows.values() {
@@ -914,6 +945,13 @@ impl Transcript {
 }
 
 impl Turn {
+    fn answer(&self) -> Option<&TextRow> {
+        match self.rows.get(self.answer.as_ref()?) {
+            Some(Row::Text(row)) => Some(row),
+            _ => None,
+        }
+    }
+
     fn update_status(&self) {
         let elapsed = self
             .elapsed
@@ -990,25 +1028,19 @@ impl Turn {
         }
     }
 
-    fn flush(&mut self) {
+    fn flush(&mut self, finished: bool) {
         for row in self.rows.values_mut() {
             let Row::Text(text) = row else {
                 continue;
             };
-            if !text.dirty {
-                continue;
+            if std::mem::take(&mut text.dirty) {
+                text.blocks
+                    .render(&text.contents, &text.text, text.live && !finished);
+            } else if finished && text.live {
+                text.blocks.settle();
             }
-            text.dirty = false;
-            if text.live {
-                if let Some(label) = text.contents.first_child().and_downcast::<gtk::Label>() {
-                    label.set_label(&text.text);
-                } else {
-                    clear(&text.contents);
-                    text.contents.append(&text_label(&text.text));
-                }
-            } else {
-                clear(&text.contents);
-                markdown::render(&text.contents, &text.text);
+            if finished {
+                text.live = false;
             }
         }
     }
@@ -1272,13 +1304,7 @@ impl View {
         let turns = self.turns.try_borrow().ok()?;
         let turn = turns.get(index)?;
         let prompt = glib::markup_escape_text(&excerpt(&turn.prompt.label(), 200));
-        let answer = turn
-            .answer
-            .as_ref()
-            .and_then(|key| match turn.rows.get(key) {
-                Some(Row::Text(row)) => Some(excerpt(&row.text, 240)),
-                _ => None,
-            });
+        let answer = turn.answer().map(|row| excerpt(&row.text, 240));
         Some(match answer.filter(|answer| !answer.is_empty()) {
             Some(answer) => format!("<b>{prompt}</b>\n{}", glib::markup_escape_text(&answer)),
             None => format!("<b>{prompt}</b>"),
