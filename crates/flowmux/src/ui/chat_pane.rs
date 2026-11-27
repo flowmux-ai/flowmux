@@ -148,7 +148,7 @@ impl ChatPane {
         queue_clamp.set_maximum_size(840);
         queue_clamp.set_child(Some(&queue_panel));
 
-        let transcript = Transcript::new();
+        let transcript = Transcript::new(cwd.clone());
         header.append(&transcript.outline);
         // The command menu floats over the conversation, just above the composer.
         let menu = commands::Menu::new(agent);

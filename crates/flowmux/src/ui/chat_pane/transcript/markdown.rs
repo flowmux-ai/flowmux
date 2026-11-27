@@ -4,6 +4,7 @@ use comrak::arena_tree::NodeEdge;
 use comrak::nodes::{AstNode, ListType, NodeTable, NodeValue, TableAlignment};
 use comrak::{format_commonmark, parse_document, Arena, Options};
 use gtk::prelude::*;
+use std::path::Path;
 
 use super::{copy_button, highlight, label, text_label};
 
@@ -16,7 +17,7 @@ struct RenderedBlock {
 }
 
 impl Blocks {
-    pub fn render(&mut self, parent: &gtk::Box, markdown: &str, live: bool) {
+    pub fn render(&mut self, parent: &gtk::Box, markdown: &str, live: bool, base: &Path) {
         let arena = Arena::new();
         let mut options = Options::default();
         options.extension.strikethrough = true;
@@ -49,7 +50,7 @@ impl Blocks {
                 }
             }
             let widget = gtk::Box::new(gtk::Orientation::Vertical, 6);
-            block(&widget, node, 0);
+            block(&widget, node, 0, base);
             let tree = if live {
                 edges()
                     .map(|node| node.map(|n| n.data().value.clone()))
@@ -119,6 +120,7 @@ fn inline<'a>(node: &'a AstNode<'a>, depth: u16) -> String {
         NodeValue::Emph => format!("<i>{}</i>", children()),
         NodeValue::Strikethrough => format!("<s>{}</s>", children()),
         NodeValue::HtmlInline(html) => escape(html),
+        NodeValue::Image(_) => String::new(),
         NodeValue::Link(link) => match link_target(&link.url) {
             Some(target) => format!("<a href=\"{}\">{}</a>", escape(&target), children()),
             None => children(),
@@ -145,7 +147,18 @@ fn link_target(url: &str) -> Option<String> {
         .then(|| format!("{}{path}", super::FILE_LINK))
 }
 
-fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
+/// The text of an image's alt description.
+fn plain<'a>(node: &'a AstNode<'a>) -> String {
+    node.descendants()
+        .filter_map(|child| match &child.data().value {
+            NodeValue::Text(text) => Some(text.to_string()),
+            NodeValue::Code(code) => Some(code.literal.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16, base: &Path) {
     if depth > 32 {
         return;
     }
@@ -162,7 +175,7 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
             quoted.add_css_class("dim-label");
             quoted.add_css_class("flowmux-chat-quote");
             for child in node.children() {
-                block(&quoted, child, depth + 1);
+                block(&quoted, child, depth + 1, base);
             }
             box_.append(&quoted);
         }
@@ -189,7 +202,7 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
                 let text = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 text.set_hexpand(true);
                 for child in item.children() {
-                    block(&text, child, depth + 1);
+                    block(&text, child, depth + 1, base);
                 }
                 row.append(&text);
                 box_.append(&row);
@@ -209,7 +222,20 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
                 }
                 _ => text.set_markup(&markup),
             }
-            box_.append(&text);
+            // Images and videos follow the text they appear in.
+            let media: Vec<_> = node
+                .descendants()
+                .filter_map(|child| match &child.data().value {
+                    NodeValue::Image(link) => Some((link.url.clone(), plain(child))),
+                    _ => None,
+                })
+                .collect();
+            if media.is_empty() || !text.text().trim().is_empty() {
+                box_.append(&text);
+            }
+            for (src, alt) in media {
+                box_.append(&super::media::media(&src, &alt, base));
+            }
         }
     }
 }
@@ -321,6 +347,7 @@ mod tests {
             &parent,
             "# Title\n\nRun `cargo test` [here](src/lib.rs:4).",
             false,
+            Path::new("/"),
         );
         let heading = parent
             .first_child()
@@ -345,12 +372,12 @@ mod tests {
         let parent = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let mut blocks = Blocks::default();
         let start = "## Progress\n\nSee [the docs][help].\n\n```rust\nlet value = 1;\n```\n";
-        blocks.render(&parent, start, true);
+        blocks.render(&parent, start, true, Path::new("/"));
         let heading = parent.first_child().unwrap();
         let paragraph = heading.next_sibling().unwrap();
         let code = parent.last_child().unwrap();
         let complete = format!("{start}\n[help]: https://example.com\n\nDone.");
-        blocks.render(&parent, &complete, false);
+        blocks.render(&parent, &complete, false, Path::new("/"));
 
         assert_eq!(parent.first_child(), Some(heading.clone()));
         let linked = heading.next_sibling().unwrap();
@@ -366,7 +393,7 @@ mod tests {
         let parent = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let markdown =
             "| Check | Count |\n| --- | ---: |\n| **Pass** | 3 |\n\n- [x] Verify\n- [ ] Ship";
-        Blocks::default().render(&parent, markdown, false);
+        Blocks::default().render(&parent, markdown, false, Path::new("/"));
         let scroller = parent
             .first_child()
             .unwrap()
@@ -405,7 +432,7 @@ mod tests {
             "| Key | Value |\n| --- | --- |\n{}| Last | End |",
             "| Row | OK |\n".repeat(256)
         );
-        Blocks::default().render(&parent, &markdown, false);
+        Blocks::default().render(&parent, &markdown, false, Path::new("/"));
         let code = parent
             .first_child()
             .unwrap()

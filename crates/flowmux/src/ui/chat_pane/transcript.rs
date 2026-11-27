@@ -13,6 +13,7 @@ use flowmux_state::chat_history::Record;
 
 mod highlight;
 mod markdown;
+mod media;
 mod selection;
 
 type OpenFile = dyn Fn(&str);
@@ -32,6 +33,8 @@ pub(super) struct Transcript {
 
 struct View {
     root: gtk::Box,
+    /// Relative media paths in answers resolve against the chat's working directory.
+    base: std::path::PathBuf,
     outline: gtk::MenuButton,
     history: gtk::Box,
     scroller: gtk::ScrolledWindow,
@@ -180,7 +183,7 @@ fn set_title(expander: &gtk::Expander, title: &str) {
 }
 
 impl Transcript {
-    pub fn new() -> Self {
+    pub fn new(base: std::path::PathBuf) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         root.set_vexpand(true);
         let history = gtk::Box::new(gtk::Orientation::Vertical, 16);
@@ -271,6 +274,7 @@ impl Transcript {
 
         let view = Rc::new(View {
             root: root.clone(),
+            base,
             outline: outline.clone(),
             history,
             scroller,
@@ -658,7 +662,7 @@ impl Transcript {
         let Some(turn) = turns.last_mut() else {
             return;
         };
-        turn.flush(false);
+        turn.flush(false, &self.view.base);
         turn.open_run = None;
         turn.entries.append(&bubble(text));
         drop(turns);
@@ -674,7 +678,7 @@ impl Transcript {
             if let Some(view) = weak.upgrade() {
                 view.text_flush_scheduled.set(false);
                 if let Some(turn) = view.turns.borrow_mut().last_mut() {
-                    turn.flush(false);
+                    turn.flush(false, &view.base);
                 }
                 view.schedule_adjustment();
             }
@@ -882,7 +886,7 @@ impl Transcript {
         turn.open.set(expanded);
         turn.activity.set_active(expanded);
         turn.show_process();
-        turn.flush(true);
+        turn.flush(true, &self.view.base);
         if turn.answer().is_some() {
             let copy = copy_button("Copy response");
             copy.set_halign(gtk::Align::Start);
@@ -1067,14 +1071,14 @@ impl Turn {
         }
     }
 
-    fn flush(&mut self, finished: bool) {
+    fn flush(&mut self, finished: bool, base: &std::path::Path) {
         for row in self.rows.values_mut() {
             let Row::Text(text) = row else {
                 continue;
             };
             if std::mem::take(&mut text.dirty) {
                 text.blocks
-                    .render(&text.contents, &text.text, text.live && !finished);
+                    .render(&text.contents, &text.text, text.live && !finished, base);
             } else if finished && text.live {
                 text.blocks.settle();
             }
@@ -1542,7 +1546,7 @@ mod tests {
     #[gtk::test]
     fn transcript_reflows_long_rows_instead_of_widening() {
         adw::init().unwrap();
-        let transcript = Transcript::new();
+        let transcript = Transcript::new(std::env::temp_dir());
         transcript.begin(&"word ".repeat(200));
         let long = format!("Command · {}", "x".repeat(150));
         transcript.work(work("a", &long, false));
