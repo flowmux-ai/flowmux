@@ -32,6 +32,19 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
         let (Some(scroller), Some(history)) = (drag.widget(), history.upgrade()) else {
             return;
         };
+        // A selectable child can receive focus and scroll into view before the first motion.
+        let mut leaves = Vec::new();
+        collect(history.upcast_ref(), &mut leaves);
+        // A label keeps its own selection (double-click, short drag) after another is pressed.
+        clear_native(&leaves);
+        // A focused label would keep showing its caret; a pressed label takes focus back.
+        if scroller
+            .root()
+            .and_then(|root| root.focus())
+            .is_some_and(|focus| leaves.contains(&focus))
+        {
+            scroller.grab_focus();
+        }
         let touch = drag
             .current_event_device()
             .is_some_and(|device| device.source() == gdk::InputSource::Touchscreen);
@@ -39,9 +52,6 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
             drag.set_state(gtk::EventSequenceState::Denied);
             return;
         }
-        // A selectable child can receive focus and scroll into view before the first motion.
-        let mut leaves = Vec::new();
-        collect(history.upcast_ref(), &mut leaves);
         if let Some(anchor) = position(&leaves, &scroller, (x, y)) {
             *start.borrow_mut() = Some(Selection {
                 leaves,
@@ -77,6 +87,8 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
                 return;
             }
             scroller.grab_focus();
+            // The pressed label may have started its own selection before the drag was claimed.
+            clear_native(&start.leaves);
             *selected = Some(start);
         }
         if let Some(selection) = selected.as_mut() {
@@ -308,11 +320,30 @@ fn length(widget: &gtk::Widget) -> i32 {
     }
 }
 
+fn clear_native(leaves: &[gtk::Widget]) {
+    for label in leaves
+        .iter()
+        .filter_map(|leaf| leaf.downcast_ref::<gtk::Label>())
+    {
+        if label.selection_bounds().is_some() {
+            label.select_region(0, 0);
+        }
+    }
+}
+
 // Native selections take exclusive ownership of the primary clipboard.
 fn paint(widget: &gtk::Widget, start: i32, end: i32, (bg, fg): (gdk::RGBA, gdk::RGBA)) {
     if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        label.set_attributes(None);
+        // GTK 4.14 merges these attributes into the parsed markup attributes in place, so
+        // clearing them leaves the old highlight. Reparsing the markup drops it; setting the
+        // same markup again is a no-op.
+        if label.uses_markup() {
+            let markup = label.label();
+            label.set_markup("");
+            label.set_markup(&markup);
+        }
         if start >= end {
-            label.set_attributes(None);
             return;
         }
         let text = label.text();
