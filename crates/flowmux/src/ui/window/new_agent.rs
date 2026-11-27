@@ -51,7 +51,48 @@ fn prepare_new_agent_launch(
 }
 
 impl WindowController {
+    /// New Agent asks first whether to work with the agent in a chat or a terminal.
     pub(super) fn show_new_agent_dialog(&self) {
+        if let Some(dialog) = self.new_agent_dialog.borrow().as_ref() {
+            dialog.present(Some(&self.window));
+            return;
+        }
+        let dialog = adw::AlertDialog::new(
+            Some("New Agent"),
+            Some("Work with the agent in a chat, or run its CLI in a terminal tab."),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("cli", "Terminal (CLI)");
+        dialog.add_response("chat", "Chat");
+        dialog.set_response_appearance("chat", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("chat"));
+        dialog.set_close_response("cancel");
+        let controller = self.clone();
+        dialog.connect_response(None, move |_, response| match response {
+            "chat" => controller.show_new_agent_chat(),
+            "cli" => controller.show_new_cli_agent_dialog(),
+            _ => {}
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    fn show_new_agent_chat(&self) {
+        // A chat opens as a tab in a local pane of the visible workspace.
+        let pane = self.focused_pane.get().filter(|pane| {
+            !self.pane_registry.borrow().is_ssh_pane(*pane) && self.pane_in_visible_workspace(*pane)
+        });
+        let Some(pane) = pane else {
+            self.clipboard_toast
+                .show_with_message("Select a local pane to add a chat.");
+            return;
+        };
+        let controller = self.clone();
+        glib::spawn_future_local(async move {
+            controller.show_new_chat_dialog(pane).await;
+        });
+    }
+
+    fn show_new_cli_agent_dialog(&self) {
         if let Some(dialog) = self.new_agent_dialog.borrow().as_ref() {
             dialog.present(Some(&self.window));
             return;
