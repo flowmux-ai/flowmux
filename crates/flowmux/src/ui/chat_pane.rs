@@ -915,7 +915,11 @@ impl ChatUi {
                     agent: provider.name().into(),
                     cwd: self.cwd.clone(),
                     catalog: self.catalog.borrow().clone(),
-                    settings: self.draft_settings(),
+                    // Elevated access is confirmed again for every new connection.
+                    settings: Settings {
+                        confirmed_access: false,
+                        ..self.draft_settings()
+                    },
                 };
                 (self.restart_cb.borrow_mut())(restart);
             }
