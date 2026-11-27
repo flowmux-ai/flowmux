@@ -574,7 +574,7 @@ impl Transcript {
                 Record::Begin {
                     prompt,
                     steer: true,
-                } if active => self.steer(&prompt),
+                } => self.steer(&prompt),
                 Record::Begin { prompt, .. } => {
                     if active {
                         self.finish("Interrupted", None, 0);

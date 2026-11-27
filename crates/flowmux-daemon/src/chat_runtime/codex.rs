@@ -254,6 +254,20 @@ pub(super) async fn frame(
                 .and_then(|turn| turn.review_thread.as_deref())
                 == Some(thread)
     });
+    // Codex may accept a steer just before its turn ends; resending it would duplicate it.
+    if let Some((_, text)) = session
+        .late_steer
+        .take_if(|(request, _)| method.is_empty() && frame["id"].as_u64() == Some(*request))
+    {
+        return emit(
+            events,
+            match response(frame) {
+                Ok(_) => Event::Steered { text },
+                Err(error) => Event::SteerRejected(error.to_string()),
+            },
+        )
+        .await;
+    }
     let Some(turn) = session.active.as_mut().filter(|_| relevant) else {
         if !method.is_empty() && frame.get("id").is_some() {
             wire.unsupported(&frame["id"]).await?;

@@ -1463,7 +1463,12 @@ impl ChatUi {
     }
 
     fn send_next_queued(self: &Rc<Self>) {
-        if self.queue_paused.get() || self.busy.get() || !self.ready.get() {
+        // Wait for a pending steer's answer; sending it again would duplicate it.
+        if self.queue_paused.get()
+            || self.busy.get()
+            || !self.ready.get()
+            || self.steering.get().is_some()
+        {
             return;
         }
         let next = self.queue.borrow().front().map(|entry| entry.id);
@@ -1635,6 +1640,7 @@ impl ChatUi {
                     });
             }
             Event::Detached => {
+                self.steering.set(None);
                 self.ready.set(false);
                 self.connecting.set(false);
                 self.commands.borrow_mut().take();
@@ -1692,11 +1698,13 @@ impl ChatUi {
                     self.queue.borrow_mut().retain(|entry| entry.id != id);
                 }
                 self.transcript.steer(&text);
+                self.send_next_queued();
                 self.refresh_queue();
             }
             Event::SteerRejected(error) => {
                 self.steering.set(None);
                 self.show_notice(&error);
+                self.send_next_queued();
                 self.refresh_queue();
             }
             Event::Finished { status, detail } => {
@@ -1728,6 +1736,7 @@ impl ChatUi {
                 self.refresh_queue();
             }
             Event::Offline(error) => {
+                self.steering.set(None);
                 self.queue_paused.set(true);
                 for prompt in self.queue.borrow_mut().iter_mut() {
                     prompt.settings.confirmed_access = false;
@@ -1774,8 +1783,7 @@ impl ChatUi {
     }
 
     fn clear_turn(&self) {
-        // An unconfirmed steer stays queued and can start the next turn.
-        self.steering.set(None);
+        // A pending steer outlives its turn: Codex may still accept it.
         self.turn_settings.borrow_mut().take();
         self.busy.set(false);
         self.stopping.set(false);

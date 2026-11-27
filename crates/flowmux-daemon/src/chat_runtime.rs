@@ -414,6 +414,8 @@ struct Session {
     model_option: Option<String>,
     access_option: Option<String>,
     effort_option: Option<String>,
+    /// A steer whose turn ended before Codex answered; the answer still decides its fate.
+    late_steer: Option<(u64, String)>,
 }
 
 impl Session {
@@ -425,6 +427,7 @@ impl Session {
             model_option: None,
             access_option: None,
             effort_option: None,
+            late_steer: None,
         }
     }
 
@@ -698,7 +701,8 @@ async fn settle(
     status: &str,
     detail: Option<String>,
 ) -> Result<()> {
-    if session.active.take().is_some() {
+    if let Some(turn) = session.active.take() {
+        session.late_steer = turn.steer;
         emit(
             events,
             Event::Finished {
