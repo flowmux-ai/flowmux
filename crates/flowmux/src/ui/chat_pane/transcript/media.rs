@@ -275,7 +275,9 @@ pub(super) fn show_errors(video: &gtk::Video, status: &gtk::Label) {
                 return;
             };
             video.set_visible(false);
-            status.set_label(&format!("The video cannot play: {}", error.message()));
+            // GStreamer messages carry element paths and source lines; keep them for the tooltip.
+            status.set_label("The video cannot play.");
+            status.set_tooltip_text(Some(error.message()));
             status.set_visible(true);
         }
     };
