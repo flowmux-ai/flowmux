@@ -449,7 +449,8 @@ pub(super) async fn frame(
             )
             .await?;
         }
-        "thread/compacted" | "turn/completed" if turn.compact => {
+        // Some releases end a compaction with this notification alone.
+        "thread/compacted" if turn.compact => {
             emit(
                 events,
                 Event::Text {
@@ -463,6 +464,7 @@ pub(super) async fn frame(
             settle(session, events, "Completed", None).await?;
         }
         "turn/completed" => {
+            let compact = turn.compact;
             let result = &params["turn"];
             let detail = result["error"]["message"].as_str().map(|s| clip(s, 2048));
             let status = match str_at(result, "status") {
@@ -470,6 +472,18 @@ pub(super) async fn frame(
                 "interrupted" => "Stopped",
                 _ => "Failed",
             };
+            if compact && status == "Completed" {
+                emit(
+                    events,
+                    Event::Text {
+                        id: "compact".into(),
+                        kind: TextKind::Answer,
+                        text: "Conversation compacted.".into(),
+                        append: false,
+                    },
+                )
+                .await?;
+            }
             settle(session, events, status, detail).await?;
         }
         _ => {}
