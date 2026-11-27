@@ -71,6 +71,10 @@
     padding: 0 3px;
 }
 
+#flowmux-chat-send.text-button {
+    padding: 0 10px;
+}
+
 .flowmux-chat-effort {
     padding: 5px 8px;
 }
@@ -78,6 +82,18 @@
 #flowmux-chat-composer,
 #flowmux-chat-composer text {
     background: transparent;
+}
+
+.flowmux-chat-paste {
+    padding: 1px 3px 1px 8px;
+    border-radius: 8px;
+    background: alpha(currentColor, 0.09);
+}
+
+.flowmux-chat-paste button {
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0;
 }
 
 .flowmux-chat-rail {

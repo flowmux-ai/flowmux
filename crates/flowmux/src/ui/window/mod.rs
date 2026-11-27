@@ -2752,9 +2752,12 @@ impl WindowController {
             }
         }
 
-        self.overlay_managed_presence(&mut ws);
+        self.overlay_sidebar_presence(&mut ws);
+        let attention = ws.agent_attention_rollup();
+        self.sidebar.set_agent_status(ws.id, attention);
         let details = workspace_row_details(&ws, &mru);
         if let Some(host) = self.detached_workspaces.borrow().get(&ws.id) {
+            host.sidebar.set_agent_status(ws.id, attention);
             host.sidebar.upsert_with_details(&ws, details.clone());
         }
         self.sidebar.upsert_with_details(&ws, details);
@@ -3547,6 +3550,12 @@ impl WindowController {
             | GtkCommand::TogglePaneZoom { .. }
             | GtkCommand::ResizePane { .. }) => {
                 self.dispatch_pane_command(command).await;
+            }
+            GtkCommand::ChatActivityChanged { pane } => {
+                let workspace = self.pane_registry.borrow().workspace_of_pane(pane);
+                if let Some(workspace) = workspace {
+                    self.update_workspace_label(workspace).await;
+                }
             }
             GtkCommand::NewAgent => self.show_new_agent_dialog(),
             GtkCommand::ControlManagedAgent {

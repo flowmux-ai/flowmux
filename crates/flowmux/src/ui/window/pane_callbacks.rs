@@ -190,6 +190,12 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::NewChatSurface { pane });
                 }))
             },
+            on_chat_activity_changed: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane| {
+                    dispatch_detached(&bridge, GtkCommand::ChatActivityChanged { pane });
+                }))
+            },
             on_chat_restart: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(

@@ -459,6 +459,9 @@ pub enum GtkCommand {
     NewChatSurface {
         pane: PaneId,
     },
+    ChatActivityChanged {
+        pane: PaneId,
+    },
     /// Replace a chat tab with a new conversation using the same agent and settings.
     RestartChat {
         pane: PaneId,

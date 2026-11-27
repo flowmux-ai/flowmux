@@ -104,6 +104,7 @@ pub struct PaneCallbacks {
     /// Pane-local new browser tab.
     pub chat_runtime: Option<tokio::runtime::Handle>,
     pub on_new_chat_surface: Rc<RefCell<dyn FnMut(PaneId)>>,
+    pub on_chat_activity_changed: Rc<RefCell<dyn FnMut(PaneId)>>,
     pub on_chat_restart: Rc<RefCell<dyn FnMut(ChatRestart)>>,
     pub on_chat_open_file: Rc<RefCell<dyn FnMut(PaneId, std::path::PathBuf)>>,
     pub on_new_browser_surface: Rc<RefCell<dyn FnMut(PaneId)>>,
@@ -235,6 +236,7 @@ impl PaneCallbacks {
             on_new_surface: Rc::new(RefCell::new(|_| {})),
             chat_runtime: None,
             on_new_chat_surface: Rc::new(RefCell::new(|_| {})),
+            on_chat_activity_changed: Rc::new(RefCell::new(|_| {})),
             on_chat_restart: Rc::new(RefCell::new(|_| {})),
             on_chat_open_file: Rc::new(RefCell::new(|_, _| {})),
             on_new_browser_surface: Rc::new(RefCell::new(|_| {})),

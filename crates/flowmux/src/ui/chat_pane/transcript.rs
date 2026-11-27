@@ -60,7 +60,7 @@ struct View {
 
 struct Turn {
     root: gtk::Box,
-    prompt: gtk::Label,
+    prompts: Vec<gtk::Label>,
     activity: gtk::ToggleButton,
     entries: gtk::Box,
     result: gtk::Box,
@@ -75,6 +75,8 @@ struct Turn {
     open_run: Option<usize>,
     explicit_open: Cell<Option<bool>>,
 }
+
+pub(super) type PromptPosition = (usize, usize);
 
 /// Consecutive tool calls; a second call moves both rows into one summary row.
 #[derive(Default)]
@@ -92,6 +94,7 @@ struct TextRow {
     root: gtk::Box,
     contents: gtk::Box,
     kind: TextKind,
+    position: usize,
     text: String,
     blocks: markdown::Blocks,
     dirty: bool,
@@ -141,27 +144,35 @@ fn linked_file(target: &str) -> &str {
     path
 }
 
+const COPY_ICON: &str = "edit-copy-symbolic";
+
 fn copy_button(action: &str) -> gtk::Button {
-    let button = gtk::Button::from_icon_name("edit-copy-symbolic");
+    let button = gtk::Button::from_icon_name(COPY_ICON);
     button.set_tooltip_text(Some(action));
     button.update_property(&[gtk::accessible::Property::Label(action)]);
     button.add_css_class("flat");
     button
 }
 
-fn bubble(text: &str) -> gtk::Label {
+fn bubble(text: &str) -> (gtk::Box, gtk::Label) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row.set_halign(gtk::Align::End);
+    row.set_margin_top(4);
+    row.set_margin_bottom(4);
     let bubble = text_label(text);
-    bubble.set_halign(gtk::Align::End);
     bubble.set_max_width_chars(70);
-    bubble.set_margin_start(28);
-    bubble.set_margin_top(4);
-    bubble.set_margin_bottom(4);
     bubble.set_css_classes(&["card", "flowmux-chat-prompt"]);
     bubble.set_widget_name("flowmux-chat-user");
     if super::commands::parse(text).is_some() {
         bubble.add_css_class("flowmux-chat-command-bubble");
     }
-    bubble
+    let copy = copy_button("Copy message");
+    copy.set_valign(gtk::Align::Start);
+    let message = bubble.clone();
+    copy.connect_clicked(move |button| button.clipboard().set_text(&message.label()));
+    row.append(&copy);
+    row.append(&bubble);
+    (row, bubble)
 }
 
 /// An expander whose title ellipsizes instead of setting the transcript's minimum width.
@@ -386,7 +397,7 @@ impl Transcript {
                 let text = label(&format!(
                     "{}. {}",
                     index + 1,
-                    excerpt(&turn.prompt.label(), 160)
+                    excerpt(&turn.prompts[0].label(), 160)
                 ));
                 text.set_wrap(false);
                 text.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -469,8 +480,8 @@ impl Transcript {
                 }
             }
         });
-        let bubble = bubble(prompt);
-        root.append(&bubble);
+        let (message, bubble) = bubble(prompt);
+        root.append(&message);
         let activity = gtk::ToggleButton::with_label("Working…");
         activity.set_active(true);
         activity.set_halign(gtk::Align::Start);
@@ -498,7 +509,7 @@ impl Transcript {
         });
         turns.push(Turn {
             root: root.clone(),
-            prompt: bubble,
+            prompts: vec![bubble],
             activity,
             entries,
             result,
@@ -601,6 +612,33 @@ impl Transcript {
         self.view.schedule_adjustment();
     }
 
+    pub fn adjacent_prompt(
+        &self,
+        current: Option<PromptPosition>,
+        older: bool,
+    ) -> Option<(PromptPosition, String)> {
+        let turns = self.view.turns.borrow();
+        let mut prompts = turns
+            .iter()
+            .enumerate()
+            .filter(|(_, turn)| turn.status != "Not sent")
+            .flat_map(|(turn, row)| {
+                row.prompts
+                    .iter()
+                    .enumerate()
+                    .map(move |(entry, label)| ((turn, entry), label))
+            });
+        let next = if older {
+            prompts
+                .rev()
+                .find(|(at, _)| current.is_none_or(|current| *at < current))
+        } else {
+            let current = current?;
+            prompts.find(|(at, _)| *at > current)
+        }?;
+        Some((next.0, next.1.label().to_string()))
+    }
+
     pub fn text(&self, id: String, kind: TextKind, text: String, append: bool) {
         if text.is_empty() {
             return;
@@ -613,6 +651,7 @@ impl Transcript {
         if kind == TextKind::Answer {
             turn.answer = Some(key.clone());
         }
+        let position = turn.rows.len();
         let row = turn.rows.entry(key).or_insert_with(|| {
             turn.open_run = None;
             let contents = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -631,6 +670,7 @@ impl Transcript {
                 root: box_,
                 contents,
                 kind,
+                position,
                 text: String::new(),
                 blocks: markdown::Blocks::default(),
                 dirty: false,
@@ -664,7 +704,9 @@ impl Transcript {
         };
         turn.flush(false, &self.view.base);
         turn.open_run = None;
-        turn.entries.append(&bubble(text));
+        let (message, prompt) = bubble(text);
+        turn.entries.append(&message);
+        turn.prompts.push(prompt);
         drop(turns);
         self.view.schedule_adjustment();
     }
@@ -888,13 +930,20 @@ impl Transcript {
         turn.show_process();
         turn.flush(true, &self.view.base);
         if turn.answer().is_some() {
-            let copy = copy_button("Copy response");
+            const COPY_RESPONSE: &str = "Copy response";
+            let copy = copy_button(COPY_RESPONSE);
+            copy.set_child(Some(
+                &adw::ButtonContent::builder()
+                    .icon_name(COPY_ICON)
+                    .label(COPY_RESPONSE)
+                    .build(),
+            ));
             copy.set_halign(gtk::Align::Start);
             let weak = Rc::downgrade(&self.view);
             copy.connect_clicked(move |button| {
                 if let Some(view) = weak.upgrade() {
-                    if let Some(answer) = view.turns.borrow().get(index).and_then(Turn::answer) {
-                        button.clipboard().set_text(&answer.text);
+                    if let Some(turn) = view.turns.borrow().get(index) {
+                        button.clipboard().set_text(&turn.response_text());
                     }
                 }
             });
@@ -993,6 +1042,20 @@ impl Turn {
             Some(Row::Text(row)) => Some(row),
             _ => None,
         }
+    }
+
+    fn response_text(&self) -> String {
+        let parts: BTreeMap<_, _> = self
+            .rows
+            .values()
+            .filter_map(|row| match row {
+                Row::Text(row) if row.kind == TextKind::Answer => {
+                    Some((row.position, row.text.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        parts.into_values().collect::<Vec<_>>().join("\n\n")
     }
 
     fn update_status(&self) {
@@ -1292,7 +1355,7 @@ impl View {
                 "Message {} · {} · {}",
                 index + 1,
                 turn.status,
-                preview(&turn.prompt.label(), 160)
+                preview(&turn.prompts[0].label(), 160)
             );
             button.update_property(&[
                 gtk::accessible::Property::Label(&name),
@@ -1346,7 +1409,7 @@ impl View {
     fn preview(&self, index: usize) -> Option<String> {
         let turns = self.turns.try_borrow().ok()?;
         let turn = turns.get(index)?;
-        let prompt = glib::markup_escape_text(&excerpt(&turn.prompt.label(), 200));
+        let prompt = glib::markup_escape_text(&excerpt(&turn.prompts[0].label(), 200));
         let answer = turn.answer().map(|row| excerpt(&row.text, 240));
         Some(match answer.filter(|answer| !answer.is_empty()) {
             Some(answer) => format!("<b>{prompt}</b>\n{}", glib::markup_escape_text(&answer)),

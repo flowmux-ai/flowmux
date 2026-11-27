@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod commands;
+mod pastes;
 mod transcript;
 
 use std::cell::{Cell, RefCell};
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use flowmux_core::{PaneId, SurfaceId};
+use flowmux_core::{AgentActivity, AgentPresence, PaneId, SurfaceId};
 use flowmux_state::chat_history::{self, History};
 use gtk::glib;
 
@@ -28,6 +29,14 @@ struct QueuedPrompt {
 struct QueueEdit {
     id: u64,
     draft: String,
+}
+
+struct PromptRecall {
+    position: transcript::PromptPosition,
+    draft: String,
+    cursor: i32,
+    pastes: Vec<(i32, String)>,
+    menu_dismissed: bool,
 }
 
 #[derive(Clone)]
@@ -51,6 +60,8 @@ struct ChatUi {
     ready: Cell<bool>,
     busy: Cell<bool>,
     stopping: Cell<bool>,
+    activity: Cell<Option<AgentActivity>>,
+    activity_changed: Rc<RefCell<dyn FnMut(PaneId)>>,
     confirmed_access: RefCell<Option<String>>,
     last_text: RefCell<Option<String>>,
     queue: RefCell<VecDeque<QueuedPrompt>>,
@@ -77,6 +88,8 @@ struct ChatUi {
     details: gtk::MenuButton,
     settings_summary: gtk::Label,
     composer: gtk::TextView,
+    pastes: pastes::Pastes,
+    recall: RefCell<Option<PromptRecall>>,
     send: gtk::Button,
     transcript: Transcript,
     menu: commands::Menu,
@@ -233,7 +246,7 @@ impl ChatPane {
         details.update_property(&[gtk::accessible::Property::Label("Chat settings")]);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_hexpand(true);
-        let send = gtk::Button::from_icon_name("go-up-symbolic");
+        let send = gtk::Button::with_label("Send");
         send.set_widget_name("flowmux-chat-send");
         send.add_css_class("suggested-action");
         send.add_css_class("pill");
@@ -244,6 +257,8 @@ impl ChatPane {
 
         let input = gtk::Box::new(gtk::Orientation::Vertical, 0);
         input.add_css_class("flowmux-chat-input");
+        let pastes = pastes::Pastes::new();
+        input.append(&pastes.root);
         input.append(&compose);
         input.append(&controls);
         let footer = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -274,6 +289,8 @@ impl ChatPane {
             ready: Cell::new(false),
             busy: Cell::new(false),
             stopping: Cell::new(false),
+            activity: Cell::new(None),
+            activity_changed: callbacks.on_chat_activity_changed.clone(),
             confirmed_access: RefCell::new(None),
             last_text: RefCell::new(None),
             queue: RefCell::new(VecDeque::new()),
@@ -299,6 +316,8 @@ impl ChatPane {
             details,
             settings_summary,
             composer,
+            pastes,
+            recall: RefCell::new(None),
             send,
             transcript,
             menu,
@@ -361,6 +380,25 @@ impl ChatPane {
                 ui.details.popdown();
                 ui.new_conversation();
             }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.composer.connect_paste_clipboard(move |composer| {
+            let Some(ui) = weak.upgrade() else { return };
+            composer.stop_signal_emission_by_name("paste-clipboard");
+            let revision = ui.pastes.revision.get();
+            let weak = weak.clone();
+            composer
+                .clipboard()
+                .read_text_async(None::<&gtk::gio::Cancellable>, move |result| {
+                    if let (Some(ui), Ok(Some(text))) = (weak.upgrade(), result) {
+                        if ui.pastes.revision.get() == revision
+                            && ui.composer.is_editable()
+                            && !text.is_empty()
+                        {
+                            ui.insert_paste(&text);
+                        }
+                    }
+                });
         });
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -426,10 +464,33 @@ impl ChatPane {
                 }
                 return glib::Propagation::Stop;
             }
+            let plain_edit = !preedit.get()
+                && !modifiers.intersects(
+                    Mod::SHIFT_MASK
+                        | Mod::ALT_MASK
+                        | Mod::CONTROL_MASK
+                        | Mod::META_MASK
+                        | Mod::SUPER_MASK,
+                );
+            if plain_edit && matches!(key, Key::Up | Key::KP_Up | Key::Down | Key::KP_Down) {
+                if let Some(ui) = weak.upgrade() {
+                    if ui.recall_prompt(matches!(key, Key::Up | Key::KP_Up)) {
+                        return glib::Propagation::Stop;
+                    }
+                }
+            }
             if key == Key::Escape && !preedit.get() {
                 if let Some(ui) = weak.upgrade().filter(|ui| ui.queue_edit.borrow().is_some()) {
                     ui.finish_queue_edit(None);
                     return glib::Propagation::Stop;
+                }
+            }
+            if plain_edit && key == Key::BackSpace {
+                if let Some(ui) = weak.upgrade() {
+                    if let Some(mark) = ui.pastes.at_cursor(&ui.composer.buffer()) {
+                        ui.remove_paste(&mark);
+                        return glib::Propagation::Stop;
+                    }
                 }
             }
             if !matches!(key, Key::Return | Key::KP_Enter | Key::ISO_Enter)
@@ -488,6 +549,7 @@ impl ChatPane {
         ui.composer.buffer().connect_changed(move |buffer| {
             placeholder.set_visible(buffer.char_count() == 0);
             if let Some(ui) = weak.upgrade() {
+                ui.recall.borrow_mut().take();
                 ui.refresh_controls();
                 ui.update_menu();
             }
@@ -535,6 +597,19 @@ impl ChatPane {
     pub fn agent_name(&self) -> Option<&'static str> {
         self.ui.provider.map(Provider::name)
     }
+
+    pub(super) fn activity_presence(&self) -> Option<AgentPresence> {
+        let activity = self.ui.activity.get()?;
+        let status = match activity {
+            AgentActivity::Running => "Working",
+            AgentActivity::NeedsInput => "Waiting for input",
+            AgentActivity::Idle => return None,
+        };
+        let mut presence = AgentPresence::new(self.agent_name()?, activity, None);
+        presence.custom_status = Some(status.into());
+        Some(presence)
+    }
+
     pub fn grab_focus(&self) {
         self.ui.composer.grab_focus();
     }
@@ -817,6 +892,10 @@ impl ChatUi {
     }
 
     fn update_menu(&self) {
+        if !self.pastes.is_empty() {
+            self.menu.hide();
+            return;
+        }
         let draft = self.draft();
         if self
             .menu_dismissed
@@ -837,9 +916,115 @@ impl ChatUi {
     }
 
     fn set_draft(&self, text: &str) {
+        self.recall.borrow_mut().take();
         let buffer = self.composer.buffer();
+        let had_pastes = !self.pastes.is_empty();
+        self.pastes.clear(&buffer);
         buffer.set_text(text);
         buffer.place_cursor(&buffer.end_iter());
+        if had_pastes {
+            self.refresh_controls();
+            self.update_menu();
+        }
+    }
+
+    fn recall_prompt(self: &Rc<Self>, older: bool) -> bool {
+        let buffer = self.composer.buffer();
+        if buffer.has_selection() || self.queue_edit.borrow().is_some() {
+            return false;
+        }
+        let caret = buffer.iter_at_mark(&buffer.get_insert());
+        let edge = if older {
+            buffer.start_iter()
+        } else {
+            buffer.end_iter()
+        };
+        let recalling = self.recall.borrow().is_some();
+        // Enter only at the beginning of the draft. Within history, wrapped lines keep
+        // their normal caret movement until the first or last display line is reached.
+        let at_edge = caret == edge
+            || (recalling
+                && self.composer.iter_location(&caret).y()
+                    == self.composer.iter_location(&edge).y());
+        if !at_edge || (!older && !recalling) {
+            return false;
+        }
+        let recall = self.recall.borrow_mut().take();
+        if let Some((position, prompt)) = self
+            .transcript
+            .adjacent_prompt(recall.as_ref().map(|state| state.position), older)
+        {
+            let mut state = recall.unwrap_or_else(|| {
+                let draft = buffer
+                    .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                    .to_string();
+                PromptRecall {
+                    position,
+                    menu_dismissed: self.menu_dismissed.borrow().as_deref() == Some(draft.as_str()),
+                    draft,
+                    cursor: caret.offset(),
+                    pastes: self.pastes.snapshot(&buffer),
+                }
+            });
+            state.position = position;
+            self.set_draft(&prompt);
+            if older {
+                buffer.place_cursor(&buffer.start_iter());
+            }
+            self.menu.hide();
+            *self.menu_dismissed.borrow_mut() = Some(prompt);
+            *self.recall.borrow_mut() = Some(state);
+        } else if !older {
+            let Some(state) = recall else { return false };
+            self.set_draft(&state.draft);
+            for (offset, text) in state.pastes {
+                self.add_paste(&buffer, &buffer.iter_at_offset(offset), text);
+            }
+            buffer.place_cursor(&buffer.iter_at_offset(state.cursor));
+            if state.menu_dismissed {
+                *self.menu_dismissed.borrow_mut() = Some(state.draft);
+            }
+            self.refresh_controls();
+            self.update_menu();
+        } else {
+            *self.recall.borrow_mut() = recall;
+            return false;
+        }
+        self.composer.scroll_mark_onscreen(&buffer.get_insert());
+        true
+    }
+
+    fn insert_paste(self: &Rc<Self>, text: &str) {
+        self.recall.borrow_mut().take();
+        let buffer = self.composer.buffer();
+        buffer.begin_user_action();
+        buffer.delete_selection(true, true);
+        if text.lines().nth(1).is_some() && !text.trim().is_empty() {
+            let cursor = buffer.iter_at_mark(&buffer.get_insert());
+            self.add_paste(&buffer, &cursor, text.to_owned());
+            self.refresh_controls();
+            self.update_menu();
+        } else {
+            buffer.insert_at_cursor(text);
+        }
+        buffer.end_user_action();
+        self.composer.scroll_mark_onscreen(&buffer.get_insert());
+    }
+
+    fn add_paste(self: &Rc<Self>, buffer: &gtk::TextBuffer, cursor: &gtk::TextIter, text: String) {
+        let weak = Rc::downgrade(self);
+        self.pastes.push(buffer, cursor, text, move |mark| {
+            if let Some(ui) = weak.upgrade() {
+                ui.remove_paste(mark);
+                ui.composer.grab_focus();
+            }
+        });
+    }
+    fn remove_paste(&self, mark: &gtk::TextMark) {
+        if self.pastes.remove(&self.composer.buffer(), mark) {
+            self.refresh_controls();
+            self.update_menu();
+        }
     }
 
     fn complete_command(&self, entry: &commands::Entry) {
@@ -904,10 +1089,24 @@ impl ChatUi {
     }
 
     fn draft(&self) -> String {
-        let buffer = self.composer.buffer();
-        buffer
-            .text(&buffer.start_iter(), &buffer.end_iter(), false)
-            .to_string()
+        self.pastes.text(&self.composer.buffer())
+    }
+
+    fn has_draft(&self) -> bool {
+        !self.pastes.is_empty() || !self.draft().trim().is_empty()
+    }
+
+    fn publish_activity(&self) {
+        let activity = if !self.busy.get() || self.commands.borrow().is_none() {
+            None
+        } else if !self.stopping.get() && self.transcript.has_pending_input() {
+            Some(AgentActivity::NeedsInput)
+        } else {
+            Some(AgentActivity::Running)
+        };
+        if self.activity.replace(activity) != activity {
+            (self.activity_changed.borrow_mut())(self.pane.get());
+        }
     }
 
     fn refresh_controls(&self) {
@@ -925,30 +1124,30 @@ impl ChatUi {
         let (action, icon, tooltip, enabled) = if stop {
             (
                 "Stop",
-                "media-playback-stop-symbolic",
+                Some("media-playback-stop-symbolic"),
                 "Stop this turn · Type to queue another message",
                 !self.stopping.get(),
             )
         } else if editing {
             (
                 "Save queued message",
-                "object-select-symbolic",
+                Some("object-select-symbolic"),
                 "Enter to save changes · Esc to cancel · Shift+Enter for a new line",
-                !self.draft().trim().is_empty(),
+                self.has_draft(),
             )
         } else if ready {
-            let enabled = !self.draft().trim().is_empty();
+            let enabled = self.has_draft();
             if self.busy.get() {
                 (
                     "Queue message",
-                    "go-up-symbolic",
+                    Some("go-up-symbolic"),
                     "Enter to queue · Shift+Enter for a new line",
                     enabled,
                 )
             } else {
                 (
                     "Send",
-                    "go-up-symbolic",
+                    None,
                     "Enter to send · Shift+Enter for a new line",
                     enabled,
                 )
@@ -956,7 +1155,7 @@ impl ChatUi {
         } else {
             (
                 "Connect",
-                "network-transmit-receive-symbolic",
+                Some("network-transmit-receive-symbolic"),
                 "Connect to the agent",
                 !self.loading_history.get()
                     && !self.connecting.get()
@@ -964,7 +1163,14 @@ impl ChatUi {
                     && self.runtime.is_some(),
             )
         };
-        self.send.set_icon_name(icon);
+        if let Some(icon) = icon {
+            self.send.set_icon_name(icon);
+            // GTK keeps the old label relation when switching to an icon.
+            self.send
+                .reset_relation(gtk::AccessibleRelation::LabelledBy);
+        } else {
+            self.send.set_label(action);
+        }
         self.send
             .update_property(&[gtk::accessible::Property::Label(action)]);
         self.send.set_tooltip_text(Some(tooltip));
@@ -973,7 +1179,7 @@ impl ChatUi {
 
     /// A running turn with an empty composer turns the send button into Stop.
     fn stop_mode(&self) -> bool {
-        self.busy.get() && self.queue_edit.borrow().is_none() && self.draft().trim().is_empty()
+        self.busy.get() && self.queue_edit.borrow().is_none() && !self.has_draft()
     }
 
     fn show_notice(&self, message: &str) {
@@ -996,13 +1202,13 @@ impl ChatUi {
 
     fn activate_send(self: &Rc<Self>) {
         let editing = self.queue_edit.borrow().is_some();
+        let text = self.draft();
         if !editing && !self.ready.get() {
             if !self.connecting.get() {
                 self.connect(true);
             }
             return;
         }
-        let text = self.draft();
         if text.trim().is_empty() {
             return;
         }
@@ -1099,7 +1305,7 @@ impl ChatUi {
                 self.queue_paused.set(false);
             }
         }
-        self.composer.buffer().set_text("");
+        self.set_draft("");
         self.refresh_queue();
         self.refresh_controls();
     }
@@ -1137,6 +1343,7 @@ impl ChatUi {
         self.transcript.begin(text);
         self.status.set_label("Sending…");
         self.refresh_controls();
+        self.publish_activity();
         true
     }
 
@@ -1147,6 +1354,7 @@ impl ChatUi {
             }
             self.stopping.set(true);
             self.status.set_label("Stopping…");
+            self.publish_activity();
         }
         self.queue_paused.set(!resume_queue);
         self.refresh_controls();
@@ -1175,9 +1383,7 @@ impl ChatUi {
             id,
             draft: self.draft(),
         });
-        let buffer = self.composer.buffer();
-        buffer.set_text(&text);
-        buffer.place_cursor(&buffer.end_iter());
+        self.set_draft(&text);
         self.refresh_controls();
         self.refresh_queue();
         self.composer.grab_focus();
@@ -1198,9 +1404,7 @@ impl ChatUi {
             }
             self.show_notice("");
         }
-        let buffer = self.composer.buffer();
-        buffer.set_text(&edit.draft);
-        buffer.place_cursor(&buffer.end_iter());
+        self.set_draft(&edit.draft);
         self.refresh_controls();
         self.refresh_queue();
         self.composer.grab_focus();
@@ -1434,11 +1638,13 @@ impl ChatUi {
                 self.ready.set(false);
                 self.connecting.set(false);
                 self.commands.borrow_mut().take();
+                self.publish_activity();
                 if self.resume_pending.replace(false) {
                     self.connect(true);
                 } else {
                     self.refresh_controls();
                 }
+                return;
             }
             Event::Ready(catalog) => {
                 let settings = self
@@ -1540,6 +1746,7 @@ impl ChatUi {
                 self.refresh_queue();
             }
         }
+        self.publish_activity();
     }
 
     fn restore_unconfirmed_draft(&self) {
@@ -1562,7 +1769,7 @@ impl ChatUi {
             edit.draft = restored;
         } else {
             drop(edit);
-            self.composer.buffer().set_text(&restored);
+            self.set_draft(&restored);
         }
     }
 
@@ -1580,6 +1787,183 @@ impl ChatUi {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn chat_reports_working_input_and_finished_activity() {
+        adw::init().unwrap();
+        let pane = PaneId::new();
+        let changed = Rc::new(Cell::new(0));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        callbacks.on_chat_activity_changed = Rc::new(RefCell::new({
+            let changed = changed.clone();
+            move |target| {
+                assert_eq!(target, pane);
+                changed.set(changed.get() + 1);
+            }
+        }));
+        let chat = ChatPane::new(
+            pane,
+            SurfaceId::new(),
+            "Codex",
+            std::env::temp_dir(),
+            &callbacks,
+        );
+        let (input, _requests) = async_channel::bounded(1);
+        chat.ui.ready.set(true);
+        *chat.ui.commands.borrow_mut() = Some(input);
+        assert!(chat.activity_presence().is_none());
+        assert!(chat.ui.send_text("Work on this", Settings::default()));
+        assert_eq!(
+            chat.activity_presence().unwrap().activity,
+            AgentActivity::Running
+        );
+
+        chat.ui.handle(Event::Prompt(runtime::Prompt {
+            id: "prompt".into(),
+            title: "Approve?".into(),
+            detail: String::new(),
+            choices: vec!["Approve".into()],
+            questions: Vec::new(),
+        }));
+        assert_eq!(
+            chat.activity_presence().unwrap().activity,
+            AgentActivity::NeedsInput
+        );
+        chat.ui.handle(Event::Notice("Still waiting".into()));
+        assert_eq!(changed.get(), 2);
+        chat.ui.handle(Event::PromptResolved {
+            id: "prompt".into(),
+            label: "Approved".into(),
+            answers: Vec::new(),
+        });
+        assert_eq!(
+            chat.activity_presence().unwrap().activity,
+            AgentActivity::Running
+        );
+        chat.ui.handle(Event::Finished {
+            status: "Completed".into(),
+            detail: None,
+        });
+        assert!(chat.activity_presence().is_none());
+        assert_eq!(changed.get(), 4);
+    }
+
+    #[gtk::test]
+    fn recall_uses_reopened_history_and_restores_draft_with_pasted_text() {
+        adw::init().unwrap();
+        use chat_history::Record;
+        let chat = ChatPane::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            "Codex",
+            std::env::temp_dir(),
+            &PaneCallbacks::noop_for_test(),
+        );
+        let begin = |text: &str, steer| Record::Begin {
+            prompt: text.into(),
+            steer,
+        };
+        let finish = |status: &str| Record::Finished {
+            status: status.into(),
+            detail: None,
+            elapsed: 1,
+        };
+        let ui = &chat.ui;
+        ui.transcript.replay(
+            vec![
+                begin("Earlier prompt", false),
+                begin("Latest prompt", true),
+                finish("Completed"),
+                begin("Rejected prompt", false),
+                finish("Not sent"),
+            ],
+            false,
+        );
+
+        ui.set_draft("draft");
+        let buffer = ui.composer.buffer();
+        ui.insert_paste("\nfirst line\nsecond line");
+        let original = ui.draft();
+        assert!(
+            !ui.recall_prompt(true),
+            "typed draft must start at its first character"
+        );
+        buffer.place_cursor(&buffer.start_iter());
+        assert!(ui.recall_prompt(true));
+        assert_eq!(ui.draft(), "Latest prompt");
+        assert!(ui.recall_prompt(true));
+        assert_eq!(ui.draft(), "Earlier prompt");
+        assert!(!ui.recall_prompt(true));
+        buffer.place_cursor(&buffer.end_iter());
+        assert!(ui.recall_prompt(false));
+        assert_eq!(ui.draft(), "Latest prompt");
+        assert!(ui.recall_prompt(false));
+        assert_eq!(ui.draft(), original);
+        assert_eq!(buffer.cursor_position(), 0);
+        assert!(ui.pastes.root.is_visible());
+
+        // Escape can dismiss the slash menu before the first Up.
+        ui.catalog.borrow_mut().commands = vec![runtime::SlashCommand {
+            name: "plan".into(),
+            ..Default::default()
+        }];
+        ui.set_draft("/plan");
+        assert!(ui.menu.is_open());
+        *ui.menu_dismissed.borrow_mut() = Some(ui.draft());
+        ui.menu.hide();
+        buffer.place_cursor(&buffer.start_iter());
+        assert!(ui.recall_prompt(true));
+        buffer.place_cursor(&buffer.end_iter());
+        assert!(ui.recall_prompt(false));
+        assert_eq!(ui.draft(), "/plan");
+        assert!(!ui.menu.is_open());
+    }
+
+    #[gtk::test]
+    fn multiline_paste_stays_collapsed_and_sends_original_text_in_order() {
+        adw::init().unwrap();
+        let chat = ChatPane::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            "Codex",
+            std::env::temp_dir(),
+            &PaneCallbacks::noop_for_test(),
+        );
+        let ui = &chat.ui;
+        let buffer = ui.composer.buffer();
+        let pasted = "첫 줄\n  second line\n";
+        ui.set_draft("before after");
+        buffer.place_cursor(&buffer.iter_at_offset(7));
+        ui.insert_paste(pasted);
+        assert!(ui.pastes.root.is_visible());
+        assert_eq!(
+            buffer.text(&buffer.start_iter(), &buffer.end_iter(), false),
+            "before after"
+        );
+        assert_eq!(ui.draft(), format!("before {pasted}after"));
+        let chip = ui.pastes.at_cursor(&buffer).unwrap();
+        ui.remove_paste(&chip);
+        assert_eq!(ui.draft(), "before after");
+        assert!(!ui.pastes.root.is_visible());
+
+        let second = "next\nblock";
+        ui.insert_paste(second);
+        buffer.place_cursor(&buffer.start_iter());
+        ui.insert_paste(pasted);
+        assert_eq!(ui.draft(), format!("{pasted}before {second}after"));
+        buffer.delete(&mut buffer.start_iter(), &mut buffer.end_iter());
+        assert_eq!(ui.draft(), format!("{pasted}{second}"));
+
+        ui.set_draft("");
+        ui.insert_paste(pasted);
+        let (input, sent) = async_channel::bounded(1);
+        ui.ready.set(true);
+        *ui.commands.borrow_mut() = Some(input);
+        ui.activate_send();
+        assert!(matches!(sent.try_recv(), Ok(Input::Send { text, .. }) if text == pasted));
+        assert!(ui.draft().is_empty());
+        assert!(!ui.pastes.root.is_visible());
+    }
 
     #[gtk::test]
     fn chat_minimum_width_stays_stable_with_a_running_turn_and_queue() {

@@ -521,18 +521,28 @@ impl WindowController {
         self.refresh_agent_displays().await;
     }
 
-    /// A Host agent's status lives in the Host, not in the stored tab. Put it on
-    /// this copy of the workspace so the workspace row shows it like any agent's.
-    pub(super) fn overlay_managed_presence(&self, ws: &mut flowmux_core::Workspace) {
-        for (view, presence) in self.managed_presences() {
-            if view.workspace == ws.id {
-                for root in &mut ws.surfaces {
-                    if root
-                        .root_pane
-                        .set_surface_agent(view.surface, Some(presence.clone()))
-                    {
-                        break;
-                    }
+    /// Add live Host and chat activity to the copy used for sidebar rendering.
+    pub(super) fn overlay_sidebar_presence(&self, ws: &mut flowmux_core::Workspace) {
+        let workspace = ws.id;
+        let managed = self
+            .managed_presences()
+            .into_iter()
+            .filter(|(view, _)| view.workspace == workspace)
+            .map(|(view, presence)| (view.surface, presence));
+        let registry = self.pane_registry.borrow();
+        let chats = registry.chats.iter().filter_map(|(&surface, chat)| {
+            if registry.surface_workspace.get(&surface) != Some(&workspace) {
+                return None;
+            }
+            Some((surface, chat.activity_presence()?))
+        });
+        for (surface, presence) in managed.chain(chats) {
+            for root in &mut ws.surfaces {
+                if root
+                    .root_pane
+                    .set_surface_agent(surface, Some(presence.clone()))
+                {
+                    break;
                 }
             }
         }
@@ -582,14 +592,8 @@ impl WindowController {
     }
 
     async fn update_workspace_agent_status(&self, workspace: WorkspaceId) {
-        let stored = self.store.get_workspace_without_scrollback(workspace).await;
-        let attention = stored.clone().and_then(|mut shown| {
-            self.overlay_managed_presence(&mut shown);
-            shown.agent_attention_rollup()
-        });
-        self.sidebar.set_agent_status(workspace, attention);
         // Teardown can restore titles without a cwd change or a new OSC title.
-        if let Some(ws) = stored {
+        if let Some(ws) = self.store.get_workspace_without_scrollback(workspace).await {
             let registry = self.pane_registry.borrow();
             for surface in &ws.surfaces {
                 surface.root_pane.for_each_leaf(|pane| {
