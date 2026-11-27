@@ -95,6 +95,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::OpenAgentView { .. }
             | GtkCommand::OpenManagedAgent { pane: Some(_), .. }
             | GtkCommand::NewChatSurface { .. }
+            | GtkCommand::RestartChat { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }
@@ -3263,6 +3264,7 @@ impl WindowController {
             | GtkCommand::NewSurface { pane }
             | GtkCommand::OpenAgentView { pane, .. }
             | GtkCommand::NewChatSurface { pane }
+            | GtkCommand::RestartChat { pane, .. }
             | GtkCommand::NewBrowserSurface { pane }
             | GtkCommand::OpenTig { pane }
             | GtkCommand::ActivateSurface { pane, .. }
@@ -3512,6 +3514,7 @@ impl WindowController {
             | GtkCommand::OpenAgentView { .. }
             | GtkCommand::OpenManagedAgent { .. }
             | GtkCommand::NewChatSurface { .. }
+            | GtkCommand::RestartChat { .. }
             | GtkCommand::NewBrowserSurface { .. }
             | GtkCommand::ActivateSurface { .. }
             | GtkCommand::CloseSurface { .. }

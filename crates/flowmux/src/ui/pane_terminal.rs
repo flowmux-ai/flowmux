@@ -67,6 +67,16 @@ pub struct ChildSpawned {
 /// Per-pane callbacks the surface backends invoke to drive the window
 /// controller (focus, tab/pane menu actions, title changes, …). Shared by
 /// the terminal and browser panes.
+/// A chat tab's request to continue in a new conversation.
+pub struct ChatRestart {
+    pub pane: PaneId,
+    pub history: flowmux_core::SurfaceId,
+    pub agent: String,
+    pub cwd: std::path::PathBuf,
+    pub catalog: flowmux_daemon::chat_runtime::Catalog,
+    pub settings: flowmux_daemon::chat_runtime::Settings,
+}
+
 #[derive(Clone)]
 pub struct PaneCallbacks {
     pub on_child_exited: Rc<RefCell<dyn FnMut(ChildExit)>>,
@@ -94,6 +104,7 @@ pub struct PaneCallbacks {
     /// Pane-local new browser tab.
     pub chat_runtime: Option<tokio::runtime::Handle>,
     pub on_new_chat_surface: Rc<RefCell<dyn FnMut(PaneId)>>,
+    pub on_chat_restart: Rc<RefCell<dyn FnMut(ChatRestart)>>,
     pub on_chat_open_file: Rc<RefCell<dyn FnMut(PaneId, std::path::PathBuf)>>,
     pub on_new_browser_surface: Rc<RefCell<dyn FnMut(PaneId)>>,
     /// Pane-local close tab.
@@ -224,6 +235,7 @@ impl PaneCallbacks {
             on_new_surface: Rc::new(RefCell::new(|_| {})),
             chat_runtime: None,
             on_new_chat_surface: Rc::new(RefCell::new(|_| {})),
+            on_chat_restart: Rc::new(RefCell::new(|_| {})),
             on_chat_open_file: Rc::new(RefCell::new(|_, _| {})),
             on_new_browser_surface: Rc::new(RefCell::new(|_| {})),
             on_close_surface: Rc::new(RefCell::new(|_, _| {})),

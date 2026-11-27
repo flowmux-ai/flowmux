@@ -190,6 +190,24 @@ impl PaneCallbackRouter {
                     dispatch_detached(&bridge, GtkCommand::NewChatSurface { pane });
                 }))
             },
+            on_chat_restart: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(
+                    move |restart: crate::ui::pane_terminal::ChatRestart| {
+                        dispatch_detached(
+                            &bridge,
+                            GtkCommand::RestartChat {
+                                pane: restart.pane,
+                                history: restart.history,
+                                agent: restart.agent,
+                                cwd: restart.cwd,
+                                catalog: Box::new(restart.catalog),
+                                settings: restart.settings,
+                            },
+                        );
+                    },
+                ))
+            },
             on_chat_open_file: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(move |pane, path| {

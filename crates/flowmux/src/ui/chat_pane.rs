@@ -66,6 +66,7 @@ struct ChatUi {
     catalog: RefCell<Catalog>,
     updating_options: Cell<bool>,
     focus_cb: Rc<RefCell<dyn FnMut(PaneId)>>,
+    restart_cb: Rc<RefCell<dyn FnMut(super::pane_terminal::ChatRestart)>>,
     root: glib::WeakRef<gtk::Box>,
     status: gtk::Label,
     notice: gtk::Label,
@@ -282,6 +283,7 @@ impl ChatPane {
             catalog: RefCell::new(Catalog::default()),
             updating_options: Cell::new(false),
             focus_cb: callbacks.on_focus.clone(),
+            restart_cb: callbacks.on_chat_restart.clone(),
             root: root.downgrade(),
             status,
             notice,
@@ -821,7 +823,7 @@ impl ChatUi {
     fn local_available(&self, local: commands::Local, catalog: &Catalog) -> bool {
         use commands::Local;
         match local {
-            Local::New => false,
+            Local::New => self.provider.is_some() && self.runtime.is_some(),
             Local::Plan => {
                 catalog.plan
                     || catalog
@@ -898,7 +900,25 @@ impl ChatUi {
         use commands::Local;
         self.menu.hide();
         match local {
-            Local::New => {}
+            Local::New => {
+                let Some(provider) = self.provider else {
+                    return;
+                };
+                // End this conversation's agent; its history stays in Agent sessions.
+                if self.commands.borrow().is_some() {
+                    self.queue_paused.set(true);
+                    let _ = self.try_input(Input::End);
+                }
+                let restart = super::pane_terminal::ChatRestart {
+                    pane: self.pane.get(),
+                    history: self.history_id,
+                    agent: provider.name().into(),
+                    cwd: self.cwd.clone(),
+                    catalog: self.catalog.borrow().clone(),
+                    settings: self.draft_settings(),
+                };
+                (self.restart_cb.borrow_mut())(restart);
+            }
             Local::Plan => {
                 if self.catalog.borrow().plan {
                     self.plan.set_active(!self.plan.is_active());

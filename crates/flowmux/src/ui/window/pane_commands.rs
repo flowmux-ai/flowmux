@@ -688,6 +688,35 @@ impl WindowController {
                     controller.show_new_chat_dialog(pane).await;
                 });
             }
+            GtkCommand::RestartChat {
+                pane,
+                history,
+                agent,
+                cwd,
+                catalog,
+                settings,
+            } => {
+                let controller = self.clone();
+                glib::spawn_future_local(async move {
+                    let previous = controller
+                        .pane_registry
+                        .borrow()
+                        .chats
+                        .iter()
+                        .find(|(_, chat)| chat.history_id() == history)
+                        .map(|(surface, _)| *surface);
+                    // The previous conversation stays in its history and in Agent sessions.
+                    if let Some(chat) = controller.add_chat_surface(pane, agent, cwd, None).await {
+                        chat.connect_started(*catalog, settings);
+                        if let Some(surface) = previous {
+                            let (ack, _) = tokio::sync::oneshot::channel();
+                            controller
+                                .dispatch(GtkCommand::CloseSurface { pane, surface, ack })
+                                .await;
+                        }
+                    }
+                });
+            }
             GtkCommand::NewBrowserSurface { pane } => {
                 if let Some((ws_id, surface_id)) = self
                     .store

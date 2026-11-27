@@ -459,6 +459,15 @@ pub enum GtkCommand {
     NewChatSurface {
         pane: PaneId,
     },
+    /// Replace a chat tab with a new conversation using the same agent and settings.
+    RestartChat {
+        pane: PaneId,
+        history: SurfaceId,
+        agent: String,
+        cwd: std::path::PathBuf,
+        catalog: Box<flowmux_daemon::chat_runtime::Catalog>,
+        settings: flowmux_daemon::chat_runtime::Settings,
+    },
     NewBrowserSurface {
         pane: PaneId,
     },
