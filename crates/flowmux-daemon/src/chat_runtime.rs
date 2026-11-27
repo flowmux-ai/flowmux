@@ -400,6 +400,10 @@ struct Turn {
     acp_text: Option<(TextKind, u64)>,
     acp_next_text: u64,
     steer: Option<(u64, String)>,
+    /// A Codex `/compact` turn, which may end with `thread/compacted` alone.
+    compact: bool,
+    /// A Codex review can run in its own thread.
+    review_thread: Option<String>,
 }
 
 struct Session {
@@ -537,7 +541,12 @@ async fn run(
                                 if provider != Provider::Codex {
                                     emit(events, Event::SettingsApplied(settings.clone())).await?;
                                 }
-                                session.active = Some(Turn { request, settings, ..Turn::default() });
+                                session.active = Some(Turn {
+                                    request,
+                                    settings,
+                                    compact: provider == Provider::Codex && codex::command(&text, "compact").is_some(),
+                                    ..Turn::default()
+                                });
                                 has_sent = true;
                             }
                             Err(error) => {

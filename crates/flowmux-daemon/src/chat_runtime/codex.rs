@@ -17,6 +17,10 @@ pub(super) async fn boot(
     )
     .await?;
     wire.notify("initialized", json!({})).await?;
+    session.catalog.commands = COMMANDS
+        .iter()
+        .map(|(name, description, hint)| SlashCommand::new(name, description, hint))
+        .collect();
 
     let mut cursor: Option<String> = None;
     for _ in 0..8 {
@@ -111,6 +115,22 @@ fn turn_settings(settings: &Settings, cwd: &Path) -> (Value, &'static str) {
     )
 }
 
+/// Commands Codex runs through its own requests; typed as text, the model would only read them.
+const COMMANDS: [(&str, &str, &str); 2] = [
+    ("compact", "Summarize the conversation to free context", ""),
+    (
+        "review",
+        "Review uncommitted changes, or follow your instructions",
+        "[instructions]",
+    ),
+];
+
+/// The arguments of `/name args`, when `text` is that command.
+pub(super) fn command<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let rest = text.trim_start().strip_prefix('/')?.strip_prefix(name)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
+}
+
 pub(super) async fn send(
     wire: &mut Wire,
     session: &Session,
@@ -118,6 +138,24 @@ pub(super) async fn send(
     text: &str,
     settings: &Settings,
 ) -> Result<u64> {
+    if command(text, "compact").is_some() {
+        return wire
+            .request("thread/compact/start", json!({"threadId":session.key}))
+            .await;
+    }
+    if let Some(instructions) = command(text, "review") {
+        let target = if instructions.is_empty() {
+            json!({"type":"uncommittedChanges"})
+        } else {
+            json!({"type":"custom","instructions":instructions})
+        };
+        return wire
+            .request(
+                "review/start",
+                json!({"threadId":session.key,"target":target,"delivery":"inline"}),
+            )
+            .await;
+    }
     let (sandbox, approval) = turn_settings(settings, cwd);
     let prompt = if settings.plan {
         format!("Plan only. Investigate the request and present a concrete plan. Do not change files.\n\n{text}")
@@ -184,9 +222,14 @@ pub(super) async fn frame(
 ) -> Result<()> {
     let method = str_at(frame, "method");
     let params = &frame["params"];
-    let relevant = params["threadId"]
-        .as_str()
-        .is_none_or(|thread| thread == session.key);
+    let relevant = params["threadId"].as_str().is_none_or(|thread| {
+        thread == session.key
+            || session
+                .active
+                .as_ref()
+                .and_then(|turn| turn.review_thread.as_deref())
+                == Some(thread)
+    });
     let Some(turn) = session.active.as_mut().filter(|_| relevant) else {
         if !method.is_empty() && frame.get("id").is_some() {
             wire.unsupported(&frame["id"]).await?;
@@ -206,6 +249,10 @@ pub(super) async fn frame(
                 .as_str()
                 .map(str::to_owned)
                 .or(turn.remote_id.take());
+            turn.review_thread = result["reviewThreadId"]
+                .as_str()
+                .filter(|thread| *thread != session.key)
+                .map(str::to_owned);
             emit(events, Event::SettingsApplied(turn.settings.clone())).await?;
             if turn.stop {
                 interrupt(wire, &session.key, turn).await?;
@@ -302,6 +349,18 @@ pub(super) async fn frame(
                         .await?;
                     }
                 }
+                "exitedReviewMode" if !running => {
+                    emit(
+                        events,
+                        Event::Text {
+                            id: id.into(),
+                            kind: TextKind::Answer,
+                            text: clip(str_at(item, "review"), MAX_DETAIL),
+                            append: false,
+                        },
+                    )
+                    .await?;
+                }
                 "reasoning" if !running => {
                     for (i, summary) in values(&item["summary"])
                         .filter_map(Value::as_str)
@@ -353,6 +412,19 @@ pub(super) async fn frame(
                 }),
             )
             .await?;
+        }
+        "thread/compacted" | "turn/completed" if turn.compact => {
+            emit(
+                events,
+                Event::Text {
+                    id: "compact".into(),
+                    kind: TextKind::Answer,
+                    text: "Conversation compacted.".into(),
+                    append: false,
+                },
+            )
+            .await?;
+            settle(session, events, "Completed", None).await?;
         }
         "turn/completed" => {
             let result = &params["turn"];
@@ -571,6 +643,17 @@ async fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commands_need_their_exact_name() {
+        assert_eq!(command("/compact", "compact"), Some(""));
+        assert_eq!(
+            command("/review focus on tests", "review"),
+            Some("focus on tests")
+        );
+        assert_eq!(command("/compaction", "compact"), None);
+        assert_eq!(command("please /compact", "compact"), None);
+    }
 
     #[test]
     fn plan_and_read_only_do_not_inherit_full_access() {
