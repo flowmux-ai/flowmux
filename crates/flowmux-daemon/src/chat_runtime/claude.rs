@@ -47,6 +47,19 @@ async fn control(wire: &mut Wire, request: Value) -> Result<Value> {
 
 pub(super) async fn boot(wire: &mut Wire, session: &mut Session) -> Result<()> {
     let result = control(wire, json!({"subtype":"initialize","hooks":{}})).await?;
+    session.catalog.commands = values(&result["commands"])
+        .filter_map(|command| {
+            let mut entry = SlashCommand::new(
+                command["name"].as_str()?,
+                str_at(command, "description"),
+                str_at(command, "argumentHint"),
+            );
+            // Skills, plugins and project commands are not built in.
+            entry.skill = command["builtin"] != true;
+            Some(entry)
+        })
+        .take(MAX_COMMANDS)
+        .collect();
     session.catalog.models.choices = values(&result["models"])
         .filter_map(|model| {
             let id = model["value"].as_str()?;

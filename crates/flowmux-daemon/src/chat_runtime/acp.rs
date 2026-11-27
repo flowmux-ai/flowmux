@@ -40,6 +40,9 @@ pub(super) async fn boot(
         result
     };
     update_options(session, &result["configOptions"]);
+    if let Some(update) = wire.commands.take() {
+        update_commands(session, &update);
+    }
     if session.model_option.is_none() {
         session.catalog.models = legacy_menu(
             &result["models"],
@@ -69,6 +72,19 @@ fn legacy_menu(data: &Value, choices: &str, current: &str, id: &str) -> Menu {
             })
             .collect(),
     }
+}
+
+fn update_commands(session: &mut Session, update: &Value) {
+    session.catalog.commands = values(&update["availableCommands"])
+        .filter_map(|command| {
+            Some(SlashCommand::new(
+                command["name"].as_str()?,
+                str_at(command, "description"),
+                str_at(&command["input"], "hint"),
+            ))
+        })
+        .take(MAX_COMMANDS)
+        .collect();
 }
 
 fn update_options(session: &mut Session, options: &Value) {
@@ -226,6 +242,10 @@ pub(super) async fn frame(
     match str_at(update, "sessionUpdate") {
         "config_option_update" => {
             update_options(session, &update["configOptions"]);
+            emit(events, Event::Ready(session.catalog.clone())).await?;
+        }
+        "available_commands_update" => {
+            update_commands(session, update);
             emit(events, Event::Ready(session.catalog.clone())).await?;
         }
         "current_mode_update" => {
@@ -443,4 +463,27 @@ pub(super) async fn frame(
         wire.unsupported(&frame["id"]).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reported_commands_keep_one_line_descriptions_and_input_hints() {
+        let mut session = Session::new();
+        update_commands(
+            &mut session,
+            &json!({"availableCommands":[
+                {"name":"review","description":"review changes\nmore detail","input":{"hint":"[commit|branch]"}},
+                {"name":"init","description":"guided AGENTS.md setup"},
+                {"description":"missing name"}
+            ]}),
+        );
+        let commands = &session.catalog.commands;
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0].description, "review changes");
+        assert_eq!(commands[0].hint, "[commit|branch]");
+        assert_eq!(commands[1].hint, "");
+    }
 }

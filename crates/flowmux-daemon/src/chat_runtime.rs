@@ -108,6 +108,46 @@ pub struct Catalog {
     pub efforts: Menu,
     pub model_efforts: HashMap<String, Menu>,
     pub plan: bool,
+    /// Slash commands and skills the agent accepts in its own syntax.
+    #[serde(default)]
+    pub commands: Vec<SlashCommand>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlashCommand {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Arguments the command takes, such as `[instructions]`.
+    #[serde(default)]
+    pub hint: String,
+    #[serde(default)]
+    pub skill: bool,
+    /// Codex invokes a skill with an input item naming this file.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+const MAX_COMMANDS: usize = 400;
+
+impl SlashCommand {
+    fn new(name: &str, description: &str, hint: &str) -> Self {
+        Self {
+            name: name.into(),
+            // Skill descriptions can run to paragraphs; the menu shows one line.
+            description: description
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .chars()
+                .take(240)
+                .collect(),
+            hint: hint.chars().take(80).collect(),
+            skill: false,
+            path: None,
+        }
+    }
 }
 
 impl Catalog {
@@ -197,6 +237,8 @@ struct Wire {
     stdin: ChildStdin,
     next_id: u64,
     read_buffer: Vec<u8>,
+    /// ACP can report its commands while a request is pending; `rpc` keeps the latest list.
+    commands: Option<Value>,
 }
 
 impl Wire {
@@ -242,6 +284,7 @@ impl Wire {
             stdin,
             next_id: 0,
             read_buffer: Vec::new(),
+            commands: None,
         })
     }
 
@@ -300,6 +343,9 @@ impl Wire {
             while let Some(frame) = self.read().await? {
                 if frame["id"].as_u64() == Some(id) && frame["method"].is_null() {
                     return response(&frame);
+                }
+                if frame["params"]["update"]["sessionUpdate"] == "available_commands_update" {
+                    self.commands = Some(frame["params"]["update"].clone());
                 }
                 if frame.get("method").is_some() && frame.get("id").is_some() {
                     self.unsupported(&frame["id"]).await?;
