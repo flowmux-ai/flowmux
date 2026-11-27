@@ -106,14 +106,16 @@ pub(super) fn parse(draft: &str) -> Option<(&str, &str)> {
     valid_name(name).then_some((name, args.trim()))
 }
 
-/// Names starting with the query come first, then names containing it.
+/// The exact name first, then names starting with the query, then names containing it.
 pub(super) fn filter(entries: &[Entry], query: &str) -> Vec<Entry> {
     let query = query.to_lowercase();
     let mut starts = Vec::new();
     let mut contains = Vec::new();
     for entry in entries {
         let name = entry.name.to_lowercase();
-        if name.starts_with(&query) {
+        if name == query {
+            starts.insert(0, entry.clone());
+        } else if name.starts_with(&query) {
             starts.push(entry.clone());
         } else if name.contains(&query) {
             contains.push(entry.clone());
@@ -258,7 +260,7 @@ fn row(entry: &Entry, query: &str, agent: &str) -> gtk::ListBoxRow {
     name.add_css_class("flowmux-chat-command-name");
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     // A narrow menu keeps the names readable and shortens descriptions first.
-    name.set_width_chars(entry.name.chars().count().min(14) as i32 + 1);
+    name.set_width_chars(entry.name.chars().count().min(9) as i32 + 1);
     name.set_max_width_chars(28);
     name.set_xalign(0.0);
     let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -341,6 +343,12 @@ mod tests {
             .map(|entry| entry.name)
             .collect();
         assert_eq!(names, ["clear", "sclear"]);
+        // Enter on `/usage` must not pick a longer name listed earlier.
+        let usage = entries(
+            &[],
+            &[command("usage-credits", false), command("usage", false)],
+        );
+        assert_eq!(filter(&usage, "usage")[0].name, "usage");
     }
 
     #[test]
