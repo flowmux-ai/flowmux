@@ -184,7 +184,17 @@ impl ProviderState {
                 });
                 self.limits_error = None;
             }
-            FieldRefresh::Failure(error) => self.limits_error = Some(error),
+            FieldRefresh::Failure(error) => {
+                if self.provider == Provider::Antigravity
+                    && matches!(
+                        error.kind,
+                        UsageErrorKind::NotLoggedIn | UsageErrorKind::Unauthorized
+                    )
+                {
+                    self.limits = None;
+                }
+                self.limits_error = Some(error);
+            }
             FieldRefresh::Skipped => {}
         }
     }

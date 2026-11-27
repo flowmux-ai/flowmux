@@ -9,7 +9,12 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    process::Command,
+};
+
+const TOKEN_FILE: &str = ".gemini/antigravity-cli/antigravity-oauth-token";
 
 pub(crate) async fn collect(home: PathBuf) -> ProviderRefresh {
     ProviderRefresh {
@@ -30,26 +35,54 @@ async fn read_limits(home: &Path) -> Result<Vec<UsageWindow>, UsageError> {
             "Antigravity CLI was not found.",
         )
     })?;
+    if !home
+        .join(TOKEN_FILE)
+        .metadata()
+        .is_ok_and(|file| file.is_file() && file.len() > 0)
+        && !tokio::time::timeout(Duration::from_secs(2), has_keyring_entry())
+            .await
+            .unwrap_or(false)
+    {
+        return Err(sign_in_required());
+    }
+
     let work = tempfile::tempdir().map_err(|_| {
         UsageError::new(
             UsageErrorKind::Io,
             "Could not start the Antigravity quota check.",
         )
     })?;
-    let mut command = Command::new(&executable);
-    command
-        .current_dir(work.path())
-        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
-        .env("BROWSER", "/usr/bin/false")
-        .env_remove("DISPLAY")
-        .env_remove("WAYLAND_DISPLAY");
-
-    let mut version = Command::new(executable);
-    version
-        .current_dir(work.path())
-        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
-        .arg("--version");
-    let version = capture(&mut version, Duration::from_secs(5)).await?;
+    // agy can fall back to the platform opener when a stored login expires.
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let browser_error = || {
+        UsageError::new(
+            UsageErrorKind::Io,
+            "Could not set up a background Antigravity quota check.",
+        )
+    };
+    std::os::unix::fs::symlink("/usr/bin/true", work.path().join(opener))
+        .map_err(|_| browser_error())?;
+    let inherited_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(work.path().to_path_buf()).chain(std::env::split_paths(&inherited_path)),
+    )
+    .map_err(|_| browser_error())?;
+    let command = || {
+        let mut command = Command::new(&executable);
+        command
+            .current_dir(work.path())
+            .env("PATH", &path)
+            .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
+            .env("BROWSER", "/usr/bin/false")
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY");
+        command
+    };
+    let version = capture(command().arg("--version"), Duration::from_secs(5)).await?;
     if !cli_version(&version).is_some_and(|version| version >= (1, 1, 11)) {
         return Err(UsageError::new(
             UsageErrorKind::Unavailable,
@@ -58,7 +91,8 @@ async fn read_limits(home: &Path) -> Result<Vec<UsageWindow>, UsageError> {
     }
 
     // Older versions can submit an unknown slash command as a model prompt.
-    command.args([
+    let mut quota = command();
+    quota.args([
         "-p",
         "/usage",
         "--output-format",
@@ -66,45 +100,108 @@ async fn read_limits(home: &Path) -> Result<Vec<UsageWindow>, UsageError> {
         "--print-timeout",
         "20s",
     ]);
-    let output = capture(&mut command, Duration::from_secs(25)).await?;
+    let output = capture(&mut quota, Duration::from_secs(25)).await?;
     parse_limits(&output)
 }
 
+#[cfg(target_os = "linux")]
+async fn has_keyring_entry() -> bool {
+    async fn search() -> zbus::Result<bool> {
+        use zbus::{proxy::MethodFlags, OwnedObjectPath};
+        let connection = zbus::Connection::session().await?;
+        let service = zbus::Proxy::new(
+            &connection,
+            "org.freedesktop.secrets",
+            "/org/freedesktop/secrets",
+            "org.freedesktop.Secret.Service",
+        )
+        .await?;
+        let attributes =
+            std::collections::HashMap::from([("service", "gemini"), ("username", "antigravity")]);
+        let items: Option<(Vec<OwnedObjectPath>, Vec<OwnedObjectPath>)> = service
+            .call_with_flags("SearchItems", MethodFlags::NO_AUTO_START, &(attributes,))
+            .await?;
+        Ok(items.is_some_and(|(unlocked, _)| !unlocked.is_empty()))
+    }
+    search().await.unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+async fn has_keyring_entry() -> bool {
+    Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", "gemini", "-a", "antigravity"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
+}
+
+fn sign_in_required() -> UsageError {
+    UsageError::new(
+        UsageErrorKind::NotLoggedIn,
+        "Sign in to refresh Antigravity quotas.",
+    )
+}
+
 async fn capture(command: &mut Command, timeout: Duration) -> Result<String, UsageError> {
+    const MAX_BYTES: u64 = 512 * 1024;
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|_| UsageError::new(UsageErrorKind::Io, "Could not start Antigravity CLI."))?;
     let mut stdout = child.stdout.take().expect("stdout is piped");
-    let result = tokio::time::timeout(timeout, async {
-        const MAX_BYTES: u64 = 512 * 1024;
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let read_output = async {
+        let invalid_data = || {
+            UsageError::new(
+                UsageErrorKind::InvalidData,
+                "Could not read the Antigravity quota response.",
+            )
+        };
         let mut bytes = Vec::new();
         (&mut stdout)
             .take(MAX_BYTES + 1)
             .read_to_end(&mut bytes)
             .await
-            .ok()?;
+            .map_err(|_| invalid_data())?;
         if bytes.len() as u64 > MAX_BYTES {
-            return None;
+            return Err(invalid_data());
         }
-        child.wait().await.ok()?;
-        String::from_utf8(bytes).ok()
+        child.wait().await.map_err(|_| invalid_data())?;
+        String::from_utf8(bytes).map_err(|_| invalid_data())
+    };
+    let login_prompt = async {
+        let mut lines = BufReader::new(stderr.take(MAX_BYTES + 1)).split(b'\n');
+        while let Ok(Some(line)) = lines.next_segment().await {
+            let line = String::from_utf8_lossy(&line).to_ascii_lowercase();
+            if line.contains("to log in")
+                || (line.contains("paste") && line.contains("authorization code"))
+            {
+                return;
+            }
+        }
+        std::future::pending::<()>().await;
+    };
+    tokio::time::timeout(timeout, async {
+        tokio::select! {
+            biased;
+            () = login_prompt => Err(sign_in_required()),
+            output = read_output => output,
+        }
     })
-    .await;
-    match result {
-        Ok(Some(output)) => Ok(output),
-        Ok(None) => Err(UsageError::new(
-            UsageErrorKind::InvalidData,
-            "Could not read the Antigravity quota response.",
-        )),
-        Err(_) => Err(UsageError::new(
+    .await
+    .unwrap_or_else(|_| {
+        Err(UsageError::new(
             UsageErrorKind::Timeout,
             "Antigravity quota check timed out.",
-        )),
-    }
+        ))
+    })
 }
 
 fn parse_limits(stdout: &str) -> Result<Vec<UsageWindow>, UsageError> {
@@ -143,16 +240,22 @@ fn parse_limits(stdout: &str) -> Result<Vec<UsageWindow>, UsageError> {
                 .as_str()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            signed_out |= ["sign in", "sign-in", "not logged", "login required"]
-                .iter()
-                .any(|word| error.contains(word));
+            signed_out |= [
+                "sign in",
+                "sign-in",
+                "log in",
+                "not logged",
+                "login required",
+                "unauthenticated",
+                "unauthorized",
+                "invalid_grant",
+            ]
+            .iter()
+            .any(|phrase| error.contains(phrase));
         }
     }
     if signed_out {
-        Err(UsageError::new(
-            UsageErrorKind::NotLoggedIn,
-            "Sign in with agy to view Antigravity quotas.",
-        ))
+        Err(sign_in_required())
     } else {
         Err(UsageError::new(
             UsageErrorKind::Unavailable,
@@ -207,6 +310,30 @@ fn group_windows(group: &Value) -> impl Iterator<Item = UsageWindow> + '_ {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn background_check_stops_when_cli_requests_login() {
+        for prompt in ["To log in, open this URL", "Paste the authorization code"] {
+            let mut command = Command::new("/bin/sh");
+            command.args([
+                "-c",
+                "printf '%s\\n' \"$1\" >&2; exec sleep 10",
+                "sh",
+                prompt,
+            ]);
+            let error = capture(&mut command, Duration::from_secs(2))
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, UsageErrorKind::NotLoggedIn);
+        }
+    }
+
+    #[test]
+    fn revoked_oauth_is_reported_as_signed_out() {
+        let error =
+            parse_limits(r#"{"status":"ERROR","error":"oauth2: invalid_grant"}"#).unwrap_err();
+        assert_eq!(error.kind, UsageErrorKind::NotLoggedIn);
+    }
 
     #[test]
     fn quota_command_keeps_group_and_window_identity_and_ignores_disabled_buckets() {

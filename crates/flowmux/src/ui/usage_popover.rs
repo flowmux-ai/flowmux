@@ -468,7 +468,9 @@ fn request_refresh(
             .is_none_or(|error| {
                 !matches!(
                     error.kind,
-                    UsageErrorKind::NotLoggedIn | UsageErrorKind::Unavailable
+                    UsageErrorKind::NotLoggedIn
+                        | UsageErrorKind::Unauthorized
+                        | UsageErrorKind::Unavailable
                 )
             });
     let check_gemini = {
@@ -585,12 +587,11 @@ fn render_usage(
         cards.remove(&child);
     }
     for provider in Provider::ALL {
-        cards.append(&provider_card(
-            state.provider(provider),
-            state.refreshing,
-            animate,
-            pins,
-        ));
+        let provider = state.provider(provider);
+        if provider.provider == Provider::Antigravity && provider.limits.is_none() {
+            continue;
+        }
+        cards.append(&provider_card(provider, state.refreshing, animate, pins));
     }
 }
 
@@ -976,6 +977,56 @@ pub(crate) mod tests {
         assert!(!rows
             .iter()
             .any(|row| row.starts_with("Rate limits last updated ")));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn antigravity_is_hidden_until_usage_loads_and_when_login_expires() {
+        let usage = UsagePopover::new(None);
+        let mut state = UsagePanelState::default();
+        let render = |state: &UsagePanelState, visible: bool| {
+            render_usage(
+                &usage.cards,
+                &usage.refresh_button,
+                &usage.spinner,
+                state,
+                false,
+                &usage.pins,
+            );
+            usage.bar.render(state, true);
+            assert_eq!(
+                usage.cards.observe_children().n_items(),
+                (Provider::ALL.len() - usize::from(!visible)) as u32
+            );
+            assert_eq!(usage.bar.root.is_visible(), visible);
+        };
+        render(&state, false);
+
+        let usage_data = ProviderRefresh {
+            provider: Provider::Antigravity,
+            tokens: FieldRefresh::Skipped,
+            limits: FieldRefresh::Success(vec![UsageWindow {
+                source_id: None,
+                label: "Weekly".into(),
+                scope: None,
+                used_percent: 25.0,
+                duration_minutes: Some(10_080),
+                resets_at: None,
+            }]),
+            collected_at: Utc::now(),
+        };
+        state.apply(usage_data.clone());
+        render(&state, true);
+
+        state.apply(refresh_failure(
+            Provider::Antigravity,
+            UsageError::new(UsageErrorKind::NotLoggedIn, "Sign-in expired."),
+            Utc::now(),
+        ));
+        render(&state, false);
+
+        state.apply(usage_data);
+        render(&state, true);
     }
 
     #[cfg_attr(not(target_os = "macos"), gtk::test)]
