@@ -30,7 +30,10 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
     drag.connect_drag_begin(move |drag, x, y| {
         start.borrow_mut().take();
         carrying.set(Carry::None);
-        if let Some(scroller) = drag.widget() {
+        let touch = drag
+            .current_event_device()
+            .is_some_and(|device| device.source() == gdk::InputSource::Touchscreen);
+        if let Some(scroller) = drag.widget().filter(|_| !touch) {
             if selected
                 .borrow()
                 .as_ref()
@@ -128,8 +131,10 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
     let selected = selection.clone();
     let weak_drag = drag.downgrade();
     // This runs only during a claimed drag so holding the pointer at an edge keeps selecting.
+    let carrying = carry.clone();
     drag.connect_sequence_state_changed(move |drag, _, state| {
-        if state != gtk::EventSequenceState::Claimed {
+        // A press that may carry the selection away never extends it at the edges.
+        if state != gtk::EventSequenceState::Claimed || carrying.get() != Carry::None {
             return;
         }
         let Some(scroller) = drag.widget().and_downcast::<gtk::ScrolledWindow>() else {

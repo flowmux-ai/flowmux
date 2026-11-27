@@ -258,12 +258,18 @@ fn render_table<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, table: &NodeTable) {
             let text = text_label("");
             text.set_markup(&inline(cell, 0));
             // The scrolled table reserves the height its cells take at their minimum width, so
-            // that width must equal the drawn one. Short cells stay on one line at their real
-            // width; an average-width estimate can be narrower and wrap them. Long cells wrap
-            // at 28 average characters, which is both their minimum and their natural width.
-            if text.text().chars().count() <= 28 {
-                text.set_wrap(false);
-            } else {
+            // that width must equal the drawn one. A cell narrower than 28 average characters
+            // stays on one line at its real width; an average-width estimate of its own length
+            // can be narrower and wrap it. Wider cells, by length or by wide glyphs such as
+            // Hangul, wrap at 28 average characters, both their minimum and natural width.
+            text.set_wrap(false);
+            let (_, width, ..) = text.measure(gtk::Orientation::Horizontal, -1);
+            let average = text
+                .pango_context()
+                .metrics(None, None)
+                .approximate_char_width();
+            if width > 28 * average / gtk::pango::SCALE {
+                text.set_wrap(true);
                 text.set_width_chars(28);
             }
             text.set_xalign(match table.alignments[x] {
@@ -326,6 +332,36 @@ pub(super) fn code(language: &str, code: &str) -> gtk::Box {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn wide_glyph_cells_wrap_like_long_ones() {
+        let parent = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let hangul = "한국어로 적은 설명은 글자 폭이 넓어서 줄을 바꿔야";
+        let markdown = format!("| 항목 | 설명 |\n| --- | --- |\n| 빌드 | {hangul} |");
+        Blocks::default().render(&parent, &markdown, false, Path::new("/"));
+        let mut cells = Vec::new();
+        let mut child = parent.first_child();
+        while let Some(widget) = child {
+            if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                cells.push((label.text().to_string(), label.wraps()));
+            }
+            child = widget
+                .first_child()
+                .or_else(|| widget.next_sibling())
+                .or_else(|| {
+                    let mut parent = widget.parent();
+                    while let Some(ancestor) = parent {
+                        if let Some(next) = ancestor.next_sibling() {
+                            return Some(next);
+                        }
+                        parent = ancestor.parent();
+                    }
+                    None
+                });
+        }
+        assert!(cells.contains(&("항목".into(), false)), "{cells:?}");
+        assert!(cells.contains(&(hangul.into(), true)), "{cells:?}");
+    }
 
     #[test]
     fn tool_image_paths_survive_markdown() {
