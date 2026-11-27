@@ -113,6 +113,18 @@ fn text_label(text: &str) -> gtk::Label {
     label
 }
 
+fn bubble(text: &str) -> gtk::Label {
+    let bubble = text_label(text);
+    bubble.set_halign(gtk::Align::End);
+    bubble.set_max_width_chars(70);
+    bubble.set_margin_start(28);
+    bubble.set_margin_top(4);
+    bubble.set_margin_bottom(4);
+    bubble.set_css_classes(&["card", "flowmux-chat-prompt"]);
+    bubble.set_widget_name("flowmux-chat-user");
+    bubble
+}
+
 /// An expander whose title ellipsizes instead of setting the transcript's minimum width.
 fn expander(title: &str) -> gtk::Expander {
     let expander = gtk::Expander::new(None);
@@ -403,14 +415,7 @@ impl Transcript {
                 }
             }
         });
-        let bubble = text_label(prompt);
-        bubble.set_halign(gtk::Align::End);
-        bubble.set_max_width_chars(70);
-        bubble.set_margin_start(28);
-        bubble.set_margin_top(4);
-        bubble.set_margin_bottom(4);
-        bubble.set_css_classes(&["card", "flowmux-chat-prompt"]);
-        bubble.set_widget_name("flowmux-chat-user");
+        let bubble = bubble(prompt);
         root.append(&bubble);
         let activity = gtk::ToggleButton::with_label("Working…");
         activity.set_active(true);
@@ -501,7 +506,11 @@ impl Transcript {
         let mut active = false;
         for record in records {
             match record {
-                Record::Begin { prompt } => {
+                Record::Begin {
+                    prompt,
+                    steer: true,
+                } if active => self.steer(&prompt),
+                Record::Begin { prompt, .. } => {
                     if active {
                         self.finish("Interrupted", None, 0);
                     }
@@ -590,6 +599,19 @@ impl Transcript {
             }
             row.live = append;
         }
+    }
+
+    /// Shows a message that joined the running turn.
+    pub fn steer(&self, text: &str) {
+        let mut turns = self.view.turns.borrow_mut();
+        let Some(turn) = turns.last_mut() else {
+            return;
+        };
+        turn.flush();
+        turn.open_run = None;
+        turn.entries.append(&bubble(text));
+        drop(turns);
+        self.view.schedule_adjustment();
     }
 
     pub fn flush_text(&self) {

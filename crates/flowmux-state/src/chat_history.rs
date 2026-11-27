@@ -54,6 +54,10 @@ pub struct Prompt {
 pub enum Record {
     Begin {
         prompt: String,
+        /// Added to the running turn instead of starting one. A field rather than a variant so
+        /// older readers of the shared history still load the record.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        steer: bool,
     },
     Text {
         id: String,
@@ -206,7 +210,10 @@ impl Store {
         let id = id.to_string();
         let at = chrono::Utc::now().timestamp_millis();
         let first_prompt = history.iter().find_map(|r| match r {
-            Record::Begin { prompt } => Some(prompt),
+            Record::Begin {
+                prompt,
+                steer: false,
+            } => Some(prompt),
             _ => None,
         });
         let tx = self.0.transaction()?;
@@ -313,6 +320,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ordinary_prompts_keep_the_format_older_readers_parse() {
+        let begin = |steer| Record::Begin {
+            prompt: "x".into(),
+            steer,
+        };
+        assert_eq!(
+            serde_json::to_string(&begin(false)).unwrap(),
+            r#"{"type":"begin","prompt":"x"}"#
+        );
+        let steered: Record =
+            serde_json::from_str(&serde_json::to_string(&begin(true)).unwrap()).unwrap();
+        assert!(matches!(steered, Record::Begin { steer: true, .. }));
+    }
+
+    #[test]
     fn restores_record_order_and_native_id_after_reopening() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("history.sqlite3");
@@ -326,6 +348,7 @@ mod tests {
                 &[
                     Record::Begin {
                         prompt: "한글 prompt\nsecond line".into(),
+                        steer: false,
                     },
                     Record::Session {
                         native_id: "native-thread".into(),
@@ -371,7 +394,7 @@ mod tests {
         let history = store.load(id).unwrap();
         assert_eq!(history.native_id.as_deref(), Some("native-thread"));
         assert!(matches!(history.records.as_slice(), [
-            Record::Begin { prompt }, Record::Work(work),
+            Record::Begin { prompt, steer: false }, Record::Work(work),
             Record::Resolved { answers, .. }, Record::Finished { elapsed: 3, .. },
         ] if prompt == "한글 prompt\nsecond line"
             && work.changes[0].diff == "+saved" && answers == &["제출한 답변"]));

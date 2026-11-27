@@ -159,6 +159,11 @@ pub enum Event {
         detail: Option<String>,
     },
     Rejected(String),
+    /// A queued message joined the running turn.
+    Steered {
+        text: String,
+    },
+    SteerRejected(String),
     Notice(String),
     StopFailed(String),
     Offline(String),
@@ -172,6 +177,10 @@ pub enum Input {
         settings: Settings,
     },
     Stop,
+    /// Adds a message to the running turn when the provider supports it.
+    Steer {
+        text: String,
+    },
     Respond {
         id: String,
         selected: usize,
@@ -344,6 +353,7 @@ struct Turn {
     message_id: String,
     acp_text: Option<(TextKind, u64)>,
     acp_next_text: u64,
+    steer: Option<(u64, String)>,
 }
 
 struct Session {
@@ -499,6 +509,19 @@ async fn run(
                                 Provider::Claude => claude::interrupt(&mut wire).await?,
                                 _ => wire.notify("session/cancel", json!({"sessionId":session.key})).await?,
                             }
+                        }
+                    }
+                    Ok(Input::Steer { text }) => {
+                        let turn = session.active.as_mut().filter(|turn| {
+                            provider == Provider::Codex
+                                && !turn.stop
+                                && turn.steer.is_none()
+                                && turn.remote_id.is_some()
+                        });
+                        if let Some(turn) = turn {
+                            codex::steer(&mut wire, &session.key, turn, text).await?;
+                        } else {
+                            emit(events, Event::SteerRejected("The running turn cannot take another message now.".into())).await?;
                         }
                     }
                     Ok(Input::Respond { id, selected, answers }) => {

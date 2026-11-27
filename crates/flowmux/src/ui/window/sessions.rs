@@ -16,7 +16,7 @@ fn chat_history_preview(chat: &ChatSummary) -> Result<String, String> {
     let mut answers = std::collections::HashMap::new();
     for record in history.records {
         match record {
-            Record::Begin { prompt } => {
+            Record::Begin { prompt, .. } => {
                 answers.clear();
                 blocks.push(format!("You\n{prompt}"));
             }

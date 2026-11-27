@@ -250,7 +250,7 @@ async fn run(
                         if state.started.is_some() || state.catalog.is_none() {
                             return Err("Chat is not ready to start another turn".into());
                         }
-                        save(&mut store, &mut state, Record::Begin { prompt: text.clone() })?;
+                        save(&mut store, &mut state, Record::Begin { prompt: text.clone(), steer: false })?;
                         state.started = Some(Instant::now());
                         state.settings = settings.clone();
                         // A plan turn's read-only access is not the chat's selection.
@@ -281,6 +281,7 @@ async fn run(
                         id: id.clone(), kind: *kind, text: text.clone(), append: *append,
                     }),
                     Event::Work(work) => Some(Record::Work(work.clone())),
+                    Event::Steered { text } => Some(Record::Begin { prompt: text.clone(), steer: true }),
                     Event::Prompt(prompt) => Some(Record::Prompt(prompt.clone())),
                     Event::PromptResolved { id, label, answers } => Some(Record::Resolved {
                         id: id.clone(), label: label.clone(), answers: answers.clone(),

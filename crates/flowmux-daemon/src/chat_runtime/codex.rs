@@ -136,6 +136,29 @@ pub(super) async fn send(
     .await
 }
 
+pub(super) async fn steer(
+    wire: &mut Wire,
+    thread: &str,
+    turn: &mut Turn,
+    text: String,
+) -> Result<()> {
+    let Some(turn_id) = turn.remote_id.as_deref() else {
+        return Ok(());
+    };
+    let request = wire
+        .request(
+            "turn/steer",
+            json!({
+                "threadId":thread, "expectedTurnId":turn_id,
+                "input":[{"type":"text","text":text,"text_elements":[]}],
+                "clientUserMessageId":uuid::Uuid::new_v4().to_string(),
+            }),
+        )
+        .await?;
+    turn.steer = Some((request, text));
+    Ok(())
+}
+
 pub(super) async fn interrupt(wire: &mut Wire, thread: &str, turn: &mut Turn) -> Result<()> {
     if let Some(turn_id) = turn
         .remote_id
@@ -187,6 +210,18 @@ pub(super) async fn frame(
             if turn.stop {
                 interrupt(wire, &session.key, turn).await?;
             }
+        } else if let Some((_, text)) = turn
+            .steer
+            .take_if(|(request, _)| frame["id"].as_u64() == Some(*request))
+        {
+            emit(
+                events,
+                match response(frame) {
+                    Ok(_) => Event::Steered { text },
+                    Err(error) => Event::SteerRejected(error.to_string()),
+                },
+            )
+            .await?;
         } else if frame["id"].as_u64() == turn.interrupt_request && frame.get("error").is_some() {
             turn.stop = false;
             turn.stop_deadline = None;

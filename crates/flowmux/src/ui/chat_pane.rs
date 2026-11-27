@@ -56,6 +56,7 @@ struct ChatUi {
     next_queue_id: Cell<u64>,
     queue_paused: Cell<bool>,
     queue_edit: RefCell<Option<QueueEdit>>,
+    steering: Cell<Option<u64>>,
     queue_panel: gtk::Box,
     queue_title: gtk::Label,
     queue_rows: gtk::Box,
@@ -261,6 +262,7 @@ impl ChatPane {
             next_queue_id: Cell::new(0),
             queue_paused: Cell::new(false),
             queue_edit: RefCell::new(None),
+            steering: Cell::new(None),
             queue_panel,
             queue_title,
             queue_rows,
@@ -1082,6 +1084,12 @@ impl ChatUi {
         };
         if !self.ready.get() {
             self.show_notice("Connect to the agent to send queued messages.");
+        } else if self.can_steer() {
+            let text = self.queue.borrow()[index].text.clone();
+            if self.try_input(Input::Steer { text }) {
+                self.steering.set(Some(id));
+                self.refresh_queue();
+            }
         } else if self.busy.get() {
             if self.stop(true) {
                 let mut queue = self.queue.borrow_mut();
@@ -1095,6 +1103,14 @@ impl ChatUi {
             self.queue_paused.set(false);
             self.send_queued(id);
         }
+    }
+
+    /// Codex accepts more input in its running turn; other agents stop and send.
+    fn can_steer(&self) -> bool {
+        self.provider == Some(Provider::Codex)
+            && self.busy.get()
+            && !self.stopping.get()
+            && self.steering.get().is_none()
     }
 
     fn send_next_queued(self: &Rc<Self>) {
@@ -1178,11 +1194,31 @@ impl ChatUi {
                 text.add_css_class("accent");
             }
             row.append(&text);
-            let now = gtk::Button::from_icon_name("go-up-symbolic");
+            let steering = self.steering.get() == Some(id);
+            let (icon, action, tooltip) = if steering {
+                (
+                    "content-loading-symbolic",
+                    "Steering",
+                    "Adding this message to the running turn…",
+                )
+            } else if self.can_steer() {
+                (
+                    "mail-send-symbolic",
+                    "Steer",
+                    "Steer · Add this message to the running turn",
+                )
+            } else {
+                (
+                    "go-up-symbolic",
+                    "Send now",
+                    "Send now · Stops the current turn if running",
+                )
+            };
+            let now = gtk::Button::from_icon_name(icon);
             now.add_css_class("flat");
-            now.set_tooltip_text(Some("Send now · Stops the current turn if running"));
-            now.update_property(&[gtk::accessible::Property::Label("Send now")]);
-            now.set_sensitive(!is_editing);
+            now.set_tooltip_text(Some(tooltip));
+            now.update_property(&[gtk::accessible::Property::Label(action)]);
+            now.set_sensitive(!is_editing && !steering);
             let weak = Rc::downgrade(self);
             now.connect_clicked(move |_| {
                 if let Some(ui) = weak.upgrade() {
@@ -1215,7 +1251,7 @@ impl ChatUi {
             remove.add_css_class("flat");
             remove.set_tooltip_text(Some("Remove queued message"));
             remove.update_property(&[gtk::accessible::Property::Label("Remove queued message")]);
-            remove.set_sensitive(!is_editing);
+            remove.set_sensitive(!is_editing && !steering);
             let weak = Rc::downgrade(self);
             remove.connect_clicked(move |_| {
                 if let Some(ui) = weak.upgrade().filter(|ui| ui.editing_id() != Some(id)) {
@@ -1299,10 +1335,23 @@ impl ChatUi {
                     self.status.set_label("Working…");
                 }
             }
+            Event::Steered { text } => {
+                if let Some(id) = self.steering.take() {
+                    self.queue.borrow_mut().retain(|entry| entry.id != id);
+                }
+                self.transcript.steer(&text);
+                self.refresh_queue();
+            }
+            Event::SteerRejected(error) => {
+                self.steering.set(None);
+                self.show_notice(&error);
+                self.refresh_queue();
+            }
             Event::Finished { status, detail } => {
                 self.finish_turn(&status, detail.as_deref());
                 self.clear_turn();
                 self.send_next_queued();
+                self.refresh_queue();
             }
             Event::Rejected(error) => {
                 self.queue_paused.set(true);
@@ -1372,6 +1421,8 @@ impl ChatUi {
     }
 
     fn clear_turn(&self) {
+        // An unconfirmed steer stays queued and can start the next turn.
+        self.steering.set(None);
         self.busy.set(false);
         self.stopping.set(false);
         self.last_text.borrow_mut().take();
