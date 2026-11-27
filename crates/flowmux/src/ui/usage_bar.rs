@@ -53,7 +53,7 @@ impl UsageBar {
         row.add_css_class("flowmux-usage-bar");
         let root = gtk::ScrolledWindow::builder()
             .child(&row)
-            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .hscrollbar_policy(gtk::PolicyType::External)
             .vscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
             .build();
