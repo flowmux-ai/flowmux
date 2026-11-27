@@ -31,14 +31,16 @@ enum Field {
     Cursor,
     SelectionBackground,
     SelectionForeground,
+    ChatBackground,
 }
 
-const FIELDS: [(Field, &str); 5] = [
+const FIELDS: [(Field, &str); 6] = [
     (Field::Background, "Terminal background"),
     (Field::Foreground, "Terminal text"),
     (Field::Cursor, "Cursor"),
     (Field::SelectionBackground, "Selection background"),
     (Field::SelectionForeground, "Selection text"),
+    (Field::ChatBackground, "Chat background"),
 ];
 
 fn override_slot(overrides: &mut ThemeOverrides, field: Field) -> &mut Option<String> {
@@ -48,6 +50,7 @@ fn override_slot(overrides: &mut ThemeOverrides, field: Field) -> &mut Option<St
         Field::Cursor => &mut overrides.cursor,
         Field::SelectionBackground => &mut overrides.selection_background,
         Field::SelectionForeground => &mut overrides.selection_foreground,
+        Field::ChatBackground => &mut overrides.chat_background,
     }
 }
 
@@ -58,6 +61,7 @@ fn override_value(overrides: &ThemeOverrides, field: Field) -> Option<String> {
         Field::Cursor => overrides.cursor.clone(),
         Field::SelectionBackground => overrides.selection_background.clone(),
         Field::SelectionForeground => overrides.selection_foreground.clone(),
+        Field::ChatBackground => overrides.chat_background.clone(),
     }
 }
 
@@ -79,6 +83,7 @@ fn base_color(cfg: &GhosttyConfig, field: Field) -> String {
         Field::Cursor => cfg.cursor_color.clone().unwrap_or(fg),
         Field::SelectionBackground => cfg.selection_background.clone().unwrap_or(bg),
         Field::SelectionForeground => cfg.selection_foreground.clone().unwrap_or(fg),
+        Field::ChatBackground => cfg.chat_background.clone().unwrap_or(bg),
     }
 }
 

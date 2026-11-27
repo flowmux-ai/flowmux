@@ -29,6 +29,8 @@ pub struct ResolvedTheme {
     pub cursor: gdk::RGBA,
     pub selection_bg: Option<gdk::RGBA>,
     pub selection_fg: Option<gdk::RGBA>,
+    /// Chat tabs follow the terminal background unless the theme sets their own.
+    pub chat_bg: gdk::RGBA,
     /// Always 16 entries. Missing or invalid colors use [`DEFAULT_PALETTE`].
     pub palette: Vec<gdk::RGBA>,
 }
@@ -92,6 +94,7 @@ impl ResolvedTheme {
         let cursor = cfg.cursor_color.as_deref().and_then(parse).unwrap_or(fg);
         let selection_bg = cfg.selection_background.as_deref().and_then(parse);
         let selection_fg = cfg.selection_foreground.as_deref().and_then(parse);
+        let chat_bg = cfg.chat_background.as_deref().and_then(parse).unwrap_or(bg);
 
         let palette: Vec<gdk::RGBA> = (0..16)
             .map(|i| {
@@ -113,6 +116,7 @@ impl ResolvedTheme {
             cursor,
             selection_bg,
             selection_fg,
+            chat_bg,
             palette,
         }
     }
@@ -315,7 +319,12 @@ impl ResolvedTheme {
             .replace("$border", &pane_border_css)
             .replace("$hover", &control_hover_css)
             .replace("$accent", &focus_full_css);
-        let chat_css = include_str!("ui/chat_pane/chat.css");
+        // The chat's `view` style would otherwise paint libadwaita's darker view color.
+        let chat_css = format!(
+            "#flowmux-chat {{ background-color: {}; }}\n{}",
+            rgba_css(&self.chat_bg),
+            include_str!("ui/chat_pane/chat.css")
+        );
         // GTK uses 72 DPI on macOS and 96 DPI on Linux for point-sized sidebar text.
         let sidebar_font_scale = if cfg!(target_os = "macos") {
             4.0 / 3.0
@@ -1144,6 +1153,25 @@ fn shift_lightness(c: &gdk::RGBA, delta: f32) -> gdk::RGBA {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_background_follows_the_theme_unless_set() {
+        let mut cfg = flowmux_config::ghostty::GhosttyConfig {
+            background: Some("#202830".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ResolvedTheme::from_ghostty(&cfg).chat_bg,
+            parse_or_black("#202830")
+        );
+        cfg.merge(flowmux_config::ghostty::parse(
+            "chat-background = #334455\n",
+        ));
+        assert_eq!(
+            ResolvedTheme::from_ghostty(&cfg).chat_bg,
+            parse_or_black("#334455")
+        );
+    }
 
     // Linearize sRGB for contrast measurement; the UI's dark/light heuristic
     // above intentionally measures brightness rather than a contrast ratio.

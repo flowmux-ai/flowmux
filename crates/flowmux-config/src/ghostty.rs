@@ -16,6 +16,8 @@ pub struct GhosttyConfig {
     pub cursor_color: Option<String>,
     pub selection_background: Option<String>,
     pub selection_foreground: Option<String>,
+    /// Chat tab background; the terminal background when unset.
+    pub chat_background: Option<String>,
     /// 16-color ANSI palette. Index N is the color for `palette = N=#...`.
     pub palette: [Option<String>; 16],
     /// Anything we don't model explicitly. Useful for diagnostics.
@@ -49,6 +51,9 @@ impl GhosttyConfig {
         }
         if other.selection_foreground.is_some() {
             self.selection_foreground = other.selection_foreground;
+        }
+        if other.chat_background.is_some() {
+            self.chat_background = other.chat_background;
         }
         for (i, v) in other.palette.into_iter().enumerate() {
             if v.is_some() {
@@ -115,6 +120,7 @@ pub fn parse(text: &str) -> GhosttyConfig {
             "cursor-color" => cfg.cursor_color = Some(value.into()),
             "selection-background" => cfg.selection_background = Some(value.into()),
             "selection-foreground" => cfg.selection_foreground = Some(value.into()),
+            "chat-background" => cfg.chat_background = Some(value.into()),
             "palette" => {
                 // Format: `palette = N=#RRGGBB` or `palette = N #RRGGBB`.
                 let rest = value

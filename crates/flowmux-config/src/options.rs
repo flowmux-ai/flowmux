@@ -432,6 +432,8 @@ pub struct ThemeOverrides {
     pub selection_background: Option<String>,
     #[serde(default)]
     pub selection_foreground: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_background: Option<String>,
 }
 
 impl ThemeOverrides {
@@ -451,6 +453,7 @@ impl ThemeOverrides {
             cursor_color: valid(&self.cursor),
             selection_background: valid(&self.selection_background),
             selection_foreground: valid(&self.selection_foreground),
+            chat_background: valid(&self.chat_background),
             ..Default::default()
         }
     }
