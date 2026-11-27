@@ -11,6 +11,7 @@ use gtk::glib;
 use crate::ui::chat_runtime::{Change, Prompt, TextKind, Work};
 use flowmux_state::chat_history::Record;
 
+mod highlight;
 mod markdown;
 mod selection;
 

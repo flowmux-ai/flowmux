@@ -5,7 +5,7 @@ use comrak::nodes::{AstNode, ListType, NodeTable, NodeValue, TableAlignment};
 use comrak::{format_commonmark, parse_document, Arena, Options};
 use gtk::prelude::*;
 
-use super::{copy_button, label, text_label};
+use super::{copy_button, highlight, label, text_label};
 
 #[derive(Default)]
 pub(super) struct Blocks(Vec<RenderedBlock>);
@@ -229,16 +229,17 @@ pub(super) fn code(language: &str, code: &str) -> gtk::Box {
     root.set_overflow(gtk::Overflow::Hidden);
     let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     toolbar.add_css_class("flowmux-chat-code-toolbar");
-    let language = label(language);
-    language.set_hexpand(true);
-    language.add_css_class("dim-label");
-    toolbar.append(&language);
+    let name = label(language);
+    name.set_hexpand(true);
+    name.add_css_class("dim-label");
+    toolbar.append(&name);
     let copy = copy_button("Copy code");
     let raw = code.to_owned();
     copy.connect_clicked(move |button| button.clipboard().set_text(&raw));
     toolbar.append(&copy);
     root.append(&toolbar);
     let view = gtk::TextView::builder()
+        .buffer(&highlight::buffer(language, code))
         .editable(false)
         .cursor_visible(false)
         .monospace(true)
@@ -248,7 +249,6 @@ pub(super) fn code(language: &str, code: &str) -> gtk::Box {
         .top_margin(4)
         .bottom_margin(4)
         .build();
-    view.buffer().set_text(code);
     let scroller = gtk::ScrolledWindow::builder()
         .child(&view)
         .propagate_natural_height(true)
