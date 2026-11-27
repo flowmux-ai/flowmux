@@ -3,9 +3,11 @@
 //! Images and videos an answer embeds with Markdown image syntax.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use gtk::{gdk, gio, glib, prelude::*};
 
+use super::viewer::{self, Content};
 use super::{text_label, FILE_LINK};
 
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
@@ -55,19 +57,23 @@ pub(super) fn classify(src: &str, base: &Path) -> Option<Source> {
     })
 }
 
+/// An image's encoded bytes, or the file holding them.
+#[derive(Clone)]
+pub(super) enum Pixels {
+    File(PathBuf),
+    Data(Arc<Vec<u8>>),
+}
+
 /// The widget for `![alt](src)`.
 pub(super) fn media(src: &str, alt: &str, base: &Path) -> gtk::Widget {
     match classify(src, base) {
-        Some(Source::Data(bytes)) => image(alt, None, move || Ok(bytes)),
-        Some(Source::Image(path)) => {
-            let read = path.clone();
-            image(alt, Some(path), move || read_limited(&read))
-        }
+        Some(Source::Data(bytes)) => image(alt, Pixels::Data(Arc::new(bytes))),
+        Some(Source::Image(path)) => image(alt, Pixels::File(path)),
         Some(Source::Video(path)) => video(alt, &path),
-        Some(Source::Remote(url)) => link(alt, &url, &url),
+        Some(Source::Remote(url)) => link(alt, &url, &url).upcast(),
         Some(Source::File(path)) => {
             let target = format!("{FILE_LINK}{}", path.display());
-            link(alt, &target, &path.display().to_string())
+            link(alt, &target, &path.display().to_string()).upcast()
         }
         None => text_label(alt).upcast(),
     }
@@ -83,8 +89,18 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|_| "The image is unavailable.".into())
 }
 
-/// A thumbnail no larger than `PREVIEW`, decoded within the image viewer's memory budget.
-pub(super) fn decode(bytes: &[u8]) -> Result<image::RgbaImage, String> {
+/// Decodes `pixels` to fit within `bound`, within the image viewer's memory budget.
+pub(super) fn decode_pixels(
+    pixels: &Pixels,
+    bound: (u32, u32),
+) -> Result<image::RgbaImage, String> {
+    match pixels {
+        Pixels::File(path) => decode(&read_limited(path)?, bound),
+        Pixels::Data(bytes) => decode(bytes, bound),
+    }
+}
+
+fn decode(bytes: &[u8], bound: (u32, u32)) -> Result<image::RgbaImage, String> {
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|_| "The image format is unknown.".to_string())?;
@@ -94,11 +110,31 @@ pub(super) fn decode(bytes: &[u8]) -> Result<image::RgbaImage, String> {
     let image = reader
         .decode()
         .map_err(|_| "The image could not be decoded.".to_string())?;
-    Ok(if image.width() > PREVIEW.0 || image.height() > PREVIEW.1 {
-        image.thumbnail(PREVIEW.0, PREVIEW.1).into_rgba8()
+    Ok(if image.width() > bound.0 || image.height() > bound.1 {
+        image.thumbnail(bound.0, bound.1).into_rgba8()
     } else {
         image.into_rgba8()
     })
+}
+
+pub(super) fn texture(rgba: image::RgbaImage) -> gdk::MemoryTexture {
+    let (width, height) = rgba.dimensions();
+    gdk::MemoryTexture::new(
+        width as i32,
+        height as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &glib::Bytes::from_owned(rgba.into_raw()),
+        width as usize * 4,
+    )
+}
+
+fn title(alt: &str, path: Option<&Path>, fallback: &str) -> String {
+    if !alt.is_empty() {
+        return alt.into();
+    }
+    path.and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| fallback.into())
 }
 
 fn caption(text: &str) -> gtk::Label {
@@ -108,78 +144,70 @@ fn caption(text: &str) -> gtk::Label {
     caption
 }
 
-fn image(
-    alt: &str,
-    path: Option<PathBuf>,
-    load: impl FnOnce() -> Result<Vec<u8>, String> + Send + 'static,
-) -> gtk::Widget {
+fn image(alt: &str, pixels: Pixels) -> gtk::Widget {
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 4);
     frame.add_css_class("flowmux-chat-media");
     let picture = gtk::Picture::builder()
         .can_shrink(true)
         .content_fit(gtk::ContentFit::Contain)
-        .halign(gtk::Align::Start)
         .build();
     picture.set_alternative_text(Some(alt).filter(|alt| !alt.is_empty()));
-    picture.update_property(&[gtk::accessible::Property::Label(if alt.is_empty() {
-        "Image"
-    } else {
-        alt
-    })]);
+    let name = title(
+        alt,
+        match &pixels {
+            Pixels::File(path) => Some(path),
+            Pixels::Data(_) => None,
+        },
+        "Image",
+    );
+    // A button, so the preview opens from the keyboard too.
+    let open = gtk::Button::builder()
+        .child(&picture)
+        .halign(gtk::Align::Start)
+        .tooltip_text("View image")
+        .visible(false)
+        .build();
+    open.add_css_class("flat");
+    open.add_css_class("flowmux-chat-media-open");
+    open.update_property(&[gtk::accessible::Property::Label(&format!("View {name}"))]);
     let status = caption("Loading image…");
-    frame.append(&picture);
+    frame.append(&open);
     frame.append(&status);
     if !alt.is_empty() {
         frame.append(&caption(alt));
     }
-    if let Some(path) = path.clone() {
-        picture.set_cursor_from_name(Some("pointer"));
-        picture.set_tooltip_text(Some(&format!("Open {}", path.display())));
-        let click = gtk::GestureClick::new();
-        click.connect_released(move |click, _, _, _| {
-            if let Some(widget) = click.widget() {
-                let _ = widget.activate_action(
-                    "chat.open-file",
-                    Some(&path.display().to_string().to_variant()),
-                );
-            }
-        });
-        picture.add_controller(click);
-    }
+    let shown = pixels.clone();
+    open.connect_clicked(move |open| {
+        viewer::show(open.upcast_ref(), &name, Content::Image(shown.clone()));
+    });
     // Decode once the preview is on screen, off the main thread.
-    let load = std::cell::Cell::new(Some(load));
-    picture.connect_map(move |picture| {
-        let Some(load) = load.take() else {
+    let pixels = std::cell::Cell::new(Some(pixels));
+    status.connect_map(move |status| {
+        let Some(pixels) = pixels.take() else {
             return;
         };
+        let open = open.downgrade();
         let picture = picture.downgrade();
         let status = status.downgrade();
         glib::spawn_future_local(async move {
-            let decoded = gio::spawn_blocking(move || decode(&load()?))
+            let decoded = gio::spawn_blocking(move || decode_pixels(&pixels, PREVIEW))
                 .await
                 .unwrap_or_else(|_| Err("The image could not be decoded.".into()));
-            let (Some(picture), Some(status)) = (picture.upgrade(), status.upgrade()) else {
+            let (Some(open), Some(picture), Some(status)) =
+                (open.upgrade(), picture.upgrade(), status.upgrade())
+            else {
                 return;
             };
             match decoded {
                 Ok(rgba) => {
-                    let (width, height) = rgba.dimensions();
-                    let texture = gdk::MemoryTexture::new(
-                        width as i32,
-                        height as i32,
-                        gdk::MemoryFormat::R8g8b8a8,
-                        &glib::Bytes::from_owned(rgba.into_raw()),
-                        width as usize * 4,
-                    );
-                    picture.set_paintable(Some(&texture));
+                    let height = rgba.height();
+                    picture.set_paintable(Some(&texture(rgba)));
                     // The height sets the preview's size; a narrow chat scales it down.
                     picture.set_height_request(height.min(PREVIEW_HEIGHT) as i32);
+                    open.set_visible(true);
                     status.set_visible(false);
                 }
-                Err(error) => {
-                    picture.set_visible(false);
-                    status.set_label(&error);
-                }
+                Err(error) => status.set_label(&error),
             }
         });
     });
@@ -194,27 +222,61 @@ fn video(alt: &str, path: &Path) -> gtk::Widget {
         .file(&gio::File::for_path(path))
         .height_request(240)
         .build();
-    video.update_property(&[gtk::accessible::Property::Label(if alt.is_empty() {
-        "Video"
-    } else {
-        alt
-    })]);
-    frame.append(&video);
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let label = if alt.is_empty() { name } else { alt.into() };
-    frame.append(&link(
-        &label,
+    let name = title(alt, Some(path), "Video");
+    video.update_property(&[gtk::accessible::Property::Label(&name)]);
+    let error = caption("");
+    error.set_visible(false);
+    show_errors(&video, &error);
+    let link = link(
+        &name,
         &format!("{FILE_LINK}{}", path.display()),
         &path.display().to_string(),
-    ));
+    );
+    link.set_hexpand(true);
+    let expand = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    expand.add_css_class("flat");
+    expand.set_tooltip_text(Some("View larger"));
+    expand.update_property(&[gtk::accessible::Property::Label(&format!(
+        "View {name} larger"
+    ))]);
+    let path = path.to_path_buf();
+    expand.connect_clicked(move |expand| {
+        viewer::show(expand.upcast_ref(), &name, Content::Video(path.clone()));
+    });
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row.append(&link);
+    row.append(&expand);
+    frame.append(&video);
+    frame.append(&error);
+    frame.append(&row);
     frame.upcast()
 }
 
+/// Replaces `video` with the stream's error, which would otherwise leave an empty box.
+pub(super) fn show_errors(video: &gtk::Video, status: &gtk::Label) {
+    let Some(stream) = video.media_stream() else {
+        return;
+    };
+    let show = {
+        let video = video.downgrade();
+        let status = status.downgrade();
+        move |stream: &gtk::MediaStream| {
+            let (Some(video), Some(status), Some(error)) =
+                (video.upgrade(), status.upgrade(), stream.error())
+            else {
+                return;
+            };
+            video.set_visible(false);
+            status.set_label(&format!("The video cannot play: {}", error.message()));
+            status.set_visible(true);
+        }
+    };
+    show(&stream);
+    stream.connect_error_notify(show);
+}
+
 /// A link that opens on request: remote media in the browser, local files in Flowmux.
-fn link(alt: &str, target: &str, tooltip: &str) -> gtk::Widget {
+fn link(alt: &str, target: &str, tooltip: &str) -> gtk::Label {
     let text = if alt.is_empty() { tooltip } else { alt };
     let label = text_label("");
     label.set_markup(&format!(
@@ -223,7 +285,7 @@ fn link(alt: &str, target: &str, tooltip: &str) -> gtk::Widget {
         glib::markup_escape_text(text)
     ));
     label.set_tooltip_text(Some(tooltip));
-    label.upcast()
+    label
 }
 
 #[cfg(test)]
@@ -262,8 +324,12 @@ mod tests {
         image::RgbaImage::new(2000, 500)
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .unwrap();
-        let preview = decode(&png).unwrap();
+        let pixels = Pixels::Data(Arc::new(png));
+        let preview = decode_pixels(&pixels, PREVIEW).unwrap();
         assert!(preview.width() <= PREVIEW.0 && preview.height() <= PREVIEW.1);
-        assert!(decode(b"not an image").is_err());
+        // The viewer decodes the original again rather than enlarging the thumbnail.
+        let full = decode_pixels(&pixels, viewer::FULL).unwrap();
+        assert_eq!(full.dimensions(), (2000, 500));
+        assert!(decode(b"not an image", PREVIEW).is_err());
     }
 }

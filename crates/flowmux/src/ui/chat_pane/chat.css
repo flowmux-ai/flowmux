@@ -241,3 +241,7 @@
     font-family: monospace;
     background: alpha(@accent_bg_color, 0.16);
 }
+
+.flowmux-chat-media-open {
+    padding: 0;
+}

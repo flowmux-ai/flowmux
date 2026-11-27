@@ -15,6 +15,7 @@ mod highlight;
 mod markdown;
 mod media;
 mod selection;
+mod viewer;
 
 type OpenFile = dyn Fn(&str);
 type Respond = dyn Fn(String, usize, Vec<String>) -> bool;

@@ -3448,6 +3448,22 @@ The MIT License (MIT)
 Copyright (c) 2015 Steven Fackler
 ~~~~
 
+Used by: gif 0.14.2
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2015 nwin
+~~~~
+
+Used by: color_quant 1.1.0
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) 2016 PistonDevelopers
+~~~~
+
 Used by: same-file 1.0.6, winapi-util 0.1.11
 
 ~~~~text
@@ -3478,6 +3494,14 @@ Used by: crossbeam-channel 0.5.15, crossbeam-deque 0.8.7, crossbeam-epoch 0.9.20
 The MIT License (MIT)
 
 Copyright (c) 2019 The Crossbeam Project Developers
+~~~~
+
+Used by: weezl 0.1.12
+
+~~~~text
+The MIT License (MIT)
+
+Copyright (c) HeroicKatora 2020
 ~~~~
 
 Used by: version_check 0.9.5
