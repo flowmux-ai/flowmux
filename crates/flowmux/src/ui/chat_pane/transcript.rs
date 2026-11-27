@@ -18,21 +18,27 @@ type OpenFile = dyn Fn(&str);
 type Respond = dyn Fn(String, usize, Vec<String>) -> bool;
 
 const PAGE: usize = 24;
-const RAIL_LIMIT: usize = 17;
+const RAIL_LIMIT: usize = 20;
+// Narrower conversations keep their width for messages; the outline still navigates.
+const RAIL_MIN_WIDTH: i32 = 512;
 const TEXT_LIMIT: usize = 192 * 1024;
 
 pub(super) struct Transcript {
     pub root: gtk::Box,
+    pub outline: gtk::MenuButton,
     view: Rc<View>,
 }
 
 struct View {
+    root: gtk::Box,
+    outline: gtk::MenuButton,
     history: gtk::Box,
     scroller: gtk::ScrolledWindow,
     older: gtk::Button,
     latest: gtk::Button,
     rail: gtk::Box,
     rail_preview: gtk::Label,
+    rail_fade: RefCell<Option<glib::SourceId>>,
     track: gtk::ScrolledWindow,
     turns: RefCell<Vec<Turn>>,
     first: Cell<usize>,
@@ -57,11 +63,19 @@ struct Turn {
     elapsed: Option<u64>,
     status: String,
     rows: HashMap<String, Row>,
+    answer: Option<String>,
     open: Cell<bool>,
     pending: HashMap<String, gtk::Box>,
-    open_read_run: Option<gtk::Expander>,
-    read_runs: Vec<gtk::Expander>,
+    runs: Vec<Run>,
+    open_run: Option<usize>,
     explicit_open: Cell<Option<bool>>,
+}
+
+/// Consecutive tool calls; a second call moves both rows into one summary row.
+#[derive(Default)]
+struct Run {
+    keys: Vec<String>,
+    group: Option<gtk::Expander>,
 }
 
 enum Row {
@@ -82,7 +96,7 @@ struct WorkRow {
     root: gtk::Expander,
     detail: gtk::Label,
     work: Work,
-    read_run: Option<gtk::Expander>,
+    run: Option<usize>,
 }
 
 pub(super) fn label(text: &str) -> gtk::Label {
@@ -99,6 +113,24 @@ fn text_label(text: &str) -> gtk::Label {
     label
 }
 
+/// An expander whose title ellipsizes instead of setting the transcript's minimum width.
+fn expander(title: &str) -> gtk::Expander {
+    let expander = gtk::Expander::new(None);
+    let heading = gtk::Label::new(None);
+    heading.set_xalign(0.0);
+    heading.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    expander.set_label_widget(Some(&heading));
+    set_title(&expander, title);
+    expander
+}
+
+fn set_title(expander: &gtk::Expander, title: &str) {
+    if let Some(heading) = expander.label_widget().and_downcast::<gtk::Label>() {
+        heading.set_label(title);
+        heading.set_tooltip_text(Some(title));
+    }
+}
+
 impl Transcript {
     pub fn new() -> Self {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -113,8 +145,6 @@ impl Transcript {
         older.set_visible(false);
         history.append(&older);
         let clamp = adw::Clamp::new();
-        // The transcript keeps its reading width while the composer can shrink.
-        clamp.set_width_request(400);
         clamp.set_maximum_size(840);
         clamp.set_child(Some(&history));
 
@@ -163,13 +193,44 @@ impl Transcript {
             .build();
         root.append(&track);
 
+        let outline_search = gtk::SearchEntry::new();
+        outline_search.set_placeholder_text(Some("Search messages"));
+        outline_search.update_property(&[gtk::accessible::Property::Label("Search messages")]);
+        let outline_list = gtk::ListBox::new();
+        outline_list.set_selection_mode(gtk::SelectionMode::None);
+        outline_list.update_property(&[gtk::accessible::Property::Label("Conversation outline")]);
+        let outline_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        outline_box.append(&outline_search);
+        outline_box.append(
+            &gtk::ScrolledWindow::builder()
+                .child(&outline_list)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .propagate_natural_height(true)
+                .max_content_height(360)
+                .min_content_width(240)
+                .build(),
+        );
+        let outline_popover = gtk::Popover::new();
+        outline_popover.set_child(Some(&outline_box));
+        let outline = gtk::MenuButton::builder()
+            .icon_name("view-list-symbolic")
+            .tooltip_text("Conversation outline")
+            .popover(&outline_popover)
+            .visible(false)
+            .build();
+        outline.add_css_class("flat");
+        outline.update_property(&[gtk::accessible::Property::Label("Conversation outline")]);
+
         let view = Rc::new(View {
+            root: root.clone(),
+            outline: outline.clone(),
             history,
             scroller,
             older,
             latest,
             rail,
             rail_preview,
+            rail_fade: RefCell::new(None),
             track,
             turns: RefCell::new(Vec::new()),
             first: Cell::new(0),
@@ -189,6 +250,13 @@ impl Transcript {
                 view.schedule_adjustment();
             }
         });
+        // Width changes reflow messages and decide whether the rail fits.
+        let weak = Rc::downgrade(&view);
+        view.scroller.hadjustment().connect_changed(move |_| {
+            if let Some(view) = weak.upgrade() {
+                view.schedule_adjustment();
+            }
+        });
         let weak = Rc::downgrade(&view);
         view.scroller
             .vadjustment()
@@ -198,10 +266,76 @@ impl Transcript {
                         view.jump_target.set(None);
                         view.follow.set(distance_to_end(adjustment) < 8.0);
                         view.latest.set_visible(!view.follow.get());
+                        view.wake_rail();
                     }
                     view.highlight_rail();
                 }
             });
+        let filter = outline_search.clone();
+        outline_list.set_filter_func(move |row| {
+            let query = filter.text().to_lowercase();
+            query.is_empty()
+                || row
+                    .child()
+                    .and_downcast::<gtk::Label>()
+                    .is_some_and(|text| text.label().to_lowercase().contains(&query))
+        });
+        let list = outline_list.clone();
+        outline_search.connect_search_changed(move |_| list.invalidate_filter());
+        let list = outline_list.clone();
+        outline_search.connect_activate(move |_| {
+            // Enter can arrive before the delayed search-changed signal.
+            list.invalidate_filter();
+            let mut index = 0;
+            while let Some(row) = list.row_at_index(index) {
+                if row.is_child_visible() {
+                    row.emit_activate();
+                    break;
+                }
+                index += 1;
+            }
+        });
+        let weak = Rc::downgrade(&view);
+        let popover = outline_popover.clone();
+        outline_list.connect_row_activated(move |_, row| {
+            popover.popdown();
+            if let Some(view) = weak.upgrade() {
+                let index = row.index() as usize;
+                let pending = view
+                    .turns
+                    .borrow()
+                    .get(index)
+                    .is_some_and(|turn| !turn.pending.is_empty());
+                view.jump(index, pending);
+            }
+        });
+        let weak = Rc::downgrade(&view);
+        outline_popover.connect_show(move |_| {
+            let Some(view) = weak.upgrade() else {
+                return;
+            };
+            outline_search.set_text("");
+            outline_list.remove_all();
+            for (index, turn) in view.turns.borrow().iter().enumerate() {
+                let text = label(&format!(
+                    "{}. {}",
+                    index + 1,
+                    excerpt(&turn.prompt.label(), 160)
+                ));
+                text.set_wrap(false);
+                text.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                text.set_max_width_chars(48);
+                text.set_margin_top(4);
+                text.set_margin_bottom(4);
+                if !turn.pending.is_empty() {
+                    text.add_css_class("warning");
+                } else if turn.failed() {
+                    text.add_css_class("error");
+                }
+                outline_list.append(&text);
+            }
+            outline_search.grab_focus();
+        });
         let weak = Rc::downgrade(&view);
         view.latest.connect_clicked(move |_| {
             if let Some(view) = weak.upgrade() {
@@ -242,7 +376,11 @@ impl Transcript {
             glib::Propagation::Stop
         });
         view.rail.add_controller(keys);
-        Self { root, view }
+        Self {
+            root,
+            outline,
+            view,
+        }
     }
 
     pub fn set_open_file(&self, callback: impl Fn(&str) + 'static) {
@@ -309,10 +447,11 @@ impl Transcript {
             elapsed: None,
             status: "Working".into(),
             rows: HashMap::new(),
+            answer: None,
             open: Cell::new(true),
             pending: HashMap::new(),
-            open_read_run: None,
-            read_runs: Vec::new(),
+            runs: Vec::new(),
+            open_run: None,
             explicit_open: Cell::new(None),
         });
         self.view.history.append(&root);
@@ -407,12 +546,16 @@ impl Transcript {
         let Some(turn) = turns.last_mut() else {
             return;
         };
-        let row = turn.rows.entry(format!("text:{id}")).or_insert_with(|| {
-            turn.open_read_run = None;
+        let key = format!("text:{id}");
+        if kind == TextKind::Answer {
+            turn.answer = Some(key.clone());
+        }
+        let row = turn.rows.entry(key).or_insert_with(|| {
+            turn.open_run = None;
             let contents = gtk::Box::new(gtk::Orientation::Vertical, 6);
             let mut root = contents.clone().upcast::<gtk::Widget>();
             if kind == TextKind::Reasoning {
-                let expander = gtk::Expander::new(Some("Reasoning summary"));
+                let expander = expander("Reasoning summary");
                 expander.set_child(Some(&contents));
                 expander.add_css_class("dim-label");
                 root = expander.upcast();
@@ -461,53 +604,47 @@ impl Transcript {
         let Some(turn) = turns.last_mut() else {
             return;
         };
-        let row = turn
-            .rows
-            .entry(format!("work:{}", work.id))
-            .or_insert_with(|| {
-                let root = gtk::Expander::new(None);
-                let detail = text_label("");
-                detail.add_css_class("monospace");
-                detail.set_margin_start(12);
-                let scroller = gtk::ScrolledWindow::builder()
-                    .child(&detail)
-                    .max_content_height(180)
-                    .propagate_natural_height(true)
-                    .hscrollbar_policy(gtk::PolicyType::Never)
-                    .build();
-                root.set_child(Some(&scroller));
-                let read_run = if work.read {
-                    let group = turn.open_read_run.get_or_insert_with(|| {
-                        let group = gtk::Expander::new(None);
-                        let contents = gtk::Box::new(gtk::Orientation::Vertical, 4);
-                        contents.set_margin_start(12);
-                        group.set_child(Some(&contents));
-                        turn.entries.append(&group);
-                        turn.read_runs.push(group.clone());
-                        group
-                    });
-                    let contents = group.child().and_downcast::<gtk::Box>().unwrap();
-                    contents.append(&root);
-                    group.set_label(Some(&format!(
-                        "Read activity · {}",
-                        contents.observe_children().n_items()
-                    )));
-                    Some(group.clone())
-                } else {
-                    turn.open_read_run = None;
-                    turn.entries.append(&root);
-                    None
-                };
+        let key = format!("work:{}", work.id);
+        if !turn.rows.contains_key(&key) {
+            let root = expander("");
+            let detail = text_label("");
+            detail.add_css_class("monospace");
+            detail.set_margin_start(12);
+            let scroller = gtk::ScrolledWindow::builder()
+                .child(&detail)
+                .max_content_height(180)
+                .propagate_natural_height(true)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .build();
+            root.set_child(Some(&scroller));
+            // The plan updates in place, so it stays outside tool runs.
+            let run = if work.id == "turn-plan" {
+                turn.open_run = None;
+                turn.entries.append(&root);
+                None
+            } else {
+                Some(turn.attach(&key, &root))
+            };
+            turn.rows.insert(
+                key.clone(),
                 Row::Work(WorkRow {
                     root,
                     detail,
                     work: work.clone(),
-                    read_run,
-                })
-            });
-        if let Row::Work(row) = row {
-            row.work = work;
-            row.update(turn.open.get());
+                    run,
+                }),
+            );
+        }
+        let open = turn.open.get();
+        let Some(Row::Work(row)) = turn.rows.get_mut(&key) else {
+            return;
+        };
+        row.work = work;
+        let run = row.run;
+        let group = run.and_then(|index| turn.runs[index].group.clone());
+        row.update(open, group.as_ref());
+        if let (Some(index), Some(group)) = (run, group) {
+            set_title(&group, &turn.run_title(index));
         }
     }
 
@@ -516,7 +653,7 @@ impl Transcript {
         let Some(turn) = turns.last_mut() else {
             return;
         };
-        turn.open_read_run = None;
+        turn.open_run = None;
         let card = gtk::Box::new(gtk::Orientation::Vertical, 6);
         card.add_css_class("card");
         card.set_widget_name("flowmux-chat-approval");
@@ -558,7 +695,13 @@ impl Transcript {
             card.append(&input);
             inputs.push(input);
         }
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        // Choices wrap onto more lines in a narrow chat.
+        let actions = gtk::FlowBox::new();
+        actions.set_selection_mode(gtk::SelectionMode::None);
+        actions.set_halign(gtk::Align::Start);
+        actions.set_column_spacing(6);
+        actions.set_row_spacing(6);
+        actions.set_max_children_per_line(prompt.choices.len().max(1) as u32);
         for (index, title) in prompt.choices.iter().enumerate() {
             let button = gtk::Button::with_label(title);
             let id = prompt.id.clone();
@@ -645,9 +788,15 @@ impl Transcript {
                 Row::Work(work) if work.work.running => {
                     work.work.running = false;
                     work.work.changes.clear();
-                    work.update(false);
+                    let group = work.run.and_then(|index| turn.runs[index].group.as_ref());
+                    work.update(false, group);
                 }
                 Row::Work(_) => {}
+            }
+        }
+        for index in 0..turn.runs.len() {
+            if let Some(group) = turn.runs[index].group.clone() {
+                set_title(&group, &turn.run_title(index));
             }
         }
         let expanded = turn.explicit_open.get().unwrap_or(false);
@@ -687,20 +836,26 @@ impl Transcript {
                 Some((added, removed)) => format!("Changed files · {files} · +{added} −{removed}"),
                 None => format!("Changed files · {files}"),
             };
-            let heading = gtk::Expander::new(Some(&title));
+            let heading = expander(&title);
             let list = gtk::Box::new(gtk::Orientation::Vertical, 5);
             let open_file = self.view.open_file.borrow().clone();
             for (path, edits) in changes {
                 let item = gtk::Box::new(gtk::Orientation::Vertical, 3);
-                let button = gtk::Button::with_label(path);
-                button.set_halign(gtk::Align::Start);
+                let name = gtk::Label::new(Some(path));
+                name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+                name.set_xalign(0.0);
+                let button = gtk::Button::builder()
+                    .child(&name)
+                    .tooltip_text(path)
+                    .halign(gtk::Align::Start)
+                    .build();
                 button.add_css_class("flat");
                 let file = path.to_owned();
                 let open_file = open_file.clone();
                 button.connect_clicked(move |_| open_file(&file));
                 item.append(&button);
                 for edit in edits.iter().filter(|edit| !edit.diff.is_empty()) {
-                    let diff = gtk::Expander::new(Some(&diff_label(&edit.diff)));
+                    let diff = expander(&diff_label(&edit.diff));
                     diff.set_child(Some(&markdown::code("diff", &edit.diff)));
                     item.append(&diff);
                 }
@@ -717,7 +872,7 @@ impl Transcript {
             } else {
                 format!("Checks · {}", checks.len())
             };
-            let heading = gtk::Expander::new(Some(&title));
+            let heading = expander(&title);
             let list = gtk::Box::new(gtk::Orientation::Vertical, 5);
             for (check, failed) in checks {
                 let check = text_label(&format!("{} {check}", if failed { "✕" } else { "✓" }));
@@ -745,8 +900,61 @@ impl Turn {
             .set_label(&format!("{} · {elapsed}s", self.status));
     }
 
+    fn failed(&self) -> bool {
+        matches!(self.status.as_str(), "Failed" | "Disconnected" | "Not sent")
+    }
+
+    /// Adds a tool row to the open run, grouping it with the previous row when there is one.
+    fn attach(&mut self, key: &str, root: &gtk::Expander) -> usize {
+        let index = *self.open_run.get_or_insert_with(|| {
+            self.runs.push(Run::default());
+            self.runs.len() - 1
+        });
+        let run = &mut self.runs[index];
+        run.keys.push(key.to_owned());
+        if run.keys.len() == 1 {
+            self.entries.append(root);
+            return index;
+        }
+        let group = run.group.get_or_insert_with(|| {
+            let group = expander("");
+            let contents = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            contents.set_margin_start(12);
+            group.set_child(Some(&contents));
+            group.set_visible(self.open.get());
+            if let Some(Row::Work(first)) = self.rows.get(&run.keys[0]) {
+                self.entries
+                    .insert_child_after(&group, first.root.prev_sibling().as_ref());
+                self.entries.remove(&first.root);
+                contents.append(&first.root);
+                if first.work.failed {
+                    group.add_css_class("error");
+                    group.set_expanded(true);
+                    group.set_visible(true);
+                }
+            }
+            group
+        });
+        if let Some(contents) = group.child().and_downcast::<gtk::Box>() {
+            contents.append(root);
+        }
+        index
+    }
+
+    fn run_title(&self, index: usize) -> String {
+        let works: Vec<_> = self.runs[index]
+            .keys
+            .iter()
+            .filter_map(|key| match self.rows.get(key) {
+                Some(Row::Work(row)) => Some(&row.work),
+                _ => None,
+            })
+            .collect();
+        run_title(&works)
+    }
+
     fn show_process(&self) {
-        for group in &self.read_runs {
+        for group in self.runs.iter().filter_map(|run| run.group.as_ref()) {
             group.set_visible(self.open.get() || group.has_css_class("error"));
         }
         for row in self.rows.values() {
@@ -785,7 +993,7 @@ impl Turn {
 }
 
 impl WorkRow {
-    fn update(&self, visible: bool) {
+    fn update(&self, visible: bool, group: Option<&gtk::Expander>) {
         let title = if self.work.failed {
             format!("Failed · {}", self.work.title)
         } else if self.work.running {
@@ -793,20 +1001,56 @@ impl WorkRow {
         } else {
             self.work.title.clone()
         };
-        self.root.set_label(Some(&title));
+        set_title(&self.root, &title);
         self.detail.set_label(&self.work.detail);
         self.root.set_visible(visible || self.work.failed);
         if self.work.failed {
             self.root.add_css_class("error");
-            if let Some(group) = &self.read_run {
+            if let Some(group) = group {
                 group.add_css_class("error");
                 group.set_expanded(true);
             }
         }
-        if let Some(group) = &self.read_run {
+        if let Some(group) = group {
             group.set_visible(visible || group.has_css_class("error"));
         }
     }
+}
+
+fn run_title(works: &[&Work]) -> String {
+    const KINDS: [(&str, &str); 4] = [
+        ("read", "reads"),
+        ("command", "commands"),
+        ("file change", "file changes"),
+        ("tool call", "tool calls"),
+    ];
+    let mut counts = [0usize; KINDS.len()];
+    for work in works {
+        let kind = if work.read {
+            0
+        } else if work.title.starts_with("Command") {
+            1
+        } else if !work.changes.is_empty() || work.title == "File changes" {
+            2
+        } else {
+            3
+        };
+        counts[kind] += 1;
+    }
+    let mut parts: Vec<_> = counts
+        .iter()
+        .zip(KINDS)
+        .filter(|(count, _)| **count > 0)
+        .map(|(count, (one, many))| format!("{count} {}", if *count == 1 { one } else { many }))
+        .collect();
+    let failed = works.iter().filter(|work| work.failed).count();
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    if let Some(work) = works.iter().rev().find(|work| work.running) {
+        parts.push(format!("Running · {}", work.title));
+    }
+    parts.join(" · ")
 }
 
 impl View {
@@ -832,6 +1076,7 @@ impl View {
                 return;
             };
             view.adjustment_scheduled.set(false);
+            view.fit_rail();
             if view.follow.get() && !view.jump_pending.get() {
                 let adjustment = view.scroller.vadjustment();
                 view.scrolling.set(true);
@@ -909,7 +1154,7 @@ impl View {
             button.add_css_class("flat");
             if pending {
                 button.add_css_class("waiting");
-            } else if matches!(turn.status.as_str(), "Failed" | "Disconnected" | "Not sent") {
+            } else if turn.failed() {
                 button.add_css_class("failed");
             }
             let mark = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -919,7 +1164,7 @@ impl View {
             button.set_child(Some(&mark));
             let motion = gtk::EventControllerMotion::new();
             let rail_preview = self.rail_preview.clone();
-            let prompt = turn.prompt.clone();
+            let weak = Rc::downgrade(self);
             motion.connect_enter(move |motion, _, _| {
                 let Some(overlay) = rail_preview.parent() else {
                     return;
@@ -930,7 +1175,10 @@ impl View {
                 else {
                     return;
                 };
-                rail_preview.set_label(&prompt.label());
+                let Some(text) = weak.upgrade().and_then(|view| view.preview(index)) else {
+                    return;
+                };
+                rail_preview.set_markup(&text);
                 rail_preview.set_margin_top(0);
                 rail_preview.set_visible(true);
                 let (_, width, _, _) = rail_preview.measure(gtk::Orientation::Horizontal, -1);
@@ -965,13 +1213,54 @@ impl View {
             }
             buttons.push((index, button));
         }
-        self.track.set_visible(count > 0);
+        self.outline.set_visible(count > 0);
         *self.rail_buttons.borrow_mut() = buttons;
         drop(turns);
+        self.fit_rail();
         if let Some(button) = restore_focus {
             button.grab_focus();
         }
         self.highlight_rail();
+    }
+
+    fn fit_rail(&self) {
+        let show = !self.rail_buttons.borrow().is_empty() && self.root.width() >= RAIL_MIN_WIDTH;
+        if self.track.is_visible() != show {
+            self.track.set_visible(show);
+        }
+    }
+
+    /// Shows the rail at full strength briefly after the reader scrolls.
+    fn wake_rail(self: &Rc<Self>) {
+        self.rail.add_css_class("active");
+        if let Some(source) = self.rail_fade.take() {
+            source.remove();
+        }
+        let weak = Rc::downgrade(self);
+        let source = glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+            if let Some(view) = weak.upgrade() {
+                view.rail_fade.take();
+                view.rail.remove_css_class("active");
+            }
+        });
+        *self.rail_fade.borrow_mut() = Some(source);
+    }
+
+    fn preview(&self, index: usize) -> Option<String> {
+        let turns = self.turns.try_borrow().ok()?;
+        let turn = turns.get(index)?;
+        let prompt = glib::markup_escape_text(&excerpt(&turn.prompt.label(), 200));
+        let answer = turn
+            .answer
+            .as_ref()
+            .and_then(|key| match turn.rows.get(key) {
+                Some(Row::Text(row)) => Some(excerpt(&row.text, 240)),
+                _ => None,
+            });
+        Some(match answer.filter(|answer| !answer.is_empty()) {
+            Some(answer) => format!("<b>{prompt}</b>\n{}", glib::markup_escape_text(&answer)),
+            None => format!("<b>{prompt}</b>"),
+        })
     }
 
     fn active_turn(&self, turns: &[Turn]) -> Option<usize> {
@@ -1071,6 +1360,24 @@ fn receipt(card: &gtk::Box, result: &str, answers: &[String]) {
     card.append(&result);
 }
 
+/// The text on one line, up to `limit` characters.
+fn excerpt(text: &str, limit: usize) -> String {
+    let mut words = String::new();
+    for word in text.split_whitespace() {
+        if !words.is_empty() {
+            words.push(' ');
+        }
+        words.push_str(word);
+        if words.len() > limit * 4 {
+            break;
+        }
+    }
+    match words.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &words[..end]),
+        None => words,
+    }
+}
+
 fn preview(text: &str, limit: usize) -> String {
     let first = text
         .lines()
@@ -1130,6 +1437,69 @@ fn rail_indices(count: usize, active: Option<usize>, focused: Option<usize>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn work(id: &str, title: &str, read: bool) -> Work {
+        Work {
+            id: id.into(),
+            title: title.into(),
+            detail: String::new(),
+            running: false,
+            failed: false,
+            read,
+            changes: Vec::new(),
+            check: None,
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn transcript_reflows_long_rows_instead_of_widening() {
+        adw::init().unwrap();
+        let transcript = Transcript::new();
+        transcript.begin(&"word ".repeat(200));
+        let long = format!("Command · {}", "x".repeat(150));
+        transcript.work(work("a", &long, false));
+        transcript.work(work("b", "Read · cat README.md", true));
+        transcript.text(
+            "answer".into(),
+            TextKind::Answer,
+            format!("Done.\n\n```rust\n{}\n```", "let value = 1; ".repeat(40)),
+            false,
+        );
+        transcript.prompt(Prompt {
+            id: "1".into(),
+            title: "Allow the command?".into(),
+            detail: long.clone(),
+            choices: vec![
+                "Allow once".into(),
+                "Allow for this session".into(),
+                "Decline".into(),
+            ],
+            questions: Vec::new(),
+        });
+        let mut changed = work("c", "File changes", false);
+        changed.changes.push(Change {
+            path: format!("{}/file.rs", "deeply/nested".repeat(12)),
+            diff: "+added\n-removed".into(),
+        });
+        transcript.work(changed);
+        transcript.finish("Completed", None, 3);
+        let (minimum, ..) = transcript
+            .view
+            .history
+            .measure(gtk::Orientation::Horizontal, -1);
+        assert!(minimum < 240, "transcript minimum width {minimum}");
+
+        // Both tool calls share one summary row; the edit started a new row after the prompt.
+        let turns = transcript.view.turns.borrow();
+        let groups = turns[0]
+            .runs
+            .iter()
+            .filter(|run| run.group.is_some())
+            .count();
+        assert_eq!(groups, 1);
+        assert_eq!(turns[0].run_title(0), "1 read · 1 command");
+    }
 
     #[test]
     fn rail_retains_endpoints_and_the_active_prompt() {

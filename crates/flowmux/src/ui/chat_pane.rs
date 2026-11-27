@@ -65,16 +65,14 @@ struct ChatUi {
     root: glib::WeakRef<gtk::Box>,
     status: gtk::Label,
     notice: gtk::Label,
-    model: Picker,
-    access: Picker,
-    effort: gtk::ListBox,
-    effort_ids: RefCell<Vec<String>>,
+    model: Choices,
+    access: Choices,
+    effort: Choices,
     plan: gtk::ToggleButton,
     details: gtk::MenuButton,
     settings_summary: gtk::Label,
     composer: gtk::TextView,
     send: gtk::Button,
-    stop: gtk::Button,
     transcript: Transcript,
 }
 
@@ -141,10 +139,12 @@ impl ChatPane {
         let queue_clamp = adw::Clamp::new();
         queue_clamp.set_maximum_size(840);
         queue_clamp.set_child(Some(&queue_panel));
-        layout.append(&queue_clamp);
 
         let transcript = Transcript::new();
+        header.append(&transcript.outline);
         layout.append(&transcript.root);
+        // Queued messages sit with the composer that sends them.
+        layout.append(&queue_clamp);
         let composer = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
             .top_margin(8)
@@ -178,11 +178,9 @@ impl ChatPane {
         notice.add_css_class("error");
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         controls.add_css_class("flowmux-chat-controls");
-        let model = picker("Model");
-        let access = picker("Access");
-        let effort = gtk::ListBox::new();
-        effort.add_css_class("boxed-list");
-        effort.update_property(&[gtk::accessible::Property::Label("Reasoning intensity")]);
+        let model = Choices::new("Model");
+        let access = Choices::new("Access");
+        let effort = Choices::new("Reasoning intensity");
         let plan = gtk::ToggleButton::with_label("Plan");
         plan.set_tooltip_text(Some("Prepare a plan with read-only access for this turn"));
         let options = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -190,44 +188,39 @@ impl ChatPane {
         options.set_margin_end(6);
         options.set_margin_top(6);
         options.set_margin_bottom(6);
-        options.append(&model.widget);
-        let reasoning = gtk::Box::new(gtk::Orientation::Vertical, 3);
-        let reasoning_label = label("Reasoning intensity");
-        reasoning_label.add_css_class("dim-label");
-        reasoning.append(&reasoning_label);
-        reasoning.append(&effort);
-        options.append(&reasoning);
-        options.append(&access.widget);
+        options.append(&model.section);
+        options.append(&effort.section);
+        options.append(&access.section);
         options.append(&plan);
         let end = gtk::Button::with_label("End session");
         end.add_css_class("destructive-action");
         options.append(&end);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&options));
+        // The current settings are the button, so the summary also opens them.
+        let settings_summary = label("");
+        settings_summary.set_wrap(false);
+        settings_summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        settings_summary.add_css_class("dim-label");
+        let details_content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        details_content.append(&gtk::Image::from_icon_name("view-more-symbolic"));
+        details_content.append(&settings_summary);
         let details = gtk::MenuButton::builder()
-            .icon_name("view-more-symbolic")
+            .child(&details_content)
             .tooltip_text("Chat settings")
             .popover(&popover)
             .build();
         details.add_css_class("flat");
         details.update_property(&[gtk::accessible::Property::Label("Chat settings")]);
-        let settings_summary = label("");
-        settings_summary.set_wrap(false);
-        settings_summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        settings_summary.set_hexpand(true);
-        settings_summary.add_css_class("dim-label");
+        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
         let send = gtk::Button::from_icon_name("go-up-symbolic");
         send.set_widget_name("flowmux-chat-send");
         send.add_css_class("suggested-action");
         send.add_css_class("pill");
         send.set_valign(gtk::Align::Center);
-        let stop = gtk::Button::from_icon_name("media-playback-stop-symbolic");
-        stop.add_css_class("flat");
-        stop.set_tooltip_text(Some("Stop this turn"));
-        stop.update_property(&[gtk::accessible::Property::Label("Stop")]);
         controls.append(&details);
-        controls.append(&settings_summary);
-        controls.append(&stop);
+        controls.append(&spacer);
         controls.append(&send);
 
         let input = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -280,13 +273,11 @@ impl ChatPane {
             model,
             access,
             effort,
-            effort_ids: RefCell::new(Vec::new()),
             plan,
             details,
             settings_summary,
             composer,
             send,
-            stop,
             transcript,
         });
         let focus = gtk::EventControllerFocus::new();
@@ -322,13 +313,13 @@ impl ChatPane {
         let weak = Rc::downgrade(&ui);
         ui.send.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
-                ui.activate_send();
-            }
-        });
-        let weak = Rc::downgrade(&ui);
-        ui.stop.connect_clicked(move |_| {
-            if let Some(ui) = weak.upgrade().filter(|ui| !ui.stopping.get()) {
-                ui.stop(false);
+                if ui.stop_mode() {
+                    if !ui.stopping.get() {
+                        ui.stop(false);
+                    }
+                } else {
+                    ui.activate_send();
+                }
             }
         });
         let weak = Rc::downgrade(&ui);
@@ -399,26 +390,40 @@ impl ChatPane {
             glib::Propagation::Stop
         });
         ui.composer.add_controller(keys);
+        for choices in [&ui.model, &ui.effort, &ui.access] {
+            let weak = Rc::downgrade(&ui);
+            choices.list.connect_row_activated(move |list, row| {
+                list.select_row(Some(row));
+                if let Some(ui) = weak.upgrade() {
+                    ui.details.popdown();
+                    ui.composer.grab_focus();
+                }
+            });
+        }
         let weak = Rc::downgrade(&ui);
-        ui.model.widget.connect_selected_notify(move |_| {
+        ui.plan.connect_toggled(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_settings_summary();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.model.list.connect_row_selected(move |_, _| {
             if let Some(ui) = weak.upgrade().filter(|ui| !ui.updating_options.get()) {
-                let effort = ui.selected_effort();
+                let effort = ui.effort.selected();
                 ui.update_effort(effort.as_deref());
             }
         });
         let weak = Rc::downgrade(&ui);
-        ui.effort.connect_row_activated(move |list, row| {
+        ui.effort.list.connect_row_selected(move |_, _| {
             if let Some(ui) = weak.upgrade().filter(|ui| !ui.updating_options.get()) {
-                list.select_row(Some(row));
                 ui.update_settings_summary();
-                ui.details.popdown();
             }
         });
         let weak = Rc::downgrade(&ui);
-        ui.access.widget.connect_selected_notify(move |_| {
+        ui.access.list.connect_row_selected(move |_, _| {
             if let Some(ui) = weak.upgrade().filter(|ui| !ui.updating_options.get()) {
                 ui.confirmed_access.borrow_mut().take();
-                ui.update_access_tooltip();
+                ui.update_settings_summary();
             }
         });
         let weak = Rc::downgrade(&ui);
@@ -547,6 +552,74 @@ pub(super) fn take_id(picker: &Picker) -> Option<String> {
         .cloned()
 }
 
+/// A choice list shown directly in the chat settings popover. A
+/// `gtk::DropDown` there opens a nested popover; on X11, once that list
+/// closes, clicking outside no longer dismisses the settings popover.
+struct Choices {
+    section: gtk::Box,
+    list: gtk::ListBox,
+    ids: RefCell<Vec<String>>,
+}
+
+impl Choices {
+    fn new(title: &str) -> Self {
+        let heading = label(title);
+        heading.add_css_class("dim-label");
+        let list = gtk::ListBox::new();
+        list.add_css_class("boxed-list");
+        list.update_property(&[gtk::accessible::Property::Label(title)]);
+        let section = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        section.append(&heading);
+        section.append(
+            &gtk::ScrolledWindow::builder()
+                .child(&list)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .propagate_natural_width(true)
+                .propagate_natural_height(true)
+                .max_content_height(240)
+                .build(),
+        );
+        Self {
+            section,
+            list,
+            ids: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn fill(&self, menu: &Menu, retain: Option<&str>) {
+        *self.ids.borrow_mut() = menu
+            .choices
+            .iter()
+            .map(|choice| choice.id.clone())
+            .collect();
+        self.list.remove_all();
+        for choice in &menu.choices {
+            let text = label(&choice.label);
+            text.set_tooltip_text(Some(&choice.description));
+            text.add_css_class("flowmux-chat-effort");
+            self.list.append(&text);
+        }
+        let selected = retain
+            .into_iter()
+            .chain(menu.current.as_deref())
+            .find_map(|id| menu.choices.iter().position(|choice| choice.id == id))
+            .unwrap_or(0);
+        self.list
+            .select_row(self.list.row_at_index(selected as i32).as_ref());
+        self.section.set_visible(!menu.choices.is_empty());
+    }
+
+    fn selected(&self) -> Option<String> {
+        let row = self.list.selected_row()?;
+        self.ids.borrow().get(row.index() as usize).cloned()
+    }
+
+    fn selected_label(&self) -> Option<glib::GString> {
+        let row = self.list.selected_row()?;
+        Some(row.child().and_downcast::<gtk::Label>()?.label())
+    }
+}
+
 impl ChatUi {
     fn load_history(self: &Rc<Self>) {
         self.status.set_label("Loading history…");
@@ -635,70 +708,35 @@ impl ChatUi {
         self.connecting.set(false);
         self.ready.set(true);
         self.set_catalog(catalog, settings);
-        if settings.confirmed_access && take_id(&self.access) == settings.access {
+        if settings.confirmed_access && self.access.selected() == settings.access {
             *self.confirmed_access.borrow_mut() = settings.access.clone();
         }
     }
 
     fn set_catalog(&self, catalog: Catalog, settings: &Settings) {
-        let old_model = take_id(&self.model);
-        let old_access = take_id(&self.access);
-        let old_effort = self.selected_effort();
+        let old_model = self.model.selected();
+        let old_access = self.access.selected();
+        let old_effort = self.effort.selected();
         self.updating_options.set(true);
-        fill(
-            &self.model,
+        self.model.fill(
             &catalog.models,
-            "Model · Default",
             settings.model.as_deref().or(old_model.as_deref()),
         );
-        fill(
-            &self.access,
+        self.access.fill(
             &catalog.access,
-            "Access · Default",
             settings.access.as_deref().or(old_access.as_deref()),
         );
         *self.catalog.borrow_mut() = catalog;
         self.update_effort(settings.effort.as_deref().or(old_effort.as_deref()));
-        self.update_access_tooltip();
         self.updating_options.set(false);
         self.refresh_controls();
     }
 
     fn update_effort(&self, retain: Option<&str>) {
         let catalog = self.catalog.borrow();
-        let model = take_id(&self.model);
+        let model = self.model.selected();
         let menu = catalog.efforts_for(model.as_deref());
-        *self.effort_ids.borrow_mut() = menu
-            .choices
-            .iter()
-            .map(|choice| choice.id.clone())
-            .collect();
-        while let Some(row) = self.effort.first_child() {
-            self.effort.remove(&row);
-        }
-        let current = retain.or(menu.current.as_deref());
-        let mut selected = 0;
-        for (index, choice) in menu.choices.iter().enumerate() {
-            let text = label(&choice.label);
-            text.set_tooltip_text(Some(&choice.description));
-            text.add_css_class("flowmux-chat-effort");
-            self.effort.append(&text);
-            if current == Some(choice.id.as_str()) {
-                selected = index as i32;
-            }
-        }
-        self.effort
-            .select_row(self.effort.row_at_index(selected).as_ref());
-        self.model
-            .widget
-            .set_visible(!catalog.models.choices.is_empty());
-        self.access
-            .widget
-            .set_visible(!catalog.access.choices.is_empty());
-        self.effort
-            .parent()
-            .unwrap()
-            .set_visible(!menu.choices.is_empty());
+        self.effort.fill(menu, retain);
         self.plan.set_visible(catalog.plan);
         if !catalog.plan {
             self.plan.set_active(false);
@@ -714,20 +752,16 @@ impl ChatUi {
     }
 
     fn update_settings_summary(&self) {
-        let model = self
-            .model
-            .widget
-            .selected_item()
-            .and_downcast::<gtk::StringObject>();
-        let effort = self
-            .effort
-            .selected_row()
-            .and_then(|row| row.child().and_downcast::<gtk::Label>());
+        // Plan replaces the access level with read-only for the turn.
+        let access = if self.plan.is_active() {
+            Some("Plan".into())
+        } else {
+            self.access.selected_label()
+        };
         let text = [
-            model
-                .filter(|_| take_id(&self.model).is_some())
-                .map(|item| item.string()),
-            effort.map(|item| item.label()),
+            self.model.selected_label(),
+            self.effort.selected_label(),
+            access,
         ]
         .into_iter()
         .flatten()
@@ -738,30 +772,6 @@ impl ChatUi {
             .set_tooltip_text((!text.is_empty()).then_some(text.as_str()));
     }
 
-    fn selected_effort(&self) -> Option<String> {
-        let row = self.effort.selected_row()?;
-        self.effort_ids.borrow().get(row.index() as usize).cloned()
-    }
-
-    fn update_access_tooltip(&self) {
-        let active = take_id(&self.access);
-        let catalog = self.catalog.borrow();
-        if let Some(choice) = catalog
-            .access
-            .choices
-            .iter()
-            .find(|choice| Some(choice.id.as_str()) == active.as_deref())
-        {
-            self.access
-                .widget
-                .set_tooltip_text(Some(&format!("{} · {}", choice.label, choice.description)));
-        } else {
-            self.access
-                .widget
-                .set_tooltip_text(Some("Access · Agent default"));
-        }
-    }
-
     fn draft(&self) -> String {
         let buffer = self.composer.buffer();
         buffer
@@ -770,21 +780,25 @@ impl ChatUi {
     }
 
     fn refresh_controls(&self) {
-        let catalog = self.catalog.borrow();
         let ready = self.ready.get();
         let editing = self.queue_edit.borrow().is_some();
-        self.model
-            .widget
-            .set_sensitive(ready && !catalog.models.choices.is_empty());
-        self.access
-            .widget
-            .set_sensitive(ready && !catalog.access.choices.is_empty());
         self.details.set_sensitive(ready && !editing);
         self.status
             .set_visible(self.connecting.get() || self.busy.get());
-        self.stop.set_visible(self.busy.get());
-        self.stop.set_sensitive(!self.stopping.get());
-        let (action, icon, tooltip, enabled) = if editing {
+        let stop = self.stop_mode();
+        if stop {
+            self.send.remove_css_class("suggested-action");
+        } else {
+            self.send.add_css_class("suggested-action");
+        }
+        let (action, icon, tooltip, enabled) = if stop {
+            (
+                "Stop",
+                "media-playback-stop-symbolic",
+                "Stop this turn · Type to queue another message",
+                !self.stopping.get(),
+            )
+        } else if editing {
             (
                 "Save queued message",
                 "object-select-symbolic",
@@ -824,6 +838,11 @@ impl ChatUi {
             .update_property(&[gtk::accessible::Property::Label(action)]);
         self.send.set_tooltip_text(Some(tooltip));
         self.send.set_sensitive(enabled);
+    }
+
+    /// A running turn with an empty composer turns the send button into Stop.
+    fn stop_mode(&self) -> bool {
+        self.busy.get() && self.queue_edit.borrow().is_none() && self.draft().trim().is_empty()
     }
 
     fn show_notice(&self, message: &str) {
@@ -958,11 +977,11 @@ impl ChatUi {
         let access = if self.plan.is_active() {
             Some("read-only".into())
         } else {
-            take_id(&self.access)
+            self.access.selected()
         };
         Settings {
-            model: take_id(&self.model),
-            effort: self.selected_effort(),
+            model: self.model.selected(),
+            effort: self.effort.selected(),
             confirmed_access: access.is_some()
                 && self.confirmed_access.borrow().as_ref() == access.as_ref(),
             access,
@@ -1192,6 +1211,19 @@ impl ChatUi {
                 }
             });
             row.append(&edit);
+            let remove = gtk::Button::from_icon_name("user-trash-symbolic");
+            remove.add_css_class("flat");
+            remove.set_tooltip_text(Some("Remove queued message"));
+            remove.update_property(&[gtk::accessible::Property::Label("Remove queued message")]);
+            remove.set_sensitive(!is_editing);
+            let weak = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade().filter(|ui| ui.editing_id() != Some(id)) {
+                    ui.queue.borrow_mut().retain(|entry| entry.id != id);
+                    ui.refresh_queue();
+                }
+            });
+            row.append(&remove);
             self.queue_rows.append(&row);
         }
     }

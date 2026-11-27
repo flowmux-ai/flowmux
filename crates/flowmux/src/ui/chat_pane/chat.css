@@ -69,6 +69,14 @@
     padding: 2px 0;
     border-radius: 10px;
     background: alpha(currentColor, 0.035);
+    opacity: 0.45;
+    transition: opacity 180ms ease-out;
+}
+
+.flowmux-chat-rail.active,
+.flowmux-chat-rail:hover,
+.flowmux-chat-rail:focus-within {
+    opacity: 1;
 }
 
 .flowmux-chat-rail button {
