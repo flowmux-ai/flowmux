@@ -2,7 +2,12 @@
 
 use super::*;
 
-pub(super) async fn boot(wire: &mut Wire, session: &mut Session, cwd: &Path) -> Result<()> {
+pub(super) async fn boot(
+    wire: &mut Wire,
+    session: &mut Session,
+    cwd: &Path,
+    native_id: Option<&str>,
+) -> Result<()> {
     let initialize = wire.rpc("initialize", json!({
         "protocolVersion":1,"clientCapabilities":{},
         "clientInfo":{"name":"flowmux","title":"Flowmux","version":env!("CARGO_PKG_VERSION")}
@@ -10,13 +15,30 @@ pub(super) async fn boot(wire: &mut Wire, session: &mut Session, cwd: &Path) -> 
     if initialize["protocolVersion"].as_u64() != Some(1) {
         bail!("This agent requires an unsupported ACP protocol version.");
     }
-    let result = wire
-        .rpc("session/new", json!({"cwd":cwd,"mcpServers":[]}))
-        .await?;
-    session.key = result["sessionId"]
-        .as_str()
-        .context("Missing ACP session ID")?
-        .into();
+    let result = if let Some(id) = native_id {
+        if initialize["agentCapabilities"]["loadSession"] != true {
+            bail!(
+                "This agent cannot resume a saved chat. The conversation remains available here."
+            );
+        }
+        let result = wire
+            .rpc(
+                "session/load",
+                json!({"sessionId":id,"cwd":cwd,"mcpServers":[]}),
+            )
+            .await?;
+        session.key = id.into();
+        result
+    } else {
+        let result = wire
+            .rpc("session/new", json!({"cwd":cwd,"mcpServers":[]}))
+            .await?;
+        session.key = result["sessionId"]
+            .as_str()
+            .context("Missing ACP session ID")?
+            .into();
+        result
+    };
     update_options(session, &result["configOptions"]);
     if session.model_option.is_none() {
         session.catalog.models = legacy_menu(

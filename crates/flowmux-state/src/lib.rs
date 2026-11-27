@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 pub mod agent_sessions;
 pub mod agent_views;
+pub mod chat_history;
 pub mod instance_lock;
 pub mod office_designs;
 pub mod review_drafts;

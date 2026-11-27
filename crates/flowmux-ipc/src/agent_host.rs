@@ -347,6 +347,9 @@ pub enum HostRequest {
         role: ClientRole,
     },
     KeepAlive,
+    Chat {
+        request: serde_json::Value,
+    },
     Launch {
         launch: LaunchAgent,
     },
@@ -551,6 +554,9 @@ pub enum HostResponse {
         connection: u64,
     },
     Ok,
+    Chat {
+        response: serde_json::Value,
+    },
     LifecycleReceipt {
         /// Accepted by the ledger; a display transition is not required.
         applied: bool,

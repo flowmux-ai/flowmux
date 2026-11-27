@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub mod json;
 pub mod session_flow;
 
-pub const AGENT_HOST_PROTOCOL_VERSION: u32 = 19;
+pub const AGENT_HOST_PROTOCOL_VERSION: u32 = 20;
 
 const TERMINAL_TAB_TITLE_MAX_CHARS: usize = 17;
 const FALLBACK_TERMINAL_TAB_TITLE: &str = "Terminal";
@@ -418,6 +418,8 @@ pub enum SurfaceKind {
     Chat {
         agent: String,
         cwd: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history_id: Option<SurfaceId>,
     },
     Editor {
         workspace_root: PathBuf,
@@ -2104,7 +2106,11 @@ impl PaneSurface {
             id: SurfaceId::new(),
             title: format!("{agent} Chat"),
             title_locked: false,
-            kind: SurfaceKind::Chat { agent, cwd },
+            kind: SurfaceKind::Chat {
+                agent,
+                cwd,
+                history_id: None,
+            },
             agent_binding: None,
             shell_binding: None,
             scrollback: None,

@@ -2,7 +2,12 @@
 
 use super::*;
 
-pub(super) async fn boot(wire: &mut Wire, session: &mut Session, cwd: &Path) -> Result<()> {
+pub(super) async fn boot(
+    wire: &mut Wire,
+    session: &mut Session,
+    cwd: &Path,
+    native_id: Option<&str>,
+) -> Result<()> {
     wire.rpc(
         "initialize",
         json!({
@@ -74,14 +79,17 @@ pub(super) async fn boot(wire: &mut Wire, session: &mut Session, cwd: &Path) -> 
         ],
     };
     session.catalog.plan = true;
-    let started = wire
-        .rpc(
-            "thread/start",
-            json!({
-                "cwd":cwd, "sandbox":"workspace-write", "approvalPolicy":"on-request", "approvalsReviewer":"user",
-            }),
-        )
-        .await?;
+    let mut request = json!({
+        "cwd":cwd, "sandbox":"workspace-write", "approvalPolicy":"on-request", "approvalsReviewer":"user",
+    });
+    let method = if let Some(id) = native_id {
+        request["threadId"] = json!(id);
+        request["excludeTurns"] = json!(true);
+        "thread/resume"
+    } else {
+        "thread/start"
+    };
+    let started = wire.rpc(method, request).await?;
     session.key = started["thread"]["id"]
         .as_str()
         .context("Missing Codex thread ID")?

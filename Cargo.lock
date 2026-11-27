@@ -1114,6 +1114,7 @@ version = "0.15.1"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
+ "async-channel",
  "chrono",
  "clap",
  "flowmux-config",
@@ -1125,6 +1126,7 @@ dependencies = [
  "flowmux-terminal",
  "flowmux-vcs",
  "libc",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

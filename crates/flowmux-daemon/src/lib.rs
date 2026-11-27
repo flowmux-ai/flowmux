@@ -4,6 +4,7 @@
 //! command bridge.
 
 pub mod agent_host;
+pub mod chat_runtime;
 pub mod handler;
 #[cfg(target_os = "linux")]
 pub mod process_scope;

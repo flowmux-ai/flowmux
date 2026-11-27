@@ -2064,6 +2064,7 @@ impl StateStore {
         pane: PaneId,
         agent: String,
         cwd: std::path::PathBuf,
+        history: Option<SurfaceId>,
     ) -> Option<(WorkspaceId, SurfaceId)> {
         let mut state = self.inner.lock().await;
         for workspace in state
@@ -2072,10 +2073,11 @@ impl StateStore {
             .filter(|ws| ws.local_root().is_some())
         {
             for root in &mut workspace.surfaces {
-                if let Some(surface) = root
-                    .root_pane
-                    .add_surface_to_leaf(pane, PaneSurface::chat(agent.clone(), cwd.clone()))
-                {
+                let mut tab = PaneSurface::chat(agent.clone(), cwd.clone());
+                if let SurfaceKind::Chat { history_id, .. } = &mut tab.kind {
+                    *history_id = history;
+                }
+                if let Some(surface) = root.root_pane.add_surface_to_leaf(pane, tab) {
                     let workspace = workspace.id;
                     drop(state);
                     self.mark_dirty();
@@ -10763,7 +10765,7 @@ Do you want to continue?";
         let workspace = store.create_workspace(None, cwd.clone()).await;
         let pane = first_pane(&store.get_workspace(workspace).await.unwrap());
         let (_, chat) = store
-            .add_chat_surface_to_pane(pane, "Codex".into(), cwd.clone())
+            .add_chat_surface_to_pane(pane, "Codex".into(), cwd.clone(), None)
             .await
             .unwrap();
         let model = store.get_workspace(workspace).await.unwrap();
@@ -10773,7 +10775,7 @@ Do you want to continue?";
             .find_surface(pane, chat)
             .unwrap();
         assert!(
-            matches!(surface.kind, SurfaceKind::Chat { agent, cwd: path } if agent == "Codex" && path == cwd)
+            matches!(surface.kind, SurfaceKind::Chat { agent, cwd: path, history_id: None } if agent == "Codex" && path == cwd)
         );
         assert!(store
             .report_agent_screen_signals(chat, None, Some("Codex Chat"))
@@ -11383,7 +11385,7 @@ Do you want to continue?";
             SurfaceKind::Browser { initial_url } => SurfaceKindFingerprint::Browser {
                 initial_url: initial_url.clone(),
             },
-            SurfaceKind::Chat { agent, cwd } => SurfaceKindFingerprint::Chat {
+            SurfaceKind::Chat { agent, cwd, .. } => SurfaceKindFingerprint::Chat {
                 agent: agent.clone(),
                 cwd: cwd.clone(),
             },

@@ -4795,10 +4795,20 @@ fn build_panel(
             r.surface_workspace.insert(surface.id, workspace);
             widget
         }
-        SurfaceKind::Chat { agent, cwd } => {
+        SurfaceKind::Chat {
+            agent,
+            cwd,
+            history_id,
+        } => {
             let reused = registry.borrow_mut().pending_chat_reuse.remove(&surface.id);
             let chat = reused.unwrap_or_else(|| {
-                super::chat_pane::ChatPane::new(pane_id, agent, cwd.clone(), callbacks)
+                super::chat_pane::ChatPane::new(
+                    pane_id,
+                    history_id.unwrap_or(surface.id),
+                    agent,
+                    cwd.clone(),
+                    callbacks,
+                )
             });
             chat.set_pane_id(pane_id);
             let widget = chat.root.clone().upcast::<gtk::Widget>();

@@ -9,6 +9,7 @@ use adw::prelude::*;
 use gtk::glib;
 
 use crate::ui::chat_runtime::{Change, Prompt, TextKind, Work};
+use flowmux_state::chat_history::Record;
 
 mod markdown;
 mod selection;
@@ -40,6 +41,7 @@ struct View {
     jump_pending: Cell<bool>,
     jump_target: Cell<Option<usize>>,
     adjustment_scheduled: Cell<bool>,
+    replaying: Cell<bool>,
     rail_buttons: RefCell<Vec<(usize, gtk::Button)>>,
     open_file: RefCell<Rc<OpenFile>>,
     respond: RefCell<Rc<Respond>>,
@@ -52,6 +54,7 @@ struct Turn {
     entries: gtk::Box,
     result: gtk::Box,
     started: Instant,
+    elapsed: Option<u64>,
     status: String,
     rows: HashMap<String, Row>,
     open: Cell<bool>,
@@ -110,6 +113,8 @@ impl Transcript {
         older.set_visible(false);
         history.append(&older);
         let clamp = adw::Clamp::new();
+        // The transcript keeps its reading width while the composer can shrink.
+        clamp.set_width_request(400);
         clamp.set_maximum_size(840);
         clamp.set_child(Some(&history));
 
@@ -118,6 +123,7 @@ impl Transcript {
             .hexpand(true)
             .vexpand(true)
             .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .overlay_scrolling(false)
             .build();
         selection::attach(&scroller, &history);
         let latest = gtk::Button::from_icon_name("go-bottom-symbolic");
@@ -172,6 +178,7 @@ impl Transcript {
             jump_pending: Cell::new(false),
             jump_target: Cell::new(None),
             adjustment_scheduled: Cell::new(false),
+            replaying: Cell::new(false),
             rail_buttons: RefCell::new(Vec::new()),
             open_file: RefCell::new(Rc::new(|_| {})),
             respond: RefCell::new(Rc::new(|_, _, _| false)),
@@ -299,6 +306,7 @@ impl Transcript {
             entries,
             result,
             started: Instant::now(),
+            elapsed: None,
             status: "Working".into(),
             rows: HashMap::new(),
             open: Cell::new(true),
@@ -310,9 +318,10 @@ impl Transcript {
         self.view.history.append(&root);
         if self.view.follow.get() {
             let first = turns.len().saturating_sub(PAGE);
-            if first > self.view.first.get() {
+            let previous = self.view.first.get();
+            if first > previous {
                 self.view.first.set(first);
-                for turn in &turns[..first] {
+                for turn in &turns[previous..first] {
                     turn.root.set_visible(false);
                 }
                 self.view.older.set_visible(true);
@@ -321,6 +330,9 @@ impl Transcript {
         drop(turns);
         self.view.build_rail();
         self.view.schedule_adjustment();
+        if self.view.replaying.get() {
+            return;
+        }
         let weak = Rc::downgrade(&self.view);
         glib::timeout_add_local(Duration::from_secs(1), move || {
             let Some(view) = weak.upgrade() else {
@@ -337,6 +349,54 @@ impl Transcript {
                 glib::ControlFlow::Break
             }
         });
+    }
+
+    pub fn replay(&self, records: Vec<Record>, running: bool) {
+        for turn in self.view.turns.borrow_mut().drain(..) {
+            self.view.history.remove(&turn.root);
+        }
+        self.view.first.set(0);
+        self.view.follow.set(true);
+        self.view.older.set_visible(false);
+        self.view.replaying.set(true);
+        let mut active = false;
+        for record in records {
+            match record {
+                Record::Begin { prompt } => {
+                    if active {
+                        self.finish("Interrupted", None, 0);
+                    }
+                    self.begin(&prompt);
+                    active = true;
+                }
+                Record::Text {
+                    id,
+                    kind,
+                    text,
+                    append,
+                } if active => self.text(id, kind, text, append),
+                Record::Work(work) if active => self.work(work),
+                Record::Prompt(prompt) if active => self.prompt(prompt),
+                Record::Resolved { id, label, answers } if active => {
+                    self.resolve(&id, &label, &answers);
+                }
+                Record::Finished {
+                    status,
+                    detail,
+                    elapsed,
+                } if active => {
+                    self.finish(&status, detail.as_deref(), elapsed);
+                    active = false;
+                }
+                _ => {}
+            }
+        }
+        if active && !running {
+            self.finish("Interrupted", None, 0);
+        }
+        self.view.replaying.set(false);
+        self.view.build_rail();
+        self.view.schedule_adjustment();
     }
 
     pub fn text(&self, id: String, kind: TextKind, text: String, append: bool) {
@@ -539,13 +599,13 @@ impl Transcript {
             .is_some_and(|turn| !turn.pending.is_empty())
     }
 
-    pub fn resolve(&self, id: &str, result: &str) -> bool {
+    pub fn resolve(&self, id: &str, result: &str, answers: &[String]) -> bool {
         let mut turns = self.view.turns.borrow_mut();
         let Some(turn) = turns.last_mut() else {
             return false;
         };
         if let Some(card) = turn.pending.remove(id) {
-            receipt(&card, result);
+            receipt(&card, result, answers);
         }
         let ready = turn.pending.is_empty();
         if ready {
@@ -557,15 +617,24 @@ impl Transcript {
         ready
     }
 
-    pub fn finish(&self, status: &str, detail: Option<&str>) {
+    pub fn elapsed(&self) -> u64 {
+        self.view
+            .turns
+            .borrow()
+            .last()
+            .map_or(0, |turn| turn.started.elapsed().as_secs())
+    }
+
+    pub fn finish(&self, status: &str, detail: Option<&str>, elapsed: u64) {
         let mut turns = self.view.turns.borrow_mut();
         let Some(turn) = turns.last_mut() else {
             return;
         };
         turn.status = status.into();
+        turn.elapsed = Some(elapsed);
         turn.update_status();
         for card in turn.pending.drain().map(|(_, card)| card) {
-            receipt(&card, "Request closed");
+            receipt(&card, "Request closed", &[]);
         }
         for row in turn.rows.values_mut() {
             match row {
@@ -640,11 +709,23 @@ impl Transcript {
             heading.set_child(Some(&list));
             turn.result.append(&heading);
         }
-        checks.sort_unstable();
-        for (check, failed) in checks {
-            let check = text_label(&format!("{} {check}", if failed { "✕" } else { "✓" }));
-            check.add_css_class(if failed { "error" } else { "dim-label" });
-            turn.result.append(&check);
+        if !checks.is_empty() {
+            checks.sort_unstable();
+            let failures = checks.iter().filter(|(_, failed)| *failed).count();
+            let title = if failures > 0 {
+                format!("Checks · {} · {failures} failed", checks.len())
+            } else {
+                format!("Checks · {}", checks.len())
+            };
+            let heading = gtk::Expander::new(Some(&title));
+            let list = gtk::Box::new(gtk::Orientation::Vertical, 5);
+            for (check, failed) in checks {
+                let check = text_label(&format!("{} {check}", if failed { "✕" } else { "✓" }));
+                check.add_css_class(if failed { "error" } else { "dim-label" });
+                list.append(&check);
+            }
+            heading.set_child(Some(&list));
+            turn.result.append(&heading);
         }
         if let Some(detail) = detail.filter(|detail| !detail.is_empty()) {
             turn.result.append(&text_label(detail));
@@ -657,7 +738,9 @@ impl Transcript {
 
 impl Turn {
     fn update_status(&self) {
-        let elapsed = self.started.elapsed().as_secs();
+        let elapsed = self
+            .elapsed
+            .unwrap_or_else(|| self.started.elapsed().as_secs());
         self.activity
             .set_label(&format!("{} · {elapsed}s", self.status));
     }
@@ -740,7 +823,7 @@ impl View {
     }
 
     fn schedule_adjustment(self: &Rc<Self>) {
-        if self.adjustment_scheduled.replace(true) {
+        if self.replaying.get() || self.adjustment_scheduled.replace(true) {
             return;
         }
         let weak = Rc::downgrade(self);
@@ -801,6 +884,9 @@ impl View {
     }
 
     fn build_rail(self: &Rc<Self>) {
+        if self.replaying.get() {
+            return;
+        }
         let turns = self.turns.borrow();
         let count = turns.len();
         let focused = self
@@ -963,9 +1049,22 @@ fn clear(box_: &gtk::Box) {
     }
 }
 
-fn receipt(card: &gtk::Box, result: &str) {
+fn receipt(card: &gtk::Box, result: &str, answers: &[String]) {
     if let Some(actions) = card.last_child() {
         card.remove(&actions);
+    }
+    let mut answers = answers.iter();
+    let mut child = card.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.is::<gtk::Entry>() {
+            if let Some(answer) = answers.next() {
+                card.insert_child_after(&text_label(answer), Some(&widget));
+            }
+            card.remove(&widget);
+        } else if widget.is::<gtk::DropDown>() {
+            card.remove(&widget);
+        }
     }
     let result = text_label(result);
     result.add_css_class("dim-label");

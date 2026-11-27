@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ui::chat_pane::{fill, picker, take_id, Picker};
-use crate::ui::chat_runtime::{self, Catalog, Event, Provider, Settings};
+use crate::ui::chat_runtime::{self, Catalog, Event, Settings};
 
 impl WindowController {
     pub(super) async fn show_new_chat_dialog(&self, pane: PaneId) {
@@ -37,7 +37,7 @@ impl WindowController {
             return;
         };
         let providers = runtime
-            .spawn(Provider::available())
+            .spawn(chat_runtime::available())
             .await
             .unwrap_or_default();
         if window.visible_dialog().is_some()
@@ -167,7 +167,7 @@ impl WindowController {
                     // Coalesce directory edits so typing does not start an agent for each prefix.
                     glib::timeout_future(std::time::Duration::from_millis(300)).await;
                     let (commands, events) =
-                        chat_runtime::start(runtime, provider, directory.clone());
+                        chat_runtime::start(runtime, provider, directory.clone(), None);
                     match events.recv().await {
                         Ok(Event::Ready(catalog)) => Ok((commands, events, catalog)),
                         event => Err(setup_error(event.ok())),
@@ -180,7 +180,7 @@ impl WindowController {
                     loaded = load => loaded,
                 };
                 match loaded {
-                    Ok((commands, events, mut catalog)) => loop {
+                    Ok((_commands, events, mut catalog)) => loop {
                         clear_options(&options);
                         let fields = ChatSetupOptions::new(&start, &status, &options, catalog);
                         tokio::select! {
@@ -189,9 +189,9 @@ impl WindowController {
                             answer = &mut response => {
                                 if answer == Ok(true) && self.pane_in_visible_workspace(pane) {
                                     if let Some(chat) = self.add_chat_surface(
-                                        pane, provider.name().into(), directory,
+                                        pane, provider.name().into(), directory, None,
                                     ).await {
-                                        chat.connect_started(commands, events, fields.catalog.clone(), fields.settings());
+                                        chat.connect_started(fields.catalog.clone(), fields.settings());
                                     }
                                 }
                                 return;
@@ -221,20 +221,23 @@ impl WindowController {
         }
     }
 
-    async fn add_chat_surface(
+    pub(super) async fn add_chat_surface(
         &self,
         pane: PaneId,
         agent: String,
         cwd: PathBuf,
+        history: Option<SurfaceId>,
     ) -> Option<crate::ui::chat_pane::ChatPane> {
-        if !cwd.is_dir() {
+        if history.is_none() && !cwd.is_dir() {
             self.clipboard_toast
                 .show_with_message("The chat working directory no longer exists.");
             return None;
         }
         let previous = self.pane_registry.borrow().active_surface(pane);
-        let Some((workspace, surface)) =
-            self.store.add_chat_surface_to_pane(pane, agent, cwd).await
+        let Some((workspace, surface)) = self
+            .store
+            .add_chat_surface_to_pane(pane, agent, cwd, history)
+            .await
         else {
             self.clipboard_toast
                 .show_with_message("The chat pane is no longer available.");

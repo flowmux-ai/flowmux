@@ -374,6 +374,7 @@ impl Registry {
 }
 
 pub struct AgentHost {
+    chats: super::chat::Chats,
     memory: Arc<Semaphore>,
     shell_memory: Arc<Semaphore>,
     epoch: Uuid,
@@ -390,6 +391,7 @@ pub struct AgentHost {
 impl AgentHost {
     pub fn new(socket: PathBuf, idle_timeout: Duration, state_path: PathBuf) -> Arc<Self> {
         Arc::new(Self {
+            chats: super::chat::Chats::default(),
             memory: Arc::new(Semaphore::new(MEMORY_EXECUTIONS)),
             shell_memory: Arc::new(Semaphore::new(MAX_SHELLS)),
             epoch: Uuid::new_v4(),
@@ -459,7 +461,8 @@ impl AgentHost {
             tick.tick().await;
             let mut registry = self.registry();
             registry.expire_views(Instant::now());
-            let empty = registry.accepted_launches == 0
+            let empty = !self.chats.has_live_chats()
+                && registry.accepted_launches == 0
                 && registry
                     .entries
                     .values()
@@ -533,6 +536,7 @@ impl AgentHost {
         peer_pid: Option<u32>,
     ) -> Result<HostResponse> {
         if let HostRequest::StopAll { force } = request {
+            self.chats.stop();
             // Before the handshake on purpose: a Flowmux of another protocol
             // version has no other way to stop executions it cannot manage.
             let mode = if force {
@@ -635,6 +639,19 @@ impl AgentHost {
         match request {
             HostRequest::Hello { .. } => unreachable!(),
             HostRequest::KeepAlive => Ok(HostResponse::Ok),
+            HostRequest::Chat { request } => {
+                let request = serde_json::from_value(request)
+                    .map_err(|error| RpcError::InvalidArgument(error.to_string()))?;
+                let response = self
+                    .chats
+                    .request(connection, request)
+                    .await
+                    .map_err(|error| RpcError::Internal(error.to_string()))?;
+                Ok(HostResponse::Chat {
+                    response: serde_json::to_value(response)
+                        .map_err(|error| RpcError::Internal(error.to_string()))?,
+                })
+            }
             HostRequest::List => {
                 let mut registry = self.registry();
                 if registry.connections.get(&connection) == Some(&ClientRole::Gui) {
@@ -1459,6 +1476,7 @@ impl Handler for HostHandler {
         })
     }
     fn connection_closed(&self, context: ConnectionContext) {
+        self.0.chats.disconnect(context.id);
         let mut registry = self.0.registry();
         registry.gui_list_revision.remove(&context.id);
         registry.peers.remove(&context.id);

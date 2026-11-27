@@ -2,8 +2,56 @@
 //! Selected-agent or focus-bound session browsing and native resume commands.
 
 use super::*;
-use crate::ui::session_panel::{SessionPanel, SessionPanelAction};
+use crate::ui::session_panel::{SessionEntry, SessionPanel, SessionPanelAction};
+use flowmux_state::chat_history::{self, Record, Summary as ChatSummary};
 use flowmux_state::session_history::{list_sessions, HistorySession, SessionAgent};
+
+fn chat_history_preview(chat: &ChatSummary) -> Result<String, String> {
+    let history = chat_history::Store::existing()
+        .and_then(|store| store.ok_or(chat_history::Error::InvalidChat)?.load(chat.id))
+        .map_err(|error| error.to_string())?;
+    const LIMIT: usize = 64 * 1024;
+    let mut preview = format!("{} · Chat\n{}\n", chat.agent, chat.cwd.display());
+    let mut blocks = Vec::new();
+    let mut answers = std::collections::HashMap::new();
+    for record in history.records {
+        match record {
+            Record::Begin { prompt } => {
+                answers.clear();
+                blocks.push(format!("You\n{prompt}"));
+            }
+            Record::Text {
+                id,
+                kind: chat_history::TextKind::Answer,
+                text,
+                append,
+            } if !text.is_empty() => {
+                let index = *answers.entry(id).or_insert_with(|| {
+                    blocks.push(String::new());
+                    blocks.len() - 1
+                });
+                let answer = &mut blocks[index];
+                if !append {
+                    answer.clear();
+                }
+                let remaining = (LIMIT + 1).saturating_sub(answer.len());
+                answer.push_str(&text[..text.floor_char_boundary(remaining)]);
+            }
+            _ => {}
+        }
+    }
+    for block in blocks {
+        preview.push('\n');
+        let length = block.floor_char_boundary(LIMIT.saturating_sub(preview.len()));
+        preview.push_str(&block[..length]);
+        preview.push('\n');
+        if length < block.len() {
+            preview.push('…');
+            break;
+        }
+    }
+    Ok(preview)
+}
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -325,6 +373,16 @@ impl WindowController {
                 focused: None,
             });
         }
+        if let Some(agent) = (|| {
+            let registry = self.pane_registry.borrow();
+            let surface = registry.active_surface(self.focused_pane.get()?)?;
+            SessionAgent::from_name(registry.chats.get(&surface)?.agent_name()?)
+        })() {
+            return Some(SessionTarget {
+                agent,
+                focused: None,
+            });
+        }
         let (pane, surface) = self.session_resume_pane()?;
         self.terminal_session_target(pane, surface).await
     }
@@ -543,40 +601,77 @@ impl WindowController {
             return;
         }
         *self.sessions.target.borrow_mut() = target.clone();
-        let generation = panel.clear("Loading sessions…");
-        let Some(target) = target else {
-            panel.status.set_text(
-                "Select an agent above or focus a local agent terminal tab to browse sessions.",
-            );
-            return;
-        };
+        let choose_agent = "Select an agent above or focus a local agent tab to browse sessions.";
+        let generation = panel.clear(if target.is_some() {
+            "Loading sessions…"
+        } else {
+            choose_agent
+        });
         let controller = self.clone();
         glib::MainContext::default().spawn_local(async move {
             let worker_target = target.clone();
             let result = gtk::gio::spawn_blocking(move || {
-                let home = session_home(&worker_target)?;
-                list_sessions(worker_target.agent, &home.path).map_err(|e| e.to_string())
+                let agent = worker_target.as_ref().map(|target| target.agent.name());
+                let chats = chat_history::Store::existing()
+                    .and_then(|store| store.map_or(Ok(Vec::new()), |store| store.list(agent)))
+                    .map_err(|e| e.to_string());
+                let native = worker_target.as_ref().map_or(Ok(Vec::new()), |target| {
+                    let home = session_home(target)?;
+                    list_sessions(target.agent, &home.path).map_err(|e| e.to_string())
+                });
+                let (chats, history_error) = match chats {
+                    Ok(chats) => (chats, None),
+                    Err(error) => (Vec::new(), Some(error)),
+                };
+                let (native, native_error) = match native {
+                    Ok(native) => (native, None),
+                    Err(error) => (Vec::new(), Some(error)),
+                };
+                let chat_native_ids: std::collections::HashSet<_> = chats
+                    .iter()
+                    .filter_map(|chat| Some((chat.agent.as_str(), chat.native_id.as_deref()?)))
+                    .collect();
+                let mut rows: Vec<_> = native
+                    .into_iter()
+                    .filter(|item| {
+                        !chat_native_ids.contains(&(item.agent.name(), item.id.as_str()))
+                    })
+                    .map(SessionEntry::Native)
+                    .collect();
+                rows.extend(chats.into_iter().map(SessionEntry::Chat));
+                rows.sort_by_key(|item| std::cmp::Reverse(item.modified()));
+                (rows, history_error.or(native_error))
             })
             .await;
             let panel = &controller.sessions.panel;
             if panel.generation.get() != generation
                 || !panel.root.is_visible()
-                || controller.session_target().await.as_ref() != Some(&target)
+                || controller.session_target().await != target
             {
                 return;
             }
             match result {
-                Ok(Ok(items)) => {
-                    panel.status.set_text(&format!(
-                        "{} · {} sessions · all projects",
-                        target.agent.name(),
-                        items.len()
-                    ));
+                Ok((items, error)) => {
+                    if let Some(error) = error {
+                        panel.status.set_text(&format!(
+                            "{} sessions · Could not load some history: {error}",
+                            items.len()
+                        ));
+                    } else if let Some(target) = target {
+                        panel.status.set_text(&format!(
+                            "{} · {} sessions · all projects",
+                            target.agent.name(),
+                            items.len()
+                        ));
+                    } else if items.is_empty() {
+                        panel.status.set_text(choose_agent);
+                    } else {
+                        panel
+                            .status
+                            .set_text(&format!("{} saved chats · all projects", items.len()));
+                    }
                     panel.set_rows(items, generation);
                 }
-                Ok(Err(error)) => panel
-                    .status
-                    .set_text(&format!("Cannot load sessions: {error}")),
                 Err(_) => panel
                     .status
                     .set_text("Session history worker failed. Try Refresh."),
@@ -614,6 +709,7 @@ impl WindowController {
                     return;
                 }
                 *panel.selection.borrow_mut() = Some(session.id.clone());
+                panel.show_chat_action(false);
                 panel.resume.set_sensitive(false);
                 panel.preview.buffer().set_text("Loading conversation…");
                 let controller = self.clone();
@@ -654,6 +750,90 @@ impl WindowController {
                 yolo,
             } => {
                 self.resume_history_session(session, generation, yolo).await;
+            }
+            SessionPanelAction::SelectChat { chat, generation } => {
+                self.select_chat_history(chat, generation)
+            }
+            SessionPanelAction::OpenChat { chat, generation } => {
+                self.open_chat_history(chat, generation).await;
+            }
+        }
+    }
+
+    fn select_chat_history(&self, chat: ChatSummary, generation: u64) {
+        let panel = &self.sessions.panel;
+        if panel.generation.get() != generation {
+            return;
+        }
+        let key = format!("chat:{}", chat.id);
+        *panel.selection.borrow_mut() = Some(key.clone());
+        panel.show_chat_action(true);
+        panel.resume.set_sensitive(true);
+        panel.preview.buffer().set_text("Loading conversation…");
+        let panel = panel.clone();
+        glib::MainContext::default().spawn_local(async move {
+            let result = gtk::gio::spawn_blocking(move || chat_history_preview(&chat)).await;
+            if panel.generation.get() != generation
+                || panel.selection.borrow().as_ref() != Some(&key)
+            {
+                return;
+            }
+            match result {
+                Ok(Ok(text)) => panel.preview.buffer().set_text(&text),
+                Ok(Err(error)) => panel
+                    .preview
+                    .buffer()
+                    .set_text(&format!("Cannot read chat: {error}")),
+                Err(_) => panel
+                    .preview
+                    .buffer()
+                    .set_text("Conversation worker failed. Try selecting again."),
+            }
+        });
+    }
+
+    async fn open_chat_history(&self, chat: ChatSummary, generation: u64) {
+        let panel = &self.sessions.panel;
+        if panel.generation.get() != generation {
+            return;
+        }
+        let existing = {
+            let registry = self.pane_registry.borrow();
+            registry.chats.iter().find_map(|(&surface, pane_chat)| {
+                if pane_chat.history_id() != chat.id {
+                    return None;
+                }
+                let pane = registry.pane_for_surface(surface)?;
+                Some((registry.workspace_of_pane(pane)?, pane, surface))
+            })
+        };
+        if let Some((workspace, pane, surface)) = existing {
+            self.activate_workspace_at(workspace, Some((pane, Some(surface))))
+                .await;
+            if let Some(chat) = self.pane_registry.borrow().chats.get(&surface) {
+                chat.resume();
+            }
+            return;
+        }
+        let Some(pane) = self.focused_pane.get().filter(|&pane| {
+            !self.pane_registry.borrow().is_ssh_pane(pane) && self.pane_in_visible_workspace(pane)
+        }) else {
+            panel
+                .status
+                .set_text("Focus a local pane to open this chat.");
+            return;
+        };
+        panel.resume.set_sensitive(false);
+        let opened = self
+            .add_chat_surface(pane, chat.agent, chat.cwd, Some(chat.id))
+            .await;
+        if panel.generation.get() == generation {
+            if let Some(chat) = opened {
+                chat.resume();
+                panel.status.set_text("Opened saved chat.");
+            }
+            if panel.selection.borrow().as_deref() == Some(&format!("chat:{}", chat.id)) {
+                panel.resume.set_sensitive(true);
             }
         }
     }

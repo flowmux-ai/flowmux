@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use flowmux_core::PaneId;
+use flowmux_core::{PaneId, SurfaceId};
+use flowmux_state::chat_history::{self, History};
 use gtk::glib;
 
 use super::chat_runtime::{self as runtime, Catalog, Event, Input, Menu, Provider, Settings};
@@ -18,8 +19,14 @@ use transcript::{label, Transcript};
 const MAX_QUEUED: usize = 32;
 
 struct QueuedPrompt {
+    id: u64,
     text: String,
     settings: Settings,
+}
+
+struct QueueEdit {
+    id: u64,
+    draft: String,
 }
 
 #[derive(Clone)]
@@ -30,6 +37,11 @@ pub(crate) struct ChatPane {
 
 struct ChatUi {
     pane: Cell<PaneId>,
+    history_id: SurfaceId,
+    loading_history: Cell<bool>,
+    resume_pending: Cell<bool>,
+    startup_settings: RefCell<Option<Settings>>,
+    native_id: RefCell<Option<String>>,
     cwd: PathBuf,
     provider: Option<Provider>,
     runtime: Option<tokio::runtime::Handle>,
@@ -41,8 +53,11 @@ struct ChatUi {
     confirmed_access: RefCell<Option<String>>,
     last_text: RefCell<Option<String>>,
     queue: RefCell<VecDeque<QueuedPrompt>>,
+    next_queue_id: Cell<u64>,
     queue_paused: Cell<bool>,
-    queue_button: gtk::MenuButton,
+    queue_edit: RefCell<Option<QueueEdit>>,
+    queue_panel: gtk::Box,
+    queue_title: gtk::Label,
     queue_rows: gtk::Box,
     catalog: RefCell<Catalog>,
     updating_options: Cell<bool>,
@@ -64,13 +79,18 @@ struct ChatUi {
 }
 
 impl ChatPane {
-    pub fn new(pane: PaneId, agent: &str, cwd: PathBuf, callbacks: &PaneCallbacks) -> Self {
+    pub fn new(
+        pane: PaneId,
+        history_id: SurfaceId,
+        agent: &str,
+        cwd: PathBuf,
+        callbacks: &PaneCallbacks,
+    ) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_widget_name("flowmux-chat");
         root.add_css_class("view");
         let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        // A narrow split scrolls the header and composer too, including the
-        // additional controls that appear while a turn is running.
+        // The composer and queue can overflow without raising the split's minimum width.
         root.append(
             &gtk::ScrolledWindow::builder()
                 .child(&layout)
@@ -78,7 +98,6 @@ impl ChatPane {
                 .hscrollbar_policy(gtk::PolicyType::Automatic)
                 .vscrollbar_policy(gtk::PolicyType::Never)
                 .overlay_scrolling(false)
-                .propagate_natural_width(true)
                 .build(),
         );
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -100,6 +119,29 @@ impl ChatPane {
         status.set_max_width_chars(22);
         header.append(&status);
         layout.append(&header);
+
+        let queue_title = label("");
+        queue_title.add_css_class("dim-label");
+        queue_title.add_css_class("caption");
+        let queue_rows = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let queue_panel = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        queue_panel.set_visible(false);
+        queue_panel.set_margin_start(8);
+        queue_panel.set_margin_end(8);
+        queue_panel.set_margin_top(6);
+        queue_panel.append(&queue_title);
+        queue_panel.append(
+            &gtk::ScrolledWindow::builder()
+                .child(&queue_rows)
+                .max_content_height(144)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .propagate_natural_height(true)
+                .build(),
+        );
+        let queue_clamp = adw::Clamp::new();
+        queue_clamp.set_maximum_size(840);
+        queue_clamp.set_child(Some(&queue_panel));
+        layout.append(&queue_clamp);
 
         let transcript = Transcript::new();
         layout.append(&transcript.root);
@@ -157,6 +199,9 @@ impl ChatPane {
         options.append(&reasoning);
         options.append(&access.widget);
         options.append(&plan);
+        let end = gtk::Button::with_label("End session");
+        end.add_css_class("destructive-action");
+        options.append(&end);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&options));
         let details = gtk::MenuButton::builder()
@@ -196,28 +241,6 @@ impl ChatPane {
         footer.set_margin_top(8);
         footer.set_margin_bottom(8);
         footer.append(&notice);
-        let queue_rows = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        queue_rows.set_margin_start(8);
-        queue_rows.set_margin_end(8);
-        queue_rows.set_margin_top(8);
-        queue_rows.set_margin_bottom(8);
-        let queue_popover = gtk::Popover::new();
-        queue_popover.set_child(Some(
-            &gtk::ScrolledWindow::builder()
-                .child(&queue_rows)
-                .min_content_width(320)
-                .max_content_height(260)
-                .hscrollbar_policy(gtk::PolicyType::Never)
-                .propagate_natural_height(true)
-                .build(),
-        ));
-        let queue_button = gtk::MenuButton::builder()
-            .halign(gtk::Align::Start)
-            .popover(&queue_popover)
-            .visible(false)
-            .build();
-        queue_button.add_css_class("flat");
-        footer.append(&queue_button);
         footer.append(&input);
         let clamp = adw::Clamp::new();
         clamp.set_maximum_size(840);
@@ -226,6 +249,11 @@ impl ChatPane {
 
         let ui = Rc::new(ChatUi {
             pane: Cell::new(pane),
+            history_id,
+            loading_history: Cell::new(true),
+            resume_pending: Cell::new(false),
+            startup_settings: RefCell::new(None),
+            native_id: RefCell::new(None),
             cwd,
             provider: Provider::parse(agent),
             runtime: callbacks.chat_runtime.clone(),
@@ -237,8 +265,11 @@ impl ChatPane {
             confirmed_access: RefCell::new(None),
             last_text: RefCell::new(None),
             queue: RefCell::new(VecDeque::new()),
+            next_queue_id: Cell::new(0),
             queue_paused: Cell::new(false),
-            queue_button,
+            queue_edit: RefCell::new(None),
+            queue_panel,
+            queue_title,
             queue_rows,
             catalog: RefCell::new(Catalog::default()),
             updating_options: Cell::new(false),
@@ -300,6 +331,15 @@ impl ChatPane {
                 ui.stop(false);
             }
         });
+        let weak = Rc::downgrade(&ui);
+        end.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.details.popdown();
+                ui.queue_paused.set(true);
+                ui.try_input(Input::End);
+                ui.refresh_queue();
+            }
+        });
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let preedit = Rc::new(Cell::new(false));
@@ -337,6 +377,12 @@ impl ChatPane {
         keys.connect_key_pressed(move |keys, key, _, modifiers| {
             use gtk::gdk::{Key, ModifierType as Mod};
             ime_enter.borrow_mut().take();
+            if key == Key::Escape && !preedit.get() {
+                if let Some(ui) = weak.upgrade().filter(|ui| ui.queue_edit.borrow().is_some()) {
+                    ui.finish_queue_edit(None);
+                    return glib::Propagation::Stop;
+                }
+            }
             if !matches!(key, Key::Return | Key::KP_Enter | Key::ISO_Enter)
                 || modifiers.intersects(Mod::ALT_MASK | Mod::SHIFT_MASK)
             {
@@ -383,18 +429,26 @@ impl ChatPane {
             }
         });
         ui.set_catalog(Catalog::default(), &Settings::default());
+        ui.load_history();
         Self { root, ui }
     }
 
-    pub(super) fn connect_started(
-        &self,
-        commands: async_channel::Sender<Input>,
-        events: async_channel::Receiver<Event>,
-        catalog: Catalog,
-        settings: Settings,
-    ) {
-        self.ui.listen(commands, events);
-        self.ui.ready(catalog, &settings);
+    pub(super) fn connect_started(&self, catalog: Catalog, settings: Settings) {
+        self.ui.loading_history.set(false);
+        self.ui.set_catalog(catalog, &settings);
+        *self.ui.startup_settings.borrow_mut() = Some(settings);
+        self.ui.connect(true);
+    }
+
+    pub(super) fn resume(&self) {
+        if self.ui.ready.get() {
+            return;
+        }
+        if self.ui.loading_history.get() || self.ui.connecting.get() {
+            self.ui.resume_pending.set(true);
+        } else {
+            self.ui.connect(true);
+        }
     }
 
     pub fn set_pane_id(&self, pane: PaneId) {
@@ -402,6 +456,14 @@ impl ChatPane {
     }
     pub fn cwd(&self) -> &Path {
         &self.ui.cwd
+    }
+
+    pub fn history_id(&self) -> SurfaceId {
+        self.ui.history_id
+    }
+
+    pub fn agent_name(&self) -> Option<&'static str> {
+        self.ui.provider.map(Provider::name)
     }
     pub fn grab_focus(&self) {
         self.ui.composer.grab_focus();
@@ -423,6 +485,8 @@ pub(super) fn picker(name: &str) -> Picker {
     let widget = gtk::DropDown::from_strings(&[]);
     widget.update_property(&[gtk::accessible::Property::Label(name)]);
     widget.set_tooltip_text(Some(name));
+    // Keep the default full-width rows when the button uses a compact label.
+    widget.set_list_factory(widget.factory().as_ref());
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         let text = gtk::Label::new(None);
@@ -484,7 +548,43 @@ pub(super) fn take_id(picker: &Picker) -> Option<String> {
 }
 
 impl ChatUi {
-    fn connect(self: &Rc<Self>) {
+    fn load_history(self: &Rc<Self>) {
+        self.status.set_label("Loading history…");
+        let id = self.history_id;
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let history = gtk::gio::spawn_blocking(move || {
+                chat_history::Store::existing()?
+                    .map_or(Ok(History::default()), |store| store.load(id))
+            })
+            .await;
+            let Some(ui) = weak
+                .upgrade()
+                .filter(|ui| ui.loading_history.replace(false))
+            else {
+                return;
+            };
+            ui.status.set_label("Ready to connect");
+            match history {
+                Ok(Ok(History { records, native_id })) => {
+                    *ui.native_id.borrow_mut() = native_id;
+                    ui.transcript.replay(records, false);
+                }
+                _ => ui.show_notice("Could not load saved chat history."),
+            }
+            ui.connect(ui.resume_pending.replace(false));
+        });
+    }
+
+    fn finish_turn(&self, status: &str, detail: Option<&str>) {
+        let elapsed = self.transcript.elapsed();
+        self.transcript.finish(status, detail, elapsed);
+    }
+
+    fn connect(self: &Rc<Self>, start: bool) {
+        if self.loading_history.get() {
+            return;
+        }
         let (Some(runtime), Some(provider)) = (&self.runtime, self.provider) else {
             self.show_notice("The chat runtime or agent is unavailable.");
             self.refresh_controls();
@@ -493,7 +593,14 @@ impl ChatUi {
         self.connecting.set(true);
         self.status.set_label("Connecting…");
         self.notice.set_visible(false);
-        let (tx, events) = runtime::start(runtime, provider, self.cwd.clone());
+        let (tx, events) = runtime::hosted(
+            runtime,
+            self.history_id,
+            provider,
+            self.cwd.clone(),
+            self.native_id.borrow().clone(),
+            start,
+        );
         self.listen(tx, events);
     }
 
@@ -597,7 +704,8 @@ impl ChatUi {
             self.plan.set_active(false);
         }
         self.details.set_visible(
-            !catalog.models.choices.is_empty()
+            self.ready.get()
+                || !catalog.models.choices.is_empty()
                 || !catalog.access.choices.is_empty()
                 || !menu.choices.is_empty()
                 || catalog.plan,
@@ -664,18 +772,26 @@ impl ChatUi {
     fn refresh_controls(&self) {
         let catalog = self.catalog.borrow();
         let ready = self.ready.get();
+        let editing = self.queue_edit.borrow().is_some();
         self.model
             .widget
             .set_sensitive(ready && !catalog.models.choices.is_empty());
         self.access
             .widget
             .set_sensitive(ready && !catalog.access.choices.is_empty());
-        self.details.set_sensitive(ready);
+        self.details.set_sensitive(ready && !editing);
         self.status
             .set_visible(self.connecting.get() || self.busy.get());
         self.stop.set_visible(self.busy.get());
         self.stop.set_sensitive(!self.stopping.get());
-        let (action, icon, tooltip, enabled) = if ready {
+        let (action, icon, tooltip, enabled) = if editing {
+            (
+                "Save queued message",
+                "object-select-symbolic",
+                "Enter to save changes · Esc to cancel · Shift+Enter for a new line",
+                !self.draft().trim().is_empty(),
+            )
+        } else if ready {
             let enabled = !self.draft().trim().is_empty();
             if self.busy.get() {
                 (
@@ -697,7 +813,10 @@ impl ChatUi {
                 "Connect",
                 "network-transmit-receive-symbolic",
                 "Connect to the agent",
-                !self.connecting.get() && self.provider.is_some() && self.runtime.is_some(),
+                !self.loading_history.get()
+                    && !self.connecting.get()
+                    && self.provider.is_some()
+                    && self.runtime.is_some(),
             )
         };
         self.send.set_icon_name(icon);
@@ -726,9 +845,10 @@ impl ChatUi {
     }
 
     fn activate_send(self: &Rc<Self>) {
-        if !self.ready.get() {
+        let editing = self.queue_edit.borrow().is_some();
+        if !editing && !self.ready.get() {
             if !self.connecting.get() {
-                self.connect();
+                self.connect(true);
             }
             return;
         }
@@ -740,8 +860,12 @@ impl ChatUi {
             self.show_notice("The message is too long. Limit messages to 128 KiB.");
             return;
         }
+        if editing {
+            self.finish_queue_edit(Some(text));
+            return;
+        }
         self.authorize(self.draft_settings(), move |ui, settings| {
-            if ui.draft() == text {
+            if ui.queue_edit.borrow().is_none() && ui.draft() == text {
                 ui.submit_draft(text.clone(), settings);
             }
         });
@@ -811,7 +935,9 @@ impl ChatUi {
                 self.show_notice("The message queue is full.");
                 return;
             }
-            queue.push_back(QueuedPrompt { text, settings });
+            let id = self.next_queue_id.get();
+            self.next_queue_id.set(id + 1);
+            queue.push_back(QueuedPrompt { id, text, settings });
             if self.stopping.get() {
                 self.queue_paused.set(false);
             }
@@ -879,8 +1005,62 @@ impl ChatUi {
         true
     }
 
-    fn send_now(self: &Rc<Self>, index: usize) {
-        self.queue_button.popdown();
+    fn editing_id(&self) -> Option<u64> {
+        self.queue_edit.borrow().as_ref().map(|edit| edit.id)
+    }
+
+    fn edit_queued(self: &Rc<Self>, id: u64) {
+        if self.editing_id().is_some() {
+            return;
+        }
+        let text = self
+            .queue
+            .borrow()
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.text.clone());
+        let Some(text) = text else { return };
+        *self.queue_edit.borrow_mut() = Some(QueueEdit {
+            id,
+            draft: self.draft(),
+        });
+        let buffer = self.composer.buffer();
+        buffer.set_text(&text);
+        buffer.place_cursor(&buffer.end_iter());
+        self.refresh_controls();
+        self.refresh_queue();
+        self.composer.grab_focus();
+    }
+
+    fn finish_queue_edit(self: &Rc<Self>, text: Option<String>) {
+        let Some(edit) = self.queue_edit.borrow_mut().take() else {
+            return;
+        };
+        if let Some(text) = text {
+            if let Some(entry) = self
+                .queue
+                .borrow_mut()
+                .iter_mut()
+                .find(|entry| entry.id == edit.id)
+            {
+                entry.text = text;
+            }
+            self.show_notice("");
+        }
+        let buffer = self.composer.buffer();
+        buffer.set_text(&edit.draft);
+        buffer.place_cursor(&buffer.end_iter());
+        self.refresh_controls();
+        self.refresh_queue();
+        self.composer.grab_focus();
+        self.send_next_queued();
+    }
+
+    fn send_now(self: &Rc<Self>, id: u64) {
+        let index = self.queue.borrow().iter().position(|entry| entry.id == id);
+        let Some(index) = index.filter(|_| self.editing_id() != Some(id)) else {
+            return;
+        };
         if !self.ready.get() {
             self.show_notice("Connect to the agent to send queued messages.");
         } else if self.busy.get() {
@@ -894,24 +1074,46 @@ impl ChatUi {
             }
         } else {
             self.queue_paused.set(false);
-            self.send_queued(index);
+            self.send_queued(id);
         }
     }
 
-    fn send_queued(self: &Rc<Self>, index: usize) {
+    fn send_next_queued(self: &Rc<Self>) {
+        if self.queue_paused.get() || self.busy.get() || !self.ready.get() {
+            return;
+        }
+        let next = self.queue.borrow().front().map(|entry| entry.id);
+        if let Some(id) = next {
+            self.send_queued(id);
+        }
+    }
+
+    fn send_queued(self: &Rc<Self>, id: u64) {
+        if self.editing_id() == Some(id) {
+            return;
+        }
         let Some(settings) = self
             .queue
             .borrow()
-            .get(index)
+            .iter()
+            .find(|entry| entry.id == id)
             .map(|entry| entry.settings.clone())
         else {
             return;
         };
         self.authorize(settings, move |ui, settings| {
-            let text = ui.queue.borrow().get(index).map(|entry| entry.text.clone());
+            if ui.editing_id() == Some(id) {
+                return;
+            }
+            let text = ui
+                .queue
+                .borrow()
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| entry.text.clone());
             if let Some(text) = text {
                 if ui.send_text(&text, settings) {
-                    ui.queue.borrow_mut().remove(index);
+                    ui.queue.borrow_mut().retain(|entry| entry.id != id);
                     ui.refresh_queue();
                 } else {
                     ui.queue_paused.set(true);
@@ -927,19 +1129,19 @@ impl ChatUi {
         }
         let queue = self.queue.borrow();
         let count = queue.len();
-        self.queue_button.set_visible(count > 0);
-        let title = format!(
-            "{count} {}",
-            if self.queue_paused.get() {
-                "paused"
-            } else {
-                "queued"
-            }
-        );
-        self.queue_button.set_label(&title);
-        self.queue_button
-            .update_property(&[gtk::accessible::Property::Label(&title)]);
-        for (index, entry) in queue.iter().enumerate() {
+        let editing = self.editing_id();
+        self.queue_panel.set_visible(count > 0);
+        let mut title = format!("{count} queued");
+        if self.queue_paused.get() {
+            title.push_str(" · Paused");
+        }
+        if editing.is_some() {
+            title.push_str(" · Editing queued message");
+        }
+        self.queue_title.set_label(&title);
+        for entry in queue.iter() {
+            let id = entry.id;
+            let is_editing = editing == Some(id);
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
             let preview: String = entry
                 .text
@@ -953,30 +1155,39 @@ impl ChatUi {
             text.set_hexpand(true);
             text.set_max_width_chars(30);
             text.set_tooltip_text(Some(preview.trim_end()));
+            if is_editing {
+                text.add_css_class("accent");
+            }
             row.append(&text);
-            let now = gtk::Button::with_label("Send now");
+            let now = gtk::Button::from_icon_name("go-up-symbolic");
             now.add_css_class("flat");
-            now.set_tooltip_text(Some("Stop the current turn and send this message next"));
+            now.set_tooltip_text(Some("Send now · Stops the current turn if running"));
+            now.update_property(&[gtk::accessible::Property::Label("Send now")]);
+            now.set_sensitive(!is_editing);
             let weak = Rc::downgrade(self);
             now.connect_clicked(move |_| {
                 if let Some(ui) = weak.upgrade() {
-                    ui.send_now(index);
+                    ui.send_now(id);
                 }
             });
             row.append(&now);
-            let edit = gtk::Button::from_icon_name("document-edit-symbolic");
+            let (edit_icon, edit_label) = if is_editing {
+                ("window-close-symbolic", "Cancel queued edit")
+            } else {
+                ("document-edit-symbolic", "Edit queued message")
+            };
+            let edit = gtk::Button::from_icon_name(edit_icon);
             edit.add_css_class("flat");
-            edit.set_tooltip_text(Some("Move message back to the draft"));
-            edit.update_property(&[gtk::accessible::Property::Label("Edit queued message")]);
+            edit.set_tooltip_text(Some(edit_label));
+            edit.update_property(&[gtk::accessible::Property::Label(edit_label)]);
+            edit.set_sensitive(is_editing || editing.is_none());
             let weak = Rc::downgrade(self);
             edit.connect_clicked(move |_| {
                 if let Some(ui) = weak.upgrade() {
-                    let prompt = ui.queue.borrow_mut().remove(index);
-                    if let Some(prompt) = prompt {
-                        ui.queue_button.popdown();
-                        ui.restore_draft(&prompt.text);
-                        ui.refresh_queue();
-                        ui.composer.grab_focus();
+                    if ui.editing_id() == Some(id) {
+                        ui.finish_queue_edit(None);
+                    } else {
+                        ui.edit_queued(id);
                     }
                 }
             });
@@ -987,7 +1198,43 @@ impl ChatUi {
 
     fn handle(self: &Rc<Self>, event: Event) {
         match event {
-            Event::Ready(catalog) => self.ready(catalog, &Settings::default()),
+            Event::Attached {
+                records,
+                busy,
+                native_id,
+                settings,
+            } => {
+                *self.native_id.borrow_mut() = native_id;
+                self.startup_settings.borrow_mut().get_or_insert(settings);
+                self.resume_pending.set(false);
+                self.busy.set(busy);
+                self.transcript.replay(records, busy);
+                self.status
+                    .set_label(if self.transcript.has_pending_input() {
+                        "Waiting for input"
+                    } else {
+                        "Working…"
+                    });
+            }
+            Event::Detached => {
+                self.ready.set(false);
+                self.connecting.set(false);
+                self.commands.borrow_mut().take();
+                if self.resume_pending.replace(false) {
+                    self.connect(true);
+                } else {
+                    self.refresh_controls();
+                }
+            }
+            Event::Ready(catalog) => {
+                let settings = self
+                    .startup_settings
+                    .borrow_mut()
+                    .take()
+                    .unwrap_or_default();
+                self.ready(catalog, &settings);
+            }
+            Event::Session(native_id) => *self.native_id.borrow_mut() = Some(native_id),
             Event::SettingsApplied(settings) => {
                 self.last_text.borrow_mut().take();
                 if !self.stopping.get() && !self.transcript.has_pending_input() {
@@ -1015,22 +1262,20 @@ impl ChatUi {
                 self.status.set_label("Waiting for input");
                 self.transcript.prompt(prompt);
             }
-            Event::PromptResolved { id, label } => {
-                if self.transcript.resolve(&id, &label) {
+            Event::PromptResolved { id, label, answers } => {
+                if self.transcript.resolve(&id, &label, &answers) {
                     self.status.set_label("Working…");
                 }
             }
             Event::Finished { status, detail } => {
-                self.transcript.finish(&status, detail.as_deref());
+                self.finish_turn(&status, detail.as_deref());
                 self.clear_turn();
-                if !self.queue_paused.get() {
-                    self.send_queued(0);
-                }
+                self.send_next_queued();
             }
             Event::Rejected(error) => {
                 self.queue_paused.set(true);
                 self.restore_unconfirmed_draft();
-                self.transcript.finish("Not sent", Some(&error));
+                self.finish_turn("Not sent", Some(&error));
                 self.show_notice(&error);
                 self.clear_turn();
                 self.refresh_queue();
@@ -1056,7 +1301,7 @@ impl ChatUi {
                 }
                 self.restore_unconfirmed_draft();
                 if self.busy.get() {
-                    self.transcript.finish("Disconnected", Some(&error));
+                    self.finish_turn("Disconnected", Some(&error));
                 }
                 self.ready.set(false);
                 self.connecting.set(false);
@@ -1077,13 +1322,21 @@ impl ChatUi {
     }
 
     fn restore_draft(&self, text: &str) {
-        let current = self.draft();
+        let mut edit = self.queue_edit.borrow_mut();
+        let current = edit
+            .as_ref()
+            .map_or_else(|| self.draft(), |edit| edit.draft.clone());
         let restored = if current.is_empty() {
             text.to_owned()
         } else {
             format!("{text}\n\n{current}")
         };
-        self.composer.buffer().set_text(&restored);
+        if let Some(edit) = edit.as_mut() {
+            edit.draft = restored;
+        } else {
+            drop(edit);
+            self.composer.buffer().set_text(&restored);
+        }
     }
 
     fn clear_turn(&self) {
@@ -1091,5 +1344,40 @@ impl ChatUi {
         self.stopping.set(false);
         self.last_text.borrow_mut().take();
         self.refresh_controls();
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    fn chat_minimum_width_stays_stable_with_a_running_turn_and_queue() {
+        adw::init().unwrap();
+        let chat = ChatPane::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            "Codex",
+            std::env::temp_dir(),
+            &PaneCallbacks::noop_for_test(),
+        );
+        let minimum = || chat.root.measure(gtk::Orientation::Horizontal, -1).0;
+        let idle_width = minimum();
+        chat.ui.ready.set(true);
+        chat.ui.busy.set(true);
+        chat.ui.set_catalog(
+            Catalog {
+                plan: true,
+                ..Catalog::default()
+            },
+            &Settings::default(),
+        );
+        chat.ui.transcript.begin("Running prompt");
+        assert_eq!(minimum(), idle_width);
+
+        chat.ui
+            .submit_draft("Queued prompt".repeat(100), Settings::default());
+        assert!(chat.ui.queue_panel.is_visible());
+        assert_eq!(minimum(), idle_width);
     }
 }

@@ -3,6 +3,7 @@
 
 use crate::bridge::{Bridge, GtkCommand};
 use adw::prelude::*;
+use flowmux_state::chat_history::Summary as ChatSummary;
 use flowmux_state::session_history::{HistorySession, SessionAgent};
 use gtk::glib;
 use std::cell::{Cell, RefCell};
@@ -25,6 +26,35 @@ pub enum SessionPanelAction {
         generation: u64,
         yolo: bool,
     },
+    SelectChat {
+        chat: ChatSummary,
+        generation: u64,
+    },
+    OpenChat {
+        chat: ChatSummary,
+        generation: u64,
+    },
+}
+
+#[derive(Clone)]
+pub(super) enum SessionEntry {
+    Native(HistorySession),
+    Chat(ChatSummary),
+}
+
+impl From<HistorySession> for SessionEntry {
+    fn from(session: HistorySession) -> Self {
+        Self::Native(session)
+    }
+}
+
+impl SessionEntry {
+    pub fn modified(&self) -> std::time::SystemTime {
+        match self {
+            Self::Native(session) => session.modified,
+            Self::Chat(chat) => chat.modified,
+        }
+    }
 }
 
 fn send(bridge: &Bridge, action: SessionPanelAction) {
@@ -40,11 +70,12 @@ pub struct SessionPanel {
     pub status: gtk::Label,
     pub preview: gtk::TextView,
     pub resume: gtk::Button,
+    yolo: gtk::CheckButton,
     pub generation: Rc<Cell<u64>>,
     pub selection: Rc<RefCell<Option<String>>>,
     pub selected_agent: Rc<Cell<Option<SessionAgent>>>,
     agent_buttons: Vec<(SessionAgent, gtk::ToggleButton)>,
-    rows: Rc<RefCell<Vec<HistorySession>>>,
+    rows: Rc<RefCell<Vec<SessionEntry>>>,
     list: gtk::ListBox,
     search: gtk::SearchEntry,
     colors: Rc<RefCell<HashMap<PathBuf, String>>>,
@@ -187,7 +218,7 @@ impl SessionPanel {
         actions.append(&yolo);
         root.append(&actions);
         let generation = Rc::new(Cell::new(0));
-        let rows = Rc::new(RefCell::new(Vec::<HistorySession>::new()));
+        let rows = Rc::new(RefCell::new(Vec::<SessionEntry>::new()));
         let rows_for_selection = rows.clone();
         let generation_for_selection = generation.clone();
         let bridge_for_selection = bridge.clone();
@@ -198,32 +229,37 @@ impl SessionPanel {
                     .get(row.index() as usize)
                     .cloned()
             }) {
-                send(
-                    &bridge_for_selection,
-                    SessionPanelAction::Select {
+                let generation = generation_for_selection.get();
+                let action = match session {
+                    SessionEntry::Native(session) => SessionPanelAction::Select {
                         session,
-                        generation: generation_for_selection.get(),
+                        generation,
                     },
-                );
+                    SessionEntry::Chat(chat) => SessionPanelAction::SelectChat { chat, generation },
+                };
+                send(&bridge_for_selection, action);
             }
         });
         let rows_for_resume = rows.clone();
         let list_for_resume = list.clone();
         let generation_for_resume = generation.clone();
         let bridge_for_resume = bridge.clone();
+        let yolo_for_resume = yolo.clone();
         resume.connect_clicked(move |_| {
             if let Some(session) = list_for_resume
                 .selected_row()
                 .and_then(|row| rows_for_resume.borrow().get(row.index() as usize).cloned())
             {
-                send(
-                    &bridge_for_resume,
-                    SessionPanelAction::Resume {
+                let generation = generation_for_resume.get();
+                let action = match session {
+                    SessionEntry::Native(session) => SessionPanelAction::Resume {
                         session,
-                        generation: generation_for_resume.get(),
-                        yolo: yolo.is_active(),
+                        generation,
+                        yolo: yolo_for_resume.is_active(),
                     },
-                );
+                    SessionEntry::Chat(chat) => SessionPanelAction::OpenChat { chat, generation },
+                };
+                send(&bridge_for_resume, action);
             }
         });
         let search_list = list.clone();
@@ -255,6 +291,7 @@ impl SessionPanel {
             status,
             preview,
             resume,
+            yolo,
             list,
             search,
             generation,
@@ -279,6 +316,7 @@ impl SessionPanel {
         self.generation.set(generation);
         self.selection.borrow_mut().take();
         self.resume.set_sensitive(false);
+        self.show_chat_action(false);
         self.preview.buffer().set_text("");
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
@@ -288,44 +326,74 @@ impl SessionPanel {
         generation
     }
 
-    pub fn set_rows(&self, sessions: Vec<HistorySession>, generation: u64) {
+    pub fn show_chat_action(&self, chat: bool) {
+        self.resume.set_label(if chat {
+            "Resume chat"
+        } else {
+            "Resume in new tab"
+        });
+        self.resume.set_tooltip_text(Some(if chat {
+            "Resume the selected chat and show its conversation."
+        } else {
+            "Open the selected session in its project directory in a new terminal tab."
+        }));
+        self.yolo.set_visible(!chat);
+    }
+
+    pub(super) fn set_rows(&self, sessions: Vec<impl Into<SessionEntry>>, generation: u64) {
         if generation != self.generation.get() {
             return;
         }
-        *self.rows.borrow_mut() = sessions;
+        *self.rows.borrow_mut() = sessions.into_iter().map(Into::into).collect();
         let mut colors = self.colors.borrow_mut();
         let mut used: Vec<_> = colors.values().cloned().collect();
         for session in self.rows.borrow().iter() {
+            let (agent, title, summary, cwd, id) = match session {
+                SessionEntry::Native(item) => (
+                    item.agent.name(),
+                    item.title.as_str(),
+                    item.summary.as_str(),
+                    &item.cwd,
+                    item.id.clone(),
+                ),
+                SessionEntry::Chat(item) => (
+                    item.agent.as_str(),
+                    item.title.as_str(),
+                    "Chat",
+                    &item.cwd,
+                    item.id.to_string(),
+                ),
+            };
             let row = gtk::ListBoxRow::new();
             row.add_css_class("flowmux-session-row");
             row.set_tooltip_text(Some(&format!(
                 "{} · {}\n{}\n{}\n{}",
-                session.agent.name(),
-                session.title,
-                session.summary,
-                session.cwd.display(),
-                session.id
+                agent,
+                title,
+                summary,
+                cwd.display(),
+                id
             )));
-            let color = colors.entry(session.cwd.clone()).or_insert_with(|| {
+            let color = colors.entry(cwd.clone()).or_insert_with(|| {
                 use std::hash::{Hash, Hasher};
                 let mut hash = std::collections::hash_map::DefaultHasher::new();
-                session.cwd.hash(&mut hash);
+                cwd.hash(&mut hash);
                 let color = flowmux_core::pick_workspace_color(&used, hash.finish() as u128);
                 used.push(color.clone());
                 color
             });
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             content.append(&super::sidebar::color_bar(color));
-            let icon = super::agent_icon(session.agent.name());
+            let icon = super::agent_icon(agent);
             icon.set_pixel_size(16);
             icon.set_valign(gtk::Align::Start);
             icon.set_margin_top(2);
-            icon.set_tooltip_text(Some(session.agent.name()));
-            icon.update_property(&[gtk::accessible::Property::Label(session.agent.name())]);
+            icon.set_tooltip_text(Some(agent));
+            icon.update_property(&[gtk::accessible::Property::Label(agent)]);
             content.append(&icon);
             let text = gtk::Box::new(gtk::Orientation::Vertical, 4);
             text.set_hexpand(true);
-            let title = gtk::Label::new(Some(&session.title));
+            let title = gtk::Label::new(Some(title));
             title.add_css_class("flowmux-session-title");
             title.set_xalign(0.0);
             title.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -335,18 +403,17 @@ impl SessionPanel {
             metadata.add_css_class("caption");
             metadata.add_css_class("dim-label");
             let project = gtk::Label::new(Some(
-                &session
-                    .cwd
-                    .file_name()
-                    .unwrap_or(session.cwd.as_os_str())
-                    .to_string_lossy(),
+                &cwd.file_name().unwrap_or(cwd.as_os_str()).to_string_lossy(),
             ));
             project.set_xalign(0.0);
             project.set_hexpand(true);
             project.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
             project.set_max_width_chars(24);
             metadata.append(&project);
-            let modified: chrono::DateTime<chrono::Local> = session.modified.into();
+            if matches!(session, SessionEntry::Chat(_)) {
+                metadata.append(&gtk::Label::new(Some("Chat")));
+            }
+            let modified: chrono::DateTime<chrono::Local> = session.modified().into();
             metadata.append(&gtk::Label::new(Some(
                 &modified.format("%m-%d %H:%M").to_string(),
             )));
