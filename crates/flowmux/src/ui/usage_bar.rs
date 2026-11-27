@@ -57,6 +57,24 @@ impl UsageBar {
             .vscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
             .build();
+        let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        let adjustment = root.hadjustment();
+        wheel.connect_scroll(move |wheel, dx, dy| {
+            let shifted = wheel
+                .current_event_state()
+                .contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            if shifted || dy.abs() <= dx.abs() {
+                return gtk::glib::Propagation::Proceed;
+            }
+            let scale = if wheel.unit() == gtk::gdk::ScrollUnit::Wheel {
+                32.0
+            } else {
+                1.0
+            };
+            adjustment.set_value(adjustment.value() + dy * scale);
+            gtk::glib::Propagation::Stop
+        });
+        row.add_controller(wheel);
         root.set_widget_name("flowmux-usage-bar");
         root.set_visible(false);
         let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
