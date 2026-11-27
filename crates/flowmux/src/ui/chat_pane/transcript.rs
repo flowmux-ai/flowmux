@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use adw::prelude::*;
 use gtk::glib;
 
-use crate::ui::chat_runtime::{Change, Prompt, TextKind, Work};
+use crate::ui::chat_runtime::{pasted_image_path, Change, Message, Prompt, TextKind, Work};
 use flowmux_state::chat_history::Record;
 
 mod highlight;
@@ -61,7 +61,7 @@ struct View {
 
 struct Turn {
     root: gtk::Box,
-    prompts: Vec<gtk::Label>,
+    prompts: Vec<Message>,
     activity: gtk::ToggleButton,
     entries: gtk::Box,
     result: gtk::Box,
@@ -69,7 +69,6 @@ struct Turn {
     elapsed: Option<u64>,
     status: String,
     rows: HashMap<String, Row>,
-    answer: Option<String>,
     open: Cell<bool>,
     pending: HashMap<String, gtk::Box>,
     runs: Vec<Run>,
@@ -155,25 +154,90 @@ fn copy_button(action: &str) -> gtk::Button {
     button
 }
 
-fn bubble(text: &str) -> (gtk::Box, gtk::Label) {
+fn bubble(text: &str, base: &std::path::Path) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     row.set_halign(gtk::Align::End);
     row.set_margin_top(4);
     row.set_margin_bottom(4);
-    let bubble = text_label(text);
-    bubble.set_max_width_chars(70);
+    let command = super::commands::parse(text).is_some();
+    let bubble: gtk::Widget = if command {
+        let label = text_label(text);
+        label.set_max_width_chars(70);
+        label.upcast()
+    } else {
+        markdown::message(text, base).upcast()
+    };
     bubble.set_css_classes(&["card", "flowmux-chat-prompt"]);
     bubble.set_widget_name("flowmux-chat-user");
-    if super::commands::parse(text).is_some() {
+    if command {
         bubble.add_css_class("flowmux-chat-command-bubble");
     }
     let copy = copy_button("Copy message");
+    copy.add_css_class("flowmux-chat-copy-message");
     copy.set_valign(gtk::Align::Start);
-    let message = bubble.clone();
-    copy.connect_clicked(move |button| button.clipboard().set_text(&message.label()));
+    let original = text.to_owned();
+    copy.connect_clicked(move |button| button.clipboard().set_text(&original));
     row.append(&copy);
-    row.append(&bubble);
-    (row, bubble)
+    row.append(
+        &adw::Clamp::builder()
+            .child(&bubble)
+            .maximum_size(560)
+            .tightening_threshold(560)
+            .build(),
+    );
+    row
+}
+
+fn prompt_widget(message: &Message, base: &std::path::Path) -> gtk::Box {
+    if message.images.is_empty() {
+        return bubble(&message.text, base);
+    }
+    let row = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    row.set_halign(gtk::Align::End);
+    if !message.text.trim().is_empty() {
+        row.append(&bubble(&message.text, base));
+    }
+    for id in &message.images {
+        if let Some(path) = pasted_image_path(id) {
+            row.append(&media::media(
+                &path.to_string_lossy(),
+                "Attached image",
+                base,
+            ));
+        }
+    }
+    row
+}
+
+pub(super) fn prompt_text(message: &Message) -> &str {
+    if message.text.trim().is_empty() && !message.images.is_empty() {
+        "Image"
+    } else {
+        &message.text
+    }
+}
+
+pub(super) fn attachment_thumbnail(id: &str) -> gtk::Picture {
+    let picture = gtk::Picture::builder()
+        .width_request(36)
+        .height_request(36)
+        .can_shrink(true)
+        .content_fit(gtk::ContentFit::Contain)
+        .build();
+    if let Some(path) = pasted_image_path(id) {
+        let weak = picture.downgrade();
+        glib::spawn_future_local(async move {
+            let pixels = media::Pixels::File(path);
+            if let Ok(Ok(rgba)) =
+                gtk::gio::spawn_blocking(move || media::decode_pixels(&pixels, (36, 36))).await
+            {
+                if let Some(picture) = weak.upgrade() {
+                    picture.set_paintable(Some(&media::texture(rgba)));
+                }
+            }
+        });
+    }
+    picture
 }
 
 /// An expander whose title ellipsizes instead of setting the transcript's minimum width.
@@ -398,7 +462,7 @@ impl Transcript {
                 let text = label(&format!(
                     "{}. {}",
                     index + 1,
-                    excerpt(&turn.prompts[0].label(), 160)
+                    excerpt(prompt_text(&turn.prompts[0]), 160)
                 ));
                 text.set_wrap(false);
                 text.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -469,7 +533,7 @@ impl Transcript {
         *self.view.respond.borrow_mut() = Rc::new(callback);
     }
 
-    pub fn begin(&self, prompt: &str) {
+    pub fn begin(&self, prompt: Message) {
         let mut turns = self.view.turns.borrow_mut();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 7);
         let weak = Rc::downgrade(&self.view);
@@ -481,8 +545,7 @@ impl Transcript {
                 }
             }
         });
-        let (message, bubble) = bubble(prompt);
-        root.append(&message);
+        root.append(&prompt_widget(&prompt, &self.view.base));
         let activity = gtk::ToggleButton::with_label("Working…");
         activity.set_active(true);
         activity.set_halign(gtk::Align::Start);
@@ -510,7 +573,7 @@ impl Transcript {
         });
         turns.push(Turn {
             root: root.clone(),
-            prompts: vec![bubble],
+            prompts: vec![prompt],
             activity,
             entries,
             result,
@@ -518,7 +581,6 @@ impl Transcript {
             elapsed: None,
             status: "Working".into(),
             rows: HashMap::new(),
-            answer: None,
             open: Cell::new(true),
             pending: HashMap::new(),
             runs: Vec::new(),
@@ -574,13 +636,20 @@ impl Transcript {
             match record {
                 Record::Begin {
                     prompt,
+                    images,
                     steer: true,
-                } => self.steer(&prompt),
-                Record::Begin { prompt, .. } => {
+                } => self.steer(Message {
+                    text: prompt,
+                    images,
+                }),
+                Record::Begin { prompt, images, .. } => {
                     if active {
                         self.finish("Interrupted", None, 0);
                     }
-                    self.begin(&prompt);
+                    self.begin(Message {
+                        text: prompt,
+                        images,
+                    });
                     active = true;
                 }
                 Record::Text {
@@ -617,7 +686,7 @@ impl Transcript {
         &self,
         current: Option<PromptPosition>,
         older: bool,
-    ) -> Option<(PromptPosition, String)> {
+    ) -> Option<(PromptPosition, Message)> {
         let turns = self.view.turns.borrow();
         let mut prompts = turns
             .iter()
@@ -627,7 +696,7 @@ impl Transcript {
                 row.prompts
                     .iter()
                     .enumerate()
-                    .map(move |(entry, label)| ((turn, entry), label))
+                    .map(move |(entry, message)| ((turn, entry), message))
             });
         let next = if older {
             prompts
@@ -637,7 +706,7 @@ impl Transcript {
             let current = current?;
             prompts.find(|(at, _)| *at > current)
         }?;
-        Some((next.0, next.1.label().to_string()))
+        Some((next.0, next.1.clone()))
     }
 
     pub fn text(&self, id: String, kind: TextKind, text: String, append: bool) {
@@ -649,9 +718,6 @@ impl Transcript {
             return;
         };
         let key = format!("text:{id}");
-        if kind == TextKind::Answer {
-            turn.answer = Some(key.clone());
-        }
         let position = turn.rows.len();
         let row = turn.rows.entry(key).or_insert_with(|| {
             turn.open_run = None;
@@ -698,16 +764,16 @@ impl Transcript {
     }
 
     /// Shows a message that joined the running turn.
-    pub fn steer(&self, text: &str) {
+    pub fn steer(&self, message: Message) {
         let mut turns = self.view.turns.borrow_mut();
         let Some(turn) = turns.last_mut() else {
             return;
         };
         turn.flush(false, &self.view.base);
         turn.open_run = None;
-        let (message, prompt) = bubble(text);
-        turn.entries.append(&message);
-        turn.prompts.push(prompt);
+        turn.entries
+            .append(&prompt_widget(&message, &self.view.base));
+        turn.prompts.push(message);
         drop(turns);
         self.view.schedule_adjustment();
     }
@@ -802,7 +868,7 @@ impl Transcript {
         }
         let mut inputs = Vec::new();
         for question in prompt.questions {
-            card.append(&text_label(&question.title));
+            card.append(&markdown::message(&question.title, &self.view.base));
             let input = gtk::Entry::new();
             input.set_placeholder_text(Some("Your answer"));
             if !question.options.is_empty() {
@@ -877,7 +943,7 @@ impl Transcript {
             return false;
         };
         if let Some(card) = turn.pending.remove(id) {
-            receipt(&card, result, answers);
+            receipt(&card, result, answers, &self.view.base);
         }
         let ready = turn.pending.is_empty();
         if ready {
@@ -907,7 +973,7 @@ impl Transcript {
         turn.elapsed = Some(elapsed);
         turn.update_status();
         for card in turn.pending.drain().map(|(_, card)| card) {
-            receipt(&card, "Request closed", &[]);
+            receipt(&card, "Request closed", &[], &self.view.base);
         }
         for row in turn.rows.values_mut() {
             match row {
@@ -930,9 +996,12 @@ impl Transcript {
         turn.activity.set_active(expanded);
         turn.show_process();
         turn.flush(true, &self.view.base);
-        if turn.answer().is_some() {
+        if let Some((key, answer)) = turn.final_answer() {
+            answer.root.add_css_class("flowmux-chat-final-answer");
+            answer.root.set_spacing(4);
             const COPY_RESPONSE: &str = "Copy response";
             let copy = copy_button(COPY_RESPONSE);
+            copy.add_css_class("flowmux-chat-copy-response");
             copy.set_child(Some(
                 &adw::ButtonContent::builder()
                     .icon_name(COPY_ICON)
@@ -940,15 +1009,19 @@ impl Transcript {
                     .build(),
             ));
             copy.set_halign(gtk::Align::Start);
+            let key = key.to_owned();
             let weak = Rc::downgrade(&self.view);
             copy.connect_clicked(move |button| {
                 if let Some(view) = weak.upgrade() {
-                    if let Some(turn) = view.turns.borrow().get(index) {
-                        button.clipboard().set_text(&turn.response_text());
+                    let turns = view.turns.borrow();
+                    if let Some(Row::Text(answer)) =
+                        turns.get(index).and_then(|turn| turn.rows.get(&key))
+                    {
+                        button.clipboard().set_text(&answer.text);
                     }
                 }
             });
-            turn.result.append(&copy);
+            answer.root.append(&copy);
         }
         let mut changes = BTreeMap::<&str, Vec<&Change>>::new();
         let mut checks = Vec::new();
@@ -1038,25 +1111,21 @@ impl Transcript {
 }
 
 impl Turn {
-    fn answer(&self) -> Option<&TextRow> {
-        match self.rows.get(self.answer.as_ref()?) {
-            Some(Row::Text(row)) => Some(row),
-            _ => None,
-        }
-    }
-
-    fn response_text(&self) -> String {
-        let parts: BTreeMap<_, _> = self
-            .rows
-            .values()
-            .filter_map(|row| match row {
-                Row::Text(row) if row.kind == TextKind::Answer => {
-                    Some((row.position, row.text.as_str()))
+    fn final_answer(&self) -> Option<(&str, &TextRow)> {
+        self.rows
+            .iter()
+            .filter_map(|(key, row)| match row {
+                // Tool images share the answer rendering path and have their own row IDs.
+                Row::Text(row)
+                    if row.kind == TextKind::Answer
+                        && !key.starts_with("text:image:")
+                        && !row.text.trim().is_empty() =>
+                {
+                    Some((key.as_str(), row))
                 }
                 _ => None,
             })
-            .collect();
-        parts.into_values().collect::<Vec<_>>().join("\n\n")
+            .max_by_key(|(_, row)| row.position)
     }
 
     fn update_status(&self) {
@@ -1356,7 +1425,7 @@ impl View {
                 "Message {} · {} · {}",
                 index + 1,
                 turn.status,
-                preview(&turn.prompts[0].label(), 160)
+                preview(prompt_text(&turn.prompts[0]), 160)
             );
             button.update_property(&[
                 gtk::accessible::Property::Label(&name),
@@ -1410,8 +1479,8 @@ impl View {
     fn preview(&self, index: usize) -> Option<String> {
         let turns = self.turns.try_borrow().ok()?;
         let turn = turns.get(index)?;
-        let prompt = glib::markup_escape_text(&excerpt(&turn.prompts[0].label(), 200));
-        let answer = turn.answer().map(|row| excerpt(&row.text, 240));
+        let prompt = glib::markup_escape_text(&excerpt(prompt_text(&turn.prompts[0]), 200));
+        let answer = turn.final_answer().map(|(_, row)| excerpt(&row.text, 240));
         Some(match answer.filter(|answer| !answer.is_empty()) {
             Some(answer) => format!("<b>{prompt}</b>\n{}", glib::markup_escape_text(&answer)),
             None => format!("<b>{prompt}</b>"),
@@ -1493,7 +1562,7 @@ fn clear(box_: &gtk::Box) {
     }
 }
 
-fn receipt(card: &gtk::Box, result: &str, answers: &[String]) {
+fn receipt(card: &gtk::Box, result: &str, answers: &[String], base: &std::path::Path) {
     if let Some(actions) = card.last_child() {
         card.remove(&actions);
     }
@@ -1503,7 +1572,7 @@ fn receipt(card: &gtk::Box, result: &str, answers: &[String]) {
         child = widget.next_sibling();
         if widget.is::<gtk::Entry>() {
             if let Some(answer) = answers.next() {
-                card.insert_child_after(&text_label(answer), Some(&widget));
+                card.insert_child_after(&markdown::message(answer, base), Some(&widget));
             }
             card.remove(&widget);
         } else if widget.is::<gtk::DropDown>() {
@@ -1611,7 +1680,10 @@ mod tests {
     fn transcript_reflows_long_rows_instead_of_widening() {
         adw::init().unwrap();
         let transcript = Transcript::new(std::env::temp_dir());
-        transcript.begin(&"word ".repeat(200));
+        transcript.begin(Message {
+            text: "word ".repeat(200),
+            ..Message::default()
+        });
         let long = format!("Command · {}", "x".repeat(150));
         transcript.work(work("a", &long, false));
         transcript.work(work("b", "Read · cat README.md", true));

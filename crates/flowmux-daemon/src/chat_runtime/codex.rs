@@ -102,6 +102,7 @@ pub(super) async fn boot(
         ],
     };
     session.catalog.plan = true;
+    session.catalog.images = true;
     let mut request = json!({
         "cwd":cwd, "sandbox":"workspace-write", "approvalPolicy":"on-request", "approvalsReviewer":"user",
     });
@@ -140,8 +141,9 @@ pub(super) async fn send(
     cwd: &Path,
     text: &str,
     settings: &Settings,
+    images: &[PathBuf],
 ) -> Result<u64> {
-    match commands::codex(text) {
+    match commands::codex(text).filter(|_| images.is_empty()) {
         Some((Run::Compact, _)) => {
             return wire
                 .request("thread/compact/start", json!({"threadId":session.key}))
@@ -182,7 +184,7 @@ pub(super) async fn send(
     } else {
         text
     };
-    let mut input = vec![json!({"type":"text","text":prompt,"text_elements":[]})];
+    let mut input = input_items(&prompt, images);
     if let Some((name, path)) = skill {
         input.push(json!({"type":"skill","name":name,"path":path}));
     }
@@ -198,11 +200,25 @@ pub(super) async fn send(
     .await
 }
 
+fn input_items(text: &str, images: &[PathBuf]) -> Vec<Value> {
+    let mut input = Vec::new();
+    if !text.trim().is_empty() || images.is_empty() {
+        input.push(json!({"type":"text","text":text,"text_elements":[]}));
+    }
+    input.extend(
+        images
+            .iter()
+            .map(|path| json!({"type":"localImage","path":path})),
+    );
+    input
+}
+
 pub(super) async fn steer(
     wire: &mut Wire,
     thread: &str,
     turn: &mut Turn,
-    text: String,
+    message: Message,
+    images: &[PathBuf],
 ) -> Result<()> {
     let Some(turn_id) = turn.remote_id.as_deref() else {
         return Ok(());
@@ -212,12 +228,12 @@ pub(super) async fn steer(
             "turn/steer",
             json!({
                 "threadId":thread, "expectedTurnId":turn_id,
-                "input":[{"type":"text","text":text,"text_elements":[]}],
+                "input":input_items(&message.text, images),
                 "clientUserMessageId":uuid::Uuid::new_v4().to_string(),
             }),
         )
         .await?;
-    turn.steer = Some((request, text));
+    turn.steer = Some((request, message));
     Ok(())
 }
 
@@ -255,14 +271,14 @@ pub(super) async fn frame(
                 == Some(thread)
     });
     // Codex may accept a steer just before its turn ends; resending it would duplicate it.
-    if let Some((_, text)) = session
+    if let Some((_, message)) = session
         .late_steer
         .take_if(|(request, _)| method.is_empty() && frame["id"].as_u64() == Some(*request))
     {
         return emit(
             events,
             match response(frame) {
-                Ok(_) => Event::Steered { text },
+                Ok(_) => Event::Steered { message },
                 Err(error) => Event::SteerRejected(error.to_string()),
             },
         )
@@ -295,14 +311,14 @@ pub(super) async fn frame(
             if turn.stop {
                 interrupt(wire, &session.key, turn).await?;
             }
-        } else if let Some((_, text)) = turn
+        } else if let Some((_, message)) = turn
             .steer
             .take_if(|(request, _)| frame["id"].as_u64() == Some(*request))
         {
             emit(
                 events,
                 match response(frame) {
-                    Ok(_) => Event::Steered { text },
+                    Ok(_) => Event::Steered { message },
                     Err(error) => Event::SteerRejected(error.to_string()),
                 },
             )

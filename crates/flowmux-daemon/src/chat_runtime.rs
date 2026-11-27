@@ -110,6 +110,8 @@ pub struct Catalog {
     pub efforts: Menu,
     pub model_efforts: HashMap<String, Menu>,
     pub plan: bool,
+    #[serde(default)]
+    pub images: bool,
     /// Slash commands and skills the agent accepts in its own syntax.
     #[serde(default)]
     pub commands: Vec<SlashCommand>,
@@ -170,6 +172,14 @@ pub struct Settings {
 }
 
 pub use flowmux_state::chat_history::{Change, Prompt, Question, TextKind, Work};
+pub use images::{pasted_image_path, save_pasted_image, MAX_PASTED_IMAGES};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Message {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
@@ -203,7 +213,8 @@ pub enum Event {
     Rejected(String),
     /// A queued message joined the running turn.
     Steered {
-        text: String,
+        #[serde(flatten)]
+        message: Message,
     },
     SteerRejected(String),
     Notice(String),
@@ -215,13 +226,15 @@ pub enum Event {
 pub enum Input {
     End,
     Send {
-        text: String,
+        #[serde(flatten)]
+        message: Message,
         settings: Settings,
     },
     Stop,
     /// Adds a message to the running turn when the provider supports it.
     Steer {
-        text: String,
+        #[serde(flatten)]
+        message: Message,
     },
     Respond {
         id: String,
@@ -401,7 +414,7 @@ struct Turn {
     message_id: String,
     acp_text: Option<(TextKind, u64)>,
     acp_next_text: u64,
-    steer: Option<(u64, String)>,
+    steer: Option<(u64, Message)>,
     /// A Codex `/compact` turn, which may end with `thread/compacted` alone.
     compact: bool,
     /// A Codex review can run in its own thread.
@@ -418,7 +431,7 @@ struct Session {
     access_option: Option<String>,
     effort_option: Option<String>,
     /// A steer whose turn ended before Codex answered; the answer still decides its fate.
-    late_steer: Option<(u64, String)>,
+    late_steer: Option<(u64, Message)>,
 }
 
 impl Session {
@@ -533,15 +546,22 @@ async fn run(
             next = input.recv() => {
                 match next {
                     Err(_) | Ok(Input::End) => return Ok(()),
-                    Ok(Input::Send { text, settings }) if session.active.is_none() => {
+                    Ok(Input::Send { message, settings }) if session.active.is_none() => {
                         if !session.accepts_settings(&settings) {
                             emit(events, Event::Rejected("The selected chat settings are unavailable. Review them and try again.".into())).await?;
                             continue;
                         }
+                        let paths = match images::input_paths(&message.images, session.catalog.images) {
+                            Ok(paths) => paths,
+                            Err(error) => {
+                                emit(events, Event::Rejected(error.to_string())).await?;
+                                continue;
+                            }
+                        };
                         let result = match provider {
-                            Provider::Codex => codex::send(&mut wire, &session, cwd, &text, &settings).await.map(Some),
-                            Provider::Claude => claude::send(&mut wire, &mut session, &text, &settings).await.map(|()| None),
-                            _ => acp::send(&mut wire, &mut session, &text, &settings).await.map(Some),
+                            Provider::Codex => codex::send(&mut wire, &session, cwd, &message.text, &settings, &paths).await.map(Some),
+                            Provider::Claude => claude::send(&mut wire, &mut session, &message.text, &settings, &paths).await.map(|()| None),
+                            _ => acp::send(&mut wire, &mut session, &message.text, &settings, &paths).await.map(Some),
                         };
                         match result {
                             Ok(request) => {
@@ -552,7 +572,8 @@ async fn run(
                                     request,
                                     settings,
                                     compact: provider == Provider::Codex
-                                        && commands::codex(&text).is_some_and(|(run, _)| run == commands::Run::Compact),
+                                        && paths.is_empty()
+                                        && commands::codex(&message.text).is_some_and(|(run, _)| run == commands::Run::Compact),
                                     ..Turn::default()
                                 });
                                 has_sent = true;
@@ -574,7 +595,7 @@ async fn run(
                             }
                         }
                     }
-                    Ok(Input::Steer { text }) => {
+                    Ok(Input::Steer { message }) => {
                         let turn = session.active.as_mut().filter(|turn| {
                             provider == Provider::Codex
                                 && !turn.stop
@@ -582,7 +603,10 @@ async fn run(
                                 && turn.remote_id.is_some()
                         });
                         if let Some(turn) = turn {
-                            codex::steer(&mut wire, &session.key, turn, text).await?;
+                            match images::input_paths(&message.images, session.catalog.images) {
+                                Ok(paths) => codex::steer(&mut wire, &session.key, turn, message, &paths).await?,
+                                Err(error) => emit(events, Event::SteerRejected(error.to_string())).await?,
+                            }
                         } else {
                             emit(events, Event::SteerRejected("The running turn cannot take another message now.".into())).await?;
                         }

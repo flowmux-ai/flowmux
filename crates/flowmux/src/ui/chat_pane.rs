@@ -14,7 +14,9 @@ use flowmux_core::{AgentActivity, AgentPresence, PaneId, SurfaceId};
 use flowmux_state::chat_history::{self, History};
 use gtk::glib;
 
-use super::chat_runtime::{self as runtime, Catalog, Event, Input, Menu, Provider, Settings};
+use super::chat_runtime::{
+    self as runtime, Catalog, Event, Input, Menu, Message, Provider, Settings,
+};
 use super::pane_terminal::PaneCallbacks;
 use transcript::{label, Transcript};
 
@@ -22,20 +24,20 @@ const MAX_QUEUED: usize = 32;
 
 struct QueuedPrompt {
     id: u64,
-    text: String,
+    message: Message,
     settings: Settings,
 }
 
 struct QueueEdit {
     id: u64,
-    draft: String,
+    draft: Message,
 }
 
 struct PromptRecall {
     position: transcript::PromptPosition,
     draft: String,
     cursor: i32,
-    pastes: Vec<(i32, String)>,
+    pastes: Vec<(i32, pastes::Content)>,
     menu_dismissed: bool,
 }
 
@@ -63,7 +65,7 @@ struct ChatUi {
     activity: Cell<Option<AgentActivity>>,
     activity_changed: Rc<RefCell<dyn FnMut(PaneId)>>,
     confirmed_access: RefCell<Option<String>>,
-    last_text: RefCell<Option<String>>,
+    last_message: RefCell<Option<Message>>,
     queue: RefCell<VecDeque<QueuedPrompt>>,
     next_queue_id: Cell<u64>,
     queue_paused: Cell<bool>,
@@ -89,6 +91,7 @@ struct ChatUi {
     settings_summary: gtk::Label,
     composer: gtk::TextView,
     pastes: pastes::Pastes,
+    pasting_image: Cell<bool>,
     recall: RefCell<Option<PromptRecall>>,
     send: gtk::Button,
     transcript: Transcript,
@@ -292,7 +295,7 @@ impl ChatPane {
             activity: Cell::new(None),
             activity_changed: callbacks.on_chat_activity_changed.clone(),
             confirmed_access: RefCell::new(None),
-            last_text: RefCell::new(None),
+            last_message: RefCell::new(None),
             queue: RefCell::new(VecDeque::new()),
             next_queue_id: Cell::new(0),
             queue_paused: Cell::new(false),
@@ -317,6 +320,7 @@ impl ChatPane {
             settings_summary,
             composer,
             pastes,
+            pasting_image: Cell::new(false),
             recall: RefCell::new(None),
             send,
             transcript,
@@ -385,20 +389,26 @@ impl ChatPane {
         ui.composer.connect_paste_clipboard(move |composer| {
             let Some(ui) = weak.upgrade() else { return };
             composer.stop_signal_emission_by_name("paste-clipboard");
+            let clipboard = composer.clipboard();
+            if clipboard
+                .formats()
+                .contains_type(gtk::gdk::Texture::static_type())
+            {
+                ui.paste_image(clipboard);
+                return;
+            }
             let revision = ui.pastes.revision.get();
             let weak = weak.clone();
-            composer
-                .clipboard()
-                .read_text_async(None::<&gtk::gio::Cancellable>, move |result| {
-                    if let (Some(ui), Ok(Some(text))) = (weak.upgrade(), result) {
-                        if ui.pastes.revision.get() == revision
-                            && ui.composer.is_editable()
-                            && !text.is_empty()
-                        {
-                            ui.insert_paste(&text);
-                        }
+            clipboard.read_text_async(None::<&gtk::gio::Cancellable>, move |result| {
+                if let (Some(ui), Ok(Some(text))) = (weak.upgrade(), result) {
+                    if ui.pastes.revision.get() == revision
+                        && ui.composer.is_editable()
+                        && !text.is_empty()
+                    {
+                        ui.insert_paste(&text);
                     }
-                });
+                }
+            });
         });
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -892,7 +902,7 @@ impl ChatUi {
     }
 
     fn update_menu(&self) {
-        if !self.pastes.is_empty() {
+        if self.pasting_image.get() || !self.pastes.is_empty() {
             self.menu.hide();
             return;
         }
@@ -923,6 +933,19 @@ impl ChatUi {
         buffer.set_text(text);
         buffer.place_cursor(&buffer.end_iter());
         if had_pastes {
+            self.refresh_controls();
+            self.update_menu();
+        }
+    }
+
+    fn set_message(self: &Rc<Self>, message: &Message) {
+        self.set_draft(&message.text);
+        let buffer = self.composer.buffer();
+        let cursor = buffer.end_iter();
+        for id in &message.images {
+            self.add_paste(&buffer, &cursor, pastes::Content::Image(id.clone()));
+        }
+        if !message.images.is_empty() {
             self.refresh_controls();
             self.update_menu();
         }
@@ -967,18 +990,18 @@ impl ChatUi {
                 }
             });
             state.position = position;
-            self.set_draft(&prompt);
+            self.set_message(&prompt);
             if older {
                 buffer.place_cursor(&buffer.start_iter());
             }
             self.menu.hide();
-            *self.menu_dismissed.borrow_mut() = Some(prompt);
+            *self.menu_dismissed.borrow_mut() = Some(prompt.text);
             *self.recall.borrow_mut() = Some(state);
         } else if !older {
             let Some(state) = recall else { return false };
             self.set_draft(&state.draft);
-            for (offset, text) in state.pastes {
-                self.add_paste(&buffer, &buffer.iter_at_offset(offset), text);
+            for (offset, content) in state.pastes {
+                self.add_paste(&buffer, &buffer.iter_at_offset(offset), content);
             }
             buffer.place_cursor(&buffer.iter_at_offset(state.cursor));
             if state.menu_dismissed {
@@ -1001,7 +1024,7 @@ impl ChatUi {
         buffer.delete_selection(true, true);
         if text.lines().nth(1).is_some() && !text.trim().is_empty() {
             let cursor = buffer.iter_at_mark(&buffer.get_insert());
-            self.add_paste(&buffer, &cursor, text.to_owned());
+            self.add_paste(&buffer, &cursor, pastes::Content::Text(text.to_owned()));
             self.refresh_controls();
             self.update_menu();
         } else {
@@ -1011,9 +1034,52 @@ impl ChatUi {
         self.composer.scroll_mark_onscreen(&buffer.get_insert());
     }
 
-    fn add_paste(self: &Rc<Self>, buffer: &gtk::TextBuffer, cursor: &gtk::TextIter, text: String) {
+    fn paste_image(self: &Rc<Self>, clipboard: gtk::gdk::Clipboard) {
+        if self.pasting_image.get() || !self.composer.is_editable() {
+            return;
+        }
+        if self.ready.get() && !self.catalog.borrow().images {
+            self.show_notice("This agent does not accept image input.");
+            return;
+        }
+        if self.pastes.images().len() >= runtime::MAX_PASTED_IMAGES {
+            self.show_notice("Attach at most four images.");
+            return;
+        }
+        self.pasting_image.set(true);
+        self.update_menu();
+        self.refresh_controls();
+        let revision = self.pastes.revision.get();
         let weak = Rc::downgrade(self);
-        self.pastes.push(buffer, cursor, text, move |mark| {
+        glib::spawn_future_local(async move {
+            let result = pastes::read_image(&clipboard).await;
+            let Some(ui) = weak.upgrade() else { return };
+            ui.pasting_image.set(false);
+            if ui.pastes.revision.get() == revision && ui.composer.is_editable() {
+                match result {
+                    Ok(id) => {
+                        ui.recall.borrow_mut().take();
+                        let buffer = ui.composer.buffer();
+                        let cursor = buffer.iter_at_mark(&buffer.get_insert());
+                        ui.add_paste(&buffer, &cursor, pastes::Content::Image(id));
+                        ui.show_notice("");
+                    }
+                    Err(error) => ui.show_notice(&error.to_string()),
+                }
+            }
+            ui.refresh_controls();
+            ui.update_menu();
+        });
+    }
+
+    fn add_paste(
+        self: &Rc<Self>,
+        buffer: &gtk::TextBuffer,
+        cursor: &gtk::TextIter,
+        content: pastes::Content,
+    ) {
+        let weak = Rc::downgrade(self);
+        self.pastes.push(buffer, cursor, content, move |mark| {
             if let Some(ui) = weak.upgrade() {
                 ui.remove_paste(mark);
                 ui.composer.grab_focus();
@@ -1092,8 +1158,15 @@ impl ChatUi {
         self.pastes.text(&self.composer.buffer())
     }
 
+    fn message(&self) -> Message {
+        Message {
+            text: self.draft(),
+            images: self.pastes.images(),
+        }
+    }
+
     fn has_draft(&self) -> bool {
-        !self.pastes.is_empty() || !self.draft().trim().is_empty()
+        self.pasting_image.get() || !self.pastes.is_empty() || !self.draft().trim().is_empty()
     }
 
     fn publish_activity(&self) {
@@ -1174,7 +1247,8 @@ impl ChatUi {
         self.send
             .update_property(&[gtk::accessible::Property::Label(action)]);
         self.send.set_tooltip_text(Some(tooltip));
-        self.send.set_sensitive(enabled);
+        self.send
+            .set_sensitive(enabled && !self.pasting_image.get());
     }
 
     /// A running turn with an empty composer turns the send button into Stop.
@@ -1201,28 +1275,34 @@ impl ChatUi {
     }
 
     fn activate_send(self: &Rc<Self>) {
+        if self.pasting_image.get() {
+            return;
+        }
         let editing = self.queue_edit.borrow().is_some();
-        let text = self.draft();
+        let message = self.message();
         if !editing && !self.ready.get() {
             if !self.connecting.get() {
                 self.connect(true);
             }
             return;
         }
-        if text.trim().is_empty() {
+        if message.text.trim().is_empty() && message.images.is_empty() {
             return;
         }
-        if text.len() > 128 * 1024 {
+        if message.text.len() > 128 * 1024 {
             self.show_notice("The message is too long. Limit messages to 128 KiB.");
             return;
         }
         if editing {
-            self.finish_queue_edit(Some(text));
+            self.finish_queue_edit(Some(message));
             return;
         }
         self.authorize(self.draft_settings(), move |ui, settings| {
-            if ui.queue_edit.borrow().is_none() && ui.draft() == text {
-                ui.submit_draft(text.clone(), settings);
+            if !ui.pasting_image.get()
+                && ui.queue_edit.borrow().is_none()
+                && ui.message() == message
+            {
+                ui.submit_draft(message.clone(), settings);
             }
         });
     }
@@ -1284,7 +1364,7 @@ impl ChatUi {
         }
     }
 
-    fn submit_draft(self: &Rc<Self>, text: String, settings: Settings) {
+    fn submit_draft(self: &Rc<Self>, message: Message, settings: Settings) {
         if self.busy.get() {
             let mut queue = self.queue.borrow_mut();
             if queue.len() >= MAX_QUEUED {
@@ -1293,12 +1373,16 @@ impl ChatUi {
             }
             let id = self.next_queue_id.get();
             self.next_queue_id.set(id + 1);
-            queue.push_back(QueuedPrompt { id, text, settings });
+            queue.push_back(QueuedPrompt {
+                id,
+                message,
+                settings,
+            });
             if self.stopping.get() {
                 self.queue_paused.set(false);
             }
         } else {
-            if !self.send_text(&text, settings) {
+            if !self.send_message(message, settings) {
                 return;
             }
             if self.queue.borrow().is_empty() {
@@ -1326,12 +1410,16 @@ impl ChatUi {
         }
     }
 
-    fn send_text(&self, text: &str, settings: Settings) -> bool {
+    fn send_message(&self, message: Message, settings: Settings) -> bool {
         if !self.ready.get() || self.busy.get() {
             return false;
         }
+        if !message.images.is_empty() && !self.catalog.borrow().images {
+            self.show_notice("This agent does not accept image input.");
+            return false;
+        }
         if !self.try_input(Input::Send {
-            text: text.to_owned(),
+            message: message.clone(),
             settings: settings.clone(),
         }) {
             return false;
@@ -1339,8 +1427,8 @@ impl ChatUi {
         *self.turn_settings.borrow_mut() = Some(settings);
         self.show_notice("");
         self.busy.set(true);
-        *self.last_text.borrow_mut() = Some(text.to_owned());
-        self.transcript.begin(text);
+        *self.last_message.borrow_mut() = Some(message.clone());
+        self.transcript.begin(message);
         self.status.set_label("Sending…");
         self.refresh_controls();
         self.publish_activity();
@@ -1372,39 +1460,39 @@ impl ChatUi {
         if self.editing_id().is_some() {
             return;
         }
-        let text = self
+        let message = self
             .queue
             .borrow()
             .iter()
             .find(|entry| entry.id == id)
-            .map(|entry| entry.text.clone());
-        let Some(text) = text else { return };
+            .map(|entry| entry.message.clone());
+        let Some(message) = message else { return };
         *self.queue_edit.borrow_mut() = Some(QueueEdit {
             id,
-            draft: self.draft(),
+            draft: self.message(),
         });
-        self.set_draft(&text);
+        self.set_message(&message);
         self.refresh_controls();
         self.refresh_queue();
         self.composer.grab_focus();
     }
 
-    fn finish_queue_edit(self: &Rc<Self>, text: Option<String>) {
+    fn finish_queue_edit(self: &Rc<Self>, message: Option<Message>) {
         let Some(edit) = self.queue_edit.borrow_mut().take() else {
             return;
         };
-        if let Some(text) = text {
+        if let Some(message) = message {
             if let Some(entry) = self
                 .queue
                 .borrow_mut()
                 .iter_mut()
                 .find(|entry| entry.id == edit.id)
             {
-                entry.text = text;
+                entry.message = message;
             }
             self.show_notice("");
         }
-        self.set_draft(&edit.draft);
+        self.set_message(&edit.draft);
         self.refresh_controls();
         self.refresh_queue();
         self.composer.grab_focus();
@@ -1416,16 +1504,12 @@ impl ChatUi {
         let Some(index) = index.filter(|_| self.editing_id() != Some(id)) else {
             return;
         };
-        let steer = {
-            let queue = self.queue.borrow();
-            // A queued command starts its own turn; it cannot join the running one.
-            commands::parse(&queue[index].text).is_none() && self.can_steer(&queue[index].settings)
-        };
+        let steer = self.can_steer(&self.queue.borrow()[index]);
         if !self.ready.get() {
             self.show_notice("Connect to the agent to send queued messages.");
         } else if steer {
-            let text = self.queue.borrow()[index].text.clone();
-            if self.try_input(Input::Steer { text }) {
+            let message = self.queue.borrow()[index].message.clone();
+            if self.try_input(Input::Steer { message }) {
                 self.steering.set(Some(id));
                 self.refresh_queue();
             }
@@ -1446,11 +1530,19 @@ impl ChatUi {
 
     /// Codex accepts more input in its running turn; other agents stop and send. A message
     /// queued with other settings, such as Plan, must not run under the current turn's.
-    fn can_steer(&self, settings: &Settings) -> bool {
+    fn can_steer(&self, entry: &QueuedPrompt) -> bool {
+        let settings = &entry.settings;
+        // A queued command starts its own turn; images and text use normal input.
+        let input = if entry.message.images.is_empty() {
+            commands::parse(&entry.message.text).is_none()
+        } else {
+            self.catalog.borrow().images
+        };
         self.provider == Some(Provider::Codex)
             && self.busy.get()
             && !self.stopping.get()
             && self.steering.get().is_none()
+            && input
             && self.turn_settings.borrow().as_ref().is_some_and(|turn| {
                 (&turn.model, &turn.access, &turn.effort, turn.plan)
                     == (
@@ -1494,14 +1586,14 @@ impl ChatUi {
             if ui.editing_id() == Some(id) {
                 return;
             }
-            let text = ui
+            let message = ui
                 .queue
                 .borrow()
                 .iter()
                 .find(|entry| entry.id == id)
-                .map(|entry| entry.text.clone());
-            if let Some(text) = text {
-                if ui.send_text(&text, settings) {
+                .map(|entry| entry.message.clone());
+            if let Some(message) = message {
+                if ui.send_message(message, settings) {
                     ui.queue.borrow_mut().retain(|entry| entry.id != id);
                     ui.refresh_queue();
                 } else {
@@ -1532,12 +1624,21 @@ impl ChatUi {
             let id = entry.id;
             let is_editing = editing == Some(id);
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-            let preview: String = entry
-                .text
+            let preview: String = transcript::prompt_text(&entry.message)
                 .split_whitespace()
                 .flat_map(|word| word.chars().chain(std::iter::once(' ')))
                 .take(160)
                 .collect();
+            let preview = if entry.message.images.is_empty() || entry.message.text.trim().is_empty()
+            {
+                preview
+            } else {
+                format!(
+                    "{} · {} image(s)",
+                    preview.trim_end(),
+                    entry.message.images.len()
+                )
+            };
             let text = label(preview.trim_end());
             text.set_wrap(false);
             text.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1555,7 +1656,7 @@ impl ChatUi {
                     "Steering",
                     "Adding this message to the running turn…",
                 )
-            } else if commands::parse(&entry.text).is_none() && self.can_steer(&entry.settings) {
+            } else if self.can_steer(entry) {
                 (
                     "mail-send-symbolic",
                     "Steer",
@@ -1662,7 +1763,7 @@ impl ChatUi {
             }
             Event::Session(native_id) => *self.native_id.borrow_mut() = Some(native_id),
             Event::SettingsApplied(settings) => {
-                self.last_text.borrow_mut().take();
+                self.last_message.borrow_mut().take();
                 if !self.stopping.get() && !self.transcript.has_pending_input() {
                     self.status.set_label("Working…");
                 }
@@ -1693,11 +1794,11 @@ impl ChatUi {
                     self.status.set_label("Working…");
                 }
             }
-            Event::Steered { text } => {
+            Event::Steered { message } => {
                 if let Some(id) = self.steering.take() {
                     self.queue.borrow_mut().retain(|entry| entry.id != id);
                 }
-                self.transcript.steer(&text);
+                self.transcript.steer(message);
                 self.send_next_queued();
                 self.refresh_queue();
             }
@@ -1758,27 +1859,24 @@ impl ChatUi {
         self.publish_activity();
     }
 
-    fn restore_unconfirmed_draft(&self) {
-        if let Some(text) = self.last_text.borrow_mut().take() {
-            self.restore_draft(&text);
-        }
-    }
-
-    fn restore_draft(&self, text: &str) {
+    fn restore_unconfirmed_draft(self: &Rc<Self>) {
+        let Some(mut message) = self.last_message.borrow_mut().take() else {
+            return;
+        };
         let mut edit = self.queue_edit.borrow_mut();
         let current = edit
             .as_ref()
-            .map_or_else(|| self.draft(), |edit| edit.draft.clone());
-        let restored = if current.is_empty() {
-            text.to_owned()
-        } else {
-            format!("{text}\n\n{current}")
-        };
+            .map_or_else(|| self.message(), |edit| edit.draft.clone());
+        if !message.text.is_empty() && !current.text.is_empty() {
+            message.text.push_str("\n\n");
+        }
+        message.text.push_str(&current.text);
+        message.images.extend(current.images);
         if let Some(edit) = edit.as_mut() {
-            edit.draft = restored;
+            edit.draft = message;
         } else {
             drop(edit);
-            self.set_draft(&restored);
+            self.set_message(&message);
         }
     }
 
@@ -1787,7 +1885,7 @@ impl ChatUi {
         self.turn_settings.borrow_mut().take();
         self.busy.set(false);
         self.stopping.set(false);
-        self.last_text.borrow_mut().take();
+        self.last_message.borrow_mut().take();
         self.refresh_controls();
     }
 }
@@ -1820,7 +1918,13 @@ mod tests {
         chat.ui.ready.set(true);
         *chat.ui.commands.borrow_mut() = Some(input);
         assert!(chat.activity_presence().is_none());
-        assert!(chat.ui.send_text("Work on this", Settings::default()));
+        assert!(chat.ui.send_message(
+            Message {
+                text: "Work on this".into(),
+                ..Message::default()
+            },
+            Settings::default()
+        ));
         assert_eq!(
             chat.activity_presence().unwrap().activity,
             AgentActivity::Running
@@ -1869,6 +1973,7 @@ mod tests {
         );
         let begin = |text: &str, steer| Record::Begin {
             prompt: text.into(),
+            images: Vec::new(),
             steer,
         };
         let finish = |status: &str| Record::Finished {
@@ -1968,7 +2073,9 @@ mod tests {
         ui.ready.set(true);
         *ui.commands.borrow_mut() = Some(input);
         ui.activate_send();
-        assert!(matches!(sent.try_recv(), Ok(Input::Send { text, .. }) if text == pasted));
+        assert!(
+            matches!(sent.try_recv(), Ok(Input::Send { message, .. }) if message.text == pasted)
+        );
         assert!(ui.draft().is_empty());
         assert!(!ui.pastes.root.is_visible());
     }
@@ -1994,11 +2101,19 @@ mod tests {
             },
             &Settings::default(),
         );
-        chat.ui.transcript.begin("Running prompt");
+        chat.ui.transcript.begin(Message {
+            text: "Running prompt".into(),
+            ..Message::default()
+        });
         assert_eq!(minimum(), idle_width);
 
-        chat.ui
-            .submit_draft("Queued prompt".repeat(100), Settings::default());
+        chat.ui.submit_draft(
+            Message {
+                text: "Queued prompt".repeat(100),
+                ..Message::default()
+            },
+            Settings::default(),
+        );
         assert!(chat.ui.queue_panel.is_visible());
         assert_eq!(minimum(), idle_width);
     }

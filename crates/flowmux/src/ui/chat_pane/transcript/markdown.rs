@@ -19,12 +19,7 @@ struct RenderedBlock {
 impl Blocks {
     pub fn render(&mut self, parent: &gtk::Box, markdown: &str, live: bool, base: &Path) {
         let arena = Arena::new();
-        let mut options = Options::default();
-        options.extension.strikethrough = true;
-        options.extension.autolink = true;
-        options.extension.table = true;
-        options.extension.tasklist = true;
-        let document = parse_document(&arena, markdown, &options);
+        let document = parse_document(&arena, markdown, &options());
         let mut previous = None;
         let mut count = 0;
         for (index, node) in document.children().enumerate() {
@@ -50,7 +45,7 @@ impl Blocks {
                 }
             }
             let widget = gtk::Box::new(gtk::Orientation::Vertical, 6);
-            block(&widget, node, 0, base);
+            block(&widget, node, 0, base, false);
             let tree = if live {
                 edges()
                     .map(|node| node.map(|n| n.data().value.clone()))
@@ -86,23 +81,44 @@ impl Blocks {
     }
 }
 
+fn options() -> Options<'static> {
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.autolink = true;
+    options.extension.table = true;
+    options.extension.tasklist = true;
+    options
+}
+
+pub(super) fn message(markdown: &str, base: &Path) -> gtk::Box {
+    let contents = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let arena = Arena::new();
+    for node in parse_document(&arena, markdown, &options()).children() {
+        block(&contents, node, 0, base, true);
+    }
+    if contents.first_child().is_none() {
+        contents.append(&text_label(markdown));
+    }
+    contents
+}
+
 fn escape(text: &str) -> String {
     gtk::glib::markup_escape_text(text).to_string()
 }
 
-fn inline<'a>(node: &'a AstNode<'a>, depth: u16) -> String {
+fn inline<'a>(node: &'a AstNode<'a>, depth: u16, keep_line_breaks: bool) -> String {
     if depth > 64 {
         return String::new();
     }
     let children = || {
         node.children()
-            .map(|child| inline(child, depth + 1))
+            .map(|child| inline(child, depth + 1, keep_line_breaks))
             .collect::<String>()
     };
     match &node.data().value {
         NodeValue::Text(text) => escape(text),
-        NodeValue::SoftBreak => " ".into(),
-        NodeValue::LineBreak => "\n".into(),
+        NodeValue::SoftBreak if !keep_line_breaks => " ".into(),
+        NodeValue::SoftBreak | NodeValue::LineBreak => "\n".into(),
         NodeValue::Code(code) => {
             // ponytail: colors follow the style at render time; a later light/dark switch keeps
             // them until the answer is drawn again.
@@ -158,7 +174,13 @@ fn plain<'a>(node: &'a AstNode<'a>) -> String {
         .collect()
 }
 
-fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16, base: &Path) {
+fn block<'a>(
+    box_: &gtk::Box,
+    node: &'a AstNode<'a>,
+    depth: u16,
+    base: &Path,
+    keep_line_breaks: bool,
+) {
     if depth > 32 {
         return;
     }
@@ -175,7 +197,7 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16, base: &Path) {
             quoted.add_css_class("dim-label");
             quoted.add_css_class("flowmux-chat-quote");
             for child in node.children() {
-                block(&quoted, child, depth + 1, base);
+                block(&quoted, child, depth + 1, base, keep_line_breaks);
             }
             box_.append(&quoted);
         }
@@ -202,7 +224,7 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16, base: &Path) {
                 let text = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 text.set_hexpand(true);
                 for child in item.children() {
-                    block(&text, child, depth + 1, base);
+                    block(&text, child, depth + 1, base, keep_line_breaks);
                 }
                 row.append(&text);
                 box_.append(&row);
@@ -210,7 +232,7 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16, base: &Path) {
         }
         _ => {
             let text = text_label("");
-            let markup = inline(node, 0);
+            let markup = inline(node, 0, keep_line_breaks);
             match &node.data().value {
                 NodeValue::Heading(heading) => {
                     text.set_markup(&format!("<b>{markup}</b>"));
@@ -256,7 +278,7 @@ fn render_table<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, table: &NodeTable) {
     for (y, row) in node.children().enumerate() {
         for (x, cell) in row.children().enumerate() {
             let text = text_label("");
-            text.set_markup(&inline(cell, 0));
+            text.set_markup(&inline(cell, 0, false));
             // The scrolled table reserves the height its cells take at their minimum width, so
             // that width must equal the drawn one. A cell narrower than 28 average characters
             // stays on one line at its real width; an average-width estimate of its own length
@@ -427,6 +449,13 @@ mod tests {
         // A markup error would leave the label empty.
         assert_eq!(body.text(), "Run \u{2009}cargo test\u{2009} here.");
         assert!(body.label().contains("href=\"flowmux-file:src/lib.rs:4\""));
+    }
+
+    #[gtk::test]
+    fn message_renders_inline_markdown_and_keeps_line_breaks() {
+        let message = message("**First line**\nSecond line", Path::new("/"));
+        let text = message.first_child().and_downcast::<gtk::Label>().unwrap();
+        assert_eq!(text.label(), "<b>First line</b>\nSecond line");
     }
 
     #[gtk::test]

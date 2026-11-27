@@ -2,7 +2,14 @@
 
 use std::cell::{Cell, RefCell};
 
-use gtk::prelude::*;
+use anyhow::{anyhow, ensure, Context, Result};
+use gtk::{gdk, gio, prelude::*};
+
+#[derive(Clone)]
+pub(super) enum Content {
+    Text(String),
+    Image(String),
+}
 
 pub(super) struct Pastes {
     pub root: gtk::ScrolledWindow,
@@ -13,7 +20,7 @@ pub(super) struct Pastes {
 
 struct Paste {
     at: gtk::TextMark,
-    text: String,
+    content: Content,
     chip: gtk::Box,
 }
 
@@ -46,19 +53,27 @@ impl Pastes {
         &self,
         buffer: &gtk::TextBuffer,
         cursor: &gtk::TextIter,
-        text: String,
+        content: Content,
         remove: impl Fn(&gtk::TextMark) + 'static,
     ) {
         let at = buffer.create_mark(None, cursor, true);
-        let lines = text.lines().count();
-        let name = format!("Pasted text · {lines} lines");
+        let name = match &content {
+            Content::Text(text) => format!("Pasted text · {} lines", text.lines().count()),
+            Content::Image(_) => "Pasted image".into(),
+        };
         let chip = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         chip.add_css_class("flowmux-chat-paste");
+        if let Content::Image(id) = &content {
+            chip.append(&super::transcript::attachment_thumbnail(id));
+        }
         chip.append(&gtk::Label::new(Some(&name)));
         let button = gtk::Button::from_icon_name("window-close-symbolic");
         button.add_css_class("flat");
         button.update_property(&[gtk::accessible::Property::Label(&format!("Remove {name}"))]);
-        button.set_tooltip_text(Some("Remove pasted text"));
+        button.set_tooltip_text(Some(match &content {
+            Content::Text(_) => "Remove pasted text",
+            Content::Image(_) => "Remove pasted image",
+        }));
         let mark = at.clone();
         button.connect_clicked(move |_| remove(&mark));
         chip.append(&button);
@@ -66,7 +81,7 @@ impl Pastes {
         let index = items.partition_point(|item| buffer.iter_at_mark(&item.at) <= *cursor);
         let previous = index.checked_sub(1).map(|index| &items[index].chip);
         self.row.insert_child_after(&chip, previous);
-        items.insert(index, Paste { at, text, chip });
+        items.insert(index, Paste { at, content, chip });
         self.root.set_visible(true);
     }
 
@@ -102,11 +117,22 @@ impl Pastes {
         self.root.set_visible(false);
     }
 
-    pub fn snapshot(&self, buffer: &gtk::TextBuffer) -> Vec<(i32, String)> {
+    pub fn snapshot(&self, buffer: &gtk::TextBuffer) -> Vec<(i32, Content)> {
         self.items
             .borrow()
             .iter()
-            .map(|item| (buffer.iter_at_mark(&item.at).offset(), item.text.clone()))
+            .map(|item| (buffer.iter_at_mark(&item.at).offset(), item.content.clone()))
+            .collect()
+    }
+
+    pub fn images(&self) -> Vec<String> {
+        self.items
+            .borrow()
+            .iter()
+            .filter_map(|item| match &item.content {
+                Content::Image(id) => Some(id.clone()),
+                Content::Text(_) => None,
+            })
             .collect()
     }
 
@@ -114,12 +140,31 @@ impl Pastes {
         let mut text = String::new();
         let mut previous = buffer.start_iter();
         for item in self.items.borrow().iter() {
+            let Content::Text(value) = &item.content else {
+                continue;
+            };
             let at = buffer.iter_at_mark(&item.at);
             text.push_str(&buffer.text(&previous, &at, false));
-            text.push_str(&item.text);
+            text.push_str(value);
             previous = at;
         }
         text.push_str(&buffer.text(&previous, &buffer.end_iter(), false));
         text
     }
+}
+
+pub(super) async fn read_image(clipboard: &gdk::Clipboard) -> Result<String> {
+    let texture = clipboard
+        .read_texture_future()
+        .await
+        .context("Could not read the clipboard image.")?
+        .context("The clipboard contains no image.")?;
+    // Bound the PNG encoder and thumbnail decoder's working memory.
+    ensure!(
+        i64::from(texture.width()) * i64::from(texture.height()) <= 16_000_000,
+        "A pasted image must be at most 16 megapixels."
+    );
+    gio::spawn_blocking(move || super::runtime::save_pasted_image(&texture.save_to_png_bytes()))
+        .await
+        .map_err(|_| anyhow!("Could not save the clipboard image."))?
 }

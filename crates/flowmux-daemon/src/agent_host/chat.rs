@@ -246,11 +246,13 @@ async fn run(
                     if commands.is_closed() || commands.is_full() {
                         return Err("Agent is unavailable or busy".into());
                     }
-                    if let Input::Send { text, settings } = &next {
+                    if let Input::Send { message, settings } = &next {
                         if state.started.is_some() || state.catalog.is_none() {
                             return Err("Chat is not ready to start another turn".into());
                         }
-                        save(&mut store, &mut state, Record::Begin { prompt: text.clone(), steer: false })?;
+                        save(&mut store, &mut state, Record::Begin {
+                            prompt: message.text.clone(), images: message.images.clone(), steer: false,
+                        })?;
                         state.started = Some(Instant::now());
                         state.settings = settings.clone();
                         // A plan turn's read-only access is not the chat's selection.
@@ -281,7 +283,9 @@ async fn run(
                         id: id.clone(), kind: *kind, text: text.clone(), append: *append,
                     }),
                     Event::Work(work) => Some(Record::Work(work.clone())),
-                    Event::Steered { text } => Some(Record::Begin { prompt: text.clone(), steer: true }),
+                    Event::Steered { message } => Some(Record::Begin {
+                        prompt: message.text.clone(), images: message.images.clone(), steer: true,
+                    }),
                     Event::Prompt(prompt) => Some(Record::Prompt(prompt.clone())),
                     Event::PromptResolved { id, label, answers } => Some(Record::Resolved {
                         id: id.clone(), label: label.clone(), answers: answers.clone(),

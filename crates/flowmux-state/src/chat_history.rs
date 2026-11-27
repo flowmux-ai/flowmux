@@ -54,6 +54,9 @@ pub struct Prompt {
 pub enum Record {
     Begin {
         prompt: String,
+        /// IDs of pasted PNGs in the chat image store.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<String>,
         /// Added to the running turn instead of starting one. A field rather than a variant so
         /// older readers of the shared history still load the record.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -212,8 +215,13 @@ impl Store {
         let first_prompt = history.iter().find_map(|r| match r {
             Record::Begin {
                 prompt,
+                images,
                 steer: false,
-            } => Some(prompt),
+            } => Some(if prompt.trim().is_empty() && !images.is_empty() {
+                "Image"
+            } else {
+                prompt.as_str()
+            }),
             _ => None,
         });
         let tx = self.0.transaction()?;
@@ -323,6 +331,7 @@ mod tests {
     fn ordinary_prompts_keep_the_format_older_readers_parse() {
         let begin = |steer| Record::Begin {
             prompt: "x".into(),
+            images: Vec::new(),
             steer,
         };
         assert_eq!(
@@ -348,6 +357,7 @@ mod tests {
                 &[
                     Record::Begin {
                         prompt: "한글 prompt\nsecond line".into(),
+                        images: vec!["0123456789abcdef0123456789abcdef".into()],
                         steer: false,
                     },
                     Record::Session {
@@ -394,9 +404,10 @@ mod tests {
         let history = store.load(id).unwrap();
         assert_eq!(history.native_id.as_deref(), Some("native-thread"));
         assert!(matches!(history.records.as_slice(), [
-            Record::Begin { prompt, steer: false }, Record::Work(work),
+            Record::Begin { prompt, images, steer: false }, Record::Work(work),
             Record::Resolved { answers, .. }, Record::Finished { elapsed: 3, .. },
         ] if prompt == "한글 prompt\nsecond line"
+            && images == &["0123456789abcdef0123456789abcdef"]
             && work.changes[0].diff == "+saved" && answers == &["제출한 답변"]));
         let chats = store.list(Some("Codex")).unwrap();
         assert_eq!(chats.len(), 1);

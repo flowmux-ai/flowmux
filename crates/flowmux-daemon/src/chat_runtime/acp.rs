@@ -15,6 +15,7 @@ pub(super) async fn boot(
     if initialize["protocolVersion"].as_u64() != Some(1) {
         bail!("This agent requires an unsupported ACP protocol version.");
     }
+    session.catalog.images = initialize["agentCapabilities"]["promptCapabilities"]["image"] == true;
     let result = if let Some(id) = native_id {
         if initialize["agentCapabilities"]["loadSession"] != true {
             bail!(
@@ -141,7 +142,16 @@ pub(super) async fn send(
     session: &mut Session,
     text: &str,
     settings: &Settings,
+    paths: &[PathBuf],
 ) -> Result<u64> {
+    let mut prompt = Vec::new();
+    if !text.trim().is_empty() || paths.is_empty() {
+        prompt.push(json!({"type":"text","text":text}));
+    }
+    for path in paths {
+        let data = images::encode_input(path).await?;
+        prompt.push(json!({"type":"image","mimeType":"image/png","data":data}));
+    }
     for (value, option, current, method, field) in [
         (
             &settings.model,
@@ -216,7 +226,7 @@ pub(super) async fn send(
     }
     wire.request(
         "session/prompt",
-        json!({"sessionId":session.key,"prompt":[{"type":"text","text":text}]}),
+        json!({"sessionId":session.key,"prompt":prompt}),
     )
     .await
 }

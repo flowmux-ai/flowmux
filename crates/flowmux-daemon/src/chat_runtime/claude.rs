@@ -47,6 +47,7 @@ async fn control(wire: &mut Wire, request: Value) -> Result<Value> {
 
 pub(super) async fn boot(wire: &mut Wire, session: &mut Session) -> Result<()> {
     let result = control(wire, json!({"subtype":"initialize","hooks":{}})).await?;
+    session.catalog.images = true;
     session.catalog.commands = values(&result["commands"])
         .filter_map(|command| {
             let mut entry = SlashCommand::new(
@@ -106,7 +107,18 @@ pub(super) async fn send(
     session: &mut Session,
     text: &str,
     settings: &Settings,
+    paths: &[PathBuf],
 ) -> Result<()> {
+    let mut content = Vec::new();
+    if !text.trim().is_empty() || paths.is_empty() {
+        content.push(json!({"type":"text","text":text}));
+    }
+    for path in paths {
+        let data = images::encode_input(path).await?;
+        content.push(
+            json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":data}}),
+        );
+    }
     if let Some(model) = settings
         .model
         .as_ref()
@@ -123,7 +135,7 @@ pub(super) async fn send(
     }
     session.catalog.access.current = Some(mode.into());
     wire.write(
-        json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":text}]},
+        json!({"type":"user","message":{"role":"user","content":content},
         "parent_tool_use_id":null,"session_id":session.key}),
     )
     .await
