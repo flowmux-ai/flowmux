@@ -348,6 +348,8 @@ int main(int argc, char **argv) {
             def new_agent():
                 click(Atspi.Role.PUSH_BUTTON, "Workspace creation options")
                 click(Atspi.Role.PUSH_BUTTON, "New Agent…")
+                # New Agent first asks for a chat or a terminal agent.
+                click(Atspi.Role.PUSH_BUTTON, "Terminal (CLI)")
             new_agent()
             click(Atspi.Role.PUSH_BUTTON, "Cancel")
             assert not host_socket.exists() and not (h.root / "starts").exists()
