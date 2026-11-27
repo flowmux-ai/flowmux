@@ -846,6 +846,14 @@ fn build_split_window_shell(
     content_header.add_css_class("flowmux-window-header");
     content_header.set_show_start_title_buttons(false);
     content_header.set_show_end_title_buttons(true);
+    let title = gtk::Label::builder()
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .css_classes(["title"])
+        .build();
+    gtk::Widget::this_expression("root")
+        .chain_property::<gtk::Window>("title")
+        .bind(&title, "label", Some(&title));
+    content_header.set_title_widget(Some(&title));
     let content_view = adw::ToolbarView::new();
     content_view.add_top_bar(&content_header);
     content_view.set_content(Some(content));
@@ -1764,6 +1772,8 @@ impl WindowController {
         }
         let activities = ActivityStore::new();
         let stack = gtk::Stack::new();
+        // A background workspace's widgets do not belong in the window width request.
+        stack.set_hhomogeneous(false);
         stack.set_transition_type(gtk::StackTransitionType::Crossfade);
         stack.set_hexpand(true);
         stack.set_vexpand(true);

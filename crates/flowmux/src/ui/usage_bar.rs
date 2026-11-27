@@ -10,7 +10,7 @@ use std::cell::RefCell;
 
 /// Persistent widgets: refreshing changes values without rebuilding the footer.
 pub(crate) struct UsageBar {
-    pub(crate) root: gtk::Box,
+    pub(crate) root: gtk::ScrolledWindow,
     icons: [gtk::Image; Provider::ALL.len()],
     separator: gtk::Box,
     providers: [gtk::Box; Provider::ALL.len()],
@@ -49,18 +49,24 @@ impl Meter {
 
 impl UsageBar {
     pub(crate) fn new() -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.add_css_class("flowmux-usage-bar");
+        let root = gtk::ScrolledWindow::builder()
+            .child(&row)
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .build();
         root.set_widget_name("flowmux-usage-bar");
-        root.add_css_class("flowmux-usage-bar");
         root.set_visible(false);
         let separator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         let providers = std::array::from_fn(|_| gtk::Box::new(gtk::Orientation::Horizontal, 8));
         let icons = Provider::ALL.map(|provider| super::agent_icon(provider.icon()));
         let meters = std::array::from_fn(|provider| {
             if provider == 1 {
-                root.append(&separator);
+                row.append(&separator);
             }
-            root.append(&providers[provider]);
+            row.append(&providers[provider]);
             providers[provider].append(&icons[provider]);
             RefCell::new(
                 (0..2)
@@ -723,7 +729,10 @@ pub(crate) mod tests {
         assert!(bar.meters[1].borrow()[0].progress.has_css_class("codex"));
         assert_eq!(bar.meters[1].borrow()[1].percent.text(), "65%(1W)");
         assert_eq!(
-            bar.root.first_child().as_ref(),
+            bar.providers[0]
+                .parent()
+                .and_then(|row| row.first_child())
+                .as_ref(),
             Some(bar.providers[0].upcast_ref())
         );
         for (provider, name) in ["claude", "codex"].into_iter().enumerate() {
@@ -774,6 +783,10 @@ pub(crate) mod tests {
         assert!(bar.providers[1].is_visible());
         assert!(bar.separator.is_visible());
         state.apply(refresh(Provider::Codex, &[(300, 0.0), (10_080, 65.0)]));
+        let quota_row = bar.providers[0].parent().unwrap();
+        let (quota_minimum, _, _, _) = quota_row.measure(gtk::Orientation::Horizontal, -1);
+        let (footer_minimum, _, _, _) = bar.root.measure(gtk::Orientation::Horizontal, -1);
+        assert!(footer_minimum < quota_minimum);
         bar.render(&state, true);
         assert!(bar.meters[1].borrow()[0].root.is_visible());
         assert_eq!(bar.meters[1].borrow()[0].progress.fraction(), 0.0);
