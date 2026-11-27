@@ -17,15 +17,32 @@ struct Selection {
 pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
     let selection = Rc::new(RefCell::new(None::<Selection>));
     let pending = Rc::new(RefCell::new(None::<Selection>));
+    // A press inside the selection may drag its text elsewhere instead of selecting again.
+    let carry = Rc::new(Cell::new(Carry::None));
     let drag = gtk::GestureDrag::new();
     drag.set_button(gdk::BUTTON_PRIMARY);
     drag.set_propagation_phase(gtk::PropagationPhase::Capture);
     scroller.set_focusable(true);
     let selected = selection.clone();
     let start = pending.clone();
+    let carrying = carry.clone();
     let history = history.downgrade();
     drag.connect_drag_begin(move |drag, x, y| {
         start.borrow_mut().take();
+        carrying.set(Carry::None);
+        if let Some(scroller) = drag.widget() {
+            if selected
+                .borrow()
+                .as_ref()
+                .is_some_and(|selection| selection.contains(&scroller, (x, y)))
+            {
+                // Claim the press so the label underneath neither selects nor takes focus;
+                // the grouped drag source still starts the drag.
+                carrying.set(Carry::Pressed);
+                drag.set_state(gtk::EventSequenceState::Claimed);
+                return;
+            }
+        }
         if let Some(selection) = selected.borrow_mut().take() {
             selection.clear();
         }
@@ -64,12 +81,24 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
 
     let scroll_point = Rc::new(Cell::new((0.0, 0.0)));
     let start = pending.clone();
+    let selected = selection.clone();
+    let carrying = carry.clone();
     drag.connect_drag_end(move |_, _, _| {
         start.borrow_mut().take();
+        // A click inside the selection, without dragging it away, deselects.
+        if carrying.replace(Carry::None) == Carry::Pressed {
+            if let Some(selection) = selected.borrow_mut().take() {
+                selection.clear();
+            }
+        }
     });
     let current_point = scroll_point.clone();
     let selected = selection.clone();
+    let carrying = carry.clone();
     drag.connect_drag_update(move |drag, dx, dy| {
+        if carrying.get() != Carry::None {
+            return;
+        }
         let (Some(scroller), Some((x, y))) = (drag.widget(), drag.start_point()) else {
             return;
         };
@@ -126,7 +155,47 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
             glib::ControlFlow::Continue
         });
     });
-    scroller.add_controller(drag);
+    scroller.add_controller(drag.clone());
+
+    // Dragging the selection offers its text, so a terminal or editor can take a copy.
+    let source = gtk::DragSource::new();
+    source.set_button(gdk::BUTTON_PRIMARY);
+    source.set_actions(gdk::DragAction::COPY);
+    source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let dragged = Rc::new(RefCell::new(String::new()));
+    let selected = selection.clone();
+    let carrying = carry.clone();
+    let text = dragged.clone();
+    source.connect_prepare(move |_, _, _| {
+        if carrying.get() != Carry::Pressed {
+            return None;
+        }
+        let selected = selected.borrow();
+        let selection = selected.as_ref()?;
+        let value = selection.text();
+        if value.is_empty() {
+            return None;
+        }
+        carrying.set(Carry::Dragged);
+        // The pressed label may have started its own selection meanwhile.
+        clear_native(&selection.leaves);
+        *text.borrow_mut() = excerpt(&value);
+        Some(gdk::ContentProvider::for_value(&value.to_value()))
+    });
+    source.connect_drag_begin(move |_, drag| {
+        let label = gtk::Label::new(Some(&dragged.borrow()));
+        label.set_margin_top(6);
+        label.set_margin_bottom(6);
+        label.set_margin_start(10);
+        label.set_margin_end(10);
+        let card = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        card.add_css_class("card");
+        card.append(&label);
+        gtk::DragIcon::for_drag(drag).set_child(Some(&card));
+    });
+    scroller.add_controller(source.clone());
+    // Grouping needs both on the widget; a claimed press then still reaches the source.
+    source.group_with(&drag);
 
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -165,6 +234,27 @@ pub(super) fn attach(scroller: &gtk::ScrolledWindow, history: &gtk::Box) {
         }
     });
     scroller.add_controller(keys);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Carry {
+    None,
+    /// Pressed inside the selection; a click deselects and a drag carries the text.
+    Pressed,
+    Dragged,
+}
+
+/// The first line of dragged text, short enough for the drag icon.
+fn excerpt(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("");
+    let mut excerpt: String = line.trim().chars().take(60).collect();
+    if excerpt.len() < line.trim().len() || text.trim().lines().count() > 1 {
+        excerpt.push('…');
+    }
+    excerpt
 }
 
 #[allow(deprecated)]
@@ -393,6 +483,27 @@ fn color_components(color: gdk::RGBA) -> [u16; 3] {
 }
 
 impl Selection {
+    /// Whether `point` in `scroller` falls on selected text.
+    fn contains(&self, scroller: &gtk::Widget, (x, y): (f64, f64)) -> bool {
+        let mut target = scroller.pick(x, y, gtk::PickFlags::DEFAULT);
+        while let Some(widget) = target {
+            if let Some(index) = self.leaves.iter().position(|leaf| *leaf == widget) {
+                let point = graphene::Point::new(x as f32, y as f32);
+                let Some(local) = scroller.compute_point(&widget, &point) else {
+                    return false;
+                };
+                let offset = offset(&widget, local);
+                let (first, last) = self.span(index, self.extent);
+                return first < last && (first..=last).contains(&offset);
+            }
+            if widget == *scroller {
+                break;
+            }
+            target = widget.parent();
+        }
+        false
+    }
+
     fn span(&self, index: usize, extent: Position) -> (i32, i32) {
         let (start, end) = (self.anchor.min(extent), self.anchor.max(extent));
         if index < start.0 || index > end.0 {

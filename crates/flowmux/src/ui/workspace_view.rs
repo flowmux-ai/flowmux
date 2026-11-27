@@ -136,6 +136,12 @@ pub(crate) fn tab_dnd_formats_accept_payload(formats: &gtk::gdk::ContentFormats)
         || formats.contains_type(gtk::glib::types::Type::STRING)
 }
 
+/// Tab drags only move. A copy drag, such as text from a chat, is not a tab whatever it carries.
+pub(crate) fn tab_drop_accepts(drop: &gtk::gdk::Drop) -> bool {
+    drop.actions().contains(gtk::gdk::DragAction::MOVE)
+        && tab_dnd_formats_accept_payload(&drop.formats())
+}
+
 // Only an in-process source can reset the controller's drag state on begin.
 pub(crate) fn external_tab_drop(drop: Option<gtk::gdk::Drop>) -> bool {
     drop.is_some_and(|drop| drop.drag().is_none())
@@ -3355,7 +3361,7 @@ fn attach_tab_dnd_handlers(
     let drop_target =
         gtk::DropTarget::new(gtk::glib::types::Type::STRING, gtk::gdk::DragAction::MOVE);
     drop_target.connect_accept(|target, drop| {
-        if tab_dnd_formats_accept_payload(&drop.formats()) {
+        if tab_drop_accepts(drop) {
             true
         } else {
             target.reject();
@@ -3951,12 +3957,14 @@ fn attach_pane_body_dnd(
             let Some(frame) = motion.widget() else {
                 return;
             };
-            if motion
-                .drop()
-                .is_some_and(|drop| tab_dnd_formats_accept_payload(&drop.formats()))
-            {
-                saw_drop_target.set(true);
+            if !motion.drop().is_some_and(|drop| tab_drop_accepts(&drop)) {
+                // Other drags, such as text for a terminal, get no split preview.
+                if zone.replace(PaneDropZone::None) != PaneDropZone::None {
+                    preview.queue_draw();
+                }
+                return;
             }
+            saw_drop_target.set(true);
             let (w, h) = (frame.width() as f64, frame.height() as f64);
             let agent_tab = motion
                 .drop()
@@ -4015,7 +4023,7 @@ fn attach_pane_body_dnd(
         gtk::DropTarget::new(gtk::glib::types::Type::STRING, gtk::gdk::DragAction::MOVE);
     drop_target.set_propagation_phase(gtk::PropagationPhase::Capture);
     drop_target.connect_accept(|target, drop| {
-        if tab_dnd_formats_accept_payload(&drop.formats()) {
+        if tab_drop_accepts(drop) {
             true
         } else {
             target.reject();

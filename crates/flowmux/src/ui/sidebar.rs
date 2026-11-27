@@ -1765,7 +1765,9 @@ fn attach_tab_drop_to_row(
     let drop_target =
         gtk::DropTargetAsync::new(Some(tab_dnd_content_formats()), gtk::gdk::DragAction::MOVE);
     drop_target.connect_accept(move |target, drop| {
-        if sidebar_tab_drop_accepts_formats(&drop.formats()) {
+        if drop.actions().contains(gtk::gdk::DragAction::MOVE)
+            && sidebar_tab_drop_accepts_formats(&drop.formats())
+        {
             true
         } else {
             target.reject_drop(drop);

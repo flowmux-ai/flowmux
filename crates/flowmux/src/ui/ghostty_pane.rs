@@ -906,6 +906,7 @@ impl GhosttyPane {
         if smart_page_enabled {
             install_smart_page_keys(&term);
         }
+        install_text_drop(&term);
 
         // OSC 99 (Konsole-format) is not exposed as a signal on Ubuntu's
         // VTE 0.68 / 0.76 builds — the `notification-received` signal is
@@ -2690,6 +2691,28 @@ fn env_flag_value_enabled(value: &str) -> bool {
 
 /// Snap back to live output before direct PTY writes and clipboard paste, which
 /// bypass VTE's `scroll-on-keystroke` key handler.
+/// Pastes dropped text, such as a selection dragged out of a chat, like a clipboard paste.
+/// Only copy drops are taken; tab and file moves inside Flowmux stay with their own targets.
+fn install_text_drop(term: &vte::Terminal) {
+    let drop = gtk::DropTarget::new(glib::Type::STRING, gtk::gdk::DragAction::COPY);
+    drop.connect_drop(|target, value, _, _| {
+        let (Some(term), Ok(text)) = (
+            target.widget().and_downcast::<vte::Terminal>(),
+            value.get::<String>(),
+        ) else {
+            return false;
+        };
+        if text.is_empty() {
+            return false;
+        }
+        scroll_terminal_to_bottom(&term);
+        term.paste_text(&text);
+        term.grab_focus();
+        true
+    });
+    term.add_controller(drop);
+}
+
 fn scroll_terminal_to_bottom(term: &vte::Terminal) {
     if let Some(adj) = term.vadjustment() {
         let bottom = adj.upper() - adj.page_size();
