@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use super::commands::{self, Run};
 use super::*;
 
 pub(super) async fn boot(
@@ -17,9 +18,9 @@ pub(super) async fn boot(
     )
     .await?;
     wire.notify("initialized", json!({})).await?;
-    session.catalog.commands = COMMANDS
+    session.catalog.commands = commands::CODEX
         .iter()
-        .map(|(name, description, hint)| SlashCommand::new(name, description, hint))
+        .map(|command| SlashCommand::new(command.name, command.description, command.hint))
         .collect();
     // Older Codex releases have no skill listing; chat still works without skills.
     if let Ok(list) = wire.rpc("skills/list", json!({"cwds":[cwd]})).await {
@@ -133,22 +134,6 @@ fn turn_settings(settings: &Settings, cwd: &Path) -> (Value, &'static str) {
     )
 }
 
-/// Commands Codex runs through its own requests; typed as text, the model would only read them.
-const COMMANDS: [(&str, &str, &str); 2] = [
-    ("compact", "Summarize the conversation to free context", ""),
-    (
-        "review",
-        "Review uncommitted changes, or follow your instructions",
-        "[instructions]",
-    ),
-];
-
-/// The arguments of `/name args`, when `text` is that command.
-pub(super) fn command<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-    let rest = text.trim_start().strip_prefix('/')?.strip_prefix(name)?;
-    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
-}
-
 pub(super) async fn send(
     wire: &mut Wire,
     session: &Session,
@@ -156,23 +141,26 @@ pub(super) async fn send(
     text: &str,
     settings: &Settings,
 ) -> Result<u64> {
-    if command(text, "compact").is_some() {
-        return wire
-            .request("thread/compact/start", json!({"threadId":session.key}))
-            .await;
-    }
-    if let Some(instructions) = command(text, "review") {
-        let target = if instructions.is_empty() {
-            json!({"type":"uncommittedChanges"})
-        } else {
-            json!({"type":"custom","instructions":instructions})
-        };
-        return wire
-            .request(
-                "review/start",
-                json!({"threadId":session.key,"target":target,"delivery":"inline"}),
-            )
-            .await;
+    match commands::codex(text) {
+        Some((Run::Compact, _)) => {
+            return wire
+                .request("thread/compact/start", json!({"threadId":session.key}))
+                .await;
+        }
+        Some((Run::Review, instructions)) => {
+            let target = if instructions.is_empty() {
+                json!({"type":"uncommittedChanges"})
+            } else {
+                json!({"type":"custom","instructions":instructions})
+            };
+            return wire
+                .request(
+                    "review/start",
+                    json!({"threadId":session.key,"target":target,"delivery":"inline"}),
+                )
+                .await;
+        }
+        None => {}
     }
     let (sandbox, approval) = turn_settings(settings, cwd);
     // Codex names a skill as `$name` and attaches the skill file as an input item.
@@ -693,17 +681,6 @@ async fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn commands_need_their_exact_name() {
-        assert_eq!(command("/compact", "compact"), Some(""));
-        assert_eq!(
-            command("/review focus on tests", "review"),
-            Some("focus on tests")
-        );
-        assert_eq!(command("/compaction", "compact"), None);
-        assert_eq!(command("please /compact", "compact"), None);
-    }
 
     #[test]
     fn plan_and_read_only_do_not_inherit_full_access() {

@@ -3,6 +3,7 @@
 mod acp;
 mod claude;
 mod codex;
+mod commands;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -544,7 +545,8 @@ async fn run(
                                 session.active = Some(Turn {
                                     request,
                                     settings,
-                                    compact: provider == Provider::Codex && codex::command(&text, "compact").is_some(),
+                                    compact: provider == Provider::Codex
+                                        && commands::codex(&text).is_some_and(|(run, _)| run == commands::Run::Compact),
                                     ..Turn::default()
                                 });
                                 has_sent = true;
