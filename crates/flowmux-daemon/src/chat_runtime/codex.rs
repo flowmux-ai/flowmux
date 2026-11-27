@@ -21,6 +21,24 @@ pub(super) async fn boot(
         .iter()
         .map(|(name, description, hint)| SlashCommand::new(name, description, hint))
         .collect();
+    // Older Codex releases have no skill listing; chat still works without skills.
+    if let Ok(list) = wire.rpc("skills/list", json!({"cwds":[cwd]})).await {
+        let skills = values(&list["data"])
+            .flat_map(|entry| values(&entry["skills"]))
+            .filter(|skill| skill["enabled"] != false)
+            .filter_map(|skill| {
+                let name = skill["name"].as_str()?;
+                let description = skill["shortDescription"]
+                    .as_str()
+                    .unwrap_or(str_at(skill, "description"));
+                let mut command = SlashCommand::new(name, description, "");
+                command.skill = true;
+                command.path = Some(skill["path"].as_str()?.into());
+                Some(command)
+            });
+        let budget = MAX_COMMANDS.saturating_sub(session.catalog.commands.len());
+        session.catalog.commands.extend(skills.take(budget));
+    }
 
     let mut cursor: Option<String> = None;
     for _ in 0..8 {
@@ -157,15 +175,33 @@ pub(super) async fn send(
             .await;
     }
     let (sandbox, approval) = turn_settings(settings, cwd);
+    // Codex names a skill as `$name` and attaches the skill file as an input item.
+    let skill = text.strip_prefix('/').and_then(|rest| {
+        let name = rest.split(char::is_whitespace).next()?;
+        session
+            .catalog
+            .commands
+            .iter()
+            .find(|command| command.skill && command.name == name)
+            .and_then(|command| Some((command.name.clone(), command.path.clone()?)))
+    });
+    let text = match &skill {
+        Some(_) => format!("${}", &text[1..]),
+        None => text.to_owned(),
+    };
     let prompt = if settings.plan {
         format!("Plan only. Investigate the request and present a concrete plan. Do not change files.\n\n{text}")
     } else {
-        text.to_owned()
+        text
     };
+    let mut input = vec![json!({"type":"text","text":prompt,"text_elements":[]})];
+    if let Some((name, path)) = skill {
+        input.push(json!({"type":"skill","name":name,"path":path}));
+    }
     wire.request(
         "turn/start",
         json!({
-            "threadId":session.key, "input":[{"type":"text","text":prompt,"text_elements":[]}],
+            "threadId":session.key, "input":input,
             "clientUserMessageId":uuid::Uuid::new_v4().to_string(),
             "model":settings.model, "effort":settings.effort, "summary":"auto",
             "sandboxPolicy":sandbox, "approvalPolicy":approval, "approvalsReviewer":"user",
