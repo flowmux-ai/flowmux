@@ -257,7 +257,9 @@ fn render_table<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, table: &NodeTable) {
         for (x, cell) in row.children().enumerate() {
             let text = text_label("");
             text.set_markup(&inline(cell, 0));
-            text.set_width_chars(text.text().chars().take(12).count() as i32);
+            // Wrapping cells are measured at their minimum width; keeping it equal to the drawn
+            // width stops the scrolled table from reserving the height of a narrower layout.
+            text.set_width_chars(text.text().chars().take(28).count() as i32);
             text.set_xalign(match table.alignments[x] {
                 TableAlignment::Center => 0.5,
                 TableAlignment::Right => 1.0,
@@ -423,6 +425,34 @@ mod tests {
                 .unwrap();
             assert_eq!(label.text(), mark);
         }
+    }
+
+    #[gtk::test]
+    fn long_cells_do_not_reserve_extra_height() {
+        let parent = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let long = "a sentence long enough to wrap inside its table cell ".repeat(3);
+        let markdown =
+            format!("| Item | Note |\n| --- | --- |\n| One | {long} |\n| Two | {long} |");
+        Blocks::default().render(&parent, &markdown, false, Path::new("/"));
+        let scroller = parent
+            .first_child()
+            .unwrap()
+            .first_child()
+            .and_downcast::<gtk::ScrolledWindow>()
+            .unwrap();
+        let grid = scroller
+            .child()
+            .and_downcast::<gtk::Viewport>()
+            .unwrap()
+            .child()
+            .unwrap();
+        let (_, width, ..) = grid.measure(gtk::Orientation::Horizontal, -1);
+        let (_, drawn, ..) = grid.measure(gtk::Orientation::Vertical, width);
+        let (_, reserved, ..) = scroller.measure(gtk::Orientation::Vertical, -1);
+        assert!(
+            reserved <= drawn + 2,
+            "reserved {reserved}px for a {drawn}px table"
+        );
     }
 
     #[gtk::test]
