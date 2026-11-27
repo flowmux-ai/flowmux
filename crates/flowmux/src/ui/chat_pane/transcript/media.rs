@@ -12,9 +12,8 @@ use super::{text_label, FILE_LINK};
 
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
-/// Previews are thumbnails; the image viewer shows the full image.
-const PREVIEW: (u32, u32) = (640, 360);
-const PREVIEW_HEIGHT: u32 = 240;
+/// Previews are thumbnails at their display size; the viewer shows the full image.
+const PREVIEW: (u32, u32) = (640, 240);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Source {
@@ -151,6 +150,9 @@ fn image(alt: &str, pixels: Pixels) -> gtk::Widget {
         .can_shrink(true)
         .content_fit(gtk::ContentFit::Contain)
         .build();
+    // A picture's natural height follows the width it is offered, which is the whole chat when
+    // rows get spare height. The clamp offers no more than the thumbnail's width.
+    let clamp = adw::Clamp::builder().child(&picture).build();
     picture.set_alternative_text(Some(alt).filter(|alt| !alt.is_empty()));
     let name = title(
         alt,
@@ -162,7 +164,7 @@ fn image(alt: &str, pixels: Pixels) -> gtk::Widget {
     );
     // A button, so the preview opens from the keyboard too.
     let open = gtk::Button::builder()
-        .child(&picture)
+        .child(&clamp)
         .halign(gtk::Align::Start)
         .tooltip_text("View image")
         .visible(false)
@@ -187,23 +189,29 @@ fn image(alt: &str, pixels: Pixels) -> gtk::Widget {
             return;
         };
         let open = open.downgrade();
+        let clamp = clamp.downgrade();
         let picture = picture.downgrade();
         let status = status.downgrade();
         glib::spawn_future_local(async move {
             let decoded = gio::spawn_blocking(move || decode_pixels(&pixels, PREVIEW))
                 .await
                 .unwrap_or_else(|_| Err("The image could not be decoded.".into()));
-            let (Some(open), Some(picture), Some(status)) =
-                (open.upgrade(), picture.upgrade(), status.upgrade())
-            else {
+            let (Some(open), Some(clamp), Some(picture), Some(status)) = (
+                open.upgrade(),
+                clamp.upgrade(),
+                picture.upgrade(),
+                status.upgrade(),
+            ) else {
                 return;
             };
             match decoded {
                 Ok(rgba) => {
-                    let height = rgba.height();
+                    // A long transcript gives rows their minimum height, which is zero for a
+                    // picture that can shrink; the thumbnail's height keeps it at full size.
+                    picture.set_height_request(rgba.height() as i32);
+                    clamp.set_maximum_size(rgba.width() as i32);
+                    clamp.set_tightening_threshold(rgba.width() as i32);
                     picture.set_paintable(Some(&texture(rgba)));
-                    // The height sets the preview's size; a narrow chat scales it down.
-                    picture.set_height_request(height.min(PREVIEW_HEIGHT) as i32);
                     open.set_visible(true);
                     status.set_visible(false);
                 }
