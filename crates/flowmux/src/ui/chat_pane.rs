@@ -206,6 +206,11 @@ impl ChatPane {
         options.append(&effort.section);
         options.append(&access.section);
         options.append(&plan);
+        let fresh = gtk::Button::with_label("New conversation");
+        fresh.set_tooltip_text(Some(
+            "Start over in this pane with the same agent and settings",
+        ));
+        options.append(&fresh);
         let end = gtk::Button::with_label("End session");
         end.add_css_class("destructive-action");
         options.append(&end);
@@ -348,6 +353,13 @@ impl ChatPane {
                 ui.queue_paused.set(true);
                 ui.try_input(Input::End);
                 ui.refresh_queue();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        fresh.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.details.popdown();
+                ui.new_conversation();
             }
         });
         let keys = gtk::EventControllerKey::new();
@@ -662,13 +674,6 @@ impl Choices {
         self.section.set_visible(!menu.choices.is_empty());
     }
 
-    fn select(&self, id: &str) {
-        let index = self.ids.borrow().iter().position(|choice| choice == id);
-        if let Some(row) = index.and_then(|index| self.list.row_at_index(index as i32)) {
-            self.list.select_row(Some(&row));
-        }
-    }
-
     fn selected(&self) -> Option<String> {
         let row = self.list.selected_row()?;
         self.ids.borrow().get(row.index() as usize).cloned()
@@ -811,36 +816,6 @@ impl ChatUi {
         self.update_settings_summary();
     }
 
-    fn local_command(&self, name: &str) -> Option<commands::Local> {
-        let catalog = self.catalog.borrow();
-        commands::LOCAL
-            .iter()
-            .find(|(local, ..)| *local == name)
-            .map(|(_, local, _)| *local)
-            .filter(|local| self.local_available(*local, &catalog))
-    }
-
-    fn local_available(&self, local: commands::Local, catalog: &Catalog) -> bool {
-        use commands::Local;
-        match local {
-            Local::New => self.provider.is_some() && self.runtime.is_some(),
-            Local::Plan => {
-                catalog.plan
-                    || catalog
-                        .access
-                        .choices
-                        .iter()
-                        .any(|choice| choice.id == "plan")
-            }
-            Local::Model => {
-                !catalog.models.choices.is_empty()
-                    || !catalog.efforts.choices.is_empty()
-                    || !catalog.access.choices.is_empty()
-            }
-            Local::Stop => self.busy.get(),
-        }
-    }
-
     fn update_menu(&self) {
         let draft = self.draft();
         if self
@@ -857,15 +832,7 @@ impl ChatUi {
             self.menu.hide();
             return;
         };
-        let entries = {
-            let catalog = self.catalog.borrow();
-            let local: Vec<_> = commands::LOCAL
-                .iter()
-                .copied()
-                .filter(|(_, local, _)| self.local_available(*local, &catalog))
-                .collect();
-            commands::entries(&local, &catalog.commands)
-        };
+        let entries = commands::entries(&self.catalog.borrow().commands);
         self.menu.show(commands::filter(&entries, query), query);
     }
 
@@ -880,66 +847,39 @@ impl ChatUi {
         self.composer.grab_focus();
     }
 
-    /// Flowmux commands run at once; agent commands with arguments wait for them.
+    /// Commands with arguments wait for them; others are sent at once.
     fn choose_command(self: &Rc<Self>, entry: commands::Entry) {
-        match entry.owner {
-            commands::Owner::Flowmux(local) => {
-                self.set_draft("");
-                self.run_local(local);
-            }
-            _ if entry.takes_input() => self.complete_command(&entry),
-            _ => {
-                self.set_draft(&format!("/{}", entry.name));
-                self.activate_send();
-            }
+        if entry.takes_input() {
+            self.complete_command(&entry);
+        } else {
+            self.set_draft(&format!("/{}", entry.name));
+            self.activate_send();
         }
         self.composer.grab_focus();
     }
 
-    fn run_local(self: &Rc<Self>, local: commands::Local) {
-        use commands::Local;
-        self.menu.hide();
-        match local {
-            Local::New => {
-                let Some(provider) = self.provider else {
-                    return;
-                };
-                // End this conversation's agent; its history stays in Agent sessions.
-                if self.commands.borrow().is_some() {
-                    self.queue_paused.set(true);
-                    let _ = self.try_input(Input::End);
-                }
-                let restart = super::pane_terminal::ChatRestart {
-                    pane: self.pane.get(),
-                    history: self.history_id,
-                    agent: provider.name().into(),
-                    cwd: self.cwd.clone(),
-                    catalog: self.catalog.borrow().clone(),
-                    // Elevated access is confirmed again for every new connection.
-                    settings: Settings {
-                        confirmed_access: false,
-                        ..self.draft_settings()
-                    },
-                };
-                (self.restart_cb.borrow_mut())(restart);
-            }
-            Local::Plan => {
-                if self.catalog.borrow().plan {
-                    self.plan.set_active(!self.plan.is_active());
-                } else {
-                    // Claude offers Plan as an access level.
-                    let planning = self.access.selected().as_deref() == Some("plan");
-                    self.access
-                        .select(if planning { "default" } else { "plan" });
-                }
-            }
-            Local::Model => self.details.popup(),
-            Local::Stop => {
-                if self.busy.get() && !self.stopping.get() {
-                    self.stop(false);
-                }
-            }
+    /// Replaces this chat with a new conversation; its history stays in Agent sessions.
+    fn new_conversation(&self) {
+        let Some(provider) = self.provider else {
+            return;
+        };
+        if self.commands.borrow().is_some() {
+            self.queue_paused.set(true);
+            let _ = self.try_input(Input::End);
         }
+        let restart = super::pane_terminal::ChatRestart {
+            pane: self.pane.get(),
+            history: self.history_id,
+            agent: provider.name().into(),
+            cwd: self.cwd.clone(),
+            catalog: self.catalog.borrow().clone(),
+            // Elevated access is confirmed again for every new connection.
+            settings: Settings {
+                confirmed_access: false,
+                ..self.draft_settings()
+            },
+        };
+        (self.restart_cb.borrow_mut())(restart);
     }
 
     fn update_settings_summary(&self) {
@@ -1056,15 +996,6 @@ impl ChatUi {
 
     fn activate_send(self: &Rc<Self>) {
         let editing = self.queue_edit.borrow().is_some();
-        // The single routing point: Flowmux commands never reach the agent as text.
-        if let Some(local) = commands::parse(&self.draft())
-            .filter(|_| !editing)
-            .and_then(|(name, _)| self.local_command(name))
-        {
-            self.set_draft("");
-            self.run_local(local);
-            return;
-        }
         if !editing && !self.ready.get() {
             if !self.connecting.get() {
                 self.connect(true);

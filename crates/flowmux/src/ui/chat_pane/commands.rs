@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The `/` menu: Flowmux's own chat commands with the agent's commands and skills.
+//! The `/` menu: the agent's own slash commands and skills.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,35 +10,8 @@ use gtk::glib;
 
 use super::runtime::SlashCommand;
 
-/// Commands Flowmux runs itself; the agent never receives them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Local {
-    New,
-    Plan,
-    Model,
-    Stop,
-}
-
-pub(super) const LOCAL: &[(&str, Local, &str)] = &[
-    ("new", Local::New, "Start a new conversation in this pane"),
-    ("clear", Local::New, "Start a new conversation in this pane"),
-    (
-        "plan",
-        Local::Plan,
-        "Turn Plan on or off for the next message",
-    ),
-    (
-        "model",
-        Local::Model,
-        "Choose the model, reasoning and access",
-    ),
-    ("effort", Local::Model, "Choose the reasoning intensity"),
-    ("stop", Local::Stop, "Stop the running turn"),
-];
-
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Owner {
-    Flowmux(Local),
     Agent,
     Skill,
 }
@@ -58,17 +31,9 @@ impl Entry {
     }
 }
 
-/// Flowmux commands first; an agent command or skill with the same name stays hidden.
-pub(super) fn entries(local: &[(&str, Local, &str)], agent: &[SlashCommand]) -> Vec<Entry> {
-    let mut entries: Vec<Entry> = local
-        .iter()
-        .map(|(name, local, description)| Entry {
-            name: (*name).into(),
-            description: (*description).into(),
-            hint: String::new(),
-            owner: Owner::Flowmux(*local),
-        })
-        .collect();
+/// The commands and skills the agent reported, once per name.
+pub(super) fn entries(agent: &[SlashCommand]) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = Vec::new();
     for command in agent {
         if valid_name(&command.name) && !entries.iter().any(|entry| entry.name == command.name) {
             entries.push(Entry {
@@ -149,7 +114,7 @@ impl Menu {
             .propagate_natural_height(true)
             .max_content_height(276)
             .build();
-        let title = gtk::Label::new(Some(&format!("Commands · Flowmux and {agent}")));
+        let title = gtk::Label::new(Some(&format!("{agent} commands")));
         title.add_css_class("caption-heading");
         title.add_css_class("dim-label");
         title.set_xalign(0.0);
@@ -279,7 +244,6 @@ fn row(entry: &Entry, query: &str, agent: &str) -> gtk::ListBoxRow {
     description.set_xalign(0.0);
     line.append(&description);
     let (badge, class) = match entry.owner {
-        Owner::Flowmux(_) => ("Flowmux", "flowmux"),
         Owner::Agent => (agent, "agent"),
         Owner::Skill => ("Skill", "skill"),
     };
@@ -298,7 +262,6 @@ fn row(entry: &Entry, query: &str, agent: &str) -> gtk::ListBoxRow {
         entry.name,
         entry.description,
         match entry.owner {
-            Owner::Flowmux(_) => "Flowmux",
             Owner::Agent => agent,
             Owner::Skill => "Skill",
         }
@@ -321,34 +284,22 @@ mod tests {
     }
 
     #[test]
-    fn flowmux_names_win_and_matches_start_with_the_query() {
-        let all = entries(
-            LOCAL,
-            &[
-                command("clear", false),
-                command("compact", false),
-                command("sclear", true),
-            ],
-        );
+    fn agent_commands_rank_exact_then_prefix_matches() {
+        let all = entries(&[
+            command("usage-credits", false),
+            command("clear", false),
+            command("usage", false),
+            command("sclear", true),
+            command("clear", true),
+        ]);
         assert_eq!(all.iter().filter(|entry| entry.name == "clear").count(), 1);
-        assert!(matches!(
-            all.iter()
-                .find(|entry| entry.name == "clear")
-                .unwrap()
-                .owner,
-            Owner::Flowmux(Local::New)
-        ));
         let names: Vec<_> = filter(&all, "cl")
             .into_iter()
             .map(|entry| entry.name)
             .collect();
         assert_eq!(names, ["clear", "sclear"]);
         // Enter on `/usage` must not pick a longer name listed earlier.
-        let usage = entries(
-            &[],
-            &[command("usage-credits", false), command("usage", false)],
-        );
-        assert_eq!(filter(&usage, "usage")[0].name, "usage");
+        assert_eq!(filter(&all, "usage")[0].name, "usage");
     }
 
     #[test]
