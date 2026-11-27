@@ -1121,6 +1121,7 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "async-channel",
+ "base64",
  "chrono",
  "clap",
  "flowmux-config",

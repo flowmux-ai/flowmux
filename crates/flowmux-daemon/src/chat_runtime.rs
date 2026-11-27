@@ -4,6 +4,7 @@ mod acp;
 mod claude;
 mod codex;
 mod commands;
+mod images;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -405,6 +406,8 @@ struct Turn {
     compact: bool,
     /// A Codex review can run in its own thread.
     review_thread: Option<String>,
+    /// Tool images shown so far.
+    images: usize,
 }
 
 struct Session {

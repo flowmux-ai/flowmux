@@ -399,6 +399,19 @@ pub(super) async fn frame(
                     )
                     .await?;
                 }
+                "imageView" | "imageGeneration" if !running => {
+                    let path = item["path"].as_str().or(item["savedPath"].as_str());
+                    if let Some(path) = path.filter(|path| !path.is_empty()) {
+                        let path = Path::new(path);
+                        let alt = match item["revisedPrompt"].as_str() {
+                            Some(prompt) if !prompt.trim().is_empty() => prompt.into(),
+                            _ => path
+                                .file_name()
+                                .map_or("Image".into(), |name| name.to_string_lossy()),
+                        };
+                        images::show(turn, events, format!("image:{id}"), &alt, path).await?;
+                    }
+                }
                 "reasoning" if !running => {
                     for (i, summary) in values(&item["summary"])
                         .filter_map(Value::as_str)

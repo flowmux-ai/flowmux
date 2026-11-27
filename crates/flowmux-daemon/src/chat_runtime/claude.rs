@@ -266,7 +266,21 @@ pub(super) async fn frame(
                         .join("\n")
                 });
                 work.detail = clip(&format!("{}\n{detail}", work.detail), MAX_DETAIL);
+                let title = work.title.clone();
                 emit(events, Event::Work(work.clone())).await?;
+                // A read image or a screenshot comes back as base64 image blocks.
+                for (index, image) in values(content)
+                    .filter(|item| item["type"] == "image" && item["source"]["type"] == "base64")
+                    .enumerate()
+                {
+                    let source = &image["source"];
+                    if let Some(path) =
+                        images::save(str_at(source, "data"), str_at(source, "media_type"))
+                    {
+                        images::show(turn, events, format!("image:{id}:{index}"), &title, &path)
+                            .await?;
+                    }
+                }
             }
         }
         "result" => {

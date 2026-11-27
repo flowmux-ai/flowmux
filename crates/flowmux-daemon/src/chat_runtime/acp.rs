@@ -326,6 +326,16 @@ pub(super) async fn frame(
         .await?;
     } else if method == "session/update" {
         match str_at(update, "sessionUpdate") {
+            "agent_message_chunk" if update["content"]["type"] == "image" => {
+                let image = &update["content"];
+                if let Some(path) = images::save(str_at(image, "data"), str_at(image, "mimeType")) {
+                    // Text after the image starts below it.
+                    turn.acp_text = None;
+                    turn.acp_next_text += 1;
+                    let id = format!("image:acp:{}", turn.acp_next_text);
+                    images::show(turn, events, id, "Image", &path).await?;
+                }
+            }
             "agent_message_chunk" | "agent_thought_chunk" => {
                 let text = str_at(&update["content"], "text");
                 if !text.is_empty() {
@@ -427,7 +437,25 @@ pub(super) async fn frame(
                         work.detail = clip(&format!("{}\n{detail}", work.detail), MAX_DETAIL);
                     }
                 }
+                let (running, title) = (work.running, work.title.clone());
                 emit(events, Event::Work(work.clone())).await?;
+                // Updates repeat the content, so images wait for the finished call.
+                if !running {
+                    for (index, content) in values(&update["content"])
+                        .filter(|content| {
+                            content["type"] == "content" && content["content"]["type"] == "image"
+                        })
+                        .enumerate()
+                    {
+                        let image = &content["content"];
+                        if let Some(path) =
+                            images::save(str_at(image, "data"), str_at(image, "mimeType"))
+                        {
+                            let id = format!("image:{id}:{index}");
+                            images::show(turn, events, id, &title, &path).await?;
+                        }
+                    }
+                }
             }
             "plan" => {
                 turn.acp_text = None;

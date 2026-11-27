@@ -322,6 +322,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tool_image_paths_survive_markdown() {
+        // The Agent Host writes tool images in this form.
+        let arena = Arena::new();
+        let document = parse_document(
+            &arena,
+            r"![A \[b\]](</tmp/shot (1) \<x\>.png>)",
+            &Options::default(),
+        );
+        let image = document
+            .descendants()
+            .find_map(|node| match &node.data().value {
+                NodeValue::Image(link) => Some(link.url.clone()),
+                _ => None,
+            });
+        assert_eq!(image.as_deref(), Some("/tmp/shot (1) <x>.png"));
+    }
+
+    #[test]
     fn links_open_web_pages_and_project_files() {
         assert_eq!(
             link_target("https://x.dev").as_deref(),
