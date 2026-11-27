@@ -125,8 +125,14 @@ impl Chats {
                     let (input, receiver) = async_channel::bounded(16);
                     let lock = chat_history::lock(id)?;
                     let store = Store::open()?;
+                    // Restore the last selection; an elevated access mode asks again.
+                    let settings = Settings {
+                        confirmed_access: false,
+                        ..store.settings(id).ok().flatten().unwrap_or_default()
+                    };
                     let snapshot = Arc::new(Mutex::new(Snapshot {
                         through: store.last_record(id)?,
+                        settings,
                         ..Snapshot::default()
                     }));
                     tokio::spawn(run(id, launch, receiver, snapshot.clone(), store, lock));
@@ -247,6 +253,13 @@ async fn run(
                         save(&mut store, &mut state, Record::Begin { prompt: text.clone() })?;
                         state.started = Some(Instant::now());
                         state.settings = settings.clone();
+                        // A plan turn's read-only access is not the chat's selection.
+                        if !settings.plan {
+                            let saved = Settings { confirmed_access: false, ..settings.clone() };
+                            if let Err(error) = store.save_settings(id, &saved) {
+                                tracing::warn!(%error, "unable to save chat settings");
+                            }
+                        }
                     }
                     commands.try_send(next).map_err(|_| "Agent is unavailable or busy".into())
                 })();

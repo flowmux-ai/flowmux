@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use flowmux_core::SurfaceId;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
@@ -153,7 +153,37 @@ impl Store {
             );
             CREATE INDEX IF NOT EXISTS chat_records_by_chat ON chat_records(chat_id);",
         )?;
+        if db.prepare("SELECT settings FROM chats LIMIT 0").is_err() {
+            db.execute_batch("ALTER TABLE chats ADD COLUMN settings TEXT")?;
+        }
         Ok(Self(db))
+    }
+
+    /// Remembers the chat's last turn settings for the next launch.
+    pub fn save_settings(&self, id: SurfaceId, settings: &impl Serialize) -> Result<(), Error> {
+        self.0.execute(
+            "UPDATE chats SET settings = ?2 WHERE id = ?1",
+            params![id.to_string(), serde_json::to_string(settings)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn settings<T: serde::de::DeserializeOwned>(
+        &self,
+        id: SurfaceId,
+    ) -> Result<Option<T>, Error> {
+        let saved: Option<Option<String>> = self
+            .0
+            .query_row(
+                "SELECT settings FROM chats WHERE id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(saved
+            .flatten()
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?)
     }
 
     pub fn existing() -> Result<Option<Self>, Error> {
@@ -351,5 +381,32 @@ mod tests {
         assert_eq!(chats[0].cwd, directory.path());
         assert_eq!(chats[0].title, "한글 prompt");
         assert!(store.list(Some("Claude")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adds_settings_to_an_existing_history_and_restores_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let id = SurfaceId::new();
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE chats (
+                    id TEXT PRIMARY KEY, agent TEXT NOT NULL, cwd BLOB NOT NULL,
+                    title TEXT NOT NULL, modified INTEGER NOT NULL, native_id TEXT
+                );
+                INSERT INTO chats VALUES ('{id}', 'Claude', x'2f', 'old', 0, NULL);"
+            ))
+            .unwrap();
+
+        let store = Store::open_at(&path).unwrap();
+        assert_eq!(store.settings::<serde_json::Value>(id).unwrap(), None);
+        let saved = serde_json::json!({"model": "opus", "access": "bypassPermissions"});
+        store.save_settings(id, &saved).unwrap();
+        drop(store);
+
+        let store = Store::open_at(&path).unwrap();
+        assert_eq!(store.settings(id).unwrap(), Some(saved));
+        assert_eq!(store.load(id).unwrap().records.len(), 0);
     }
 }
