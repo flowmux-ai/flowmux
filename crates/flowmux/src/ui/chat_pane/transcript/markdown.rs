@@ -102,18 +102,47 @@ fn inline<'a>(node: &'a AstNode<'a>, depth: u16) -> String {
         NodeValue::Text(text) => escape(text),
         NodeValue::SoftBreak => " ".into(),
         NodeValue::LineBreak => "\n".into(),
-        NodeValue::Code(code) => format!("<tt>{}</tt>", escape(&code.literal)),
+        NodeValue::Code(code) => {
+            // ponytail: colors follow the style at render time; a later light/dark switch keeps
+            // them until the answer is drawn again.
+            let color = if adw::StyleManager::default().is_dark() {
+                "#f0a479"
+            } else {
+                "#b4441b"
+            };
+            format!(
+                "<span font_family=\"monospace\" fgcolor=\"{color}\" bgcolor=\"#808080\" bgalpha=\"18%\">\u{2009}{}\u{2009}</span>",
+                escape(&code.literal)
+            )
+        }
         NodeValue::Strong => format!("<b>{}</b>", children()),
         NodeValue::Emph => format!("<i>{}</i>", children()),
         NodeValue::Strikethrough => format!("<s>{}</s>", children()),
         NodeValue::HtmlInline(html) => escape(html),
-        NodeValue::Link(link)
-            if link.url.starts_with("https://") || link.url.starts_with("http://") =>
-        {
-            format!("<a href=\"{}\">{}</a>", escape(&link.url), children())
-        }
+        NodeValue::Link(link) => match link_target(&link.url) {
+            Some(target) => format!("<a href=\"{}\">{}</a>", escape(&target), children()),
+            None => children(),
+        },
         _ => children(),
     }
+}
+
+/// Web links open in the browser; paths open in Flowmux through the transcript's `chat.open-file`.
+fn link_target(url: &str) -> Option<String> {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return Some(url.into());
+    }
+    let path = url.strip_prefix("file://").unwrap_or(url);
+    // `mailto:` and other schemes stay text; `src/main.rs:12` is a path with a line.
+    let scheme = path.split_once(':').is_some_and(|(scheme, rest)| {
+        scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+            && !rest.starts_with(|c: char| c.is_ascii_digit())
+    });
+    (!path.is_empty() && !path.starts_with('#') && !scheme)
+        .then(|| format!("{}{path}", super::FILE_LINK))
 }
 
 fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
@@ -130,8 +159,8 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
         NodeValue::ThematicBreak => box_.append(&gtk::Separator::new(gtk::Orientation::Horizontal)),
         NodeValue::BlockQuote => {
             let quoted = gtk::Box::new(gtk::Orientation::Vertical, 4);
-            quoted.set_margin_start(12);
             quoted.add_css_class("dim-label");
+            quoted.add_css_class("flowmux-chat-quote");
             for child in node.children() {
                 block(&quoted, child, depth + 1);
             }
@@ -172,9 +201,11 @@ fn block<'a>(box_: &gtk::Box, node: &'a AstNode<'a>, depth: u16) {
             match &node.data().value {
                 NodeValue::Heading(heading) => {
                     text.set_markup(&format!("<b>{markup}</b>"));
-                    if heading.level <= 2 {
-                        text.add_css_class("title-4");
-                    }
+                    text.add_css_class(match heading.level {
+                        1 => "flowmux-chat-h1",
+                        2 => "flowmux-chat-h2",
+                        _ => "flowmux-chat-h3",
+                    });
                 }
                 _ => text.set_markup(&markup),
             }
@@ -261,6 +292,53 @@ pub(super) fn code(language: &str, code: &str) -> gtk::Box {
 #[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_open_web_pages_and_project_files() {
+        assert_eq!(
+            link_target("https://x.dev").as_deref(),
+            Some("https://x.dev")
+        );
+        assert_eq!(
+            link_target("src/main.rs:12").as_deref(),
+            Some("flowmux-file:src/main.rs:12")
+        );
+        assert_eq!(
+            link_target("file:///a/b.rs#L3").as_deref(),
+            Some("flowmux-file:/a/b.rs#L3")
+        );
+        assert_eq!(link_target("mailto:me@example.com"), None);
+        assert_eq!(link_target("#section"), None);
+        assert_eq!(super::super::linked_file("/a/b.rs:12:3"), "/a/b.rs");
+        assert_eq!(super::super::linked_file("a.rs#L3"), "a.rs");
+    }
+
+    #[gtk::test]
+    fn inline_code_and_headings_keep_their_text() {
+        adw::init().unwrap();
+        let parent = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        Blocks::default().render(
+            &parent,
+            "# Title\n\nRun `cargo test` [here](src/lib.rs:4).",
+            false,
+        );
+        let heading = parent
+            .first_child()
+            .unwrap()
+            .first_child()
+            .and_downcast::<gtk::Label>()
+            .unwrap();
+        assert!(heading.has_css_class("flowmux-chat-h1"));
+        let body = parent
+            .last_child()
+            .unwrap()
+            .first_child()
+            .and_downcast::<gtk::Label>()
+            .unwrap();
+        // A markup error would leave the label empty.
+        assert_eq!(body.text(), "Run \u{2009}cargo test\u{2009} here.");
+        assert!(body.label().contains("href=\"flowmux-file:src/lib.rs:4\""));
+    }
 
     #[gtk::test]
     fn streaming_keeps_unchanged_blocks_and_resolves_late_links() {

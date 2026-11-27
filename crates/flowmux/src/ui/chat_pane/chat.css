@@ -141,3 +141,22 @@
 .flowmux-chat-rail .failed .flowmux-chat-rail-mark {
     background: @error_color;
 }
+
+#flowmux-chat .flowmux-chat-h1 {
+    font-size: 1.29em;
+    margin-top: 4px;
+}
+
+#flowmux-chat .flowmux-chat-h2 {
+    font-size: 1.14em;
+    margin-top: 2px;
+}
+
+#flowmux-chat .flowmux-chat-h3 {
+    font-size: 1.07em;
+}
+
+.flowmux-chat-quote {
+    padding-left: 10px;
+    border-left: 3px solid alpha(currentColor, 0.25);
+}

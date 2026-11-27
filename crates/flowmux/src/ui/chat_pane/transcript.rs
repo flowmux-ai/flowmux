@@ -110,10 +110,32 @@ pub(super) fn label(text: &str) -> gtk::Label {
     label
 }
 
+const FILE_LINK: &str = "flowmux-file:";
+
 fn text_label(text: &str) -> gtk::Label {
     let label = label(text);
     label.set_selectable(true);
+    label.connect_activate_link(|label, uri| match uri.strip_prefix(FILE_LINK) {
+        Some(path) => {
+            let _ = label.activate_action("chat.open-file", Some(&linked_file(path).to_variant()));
+            glib::Propagation::Stop
+        }
+        None => glib::Propagation::Proceed,
+    });
     label
+}
+
+/// Drops the `#L12` or `:12:3` position agents append to file links.
+fn linked_file(target: &str) -> &str {
+    let mut path = target.split('#').next().unwrap_or(target);
+    for _ in 0..2 {
+        if let Some((head, tail)) = path.rsplit_once(':') {
+            if !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_digit()) {
+                path = head;
+            }
+        }
+    }
+    path
 }
 
 fn copy_button(action: &str) -> gtk::Button {
@@ -274,6 +296,19 @@ impl Transcript {
                 view.schedule_adjustment();
             }
         });
+        // File links in answers open through the chat's own file handler.
+        let actions = gtk::gio::SimpleActionGroup::new();
+        let open = gtk::gio::SimpleAction::new("open-file", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&view);
+        open.connect_activate(move |_, path| {
+            if let (Some(view), Some(path)) = (weak.upgrade(), path.and_then(|p| p.get::<String>()))
+            {
+                let open_file = view.open_file.borrow().clone();
+                open_file(&path);
+            }
+        });
+        actions.add_action(&open);
+        view.root.insert_action_group("chat", Some(&actions));
         // Width changes reflow messages and decide whether the rail fits.
         let weak = Rc::downgrade(&view);
         view.scroller.hadjustment().connect_changed(move |_| {
