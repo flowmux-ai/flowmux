@@ -155,6 +155,9 @@ fn bubble(text: &str) -> gtk::Label {
     bubble.set_margin_bottom(4);
     bubble.set_css_classes(&["card", "flowmux-chat-prompt"]);
     bubble.set_widget_name("flowmux-chat-user");
+    if super::commands::parse(text).is_some() {
+        bubble.add_css_class("flowmux-chat-command-bubble");
+    }
     bubble
 }
 

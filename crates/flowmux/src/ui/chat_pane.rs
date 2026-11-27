@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+mod commands;
 mod transcript;
 
 use std::cell::{Cell, RefCell};
@@ -77,6 +78,9 @@ struct ChatUi {
     composer: gtk::TextView,
     send: gtk::Button,
     transcript: Transcript,
+    menu: commands::Menu,
+    /// The draft the command menu was closed for; typing reopens it.
+    menu_dismissed: RefCell<Option<String>>,
 }
 
 impl ChatPane {
@@ -145,7 +149,13 @@ impl ChatPane {
 
         let transcript = Transcript::new();
         header.append(&transcript.outline);
-        layout.append(&transcript.root);
+        // The command menu floats over the conversation, just above the composer.
+        let menu = commands::Menu::new(agent);
+        let stage = gtk::Overlay::new();
+        stage.set_vexpand(true);
+        stage.set_child(Some(&transcript.root));
+        stage.add_overlay(&menu.root);
+        layout.append(&stage);
         // Queued messages sit with the composer that sends them.
         layout.append(&queue_clamp);
         let composer = gtk::TextView::builder()
@@ -284,6 +294,8 @@ impl ChatPane {
             composer,
             send,
             transcript,
+            menu,
+            menu_dismissed: RefCell::new(None),
         });
         let focus = gtk::EventControllerFocus::new();
         let weak = Rc::downgrade(&ui);
@@ -373,6 +385,33 @@ impl ChatPane {
         keys.connect_key_pressed(move |keys, key, _, modifiers| {
             use gtk::gdk::{Key, ModifierType as Mod};
             ime_enter.borrow_mut().take();
+            if let Some(ui) = weak
+                .upgrade()
+                .filter(|ui| !preedit.get() && ui.menu.is_open())
+            {
+                let plain =
+                    !modifiers.intersects(Mod::SHIFT_MASK | Mod::ALT_MASK | Mod::CONTROL_MASK);
+                match key {
+                    Key::Up | Key::KP_Up => ui.menu.step(-1),
+                    Key::Down | Key::KP_Down => ui.menu.step(1),
+                    Key::Tab | Key::ISO_Left_Tab => {
+                        if let Some(entry) = ui.menu.selected() {
+                            ui.complete_command(&entry);
+                        }
+                    }
+                    Key::Return | Key::KP_Enter | Key::ISO_Enter if plain => {
+                        if let Some(entry) = ui.menu.selected() {
+                            ui.choose_command(entry);
+                        }
+                    }
+                    Key::Escape => {
+                        *ui.menu_dismissed.borrow_mut() = Some(ui.draft());
+                        ui.menu.hide();
+                    }
+                    _ => return glib::Propagation::Proceed,
+                }
+                return glib::Propagation::Stop;
+            }
             if key == Key::Escape && !preedit.get() {
                 if let Some(ui) = weak.upgrade().filter(|ui| ui.queue_edit.borrow().is_some()) {
                     ui.finish_queue_edit(None);
@@ -436,6 +475,13 @@ impl ChatPane {
             placeholder.set_visible(buffer.char_count() == 0);
             if let Some(ui) = weak.upgrade() {
                 ui.refresh_controls();
+                ui.update_menu();
+            }
+        });
+        let weak = Rc::downgrade(&ui);
+        ui.menu.connect_activate(move |entry| {
+            if let Some(ui) = weak.upgrade() {
+                ui.choose_command(entry);
             }
         });
         ui.set_catalog(Catalog::default(), &Settings::default());
@@ -614,6 +660,13 @@ impl Choices {
         self.section.set_visible(!menu.choices.is_empty());
     }
 
+    fn select(&self, id: &str) {
+        let index = self.ids.borrow().iter().position(|choice| choice == id);
+        if let Some(row) = index.and_then(|index| self.list.row_at_index(index as i32)) {
+            self.list.select_row(Some(&row));
+        }
+    }
+
     fn selected(&self) -> Option<String> {
         let row = self.list.selected_row()?;
         self.ids.borrow().get(row.index() as usize).cloned()
@@ -756,6 +809,115 @@ impl ChatUi {
         self.update_settings_summary();
     }
 
+    fn local_command(&self, name: &str) -> Option<commands::Local> {
+        let catalog = self.catalog.borrow();
+        commands::LOCAL
+            .iter()
+            .find(|(local, ..)| *local == name)
+            .map(|(_, local, _)| *local)
+            .filter(|local| self.local_available(*local, &catalog))
+    }
+
+    fn local_available(&self, local: commands::Local, catalog: &Catalog) -> bool {
+        use commands::Local;
+        match local {
+            Local::New => false,
+            Local::Plan => {
+                catalog.plan
+                    || catalog
+                        .access
+                        .choices
+                        .iter()
+                        .any(|choice| choice.id == "plan")
+            }
+            Local::Model => {
+                !catalog.models.choices.is_empty()
+                    || !catalog.efforts.choices.is_empty()
+                    || !catalog.access.choices.is_empty()
+            }
+            Local::Stop => self.busy.get(),
+        }
+    }
+
+    fn update_menu(&self) {
+        let draft = self.draft();
+        if self
+            .menu_dismissed
+            .borrow()
+            .as_ref()
+            .is_some_and(|dismissed| *dismissed != draft)
+        {
+            self.menu_dismissed.borrow_mut().take();
+        }
+        let Some(query) =
+            commands::typed(&draft).filter(|_| self.menu_dismissed.borrow().is_none())
+        else {
+            self.menu.hide();
+            return;
+        };
+        let entries = {
+            let catalog = self.catalog.borrow();
+            let local: Vec<_> = commands::LOCAL
+                .iter()
+                .copied()
+                .filter(|(_, local, _)| self.local_available(*local, &catalog))
+                .collect();
+            commands::entries(&local, &catalog.commands)
+        };
+        self.menu.show(commands::filter(&entries, query), query);
+    }
+
+    fn set_draft(&self, text: &str) {
+        let buffer = self.composer.buffer();
+        buffer.set_text(text);
+        buffer.place_cursor(&buffer.end_iter());
+    }
+
+    fn complete_command(&self, entry: &commands::Entry) {
+        self.set_draft(&format!("/{} ", entry.name));
+        self.composer.grab_focus();
+    }
+
+    /// Flowmux commands run at once; agent commands with arguments wait for them.
+    fn choose_command(self: &Rc<Self>, entry: commands::Entry) {
+        match entry.owner {
+            commands::Owner::Flowmux(local) => {
+                self.set_draft("");
+                self.run_local(local);
+            }
+            _ if entry.takes_input() => self.complete_command(&entry),
+            _ => {
+                self.set_draft(&format!("/{}", entry.name));
+                self.activate_send();
+            }
+        }
+        self.composer.grab_focus();
+    }
+
+    fn run_local(self: &Rc<Self>, local: commands::Local) {
+        use commands::Local;
+        self.menu.hide();
+        match local {
+            Local::New => {}
+            Local::Plan => {
+                if self.catalog.borrow().plan {
+                    self.plan.set_active(!self.plan.is_active());
+                } else {
+                    // Claude offers Plan as an access level.
+                    let planning = self.access.selected().as_deref() == Some("plan");
+                    self.access
+                        .select(if planning { "default" } else { "plan" });
+                }
+            }
+            Local::Model => self.details.popup(),
+            Local::Stop => {
+                if self.busy.get() && !self.stopping.get() {
+                    self.stop(false);
+                }
+            }
+        }
+    }
+
     fn update_settings_summary(&self) {
         // Plan replaces the access level with read-only for the turn.
         let access = if self.plan.is_active() {
@@ -870,6 +1032,15 @@ impl ChatUi {
 
     fn activate_send(self: &Rc<Self>) {
         let editing = self.queue_edit.borrow().is_some();
+        // The single routing point: Flowmux commands never reach the agent as text.
+        if let Some(local) = commands::parse(&self.draft())
+            .filter(|_| !editing)
+            .and_then(|(name, _)| self.local_command(name))
+        {
+            self.set_draft("");
+            self.run_local(local);
+            return;
+        }
         if !editing && !self.ready.get() {
             if !self.connecting.get() {
                 self.connect(true);
@@ -1086,9 +1257,14 @@ impl ChatUi {
         let Some(index) = index.filter(|_| self.editing_id() != Some(id)) else {
             return;
         };
+        let steer = {
+            let queue = self.queue.borrow();
+            // A queued command starts its own turn; it cannot join the running one.
+            commands::parse(&queue[index].text).is_none() && self.can_steer(&queue[index].settings)
+        };
         if !self.ready.get() {
             self.show_notice("Connect to the agent to send queued messages.");
-        } else if self.can_steer(&self.queue.borrow()[index].settings) {
+        } else if steer {
             let text = self.queue.borrow()[index].text.clone();
             if self.try_input(Input::Steer { text }) {
                 self.steering.set(Some(id));
@@ -1215,7 +1391,7 @@ impl ChatUi {
                     "Steering",
                     "Adding this message to the running turn…",
                 )
-            } else if self.can_steer(&entry.settings) {
+            } else if commands::parse(&entry.text).is_none() && self.can_steer(&entry.settings) {
                 (
                     "mail-send-symbolic",
                     "Steer",

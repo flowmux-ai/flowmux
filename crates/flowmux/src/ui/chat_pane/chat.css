@@ -160,3 +160,68 @@
     padding-left: 10px;
     border-left: 3px solid alpha(currentColor, 0.25);
 }
+
+.flowmux-chat-commands {
+    margin: 0 8px 6px;
+    padding: 4px;
+    border: 1px solid alpha(currentColor, 0.12);
+    border-radius: 12px;
+    background: @popover_bg_color;
+    color: @popover_fg_color;
+    box-shadow: 0 8px 28px alpha(black, 0.30), 0 1px 3px alpha(black, 0.18);
+}
+
+.flowmux-chat-commands-header {
+    padding: 4px 8px 3px;
+}
+
+.flowmux-chat-commands list {
+    background: transparent;
+}
+
+.flowmux-chat-commands row {
+    min-height: 0;
+    padding: 5px 8px;
+    border-radius: 8px;
+}
+
+.flowmux-chat-commands row:selected {
+    background: alpha(@accent_bg_color, 0.22);
+    color: inherit;
+}
+
+.flowmux-chat-commands row:hover:not(:selected) {
+    background: alpha(currentColor, 0.06);
+}
+
+.flowmux-chat-command-name {
+    font-family: monospace;
+}
+
+.flowmux-chat-command-hint {
+    font-family: monospace;
+    opacity: 0.55;
+}
+
+.flowmux-chat-command-badge {
+    padding: 0 7px;
+    border-radius: 99px;
+    font-size: 0.78em;
+    font-weight: 600;
+    background: alpha(currentColor, 0.09);
+}
+
+.flowmux-chat-command-badge.flowmux {
+    color: @accent_color;
+    background: alpha(@accent_bg_color, 0.18);
+}
+
+.flowmux-chat-command-badge.skill {
+    color: #a371f7;
+    background: alpha(#a371f7, 0.16);
+}
+
+#flowmux-chat .flowmux-chat-prompt.flowmux-chat-command-bubble {
+    font-family: monospace;
+    background: alpha(@accent_bg_color, 0.16);
+}
